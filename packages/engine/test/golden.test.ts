@@ -2351,3 +2351,48 @@ describe("golden import stages", () => {
     });
   });
 });
+
+describe("the manifest of what the recipe wrote into home", () => {
+  const recipe: RecipeDigest = {
+    ticks: [],
+    files: [
+      { id: "shell/zshrc", path: "~/.zshrc", dest: ".zshrc", digest: "d1" },
+      { id: "agents/claude", path: "~/.claude", dest: ".claude", digest: "d2" },
+      { id: "shell/zshrc", path: "~/.zshrc", dest: ".zshrc", digest: "d1" },
+    ],
+  };
+  const ON_DISK: Record<string, string> = { ".zshrc": "a".repeat(64), ".claude/settings.json": "b".repeat(64), ".claude/CLAUDE.md": "c".repeat(64) };
+  const hashing = (cmd: string): boolean => cmd.startsWith("cd '/root'") && cmd.includes("sha256sum");
+  const hashed = (cmd: string): ExecResult =>
+    hashing(cmd) ? { exitCode: 0, stdout: `${Object.entries(ON_DISK).map(([p, h]) => `${h}  ${p}`).join("\n")}\n`, stderr: "" } : cmd === "echo ok" ? REACH_OK : { exitCode: 0, stdout: "", stderr: "" };
+
+  it("the seal hashes every file the recipe writes into home on the builder, each path once, and the version records them", async () => {
+    const { backend, inline, timeline } = recordingBackend({}, { exec: hashed });
+    const builder = await prepareBuilder({ backend, setup: "true", import: { recipeHash: "h1", recipe, tools: [], agents: [] } });
+    const { version } = await sealGolden(builder, { backend, hostId: "h1", smoke: "true" });
+    expect(version.owned).toEqual([
+      { path: ".claude/CLAUDE.md", sha256: ON_DISK[".claude/CLAUDE.md"] },
+      { path: ".claude/settings.json", sha256: ON_DISK[".claude/settings.json"] },
+      { path: ".zshrc", sha256: ON_DISK[".zshrc"] },
+    ]);
+    // The recipe's own list of written paths, deduplicated and nothing else; a directory row travels as its files.
+    const read = inline.filter(i => hashing(i.cmd));
+    expect(read).toHaveLength(1);
+    expect(read[0]!.cmd).toContain("find '.claude' '.zshrc' -type f -print0");
+    // Read off the disk the snapshot then takes, on the builder and not on the smoke fork.
+    expect(read[0]!.id).toBe("m1");
+    expect(timeline.indexOf("snapshot m1")).toBeGreaterThan(-1);
+  });
+
+  it("a golden built from no recipe records no files of its own, so its forks move image the old way", async () => {
+    const { backend } = recordingBackend({}, { exec: hashed });
+    const builder = await prepareBuilder({ backend, setup: "true" });
+    expect((await sealGolden(builder, { backend, hostId: "h1", smoke: "true" })).version.owned).toBeUndefined();
+  });
+
+  it("a recipe that writes no file records an empty list, which is not the same as recording none", async () => {
+    const { backend } = recordingBackend({}, { exec: hashed });
+    const builder = await prepareBuilder({ backend, setup: "true", import: { recipeHash: "h1", recipe: { ticks: [], files: [] }, tools: [], agents: [] } });
+    expect((await sealGolden(builder, { backend, hostId: "h1", smoke: "true" })).version.owned).toEqual([]);
+  });
+});

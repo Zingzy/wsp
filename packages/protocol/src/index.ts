@@ -13,7 +13,7 @@ import { openingTitle, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitRoad, InitScreenId } from "./init-job.js";
 import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
-import { WorkspaceGlyph, WorkspaceLook, WorkspaceTint } from "./workspace-look.js";
+import { WorkspaceGlyph, WorkspaceLook, WorkspaceTheme } from "./workspace-look.js";
 
 /** The one rule for a URL a guest may hand to the laptop: http or https in any
  * case, no whitespace or control characters, at most HTTP_URL_MAX bytes, and
@@ -253,8 +253,8 @@ export const WorkspaceView = z.object({
   screen: z.object({ streamUrl: z.string() }).optional(),
   /** With phase gone: the provider's words when it stopped knowing the machine; every refusal quotes them. */
   gone: z.string().optional(),
-  /** The hue a person picked for this workspace; absent is none, and nothing is tinted. */
-  tint: WorkspaceTint.optional(),
+  /** The theme a person gave this workspace; absent is none, and the sidebar keeps its own surface. */
+  theme: WorkspaceTheme.optional(),
   /** The glyph a person picked for this workspace; absent is none, and the state dot stands alone. */
   glyph: WorkspaceGlyph.optional(),
   /** One line for the machine's row while the runtime is doing something to the machine's daemon, or why the last
@@ -296,7 +296,7 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
  * handed over by having been forgotten, which is how the display stream rode these doors until now. */
 const WORKSPACE_OUT = {
   id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, projects: true, folder: true, home: true,
-  claudeSessionId: true, gone: true, tint: true, glyph: true, daemonNote: true, vaultedAt: true, vaultRefused: true,
+  claudeSessionId: true, gone: true, theme: true, glyph: true, daemonNote: true, vaultedAt: true, vaultRefused: true,
 } as const;
 
 /** A workspace as every verb answers with it: the view without the display stream a desktop machine carries, which
@@ -310,6 +310,15 @@ export type WorkspaceOut = z.infer<typeof WorkspaceOut>;
  * machine. Parsing a status through it is what drops the routes; the app's own socket still gets both. */
 export const WorkspaceListing = WorkspaceStatus.pick({ ...WORKSPACE_OUT, machineState: true, size: true, rateUsdPerHour: true, reason: true, idleAt: true }).extend({ reach: ReachView });
 export type WorkspaceListing = z.infer<typeof WorkspaceListing>;
+
+/** What moving a workspace onto a newer image came to: the workspace as it now stands, whether a machine was
+ * actually replaced, and which of the files the image's own recipe writes into home this workspace had changed, so
+ * its copies travelled instead of the new image's. `moved` is false for a workspace already on the newest version,
+ * which is answered untouched and whose empty `kept` means nothing was judged rather than nothing was changed.
+ * `fallback` is the image it stood on listing no files of its own, which is every image sealed before they were
+ * recorded: nothing was left to the new image and the whole home came across. */
+export const UpgradeResult = z.object({ workspace: WorkspaceView, moved: z.boolean(), kept: z.array(z.string()), fallback: z.boolean().optional() });
+export type UpgradeResult = z.infer<typeof UpgradeResult>;
 
 export const SessionStatus = z.enum(["running", "completed", "interrupted", "failed"]);
 export type SessionStatus = z.infer<typeof SessionStatus>;
@@ -875,12 +884,12 @@ export const WorkspaceUpgradedEvent = z.object({
 /** A person named the workspace: its record alone changed, and every client puts the name on the row it holds. The
  * machine was not touched, so nothing that meters it reads this. */
 export const WorkspaceRenamedEvent = z.object({ type: z.literal("workspace.renamed"), workspaceId: z.string(), name: z.string() });
-/** A person picked the workspace's hue or its glyph: the record alone changed, and both facts travel whole so a
+/** A person set the workspace's theme or its glyph: the record alone changed, and both facts travel whole so a
  * client never has to merge one key into what it holds. null on either is none picked. */
 export const WorkspaceLookEvent = z.object({
   type: z.literal("workspace.look"),
   workspaceId: z.string(),
-  tint: WorkspaceTint.nullable(),
+  theme: WorkspaceTheme.nullable(),
   glyph: WorkspaceGlyph.nullable(),
 });
 export const WorkspaceDeletedEvent = z.object({ type: z.literal("workspace.deleted"), workspaceId: z.string() });
@@ -1311,6 +1320,18 @@ export type GoldenBaseTool = z.infer<typeof GoldenBaseTool>;
 export const GoldenRetired = z.object({ id: z.string(), name: z.string() });
 export type GoldenRetired = z.infer<typeof GoldenRetired>;
 
+/** One file the recipe wrote into the image's home: where it sits under the guest home and the sha256 of the bytes
+ * the builder had when the version sealed. The upgrade reads it to tell a file a fork never touched, whose new copy
+ * comes with the new image, from one the fork changed, which travels. */
+export const RecipeOwnedFile = z.object({
+  path: z.string(),
+  sha256: z.string(),
+  /** The recipe marks this row volatile: a tool rewrites it as it runs, or the machine renders it. Its bytes differ
+   * on any fork that has run anything, so an upgrade carries the fork's copy and never names it as a person's edit. */
+  volatile: z.boolean().optional(),
+});
+export type RecipeOwnedFile = z.infer<typeof RecipeOwnedFile>;
+
 /** One sealed image. `kind` is the machine kind the snapshot was taken from and
  * therefore restores as; entries sealed before kind was recorded were all
  * sandboxes, so readers treat a missing kind as sandbox. */
@@ -1353,6 +1374,10 @@ export const GoldenVersion = z.object({
   /** Every row on this version's image that its recipe no longer asks for, carried from the version before it.
    * Absent when the recipe asks for everything the image carries. */
   retired: z.array(GoldenRetired).optional(),
+  /** Every file this version's recipe wrote into the guest home, hashed on the builder at seal. Absent on a version
+   * sealed before the manifest existed and on one built from no recipe; a fork of such a version upgrades under the
+   * old rule, its whole home landing over the new image. */
+  owned: z.array(RecipeOwnedFile).optional(),
 });
 export type GoldenVersion = z.infer<typeof GoldenVersion>;
 
@@ -2434,7 +2459,45 @@ export * from "./oom.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { ThreadMessage, threadMessages, threadReplyRows, threadResult, ThreadVoice } from "./thread-read.js";
 export { inFolder, shellLine, shellQuote } from "./shell-quote.js";
-export { LOOK_PARTS, WORKSPACE_GLYPHS, WORKSPACE_TINTS, WorkspaceGlyph, WorkspaceLook, WorkspaceTint, type LookPart } from "./workspace-look.js";
+export {
+  DEFAULT_THEME,
+  INK_FLOOR,
+  LOOK_PARTS,
+  SIDE_INK,
+  THEME_GRAIN_STEPS,
+  THEME_HARMONIES,
+  THEME_MAX_DOTS,
+  THEME_MIN_OPACITY,
+  THEME_PRESETS,
+  WORD_FLOOR,
+  ThemeDot,
+  ThemeHarmony,
+  ThemeMode,
+  WORKSPACE_GLYPHS,
+  WorkspaceGlyph,
+  WorkspaceLook,
+  WorkspaceTheme,
+  applyPreset,
+  contrastRatio,
+  cycleHarmony,
+  dotColour,
+  effectiveOpacity,
+  harmoniesOf,
+  harmonyDots,
+  harmonySize,
+  hslToRgb,
+  isPreset,
+  moveFirstDot,
+  opacityCap,
+  resizeDots,
+  rgbToHsl,
+  snapGrain,
+  themeInk,
+  themeScheme,
+  type LookPart,
+  type Rgb,
+  type ThemePreset,
+} from "./workspace-look.js";
 export { rootsPathIn, underProject } from "./project-path.js";
 export * from "./projects.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, registerRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";

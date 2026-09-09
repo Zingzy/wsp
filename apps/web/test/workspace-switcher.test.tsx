@@ -4,7 +4,10 @@
 // workspace, Escape and a lost window leave everything where it was, and a
 // tap is a walk of one followed by a release, which paints nothing. The cards
 // read the sidebar's own order and threads, and carry three parts: the picture
-// well, the workspace name and the open thread's title.
+// well, the workspace name and the open thread's title. In Spaces the same
+// chord walks the last five threads opened in the space on screen: a hold
+// shows them, letting go lands on the highlighted one, a tap is the thread
+// before this one.
 import { act, cleanup, configure, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES, type SessionView, type WorkspaceView } from "@wsp/protocol";
@@ -17,6 +20,7 @@ import { ROW_META_CLASS } from "../src/sidebar/rowGrammar.js";
 import { AppShell } from "../src/shell/AppShell.js";
 import { onComposerFocusRequest } from "../src/shell/shellRequests.js";
 import { loadPagePreviews, useWorkspacePreviews } from "../src/shell/workspacePreviews.js";
+import { recentThreads, useThreadHistory } from "../src/shell/threadHistory.js";
 import { releasesSwitchHold, stepSwitcherAt, SWITCHER_PAINT_DELAY_MS, useWorkspaceSwitcher } from "../src/shell/workspaceSwitcher.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 
@@ -487,6 +491,148 @@ describe("the card the space arrows put up", () => {
   });
 });
 
+describe("the thread switcher in Spaces", () => {
+  const thread = (id: string, title: string, minutesAgo: number): SessionView => ({ ...session(`s_${id}`, "ws_a", title, Date.now() - minutesAgo * 60_000), threadId: id });
+  const SIX = [1, 2, 3, 4, 5, 6].map(n => thread(`thr_${n}`, `thread ${n}`, n));
+
+  async function mountSpaces(threads: SessionView[]): Promise<() => void> {
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarMode: "spaces" } });
+    useThreadHistory.setState({ recent: [] });
+    useStore.getState().bind({ ...fakeApi(), listSessions: async () => threads });
+    render(
+      <AppShell>
+        <div>center content</div>
+      </AppShell>,
+    );
+    await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_a"));
+    await waitFor(() => expect(useStore.getState().sessions["ws_a"]?.length).toBe(threads.length));
+    return asDesktopShell();
+  }
+  const visit = (threadId: string): void => {
+    act(() => useStore.getState().select("ws_a", threadId));
+  };
+  const threadCards = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-thread-card]")].map(el => el.dataset["threadCard"]!);
+  const highlightedThread = (): string | null => document.querySelector<HTMLElement>("[data-thread-card][aria-selected=true]")?.dataset["threadCard"] ?? null;
+
+  it("held, the chord puts up the last five threads opened, the open one first and the one before it highlighted; tab walks on and letting go lands there", async () => {
+    const restore = await mountSpaces(SIX);
+    try {
+      for (const id of ["thr_6", "thr_5", "thr_4", "thr_3", "thr_2", "thr_1"]) visit(id);
+      tab();
+      await waitFor(() => expect(overlay()).not.toBeNull());
+      // Five cards, most recent first, and no picture well on any: the threads all share one page.
+      expect(threadCards()).toEqual(["thr_1", "thr_2", "thr_3", "thr_4", "thr_5"]);
+      expect(document.querySelectorAll("[data-card-preview]")).toHaveLength(0);
+      expect(highlightedThread()).toBe("thr_2");
+      expect(document.querySelector("[data-thread-card='thr_2'] [data-card-name]")?.textContent).toBe("thread 2");
+      expect(document.querySelector("[data-thread-card='thr_2'] [data-card-thread]")?.textContent).toBe("Claude Code · you");
+      // Nothing moves until the hold is let go.
+      expect(useStore.getState().selectedThreadId).toBe("thr_1");
+      tab();
+      await waitFor(() => expect(highlightedThread()).toBe("thr_3"));
+      tab({ shiftKey: true });
+      await waitFor(() => expect(highlightedThread()).toBe("thr_2"));
+      tab();
+      tab();
+      await waitFor(() => expect(highlightedThread()).toBe("thr_4"));
+      release();
+      await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_4"));
+      expect(useStore.getState().selectedId).toBe("ws_a");
+      expect(overlay()).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it("a tap switches to the thread before this one, and a second tap comes back, without the overlay ever painting", async () => {
+    const restore = await mountSpaces(SIX);
+    vi.useFakeTimers();
+    try {
+      visit("thr_3");
+      visit("thr_5");
+      act(() => {
+        tab();
+      });
+      act(() => {
+        release();
+      });
+      expect(useStore.getState().selectedThreadId).toBe("thr_3");
+      act(() => {
+        vi.advanceTimersByTime(SWITCHER_PAINT_DELAY_MS * 2);
+      });
+      expect(overlay()).toBeNull();
+      act(() => {
+        tab();
+      });
+      act(() => {
+        release();
+      });
+      expect(useStore.getState().selectedThreadId).toBe("thr_5");
+      // Shift and a tap is the far end of the five.
+      act(() => {
+        tab({ shiftKey: true });
+      });
+      act(() => {
+        release();
+      });
+      expect(useStore.getState().selectedThreadId).not.toBe("thr_5");
+      expect(useStore.getState().selectedThreadId).not.toBe("thr_3");
+    } finally {
+      vi.useRealTimers();
+      restore();
+    }
+  });
+
+  it("with no thread open, as right after a space switch, a tap lands on the most recently opened thread and the hold starts there; Shift starts at the far end", async () => {
+    const restore = await mountSpaces(SIX);
+    try {
+      visit("thr_3");
+      visit("thr_5");
+      // The workspace alone, the way goToWorkspace leaves it after a switch between spaces.
+      act(() => useStore.getState().select("ws_a"));
+      expect(useStore.getState().selectedThreadId).toBeNull();
+      tab();
+      await waitFor(() => expect(overlay()).not.toBeNull());
+      expect(threadCards()).toEqual(["thr_5", "thr_3", "thr_1", "thr_2", "thr_4"]);
+      expect(highlightedThread()).toBe("thr_5");
+      release();
+      await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_5"));
+      act(() => useStore.getState().select("ws_a"));
+      tab({ shiftKey: true });
+      release();
+      await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_4"));
+    } finally {
+      restore();
+    }
+  });
+
+  it("threads never opened follow the ones that were, in the sidebar's order, and one thread alone puts nothing up", async () => {
+    const restore = await mountSpaces(SIX.slice(0, 3));
+    try {
+      visit("thr_2");
+      tab();
+      await waitFor(() => expect(overlay()).not.toBeNull());
+      expect(threadCards()).toEqual(["thr_2", "thr_1", "thr_3"]);
+      escape();
+      await waitFor(() => expect(overlay()).toBeNull());
+      expect(recentThreads([], [], null)).toEqual([]);
+    } finally {
+      restore();
+    }
+    cleanup();
+    const alone = await mountSpaces(SIX.slice(0, 1));
+    try {
+      visit("thr_1");
+      tab();
+      await settle();
+      expect(useWorkspaceSwitcher.getState().open).toBe(false);
+      expect(useStore.getState().selectedThreadId).toBe("thr_1");
+    } finally {
+      alone();
+    }
+  });
+});
+
 describe("stepSwitcherAt", () => {
   it("wraps at both ends and always moves, since the key has to answer once the overlay is up", () => {
     expect(stepSwitcherAt(3, 0, 1)).toBe(1);
@@ -511,16 +657,16 @@ describe("buildSwitcherCards", () => {
   const projects = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_b: SESSIONS } });
 
   it("keeps the order it is given, drops an id the snapshot no longer holds, and carries the three parts alone", () => {
-    const cards = buildSwitcherCards({ projects, ids: ["ws_c", "ws_gone", "ws_a"], images: {}, currentId: "ws_a", pinnedThreadId: null });
+    const cards = buildSwitcherCards({ projects, targets: ["ws_c", "ws_gone", "ws_a"].map(workspaceId => ({ workspaceId, threadId: null })), images: {}, currentId: "ws_a", pinnedThreadId: null });
     expect(cards.map(c => c.workspaceId)).toEqual(["ws_c", "ws_a"]);
-    expect(Object.keys(cards[0]!)).toEqual(["workspaceId", "name", "threadTitle", "image"]);
+    expect(Object.keys(cards[0]!)).toEqual(["workspaceId", "threadId", "name", "threadTitle", "image"]);
   });
 
   it("names the thread the sidebar draws at the top of the workspace, not the first row the fold happens to hand back", () => {
     const older = session("s_old", "ws_a", "The oldest thread.", Date.parse("2026-09-01T01:00:00Z"));
     const working = { ...session("s_new", "ws_a", "The working thread.", Date.parse("2026-09-01T02:00:00Z")), status: "running" as const, endedAt: undefined };
     const snapshot = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_a: [older, working] } });
-    const cards = buildSwitcherCards({ projects: snapshot, ids: ["ws_a"], images: {}, currentId: null, pinnedThreadId: null });
+    const cards = buildSwitcherCards({ projects: snapshot, targets: [{ workspaceId: "ws_a", threadId: null }], images: {}, currentId: null, pinnedThreadId: null });
     expect(cards[0]?.threadTitle).toBe("The working thread.");
   });
 
@@ -528,9 +674,16 @@ describe("buildSwitcherCards", () => {
     const older = session("s_old", "ws_a", "The oldest thread.", Date.parse("2026-09-01T01:00:00Z"));
     const newer = session("s_new", "ws_a", "The newest thread.", Date.parse("2026-09-01T02:00:00Z"));
     const snapshot = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_a: [older, newer] } });
-    const pinned = buildSwitcherCards({ projects: snapshot, ids: ["ws_a"], images: {}, currentId: "ws_a", pinnedThreadId: "s_old" });
+    const pinned = buildSwitcherCards({ projects: snapshot, targets: [{ workspaceId: "ws_a", threadId: null }], images: {}, currentId: "ws_a", pinnedThreadId: "s_old" });
     expect(pinned[0]?.threadTitle).toBe("The oldest thread.");
-    const elsewhere = buildSwitcherCards({ projects: snapshot, ids: ["ws_a"], images: {}, currentId: "ws_b", pinnedThreadId: "s_old" });
+    const elsewhere = buildSwitcherCards({ projects: snapshot, targets: [{ workspaceId: "ws_a", threadId: null }], images: {}, currentId: "ws_b", pinnedThreadId: "s_old" });
     expect(elsewhere[0]?.threadTitle).toBe("The newest thread.");
+  });
+
+  it("a thread target is a card of the thread's title over where it came from, with no picture well, and a thread that has gone leaves none", () => {
+    const thread = { ...session("s_t", "ws_a", "The thread.", Date.parse("2026-09-01T02:00:00Z")), threadId: "thr_t", startedBy: "cli" as const };
+    const snapshot = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_a: [thread] } });
+    const cards = buildSwitcherCards({ projects: snapshot, targets: [{ workspaceId: "ws_a", threadId: "thr_t" }, { workspaceId: "ws_a", threadId: "thr_gone" }], images: { ws_a: "data:image/png;base64,AAA" }, currentId: "ws_a", pinnedThreadId: null });
+    expect(cards).toEqual([{ workspaceId: "ws_a", threadId: "thr_t", name: "The thread.", threadTitle: "Claude Code · cli", image: null }]);
   });
 });

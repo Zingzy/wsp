@@ -23,6 +23,7 @@ import type { Machine, MachineBackend, MachineKind, MachineState, TemplateRow } 
 import { isMissing } from "./errors.js";
 import { BUILDER_LABEL, CREATED_AT_LABEL, SMOKE_LABEL } from "./labels.js";
 import { goldenName } from "./snapshot-names.js";
+import { recipeOwnedFiles } from "./recipe-owned.js";
 import { importInto } from "./vault.js";
 
 export { goldenHead, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenStage, type GoldenVersion };
@@ -814,6 +815,9 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
     ...envSpec(opts),
   });
   const retryMs = opts.snapshotRetryMs ?? SNAPSHOT_RETRY_MS;
+  // Read before the snapshot is asked for, off the disk the snapshot takes, and before the try: a builder whose
+  // files cannot be read is left as the person set it up, the way a refused snapshot leaves it.
+  const owned = builder.import?.recipe === undefined ? undefined : await recipeOwnedFiles(builder.machine, builder.import.recipe);
   // The 502 is asked again only while the provider still reads the builder running; one that reads otherwise is
   // never snapshotted, so the seal stops at once and says what the provider said.
   const takeSnapshot = async (): Promise<string> => {
@@ -889,6 +893,7 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
       ...(builder.import?.leftBehind !== undefined ? { leftBehind: builder.import.leftBehind } : {}),
       ...(builder.base !== undefined ? { base: builder.base } : {}),
       ...(builder.retired !== undefined && builder.retired.length > 0 ? { retired: builder.retired } : {}),
+      ...(owned !== undefined ? { owned } : {}),
     };
     const kept = builderAlive ? "; builder kept for one more change" : "";
     stage("sealed", leak === undefined ? `v${versionNum}${kept}` : `v${versionNum}${kept}; ${leak}`);

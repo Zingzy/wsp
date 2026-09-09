@@ -1,25 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The machine surface of the right panel: facts, the workspace's own colour
-// and icon, the projects on the machine with the import and the snapshot that
-// images them, live utilisation, spend, lineage with rollback, pause, wake,
-// upgrade, rebuild and forget for one workspace's machine. Pause, wake,
-// rebuild, forget, import and copy id read the workspace registry; the tab
-// keeps its own confirmations for the two that ask. A button is offered only
-// where its verb can run and its capability is there; the panel ends where its
-// content ends, with no sentence explaining what is not on it.
+// The machine surface of the right panel: facts, the projects on the machine
+// with the import and the snapshot that images them, live utilisation, spend,
+// lineage with rollback, pause, wake, upgrade, rebuild and forget for one
+// workspace's machine. Pause, wake, rebuild, forget, import and copy id read
+// the workspace registry; the tab keeps its own confirmations for the two
+// that ask. A button is offered only where its verb can run and its
+// capability is there; the panel ends where its content ends, with no
+// sentence explaining what is not on it.
 import { CopyIcon } from "lucide-react";
-import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { runAction } from "../../actions/contextMenu.js";
 import { CLIENT_CANNOT_REBUILD } from "../../actions/format.js";
 import { actionById, resolveActions, rowLabelOf } from "../../actions/registry.js";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { workspaceActions, workspaceTarget } from "../../actions/workspaceActions.js";
-import { FREE_WORD, LINEAGE_MARKS, LOOK_PARTS, NOT_ON_THIS_KIND, behindGoldenLine, biggerSizeLine, fmtBytes, fmtRate, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, sizeWord, vaultStaleLine, workspaceKind, workspaceProjects, workspaceState, workspaceStateOf, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, LINEAGE_MARKS, NOT_ON_THIS_KIND, behindGoldenLine, biggerSizeLine, fmtBytes, fmtRate, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageKeptLine, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, sizeWord, vaultStaleLine, workspaceKind, workspaceProjects, workspaceState, workspaceStateOf, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { isDesktopShell } from "../../lib/desktopShell.js";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, useOutOfMemoryReading, useWorkspaceLive } from "../../machine/live.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type Upgrade } from "../../protocol/machine.js";
-import { useCapabilities, useCost, useLabs, useProtocolEvents, useStatus, useStore, useWorkspace } from "../../protocol/store.js";
+import { useCapabilities, useCost, useProtocolEvents, useStatus, useStore, useWorkspace } from "../../protocol/store.js";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -32,7 +32,6 @@ import {
 import { Button, WARN_BUTTON } from "../ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty.js";
 import { ForgetWorkspaceDialog } from "../ForgetWorkspaceDialog.js";
-import { LOOK_WORDS, WorkspaceLookPicker } from "../workspaceLook.js";
 import { ScrollArea } from "../ui/scroll-area.js";
 import {
   bytesOfLabel,
@@ -75,14 +74,12 @@ function Surface({ workspace, series }: { workspace: WorkspaceView; series: Work
   // A machine wsp neither forks nor pays for has no spend to chart, nothing to nap and no image behind it; its rows
   // say what it is instead.
   const kind = kindWords(workspaceKind(workspace));
-  const labs = useLabs();
   const goldens = useProjectGoldens(kind.machine === null);
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Header workspace={workspace} status={status} />
       <ScrollArea className="min-h-0 flex-1">
         <Facts workspace={workspace} status={status} awakeMs={last ? last.awakeMs : null} pendingSize={pendingSize} kind={kind} />
-        {labs ? <Look workspace={workspace} /> : null}
         <Projects workspace={workspace} status={status} kind={kind} onTaken={goldens.add} />
         <Live workspace={workspace} kind={kind} />
         {kind.driven && <Usage workspace={workspace} status={status} series={series} />}
@@ -339,22 +336,6 @@ function Projects({ workspace, status, kind, onTaken }: { workspace: WorkspaceVi
   );
 }
 
-/** The workspace's own hue and glyph, the same rows the row's menu opens in a dialog, each under the tab's own
- * section heading rather than a label style of its own. */
-function Look({ workspace }: { workspace: WorkspaceView }) {
-  return (
-    <>
-      {LOOK_PARTS.map(part => (
-        <Section key={part} label={LOOK_WORDS[part]}>
-          <div className="mt-2">
-            <WorkspaceLookPicker workspace={workspace} part={part} />
-          </div>
-        </Section>
-      ))}
-    </>
-  );
-}
-
 /** Re-renders once a second while a countdown is showing. */
 function useClock(ticking: boolean): number {
   const [now, setNow] = useState(() => Date.now());
@@ -570,9 +551,17 @@ function GoldenLineage({ workspace, projects }: { workspace: WorkspaceView; proj
   const [lineage, setLineage] = useState<SnapshotLineage | null>(null);
   /** Version whose rollback awaits the confirm dialog. */
   const [armed, setArmed] = useState<GoldenVersion | null>(null);
+  /** Version this workspace's move onto the head awaits the confirm dialog for. */
+  const [moving, setMoving] = useState<number | null>(null);
   /** The action in flight, so the buttons wait for each other and the note names it. */
   const [busy, setBusy] = useState<"rollback" | "image" | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const noteRef = useRef<HTMLParagraphElement>(null);
+  // The note is the last thing in a tab that scrolls, and after a move it is the only place that says which of the
+  // person's own files did not follow the image, so it is brought into view instead of left below the fold.
+  useEffect(() => {
+    if (note !== null) noteRef.current?.scrollIntoView({ block: "nearest" });
+  }, [note]);
 
   const load = useCallback(() => {
     if (!api) return () => {};
@@ -616,10 +605,12 @@ function GoldenLineage({ workspace, projects }: { workspace: WorkspaceView; proj
 
   const updateImage = async (to: number): Promise<void> => {
     if (!api?.updateImage) return;
+    setMoving(null);
     setBusy("image");
     try {
-      applyWorkspace(await api.updateImage(workspace.id));
-      setNote(`${workspace.name} is on v${to}. Its files came across; anything running in it stopped with the old machine.`);
+      const moved = await api.updateImage(workspace.id);
+      applyWorkspace(moved.workspace);
+      setNote(`${workspace.name} is on v${to}: ${moved.moved ? imageKeptLine(moved.kept, moved.fallback) : IMAGE_ALREADY_NEWEST}.`);
     } catch (e) {
       setNote(errorText(e));
     } finally {
@@ -693,7 +684,7 @@ function GoldenLineage({ workspace, projects }: { workspace: WorkspaceView; proj
                   // golden's head for every fork after it. Neither stands in for the other.
                   <>
                     {fork && behind !== null && offered && (
-                      <Button size="xs" variant="outline" disabled={busy !== null || moveRefusal !== null} aria-label={`update ${workspace.name} to v${behind}`} onClick={() => void updateImage(behind)}>
+                      <Button size="xs" variant="outline" disabled={busy !== null || moveRefusal !== null} aria-label={`update ${workspace.name} to v${behind}`} onClick={() => setMoving(behind)}>
                         Update
                       </Button>
                     )}
@@ -709,9 +700,21 @@ function GoldenLineage({ workspace, projects }: { workspace: WorkspaceView; proj
           })
         )}
       </ul>
-      <p className="min-h-4 text-[11px] text-muted-foreground" data-k="lineage-note">
+      <p ref={noteRef} className="min-h-4 text-[11px] text-muted-foreground" data-k="lineage-note">
         {busy === "rollback" ? "Rolling back…" : busy === "image" ? "Moving to the newer image…" : (note ?? (behind !== null && moveRefusal !== null ? moveRefusal : null))}
       </p>
+      <AlertDialog open={moving !== null} onOpenChange={open => !open && setMoving(null)}>
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Move {workspace.name} to v{moving}?</AlertDialogTitle>
+            <AlertDialogDescription>{IMAGE_MOVE_CONFIRM}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <Button onClick={() => moving !== null && void updateImage(moving)}>Move</Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
       <AlertDialog open={armed !== null} onOpenChange={open => !open && setArmed(null)}>
         <AlertDialogPopup>
           <AlertDialogHeader>

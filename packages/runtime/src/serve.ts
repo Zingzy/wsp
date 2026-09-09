@@ -261,14 +261,16 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.upgrade(msg.workspaceId, spec, origin)) });
               return;
             }
-            case "workspaces.updateImage":
-              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.updateImage(msg.workspaceId, origin)) });
+            case "workspaces.updateImage": {
+              const moved = await rt.workspaces.updateImage(msg.workspaceId, origin);
+              send({ id: msg.id, ok: true, workspace: handed(moved.workspace), moved: moved.moved, kept: moved.kept, ...(moved.fallback === true ? { fallback: true } : {}) });
               return;
+            }
             case "workspaces.rename":
               send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.rename(msg.workspaceId, msg.name, origin)) });
               return;
             case "workspaces.look":
-              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.look(msg.workspaceId, { ...(msg.tint !== undefined ? { tint: msg.tint } : {}), ...(msg.glyph !== undefined ? { glyph: msg.glyph } : {}) }, origin)) });
+              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.look(msg.workspaceId, { ...(msg.theme !== undefined ? { theme: msg.theme } : {}), ...(msg.glyph !== undefined ? { glyph: msg.glyph } : {}) }, origin)) });
               return;
             case "workspaces.delete":
               await rt.workspaces.delete(msg.workspaceId, origin);

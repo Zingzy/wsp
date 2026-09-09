@@ -7,7 +7,7 @@ import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe } from "@wsp/adapter-claude";
-import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, type AdapterEvent, type EventUnion, type RecipeDigest, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
+import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, type AdapterEvent, type EventUnion, type RecipeDigest, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
@@ -1237,6 +1237,285 @@ describe("runtime session index", () => {
     expect(starts).toHaveLength(3);
   });
 
+  it("a thread whose first turn is still reaching the machine is listed, running, under one row; a start that never opens leaves none", async () => {
+    const backend = stubBackend();
+    backend.execImpl = () => ({ exitCode: 0, stdout: "", stderr: "" });
+    let letProbe!: () => void;
+    const probed = new Promise<void>(r => (letProbe = r));
+    const slow: HarnessAdapterFactory = ctx => ({ ...turns().adapter(ctx), probeCatalog: async () => (await probed, null) });
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: slow } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const starting = rt.sessions.start(ws.id, { prompt: "build it", startedBy: "cli" });
+    await until(async () => (await rt.sessions.list(ws.id)).length === 1);
+    const [pending] = await rt.sessions.list(ws.id);
+    expect(pending).toMatchObject({ workspaceId: ws.id, harness: "claude", status: "running", startedBy: "cli", prompt: "build it" });
+    expect(foldThreads(await rt.sessions.list(ws.id))).toMatchObject([{ id: pending!.threadId, status: "running", turns: 1 }]);
+
+    letProbe();
+    const handle = await starting;
+    expect(handle.view().threadId).toBe(pending!.threadId);
+    expect((await handle.finished).status).toBe("completed");
+    const rows = await rt.sessions.list(ws.id);
+    expect(rows.map(r => [r.prompt, r.status, r.threadId])).toEqual([["build it", "completed", pending!.threadId]]);
+    expect(rows[0]!.id).toBe(handle.id);
+    await rt.close();
+  });
+
+  it("a second send inside that window writes no row of its own and waits: the turn still reaching the machine is the one a wait is waiting on, and this send's fate follows it", async () => {
+    const backend = stubBackend();
+    backend.execImpl = () => ({ exitCode: 0, stdout: "", stderr: "" });
+    let letProbe!: () => void;
+    const probed = new Promise<void>(r => (letProbe = r));
+    const starts: string[] = [];
+    const slow: HarnessAdapterFactory = ctx => ({
+      ...turns().adapter(ctx),
+      probeCatalog: async () => (await probed, null),
+      start: o => {
+        starts.push(o.prompt);
+        if (o.prompt === "and this too") throw new Error("the harness would not launch");
+        return turns().adapter(ctx).start(o);
+      },
+    });
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: slow } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ends: SessionEvent[] = [];
+    rt.events.on("session.end", e => ends.push(e as SessionEvent));
+    const first = rt.sessions.start(ws.id, { prompt: "build it" });
+    await until(async () => (await rt.sessions.list(ws.id)).length === 1);
+    const thread = (await rt.sessions.list(ws.id))[0]!.threadId!;
+
+    // The thread is already spoken for by a turn no harness holds yet, so this one waits for it rather than
+    // writing a row beside it and becoming the row every client folds the thread off.
+    const second = rt.sessions.start(ws.id, { prompt: "and this too", thread });
+    await new Promise(r => setTimeout(r, 50));
+    const folded = foldThreads(await rt.sessions.list(ws.id));
+    expect(await rt.sessions.list(ws.id)).toHaveLength(1);
+    expect(folded).toMatchObject([{ id: thread, status: "running", turns: 1 }]);
+
+    letProbe();
+    const handle = await first;
+    expect((await handle.finished).status).toBe("completed");
+    await expect(second).rejects.toThrow("the harness would not launch");
+    // The second send waited out the first turn and gave up only as the thread's next turn, resuming the session the
+    // first announced: its end follows the first turn's own, so a wait following the thread for that turn got that
+    // turn's fate and not this send's.
+    expect(starts).toEqual(["build it", "and this too"]);
+    expect(ends.map(e => [(e as { turnId?: string }).turnId === handle.turnId, (e as { reason?: string }).reason])).toEqual([
+      [true, undefined],
+      [false, "the harness would not launch"],
+    ]);
+    expect(foldThreads(await rt.sessions.list(ws.id))).toMatchObject([{ id: thread, status: "completed", cwd: "/root/work", turns: 1 }]);
+    await rt.close();
+  });
+
+  it.each([
+    ["the same trips as the first", {}],
+    ["its access named, which skips a trip the first turn still makes", { permissionMode: "bypassPermissions" }],
+  ])("a send named at a thread while its first turn is still reaching the machine waits for that turn and resumes its session, with %s: one harness session per thread, sends taken as they reach the loop", async (_shape, extra) => {
+    const backend = stubBackend();
+    backend.execImpl = () => ({ exitCode: 0, stdout: "", stderr: "" });
+    let letProbe!: () => void;
+    const probed = new Promise<void>(r => (letProbe = r));
+    const t = turns();
+    const slow: HarnessAdapterFactory = ctx => ({ ...t.adapter(ctx), probeCatalog: async () => (await probed, null) });
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: slow } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const first = rt.sessions.start(ws.id, { prompt: "A first" });
+    await until(async () => (await rt.sessions.list(ws.id)).length === 1);
+    const thread = (await rt.sessions.list(ws.id))[0]!.threadId!;
+    const second = rt.sessions.start(ws.id, { prompt: "B second", thread, ...extra });
+    await new Promise(r => setTimeout(r, 50));
+    expect(t.starts).toEqual([]);
+
+    letProbe();
+    const a = await first;
+    expect((await a.finished).status).toBe("completed");
+    const b = await second;
+    expect(b.outcome).toBe("queued");
+    expect((await b.finished).status).toBe("completed");
+    // The second send joins the session the first turn minted, which it could not have read when it arrived.
+    expect(t.starts.map(s => [s.prompt, s.resume])).toEqual([
+      ["A first", undefined],
+      ["B second", a.view().claudeSessionId],
+    ]);
+    expect(foldThreads(await rt.sessions.list(ws.id))).toMatchObject([{ id: thread, status: "completed", turns: 1, claudeSessionId: a.view().claudeSessionId }]);
+    await rt.close();
+  });
+
+  it("a send named at a thread while its first turn is still reaching the machine tells whoever that thread tells: the notify the opener registered is on the thread from its row, not from its launch", async () => {
+    const backend = stubBackend();
+    backend.execImpl = () => ({ exitCode: 0, stdout: "", stderr: "" });
+    let letProbe!: () => void;
+    const probed = new Promise<void>(r => (letProbe = r));
+    const slow: HarnessAdapterFactory = ctx => ({ ...turns().adapter(ctx), probeCatalog: async () => (await probed, null) });
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: slow } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const first = rt.sessions.start(ws.id, { prompt: "a", notify: [NOTIFY_ME] });
+    await until(async () => (await rt.sessions.list(ws.id)).length === 1);
+    const thread = (await rt.sessions.list(ws.id))[0]!.threadId!;
+    const second = rt.sessions.start(ws.id, { prompt: "b", thread });
+    await new Promise(r => setTimeout(r, 50));
+    letProbe();
+    const a = await first;
+    const b = await second;
+    await Promise.all([a.finished, b.finished]);
+    // Both turns tell the person, since a send into the thread inherits what its opener registered whether it arrived
+    // inside the launch window or after it.
+    const told = (await rt.sessions.history(ws.id)).filter(e => e.type === "session.notify");
+    expect(told.map(e => [e.turnId === a.turnId, (e as { text: string }).text])).toEqual([
+      [true, notifyLine(thread, { status: "completed", text: "a" }, "tail")],
+      [false, notifyLine(thread, { status: "completed", text: "b" }, "tail")],
+    ]);
+    await rt.close();
+  });
+
+  it("a row for a turn still reaching the machine never reaches the session file: another turn's write leaves it out, and a host reading that file back finds no turn to cut", async () => {
+    const backend = stubBackend();
+    backend.execImpl = () => ({ exitCode: 0, stdout: "", stderr: "" });
+    const store = memoryStore();
+    let letProbe!: () => void;
+    const probed = new Promise<void>(r => (letProbe = r));
+    const slow: HarnessAdapterFactory = ctx => ({ ...turns().adapter(ctx), probeCatalog: async () => (await probed, null) });
+    const rt = createRuntime({ backend, store, adapters: { claude: slow, quick: turns().adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const starting = rt.sessions.start(ws.id, { prompt: "build it" });
+    await until(async () => (await rt.sessions.list(ws.id)).length === 1);
+    // Another thread on the workspace runs to its end while the first is still reaching the machine, and its turn
+    // writes the workspace's session file.
+    await (await rt.sessions.start(ws.id, { prompt: "quick one", harness: "quick" })).finished;
+    const stored = async (): Promise<string[]> => (((await store.get("sessions", ws.id)) as { sessions: { prompt?: string }[] } | undefined)?.sessions ?? []).map(r => r.prompt!);
+    await until(async () => (await stored()).includes("quick one"));
+    expect(await stored()).toEqual(["quick one"]);
+    // What a host reading that file back sees: no running row with nothing behind it, so no turn to settle as cut.
+    const again = createRuntime({ backend, store, adapters: { claude: turns().adapter, quick: turns().adapter } });
+    expect((await again.sessions.list(ws.id)).map(r => [r.prompt, r.status])).toEqual([["quick one", "completed"]]);
+    expect((await again.sessions.history(ws.id)).filter(e => e.type === "session.end")).toHaveLength(1);
+    await again.close();
+
+    letProbe();
+    expect((await (await starting).finished).status).toBe("completed");
+    await rt.close();
+  });
+
+  it("a start whose harness will not open sends its turn's end with the reason and leaves no row: nobody waits on a turn that is not coming", async () => {
+    const refusing: HarnessAdapterFactory = () => ({
+      steers: false,
+      start: () => {
+        throw new Error("the harness would not launch");
+      },
+    });
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: refusing } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ends: SessionEvent[] = [];
+    rt.events.on("session.end", e => ends.push(e as SessionEvent));
+    await expect(rt.sessions.start(ws.id, { prompt: "build it" })).rejects.toThrow("the harness would not launch");
+    expect(ends).toMatchObject([{ reason: "the harness would not launch", exitCode: null, sawResult: false }]);
+    // No turn ran, so the thread is on no listing and the transcript holds nothing of it either; the end is a wake
+    // for whoever the row had already told this thread was working, and the reason rides that end.
+    expect(await rt.sessions.list(ws.id)).toEqual([]);
+    expect(await rt.sessions.history(ws.id)).toEqual([]);
+    await rt.close();
+  });
+
+  it("a send that never launches leaves the thread's last turn exactly as it was: the row, the read and the reply all still say what that turn came to", async () => {
+    const starts: string[] = [];
+    const oneThenNothing: HarnessAdapterFactory = () => ({
+      steers: false,
+      start: o => {
+        starts.push(o.prompt);
+        if (starts.length > 1) throw new Error("the harness would not launch");
+        const sessionId = randomUUID();
+        const result: TurnResult = { status: "completed", text: "all green" };
+        const finished = Promise.resolve().then(() => {
+          o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5", cwd: "/root/app" });
+          o.onEvent({ type: "turn.delta", sessionId, kind: "text", text: "all green" });
+          o.onEvent({ type: "turn.done", sessionId, result });
+          o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+          return result;
+        });
+        return { localId: sessionId, finished, interrupt: async () => {} };
+      },
+    });
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: oneThenNothing } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const first = await rt.sessions.start(ws.id, { prompt: "build it" });
+    await first.finished;
+    const thread = first.view().threadId!;
+    expect(threadResult(await rt.sessions.history(ws.id), thread)).toEqual({ status: "completed", text: "all green" });
+
+    await expect(rt.sessions.start(ws.id, { prompt: "and then this", thread })).rejects.toThrow("the harness would not launch");
+    const after = await rt.sessions.history(ws.id);
+    // One fact, how the thread's last turn went, read the four ways every client reads it; the send that never
+    // opened is on none of them, since it never became a turn.
+    expect(after.map(e => e.type)).toEqual(["session.start", "session.delta", "session.done", "session.end"]);
+    expect(threadResult(after, thread)).toEqual({ status: "completed", text: "all green" });
+    expect(threadReplyRows(after, thread).map(m => m.text)).toEqual(["all green"]);
+    expect(threadMessages(after, thread).map(m => m.text)).toEqual(["build it", "all green", "completed"]);
+    expect(foldThreads(await rt.sessions.list(ws.id))).toMatchObject([{ id: thread, status: "completed", turns: 1 }]);
+    await rt.close();
+  });
+
+  it("a message the running turn steers takes no row of its own: the thread keeps one turn, and its facts stay the running turn's", async () => {
+    const steering: HarnessAdapterFactory = () => ({
+      steers: true,
+      start: o => {
+        const sessionId = o.resume ?? randomUUID();
+        queueMicrotask(() => o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5", cwd: "/root/app" }));
+        return { localId: sessionId, finished: new Promise<TurnResult>(() => {}), interrupt: async () => {}, steer: async () => "accepted" as const };
+      },
+    });
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: steering } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const running = await rt.sessions.start(ws.id, { prompt: "build it" });
+    const thread = running.view().threadId!;
+    await until(async () => (await rt.sessions.list(ws.id))[0]?.claudeSessionId !== undefined);
+    const joined = await rt.sessions.start(ws.id, { prompt: "and this too", thread });
+    expect(joined.outcome).toBe("steered");
+    expect(foldThreads(await rt.sessions.list(ws.id))).toMatchObject([{ id: thread, status: "running", sessionId: running.id, cwd: "/root/app", turns: 1 }]);
+    await rt.close();
+  });
+
+  it("a send that queues behind a running turn writes no second row: the thread's state, folder and stop stay the running turn's", async () => {
+    const opened: ((r: TurnResult) => void)[] = [];
+    const holding: HarnessAdapterFactory = () => ({
+      steers: false,
+      start: o => {
+        const sessionId = o.resume ?? randomUUID();
+        queueMicrotask(() => o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5", cwd: "/root/app" }));
+        let end!: (r: TurnResult) => void;
+        const finished = new Promise<TurnResult>(r => {
+          end = result => {
+            o.onEvent({ type: "turn.done", sessionId, result });
+            o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+            r(result);
+          };
+        });
+        opened.push(end);
+        return { localId: sessionId, finished, interrupt: async () => end({ status: "interrupted" }) };
+      },
+    });
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: holding } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const running = await rt.sessions.start(ws.id, { prompt: "build it" });
+    const thread = running.view().threadId!;
+    await until(async () => (await rt.sessions.list(ws.id))[0]?.claudeSessionId !== undefined);
+    const queued = rt.sessions.start(ws.id, { prompt: "and then this", thread });
+    await new Promise(r => setTimeout(r, 50));
+    // The thread reads as its running turn does, and the row a client would stop is that turn's, not the queued one's.
+    const folded = foldThreads(await rt.sessions.list(ws.id));
+    expect(folded).toMatchObject([{ id: thread, status: "running", sessionId: running.id, cwd: "/root/app", turns: 1 }]);
+    expect(await rt.sessions.interrupt(folded[0]!.sessionId)).toEqual({ outcome: "accepted" });
+
+    const second = await queued;
+    expect(second.outcome).toBe("queued");
+    expect(second.view().threadId).toBe(thread);
+    opened[1]!({ status: "completed", text: "second done" });
+    await second.finished;
+    // The queued turn resumed the first one's harness session, so it took over its row, as every resume does.
+    expect(foldThreads(await rt.sessions.list(ws.id))).toMatchObject([{ id: thread, status: "completed", turns: 1 }]);
+    await rt.close();
+  });
+
   it("a resume after a restart joins the persisted thread and hands the harness the session id and folder", async () => {
     const backend = stubBackend();
     const store = memoryStore();
@@ -1910,6 +2189,46 @@ describe("runtime daemon reach", () => {
       expect(deployed).toEqual(["m1"]);
     } finally {
       finish?.({ status: "completed", text: "" });
+      await daemon.close();
+    }
+  });
+
+  it("a start that gives up before its turn reached the machine lets the daemon update through: its end says the turn stopped running", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const daemon = await helloingDaemon(1, true);
+    let letProbe!: () => void;
+    const probed = new Promise<void>(r => (letProbe = r));
+    const refusing: HarnessAdapterFactory = () => ({
+      steers: false,
+      probeCatalog: async () => (await probed, null),
+      start: () => {
+        throw new Error("the harness would not launch");
+      },
+    });
+    try {
+      const store = memoryStore();
+      const before = createRuntime({ backend, store, adapters: {} });
+      const ws = await before.workspaces.create({ golden: "snap_g", name: "a" });
+      backend.machines[0]!.previewUrl = async () => ({ url: `ws://127.0.0.1:${daemon.port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
+
+      const deployed: string[] = [];
+      const recipe = { setup: "true", smoke: "true", deployDaemon: async (m: { id: string }) => void deployed.push(m.id) };
+      const rt = createRuntime({ backend, store, adapters: { claude: refusing }, daemonToken: TOKEN, goldenRecipe: recipe, daemonHelloTimeoutMs: 5_000 });
+      await rt.workspaces.list();
+      const giving = rt.sessions.start(ws.id, { prompt: "go" });
+      await until(async () => (await rt.sessions.list())[0]?.status === "running");
+      // The update now waits out the turn this start is opening, as it waits out one already running.
+      daemon.release();
+      await new Promise(r => setTimeout(r, 200));
+      expect(deployed).toEqual([]);
+
+      letProbe();
+      await expect(giving).rejects.toThrow("the harness would not launch");
+      await until(() => deployed.length === 1);
+      expect(await rt.sessions.list()).toEqual([]);
+      await rt.close();
+    } finally {
       await daemon.close();
     }
   });
@@ -6315,8 +6634,8 @@ describe("a workspace behind the golden's head", () => {
     rt.events.on("*", e => events.push(e));
     const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
     const moved = await rt.workspaces.updateImage(ws.id);
-    expect(moved.golden).toBe("snap_golden-v2");
-    expect(moved.machineId).toBe("m2");
+    expect(moved.workspace.golden).toBe("snap_golden-v2");
+    expect(moved.workspace.machineId).toBe("m2");
     expect(backend.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([["snap_golden-v1", true], ["snap_golden-v2", false]]);
     expect(await store.get("workspaces", ws.id)).toMatchObject({ golden: "snap_golden-v2", machineId: "m2" });
     expect(events.filter(e => e.type === "workspace.upgraded")).toMatchObject([{ workspaceId: ws.id, machineId: "m2" }]);
@@ -6327,7 +6646,8 @@ describe("a workspace behind the golden's head", () => {
   it("one already on the head is handed back untouched: no machine is replaced", async () => {
     const { backend, rt } = await seeded();
     const ws = await rt.workspaces.create({ golden: "snap_golden-v2", name: "api" });
-    expect(await rt.workspaces.updateImage(ws.id)).toMatchObject({ golden: "snap_golden-v2", machineId: "m1" });
+    // The one place that knows no machine was replaced says so, rather than leaving every client to work it out.
+    expect(await rt.workspaces.updateImage(ws.id)).toMatchObject({ workspace: { golden: "snap_golden-v2", machineId: "m1" }, moved: false, kept: [] });
     expect(backend.machines).toHaveLength(1);
     expect(backend.machines[0]!.killed).toBe(false);
   });
@@ -6398,5 +6718,141 @@ describe("a workspace behind the golden's head", () => {
     const { rt } = await seeded();
     const ws = await rt.workspaces.create({ golden: "snap_elsewhere", name: "api" });
     await expect(rt.workspaces.updateImage(ws.id)).rejects.toThrow("api's image is not a version of any golden this host knows");
+  });
+});
+
+describe("what a move onto a newer image does with the files the image itself wrote", () => {
+  const sha = (c: string): string => c.repeat(64);
+  /** What the fork's home holds at the top level, as the vault enumerates it. */
+  const HOME = [".zshrc", ".gitconfig", ".claude", "proj"];
+  const V1 = [
+    { path: ".zshrc", sha256: sha("1") },
+    { path: ".gitconfig", sha256: sha("2") },
+    { path: ".claude/settings.json", sha256: sha("3") },
+    // Rewritten by the tool as it runs, so its bytes on the fork say nothing about a person.
+    { path: ".claude.json", sha256: sha("4"), volatile: true },
+  ];
+  const V2 = [
+    { path: ".zshrc", sha256: sha("9") },
+    { path: ".gitconfig", sha256: sha("2") },
+    { path: ".claude/settings.json", sha256: sha("8") },
+    { path: ".config/gh/hosts.yml", sha256: sha("7") },
+  ];
+  /** The fork left .zshrc and the agent's settings as v1 wrote them and rewrote its gitconfig. */
+  const ON_FORK: Record<string, string> = { ".zshrc": sha("1"), ".gitconfig": sha("f"), ".claude/settings.json": sha("3") };
+
+  const version = (n: number, owned?: { path: string; sha256: string; volatile?: boolean }[]): Record<string, unknown> => ({
+    version: n,
+    snapshotId: `snap_golden-v${n}`,
+    baseTemplate: "base",
+    setupSha: `s${n}`,
+    createdAt: `2026-09-0${n}T00:00:00.000Z`,
+    smoke: { cmd: "true", exitCode: 0 },
+    ...(owned !== undefined ? { owned } : {}),
+  });
+
+  const seeded = async (versions: Record<string, unknown>[], on: { home?: string[]; fork?: Record<string, string> } = {}) => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const home = on.home ?? HOME;
+    const fork = on.fork ?? ON_FORK;
+    await store.put("goldens", "default", { head: 2, versions });
+    backend.execImpl = (_m, cmd) => {
+      if (cmd.startsWith("ls -A /root")) return { exitCode: 0, stdout: `${home.join("\n")}\n`, stderr: "" };
+      // The guest hashes what it was asked for and nothing else, so a path the read never names cannot reach the
+      // comparison however much the fork holds.
+      if (cmd.includes("sha256sum")) {
+        const asked = Object.entries(fork).filter(([p]) => cmd.includes(`'${p}'`));
+        return { exitCode: 0, stdout: asked.length === 0 ? "" : `${asked.map(([p, h]) => `${h}  ${p}`).join("\n")}\n`, stderr: "" };
+      }
+      return { exitCode: 0, stdout: cmd.includes("echo WSP_CTX") ? "WSP_CTX\nWSP_CTX_END\n" : "", stderr: "" };
+    };
+    return { backend, store, rt: createRuntime({ backend, store, adapters: {} }) };
+  };
+  const tarScript = (m: StubMachine): string => m.runLog.find(r => r.includes("tar czf"))!;
+  /** The read of the fork's own copies, told from the hash the vault upload checks itself with. */
+  const READ = "xargs -0 -r sha256sum";
+
+  it("the files it never touched are left to the new image, its own edits travel and are named, and a directory holding one of them travels as its contents", async () => {
+    const { backend, rt } = await seeded([version(1, V1), version(2, V2)]);
+    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    const moved = await rt.workspaces.updateImage(ws.id);
+    expect(moved.kept).toEqual([".gitconfig"]);
+    expect(moved.moved).toBe(true);
+    expect(moved.fallback).toBeUndefined();
+    expect(moved.workspace.golden).toBe("snap_golden-v2");
+    const script = tarScript(backend.machines[0]!);
+    // Dropped: the two the fork left as v1 wrote them, and the path only v2 writes.
+    expect(script).toContain("-path 'root/.zshrc'");
+    expect(script).toContain("-path 'root/.claude/settings.json'");
+    expect(script).toContain("-path 'root/.config/gh/hosts.yml'");
+    expect(script).not.toContain("-path 'root/.gitconfig'");
+    // .claude holds a dropped path, so its own entry stays out of the archive and its contents travel. It is a
+    // starting point, so it leaves by not being on the list tar is handed and not by a predicate find never tests.
+    expect(script).toContain("printf '%s\\0' 'root/.gitconfig' 'root/proj' >");
+    expect(script).not.toContain("-path 'root/.claude'");
+  });
+
+  it("a version sealed before the manifest existed falls back: nothing is read off the fork, nothing is dropped, and the result says so", async () => {
+    const { backend, rt } = await seeded([version(1), version(2, V2)]);
+    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    const moved = await rt.workspaces.updateImage(ws.id);
+    expect(moved).toMatchObject({ kept: [], fallback: true });
+    expect(backend.machines[0]!.execLog.some(c => c.includes(READ))).toBe(false);
+    expect(tarScript(backend.machines[0]!)).toContain("-C '/' 'root/.zshrc' 'root/.gitconfig' 'root/.claude' 'root/proj'");
+  });
+
+  it("a fork that changed nothing of the image's keeps nothing and every one of those files comes from the new image", async () => {
+    const { backend, rt } = await seeded([version(1, V1.map(f => ({ ...f, sha256: ON_FORK[f.path] ?? f.sha256 }))), version(2, V2)]);
+    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    expect((await rt.workspaces.updateImage(ws.id)).kept).toEqual([]);
+    const script = tarScript(backend.machines[0]!);
+    for (const path of [".zshrc", ".gitconfig", ".claude/settings.json"]) expect(script).toContain(`-path 'root/${path}'`);
+    expect(script).toContain("printf '%s\\0' 'root/proj' >");
+  });
+
+  it("a volatile file is never read off the fork and never named: its bytes move on their own, so the line stays the person's own edits", async () => {
+    const { backend, rt } = await seeded([version(1, V1), version(2, V2)]);
+    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    expect((await rt.workspaces.updateImage(ws.id)).kept).toEqual([".gitconfig"]);
+    const read = backend.machines[0]!.execLog.find(c => c.includes(READ))!;
+    expect(read).not.toContain(".claude.json");
+    // It is not dropped either: the fork's own copy is the one that travels.
+    expect(tarScript(backend.machines[0]!)).not.toContain("-path 'root/.claude.json'");
+  });
+
+  it("a volatile row the new image adds is asked of the fork, so the live copy the fork keeps is the one that travels", async () => {
+    // v1 never wrote .claude.json; v2 starts owning it as a volatile row, and the fork has been running with its own.
+    const v1 = version(1, [{ path: ".zshrc", sha256: sha("1") }]);
+    const v2 = version(2, [
+      { path: ".zshrc", sha256: sha("9") },
+      { path: ".claude.json", sha256: sha("7"), volatile: true },
+    ]);
+    const { backend, rt } = await seeded([v1, v2], {
+      home: [".zshrc", ".claude.json", "proj"],
+      fork: { ".zshrc": sha("1"), ".claude.json": sha("b") },
+    });
+    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    const moved = await rt.workspaces.updateImage(ws.id);
+    const read = backend.machines[0]!.execLog.find(c => c.includes(READ))!;
+    expect(read).toContain("'.claude.json'");
+    const script = tarScript(backend.machines[0]!);
+    // The fork's own copy travels: the archive neither prunes the path nor holds it off the list tar is handed.
+    expect(script).not.toContain("-path 'root/.claude.json'");
+    expect(script).toContain("'root/.claude.json'");
+    // It is live state, not a person's edit, so it is never named.
+    expect(moved.kept).toEqual([]);
+    // The untouched one still goes the other way, so the new image's .zshrc stands.
+    expect(script).toContain("-path 'root/.zshrc'");
+  });
+
+  it("the comparison is read off the machine before it is killed, so the fork's own copies are what the archive judges", async () => {
+    const { backend, rt } = await seeded([version(1, V1), version(2, V2)]);
+    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    await rt.workspaces.updateImage(ws.id);
+    const log = backend.machines[0]!.execLog;
+    expect(log.findIndex(c => c.includes(READ))).toBeGreaterThan(-1);
+    expect(log.findIndex(c => c.includes(READ))).toBeLessThan(log.findIndex(c => c.includes("tar czf")));
+    expect(backend.machines[0]!.killed).toBe(true);
   });
 });

@@ -2,7 +2,7 @@
 // The store's session folding: rows come from the sessions.list op, the
 // session.* events decide when to refetch and what to patch in between.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SessionView, WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_THEME, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api, type ProtocolEvent } from "../src/protocol/client.js";
 import { LAST_WORKSPACE_KEY } from "../src/protocol/lastWorkspace.js";
 import { useStore } from "../src/protocol/store.js";
@@ -624,38 +624,38 @@ describe("store workspaces", () => {
     const { api, emit } = fakeApi([view("ws_a")], []);
     useStore.getState().bind(api);
     await flush();
-    emit({ type: "workspace.look", workspaceId: "ws_a", tint: "cyan", glyph: "flask" });
-    expect(useStore.getState().workspaces[0]!).toMatchObject({ tint: "cyan", glyph: "flask" });
-    expect(useStore.getState().statuses["ws_a"]).toMatchObject({ tint: "cyan", glyph: "flask" });
-    // Clearing one is a null, not a missing key, so the row loses it instead of keeping the old hue.
-    emit({ type: "workspace.look", workspaceId: "ws_a", tint: null, glyph: "flask" });
-    expect(useStore.getState().workspaces[0]!).not.toHaveProperty("tint");
-    expect(useStore.getState().statuses["ws_a"]).not.toHaveProperty("tint");
+    emit({ type: "workspace.look", workspaceId: "ws_a", theme: DEFAULT_THEME, glyph: "flask" });
+    expect(useStore.getState().workspaces[0]!).toMatchObject({ theme: DEFAULT_THEME, glyph: "flask" });
+    expect(useStore.getState().statuses["ws_a"]).toMatchObject({ theme: DEFAULT_THEME, glyph: "flask" });
+    // Clearing one is a null, not a missing key, so the row loses it instead of keeping the old theme.
+    emit({ type: "workspace.look", workspaceId: "ws_a", theme: null, glyph: "flask" });
+    expect(useStore.getState().workspaces[0]!).not.toHaveProperty("theme");
+    expect(useStore.getState().statuses["ws_a"]).not.toHaveProperty("theme");
     expect(useStore.getState().workspaces[0]!.glyph).toBe("flask");
     // A workspace no row holds is not invented by a look.
-    emit({ type: "workspace.look", workspaceId: "ws_gone", tint: "magenta", glyph: null });
+    emit({ type: "workspace.look", workspaceId: "ws_gone", theme: DEFAULT_THEME, glyph: null });
     expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a"]);
     expect(useStore.getState().statuses["ws_gone"]).toBeUndefined();
   });
 
   it("setWorkspaceLook sends the one fact a picker changed and puts what the runtime answers with on the row", async () => {
     const { api } = fakeApi([view("ws_a")], []);
-    const looked = { ...view("ws_a"), tint: "violet" as const };
+    const looked = { ...view("ws_a"), theme: DEFAULT_THEME };
     const calls: unknown[][] = [];
     api.setWorkspaceLook = async (...args) => { calls.push(args); return looked; };
     useStore.getState().bind(api);
     await flush();
-    expect(await useStore.getState().setWorkspaceLook({ workspaceId: "ws_a", look: { tint: "violet" } })).toBe(true);
-    expect(calls).toEqual([["ws_a", { tint: "violet" }]]);
-    expect(useStore.getState().workspaces[0]!.tint).toBe("violet");
+    expect(await useStore.getState().setWorkspaceLook({ workspaceId: "ws_a", look: { theme: DEFAULT_THEME } })).toBe(true);
+    expect(calls).toEqual([["ws_a", { theme: DEFAULT_THEME }]]);
+    expect(useStore.getState().workspaces[0]!.theme).toEqual(DEFAULT_THEME);
     // A refusal is a toast and a false, and the row keeps what it had.
     api.setWorkspaceLook = async () => { throw new Error("the host said no"); };
-    expect(await useStore.getState().setWorkspaceLook({ workspaceId: "ws_a", look: { tint: null } })).toBe(false);
+    expect(await useStore.getState().setWorkspaceLook({ workspaceId: "ws_a", look: { theme: null } })).toBe(false);
     expect(useStore.getState().toast).toBe("the host said no");
-    expect(useStore.getState().workspaces[0]!.tint).toBe("violet");
+    expect(useStore.getState().workspaces[0]!.theme).toEqual(DEFAULT_THEME);
     // A client without the verb takes no pick at all.
     delete api.setWorkspaceLook;
-    expect(await useStore.getState().setWorkspaceLook({ workspaceId: "ws_a", look: { tint: "cyan" } })).toBe(false);
+    expect(await useStore.getState().setWorkspaceLook({ workspaceId: "ws_a", look: { glyph: "bug" } })).toBe(false);
   });
 
   it("gone carries the phase and the provider's words onto the view and its status", async () => {

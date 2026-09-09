@@ -6,8 +6,9 @@ export interface WorkspaceHooks {
   goldenSnapshot: string;
   /** Fresh fork from the golden image; used when a paused machine vanished or on upgrade. */
   resurrect?: (spec?: Partial<MachineSpec>) => Promise<Machine>;
-  /** Export durable state (vault) off a machine before it is replaced. */
-  vaultExport?: (m: Machine) => Promise<Buffer>;
+  /** Export durable state (vault) off a machine before it is replaced; `drop` names guest paths the archive leaves
+   * behind, so what stands at each on the replacement is left alone. */
+  vaultExport?: (m: Machine, drop?: readonly string[]) => Promise<Buffer>;
   /** Restore durable state (vault) onto a replacement machine. */
   vaultImport?: (m: Machine, payload: Buffer) => Promise<void>;
   /** Runs before every pause: keep a copy of the vault the machine may never hand back. */
@@ -204,10 +205,11 @@ export class Workspace {
     return this.machine.snapshot(name);
   }
 
-  /** Replace the machine with a fresh golden fork under a new spec, carrying vaulted state across. */
-  async upgrade(spec?: Partial<MachineSpec>): Promise<void> {
+  /** Replace the machine with a fresh golden fork under a new spec, carrying vaulted state across; `drop` names the
+   * guest paths the vault leaves behind, so the replacement's own copy of each stands. */
+  async upgrade(spec?: Partial<MachineSpec>, opts: { drop?: readonly string[] } = {}): Promise<void> {
     if (!this.hooks.resurrect) throw new Error("upgrade requires a resurrect hook");
-    const payload = this.hooks.vaultExport ? await this.hooks.vaultExport(this.machine) : undefined;
+    const payload = this.hooks.vaultExport ? await this.hooks.vaultExport(this.machine, opts.drop) : undefined;
     await this.machine.kill();
     this.machine = await this.hooks.resurrect(spec);
     if (payload !== undefined && this.hooks.vaultImport) {

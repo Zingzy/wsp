@@ -267,7 +267,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     await win.waitForSelector("text=No workspaces yet");
     await win.keyboard.press("Meta+,");
     await win.waitForSelector("[data-settings-page]");
-    await win.getByRole("radio", { name: THEME_WORDS.light.title }).click();
+    await win.getByRole("radio", { name: THEME_WORDS.light, exact: true }).click();
     await vi.waitFor(async () => expect(await source()).toBe("light"));
     expect(await win.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(false);
     // Pinned dark again by hand, a reload has to say light on its own: the record on the host, and the page's cache before it.
@@ -439,7 +439,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     const darkInset = await insetColour();
     await win.keyboard.press("Meta+,");
     await win.waitForSelector("[data-settings-page]");
-    await win.getByRole("radio", { name: THEME_WORDS.light.title }).click();
+    await win.getByRole("radio", { name: THEME_WORDS.light, exact: true }).click();
     await win.waitForFunction(() => !document.documentElement.classList.contains("dark"));
     await vi.waitFor(async () => expect(await insetColour()).not.toBe(darkInset));
     await win.keyboard.press("Meta+,");

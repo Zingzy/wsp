@@ -10,28 +10,23 @@ export const SETTINGS_WORDS = {
   theme: "Theme",
   sidebar: "Sidebar",
   sidebarWidth: "Sidebar width",
-  sidebarWidthDefault: "default",
   reset: "Reset",
   terminal: "Terminal",
   textSize: "Text size",
 } as const;
 
-/** Each theme as its row names it: the word, and the sentence under the one that does not say it all. */
-export const THEME_WORDS: Record<ThemePreference, { readonly title: string; readonly detail?: string }> = {
-  system: { title: "System", detail: "Follows this computer" },
-  light: { title: "Light" },
-  dark: { title: "Dark" },
-};
+/** Each theme as its segment names it. */
+export const THEME_WORDS: Record<ThemePreference, string> = { system: "System", light: "Light", dark: "Dark" };
 
-/** Each size source as its row names it. */
+/** Each size source as its segment names it. */
 export const TERMINAL_SIZE_WORDS: Record<TerminalSizeSource, string> = {
   app: "From the app",
   file: "From the Ghostty file",
 };
 
-/** The size each source hands the pane, as the fact beside its row: the app's own size, or the file's, which is the
- * app's again for a file that names none. */
+/** The size the picked source hands the pane, as the fact beside the control: the app's own size, or the file's,
+ * which is the app's again for a file that names none. */
 export const TERMINAL_SIZE_FACT: Record<TerminalSizeSource, (appPx: number, filePx: number | undefined) => string> = {
   app: appPx => fmtPx(appPx),
-  file: (appPx, filePx) => (filePx === undefined ? `${fmtPx(appPx)}, the file names no size` : fmtPx(filePx)),
+  file: (appPx, filePx) => fmtPx(filePx ?? appPx),
 };

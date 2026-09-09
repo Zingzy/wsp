@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, DAEMON_VERSION, FREE_WORD, NOT_ON_THIS_KIND, fmtBytes } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, DAEMON_VERSION, FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, NOT_ON_THIS_KIND, fmtBytes, imageKeptLine } from "@wsp/protocol";
 import type {
   Capabilities,
   EventUnion,
@@ -11,6 +11,7 @@ import type {
   SnapshotLineage,
   SnapshotRollbackResult,
   SysSample,
+  UpgradeResult,
   WorkspaceLook,
   WorkspacePhase,
   WorkspaceSize,
@@ -84,7 +85,7 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
     nap: ReturnType<typeof vi.fn<(id: string) => Promise<WorkspaceView>>>;
     wake: ReturnType<typeof vi.fn<(id: string) => Promise<WorkspaceView>>>;
     upgrade: ReturnType<typeof vi.fn<(id: string, size: WorkspaceSize) => Promise<WorkspaceView>>>;
-    updateImage: ReturnType<typeof vi.fn<(id: string) => Promise<WorkspaceView>>>;
+    updateImage: ReturnType<typeof vi.fn<(id: string) => Promise<UpgradeResult>>>;
     rollbackSnapshot: ReturnType<typeof vi.fn<(version: number, name?: string) => Promise<SnapshotRollbackResult>>>;
     listSnapshots: ReturnType<typeof vi.fn<() => Promise<SnapshotLineage>>>;
     listProjectGoldens: ReturnType<typeof vi.fn<() => Promise<ProjectGolden[]>>>;
@@ -100,7 +101,7 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
       return taken;
     }),
     upgrade: vi.fn(async (id: string, _size: WorkspaceSize) => view(id, "?", "running")),
-    updateImage: vi.fn(async (id: string) => ({ ...view(id, "?", "running"), golden: `snap_golden-v${current.head ?? 0}` })),
+    updateImage: vi.fn(async (id: string) => ({ workspace: { ...view(id, "?", "running"), golden: `snap_golden-v${current.head ?? 0}` }, moved: true, kept: [] })),
     capabilities: vi.fn(async () => capabilities),
     portReach: vi.fn(async (_id: string, port: number) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 })),
     daemonReach: vi.fn(async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 })),
@@ -318,18 +319,15 @@ describe("machine facts", () => {
   });
 });
 
-describe("the workspace's colour and icon", () => {
-  it("the tab carries the same picker the row's menu opens, and a pick goes to the runtime from here too", async () => {
-    const api = { ...fakeApi([view("ws_a", "api")]), setWorkspaceLook: vi.fn(async (_id: string, _look: WorkspaceLook) => ({ ...view("ws_a", "api"), tint: "cyan" as const })) };
+describe("the workspace's look", () => {
+  it("the tab carries no colour or icon section: those belong to the workspace's own menu", async () => {
+    const api = { ...fakeApi([view("ws_a", "api")]), setWorkspaceLook: vi.fn(async (_id: string, _look: WorkspaceLook) => view("ws_a", "api")) };
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true } });
     useStore.getState().bind(api);
     render(<MachineSurface workspaceId="ws_a" />);
-    await waitFor(() => expect(document.querySelector("[data-workspace-look]")).not.toBeNull());
-    // Both facts on the tab, since it has the room the menu's dialog gives one at a time.
-    expect(screen.getByRole("group", { name: "Colour" })).toBeDefined();
-    expect(screen.getByRole("group", { name: "Icon" })).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: "Colour: Cyan" }));
-    await waitFor(() => expect(api.setWorkspaceLook).toHaveBeenCalledWith("ws_a", { tint: "cyan" }));
-    await waitFor(() => expect(useStore.getState().workspaces[0]!.tint).toBe("cyan"));
+    await waitFor(() => expect(screen.getByText("api")).toBeDefined());
+    expect(document.querySelector("[data-workspace-look], [data-theme-picker], [data-icon-picker]")).toBeNull();
+    expect(screen.queryByRole("group", { name: /Colour|Icon|theme/ })).toBeNull();
   });
 });
 
@@ -669,7 +667,13 @@ describe("a workspace behind the golden's head", () => {
     expect(within(row as HTMLElement).getByRole("button", { name: "update api to v12" })).toBeDefined();
     expect(within(row as HTMLElement).getByRole("button", { name: "roll back to v11" })).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "update api to v12" }));
-    await waitFor(() => expect(fact("lineage-note")).toBe("api is on v12. Its files came across; anything running in it stopped with the old machine."));
+    // The move replaces the machine and leaves part of the home to the new image, so it is asked before it runs.
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toContain("Move api to v12?");
+    expect(dialog.textContent).toContain(IMAGE_MOVE_CONFIRM);
+    expect(api.updateImage).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Move" }));
+    await waitFor(() => expect(fact("lineage-note")).toBe(`api is on v12: ${imageKeptLine([])}.`));
     expect(api.updateImage.mock.calls).toEqual([["ws_a"]]);
   });
 
@@ -677,6 +681,7 @@ describe("a workspace behind the golden's head", () => {
     await mount([onV11()], CAPS, twoVersions);
     await waitFor(() => expect(marks("v11")).toEqual(["this fork", "volatile"]));
     fireEvent.click(screen.getByRole("button", { name: "update api to v12" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Move" }));
     await waitFor(() => expect(marks("v12")).toEqual(["head", "this fork", "volatile"]));
     expect(fact("v11")).toBe("v11");
     expect(useStore.getState().workspaces[0]!.golden).toBe("snap_golden-v12");
@@ -732,7 +737,45 @@ describe("a workspace behind the golden's head", () => {
     api.updateImage.mockRejectedValueOnce(new Error("at cap"));
     await waitFor(() => expect(marks("v11")).toEqual(["this fork", "volatile"]));
     fireEvent.click(screen.getByRole("button", { name: "update api to v12" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Move" }));
     await waitFor(() => expect(fact("lineage-note")).toBe("at cap"));
+  });
+
+  it("cancelling the move touches nothing", async () => {
+    const api = await mount([onV11()], CAPS, twoVersions);
+    await waitFor(() => expect(marks("v11")).toEqual(["this fork", "volatile"]));
+    fireEvent.click(screen.getByRole("button", { name: "update api to v12" }));
+    await screen.findByRole("alertdialog");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(api.updateImage).not.toHaveBeenCalled();
+  });
+
+  it("the note names the files of the image's own this workspace had changed, so a person sees what did not follow the image", async () => {
+    const api = await mount([onV11()], CAPS, twoVersions);
+    api.updateImage.mockResolvedValueOnce({ workspace: { ...onV11(), golden: "snap_golden-v12" }, moved: true, kept: [".zshrc", ".claude/settings.json"] });
+    await waitFor(() => expect(marks("v11")).toEqual(["this fork", "volatile"]));
+    fireEvent.click(screen.getByRole("button", { name: "update api to v12" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Move" }));
+    await waitFor(() => expect(fact("lineage-note")).toContain("kept 2 changed files: .claude/settings.json, .zshrc"));
+  });
+
+  it("a move that replaced no machine says so rather than claiming the image's files came across", async () => {
+    const api = await mount([onV11()], CAPS, twoVersions);
+    api.updateImage.mockResolvedValueOnce({ workspace: onV11(), moved: false, kept: [] });
+    await waitFor(() => expect(marks("v11")).toEqual(["this fork", "volatile"]));
+    fireEvent.click(screen.getByRole("button", { name: "update api to v12" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Move" }));
+    await waitFor(() => expect(fact("lineage-note")).toContain(IMAGE_ALREADY_NEWEST));
+  });
+
+  it("a move off an image that lists no files of its own says the whole home came across", async () => {
+    const api = await mount([onV11()], CAPS, twoVersions);
+    api.updateImage.mockResolvedValueOnce({ workspace: { ...onV11(), golden: "snap_golden-v12" }, moved: true, kept: [], fallback: true });
+    await waitFor(() => expect(marks("v11")).toEqual(["this fork", "volatile"]));
+    fireEvent.click(screen.getByRole("button", { name: "update api to v12" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Move" }));
+    await waitFor(() => expect(fact("lineage-note")).toContain(imageKeptLine([], true)));
   });
 
   it("lists what a version retired under a micro-label, under the forked version alone", async () => {

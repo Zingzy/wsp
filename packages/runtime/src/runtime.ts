@@ -56,6 +56,9 @@ import {
   applyGoldenImport,
   upgradeBuilder,
   nextSetupSha,
+  readOwnedFiles,
+  upgradePlan,
+  type UpgradePlan,
   type Builder,
   type BuildGoldenOptions,
   type CacheRule,
@@ -149,6 +152,7 @@ import type {
   SessionTitleMaker,
   SessionTitleReader,
   SessionView,
+  StartPicks,
   TitleSource,
   SnapshotStorage,
   ImageAttachment,
@@ -156,6 +160,7 @@ import type {
   TurnImage,
   TurnResult,
   TurnStatus,
+  UpgradeResult,
   WorkspaceCostEvent,
   WorkspaceCreateStage,
   WorkspaceKind,
@@ -936,7 +941,7 @@ export interface Runtime {
     /** Moves the workspace onto its golden's head version, carrying its files across. Refused in one sentence when
      * the machine is not running, the image is a project golden, or no golden knows the image; a workspace past
      * those and already on the head is returned untouched. */
-    updateImage(id: string, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
+    updateImage(id: string, origin?: WorkspaceOrigin): Promise<UpgradeResult>;
     /** Fresh golden fork with the nap-time vault, old machine killed, id and name kept: the way out of a zombie. */
     rebuild(id: string, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
     /** Names the workspace, under the rules a fork's name takes: the space around the name is dropped, and a name
@@ -949,7 +954,7 @@ export interface Runtime {
      * records so a sweep that records this machine after the store lost its workspace document restores it under
      * the name a person gave rather than the fork's. */
     rename(id: string, name: string, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
-    /** The hue and the glyph a person picked for this workspace. A key left out keeps that fact as it is and null
+    /** The theme and the glyph a person gave this workspace. A key left out keeps that fact as it is and null
      * clears it, so the colour picker and the icon picker each send their own without reading the other's. The record
      * alone changes and the machine is untouched, so this goes out as workspace.look. */
     look(id: string, look: WorkspaceLook, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
@@ -1708,14 +1713,33 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       .filter(s => s.length > 0 && !VAULT_SKIP.has(s))
       .map(s => `/root/${s}`);
   };
-  const vaultExport = async (m: Machine, o: Pick<VaultOptions, "maxBytes"> = {}): Promise<Buffer> =>
+  const vaultExport = async (m: Machine, o: Pick<VaultOptions, "maxBytes" | "drop"> = {}): Promise<Buffer> =>
     exportPaths(m, await vaultPathsOf(m), { ...o, ...(opts.vaultCaches !== undefined ? { exclude: opts.vaultCaches } : {}) });
+  /** What the fork's home owes a newer image, read while the machine still runs: the files the image it stands on
+   * wrote and it never touched, which the archive leaves behind so the new image's copies stand, and the ones it
+   * changed, which travel and are named on the result. A version that recorded none falls back to the old rule,
+   * where the whole home lands over the new image. */
+  const imageMovePlan = async (m: Machine, from: GoldenVersion | undefined, to: GoldenVersion): Promise<UpgradePlan> => {
+    if (from?.owned === undefined) return upgradePlan(undefined, to.owned, []);
+    const was = new Set(from.owned.map(f => f.path));
+    // What the comparison actually judges by the fork's bytes: the version's own rows, less the volatile ones, whose
+    // bytes never stand for an edit; and the volatile rows only the new image writes, where the comparison asks
+    // whether the fork holds a live copy of its own to leave alone.
+    const read = [
+      ...from.owned.filter(f => f.volatile !== true).map(f => f.path),
+      ...(to.owned ?? []).filter(f => f.volatile === true && !was.has(f.path)).map(f => f.path),
+    ];
+    return upgradePlan(from.owned, to.owned, await readOwnedFiles(m, read));
+  };
   const live = new Map<string, LiveWorkspace>();
   const builders = new Map<string, LiveBuilder>();
   /** The prepare in flight per golden name; a second call for the same recipe joins it instead of running the stages twice on one machine. */
   const preparing = new Map<string, { hash: string | undefined; promise: Promise<GoldenBuilderView> }>();
   /** A row read back from the store has no handle: its process died with the runtime that started it. */
-  const sessions = new Map<string, { view: SessionView; turnId: string; notify?: readonly string[]; turnToken?: string; handle?: SessionHandle; end?: (reason: string) => void; turnLive?: TurnLive; run?: string }>();
+  /** `launch` is carried only by a row the start road wrote before its turn reached the machine, and settles when the
+   * turn's harness holds the row or the start gave it up: a send behind such a row waits on it, and the file never
+   * takes the row, since a restart could re-open nothing from it. */
+  const sessions = new Map<string, { view: SessionView; turnId: string; notify?: readonly string[]; turnToken?: string; handle?: SessionHandle; end?: (reason: string) => void; turnLive?: TurnLive; run?: string; launch?: Promise<void> }>();
   /** Every exec stream still running, so the machine going away ends it the way it ends a session. */
   const execs = new Set<{ workspaceId: string; end: (reason: string) => void }>();
   const indexFlushes = new Map<string, Promise<void>>();
@@ -1772,7 +1796,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (!live.has(workspaceId)) return Promise.resolve();
     capSessions(workspaceId);
     const rows = [...sessions.values()]
-      .filter(s => s.view.workspaceId === workspaceId)
+      .filter(s => s.view.workspaceId === workspaceId && s.launch === undefined)
       .map(s => ({
         ...s.view,
         turnId: s.turnId,
@@ -1903,7 +1927,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     ...(r.screen !== undefined ? { screen: r.screen } : {}),
     ...(r.projects !== undefined ? { projects: r.projects } : {}),
     ...(r.gone !== undefined ? { gone: r.gone } : {}),
-    ...(r.tint !== undefined ? { tint: r.tint } : {}),
+    ...(r.theme !== undefined ? { theme: r.theme } : {}),
     ...(r.glyph !== undefined ? { glyph: r.glyph } : {}),
     ...(daemonNotes.has(r.id) ? { daemonNote: daemonNotes.get(r.id)! } : {}),
     ...(r.vaultedAt !== undefined ? { vaultedAt: r.vaultedAt } : {}),
@@ -1912,7 +1936,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** One fact of a workspace's look: a value sets it, null clears it back to none, and undefined leaves what the
    * record holds, so a picker sends its own fact without reading the other's. */
-  const putLook = <K extends "tint" | "glyph">(r: WorkspaceRecord, key: K, value: WorkspaceRecord[K] | null | undefined): void => {
+  const putLook = <K extends "theme" | "glyph">(r: WorkspaceRecord, key: K, value: WorkspaceRecord[K] | null | undefined): void => {
     if (value === undefined) return;
     if (value === null) delete r[key];
     else r[key] = value;
@@ -2403,7 +2427,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           fork(record, m => {
             entry.machine = m;
           }, override),
-        vaultExport: m => vaultExport(m),
+        vaultExport: (m, drop) => vaultExport(m, drop === undefined ? {} : { drop }),
         vaultImport: async (m, payload) => {
           await importInto(m, payload, "/");
         },
@@ -3203,15 +3227,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (refusal !== null) throw Object.assign(new Error(refusal), { kind: "conflict" });
       // The refusal covers an image no manifest knows, so both are there by the time the move runs.
       const to = head!;
-      const from = manifest!.versions.find(v => v.snapshotId === entry.record.golden)!.version;
-      if (to.snapshotId === entry.record.golden) return view(entry.record);
+      const was = entry.record.golden;
+      const from = manifest!.versions.find(v => v.snapshotId === was);
+      if (to.snapshotId === was) return { workspace: view(entry.record), moved: false, kept: [] };
+      // The archive is what lands and --recursive-unlink cannot merge, so which of the image's own files the fork
+      // keeps is settled here, off the machine that is still running, before anything is replaced.
+      const plan = await imageMovePlan(entry.machine, from, to);
       // The fork reads the record, so the new image is named before the machine is replaced; the vault carries the
       // work across the way a resize does. A move that throws puts the record back, so a retry forks what the
       // workspace is actually running.
-      const was = entry.record.golden;
       entry.record.golden = to.snapshotId;
       try {
-        await entry.ws.upgrade();
+        await entry.ws.upgrade(undefined, { drop: plan.drop.map(path => `${GUEST_HOME}/${path}`) });
       } catch (e) {
         entry.record.golden = was;
         throw e;
@@ -3219,8 +3246,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       followMachine(entry);
       await persist(entry.record);
       bus.emit({ type: "workspace.upgraded", workspaceId: id, machineId: entry.record.machineId });
-      await emitStatus(entry, reachOf(entry), `moved from image v${from ?? "?"} to v${to.version}`);
-      return view(entry.record);
+      await emitStatus(entry, reachOf(entry), `moved from image v${from?.version ?? "?"} to v${to.version}`);
+      return { workspace: view(entry.record), moved: true, kept: plan.kept, ...(plan.fallback ? { fallback: true } : {}) };
     },
 
     async rebuild(id, origin) {
@@ -3255,10 +3282,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async look(id, look, origin) {
       const entry = await entryOf(id, origin);
-      putLook(entry.record, "tint", look.tint);
+      putLook(entry.record, "theme", look.theme);
       putLook(entry.record, "glyph", look.glyph);
       await persist(entry.record);
-      bus.emit({ type: "workspace.look", workspaceId: id, tint: entry.record.tint ?? null, glyph: entry.record.glyph ?? null });
+      bus.emit({ type: "workspace.look", workspaceId: id, theme: entry.record.theme ?? null, glyph: entry.record.glyph ?? null });
       return view(entry.record);
     },
 
@@ -3615,6 +3642,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       harness,
       adapter: factory({ machine: entry.machine, workspaceId: entry.record.id, execStream: execFactoryFor(entry), home: id => kind.home(entry, id), env: { ...kind.env(entry), ...turnEnv } }),
     };
+  };
+
+  /** Whether any row of the thread is running, the harness holding it or not: a start writes its row before the turn
+   * reaches the machine, and that row is one, so this is the test for whether the thread is spoken for. turnRuns is
+   * the same test keyed by workspace. */
+  const threadRuns = (threadId: string): boolean => [...sessions.values()].some(s => s.view.threadId === threadId && s.view.status === "running");
+  /** The thread's row whose turn is still reaching the machine, if it has one; there is never more than one. */
+  const launchingOn = (threadId: string): { turnId: string; launch: Promise<void> } | undefined => {
+    for (const s of sessions.values()) {
+      if (s.view.threadId === threadId && s.launch !== undefined) return { turnId: s.turnId, launch: s.launch };
+    }
+    return undefined;
   };
 
   type LiveSession = { view: SessionView; turnId: string; handle: SessionHandle; turnLive?: TurnLive };
@@ -3975,8 +4014,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     answerAsk = started.answer?.bind(started);
     const handleId = started.localId;
     // A row that already has an id keeps it: a re-opened turn is named by the harness's own session, which is not
-    // always the id the row was keyed by, and a client holding the row must not see it change under a restart.
-    if (view.id === "") view.id = handleId;
+    // always the id the row was keyed by, and a client holding the row must not see it change under a restart. The
+    // turn's own id is the exception, the one the start road keyed this row by while the turn was still reaching the
+    // machine, and it gives way to the harness's here: an id does move under a client inside that window, which is
+    // safe only because every client keys a thread by its threadId, through foldThreads and through the wait alike.
+    if (view.id === "" || view.id === turnId) view.id = handleId;
     const rowId = view.id;
     // A resumed turn takes over the row of the turn it resumes; the row keeps saying who opened the thread and
     // with what, since every client titles the thread by the row's prompt. Later turns live in the transcript.
@@ -4018,6 +4060,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       void persistSessions(workspaceId);
       void started.interrupt().catch(() => {});
     };
+    // One row per turn, never two: the key the start road held this turn under goes as the harness's own takes over.
+    if (turnId !== rowId) sessions.delete(turnId);
     sessions.set(rowId, { view, turnId, ...(notify !== undefined ? { notify } : {}), ...(turnToken !== undefined ? { turnToken } : {}), handle, end, turnLive, ...(started.run !== undefined ? { run: started.run } : {}) });
     void persistSessions(workspaceId);
     /** The turn's process is over: its status settles, its token stops naming anything, and the harness's own title
@@ -4150,7 +4194,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (blocked !== null) throw new Error(blocked);
       const named = o.thread === undefined ? undefined : latestOn(o.thread);
       if (o.thread !== undefined && named?.workspaceId !== workspaceId) throw new Error(`no thread ${o.thread} on this workspace`);
-      const resume = o.resume ?? named?.claudeSessionId;
+      // Read again where the thread becomes this send's to run: the id it must resume may not exist yet.
+      let resume = o.resume ?? named?.claudeSessionId;
       const threadId = named?.threadId ?? threadOf(workspaceId, resume);
       // me is the caller: the thread this request came out of when its token says it came out of one, and the person
       // when there is no token, which is every road that is not a turn. A target named twice is one target, since a
@@ -4170,18 +4215,43 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         }
       }
       const notify = asked ?? notifyOf(threadId);
-      const table = harnessCatalog(harness);
-      // Checked against the binary's own lists, the ones the composer shows for this workspace.
-      const catalog = table === undefined ? undefined : await catalogOn(table, entry, adapter);
-      // A remembered access, the thread's own then the workspace's, read against the list in front of us: this send
-      // may be on a harness whose modes are not the ones that pick belongs to, and a mode this one does not take is
-      // a pick that does not apply here, not a send to refuse. An access this send NAMED is still refused, by
-      // startPicks, in the same words.
-      const access =
-        o.permissionMode ??
-        (catalog === undefined ? undefined : listedPick(catalog.permissionModes, accessOf(workspaceId, resume) ?? (await pickedAccess(workspaceId))));
-      const picks = startPicks(catalog, { ...o, permissionMode: access }, resume === undefined);
-      const folder = await threadFolder(entry, o);
+      const turnId = randomUUID();
+      // The thread's row is written here, before anything is asked of the machine: the harness's own lists, the
+      // folder and the images all sit between this line and the launch, and they are seconds. A thread no row holds
+      // is a thread nothing can be waited on, so a wait fired the moment after a detached start would find nothing
+      // to wait for. Only where the thread has none of its own: a thread whose turn is running already has the row
+      // a wait waits on, and a second would be the one every client folds the thread's state, folder and times off
+      // while it holds none of them. So a send that finds the thread taken holds nothing until the thread is free,
+      // and holds its row from then to the launch. The row carries what is known now; the picks and the folder land
+      // on it below, and the harness's own facts as the turn answers.
+      const view: SessionView = {
+        id: turnId,
+        workspaceId,
+        harness,
+        status: "running",
+        startedBy: o.startedBy ?? "person",
+        threadId,
+        prompt: o.prompt,
+        startedAt: Date.now(),
+        ...(title !== undefined ? { harnessTitle: title, titleSource: "person" as const } : carriedTitle(threadId)),
+        ...(resume !== undefined ? { claudeSessionId: resume } : {}),
+        ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
+      };
+      let launched!: () => void;
+      const launch = new Promise<void>(r => (launched = r));
+      let held = false;
+      const hold = (): void => {
+        if (held || threadRuns(threadId)) return;
+        // The thread is this send's to run, and the session it resumes is the one the thread's latest turn ran as:
+        // a send that arrived while that turn was still launching read none, since the harness names its session
+        // only after it is up.
+        resume = o.resume ?? latestOn(threadId)?.claudeSessionId ?? resume;
+        held = true;
+        // The row that says the thread is spoken for also says who its turns tell: a send into the thread reads the
+        // opener's notify off its rows, and inside the launch window this is the only one.
+        sessions.set(turnId, { view, turnId, launch, ...(notify !== undefined ? { notify } : {}) });
+      };
+      hold();
       let outcome: SessionStartOutcome = "started";
       let images: TurnImage[] = [];
       let imagesDir: string | undefined;
@@ -4190,27 +4260,59 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // registered, so two sends arriving together both pass the wait, and a folder they shared would leave the first
       // turn holding the second's picture.
       const sendDir = turnImagesDir(threadId, o.requestId, randomUUID());
-      // Every road out of the window between the landing and runTurn is in here, since the turn that would take
-      // this send's images off the machine is the one that does not exist on any of them: a refusal after the wait,
-      // a steer that took the message instead, a start that never opened. The finally covers the steer, which
-      // leaves by returning rather than by throwing.
+      // Every road out of the window between the row above and runTurn is in here, since the row that says this
+      // thread is working and the images this send put on the machine both belong to a turn that does not exist on
+      // any of them: a refusal after a trip, a start that never opened. A steer leaves by returning and holds
+      // neither: a send steers only a turn that was running when it looked, before it held the thread or landed a
+      // thing.
       let handedOver = false;
+      let failure: string | undefined;
       try {
+        const table = harnessCatalog(harness);
+        // Checked against the binary's own lists, the ones the composer shows for this workspace.
+        const catalog = table === undefined ? undefined : await catalogOn(table, entry, adapter);
+        // A remembered access, the thread's own then the workspace's, read against the list in front of us: this send
+        // may be on a harness whose modes are not the ones that pick belongs to, and a mode this one does not take is
+        // a pick that does not apply here, not a send to refuse. An access this send NAMED is still refused, by
+        // startPicks, in the same words.
+        const picked = o.permissionMode === undefined && catalog !== undefined ? await pickedAccess(workspaceId) : undefined;
+        const picksFor = (session: string | undefined): StartPicks => {
+          const access = o.permissionMode ?? (catalog === undefined ? undefined : listedPick(catalog.permissionModes, accessOf(workspaceId, session) ?? picked));
+          return startPicks(catalog, { ...o, permissionMode: access }, session === undefined);
+        };
+        // A pick the lists do not carry is refused here, before this send waits on anything; the picks themselves
+        // are decided below the loop, against the session this send turns out to resume.
+        picksFor(resume);
+        const folder = await threadFolder(entry, o);
         // Two processes on one harness session corrupt its transcript, so a thread runs one turn at a time. Nothing
         // below this loop may await: the wait ends the moment no turn is running, and every line from there to
-        // runTurn, which registers this one, is one synchronous run. The images land inside it for that reason, and
-        // the wait is entered again after them, since landing them is a trip to the machine.
+        // runTurn, which registers this one, is one synchronous run. The images land inside it for that reason, once
+        // the thread is this send's, and the workspace is checked again after them, since landing them is a trip to
+        // the machine and the row this send holds keeps every other send behind it meanwhile. Sends are taken as they
+        // reach this loop, which is the order their trips finish and not always the order they arrived.
         for (;;) {
           const running = runningOn(threadId);
           if (running === undefined) {
+            // A turn of this thread another send is still carrying to the machine has no harness to steer or to wait
+            // out yet, so this one waits for the moment it has one or is given up, and looks again.
+            const launching = launchingOn(threadId);
+            if (launching !== undefined && launching.turnId !== turnId) {
+              if (outcome === "started") bus.emit({ type: "session.queued", workspaceId, threadId, prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}) });
+              outcome = "queued";
+              await launching.launch;
+              refuse();
+              continue;
+            }
+            hold();
             if (landed) break;
             landed = true;
             ({ images, dir: imagesDir } = await landImages(entry, adapter.attachments, sendDir, o.attachments ?? []));
+            refuse();
             continue;
           }
           // A turn that has already answered takes no message, however well its harness steers: the words would
           // land after the reply the caller read. The send waits for that process to exit and runs as the thread's
-          // next turn, in the order the sends arrived; nothing here is ever refused for being in the way.
+          // next turn; nothing here is ever refused for being in the way.
           const steer = running.turnLive?.reply === undefined && adapter.steers ? running.handle.steer : undefined;
           if (steer !== undefined && (await steer(o.prompt)) === "accepted") {
             recordSteer(running, running.handle.id, o);
@@ -4221,30 +4323,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           await running.handle.finished.catch(() => {});
           refuse();
         }
-        const turnId = randomUUID();
+        const picks = picksFor(resume);
         const cwd = (resume !== undefined ? folderOf(workspaceId, resume) : undefined) ?? folder;
         const afterCut = resume !== undefined && cutBefore(workspaceId, threadId);
-        // Created before adapter.start so events that fire synchronously during
-        // start() still land on the view. A resume id was announced by the harness
-        // in an earlier turn, so the row carries it before this one answers.
-        const sessionView: SessionView = {
-          id: "",
-          workspaceId,
-          harness,
-          status: "running",
-          startedBy: o.startedBy ?? "person",
-          threadId,
-          prompt: o.prompt,
-          startedAt: Date.now(),
-          ...(title !== undefined ? { harnessTitle: title, titleSource: "person" as const } : carriedTitle(threadId)),
-          ...(resume !== undefined ? { claudeSessionId: resume } : {}),
-          ...(cwd !== undefined ? { cwd } : {}),
-          ...picks,
-          ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
-        };
+        // What the trips above settled, onto the row the start wrote: the reads that decide them are behind us, so
+        // none of them can be answered from the row they are about. Written before adapter.start, so events that
+        // fire synchronously inside start() land on the same view.
+        Object.assign(view, picks, cwd !== undefined ? { cwd } : {}, resume !== undefined ? { claudeSessionId: resume } : {});
         const handle = runTurn({
           entry,
-          view: sessionView,
+          view,
           threadId,
           turnId,
           ...(notify !== undefined ? { notify } : {}),
@@ -4266,10 +4354,30 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             }),
         });
         handedOver = true;
+        launched();
         // The turn is running; what the record failed to remember must not read as a start that failed.
         if (resume === undefined) await rememberTarget(entry.record, cwd).catch((e: unknown) => console.warn(`last target for ${workspaceId} not remembered: ${e instanceof Error ? e.message : String(e)}`));
         return handle;
+      } catch (e: unknown) {
+        failure = e instanceof Error ? e.message : String(e);
+        throw e;
       } finally {
+        if (!handedOver) {
+          if (held) {
+            sessions.delete(turnId);
+            // Whoever the row told this thread was working must not be left waiting for a turn that never opened, so
+            // its end goes out. On the bus alone and not through record: no turn ran, and a transcript that held an
+            // end with no start behind it would be read as the thread's latest turn by every reader that folds those
+            // rows, which is what the reply, the read and the wait itself all come off. Nothing goes out where the
+            // road out named no reason, which is the message the thread's running turn took instead, nor where the
+            // thread is still working: the turn that is running is the one a wait here is waiting on.
+            if (failure !== undefined && !threadRuns(threadId)) {
+              bus.emit({ type: "session.end", workspaceId, sessionId: view.id, turnId, threadId, exitCode: null, sawResult: false, reason: failure, at: Date.now() });
+            }
+          }
+          // After the row is gone and its end is out, so a send that waited on it finds the thread as it now is.
+          launched();
+        }
         if (!handedOver && imagesDir !== undefined) dropImages(entry, imagesDir);
       }
     },

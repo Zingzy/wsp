@@ -172,6 +172,12 @@ export function threadPill(thread: Pick<SidebarThreadSnapshot, "status" | "indic
   }
 }
 
+/** How a workspace's glyph dims while its machine is paused, on the row's lead and the space bar's icon alike: half
+ * ink, and no hue, since the state is a word elsewhere. Every other state leaves the glyph whole. */
+export function leadDimClass(project: Pick<SidebarProjectSnapshot, "state">): string | undefined {
+  return project.state === "paused" ? "opacity-50" : undefined;
+}
+
 export function dotClassForTone(tone: StatusIndicatorTone): string {
   switch (tone) {
     case "running":

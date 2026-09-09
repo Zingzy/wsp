@@ -3,7 +3,8 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { GoldenMissingTool, HarnessCatalog, InitJob, InitPhase, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceTint, WorkspaceView } from "./index.js";
+import type { GoldenMissingTool, HarnessCatalog, InitJob, InitPhase, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
+import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
 import { shellLine } from "./shell-quote.js";
 import type { ThreadMessage } from "./thread-read.js";
 const KIB = 1024;
@@ -838,6 +839,26 @@ export function vaultStaleLine(w: Pick<WorkspaceView, "vaultedAt" | "vaultRefuse
   return w.vaultRefused === undefined ? null : staleWord(w);
 }
 
+/** What moving a workspace onto a newer image does, the words every client shows before it runs. The home travels,
+ * less the files the image's own recipe wrote and this workspace never changed, whose newer copies come with the
+ * image; an archive carries no deletion, so a file the person took out of a folder the image writes into comes back
+ * with it; nothing installed outside the home travels at all, and the machine it all runs on is replaced. */
+export const IMAGE_MOVE_CONFIRM =
+  "Your home folder moves to the new machine, minus the files the image itself wrote and you never changed, which come from the new image; a file you deleted from a folder the image writes into comes back with it. Anything installed outside your home comes from the new image, and everything running on this machine stops with it.";
+
+/** What a move found nothing to do: the workspace already stands on the newest version, so no machine was replaced
+ * and no file was judged. Said in place of the kept line, which would otherwise claim files came across. */
+export const IMAGE_ALREADY_NEWEST = "already on the newest version of its image, so nothing moved";
+
+/** What the move came to, for the line the command line, the tool and the app print after it: the workspace's own
+ * edits to the image's files, which travelled, or the note that the image it stood on lists no files of its own
+ * (sealed before they were recorded), so its whole home came across and nothing of the newer image's stands. */
+export function imageKeptLine(kept: readonly string[], fallback = false): string {
+  if (fallback) return "the image it stood on lists no files of its own, so its whole home came across and none of the new image's copies stand";
+  if (kept.length === 0) return "every file the image wrote came from the new image; none of them had been changed here";
+  return `kept ${plural(kept.length, "changed file")}: ${nameList([...kept].sort())}; every other file the image wrote came from the new image`;
+}
+
 /** Which call found the provider no longer knew a record's machine: the status poll's read, a pause, a wake's read,
  * the sweep's read of a machine its listing lacked, or the record load at host start. */
 export type GoneSeenBy = "status poll" | "pause" | "wake" | "sweep" | "record load";
@@ -1592,8 +1613,44 @@ export function terminalConfigLines(config: TerminalConfig): string[] {
   return [`Read ${config.files.join(", ")}`, ...rows.filter(([, value]) => value !== undefined).map(([key, value]) => `${key} = ${value}`)];
 }
 
-/** A tint's or a glyph's id as a picker names it. The ids are one word each, so the word is the id with its first
- * letter up; a second table of names would drift from the list the wire validates against. */
-export function lookWord(id: WorkspaceTint | WorkspaceGlyph): string {
+/** A glyph's id as a picker names it. The ids are one word each, so the word is the id with its first letter up; a
+ * second table of names would drift from the list the wire validates against. */
+export function lookWord(id: WorkspaceGlyph): string {
   return id.charAt(0).toUpperCase() + id.slice(1);
+}
+
+/** The custom properties a workspace's theme paints with, the one place the theme object is read. The gradient is
+ * one dot's colour laid flat, two dots fading toward each other from opposite corners, or three with two settling
+ * in the top corners over the third rising from the bottom; every stop carries the opacity as its alpha, so the
+ * colour lies over whatever surface the sidebar has, the glass, the macOS material or the plain token, rather
+ * than replacing it, held under the cap that keeps the side's words reading. The grain is the slider's number,
+ * which the stylesheet gives to a pre-rendered tile. The ink is the one colour the chrome takes from the theme. */
+export interface ThemeVars {
+  readonly "--space-gradient": string;
+  readonly "--space-grain": string;
+  readonly "--space-tint": string;
+}
+
+/** A share as a whole percent: 0.5 reads 50%. */
+export function fmtPercent(share: number): string {
+  return `${Math.round(share * 100)}%`;
+}
+
+/** A colour as CSS spells it, with its alpha as a percent where one is given. */
+export function fmtRgb(colour: Rgb, alpha?: number): string {
+  const channels = `${colour[0]} ${colour[1]} ${colour[2]}`;
+  return alpha === undefined ? `rgb(${channels})` : `rgb(${channels} / ${fmtPercent(alpha)})`;
+}
+
+export function fmtThemeVars(theme: WorkspaceTheme, appDark: boolean): ThemeVars {
+  const alpha = effectiveOpacity(theme, appDark);
+  const colours = theme.dots.map(dot => fmtRgb(dotColour(dot), alpha));
+  const [first, second, third] = colours;
+  const gradient =
+    colours.length === 1
+      ? `linear-gradient(${first}, ${first})`
+      : colours.length === 2
+        ? `linear-gradient(160deg, ${second} 0%, transparent 100%), linear-gradient(340deg, ${first} 0%, transparent 100%)`
+        : `radial-gradient(circle at 0% 0%, ${first} 0%, transparent 70%), radial-gradient(circle at 100% 0%, ${second} 0%, transparent 70%), linear-gradient(to top, ${third} 0%, transparent 65%)`;
+  return { "--space-gradient": gradient, "--space-grain": String(theme.grain), "--space-tint": fmtRgb(themeInk(theme, appDark)) };
 }

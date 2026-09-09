@@ -28,7 +28,9 @@ import {
   InitSetup,
   initSetupLines,
   IMAGES_MAX,
+  IMAGE_ALREADY_NEWEST,
   IMAGE_MAX_WORDS,
+  IMAGE_MOVE_CONFIRM,
   IMAGE_TYPE_WORDS,
   LOGIN_CHOICES,
   NOTIFY_CALLER,
@@ -53,6 +55,7 @@ import {
   ThreadMessage,
   ThreadView,
   TurnStatus,
+  UpgradeResult,
   WorkspaceListing,
   WorkspaceOut,
   WorkspaceView,
@@ -73,6 +76,7 @@ import {
   forgetNotice,
   goldenHead,
   goneRefusal,
+  imageKeptLine,
   imageLine,
   imageTypeOf,
   imagesRefusal,
@@ -515,6 +519,21 @@ export async function rebuild(client: HostClient, ref: string): Promise<Workspac
  * so a caller that held the old one is told. */
 export function rebuiltLine(workspace: WorkspaceView): string {
   return `${stateLine(workspace)} on ${workspace.machineId}`;
+}
+
+/** Moves a workspace onto the newest version of the image it stands on, by the id a caller already resolved. The
+ * runtime alone knows which of the image's own files the workspace changed, so the whole answer, the kept list
+ * included, comes back from it. */
+export async function moveImage(client: HostClient, workspaceId: string): Promise<UpgradeResult> {
+  const { workspace, moved, kept, fallback } = await client.request<UpgradeResult>("workspaces.updateImage", { workspaceId });
+  return { workspace, moved, kept, ...(fallback === true ? { fallback: true } : {}) };
+}
+
+/** What every director prints after the move: where the workspace stands, on which machine, and what of the image's
+ * own files came across as this workspace's rather than the new image's. One that had nowhere to go says that
+ * instead of naming files nothing judged, off the answer's own word for it. */
+export function imageMovedLine(moved: UpgradeResult): string {
+  return `${rebuiltLine(moved.workspace)}; ${moved.moved ? imageKeptLine(moved.kept, moved.fallback) : IMAGE_ALREADY_NEWEST}`;
 }
 
 /** What a workspace rename came to, as every director prints it: the name it went in under and the record after. */
@@ -1103,9 +1122,11 @@ export interface Ended {
 export type Waited = { ended: Ended } | { timedOutMs: number };
 
 /** The thread's latest turn as its transcript ended it, by the protocol's one reading of a transcript; a thread the
- * transcript no longer holds a turn of answers with its row's status alone. */
-async function endedOf(client: HostClient, workspaceId: string, threadId: string, status: TurnStatus): Promise<Ended> {
-  return { threadId, result: threadResult(await history(client, workspaceId), threadId) ?? { status } };
+ * transcript holds no turn of answers with `ended`, what the end that woke this wait carried. A turn the runtime
+ * gave up before it opened is the case with no rows behind it: it never wrote any, since it never ran, and the
+ * reason it did not is on that end and nowhere else. */
+async function endedOf(client: HostClient, workspaceId: string, threadId: string, ended: TurnResult): Promise<Ended> {
+  return { threadId, result: threadResult(await history(client, workspaceId), threadId) ?? ended };
 }
 
 /** The workspace's transcript as the host holds it, the rows every read and every wait folds. */
@@ -1130,17 +1151,21 @@ const threadIdOf = (t: ThreadView): string => t.threadId ?? t.id;
 
 /** Blocks until one of the named threads leaves running and answers with that thread's end: at once for one already
  * over, else on the first done or end the host pushes for any of them; the deadline when `timeoutMs` passes first.
- * The rows are listed after the subscription, so an end between the two is a held frame and not a gap. A done
- * carries its result; an end without one in hand is read off the transcript, since the reply may have landed before
- * this call. Fails when the host goes away first. */
+ * The rows are listed after the subscription, so an end between the two is a held frame and not a gap. A named
+ * thread the listing no longer holds is over too: its only turn was given up before it opened, between the naming
+ * and this call, and its end went out before the subscription, so it is answered failed off what the transcript
+ * holds of it, which is nothing but the status. A done carries its result; an end without one in hand is read off
+ * the transcript, since the reply may have landed before this call. Fails when the host goes away first. */
 export async function firstEnded(client: HostClient, named: readonly ThreadView[], timeoutMs?: number): Promise<Waited> {
   const pushed = pushedFrames(client);
   let timer: NodeJS.Timeout | undefined;
   try {
     await client.events();
     const rows = await threads(client);
+    const gone = named.find(t => rows.every(r => threadIdOf(r) !== threadIdOf(t)));
+    if (gone !== undefined) return { ended: await endedOf(client, gone.workspaceId, threadIdOf(gone), { status: "failed" }) };
     const over = named.map(t => rows.find(r => r.id === t.id)).find((r): r is ThreadView & { status: TurnStatus } => r !== undefined && r.status !== "running");
-    if (over !== undefined) return { ended: await endedOf(client, over.workspaceId, threadIdOf(over), over.status) };
+    if (over !== undefined) return { ended: await endedOf(client, over.workspaceId, threadIdOf(over), { status: over.status }) };
     const ids = new Set(named.map(threadIdOf));
     const ended = new Promise<Waited>(done => {
       pushed.follow(
@@ -1149,7 +1174,7 @@ export async function firstEnded(client: HostClient, named: readonly ThreadView[
           const e = f as unknown as SessionEvent & { threadId: string };
           pushed.stop();
           if (e.type === "session.done") done({ ended: { threadId: e.threadId, result: e.result } });
-          else done(endedOf(client, e.workspaceId, e.threadId, "failed").then(ended => ({ ended })));
+          else done(endedOf(client, e.workspaceId, e.threadId, { status: "failed", ...(e.type === "session.end" && e.reason !== undefined ? { error: e.reason } : {}) }).then(ended => ({ ended })));
         },
       );
     });
@@ -1985,6 +2010,34 @@ export const VERBS: readonly Verb[] = [
       call: async ({ workspace: ref }, deps) => {
         const workspace = await rebuild(await deps.client(), ref);
         return asText(rebuiltLine(workspace), { workspace });
+      },
+    }),
+  },
+  {
+    name: "image move",
+    usage: "wsp image move <workspace>",
+    about: "moves the workspace onto the newest version of its image and prints what of the image's own files it kept",
+    options: {},
+    run: async ctx => {
+      const [ref] = ctx.args;
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp image move takes one workspace");
+      const client = await ctx.client();
+      const source = await workspaceOf(client, ref);
+      ctx.io.error(IMAGE_MOVE_CONFIRM);
+      const moved = await moveImage(client, source.id);
+      ctx.out.emit(moved, imageMovedLine(moved));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Moves the workspace onto the newest version of the image it was forked from: a fresh machine of that image replaces the old one and the workspace's home folder comes across, less the files the image itself wrote and nobody changed here, whose newer copies come with the image. `kept` names the files of the image's own this workspace had changed, which travelled instead. An archive carries no deletion, so a file taken out of a folder the image writes into comes back with the new image. Anything installed outside the home folder comes from the new image, and everything running on the old machine stops with it. Refused in one line on a workspace that is not running, one forked from a project image, and one whose image no golden here knows; one already on the newest version comes back untouched and says so.",
+      input: { workspace: WorkspaceIn },
+      output: { workspace: WorkspaceOut, moved: z.boolean(), kept: z.array(z.string()), fallback: z.boolean().optional() },
+      call: async ({ workspace: ref }, deps) => {
+        const client = await deps.client();
+        const source = await workspaceOf(client, ref);
+        const moved = await moveImage(client, source.id);
+        return asText(imageMovedLine(moved), moved);
       },
     }),
   },

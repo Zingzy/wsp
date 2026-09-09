@@ -201,7 +201,7 @@ describe("command palette", () => {
     await waitFor(() => expect(document.querySelector("[data-space-header]")).not.toBeNull());
     // No workspace row: the one id under ws: is the header's, which wears it so the arrow walk stops there.
     expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(1);
-    expect(document.querySelectorAll("[data-space-dot]")).toHaveLength(2);
+    expect(document.querySelectorAll("[data-space-icon]")).toHaveLength(2);
     expect(useStore.getState().preferences.sidebarMode).toBe("spaces");
     mod("k");
     await waitFor(() => expect(palette()).not.toBeNull());
@@ -549,7 +549,7 @@ describe("default shortcuts", () => {
     expect(useStore.getState().selectedId).toBe("ws_b");
   });
 
-  it("in Spaces the Tab pair walks the threads of the workspace on screen, wrapping, and lands the caret", async () => {
+  it("in Spaces the Tab pair walks the threads of the workspace on screen, last opened first, on the hold's release, and lands the caret", async () => {
     act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarMode: "spaces" } }));
     await mountShell([
       session("s1", "ws_a", "fix the port list", { threadId: "thr_1", status: "running" }),
@@ -559,19 +559,25 @@ describe("default shortcuts", () => {
     const restore = asDesktopShell();
     const { asks, off } = watchComposerFocus("ws_a");
     try {
-      useStore.getState().select("ws_a");
+      useStore.getState().select("ws_a", "thr_1");
       ctrlTab();
-      // Nothing is selected until a hold is let go for a workspace walk; a thread walk lands on the press.
-      await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_1"));
+      // Nothing is selected until the hold is let go, for a thread walk as for a workspace walk.
+      await settle();
+      expect(useStore.getState().selectedThreadId).toBe("thr_1");
+      ctrlUp();
+      await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_2"));
       expect(useStore.getState().selectedId).toBe("ws_a");
       expect(asks).toEqual(["ws_a"]);
+      // A tap is the thread before this one, so two taps come back; the threads never opened follow in the
+      // sidebar's order, and Shift walks the other way round the five.
       ctrlTab();
-      await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_2"));
-      ctrlTab();
+      ctrlUp();
       await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_1"));
       ctrlTab({ shiftKey: true });
+      ctrlUp();
+      // Two threads in this space, so Shift lands on the same other one; the walk stays inside the workspace on
+      // screen and the other workspace's thread is never landed on.
       await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_2"));
-      // The walk stays inside the workspace on screen: the other workspace's thread is never landed on.
       expect(useStore.getState().selectedId).toBe("ws_a");
     } finally {
       off();
