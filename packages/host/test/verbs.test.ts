@@ -8,7 +8,7 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, ThreadView, WorkspaceView, effortsFor, markedDefault, notifyLine, unknownAgentLine, workspaceKind, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, ThreadView, WorkspaceView, effortsFor, markedDefault, noProjectLine, notifyLine, unknownAgentLine, workspaceKind, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -187,7 +187,7 @@ describe("wsp verbs over the host", () => {
     const listed = await run("workspaces");
     expect(listed.code).toBe(0);
     const [heading, ...rows] = listed.io.lines[0]!.split("\n");
-    expect(heading!.split(/ {2,}/)).toEqual(["WORKSPACE", "ID", "MACHINE", "STATE", "PROJECT"]);
+    expect(heading!.split(/ {2,}/)).toEqual(["WORKSPACE", "ID", "MACHINE", "STATE", "PROJECTS"]);
     // The fork names its machine and its state; this computer names neither, so both cells fall off the end of the row.
     expect(rows.map(r => r.split(/ {2,}/))).toEqual([
       ["alpha", expect.stringMatching(/^ws_/), expect.stringMatching(/^m\d+$/), "Running"],
@@ -816,6 +816,68 @@ describe("wsp verbs over the host", () => {
     expect(rows.map(r => r.cwd)).toEqual(["/root/work/elsewhere", undefined, "/root/work/proj"]);
   });
 
+  it("thread new --project starts the thread in that project's folder and is remembered as the workspace's last; --cwd wins over it; a name the workspace lacks is refused before the machine is woken or anything starts", async () => {
+    await run("new", "alpha");
+    const [alpha] = await rt.workspaces.list();
+    await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/spoo", dest: "/root/spoo", bundler: projectBundler() });
+    await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/wsp", dest: "/root/wsp", bundler: projectBundler() });
+    const named = await run("thread", "new", "--in", "alpha", "--project", "wsp", "build it");
+    expect(named.code).toBe(0);
+    expect(named.io.errors).toEqual([]);
+    expect(claude.starts.map(s => s.cwd)).toEqual(["/root/wsp"]);
+    const both = await run("thread", "new", "--in", "alpha", "--project", "wsp", "--cwd", "/root/elsewhere", "build it");
+    expect(both.code).toBe(0);
+    expect(claude.starts.at(-1)!.cwd).toBe("/root/elsewhere");
+    // The project the last thread landed in is where the next one starts, the same memory the composer's pick writes.
+    const remembered = await run("thread", "new", "--in", "alpha", "again");
+    expect(remembered.code).toBe(0);
+    expect(claude.starts.at(-1)!.cwd).toBe("/root/wsp");
+    expect((await rt.preferences.get()).project).toEqual({ [alpha!.id]: "wsp" });
+
+    await rt.workspaces.nap(alpha!.id);
+    const projects = (await rt.workspaces.get(alpha!.id)).projects!;
+    const missing = await run("thread", "new", "--in", "alpha", "--project", "nope", "build it");
+    expect(missing.code).toBe(3);
+    expect(missing.io.errors).toEqual([`wsp thread new: ${noProjectLine("nope", projects)}`]);
+    expect((await rt.workspaces.get(alpha!.id)).phase).toBe("napping");
+    expect(claude.starts).toHaveLength(3);
+  });
+
+  it("projects lists a workspace's projects, name, folder, size and import date, oldest first, and workspaces carries the count", async () => {
+    await run("new", "alpha");
+    await run("new", "beta");
+    const [alpha] = await rt.workspaces.list();
+    const none = await run("projects", "alpha");
+    expect(none.code).toBe(0);
+    expect(none.io.lines).toEqual(["alpha has no projects; wsp import <folder> --to 'alpha' lands one"]);
+    expect(json((await run("projects", "alpha", "--json")).io)).toEqual([{ projects: [] }]);
+
+    await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/spoo", dest: "/root/spoo", bundler: projectBundler() });
+    await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/wsp", dest: "/root/wsp", bundler: projectBundler() });
+    const listed = await run("projects", "alpha");
+    expect(listed.code).toBe(0);
+    expect(listed.io.errors).toEqual([]);
+    const [heading, ...rows] = listed.io.lines[0]!.split("\n");
+    expect(heading!.split(/ {2,}/)).toEqual(["PROJECT", "FOLDER", "SIZE", "IMPORTED"]);
+    const today = new Date().toISOString().slice(0, 10);
+    expect(rows.map(r => r.split(/ {2,}/))).toEqual([["spoo", "/root/spoo", "20 B", today], ["wsp", "/root/wsp", "20 B", today]]);
+    const raw = await run("projects", alpha!.id, "--json");
+    expect(json(raw.io)).toEqual([{ projects: [expect.objectContaining({ name: "spoo", dest: "/root/spoo", size: 20 }), expect.objectContaining({ name: "wsp", dest: "/root/wsp", size: 20 })] }]);
+
+    const workspaces = await run("workspaces");
+    const table = workspaces.io.lines[0]!.split("\n").slice(1).map(r => r.split(/ {2,}/));
+    expect(table).toEqual([
+      ["alpha", expect.stringMatching(/^ws_/), expect.stringMatching(/^m\d+$/), "Running", "2"],
+      ["beta", expect.stringMatching(/^ws_/), expect.stringMatching(/^m\d+$/), "Running"],
+    ]);
+    const unknown = await run("projects", "nope");
+    expect(unknown.code).toBe(1);
+    expect(unknown.io.errors).toEqual(["wsp projects: no workspace nope"]);
+    const bare = await run("projects");
+    expect(bare.code).toBe(3);
+    expect(bare.io.errors[0]).toMatch(/^wsp projects: wsp projects takes one workspace/);
+  });
+
   it("fork --send --cwd starts the first thread in that folder; without it, in the project folder the fork inherited, else none", async () => {
     await run("new", "alpha");
     const [alpha] = await rt.workspaces.list();
@@ -920,7 +982,7 @@ describe("wsp verbs over the host", () => {
     await run("new", "alpha");
     const relative = await run("thread", "new", "--in", "alpha", "--cwd", "packages/host", "look here");
     expect(relative.code).toBe(3);
-    expect(relative.io.errors).toEqual(['--cwd is a path on the machine, absolute: got "packages/host"\n\nusage: wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify, --title, --image <path>, --detach] "<task>"']);
+    expect(relative.io.errors).toEqual(['--cwd is a path on the machine, absolute: got "packages/host"\n\nusage: wsp thread new --in <workspace> [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, --title, --image <path>, --detach] "<task>"']);
     const forked = await run("fork", "alpha", "--send", "build it", "--cwd", "packages/host");
     expect(forked.code).toBe(3);
     expect(forked.io.errors[0]).toMatch(/^--cwd is a path on the machine, absolute: got "packages\/host"\n\nusage: wsp fork /);
@@ -1531,12 +1593,12 @@ describe("wsp verbs over the host", () => {
     const byName = await run("new", "task-a", "--from", "proj");
     expect(byName.code).toBe(0);
     const taskA = (await rt.workspaces.list()).find(w => w.name === "task-a")!;
-    expect(taskA).toMatchObject({ golden: second.snapshotId, project: first.project });
+    expect(taskA).toMatchObject({ golden: second.snapshotId, projects: [first.project] });
     expect(byName.io.lines).toEqual([`created task-a ${taskA.id}`]);
 
     const byId = await run("new", "task-b", "--from", first.snapshotId);
     expect(byId.code).toBe(0);
-    expect((await rt.workspaces.list()).find(w => w.name === "task-b")).toMatchObject({ golden: first.snapshotId, project: first.project });
+    expect((await rt.workspaces.list()).find(w => w.name === "task-b")).toMatchObject({ golden: first.snapshotId, projects: [first.project] });
 
     const missing = await run("new", "task-c", "--from", "nope");
     expect(missing.code).toBe(1);
@@ -1693,7 +1755,7 @@ describe("wsp verbs over the host", () => {
     expect(landings()).toHaveLength(1);
     expect(landings()[0]).toMatch(new RegExp(`test ! -e '${real}' \\|\\| exit 66\nmv '${real}\\.wsp-in-[^']+' '${real}'`));
     const [ws] = await rt.workspaces.list();
-    expect(ws!.project).toMatchObject({ name: "proj", dest: real });
+    expect(ws!.projects).toEqual([{ name: "proj", dest: real, importedAt: expect.any(String), size: 20 }]);
 
     const again = await run("import", proj, "--to", "alpha", "--yes", "--replace", "--json");
     expect(again.code).toBe(0);
@@ -1836,7 +1898,7 @@ describe("wsp verbs over the host", () => {
     expect(proto.io.errors[0]).not.toContain("belongs to");
     const half = await run("thread");
     expect(half.code).toBe(3);
-    expect(half.io.errors).toEqual(['usage: wsp thread new --in <workspace> [--agent, --model, --effort, --access, --cwd, --notify, --title, --image <path>, --detach] "<task>"\nusage: wsp thread rename <thread> "<title>"']);
+    expect(half.io.errors).toEqual(['usage: wsp thread new --in <workspace> [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, --title, --image <path>, --detach] "<task>"\nusage: wsp thread rename <thread> "<title>"']);
   });
 
   it("without a host serving the state file every verb refuses in one line before dialling anything", async () => {

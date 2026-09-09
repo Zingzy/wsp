@@ -162,7 +162,7 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
-import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, machineCapRefusal, machineWord, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, RECORD_RESTORED, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshHostKeyNotice, startPicks, stillWorkingRefusal, storedTitleSource, THIS_COMPUTER, titleLine, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, workspaceState } from "@wsp/protocol";
+import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, machineCapRefusal, machineWord, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshHostKeyNotice, startPicks, stillWorkingRefusal, storedTitleSource, THIS_COMPUTER, titleLine, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, workspaceProjects, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
@@ -989,7 +989,11 @@ export interface Runtime {
          * never announced a session (a launch that never reached the machine) takes the message as a first turn on
          * that same thread. Rejects when no thread on the workspace has that id. */
         thread?: string;
+        /** The folder the thread starts in, absolute; it wins over project and the default folder rule. */
         cwd?: string;
+        /** One of the workspace's projects by name, where the thread starts when cwd names none; refused when the
+         * workspace has no project of that name. */
+        project?: string;
         model?: string;
         effort?: string;
         permissionMode?: string;
@@ -1480,11 +1484,27 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
   const backendFor = (kind: WorkspaceKind): MachineBackend => moduleOf(kind).backend;
   const execFactoryFor = (entry: LiveWorkspace, o?: MachineExecOptions): ExecStreamFactory => moduleOf(entry.record.kind).execStream(entry, o);
-  /** The folder a turn or a command runs in: the one the caller named, else the kind's own. Both roads that launch a
+  /** The folder a turn or a command starts in, the one rule every road reads: the folder the caller named, else the
+   * project named, else the project a thread last landed in on this workspace, else its only project, else the
+   * kind's own folder, where a kind that names none leaves the shell in the machine's home. Both roads that launch a
    * process through this runtime read it here, the turn and the exec verb, so the folder a turn opens in and the one
-   * a command runs in cannot differ; the roads that reach `entry.machine` directly land in the folder that machine
-   * was built with, which for this computer is the same one, since the kind reads it off the backend. */
-  const folderFor = (entry: LiveWorkspace, cwd: string | undefined): string | undefined => cwd ?? moduleOf(entry.record.kind).folder;
+   * a command runs in cannot differ, and the app, the command line and the tool need not restate it; the roads that
+   * reach `entry.machine` directly land in the folder that machine was built with, which for this computer is the
+   * same one, since the kind reads it off the backend. */
+  const threadFolder = async (entry: LiveWorkspace, o: { cwd?: string | undefined; project?: string | undefined }): Promise<string | undefined> => {
+    if (o.cwd !== undefined) return o.cwd;
+    const projects = workspaceProjects(entry.record);
+    const last = projects.length === 0 ? undefined : (await preferences.get()).project[entry.record.id];
+    return projectFor(projects, { named: o.project, last })?.dest ?? moduleOf(entry.record.kind).folder;
+  };
+  /** What a start that opened a thread leaves on the preferences record: the project the thread landed in, by
+   * workspace, the second branch of threadFolder for the next thread there. Written only when it moves the record,
+   * so a start outside every project, or on the project the last one used, pushes no record to any socket. */
+  const rememberProject = async (record: WorkspaceRecord, cwd: string | undefined): Promise<void> => {
+    const used = projectAt(workspaceProjects(record), cwd);
+    if (used === null || (await preferences.get()).project[record.id] === used.name) return;
+    await preferences.set({ project: { [record.id]: used.name } });
+  };
   /** The capability a verb reads before it runs: a machine whose capability is false refuses the verb with the one
    * sentence, which reads for the local computer, the only machine short of these capabilities today. */
   const refuseCannot = (entry: LiveWorkspace, can: keyof Omit<Capabilities, "sizes">, action: string): void => {
@@ -1763,6 +1783,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const daemonNotes = new Map<string, string>();
 
   const view = (r: WorkspaceRecord): WorkspaceView => ({
+    ...(moduleOf(r.kind).folder !== undefined ? { folder: moduleOf(r.kind).folder } : {}),
     id: r.id,
     name: r.name,
     machineId: r.machineId,
@@ -1772,7 +1793,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     createdAt: r.createdAt,
     ...(r.claudeSessionId !== undefined ? { claudeSessionId: r.claudeSessionId } : {}),
     ...(r.screen !== undefined ? { screen: r.screen } : {}),
-    ...(r.project !== undefined ? { project: r.project } : {}),
+    ...(r.projects !== undefined ? { projects: r.projects } : {}),
     ...(r.gone !== undefined ? { gone: r.gone } : {}),
     ...(r.tint !== undefined ? { tint: r.tint } : {}),
     ...(r.glyph !== undefined ? { glyph: r.glyph } : {}),
@@ -1967,9 +1988,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * one place, and the file follows it on every connect, so a project that landed before the daemon read that file
    * is browsable without a second import. Non-fatal: an update or a turn must not fail on it. */
   const writeDaemonRoots = async (entry: LiveWorkspace): Promise<void> => {
-    const dest = entry.record.project?.dest;
-    if (dest === undefined) return;
-    const written = await entry.machine.exec(writeDaemonRootsScript([dest]), { timeoutMs: INLINE_EXEC_MS }).catch((e: unknown) => ({ exitCode: 1, stdout: "", stderr: e instanceof Error ? e.message : String(e) }));
+    const dests = workspaceProjects(entry.record).map(p => p.dest);
+    if (dests.length === 0) return;
+    const written = await entry.machine.exec(writeDaemonRootsScript(dests), { timeoutMs: INLINE_EXEC_MS }).catch((e: unknown) => ({ exitCode: 1, stdout: "", stderr: e instanceof Error ? e.message : String(e) }));
     if (written.exitCode !== 0) console.warn(`browsable folders for ${entry.record.id} not written on ${entry.machine.id}: ${written.stderr.slice(-200)}`);
   };
 
@@ -2617,8 +2638,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         await store.put(OWNER, "id", { id: owner });
       }
       for (const raw of await store.list(WORKSPACES)) {
-        const stored = raw as Omit<WorkspaceRecord, "size" | "kind"> & { size?: WorkspaceSize; kind?: WorkspaceKind };
+        const stored = raw as Omit<WorkspaceRecord, "size" | "kind"> & { size?: WorkspaceSize; kind?: WorkspaceKind; project?: WorkspaceProject };
         const kind: WorkspaceKind = stored.kind ?? "cloud";
+        // A record from before a workspace held a list of projects carries the one it imported under `project`.
+        const { project: single, ...rest } = stored;
+        const projects = rest.projects ?? (single !== undefined ? [single] : undefined);
         // A record whose kind this host wired no module for is left as it was: only the host that owns that machine can serve it.
         let module: KindModule;
         try {
@@ -2656,10 +2680,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
                     ? "napping"
                     : stored.phase;
         const record: WorkspaceRecord = {
-          ...stored,
+          ...rest,
           kind,
           phase,
           size: stored.size ?? sizeBuilt(await shapeOf(machine), module.backend.pricing.defaultSize),
+          ...(projects !== undefined ? { projects } : {}),
           ...(machine.streamUrl !== undefined ? { screen: { streamUrl: machine.streamUrl } } : {}),
         };
         if (phase === "gone") record.gone = stored.gone ?? goneWords(stored.machineId, { by: "record load", at: clock.now(), ...(missing !== undefined ? { answer: missing } : {}) });
@@ -2669,7 +2694,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           if (phase === "gone") console.warn(goneLogLine(stored.id, record.gone!));
           else console.warn(`workspace ${stored.id} was left ${stored.phase} and its machine is ${atProvider} at the provider; the record hydrates ${phase}`);
           await persist(record);
-        }
+        } else if (single !== undefined) await persist(record);
         if (phase === "running") {
           idle.touch(stored.id);
           void syncDaemon(live.get(stored.id)!);
@@ -2754,7 +2779,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       phase: "running",
       golden: o.golden,
       createdAt: new Date().toISOString(),
-      ...(image.project !== undefined ? { project: image.project } : {}),
+      ...(image.project !== undefined ? { projects: [image.project] } : {}),
       spec: {
         ...(o.envs !== undefined ? { envs: o.envs } : {}),
         ...(o.labels !== undefined ? { labels: o.labels } : {}),
@@ -3114,7 +3139,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async snapshot(id, origin) {
       const entry = await entryOf(id, origin);
       refuseCannot(entry, "liveCloneForks", "be snapshotted");
-      const { name, project } = entry.record;
+      const { name } = entry.record;
+      // The project the rule would start a thread in, else the newest import: a project golden carries one today.
+      const projects = workspaceProjects(entry.record);
+      const project = projectFor(projects, { named: undefined, last: (await preferences.get()).project[id] }) ?? projects.at(-1);
       if (project === undefined) throw new Error(`${name} has no project loaded; import one before snapshotting it`);
       if (entry.record.phase !== "running") throw new Error(`${name} is ${entry.record.phase}; only a running first-life machine can be snapshotted`);
       const createdAt = new Date(clock.now()).toISOString();
@@ -3184,7 +3212,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const entry = await entryOf(id, origin);
       const { adapter } = adapterFor(entry);
       // Only the socket or the machine going away ends a command; a build may outlive the deadline a harness turn gets.
-      const ranIn = folderFor(entry, cwd);
+      const ranIn = await threadFolder(entry, { cwd });
       const inner = execFactoryFor(entry, { idleMs: Number.POSITIVE_INFINITY, deadlineMs: Number.POSITIVE_INFINITY })(inFolder(ranIn, argv.map(shellQuote).join(" ")), { env: { ...adapter.env } });
       let endWith: (reason: string) => void = () => {};
       const ended = new Promise<{ reason: string }>(resolve => {
@@ -3980,6 +4008,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         o.permissionMode ??
         (catalog === undefined ? undefined : listedPick(catalog.permissionModes, accessOf(workspaceId, resume) ?? (await pickedAccess(workspaceId))));
       const picks = startPicks(catalog, { ...o, permissionMode: access }, resume === undefined);
+      const folder = await threadFolder(entry, o);
       let outcome: SessionStartOutcome = "started";
       let images: TurnImage[] = [];
       let imagesDir: string | undefined;
@@ -4019,7 +4048,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           refuse();
         }
         const turnId = randomUUID();
-        const cwd = folderFor(entry, (resume !== undefined ? folderOf(workspaceId, resume) : undefined) ?? o.cwd);
+        const cwd = (resume !== undefined ? folderOf(workspaceId, resume) : undefined) ?? folder;
         const afterCut = resume !== undefined && cutBefore(workspaceId, threadId);
         // Created before adapter.start so events that fire synchronously during
         // start() still land on the view. A resume id was announced by the harness
@@ -4062,6 +4091,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             }),
         });
         handedOver = true;
+        // The turn is running; what the record failed to remember must not read as a start that failed.
+        if (resume === undefined) await rememberProject(entry.record, cwd).catch((e: unknown) => console.warn(`last project for ${workspaceId} not remembered: ${e instanceof Error ? e.message : String(e)}`));
         return handle;
       } finally {
         if (!handedOver && imagesDir !== undefined) dropImages(entry, imagesDir);
@@ -4943,9 +4974,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           }
           report("landing", `Landing sessions: ${outcomes()}.`);
         }
-        const browsable = await entry.machine.exec(writeDaemonRootsScript([o.dest]), { timeoutMs: INLINE_EXEC_MS });
+        const projects = [...workspaceProjects(entry.record).filter(p => p.dest !== o.dest), { name: posix.basename(o.dest), dest: o.dest, importedAt: new Date(clock.now()).toISOString(), size: packed.bytes }];
+        const browsable = await entry.machine.exec(writeDaemonRootsScript(projects.map(p => p.dest)), { timeoutMs: INLINE_EXEC_MS });
         if (browsable.exitCode !== 0) throw new Error(`could not make ${o.dest} browsable on the machine: ${browsable.stderr.slice(-200)}`);
-        entry.record.project = { name: posix.basename(o.dest), dest: o.dest, importedAt: new Date(clock.now()).toISOString() };
+        entry.record.projects = projects;
         await persist(entry.record);
         report("done", `${plural(packed.files, "file")}, ${fmtBytes(packed.bytes)}, landed at ${o.dest}${parts > 1 ? ` in ${parts} parts` : ""}${agents.length > 0 ? `; sessions: ${outcomes()}` : ""}.`);
         return { dest: o.dest, files: packed.files, bytes: packed.bytes, parts, cut: packed.cut, rewritten: packed.rewritten, agents };
@@ -5024,6 +5056,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(moduleOf(e.record.kind).hasDaemon(e) ? { daemonReach: () => moduleOf(e.record.kind).daemonRoad(e) } : {}),
         providerState: () => e.machine.state(),
         ...(e.machine.metrics !== undefined ? { metrics: e.machine.metrics.bind(e.machine) } : {}),
+        ...(e.machine.facts !== undefined ? { facts: e.machine.facts.bind(e.machine) } : {}),
         exec: (cmd, o) => e.machine.exec(cmd, o),
       }));
     },

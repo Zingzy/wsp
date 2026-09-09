@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { NOTIFY_ME, applyPreferencesPatch, foldThreads, isLocalWorkspace, threadFromHash, workspaceFromHash, workspaceStateOf, type Capabilities, type HarnessCatalog, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { NOTIFY_ME, applyPreferencesPatch, foldThreads, goldenHead, isLocalWorkspace, threadFromHash, workspaceFromHash, workspaceStateOf, type Capabilities, type HarnessCatalog, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { sidebarWorkspaceOrder } from "../adapt/workspaces.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
@@ -66,6 +66,8 @@ interface State {
   conn: ConnStatus;
   /** Backend feature flags; null until the first reply. Gate upgrade/resize on these. */
   capabilities: Capabilities | null;
+  /** Whether a golden with a head is sealed; null until the first reply. The sidebar's cloud row shows while it is false. */
+  hasGolden: boolean | null;
   /** What each harness's CLI takes at launch, from the runtime's table; empty until it answers, and the composer shows no pickers. */
   harnesses: HarnessCatalog[];
   /** The same, as the binaries on a workspace's machine reported them; set once loadHarnesses got an answer for it. */
@@ -271,6 +273,7 @@ export const useStore = create<State>((set, get) => {
     api: null,
     conn: "connecting",
     capabilities: null,
+    hasGolden: null,
     harnesses: [],
     harnessesByWorkspace: {},
     workspaces: [],
@@ -295,6 +298,11 @@ export const useStore = create<State>((set, get) => {
         .capabilities()
         .then(capabilities => set({ capabilities }))
         .catch(() => {});
+      // A failed lookup reads as sealed: the row is a door, not a gate, and the create's own error says the rest.
+      void api
+        .getGolden()
+        .then(m => set({ hasGolden: goldenHead(m) !== undefined }))
+        .catch(() => set({ hasGolden: true }));
       void api
         .listHarnesses?.()
         .then(harnesses => set({ harnesses }))

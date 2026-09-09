@@ -4,8 +4,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES, type WorkspaceView } from "@wsp/protocol";
-import { App, Shell } from "../src/App.js";
-import { MARK_PATH } from "../src/brand/Brand.js";
+import { App } from "../src/App.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { RIGHT_PANEL_WIDTH_STORAGE_KEY, useRightPanelStore } from "../src/rightPanelStore.js";
@@ -223,15 +222,6 @@ class ScriptedSocket {
     this.onclose?.({ code: 1000 });
   }
 }
-
-describe("no golden image", () => {
-  it("the line pointing at wsp init leads with the mark", async () => {
-    useStore.getState().bind(fakeApi([]));
-    render(<Shell />);
-    const line = await screen.findByText(/No golden image yet/);
-    expect(line.querySelector("svg path")?.getAttribute("d")).toBe(MARK_PATH);
-  });
-});
 
 describe("disconnected banner", () => {
   it("appears while the runtime socket redials and clears when it is back", async () => {

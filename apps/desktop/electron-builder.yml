@@ -8,11 +8,8 @@ asar: false
 npmRebuild: false
 files:
   - main/**
-  - web/**
+  - assets/**
   - package.json
-extraResources:
-  - from: build/app/node_modules/@wsp/daemon
-    to: node_modules/@wsp/daemon
 afterPack: scripts/after-pack.mjs
 mac:
   target:

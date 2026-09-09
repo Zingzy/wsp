@@ -10,7 +10,7 @@ describe("the preferences record", () => {
     expect(preferencesFrom({})).toEqual(DEFAULT_PREFERENCES);
     expect(preferencesFrom({ theme: "sepia" })).toEqual(DEFAULT_PREFERENCES);
     expect(preferencesFrom("nonsense")).toEqual(DEFAULT_PREFERENCES);
-    expect(DEFAULT_PREFERENCES).toEqual({ theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, labs: false });
+    expect(DEFAULT_PREFERENCES).toEqual({ theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, project: {}, labs: false });
   });
 
   it("a stored record keeps what it has and takes the defaults for the rest", () => {
@@ -19,11 +19,11 @@ describe("the preferences record", () => {
 
   it("a patch lands field by field, a null width clears the width, and the zoom lands per workspace, a null entry dropping that workspace's", () => {
     const one = applyPreferencesPatch(DEFAULT_PREFERENCES, { theme: "dark", sidebarWidth: 300, terminalZoom: { ws_a: 2 } });
-    expect(one).toEqual({ theme: "dark", sidebarMode: "list", sidebarWidth: 300, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: {}, labs: false });
+    expect(one).toEqual({ theme: "dark", sidebarMode: "list", sidebarWidth: 300, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: {}, project: {}, labs: false });
     const two = applyPreferencesPatch(one, { terminalZoom: { ws_b: -1 } });
     expect(two.terminalZoom).toEqual({ ws_a: 2, ws_b: -1 });
     const three = applyPreferencesPatch(two, { sidebarWidth: null, terminalZoom: { ws_a: null } });
-    expect(three).toEqual({ theme: "dark", sidebarMode: "list", terminalSize: "app", terminalZoom: { ws_b: -1 }, access: {}, labs: false });
+    expect(three).toEqual({ theme: "dark", sidebarMode: "list", terminalSize: "app", terminalZoom: { ws_b: -1 }, access: {}, project: {}, labs: false });
     expect(applyPreferencesPatch(one, {})).toEqual(one);
     expect(PreferencesPatch.safeParse({ terminalZoom: { ws_a: null } }).success).toBe(true);
   });
@@ -69,5 +69,30 @@ describe("the preferences record", () => {
   it("a size in css pixels reads as a number and the unit", () => {
     expect(fmtPx(14)).toBe("14 px");
     expect(fmtPx(312)).toBe("312 px");
+  });
+});
+
+describe("the project entries on the preferences record", () => {
+  it("the last project per workspace lands beside the access pick, a null entry dropping that workspace's, and a record without it reads as none", () => {
+    const one = applyPreferencesPatch(DEFAULT_PREFERENCES, { project: { ws_a: "spoo" } });
+    expect(one.project).toEqual({ ws_a: "spoo" });
+    const two = applyPreferencesPatch(one, { project: { ws_b: "wsp" }, access: { ws_a: "plan" } });
+    expect(two.project).toEqual({ ws_a: "spoo", ws_b: "wsp" });
+    expect(two.access).toEqual({ ws_a: "plan" });
+    expect(applyPreferencesPatch(two, { project: { ws_a: null } }).project).toEqual({ ws_b: "wsp" });
+    expect(preferencesFrom({ theme: "light" }).project).toEqual({});
+    expect(DEFAULT_PREFERENCES.project).toEqual({});
+  });
+
+  it("the last target, the workspace and project a thread was started on, lands whole and a null clears it", () => {
+    const one = applyPreferencesPatch(DEFAULT_PREFERENCES, { target: { workspace: "ws_a", project: "spoo" } });
+    expect(one.target).toEqual({ workspace: "ws_a", project: "spoo" });
+    const two = applyPreferencesPatch(one, { target: { workspace: "ws_b" } });
+    expect(two.target).toEqual({ workspace: "ws_b" });
+    expect(applyPreferencesPatch(two, { theme: "dark" }).target).toEqual({ workspace: "ws_b" });
+    expect("target" in applyPreferencesPatch(two, { target: null })).toBe(false);
+    expect("target" in DEFAULT_PREFERENCES).toBe(false);
+    expect(PreferencesPatch.safeParse({ project: { ws_a: null }, target: null }).success).toBe(true);
+    expect(PreferencesPatch.safeParse({ target: { project: "spoo" } }).success).toBe(false);
   });
 });

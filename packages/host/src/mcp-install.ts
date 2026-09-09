@@ -27,6 +27,9 @@ export interface RunningWsp {
   argv: readonly string[];
   version: string;
   PATH: string | undefined;
+  /** The shim this process runs behind, when it does: the desktop's bundled command sits inside the app bundle,
+   * which moves, so an agent's config runs the shim the app wrote instead. */
+  shim?: string;
 }
 
 export const runningWsp = (): RunningWsp => ({ execPath: process.execPath, execArgv: process.execArgv, argv: process.argv, version: VERSION, PATH: process.env.PATH });
@@ -63,9 +66,11 @@ function npxBeside(execPath: string): string {
 
 /** How an agent starts this same wsp again, the one rule for every agent's config. Run out of npx's cache, the
  * command is npx with this version pinned: the cache path goes with a sweep or a version bump, and the pin brings
- * the same wsp back. Run as the wsp on PATH, the command is that binary. Any other start (a checkout, a bin folder
- * PATH does not hold) is this node with the flags and script it was given. */
+ * the same wsp back. Run behind the desktop's shim, the command is that shim. Run as the wsp on PATH, the command is
+ * that binary. Any other start (a checkout, a bin folder PATH does not hold) is this node with the flags and script
+ * it was given. */
 function mcpServerCommand(run: RunningWsp): McpServerSpec {
+  if (run.shim !== undefined) return { command: run.shim, args: ["mcp"] };
   const script = run.argv[1];
   if (script !== undefined && script.split(sep).includes(NPX_CACHE_DIR)) return { command: npxBeside(run.execPath), args: ["-y", `${NPM_PACKAGE}@${run.version}`, "mcp"] };
   const wsp = onPath("wsp", run.PATH);

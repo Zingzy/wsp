@@ -30,7 +30,10 @@
 // with the theme rule mounted so a pick on it moves the page's theme as the
 // app's would; ?size=file is the record saying the terminal's text size comes
 // from the Ghostty file; ?local=1 puts this computer in the list beside the
-// cloud machines, so a mixed list of both kinds can be measured.
+// cloud machines, so a mixed list of both kinds can be measured; ?projects=1
+// gives the first workspace two projects, its threads folders inside them and
+// the record a last project for it, so the composer's project pick, the folder
+// line under the box and the thread rows' project word can be measured.
 import { createRoot } from "react-dom/client";
 import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DESKTOP_MAC_CLASS, THIS_COMPUTER, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
@@ -69,6 +72,13 @@ const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running
   createdAt: "2026-09-05T11:00:00Z",
 });
 const cloud = [view("ws_a", "api"), view("ws_b", "web", "napping"), { ...view("ws_c", "old", "gone"), gone: "machine m_ws_c is gone at the provider: Not found" }];
+// ?projects=1: two projects on the first workspace, as two imports leave them, with the sizes the imports measured.
+const PROJECTS = [
+  { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-04T10:00:00Z", size: 48_200_000 },
+  { name: "wsp", dest: "/root/wsp", importedAt: "2026-09-05T09:30:00Z", size: 133_000_000 },
+];
+const projects = params.get("projects") === "1";
+if (projects) Object.assign(cloud[0]!, { projects: PROJECTS });
 // ?local=1 adds this computer to the list, so a mixed list can be measured: two cloud rows and one local beside them.
 const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
 const workspaces = params.get("local") === "1" ? [...cloud, MAC] : cloud;
@@ -91,8 +101,9 @@ const archived: SessionView[] = params.get("archived") !== "1"
       { id: "s6", workspaceId: "ws_a", harness: "codex", status: "interrupted", prompt: "Drop the preview shim from the packing list.", startedBy: "cli", startedAt: Date.now() - 9 * 24 * 60 * 60_000, endedAt: Date.now() - 8 * 24 * 60 * 60_000 },
     ];
 const sessions: SessionView[] = [
-  { id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "Now reply with exactly the word pong.", startedBy: "person", startedAt: Date.now() - 48 * 60_000 },
-  { id: "s2", workspaceId: "ws_a", harness: "claude", status: "completed", prompt: "Reply with exactly the word hi.", startedBy: "cli", startedAt: Date.now() - 30 * 60_000, endedAt: Date.now() - 24 * 60_000 },
+  // With ?projects=1 the first thread works in spoo and the second deep inside wsp, so both rows carry a project word.
+  { id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "Now reply with exactly the word pong.", startedBy: "person", startedAt: Date.now() - 48 * 60_000, ...(projects ? { cwd: "/root/spoo" } : {}) },
+  { id: "s2", workspaceId: "ws_a", harness: "claude", status: "completed", prompt: "Reply with exactly the word hi.", startedBy: "cli", startedAt: Date.now() - 30 * 60_000, endedAt: Date.now() - 24 * 60_000, ...(projects ? { cwd: "/root/wsp/packages/host" } : {}) },
   { id: "s3", workspaceId: "ws_b", harness: "codex", status: "completed", prompt: "Bump the lockfile and run the gate.", startedBy: "cli", startedAt: Date.now() - 90 * 60_000, endedAt: Date.now() - 80 * 60_000 },
   { id: "s4", workspaceId: "ws_b", harness: "claude", status: "interrupted", prompt: "Drop the old preview shim.", startedBy: "person", startedAt: Date.now() - 120 * 60_000, endedAt: Date.now() - 110 * 60_000 },
   ...archived,
@@ -217,7 +228,7 @@ const api: Api = {
   watchStatuses: async () =>
     workspaces.map(w =>
       w.id === MAC.id
-        ? statusOf(w, { kind: "local", size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 })
+        ? statusOf(w, { kind: "local", size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0, facts: { os: "macOS 15.5", uptimeMs: 3 * 86_400_000 + 4 * 3_600_000, folder: "/Users/zingzy/wsp" } })
         : statusOf(w, params.get("offline") === "1" ? { reach: { state: statusOf(w).reach.state, offline: true } } : w.id !== "ws_a" ? {} : params.get("helper") === "1" ? { daemonNote: DAEMON_UPDATING } : params.get("oom") === "1" ? { reach: { state: "unreachable" } } : { idleAt: Date.now() + 15.5 * 60_000 }),
     ),
   forget: async () => {},
@@ -307,7 +318,7 @@ useStore.setState({ conn: "live", ...(toast !== null ? { toast } : {}), ...(show
 // preferences op, so the record is put in place here as the host's answer would put it. The shell is where the
 // surfaces behind labs are shot, so labs is on unless ?labs=0 asks for the record a host without it serves.
 const sidebarWidth = params.get("sidebar");
-useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme, labs: params.get("labs") !== "0", ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(params.get("spaces") === "1" ? { sidebarMode: "spaces" as const } : {}), ...(params.get("size") === "file" ? { terminalSize: "file" as const } : {}) } });
+useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme, labs: params.get("labs") !== "0", ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(params.get("spaces") === "1" ? { sidebarMode: "spaces" as const } : {}), ...(params.get("size") === "file" ? { terminalSize: "file" as const } : {}), ...(projects ? { project: { ws_a: "spoo" } } : {}) } });
 const settings = params.get("settings") === "1";
 if (settings) useStore.setState({ settingsOpen: true });
 function ThemeRule() {

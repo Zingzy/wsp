@@ -12,7 +12,7 @@ import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/s
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG, THREAD_AGENTS } from "@wsp/catalog";
-import { EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, ProjectGolden, Recipe, ThreadView, WorkspaceView, workspaceKind, type ExitClass } from "@wsp/protocol";
+import { EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, ProjectGolden, Recipe, ThreadView, WorkspaceView, noProjectLine, workspaceKind, type ExitClass } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localWiring, serve } from "../src/cli.js";
@@ -134,14 +134,14 @@ describe("the MCP server over the host", () => {
   it("offers the verbs as tools, each described", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "folders", "forget", "fork", "import", "new", "pause", "rebuild", "recipe", "recipe_scan", "rename", "send", "snapshot", "stop", "terminal_config", "thread_new", "thread_rename", "threads", "threads_wait", "wake", "workspaces"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "folders", "forget", "fork", "import", "new", "pause", "projects", "rebuild", "recipe", "recipe_scan", "rename", "send", "snapshot", "stop", "terminal_config", "thread_new", "thread_rename", "threads", "threads_wait", "wake", "workspaces"]);
     expect(Object.keys((tools.find(t => t.name === "folders")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["folder", "hidden"]);
     expect(Object.keys((tools.find(t => t.name === "terminal_config")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["scheme"]);
     expect(Object.keys((tools.find(t => t.name === "import")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agents", "cut", "folder", "keep", "replace", "workspace", "yes"]);
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
     expect(Object.keys((tools.find(t => t.name === "new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["from", "local", "name", "size", "ssh", "ssh_key", "ssh_port"]);
     expect(Object.keys((tools.find(t => t.name === "rename")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["name", "workspace"]);
-    expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "detach", "effort", "images", "model", "notify", "task", "title", "workspace"]);
+    expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "detach", "effort", "images", "model", "notify", "project", "task", "title", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "fork")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "model", "name", "notify", "size", "task", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "send")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "detach", "effort", "images", "message", "model", "thread"]);
     expect(Object.keys((tools.find(t => t.name === "threads_wait")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["threads", "timeout"]);
@@ -183,11 +183,11 @@ describe("the MCP server over the host", () => {
     const byName = await call("new", { name: "task-a", from: "proj" });
     expect(byName.isError).toBe(false);
     const taskA = (await rt.workspaces.list()).find(w => w.name === "task-a")!;
-    expect(taskA).toMatchObject({ golden: golden!.snapshotId, project: golden!.project });
+    expect(taskA).toMatchObject({ golden: golden!.snapshotId, projects: [golden!.project] });
     expect(byName.structured).toEqual({ workspace: expect.objectContaining({ id: taskA.id, name: "task-a", golden: golden!.snapshotId }) });
     const byId = await call("new", { name: "task-b", from: golden!.snapshotId });
     expect(byId.isError).toBe(false);
-    expect((await rt.workspaces.list()).find(w => w.name === "task-b")).toMatchObject({ golden: golden!.snapshotId, project: golden!.project });
+    expect((await rt.workspaces.list()).find(w => w.name === "task-b")).toMatchObject({ golden: golden!.snapshotId, projects: [golden!.project] });
 
     const missing = await call("new", { name: "task-c", from: "nope" });
     expect(missing).toEqual(failedWith("no project golden named nope; wsp snapshot <workspace> takes one"));
@@ -535,6 +535,27 @@ describe("the MCP server over the host", () => {
     expect(claude.starts.at(-1)?.cwd).toBe("/root/work/site");
     const { threads } = (await call("threads", { workspace: "worker" })).structured as { threads: ThreadView[] };
     expect(threads.map(t => t.cwd)).toEqual(["/root/work/site"]);
+  });
+
+  it("thread_new takes project, one of the workspace's projects by name, refused in one line when it has none of that name; projects lists them as wsp projects does", async () => {
+    await call("new", { name: "alpha" });
+    const [alpha] = await rt.workspaces.list();
+    expect(await call("projects", { workspace: "alpha" })).toMatchObject({ isError: false, structured: { projects: [] } });
+    await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/spoo", dest: "/root/spoo", bundler: projectBundler() });
+    await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/wsp", dest: "/root/wsp", bundler: projectBundler() });
+    const listed = await call("projects", { workspace: "alpha" });
+    expect(listed.isError).toBe(false);
+    expect(listed.structured).toEqual({ projects: [expect.objectContaining({ name: "spoo", dest: "/root/spoo", size: 20 }), expect.objectContaining({ name: "wsp", dest: "/root/wsp", size: 20 })] });
+    expect(JSON.parse(listed.text)).toEqual(listed.structured);
+
+    const named = await call("thread_new", { workspace: "alpha", task: "build it", project: "wsp" });
+    expect(named.isError).toBe(false);
+    expect(claude.starts.map(s => s.cwd)).toEqual(["/root/wsp"]);
+    const projects = (await rt.workspaces.get(alpha!.id)).projects!;
+    expect(await call("thread_new", { workspace: "alpha", task: "build it", project: "nope" })).toEqual(failedWith(noProjectLine("nope", projects), "usage"));
+    expect(claude.starts).toHaveLength(1);
+    const { workspaces } = (await call("workspaces")).structured as { workspaces: WorkspaceView[] };
+    expect(workspaces.find(w => w.name === "alpha")!.projects).toHaveLength(2);
   });
 
   it("thread_new, send and fork take model, effort and access, the composer's three picks; a new thread without a model runs the catalog's default and an unlisted value is refused with the list", async () => {

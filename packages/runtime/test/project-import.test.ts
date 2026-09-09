@@ -143,7 +143,7 @@ describe("project.import on a workspace", () => {
     const browsable = machine.execLog.find(c => c.includes("/root/.wsp/roots"))!;
     expect(browsable).toBe("mkdir -p '/root/.wsp'\nprintf '%s\\n' '/root/work/proj' > '/root/.wsp/roots.next'\nmv -f '/root/.wsp/roots.next' '/root/.wsp/roots'");
     expect(machine.execLog.indexOf(browsable)).toBeGreaterThan(machine.execLog.indexOf(landing));
-    expect((await rt.workspaces.get(ws.id))?.project).toMatchObject({ name: "proj", dest: "/root/work/proj" });
+    expect((await rt.workspaces.get(ws.id))?.projects).toEqual([{ name: "proj", dest: "/root/work/proj", importedAt: expect.any(String), size: 4000 }]);
   });
 
   it("fails the import, with no project on the record, when the machine will not take the roots file", async () => {
@@ -158,7 +158,7 @@ describe("project.import on a workspace", () => {
       "could not make /root/work/proj browsable on the machine: mkdir: read-only file system",
     );
     expect(imports(events).at(-1)).toMatchObject({ stage: "failed", message: "could not make /root/work/proj browsable on the machine: mkdir: read-only file system" });
-    expect((await rt.workspaces.get(ws.id))?.project).toBeUndefined();
+    expect((await rt.workspaces.get(ws.id))?.projects).toBeUndefined();
   });
 
   it("a rewrite the person accepted reaches the pack, is said in the consented line and named in the result", async () => {

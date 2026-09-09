@@ -140,6 +140,15 @@ describe("local workspace", () => {
     expect(handed.at(-1)).toEqual({ idleMs: Number.POSITIVE_INFINITY, deadlineMs: Number.POSITIVE_INFINITY });
   });
 
+  it("the view names the workspace's own folder, the one a thread starts in when no project does, so the app's line under the box says what the runtime will do", async () => {
+    const rt = runtime();
+    const ws = await rt.workspaces.createLocal("mac");
+    expect(ws.folder).toBe(root);
+    expect((await rt.workspaces.get(ws.id)).folder).toBe(root);
+    expect((await rt.status.list()).find(s => s.id === ws.id)?.folder).toBe(root);
+    await rt.close();
+  });
+
   it("a turn over the wire starts in the workspace's own folder, never the person's home, and the thread's row names it", async () => {
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: pwdAdapter }, local: localWiring });
     const ws = await rt.workspaces.createLocal("mac");
@@ -408,6 +417,19 @@ describe("local workspace", () => {
     const status = (await rt.status.list()).find(s => s.id === ws.id)!;
     expect(status.rateUsdPerHour).toBe(0);
     expect(status.kind).toBe("local");
+  });
+
+  it("the local row's status carries this computer's facts: the system's name, its uptime and the folder its commands start in; a cloud row carries none", async () => {
+    const rt = runtime();
+    const ws = await rt.workspaces.createLocal("mac");
+    const cloud = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    const statuses = await rt.status.list();
+    const local = statuses.find(s => s.id === ws.id)!;
+    expect(local.facts).toBeDefined();
+    expect(local.facts!.os).not.toBe("");
+    expect(local.facts!.uptimeMs).toBeGreaterThan(0);
+    expect(local.facts!.folder).toBe(root);
+    expect(statuses.find(s => s.id === cloud.id)!.facts).toBeUndefined();
   });
 
   it("the panes dial this computer's own daemon: workspaces.daemonReach hands out the road the host wired", async () => {

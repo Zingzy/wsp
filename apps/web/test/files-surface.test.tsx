@@ -124,7 +124,7 @@ describe("files surface", () => {
     fireEvent.click(screen.getByRole("button", { name: "app" }));
     await waitFor(() => expect(shownFolder(container)).toBe("/root/app"));
     expect(folderCrumbRow(container)).toEqual([["/root", "/root"], ["app", "/root/app"]]);
-    expect(useRootStore.getState().byWorkspaceId[WS]).toEqual({ followed: "/root/app/lib", pinned: "/root/app", shell: null });
+    expect(useRootStore.getState().byWorkspaceId[WS]).toEqual({ followed: "/root/app/lib", pinned: "/root/app", shell: null, chosen: null });
     expect(listCalls(wire)).toEqual(["/root/app/lib", "/root/app"]);
     expect(treeRows(container).map(r => r.path)).toEqual(["lib/", "package.json"]);
   });
@@ -231,7 +231,7 @@ describe("files surface", () => {
     await waitFor(() => expect(shownFolder(container)).toBe("/root/app"));
     fireEvent.click(screen.getByRole("button", { name: "/root" }));
     await waitFor(() => expect(shownFolder(container)).toBe("/root"));
-    expect(useRootStore.getState().byWorkspaceId[WS]).toEqual({ followed: "/root/app", pinned: "/root", shell: null });
+    expect(useRootStore.getState().byWorkspaceId[WS]).toEqual({ followed: "/root/app", pinned: "/root", shell: null, chosen: null });
 
     const requests: string[] = [];
     const off = onNewThreadRequest(detail => requests.push(detail.workspaceId));
@@ -315,7 +315,7 @@ describe("files surface", () => {
     expect(treeRows(container).map(r => r.path)).toEqual(["packages/", "pnpm-workspace.yaml"]);
     expect(listCalls(wire)).toEqual(["/root", PROJECT_DEST]);
     expect(folderCrumbRow(container)).toEqual([[PROJECT_DEST, PROJECT_DEST]]);
-    expect(useRootStore.getState().byWorkspaceId[WS]).toEqual({ followed: null, pinned: PROJECT_DEST, shell: null });
+    expect(useRootStore.getState().byWorkspaceId[WS]).toEqual({ followed: null, pinned: PROJECT_DEST, shell: null, chosen: null });
 
     // At a root's edge the key does nothing, as the daemon lists nothing above it.
     const pane = container.querySelector<HTMLElement>("[data-files-pane]")!;

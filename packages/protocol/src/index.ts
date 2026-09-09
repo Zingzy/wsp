@@ -193,9 +193,10 @@ export type PortReachView = z.infer<typeof PortReachView>;
 export const PortProbeView = z.object({ status: z.number().int(), body: z.string() });
 export type PortProbeView = z.infer<typeof PortProbeView>;
 
-/** The project a workspace holds: the folder the bundle landed at, named by its last segment, and when the bundle
- * landed. Set by an import, inherited by every fork of a project golden. */
-export const WorkspaceProject = z.object({ name: z.string(), dest: z.string(), importedAt: z.string() });
+/** One project a workspace holds: the folder the bundle landed at, named by its last segment, when the bundle landed
+ * and, where the import measured it, its size in bytes. Added by an import, inherited by every fork of a project
+ * golden. */
+export const WorkspaceProject = z.object({ name: z.string(), dest: z.string(), importedAt: z.string(), size: z.number().int().nonnegative().optional() });
 export type WorkspaceProject = z.infer<typeof WorkspaceProject>;
 
 /** What a workspace's machine is: cloud, a fork wsp made at a provider, local, this computer itself, or ssh, a
@@ -222,7 +223,12 @@ export const WorkspaceView = z.object({
    * workspace, which forks from no image. */
   golden: z.string(),
   createdAt: z.string(),
-  project: WorkspaceProject.optional(),
+  /** The projects on the machine, oldest import first; absent reads as none, through workspaceProjects. */
+  projects: z.array(WorkspaceProject).optional(),
+  /** The folder a thread or a command starts in when no project does, the last branch of the runtime's default folder
+   * rule: the kind's own (the work folder on this computer). Absent where the kind names none and the machine's own
+   * home is where the shell lands (a fork, a machine over ssh). Published so a client shows what the runtime will do. */
+  folder: z.string().optional(),
   /** Claude session id of the last session, so the next send can --resume it. */
   claudeSessionId: z.string().optional(),
   /** Present when the machine streams a display (desktop kind); sandbox machines are headless. */
@@ -239,6 +245,12 @@ export const WorkspaceView = z.object({
 });
 export type WorkspaceView = z.infer<typeof WorkspaceView>;
 
+/** What a machine that already existed before wsp says about itself, read off the machine at every status poll: the
+ * operating system as its maker names it with its version, how long it has been up, and the folder its commands
+ * start in. A fork wsp made carries none; its image and size say what it is. */
+export const MachineFacts = z.object({ os: z.string(), uptimeMs: z.number(), folder: z.string() });
+export type MachineFacts = z.infer<typeof MachineFacts>;
+
 /** WorkspaceView enriched with what the rail and meta panel render live. */
 export const WorkspaceStatus = WorkspaceView.extend({
   machineState: MachineState,
@@ -246,6 +258,7 @@ export const WorkspaceStatus = WorkspaceView.extend({
   size: WorkspaceSize,
   /** Awake burn rate for this size; 0 never appears here (napping costs ride the cost event). */
   rateUsdPerHour: z.number(),
+  facts: MachineFacts.optional(),
   /** Why the runtime pushed this status outside the poll: a wake that had to retry or replace the machine, or "idle 20 min". */
   reason: z.string().optional(),
   /** Epoch ms when the runtime's idle policy naps this workspace; absent while napping, held by a running session, or with auto-nap off. */
@@ -257,7 +270,7 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
  * facts, and nothing the provider minted. Picked rather than omitted, so a route added to the view later is not
  * handed over by having been forgotten, which is how the display stream rode these doors until now. */
 const WORKSPACE_OUT = {
-  id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, project: true,
+  id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, projects: true, folder: true,
   claudeSessionId: true, gone: true, tint: true, glyph: true, daemonNote: true,
 } as const;
 
@@ -1066,6 +1079,10 @@ export type SidebarMode = z.infer<typeof SidebarMode>;
 export const TerminalSizeSource = z.enum(["app", "file"]);
 export type TerminalSizeSource = z.infer<typeof TerminalSizeSource>;
 
+/** The last target: the workspace a thread was last started on, and the project when it landed in one. */
+export const PreferencesTarget = z.object({ workspace: z.string(), project: z.string().optional() });
+export type PreferencesTarget = z.infer<typeof PreferencesTarget>;
+
 /** One record on the host's state; the desktop app and a browser tab on the same host read and write this one. sidebarWidth
  * absent is the sidebar's own default; terminalZoom is the pixels a workspace's panes add to the base size, by workspace id. */
 export const Preferences = z.object({
@@ -1081,6 +1098,14 @@ export const Preferences = z.object({
    * either harness and their mode lists are disjoint, and a pick the harness in front of us does not take drops to
    * that harness's own default rather than refusing the send. */
   access: z.record(z.string(), z.string()),
+  /** The project a thread was last started in, by workspace id and project name: the second branch of the default
+   * folder rule (projectFor), written by the runtime on every start that lands in one of the workspace's projects
+   * and by the composer when its pick changes, so the next thread on that workspace opens where the last one did
+   * whichever client or CLI opens it. A name the workspace no longer holds drops through, as a stale access does. */
+  project: z.record(z.string(), z.string()),
+  /** The workspace and, when it landed in one, the project a thread was last started on anywhere: where a new
+   * thread asked for from nowhere goes. Absent until the first start. */
+  target: PreferencesTarget.optional(),
   /** Whether the surfaces still being worked on are offered at all. The host stamps it from its own environment at
    * every read, so no client sets it and nothing a state file holds can turn it on. */
   labs: z.boolean(),
@@ -1092,16 +1117,18 @@ export const LABS_ENV = "WSP_LABS";
 export const labsFromEnv = (env: Record<string, string | undefined>): boolean => env[LABS_ENV] === "1";
 
 /** What preferences.set takes: any of the record's fields but labs, which is the host's to say; a null sidebarWidth
- * clears it back to the default, and terminalZoom and access name only the workspaces they move, a null entry
- * dropping that workspace's zoom or pick. */
+ * clears it back to the default, terminalZoom, access and project name only the workspaces they move, a null entry
+ * dropping that workspace's zoom or pick, and a null target clears the last target. */
 export const PreferencesPatch = Preferences.omit({ labs: true }).partial().extend({
   sidebarWidth: z.number().int().positive().nullable().optional(),
   terminalZoom: z.record(z.string(), z.number().int().nullable()).optional(),
   access: z.record(z.string(), z.string().nullable()).optional(),
+  project: z.record(z.string(), z.string().nullable()).optional(),
+  target: PreferencesTarget.nullable().optional(),
 });
 export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
 
-export const DEFAULT_PREFERENCES: Preferences = { theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, labs: false };
+export const DEFAULT_PREFERENCES: Preferences = { theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, project: {}, labs: false };
 
 /** The record as stored, over the defaults; a record that does not parse (an older or a hand-edited state file) reads as the defaults. */
 export function preferencesFrom(stored: unknown): Preferences {
@@ -1113,24 +1140,25 @@ export function preferencesFrom(stored: unknown): Preferences {
  * that paints ahead of the host's answer, so both land on the same record. */
 export function applyPreferencesPatch(current: Preferences, patch: PreferencesPatch): Preferences {
   const sidebarWidth = patch.sidebarWidth === undefined ? current.sidebarWidth : patch.sidebarWidth;
-  const terminalZoom = { ...current.terminalZoom };
-  for (const [workspaceId, zoom] of Object.entries(patch.terminalZoom ?? {})) {
-    if (zoom === null) delete terminalZoom[workspaceId];
-    else terminalZoom[workspaceId] = zoom;
-  }
-  const access = { ...current.access };
-  for (const [workspaceId, mode] of Object.entries(patch.access ?? {})) {
-    if (mode === null) delete access[workspaceId];
-    else access[workspaceId] = mode;
-  }
+  const perWorkspace = <T,>(kept: Record<string, T>, moved: Record<string, T | null> | undefined): Record<string, T> => {
+    const next = { ...kept };
+    for (const [workspaceId, value] of Object.entries(moved ?? {})) {
+      if (value === null) delete next[workspaceId];
+      else next[workspaceId] = value;
+    }
+    return next;
+  };
+  const target = patch.target === undefined ? current.target : patch.target;
   return {
     theme: patch.theme ?? current.theme,
     sidebarMode: patch.sidebarMode ?? current.sidebarMode,
     terminalSize: patch.terminalSize ?? current.terminalSize,
-    terminalZoom,
-    access,
+    terminalZoom: perWorkspace(current.terminalZoom, patch.terminalZoom),
+    access: perWorkspace(current.access, patch.access),
+    project: perWorkspace(current.project, patch.project),
     labs: current.labs,
     ...(sidebarWidth === null || sidebarWidth === undefined ? {} : { sidebarWidth }),
+    ...(target === null || target === undefined ? {} : { target }),
   };
 }
 
@@ -2007,7 +2035,12 @@ const RuntimeOp = z.discriminatedUnion("op", [
      * announced a session takes the message as a first turn on that same thread. Refused when the workspace has no
      * thread with that id. */
     thread: z.string().optional(),
+    /** The folder the thread starts in, absolute; it wins over project and the rule. Absent leaves the runtime's
+     * default folder rule (projectFor, then the kind's own folder) to say. */
     cwd: z.string().optional(),
+    /** One of the workspace's projects by name, the folder the thread starts in when cwd names none; refused with
+     * noProjectLine when the workspace has no project of that name. */
+    project: z.string().optional(),
     /** Values from the harness's catalog for the workspace (harnesses.list), refused with that list on a miss. A
      * start that opens a thread without a model runs the one the catalog marks default, so the app, the command line
      * and the MCP server run the same model; an absent effort or mode leaves the CLI's own. */
@@ -2328,6 +2361,7 @@ export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { inFolder, shellLine, shellQuote } from "./shell-quote.js";
 export { LOOK_PARTS, WORKSPACE_GLYPHS, WORKSPACE_TINTS, WorkspaceGlyph, WorkspaceLook, WorkspaceTint, type LookPart } from "./workspace-look.js";
 export { rootsPathIn, underProject } from "./project-path.js";
+export * from "./projects.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";
 export * from "./app-ports.js";
