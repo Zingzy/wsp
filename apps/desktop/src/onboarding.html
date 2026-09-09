@@ -46,8 +46,32 @@
       main { position: relative; display: grid; place-items: center; }
       section { width: 560px; display: flex; flex-direction: column; align-items: center; text-align: center; }
       section[hidden] { display: none; }
-      .hero { position: relative; width: 96px; height: 96px; display: grid; place-items: center; margin-bottom: 28px; }
-      .hero svg { width: 96px; height: 96px; color: var(--foreground); }
+      .hero { position: relative; display: grid; place-items: center; margin-bottom: 28px; }
+      /* The mark's 12.8 units across at 250 px is a tilde 200 px wide; the box is cropped to the stroke's own rows. */
+      .tilde { width: 250px; height: 156px; overflow: visible; color: var(--foreground); }
+      /* Lit from above, as the Mac draws the app icon: the body flat in the ink, one thin light along the top edge and
+         one thin shade along the bottom, each cut from the stroke's own outline moved 0.3 units, so a vertical run
+         carries neither and nothing shades across the body. */
+      .tilde .body { stroke-width: 2.6; stroke-dasharray: 22; }
+      .tilde .lit { flood-color: light-dark(color-mix(in oklab, var(--color-white) 75%, transparent), var(--color-white)); }
+      .tilde .shade { flood-color: light-dark(var(--color-neutral-950), var(--background)); flood-opacity: 0.4; }
+      /* One entrance, from CSS so it plays before any script: the tilde draws itself, its top edge lights, the words
+         and the button rise, all inside 0.8 s; nothing plays after. */
+      @keyframes draw { from { stroke-dashoffset: 22; } }
+      @keyframes light { from { flood-opacity: 0; } }
+      @keyframes rise { from { opacity: 0; translate: 0 12px; } }
+      .tilde .body, .tilde .lit, #welcome h1, #welcome .sub, #welcome .primary {
+        animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+        animation-fill-mode: backwards;
+      }
+      .tilde .body { animation-name: draw; animation-duration: 0.42s; }
+      .tilde .lit { animation-name: light; animation-duration: 0.22s; animation-delay: 0.3s; }
+      #welcome h1 { animation-name: rise; animation-duration: 0.34s; animation-delay: 0.26s; }
+      #welcome .sub { animation-name: rise; animation-duration: 0.34s; animation-delay: 0.34s; }
+      #welcome .primary { animation-name: rise; animation-duration: 0.34s; animation-delay: 0.42s; }
+      @media (prefers-reduced-motion: reduce) {
+        .tilde .body, .tilde .lit, #welcome h1, #welcome .sub, #welcome .primary { animation: none; }
+      }
       .micro {
         margin: 0 0 14px;
         font: 11px/1 var(--font-mono);
@@ -57,6 +81,8 @@
       }
       h1 { margin: 0 0 12px; font: 600 34px/1.15 var(--font-sans); letter-spacing: -0.02em; }
       .sub { margin: 0 0 32px; max-width: 440px; font-size: 15px; line-height: 1.5; color: var(--muted-foreground); }
+      .said { margin: 0 0 32px; max-width: 440px; display: grid; gap: 12px; font-size: 15px; line-height: 1.5; color: var(--muted-foreground); }
+      .said p { margin: 0; }
       .card {
         margin: 0 0 28px;
         padding: 0;
@@ -98,17 +124,11 @@
         color: var(--muted-foreground);
       }
       .card .name { color: var(--foreground); }
+      .card li.absent, .card li.absent .name, .card li.absent .glyph { color: var(--muted-foreground); }
       .card .meta { font: 12px var(--font-mono); color: var(--muted-foreground); white-space: nowrap; }
       .card .slot { margin-left: auto; display: flex; justify-content: flex-end; align-items: center; min-width: 96px; }
       .state { font: 12px var(--font-mono); color: var(--muted-foreground); padding: 0 6px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .state.err { color: var(--foreground); }
-      kbd {
-        font: 12px var(--font-mono);
-        color: var(--muted-foreground);
-        padding: 3px 7px;
-        border: 1px solid var(--input);
-        border-radius: 6px;
-      }
       button {
         font: 12px var(--font-mono);
         color: var(--foreground);
@@ -146,17 +166,8 @@
         color: var(--muted-foreground);
       }
       button.link:hover { color: var(--foreground); background: none; }
-      footer {
-        position: relative;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 0 40px 28px;
-        font-size: 13px;
-        color: var(--muted-foreground);
-      }
-      footer .fact { color: var(--foreground); }
-      #status { font: 12px var(--font-mono); max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      footer { position: relative; display: flex; justify-content: center; padding: 0 40px 28px; color: var(--muted-foreground); }
+      #status { font: 12px var(--font-mono); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
   </head>
   <body>
@@ -170,42 +181,52 @@
     <main>
       <section id="welcome" data-screen="welcome">
         <div class="hero">
-          <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M1.6 8A3.4 3.4 0 0 1 8 8A3.4 3.4 0 0 0 14.4 8" /></svg>
+          <!-- The same copy of mark.svg's path; the band its outline leaves bare when moved down is the top edge, moved up the bottom. -->
+          <svg class="tilde" viewBox="0 3 16 10" aria-hidden="true" fill="none" stroke="currentColor" stroke-linecap="round">
+            <defs>
+              <!-- The region is the box, not the path's own: a percentage of a 4.5 unit tall geometry cuts the stroke's rows. -->
+              <filter id="edges" filterUnits="userSpaceOnUse" x="-1" y="2" width="18" height="12">
+                <feOffset in="SourceAlpha" dy="0.3" result="down" />
+                <feComposite in="SourceAlpha" in2="down" operator="out" result="top" />
+                <feFlood class="lit" result="light" />
+                <feComposite in="light" in2="top" operator="in" result="rim" />
+                <feOffset in="SourceAlpha" dy="-0.3" result="up" />
+                <feComposite in="SourceAlpha" in2="up" operator="out" result="bottom" />
+                <feFlood class="shade" result="ink" />
+                <feComposite in="ink" in2="bottom" operator="in" result="under" />
+                <feMerge><feMergeNode in="SourceGraphic" /><feMergeNode in="rim" /><feMergeNode in="under" /></feMerge>
+              </filter>
+            </defs>
+            <g class="body" filter="url(#edges)"><path d="M1.6 8A3.4 3.4 0 0 1 8 8A3.4 3.4 0 0 0 14.4 8" /></g>
+          </svg>
         </div>
         <h1>Welcome to wsp</h1>
         <p class="sub">Your setup, on cloud machines, for coding agents. This computer is the first one.</p>
-        <button id="start" type="button" class="primary" autofocus>Get started<span class="arrow" aria-hidden="true">→</span></button>
+        <button id="start" type="button" class="primary">Get started<span class="arrow" aria-hidden="true">→</span></button>
       </section>
       <section id="agents" data-screen="agents" hidden>
         <p class="micro">Your agents</p>
         <h1>Let your agents drive wsp</h1>
         <p class="sub">Each agent found here gets the wsp tools and skill, so it can start threads on this computer.</p>
         <ul class="card" id="rows"></ul>
-        <button id="all" type="button" class="primary">Install all<span class="arrow" aria-hidden="true">→</span></button>
+        <button id="all" type="button" class="primary">Add to all<span class="arrow" aria-hidden="true">→</span></button>
         <button id="skip" type="button" class="link">Skip</button>
       </section>
       <section id="recap" data-screen="recap" hidden>
         <p class="micro">This computer</p>
         <h1>This computer is your first workspace</h1>
-        <p class="sub">Threads run here, under your own sign-ins. Cloud machines come later, from the sidebar.</p>
+        <div class="said">
+          <p id="happened"></p>
+          <p id="later" hidden>The wsp tools can be added to your agents later, from the app's settings.</p>
+        </div>
         <button id="open" type="button" class="primary">Open wsp<span class="arrow" aria-hidden="true">→</span></button>
-        <p class="micro" style="margin-top: 36px">Next</p>
-        <ul class="card" id="next">
-          <li><span class="name">Start a thread</span><span class="slot"><kbd id="thread-key"></kbd></span></li>
-          <li><span class="name">Let your agent drive wsp</span><span class="slot" id="recap-agents"></span></li>
-          <li><span class="name">Set up cloud machines</span><span class="slot"><span class="state">in the sidebar</span></span></li>
-        </ul>
       </section>
     </main>
-    <footer>
-      <span>this computer: <span class="fact" id="computer"></span></span>
-      <span id="status"></span>
-    </footer>
+    <footer><span id="status"></span></footer>
     <script>
       const $ = id => document.getElementById(id);
-      const params = new URLSearchParams(location.search);
-      $("computer").textContent = params.get("computer") || "";
-      $("thread-key").textContent = params.get("threadKey") || "";
+      /** The row words: the action, its done state, and the row whose command is not here, with nothing to add to. */
+      const WORDS = { add: "Add MCP", added: "MCP added", absent: "not installed" };
       const text = e => String(e && e.message ? e.message : e).replace(/^.*Error: /, "");
 
       // The app's stylesheet has two sides told apart by the dark class; this page follows the computer's, with
@@ -220,7 +241,8 @@
       follow();
       scheme.addEventListener("change", follow);
 
-      /** id -> its row's slot, whether wsp is in it, whether an install is in flight, and whether it is on this computer. */
+      /** id -> its row, its slot and meta, whether wsp is in it, whether an install is in flight, whether its command is
+       * on this computer, and how many sessions its store holds once that is known. */
       const rows = new Map();
       let screen = "welcome";
 
@@ -249,13 +271,21 @@
         return button;
       }
 
+      /** What the recap says happened: the count of agents the tools are in, and a word about later when some were left. */
       function settle() {
         const left = installable();
         $("all").disabled = left.length === 0;
-        const recap = $("recap-agents");
-        if (left.length > 0) recap.replaceChildren(keycap("Install", () => install(left)));
-        else if ([...rows.values()].some(r => r.done)) stateOf(recap, "MCP added");
-        else stateOf(recap, "not found");
+        const added = [...rows.values()].filter(r => r.done).length;
+        const agents = added === 1 ? "1 agent" : `${added} agents`;
+        $("happened").textContent = added === 0 ? "Recorded as your workspace." : `Recorded as your workspace, with the wsp tools added to ${agents}.`;
+        $("later").hidden = left.length === 0;
+      }
+
+      /** The rows in their order: by sessions, most first, ties in the catalog's order; those not installed last. */
+      function order() {
+        const list = $("rows");
+        const sorted = [...rows.values()].sort((a, b) => Number(b.found) - Number(a.found) || b.sessions - a.sessions || a.index - b.index);
+        list.append(...sorted.map(r => r.li));
       }
 
       async function install(ids) {
@@ -282,7 +312,7 @@
           const r = rows.get(placed.id);
           r.busy = false;
           r.done = true;
-          stateOf(r.slot, "MCP added");
+          stateOf(r.slot, WORDS.added);
         }
         for (const failed of report.failures) {
           const r = rows.get(failed.id);
@@ -309,27 +339,27 @@
       }
 
       function draw(agents) {
-        const list = $("rows");
-        list.replaceChildren();
-        for (const a of agents) {
+        $("rows").replaceChildren();
+        rows.clear();
+        agents.forEach((a, index) => {
           const li = document.createElement("li");
           li.dataset.agent = a.id;
+          li.classList.toggle("absent", !a.found);
           const name = document.createElement("span");
           name.className = "name";
           name.textContent = a.name;
           const meta = document.createElement("span");
           meta.className = "meta";
           meta.dataset.k = "meta";
-          meta.textContent = a.version ? `v${a.version}` : "";
           const slot = document.createElement("span");
           slot.className = "slot";
           li.append(glyphFor(a), name, meta, slot);
-          list.append(li);
-          rows.set(a.id, { slot, meta, found: a.found, done: a.configured, busy: false });
-          if (!a.found) stateOf(slot, "not found");
-          else if (a.configured) stateOf(slot, "MCP added");
-          else slot.append(keycap("Install", () => install([a.id])));
-        }
+          rows.set(a.id, { li, slot, meta, index, sessions: 0, found: a.found, done: a.found && a.configured, busy: false });
+          if (!a.found) stateOf(slot, WORDS.absent);
+          else if (a.configured) stateOf(slot, WORDS.added);
+          else slot.append(keycap(WORDS.add, () => install([a.id])));
+        });
+        order();
         settle();
       }
 
@@ -346,9 +376,10 @@
         for (const c of counts) {
           const r = rows.get(c.id);
           if (r === undefined) continue;
-          const words = c.sessions === 1 ? "1 session" : `${c.sessions} sessions`;
-          r.meta.textContent = [r.meta.textContent, words].filter(Boolean).join(" · ");
+          r.sessions = c.sessions;
+          r.meta.textContent = c.sessions === 1 ? "1 session" : `${c.sessions} sessions`;
         }
+        order();
       }
 
       async function start() {
