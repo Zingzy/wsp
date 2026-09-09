@@ -14,7 +14,7 @@ import { CLIENT_CANNOT_REBUILD } from "../../actions/format.js";
 import { actionById, resolveActions, rowLabelOf } from "../../actions/registry.js";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { workspaceActions, workspaceTarget } from "../../actions/workspaceActions.js";
-import { FREE_WORD, LINEAGE_MARKS, LOOK_PARTS, NOT_ON_THIS_KIND, behindGoldenLine, biggerSizeLine, fmtBytes, fmtRate, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, sizeWord, workspaceKind, workspaceProjects, workspaceState, workspaceStateOf, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, LINEAGE_MARKS, LOOK_PARTS, NOT_ON_THIS_KIND, behindGoldenLine, biggerSizeLine, fmtBytes, fmtRate, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, sizeWord, vaultStaleLine, workspaceKind, workspaceProjects, workspaceState, workspaceStateOf, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { isDesktopShell } from "../../lib/desktopShell.js";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, useOutOfMemoryReading, useWorkspaceLive } from "../../machine/live.js";
@@ -163,6 +163,8 @@ function Facts({ workspace, status, awakeMs, pendingSize, kind }: FactsProps) {
   const billing = isBilling(workspaceStateOf(workspace, status));
   const outOfMemory = useOutOfMemoryReading(workspace.id, workspace.phase);
   const facts = status?.facts;
+  const vault = status ?? workspace;
+  const vaultStale = vaultStaleLine(vault);
   return (
     <Section label="Machine">
       <div className="mt-1 divide-y divide-border/40">
@@ -216,10 +218,20 @@ function Facts({ workspace, status, awakeMs, pendingSize, kind }: FactsProps) {
             </Row>
           </>
         )}
+        {vaultStale !== null && (
+          <Row label="Backup" k="vault" title={vaultStale}>
+            <span className="text-muted-foreground">{vaultStale}</span>
+          </Row>
+        )}
       </div>
       {status?.reason && (
         <p className={cn("mt-1.5 text-[11px] leading-relaxed", zombie ? "text-destructive-foreground" : "text-muted-foreground")} data-k="reason">
           {status.reason}
+        </p>
+      )}
+      {vaultStale !== null && (
+        <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground" data-k="vault-refused">
+          {vault.vaultRefused}
         </p>
       )}
       {outOfMemory && (

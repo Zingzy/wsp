@@ -3,7 +3,8 @@
 // workspaces (running, paused, gone) and four threads, in either theme
 // (?theme=light), with a status toast in the footer (?toast=...) and with the
 // runtime replacing the first machine's helper (?helper=1) or the first
-// machine's link dropped after a near-full memory sample (?oom=1) or every
+// machine's link dropped after a near-full memory sample (?oom=1) or the
+// napping machine's last vault refused for its size (?vault=1) or every
 // probe failing before it left this computer (?offline=1), so a test
 // can measure the chrome's geometry, which jsdom cannot lay out. With
 // ?ws=<id> the centre holds that workspace's thread and composer, so the
@@ -47,7 +48,7 @@
 // ?init=building puts the init job mid-build so the cloud row's progress line
 // can be measured.
 import { createRoot } from "react-dom/client";
-import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DESKTOP_MAC_CLASS, keptAccess, THIS_COMPUTER, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DESKTOP_MAC_CLASS, keptAccess, THIS_COMPUTER, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api } from "../../src/protocol/client";
@@ -88,6 +89,9 @@ const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running
   createdAt: "2026-09-05T11:00:00Z",
 });
 const cloud = [view("ws_a", "api"), view("ws_b", "web", "napping"), { ...view("ws_c", "old", "gone"), gone: "machine m_ws_c is gone at the provider: Not found" }];
+// ?vault=1: the napping workspace's last nap could not store a vault, so its row says the machine has no backup
+// since the day of the one that stands and the Machine tab names the cap the export was cut against.
+if (params.get("vault") === "1") Object.assign(cloud[1]!, { vaultedAt: "2026-09-08T07:10:04.444Z", vaultRefused: vaultOverCapLine(677_178_573, 209_715_200) });
 // ?projects=1: two projects on the first workspace, as two imports leave them, with the sizes the imports measured.
 const PROJECTS = [
   { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-04T10:00:00Z", size: 48_200_000 },

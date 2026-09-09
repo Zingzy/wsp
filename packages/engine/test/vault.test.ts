@@ -649,6 +649,61 @@ describe("exportFolder", () => {
     }
   });
 
+  it("exportPaths judges the paths it is handed too: the install a box's worktrees share at the top of the home never travels, and what is left fits the cap", async () => {
+    const g = await guest();
+    const root = mkdtempSync(join(tmpdir(), "wsp-vault-box-"));
+    dirs.push(root);
+    const put = (rel: string, text: string | Buffer): void => {
+      mkdirSync(join(root, rel, ".."), { recursive: true });
+      writeFileSync(join(root, rel), text);
+    };
+    put("wsp/src/a.ts", "the checkout the person works in\n");
+    put("wsp/node_modules/big/blob", randomBytes(400_000));
+    put("node_modules/big/blob", randomBytes(400_000));
+    put(".pnpm-store/v3/files/00/deadbeef", randomBytes(400_000));
+    put("notes.md", "kept\n");
+    const rule: CacheRule = { dirs: ["node_modules", ".pnpm-store", "dist"], files: [".DS_Store"], markers: ["pyvenv.cfg", ".git"] };
+    // Every top-level entry of the home, as the vault enumerates them.
+    const paths = readdirSync(root).sort().map(name => join(root, name));
+    try {
+      const tar = await exportPaths(g.machine, paths, { fetch: globalThis.fetch, maxBytes: 100_000, exclude: rule });
+      const rel = (p: string): string => p.replace(/^\//, "");
+      const names = listing(tar).map(l => (l.startsWith(rel(root)) ? l.slice(rel(root).length + 1) : l));
+      expect(names).toEqual(["notes.md", "wsp", "wsp/src", "wsp/src/a.ts"]);
+      const script = g.cmds.find(c => c.includes("find "))!;
+      const where = `'${rel(join(root, "notes.md"))}' '${rel(join(root, "wsp"))}'`;
+      expect(script).toContain(`find ${where} -mindepth 1`);
+      expect(script).toContain(`printf '%s\\0' ${where} > `);
+    } finally {
+      g.close();
+    }
+  });
+
+  it("an export that names no path at all archives nothing: no find, no walk of the root it runs in, and the refusal about caches is not what it says", async () => {
+    const g = await guest();
+    try {
+      const tar = await exportPaths(g.machine, [], { fetch: globalThis.fetch, exclude: RULE });
+      expect(listing(tar)).toEqual([]);
+      const script = g.cmds.find(c => c.includes("tar czf"))!;
+      expect(script).toMatch(/^tar czf '\/tmp\/wsp-vault-[^']+\.tgz' --no-recursion --null -T \/dev\/null$/);
+      expect(g.cmds.some(c => c.includes("find "))).toBe(false);
+    } finally {
+      g.close();
+    }
+  });
+
+  it("refuses an export whose every path is a cache under the rule rather than running find with none", async () => {
+    const g = await guest();
+    try {
+      await expect(exportPaths(g.machine, ["/root/node_modules", "/root/dist"], { fetch: globalThis.fetch, exclude: RULE })).rejects.toThrow(
+        "vault export: every path named is a cache under the rule (/root/node_modules, /root/dist), so there is nothing to archive",
+      );
+      expect(g.cmds).toEqual([]);
+    } finally {
+      g.close();
+    }
+  });
+
   it("streams the archive into a file on this computer with its size known up front, names the excluded roots, and leaves nothing on the guest", async () => {
     const g = await guest();
     const root = folder();
