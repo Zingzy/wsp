@@ -3601,9 +3601,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // and the persisted row read it whether the harness emits its result synchronously in start() (before the entry
     // exists) or later from its stream.
     const turnLive: TurnLive = t.turnLive ?? {};
-    /** The permission prompts of this turn nobody has answered, each with the timer that denies it when nobody
-     * does. The harness is blocked on every one of them, so this map is what the thread is waiting on. */
-    const open = new Map<string, { ask: PermissionAsk; timer: ReturnType<typeof setTimeout> }>();
+    /** The permission prompts of this turn nobody has answered, each with the end of the wait that denies it when
+     * nobody does. The harness is blocked on every one of them, so this map is what the thread is waiting on. */
+    const open = new Map<string, { ask: PermissionAsk; endWait: () => void }>();
     /** The harness's own answer road, once the turn is open; a prompt raised inside start() is answered through it
      * too, since its wait outlasts the synchronous run that raised it by minutes. */
     let answerAsk: HarnessSession["answer"];
@@ -3623,7 +3623,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const closeAsk = (askId: string, outcome: PermissionOutcome, optionId?: string): void => {
       const held = open.get(askId);
       if (held === undefined) return;
-      clearTimeout(held.timer);
+      held.endWait();
       open.delete(askId);
       record({
         type: "session.permission.closed",
@@ -3742,11 +3742,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           const ask = { ...event.ask, options: named(event.ask) };
           // The turn stops here until an option comes back, and nobody may be reading: the wait is the policy for
           // an unattended thread, and it denies rather than let the wait reach the turn's idle cut.
-          const timer = setTimeout(() => {
-            void answer(ask.askId, { optionId: PERMISSION_DENY, by: "wait" });
-          }, permissionWaitMs);
-          timer.unref?.();
-          open.set(ask.askId, { ask, timer });
+          const endWait = clock.schedule(() => void answer(ask.askId, { optionId: PERMISSION_DENY, by: "wait" }), permissionWaitMs, { unref: true });
+          open.set(ask.askId, { ask, endWait });
           record({ type: "session.permission", workspaceId, sessionId, turnId, threadId, ...ask, options: [...ask.options], waitMs: permissionWaitMs });
           return;
         }
