@@ -121,17 +121,17 @@ function holdsModAlone(shortcut: KeybindingShortcut, platform: string): boolean 
   return isMacPlatform(platform) ? metaKey && !ctrlKey : ctrlKey && !metaKey;
 }
 
-// The digits a browser keeps for its own tabs. Not the same fact as how many
-// sidebar slots this shell binds: WORKSPACE_SELECT_SLOTS moves on its own.
-const BROWSER_TAB_DIGITS: ReadonlySet<string> = new Set(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+/** The keys a browser takes with the platform's mod alone: a digit picks one of its tabs, t opens a new one. Not the
+ * same fact as how many sidebar slots this shell binds: WORKSPACE_SELECT_SLOTS moves on its own. */
+const BROWSER_TAB_KEYS: ReadonlySet<string> = new Set(["1", "2", "3", "4", "5", "6", "7", "8", "9", "t"]);
 
 /** The side arrows a macOS browser keeps for its own tabs, held with Command and Option. */
 const BROWSER_TAB_ARROWS: ReadonlySet<string> = new Set(["arrowleft", "arrowright"]);
 
 /**
- * The chords a browser keeps for switching its own tabs: Control with Tab, the
- * platform's mod with a digit, and on macOS Command and Option with a side
- * arrow. A page in a tab never receives them, so the rules must not fire on
+ * The chords a browser keeps for its own tabs: Control with Tab, the
+ * platform's mod with a digit or with T, and on macOS Command and Option with a
+ * side arrow. A page in a tab never receives them, so the rules must not fire on
  * them and no label may offer them there. The desktop shell has no tab strip
  * and the page gets them. Two chords that look like these are not: Control
  * with a digit, which macOS browsers leave to the page, and Control with Alt
@@ -147,7 +147,7 @@ export function browserTabClaimsShortcut(
     return isMacPlatform(platform) && BROWSER_TAB_ARROWS.has(shortcut.key) && holdsModAlone(shortcut, platform) && !shortcut.shiftKey;
   }
   if (shortcut.key === "tab") return ctrlKey && !metaKey;
-  return BROWSER_TAB_DIGITS.has(shortcut.key) && holdsModAlone(shortcut, platform) && !shortcut.shiftKey;
+  return BROWSER_TAB_KEYS.has(shortcut.key) && holdsModAlone(shortcut, platform) && !shortcut.shiftKey;
 }
 
 /** Whether a rule's chord can reach this shell at all, whatever its when clause says. */

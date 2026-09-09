@@ -33,13 +33,17 @@ describe("the search row", () => {
     expect(row.querySelector("kbd")).toBeNull();
   });
 
-  it("wears the surface tint the section rows do not, so over the glass it reads as a field", () => {
+  it("sits on the selected row's surface with the sidebar's hairline, no fill of its own, so it reads as a field on the rows' tier", () => {
     render(
       <SidebarProvider defaultOpen>
         <SearchRow />
       </SidebarProvider>,
     );
-    expect(screen.getByRole("button", { name: "Search" }).hasAttribute("data-search-row")).toBe(true);
+    const row = screen.getByRole("button", { name: "Search" });
+    expect(row.hasAttribute("data-search-row")).toBe(true);
+    expect(row.className).toContain("bg-sidebar-row-selected");
+    expect(row.className).toContain("border-sidebar-border");
+    expect(row.className).not.toMatch(/bg-sidebar-control-surface|bg-black|bg-white|tint/);
   });
 
   it("is still the palette's door with the tooltip around it", () => {

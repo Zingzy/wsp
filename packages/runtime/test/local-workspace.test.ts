@@ -410,6 +410,19 @@ describe("local workspace", () => {
     expect(status.kind).toBe("local");
   });
 
+  it("the local row's status carries this computer's facts: the system's name, its uptime and the folder its commands start in; a cloud row carries none", async () => {
+    const rt = runtime();
+    const ws = await rt.workspaces.createLocal("mac");
+    const cloud = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    const statuses = await rt.status.list();
+    const local = statuses.find(s => s.id === ws.id)!;
+    expect(local.facts).toBeDefined();
+    expect(local.facts!.os).not.toBe("");
+    expect(local.facts!.uptimeMs).toBeGreaterThan(0);
+    expect(local.facts!.folder).toBe(root);
+    expect(statuses.find(s => s.id === cloud.id)!.facts).toBeUndefined();
+  });
+
   it("the panes dial this computer's own daemon: workspaces.daemonReach hands out the road the host wired", async () => {
     const road = { url: "http://127.0.0.1:54321", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "t0ken" };
     localWiring = { ...localWiring, daemonRoad: async () => road };

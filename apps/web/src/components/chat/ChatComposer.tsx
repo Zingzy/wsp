@@ -63,7 +63,8 @@ const PLACEHOLDER = "Ask anything, or / for commands";
 const noop = () => {};
 
 /** What blocks a send right now, or null; the refusal table gives its words. The socket comes first: with it down
- * every other reading is stale. */
+ * every other reading is stale. A paused machine is named too, and the composer reads it not as a block but as the
+ * wake the send makes first. */
 export function composerSendBlock(input: {
   conn: ConnStatus;
   hasApi: boolean;
@@ -98,6 +99,7 @@ interface SteerAttempt {
 
 export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thread: ChatThreadHandle }) {
   const api = useStore(s => s.api);
+  const wake = useStore(s => s.wake);
   const conn = useStore(s => s.conn);
   const sessions = useStore(s => s.sessions[workspaceId]);
   const workspace = useWorkspace(workspaceId);
@@ -146,7 +148,10 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     reach: status?.reach.state ?? null,
     hydrated: thread.hydrated,
   });
-  const unavailable = blocked === null ? null : sendRefusal(blocked);
+  // A send wakes a paused machine by itself, so paused is not a refusal here: the box takes the words and the send
+  // button says it wakes first.
+  const wakesFirst = blocked === "paused";
+  const unavailable = blocked === null || wakesFirst ? null : sendRefusal(blocked);
   const sendDisabledReason = unavailable ?? (thread.busy ? TURN_IN_FLIGHT : null);
   const hasText = draft.prompt.trim().length > 0;
   // The catalog answers before the click; a row the runtime's table stood in for is no answer, so the picker is
@@ -272,17 +277,21 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
       // row in the transcript is drawn from; a refused send hands them back rather than losing them.
       sendImagesAs(workspaceId, requestId);
       setImageRefusal(null);
-      void api
-        .startSession({
-          workspaceId,
-          prompt,
-          requestId,
-          ...(resume ? { resume } : {}),
-          ...(into !== undefined ? { thread: into } : {}),
-          ...(cwd !== null ? { cwd } : {}),
-          ...(attachments.length > 0 ? { attachments } : {}),
-          ...startOptions,
-        })
+      // The wake settles or fails before the start is asked; a wake that failed leaves the runtime to refuse the
+      // start in its own words, which land in the transcript like any other refusal.
+      void (wakesFirst ? wake(workspaceId) : Promise.resolve())
+        .then(() =>
+          api.startSession({
+            workspaceId,
+            prompt,
+            requestId,
+            ...(resume ? { resume } : {}),
+            ...(into !== undefined ? { thread: into } : {}),
+            ...(cwd !== null ? { cwd } : {}),
+            ...(attachments.length > 0 ? { attachments } : {}),
+            ...startOptions,
+          }),
+        )
         .catch((err: unknown) => {
           setSending(false);
           onRefused();
@@ -290,7 +299,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
           appendLocalError(err instanceof Error ? err.message : String(err));
         });
     },
-    [api, appendLocalError, appendUserTurn, cwd, hold, images, into, restoreImages, resume, sendImagesAs, setSending, startOptions, threadKey, workspaceId],
+    [api, appendLocalError, appendUserTurn, cwd, hold, images, into, restoreImages, resume, sendImagesAs, setSending, startOptions, threadKey, wake, wakesFirst, workspaceId],
   );
 
   const send = useCallback(() => {
@@ -543,6 +552,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
                         showPlanFollowUpPrompt={false}
                         promptHasText={hasText}
                         isSendBusy={thread.busy}
+                        wakesFirst={wakesFirst}
                         sendDisabledReason={sendDisabledReason}
                         isConnecting={false}
                         isEnvironmentUnavailable={false}

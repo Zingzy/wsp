@@ -3,7 +3,7 @@
 // pill rollup over wsp thread snapshots, plus our row labels and the
 // new-workspace helpers.
 import { describe, expect, it } from "vitest";
-import { MACHINE_OS_WORD, OVER_SSH, THREAD_ARCHIVE_MS, kindWords, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, OVER_SSH, THREAD_ARCHIVE_MS, kindWords, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { RequestError } from "../src/protocol/client.js";
 import { explainCreateRefusal } from "../src/protocol/store.js";
 import {
@@ -187,31 +187,31 @@ describe("workspace row labels", () => {
     expect(slot("waking", "Waking", "neutral", true)).toBe("Waking");
   });
 
-  it("one machine line for the row and the Spaces header: the kind's words where it has them, else the size and the OS word, nothing before a status", () => {
+  it("one machine line for the row and the Spaces header: the kind's words where it has them, else the size alone, nothing before a status", () => {
     expect(machineLine(project({}, { kind: "local" }))).toBe("this computer");
-    expect(machineLine(project({}))).toBe(`2 vCPU · 4 GB · ${MACHINE_OS_WORD}`);
+    expect(machineLine(project({}))).toBe("2 vCPU · 4 GB");
     expect(machineLine({ status: null, workspace: project({}).workspace })).toBeNull();
     // A kind with its own words says them before any status has arrived, since no size is behind them.
     expect(machineLine({ status: null, workspace: { ...project({}).workspace, kind: "local" } })).toBe("this computer");
   });
 
-  it("the Spaces header of a machine wsp does not drive is its machine words alone: no cost line, no rate, no nap line", () => {
+  it("the Spaces header of a machine wsp does not drive is its machine words and the word free: no figure, no rate, no nap line", () => {
     const header = (over: Partial<WorkspaceStatus>, view: Partial<WorkspaceView> = {}, meter: ReturnType<typeof tick> | null = null) =>
       spaceHeaderLines({ project: project(over, view), cost: meter, outOfMemory: undefined, nowMs: now });
-    expect(header({ idleAt: now + 14.5 * 60_000 }, { kind: "local" }, tick(0.29))).toEqual(["this computer"]);
+    expect(header({ idleAt: now + 14.5 * 60_000 }, { kind: "local" }, tick(0.29))).toEqual(["this computer", FREE_WORD]);
     // Nothing the machine bills for reaches it, whatever the meter has ticked or the runtime has scheduled.
-    expect(header({}, { kind: "local" })).toEqual(["this computer"]);
-    // A fork's header is untouched: the size and the OS word, the spend with its rate, the countdown when one is set.
-    expect(header({ idleAt: now + 14.5 * 60_000 }, {}, tick(0.29))).toEqual([`2 vCPU · 4 GB · ${MACHINE_OS_WORD}`, "$0.29 today · $0.110/hr", "naps in 14m"]);
-    expect(header({})).toEqual([`2 vCPU · 4 GB · ${MACHINE_OS_WORD}`, "$0.00 today · $0.110/hr"]);
+    expect(header({}, { kind: "local" })).toEqual(["this computer", FREE_WORD]);
+    // A fork's header is untouched: the size, the spend with its rate, the countdown when one is set.
+    expect(header({ idleAt: now + 14.5 * 60_000 }, {}, tick(0.29))).toEqual(["2 vCPU · 4 GB", "$0.29 today · $0.110/hr", "naps in 14m"]);
+    expect(header({})).toEqual(["2 vCPU · 4 GB", "$0.00 today · $0.110/hr"]);
     // What the runtime is doing to the daemon still leads on both kinds: it is the one thing there a person waits on.
-    expect(header({ daemonNote: "updating the helper" }, { kind: "local" })).toEqual(["updating the helper", "this computer"]);
+    expect(header({ daemonNote: "updating the helper" }, { kind: "local" })).toEqual(["updating the helper", "this computer", FREE_WORD]);
   });
 
-  it("this computer's row says what it is and nothing about spend, naps or state: it runs while the host does", () => {
+  it("this computer's cost line reads free and nothing about naps or state: it runs while the host does", () => {
     const local = project({}, { kind: "local" });
-    expect(workspaceMetaLine({ project: local, cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toBe("this computer");
-    expect(workspaceMetaLine({ project: project({ idleAt: now + 14.5 * 60_000 }, { kind: "local" }), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toBe("this computer");
+    expect(workspaceMetaLine({ project: local, cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toBe(FREE_WORD);
+    expect(workspaceMetaLine({ project: project({ idleAt: now + 14.5 * 60_000 }, { kind: "local" }), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toBe(FREE_WORD);
     expect(stateSlotWord({ ...local, indicator: { label: "Unreachable", tone: "neutral", pulse: false } })).toBe("");
     // What the runtime is doing to its daemon still takes the line: it is the one thing there a person waits on.
     expect(workspaceMetaLine({ project: project({ daemonNote: "updating the helper" }, { kind: "local" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
@@ -223,13 +223,13 @@ describe("workspace row labels", () => {
     // The two are different facts: nothing answering on the port, and no daemon road at all.
     expect(line("no-daemon")).toBe("no daemon answering");
     expect(line("unsupported")).toBe("no daemon on this machine");
-    expect(line("reachable")).toBe("this computer");
+    expect(line("reachable")).toBe(FREE_WORD);
     // Its state word is still empty by design, which is why the line is where this goes.
     expect(stateSlotWord({ ...local("no-daemon"), indicator: { label: "Unreachable", tone: "neutral", pulse: false } })).toBe("");
     // What the runtime is doing to the daemon still leads: a note means an attempt is in flight.
     expect(workspaceMetaLine({ project: project({ reach: { state: "no-daemon" }, daemonNote: "updating the helper" }, { kind: "local" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
     // The Spaces header says it above what the machine is, in the same place the row gives it.
-    expect(spaceHeaderLines({ project: local("no-daemon"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toEqual(["no daemon answering", "this computer"]);
+    expect(spaceHeaderLines({ project: local("no-daemon"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toEqual(["no daemon answering", "this computer", FREE_WORD]);
     expect(daemonGoneLine("slow", kindWords("local"))).toBeUndefined();
     expect(daemonGoneLine(null, kindWords("local"))).toBeUndefined();
   });
@@ -256,15 +256,15 @@ describe("workspace row labels", () => {
     expect(daemonGoneLine("no-daemon", kindWords("ssh"))).toBeUndefined();
   });
 
-  it("a machine over ssh serves no daemon at all, so its row says what the machine is rather than that one is missing", () => {
+  it("a machine over ssh serves no daemon at all, so its rows say what the machine is and that it is free rather than that a daemon is missing", () => {
     const over = (reach: ReachState) => project({ reach: { state: reach } }, { kind: "ssh" });
     const line = (reach: ReachState) => workspaceMetaLine({ project: over(reach), cost: tick(0.29), outOfMemory: undefined, nowMs: now });
-    // unsupported is this kind's steady state, not a daemon that went away, and the row has nowhere else to say
-    // what the machine is.
-    expect(line("unsupported")).toBe(OVER_SSH);
-    expect(line("reachable")).toBe(OVER_SSH);
+    // unsupported is this kind's steady state, not a daemon that went away.
+    expect(line("unsupported")).toBe(FREE_WORD);
+    expect(line("reachable")).toBe(FREE_WORD);
+    expect(machineLine(over("unsupported"))).toBe(OVER_SSH);
     // The Spaces header reads the same rule, and what the runtime is doing still leads on both surfaces.
-    expect(spaceHeaderLines({ project: over("unsupported"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toEqual([OVER_SSH]);
+    expect(spaceHeaderLines({ project: over("unsupported"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toEqual([OVER_SSH, FREE_WORD]);
     expect(workspaceMetaLine({ project: project({ reach: { state: "unsupported" }, daemonNote: "updating the helper" }, { kind: "ssh" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
     // This computer keeps the note: its host wires a daemon, so one missing is a fact worth the line.
     expect(workspaceMetaLine({ project: project({ reach: { state: "unsupported" } }, { kind: "local" }), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toBe("no daemon on this machine");

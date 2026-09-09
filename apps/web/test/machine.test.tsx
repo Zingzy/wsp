@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, DAEMON_VERSION } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, DAEMON_VERSION, FREE_WORD, NOT_ON_THIS_KIND } from "@wsp/protocol";
 import type {
   Capabilities,
   EventUnion,
@@ -228,7 +228,7 @@ describe("machine facts", () => {
     expect(writeText).toHaveBeenCalledWith("m_ws_a_0123456789abcdef");
   });
 
-  it("the footer's phase button reads one entry: a record still saying running while the machine is paused reads and labels Wake, and one whose machine is starting reads Waking and refuses", async () => {
+  it("the footer's phase button reads one entry: a record still saying running while the machine is paused offers Wake, and one whose machine is starting offers nothing, since neither verb can run", async () => {
     const w = view("ws_a", "api");
     const api = await mount([w]);
     act(() => api.emit({ type: "workspace.status", status: { ...status(w), machineState: "paused", reach: { state: "napping" } } }));
@@ -237,13 +237,12 @@ describe("machine facts", () => {
     expect(wake.disabled).toBe(false);
     expect(wake.title).toBe("Boot the VM from its disk");
     act(() => api.emit({ type: "workspace.status", status: { ...status(w), machineState: "starting" } }));
-    await waitFor(() => expect((screen.getByRole("button", { name: "Wake api" }) as HTMLButtonElement).textContent).toBe("Waking…"));
-    const waking = screen.getByRole("button", { name: "Wake api" }) as HTMLButtonElement;
-    expect(waking.disabled).toBe(true);
-    expect(waking.title).toBe("Workspace is waking");
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Wake api" })).toBeNull());
+    expect(screen.queryByRole("button", { name: "Pause api" })).toBeNull();
+    expect(document.body.textContent).not.toContain("Waking…");
   });
 
-  it("renders napping as Paused and waking as Waking with the wake control held", async () => {
+  it("renders napping as Paused with Wake offered, and waking as Waking with no button at all: Wake shows only while the machine is paused", async () => {
     await mount([view("ws_a", "api", "napping")]);
     expect(fact("state")).toBe("Paused");
     expect(screen.getByRole("button", { name: "Wake api" })).toBeDefined();
@@ -251,7 +250,10 @@ describe("machine facts", () => {
     // The store moves the record and its status together on every phase change, so the test moves both.
     act(() => useStore.setState(s => ({ workspaces: s.workspaces.map(w => ({ ...w, phase: "waking" as const })), statuses: { ...s.statuses, ws_a: { ...s.statuses["ws_a"]!, phase: "waking" as const } } })));
     expect(fact("state")).toBe("Waking");
-    expect((screen.getByRole("button", { name: "Wake api" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Wake api" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Pause api" })).toBeNull();
+    expect(document.querySelectorAll("footer button")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "upgrade api" })).toBeDefined();
   });
 
   it("shows machine-state divergence next to the phase", async () => {
@@ -284,14 +286,11 @@ describe("machine facts", () => {
     await waitFor(() => expect(fact("reason")).toBe("idle 20 min"));
   });
 
-  it("says machines cannot run containers when the backend reports containers: false", async () => {
+  it("says nothing about containers or the idle window whatever the backend reports: a fact the tab cannot act on is not a sentence on it", async () => {
     await mount([view("ws_a", "api")], { ...CAPS, containers: false });
-    expect(fact("containers")).toBe("This provider's machines cannot run containers; install services natively.");
-  });
-
-  it("shows no container line when the backend can run them", async () => {
-    await mount([view("ws_a", "api")]);
     expect(document.querySelector('[data-k="containers"]')).toBeNull();
+    expect(document.body.textContent).not.toContain("containers");
+    expect(document.body.textContent).not.toContain("The idle window is fixed");
   });
 
   it("renders an empty state without a workspace", () => {
@@ -774,13 +773,13 @@ describe("project goldens in the lineage", () => {
 describe("gone machines", () => {
   const gone = (): WorkspaceView => ({ ...view("ws_a", "api", "gone"), gone: "machine m_ws_a_0123456789abcdef is gone at the provider: Not found" });
 
-  it("the footer offers forget in place of pause and holds upgrade; confirming names what goes and calls the api once", async () => {
+  it("the footer offers forget in place of pause and no upgrade; confirming names what goes and calls the api once", async () => {
     const api = await mount([gone()]);
     const forget = vi.fn(async (_id: string) => {});
     api.forget = forget;
     const forgetButton = await screen.findByRole("button", { name: "Forget api" });
     expect(screen.queryByRole("button", { name: "Pause api" })).toBeNull();
-    expect((screen.getByRole("button", { name: "upgrade api" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "upgrade api" })).toBeNull();
     fireEvent.click(forgetButton);
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog.textContent).toContain("Forget api?");
@@ -815,14 +814,12 @@ describe("gone machines", () => {
 });
 
 describe("pause and wake", () => {
-  it("pause paints the phase immediately and calls the api once", async () => {
+  it("pause paints the phase immediately, drops the button while the machine moves, and calls the api once", async () => {
     const api = await mount([view("ws_a", "api")]);
     fireEvent.click(screen.getByRole("button", { name: "Pause api" }));
     expect(useStore.getState().workspaces[0]!.phase).toBe("pausing");
     expect(fact("state")).toBe("Pausing");
-    const held = screen.getByRole("button", { name: "Wake api" }) as HTMLButtonElement;
-    expect(held.textContent).toBe("Pausing…");
-    expect(held.disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: /Pause api|Wake api/ })).toBeNull();
     await waitFor(() => expect(api.nap).toHaveBeenCalledTimes(1));
     expect(api.nap).toHaveBeenCalledWith("ws_a");
   });
@@ -877,7 +874,8 @@ describe("upgrade", () => {
 
     const w = view("ws_a", "api");
     act(() => api.emit({ type: "workspace.status", status: { ...status(w), size: { cpu: 4, memMb: 8192 } } }));
-    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(""));
+    // The footer ends where its content ends: no empty status line is kept under the buttons.
+    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
     expect(fact("size")).toBe("4 vCPU · 8 GB");
   });
 
@@ -898,14 +896,21 @@ describe("upgrade", () => {
     expect(fact("size")).toBe("2 vCPU · 4 GB");
   });
 
-  it("is a disabled control with a hint when the backend cannot resize", async () => {
-    const api = await mount([view("ws_a", "api")], { ...CAPS, resize: false });
-    const button = screen.getByRole("button", { name: "upgrade api" }) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
-    expect(fact("resize-hint")).toBe("This provider cannot resize a machine. Pick the size when you create a workspace.");
-    fireEvent.click(button);
-    expect(screen.queryByRole("button", { name: "Confirm resize" })).toBeNull();
-    expect(api.upgrade).not.toHaveBeenCalled();
+  it("a backend that cannot resize gets no Upgrade button and no sentence about it; Pause stays, and the footer ends there", async () => {
+    await mount([view("ws_a", "api")], { ...CAPS, resize: false });
+    expect(screen.queryByRole("button", { name: "upgrade api" })).toBeNull();
+    expect(document.querySelector('[data-k="resize-hint"]')).toBeNull();
+    expect(document.body.textContent).not.toContain("cannot resize");
+    expect(screen.getByRole("button", { name: "Pause api" })).toBeDefined();
+    const footer = document.querySelector("footer")!;
+    expect(footer.querySelectorAll("button")).toHaveLength(1);
+    expect(footer.querySelector("[role=status]")).toBeNull();
+  });
+
+  it("a machine already at the largest size offered gets no Upgrade button either", async () => {
+    await mount([view("ws_a", "api")], { ...CAPS, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] });
+    expect(screen.queryByRole("button", { name: "upgrade api" })).toBeNull();
+    expect(document.body.textContent).not.toContain("Largest size");
   });
 });
 
@@ -998,7 +1003,7 @@ describe("gone machine", () => {
     expect(screen.getByRole("button", { name: "Rebuild api" })).toBeDefined();
     expect(screen.queryByRole("button", { name: "Pause api" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Wake api" })).toBeNull();
-    expect((screen.getByRole("button", { name: "upgrade api" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "upgrade api" })).toBeNull();
   });
 
   it("the rebuild asks first, then calls the api once", async () => {
@@ -1174,10 +1179,12 @@ describe("live", () => {
 describe("this computer as a workspace", () => {
   const MAC: WorkspaceView = { id: "ws_m", name: "zingzy-mac", machineId: "local", phase: "running", golden: "", createdAt: "2026-09-08T09:00:00Z", kind: "local" };
 
-  /** The same mount, with a local record and this computer's own shape on its status. */
-  async function mountLocal() {
+  const FACTS = { os: "macOS 15.5", uptimeMs: 3 * 86_400_000 + 4 * 3_600_000, folder: "/Users/zingzy/wsp" };
+
+  /** The same mount, with a local record and this computer's own shape and facts on its status. */
+  async function mountLocal(facts: typeof FACTS | null = FACTS) {
     const api = fakeApi([MAC]);
-    api.watchStatuses = vi.fn(async () => [{ ...status(MAC), kind: "local" as const, size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }]);
+    api.watchStatuses = vi.fn(async () => [{ ...status(MAC), kind: "local" as const, size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0, ...(facts === null ? {} : { facts }) }]);
     useStore.getState().bind(api);
     render(<MachineSurface workspaceId={MAC.id} />);
     await waitFor(() => expect(fact("size")).toBe("10 vCPU · 16 GB"));
@@ -1191,6 +1198,45 @@ describe("this computer as a workspace", () => {
     expect(fact("machine-id")).toBe("local");
   });
 
+  it("says what is true of this computer: it costs nothing, the system it runs, how long it has been up and the folder its commands start in, each a fact row in mono", async () => {
+    await mountLocal();
+    expect(fact("cost")).toBe(FREE_WORD);
+    expect(fact("os")).toBe("macOS 15.5");
+    expect(fact("uptime")).toBe("3d 4h");
+    expect(fact("folder")).toBe("/Users/zingzy/wsp");
+    for (const k of ["cost", "os", "uptime", "folder"]) {
+      const el = document.querySelector(`[data-k="${k}"]`)!;
+      expect(el.className).toContain("font-mono");
+      expect(el.getAttribute("title")).toBe(el.textContent);
+    }
+    // A fork carries none of them: its image and size say what it is.
+    cleanup();
+    await mount([view("ws_a", "api")]);
+    for (const k of ["cost", "os", "uptime", "folder"]) expect(document.querySelector(`[data-k="${k}"]`)).toBeNull();
+  });
+
+  it("before the status carries the facts the rows read pending, at the same height", async () => {
+    await mountLocal(null);
+    expect(fact("cost")).toBe(FREE_WORD);
+    expect(fact("os")).toBe("pending");
+    expect(fact("uptime")).toBe("pending");
+    expect(fact("folder")).toBe("pending");
+  });
+
+  it("the Live rows say the stream is not on this kind, in the slot a figure takes, rather than pending forever", async () => {
+    await mountLocal();
+    for (const k of ["cpu", "mem", "disk"]) {
+      const el = document.querySelector(`[data-k="${k}"]`)!;
+      expect(el.textContent).toBe(NOT_ON_THIS_KIND);
+      expect(el.className).toContain("font-mono");
+      expect(el.className).not.toMatch(/border|bg-|badge|destructive|warning/);
+    }
+    // A fork's rows read the link's own word instead: with no daemon link in this fixture, unreachable.
+    cleanup();
+    await mount([view("ws_a", "api")]);
+    expect(fact("cpu")).toBe("unreachable");
+  });
+
   it("nothing wsp does not drive: no awake meter, no auto-nap row, no idle-window line and no usage section", async () => {
     await mountLocal();
     expect(document.querySelector('[data-k="awake"]')).toBeNull();
@@ -1201,21 +1247,25 @@ describe("this computer as a workspace", () => {
     expect(document.body.textContent).not.toContain("Usage");
   });
 
-  it("the lineage says this computer and lists no golden: it forks from no image", async () => {
+  it("no lineage section at all: this computer forks from no image, so nothing about goldens is drawn or fetched", async () => {
     const api = await mountLocal();
-    expect(fact("machine")).toBe("this computer");
-    expect(marks("machine")).toEqual(["now"]);
+    expect(document.body.textContent).not.toContain("Lineage");
+    expect(document.body.textContent).not.toContain("forks from no image");
+    expect(document.querySelector('[data-k="machine"]')).toBeNull();
     expect(document.querySelector('[data-k="golden"]')).toBeNull();
     expect(api.listSnapshots).not.toHaveBeenCalled();
   });
 
-  it("the header wears the kind's glyph where a fork wears its phase dot", async () => {
+  it("the header wears the kind's glyph on every kind, the laptop here and the cloud on a fork, and no phase dot", async () => {
     const lead = (): Element => document.querySelector('[data-k="machine-id"]')!.closest("div")!.firstElementChild!;
     await mountLocal();
     expect(lead().tagName).toBe("svg");
+    expect(lead().getAttribute("class")).toContain("lucide-laptop");
     cleanup();
     await mount([view("ws_a", "api")]);
-    expect(lead().className).toContain("rounded-full");
+    expect(lead().tagName).toBe("svg");
+    expect(lead().getAttribute("class")).toContain("lucide-cloud");
+    expect(lead().getAttribute("class")).not.toMatch(/success|destructive|rounded-full/);
   });
 
   it("no machine buttons: this computer takes none of pause, wake, upgrade or forget, so the tab ends at its facts", async () => {
@@ -1230,7 +1280,7 @@ describe("this computer as a workspace", () => {
     expect(document.querySelector('[data-k="idle"]')).not.toBeNull();
     expect(document.querySelector('[data-k="rate"]')).not.toBeNull();
     expect(fact("golden")).toBe("snap_golden01");
-    expect(document.querySelector('[data-k="machine"]')).toBeNull();
+    expect(document.body.textContent).toContain("Lineage");
     expect(screen.queryByRole("button", { name: "Pause api" })).not.toBeNull();
   });
 });

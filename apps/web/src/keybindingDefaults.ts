@@ -4,7 +4,9 @@
 // dispatches; the jump, model-picker, diff, stash, settings and editor rules
 // are left out with the features they drive. The zoom is here but it is the
 // terminal's own, reaching a focused pane and never the app around it. The
-// workspace switch is ours: a Control chord is the terminal's while it has
+// workspace switch is ours, and so is the new thread's mod+t, listed after
+// mod+n so a label reads it; a browser tab keeps mod+t for its own new tab,
+// so mod+n stays for the app in a tab. A Control chord is the terminal's while it has
 // focus, and Tab and the digits with mod are the browser's inside a tab, where
 // keybindings.ts drops them. The Tab pair is bound twice, once per sidebar
 // body, since in Spaces the one workspace on screen makes its threads what a
@@ -48,8 +50,8 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+j", command: "preview.toggle" },
   { key: "mod+k", command: "commandPalette.toggle", when: "!terminalOwnsMod" },
   { key: "mod+,", command: "settings.toggle" },
-  { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
+  { key: "mod+t", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+alt+arrowleft", command: "workspace.previous", when: "!terminalFocus" },
   { key: "mod+alt+arrowright", command: "workspace.next", when: "!terminalFocus" },
   { key: "ctrl+tab", command: "workspace.next", when: "!terminalFocus && !spacesMode" },

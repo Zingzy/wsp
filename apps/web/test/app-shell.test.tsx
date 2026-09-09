@@ -280,10 +280,12 @@ const collapse = async () => {
 };
 
 describe("the header row", () => {
-  it("open: the sidebar's row carries the toggle then the wordmark, the page's row the workspace's breadcrumb with no toggle and no wordmark", async () => {
+  it("open: the sidebar's row carries the wordmark first and the toggle at its end, the page's row the workspace's breadcrumb with no toggle and no wordmark", async () => {
     await mountShell();
     expect(toggleIn(sidebarHeader())).not.toBeNull();
     expect(sidebarHeader().querySelector("[role=img][aria-label=wsp]")).not.toBeNull();
+    expect(sidebarHeader().firstElementChild!.getAttribute("aria-label")).toBe("wsp");
+    expect(sidebarHeader().lastElementChild).toBe(toggleIn(sidebarHeader()));
     expect(sidebarHeader().getAttribute("data-header-row")).toBe("frame");
     expect(toggleIn(banner())).toBeNull();
     expect(banner().querySelector("[role=img][aria-label=wsp]")).toBeNull();

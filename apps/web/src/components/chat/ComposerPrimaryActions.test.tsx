@@ -77,7 +77,7 @@ function renderStoppingActions() {
   );
 }
 
-function renderSendButton(sendDisabledReason: string | null = null) {
+function renderSendButton(sendDisabledReason: string | null = null, wakesFirst = false) {
   return renderToStaticMarkup(
     createElement(ComposerPrimaryActions, {
       compact: true,
@@ -87,6 +87,7 @@ function renderSendButton(sendDisabledReason: string | null = null) {
       promptHasText: true,
       isSendBusy: false,
       sendDisabledReason,
+      wakesFirst,
       isConnecting: false,
       isEnvironmentUnavailable: false,
       isPreparingWorktree: false,
@@ -194,6 +195,14 @@ describe("ComposerPrimaryActions", () => {
 
     expect(markup).toContain("disabled");
     expect(markup).toContain('aria-label="Sending feedback"');
+  });
+
+  it("names the send Wake and send while the machine is paused, on the same button, and Send message otherwise", () => {
+    expect(renderSendButton(null, true)).toContain('aria-label="Wake and send"');
+    expect(renderSendButton(null, true)).toContain('title="Wake and send"');
+    expect(renderSendButton(null, true)).not.toMatch(/<button[^>]* disabled=""/);
+    expect(renderSendButton()).toContain('aria-label="Send message"');
+    expect(renderSendButton()).not.toContain("title=");
   });
 
   it("offers Stop generation while a running turn is waiting for user input", () => {

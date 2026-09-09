@@ -5,7 +5,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DEFAULT_PREFERENCES, PROVIDER_UNREACHED_LINE, exportFromLine, importIntoLine, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DEFAULT_PREFERENCES, FREE_WORD, PROVIDER_UNREACHED_LINE, exportFromLine, importIntoLine, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { WORKSPACE_WORDS } from "../src/actions/format.js";
 import { onOpenCommandPalette } from "../src/commandPaletteBus.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
@@ -144,7 +144,7 @@ describe("header", () => {
     expect(screen.getByRole("img", { name: "wsp" })).toBeTruthy();
   });
 
-  it("the header row starts at the frame inset with the toggle, the lockup follows it, and the search row shares the content inset", async () => {
+  it("the header row starts at the frame inset with the lockup, the toggle sits at the row's end, and the search row shares the content inset", async () => {
     useStore.getState().bind(fakeApi([], []));
     await act(async () => {
       render(
@@ -158,7 +158,10 @@ describe("header", () => {
     expect(row.getAttribute("data-slot")).toBe("sidebar-header");
     expect(row.className).toContain("pl-[var(--header-frame-inset)]");
     expect(row.className).toContain("gap-[calc(var(--header-gap)-var(--workspace-titlebar-control-size)/2)]");
-    expect(lockup.previousElementSibling!.getAttribute("data-slot")).toBe("sidebar-trigger");
+    expect(lockup.previousElementSibling).toBeNull();
+    expect(row.lastElementChild!.getAttribute("data-slot")).toBe("sidebar-trigger");
+    expect(row.lastElementChild!.className).toContain("ml-auto");
+    expect(row.className).toContain("pr-[var(--sidebar-content-inset)]");
     expect(screen.getByRole("button", { name: "Search" }).closest("[data-sidebar-search]")!.className).toContain("px-[var(--sidebar-content-inset)]");
   });
 });
@@ -489,20 +492,35 @@ describe("rows from the fixture wire", () => {
     await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("$0.29 today · $0.110/hr · active"));
   });
 
-  it("this computer's row: the laptop glyph where the state dot goes, no state word, and what the machine is on the meta line, beside cloud rows that keep all three", async () => {
+  it("every row leads with its kind's glyph and no state dot: the laptop for this computer, the cloud for a fork; line two says what the machine is, line three what it costs, and the state is a word on the right", async () => {
     const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
     await mount(fakeApi([API, WEB, MAC], [status(API, { idleAt: iso(14.5 * 60_000) }), status(WEB), { ...status(MAC), kind: "local", rateUsdPerHour: 0 }]), "api");
     await waitFor(() => expect(rowOf("zingzy-mac")).toBeDefined());
     const lead = (row: HTMLElement) => row.querySelector<HTMLElement>("[data-workspace-lead]")!;
-    expect(lead(rowOf("zingzy-mac")).dataset["workspaceLead"]).toBe("glyph");
-    expect(lead(rowOf("zingzy-mac")).querySelector("svg")).not.toBeNull();
-    expect(lead(rowOf("api")).dataset["workspaceLead"]).toBe("dot");
-    expect(lead(rowOf("api")).querySelector("svg")).toBeNull();
-    expect(metaOf(rowOf("zingzy-mac")).textContent).toBe("this computer");
+    const glyphClass = (row: HTMLElement) => lead(row).querySelector("svg")!.getAttribute("class") ?? "";
+    expect(glyphClass(rowOf("zingzy-mac"))).toContain("lucide-laptop");
+    expect(glyphClass(rowOf("api"))).toContain("lucide-cloud");
+    expect(glyphClass(rowOf("web"))).toContain("lucide-cloud");
+    for (const name of ["zingzy-mac", "api", "web"]) {
+      expect(lead(rowOf(name)).querySelector(".rounded-full")).toBeNull();
+      // One ink for every glyph, no hue with the state; the paused one dims and nothing else about it changes.
+      expect(glyphClass(rowOf(name))).toContain("text-muted-foreground/60");
+      expect(glyphClass(rowOf(name))).not.toMatch(/success|destructive|warning|info/);
+    }
+    expect(glyphClass(rowOf("web"))).toContain("opacity-50");
+    expect(glyphClass(rowOf("api"))).not.toContain("opacity-50");
+    const machineOf = (row: HTMLElement) => row.querySelector<HTMLElement>("[data-workspace-machine]")!;
+    expect(machineOf(rowOf("zingzy-mac")).textContent).toBe("this computer");
+    expect(machineOf(rowOf("api")).textContent).toBe("2 vCPU · 4 GB");
+    expect(metaOf(rowOf("zingzy-mac")).textContent).toBe(FREE_WORD);
     expect(stateSlot(rowOf("zingzy-mac")).textContent).toBe("");
-    // The cloud rows beside it are untouched: the spend, the countdown and the paused word all still read.
+    // The cloud rows beside it: the spend, the countdown and the paused word all read in their own slots.
     expect(metaOf(rowOf("api")).textContent).toBe("$0.00 today · $0.110/hr · naps in 14m");
     expect(stateSlot(rowOf("web")).textContent).toBe("Paused");
+    for (const name of ["zingzy-mac", "api", "web"]) {
+      expect(machineOf(rowOf(name)).className).toContain("font-mono");
+      expect(machineOf(rowOf(name)).getAttribute("title")).toBe(machineOf(rowOf(name)).textContent);
+    }
     // One row grammar for both kinds: the same lead slot and the same height.
     const boxOf = (row: HTMLElement) => [...row.firstElementChild!.classList].filter(c => /^(size-|mt-)/.test(c)).sort();
     expect(boxOf(rowOf("zingzy-mac"))).toEqual(boxOf(rowOf("api")));
@@ -510,7 +528,7 @@ describe("rows from the fixture wire", () => {
     expect(heightOf(rowOf("zingzy-mac"))).toEqual(heightOf(rowOf("api")));
   });
 
-  it("every two-line row is one height, the thread rows share the workspace rows' grammar, and the Idle row is the kit row", async () => {
+  it("every workspace row is one three-line height, every thread row one two-line height with no glyph before its title, and the Idle row is the kit row", async () => {
     await mount(
       fakeApi(
         [API],
@@ -524,7 +542,7 @@ describe("rows from the fixture wire", () => {
     );
     await waitFor(() => expect(screen.getByText("upgrade node")).toBeDefined());
     const heightOf = (row: HTMLElement) => [...row.classList].filter(c => /^(h-|min-h-|py-)/.test(c)).sort();
-    expect(heightOf(rowOf("api"))).toEqual(["h-11", "py-1.5"]);
+    expect(heightOf(rowOf("api"))).toEqual(["h-15", "py-1.5"]);
     expect(heightOf(rowOf("fix the port list"))).toEqual(["h-11", "py-1.5"]);
     expect(heightOf(rowOf("upgrade node"))).toEqual(["h-11", "py-1.5"]);
     // A button centres its text unless told otherwise; a short title starts where a long one does.
@@ -543,9 +561,10 @@ describe("rows from the fixture wire", () => {
     expect(time.className).not.toContain("min-w-");
     expect(time.className).toContain("text-right");
     expect(time.className).toContain("shrink-0");
-    // The same leading slot on both rows, so the title starts where the name starts.
-    const lead = (row: HTMLElement) => [...row.firstElementChild!.classList].filter(c => /^(size-|mt-)/.test(c)).sort();
-    expect(lead(rowOf("fix the port list"))).toEqual(lead(rowOf("api")));
+    // Every row in the list is a thread, so nothing leads the title: the title's column is the row's first child.
+    expect(rowOf("fix the port list").firstElementChild!.contains(title)).toBe(true);
+    expect(rowOf("fix the port list").querySelector("svg.lucide-message-square")).toBeNull();
+    expect(rowOf("api").firstElementChild!.getAttribute("aria-hidden")).toBe("true");
   });
 
   it("while the runtime replaces the machine's helper the row says only that, and clears when it lands", async () => {
@@ -705,8 +724,10 @@ describe("search", () => {
     expect(compose.closest("[data-sidebar-search]")).not.toBeNull();
     expect(row.contains(compose)).toBe(false);
     expect(row.className).toContain("pe-8");
-    // The row is the kit's row: no border, no fill at rest, the hover tint every other row has.
-    expect(row.className).not.toMatch(/\bborder\b|ring-1|bg-background|bg-sidebar-control-surface/);
+    // The row is the kit's row on the selected row's surface with the sidebar's hairline: no fill or ring of its own, the hover tint every other row has.
+    expect(row.className).toContain("bg-sidebar-row-selected");
+    expect(row.className).toContain("border-sidebar-border");
+    expect(row.className).not.toMatch(/ring-1|bg-background|bg-sidebar-control-surface/);
     expect(row.className).toContain("hover:bg-sidebar-row-hover");
     expect(row.className).toContain("h-8");
     const before = rowIds();
@@ -949,14 +970,14 @@ describe("gone machines", () => {
   it("a gone row offers forget beside the rebuild; confirming names what goes, calls the api once, and the row leaves on workspace.deleted", async () => {
     const api = await mount(fakeApi([OLD], [status(OLD)], [session("s1", "ws_c", { prompt: "fix the port list", status: "completed" })]), "old");
     await waitFor(() => expect(stateSlot(rowOf("old")).textContent).toBe("Gone"));
-    // The two recovery glyphs sit in the row's two right-edge slots, forget before rebuild, and are always shown.
+    // The two recovery glyphs sit in the row's two right-edge slots, forget before rebuild, on hover like every
+    // row's glyphs: the resting row carries its word alone, and the word yields to them so nothing moves.
     const recovery = Array.from(rowOf("old").parentElement!.querySelectorAll<HTMLElement>("[data-sidebar=menu-action]"));
     expect(recovery.map(b => b.getAttribute("aria-label"))).toEqual(["Forget old", "Rebuild old"]);
     expect(recovery.map(b => [...b.classList].find(c => c.startsWith("right-")))).toEqual(["right-7", "right-2"]);
-    for (const glyph of recovery) expect(glyph.className).not.toContain("md:opacity-0");
-    // Its word never yields to them: the row makes room for both.
-    expect(stateSlot(rowOf("old")).className).not.toContain("opacity-0");
-    expect([...rowOf("old").classList].filter(c => /pe-\d/.test(c))).toEqual(["group-has-data-[sidebar=menu-action]/menu-item:pe-14"]);
+    for (const glyph of recovery) expect(glyph.className).toContain("md:opacity-0");
+    expect(stateSlot(rowOf("old")).className).toContain("group-hover/menu-item:opacity-0");
+    expect([...rowOf("old").classList].filter(c => /pe-\d/.test(c))).toEqual(["group-has-data-[sidebar=menu-action]/menu-item:pe-2"]);
     fireEvent.click(screen.getByRole("button", { name: "Forget old" }));
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog.textContent).toContain("Forget old?");
@@ -1204,7 +1225,7 @@ describe("Spaces mode", () => {
 
   it("the header's lines are the machine, what it cost today with its rate, and the nap countdown only when one is set", async () => {
     await mountSpaces(fakeApi(THREE, statuses()));
-    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB · Linux", "$0.00 today · $0.110/hr", "naps in 15m"]));
+    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.00 today · $0.110/hr", "naps in 15m"]));
     act(() =>
       useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 120_000, accruedUsd: 0.29, at: new Date(NOW).toISOString() }),
     );
@@ -1219,14 +1240,14 @@ describe("Spaces mode", () => {
     expect(spaceHeader()!.querySelector("[data-space-state]")!.textContent).toBe("");
     // With no nap scheduled the line is gone rather than reading "active"; a paused machine bills nothing, so no rate.
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API) }));
-    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB · Linux", "$0.29 today · $0.110/hr"]));
+    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.29 today · $0.110/hr"]));
   });
 
   it("a paused workspace's header drops the rate, and its state word takes the name's line", async () => {
     useStore.setState({ selectedId: "ws_b" });
     await mountSpaces(fakeApi(THREE, statuses()));
     await waitFor(() => expect(within(spaceHeader()!).getByText("web")).toBeDefined());
-    expect(headerLines()).toEqual(["2 vCPU · 4 GB · Linux", "$0.00 today"]);
+    expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.00 today"]);
     expect(spaceHeader()!.querySelector("[data-space-state]")!.textContent).toBe("Paused");
   });
 
@@ -1239,24 +1260,24 @@ describe("Spaces mode", () => {
     expect(dots().map(d => d.textContent)).toEqual(["", "web", ""]);
   });
 
-  it("this computer's header says what the machine is where a fork's size reads, through the one machine line", async () => {
+  it("this computer's header says what the machine is where a fork's size reads, through the one machine line, and free where a fork's spend reads", async () => {
     const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
     useStore.setState({ selectedId: "ws_m" });
     await mountSpaces(fakeApi([API, MAC], [status(API), { ...status(MAC), kind: "local", size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }]));
     await waitFor(() => expect(within(spaceHeader()!).getByText("zingzy-mac")).toBeDefined());
-    // The machine words alone: nothing wsp does not pay for, so no cost line and no rate under them.
-    expect(headerLines()).toEqual(["this computer"]);
+    // The machine words and the word free: nothing wsp pays for, so no figure and no rate under them.
+    expect(headerLines()).toEqual(["this computer", FREE_WORD]);
     expect(spaceHeader()!.querySelector("[data-space-state]")!.textContent).toBe("");
     // A tick on this computer's meter changes nothing there either.
     act(() =>
       useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_m", phase: "running", rateUsdPerHour: 0, awakeMs: 120_000, accruedUsd: 0, at: new Date(NOW).toISOString() }),
     );
-    await waitFor(() => expect(headerLines()).toEqual(["this computer"]));
-    // The fork beside it keeps every line it had: the size and the OS word, then the spend with its rate. Both
-    // bodies carry a header while one travels out, so the lines are read once the body asked for is there alone.
+    await waitFor(() => expect(headerLines()).toEqual(["this computer", FREE_WORD]));
+    // The fork beside it keeps every line it had: the size, then the spend with its rate. Both bodies carry a
+    // header while one travels out, so the lines are read once the body asked for is there alone.
     fireEvent.click(dots()[0]!);
     await waitFor(() => expect(within(spaceHeader()!).getByText("api")).toBeDefined());
-    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB · Linux", "$0.00 today · $0.110/hr"]));
+    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.00 today · $0.110/hr"]));
   });
 
   it("a space asked for while the body is still travelling turns it around and never draws one workspace twice", async () => {
@@ -1325,18 +1346,18 @@ describe("Spaces mode", () => {
     expect(useStore.getState().selectedId).toBe("ws_b");
   });
 
-  it("before the first status the header carries no machine line: nothing draws a bare OS word", async () => {
+  it("before the first status the header carries no machine line: nothing draws a size it does not have", async () => {
     await mountSpaces(fakeApi([API], []));
     await waitFor(() => expect(headerLines()).toEqual(["$0.00 today"]));
   });
 
   it("the two lines the row gives a whole line to lead the header's, and the rest stay under them", async () => {
     await mountSpaces(fakeApi(THREE, statuses()));
-    await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB · Linux"));
+    await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB"));
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: { ...status(API, { idleAt: iso(15.5 * 60_000) }), daemonNote: DAEMON_UPDATING } }));
-    await waitFor(() => expect(headerLines()).toEqual([DAEMON_UPDATING, "2 vCPU · 4 GB · Linux", "$0.00 today · $0.110/hr", "naps in 15m"]));
+    await waitFor(() => expect(headerLines()).toEqual([DAEMON_UPDATING, "2 vCPU · 4 GB", "$0.00 today · $0.110/hr", "naps in 15m"]));
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { idleAt: iso(15.5 * 60_000) }) }));
-    await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB · Linux"));
+    await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB"));
   });
 
   it("a machine that stopped answering with memory near full says so at the top of its header", async () => {
@@ -1349,9 +1370,9 @@ describe("Spaces mode", () => {
       getLive("ws_a").feedStatus("connecting");
     });
     await waitFor(() => expect(headerLines()[0]).toBe("out of memory, 3.6 of 3.9 GB"));
-    expect(headerLines()).toContain("2 vCPU · 4 GB · Linux");
+    expect(headerLines()).toContain("2 vCPU · 4 GB");
     act(() => getLive("ws_a").feedStatus("live"));
-    await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB · Linux"));
+    await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB"));
   });
 
   it("the header is a stop in the arrow walk, and the walk carries on into the space's threads", async () => {

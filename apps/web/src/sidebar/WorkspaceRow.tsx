@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// One machine's row, two lines at every width. Line one: the lead slot, the
-// name, and at the right edge a slot as wide as two glyphs holding the
-// state's word in muted mono only while the state is not running (the dot
-// says running). The lead holds the state dot for a machine wsp drives and
-// the kind's own glyph for one it does not, which has no state to report.
-// On hover the word yields and the row's two glyphs, the
-// collapse chevron and new thread, take the slot, so nothing moves. Line
-// two: the one mono meta line over the row's whole width, cut from the right
-// and whole in its title. Renaming turns the name into the sidebar's one name
-// box in the same slot, opened from the menu or by a double-click on the
-// name, so the row keeps its height and its grammar. A dead row's glyphs are
-// its recovery and always show, so that row makes room for them beside the
-// word: a gone row's forget and rebuild, a zombie's rebuild alone. The words
-// come from workspaceRows.ts and the actions from the workspace registry.
+// One machine's row, three lines at every width, one fixed slot each so every
+// row has the same shape and height. Line one: the kind's glyph in the lead,
+// the name, and at the right edge a slot as wide as two glyphs holding the
+// state's word in muted mono while the state is not running, empty while it
+// is; the glyph dims while the machine is paused, and no hue changes with the
+// state. Line two: what the machine is, in words. Line three: what it cost
+// today, free for a machine wsp does not pay for; the one sentence a person may
+// be waiting on takes that line while it lasts. The row's actions, the collapse
+// chevron and new thread on a live row, forget and rebuild on a dead one, show
+// on hover in the state slot, where the word yields to them so nothing moves,
+// and in the row's menu; the resting row carries none. Renaming turns the name
+// into the sidebar's one name box in the same slot, opened from the menu or by
+// a double-click on the name, so the row keeps its height and its grammar. The
+// words come from workspaceRows.ts and the actions from the workspace registry.
 import { ChevronDownIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { needsRebuild, workspaceKind, type MemoryReading } from "@wsp/protocol";
 import { runAction } from "../actions/contextMenu.js";
@@ -24,19 +24,17 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.
 import { cn } from "../lib/utils.js";
 import { workspaceKindGlyph } from "../workspaceKindGlyph.js";
 import { RowNameInput } from "./RowNameInput.js";
-import { ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, TWO_LINE_ROW_CLASS, workspaceRowId } from "./rowGrammar.js";
-import { NEW_THREAD_TITLE, dotClassForTone, metaSentences, stateSlotWord, workspaceMetaLine } from "./workspaceRows.js";
+import { ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, THREE_LINE_ROW_CLASS, workspaceRowId } from "./rowGrammar.js";
+import { NEW_THREAD_TITLE, machineLine, metaSentences, stateSlotWord, workspaceMetaLine } from "./workspaceRows.js";
 
 /** The glyphs sit on line one inside the state slot, the inner one and the one at the row's inset; the kit's own place is the row's middle and edge. */
 const GLYPH_CLASS = "peer-data-[size=lg]/menu-button:top-1 right-2";
 const INNER_GLYPH_CLASS = cn(GLYPH_CLASS, "right-7");
-/** A live row's text runs to the row's own inset; the glyphs land in the state slot. A dead row keeps two glyphs' room. */
-const LIVE_ROW_CLASS = "group-has-data-[sidebar=menu-action]/menu-item:pe-2";
-const DEAD_ROW_CLASS = "group-has-data-[sidebar=menu-action]/menu-item:pe-14";
-const STATE_SLOT_CLASS = "min-w-11 shrink-0 text-right";
-/** A kind's own glyph reads at the weight of the neutral dot it stands in for, so no row's lead is louder than another's. */
+/** The row's text runs to the row's own inset; the glyphs land in the state slot on hover. */
+const ROW_CLASS = "group-has-data-[sidebar=menu-action]/menu-item:pe-2";
+const STATE_SLOT_CLASS = "min-w-11 shrink-0 text-right transition-opacity group-hover/menu-item:opacity-0 group-focus-within/menu-item:opacity-0";
+/** The kind's glyph reads at the weight of the muted meta beside it, and half that while the machine is paused. */
 const LEAD_GLYPH_CLASS = "text-muted-foreground/60";
-const YIELDING_SLOT_CLASS = "transition-opacity group-hover/menu-item:opacity-0 group-focus-within/menu-item:opacity-0";
 
 export function WorkspaceRow({
   project,
@@ -77,8 +75,9 @@ export function WorkspaceRow({
   const dead = needsRebuild({ phase: project.phase, machineState: project.machineState, reach: project.reach });
   const KindGlyph = workspaceKindGlyph(workspaceKind(project.workspace));
   const gone = project.state === "gone";
+  const machine = machineLine(project) ?? "";
   const meta = workspaceMetaLine({ project, cost, outOfMemory, nowMs });
-  // The same slot carries counts most of the time and a sentence when something needs reading.
+  // The same slot carries the cost most of the time and a sentence when something needs reading.
   const metaIsProse = metaSentences({ project, outOfMemory }).includes(meta);
   const forgetAction = actionById(actions, "forget");
   const rebuildAction = actionById(actions, "rebuild");
@@ -92,17 +91,13 @@ export function WorkspaceRow({
         isActive={active}
         data-sidebar-row
         data-row-id={workspaceRowId(project.id)}
-        className={cn(TWO_LINE_ROW_CLASS, dead ? DEAD_ROW_CLASS : LIVE_ROW_CLASS)}
+        className={cn(THREE_LINE_ROW_CLASS, ROW_CLASS)}
         {...(renaming ? {} : { onClick: onSelect })}
       >
-        <span aria-hidden className={ROW_LEAD_CLASS} data-workspace-lead={KindGlyph === null ? "dot" : "glyph"}>
-          {KindGlyph === null ? (
-            <span className={cn("size-2 rounded-full", dotClassForTone(project.indicator.tone), project.indicator.pulse && "animate-status-pulse")} />
-          ) : (
-            <KindGlyph className={cn("size-3.5", LEAD_GLYPH_CLASS)} />
-          )}
+        <span aria-hidden className={ROW_LEAD_CLASS} data-workspace-lead>
+          <KindGlyph className={cn("size-3.5", LEAD_GLYPH_CLASS, project.state === "paused" && "opacity-50")} />
         </span>
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
+        <span className="flex min-w-0 flex-1 flex-col gap-px leading-tight">
           <span className="flex items-center gap-2">
             {renaming ? (
               <RowNameInput name={project.displayName} label={WORKSPACE_WORDS.rename} saving={saving} onRename={onRename} onCancel={onRenameCancel} />
@@ -118,9 +113,12 @@ export function WorkspaceRow({
                 {project.displayName}
               </span>
             )}
-            <span data-workspace-state className={cn(ROW_META_CLASS, STATE_SLOT_CLASS, !dead && YIELDING_SLOT_CLASS)}>
+            <span data-workspace-state className={cn(ROW_META_CLASS, STATE_SLOT_CLASS)}>
               {stateSlotWord(project)}
             </span>
+          </span>
+          <span data-workspace-machine className={cn(ROW_META_CLASS, "truncate")} title={machine}>
+            {machine}
           </span>
           <span data-workspace-meta className={cn(metaIsProse ? ROW_PROSE_CLASS : ROW_META_CLASS, "truncate")} title={meta}>
             {meta}
@@ -131,6 +129,7 @@ export function WorkspaceRow({
         <>
           {gone ? (
             <SidebarMenuAction
+              showOnHover
               className={INNER_GLYPH_CLASS}
               aria-label={rowLabelOf(forgetAction)}
               title={forgetAction.refusal ?? forgetAction.hint ?? undefined}
@@ -141,6 +140,7 @@ export function WorkspaceRow({
             </SidebarMenuAction>
           ) : null}
           <SidebarMenuAction
+            showOnHover
             className={GLYPH_CLASS}
             aria-label={rowLabelOf(rebuildAction)}
             title={rebuildAction.refusal ?? rebuildAction.hint ?? undefined}

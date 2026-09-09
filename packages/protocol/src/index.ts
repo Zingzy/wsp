@@ -239,6 +239,12 @@ export const WorkspaceView = z.object({
 });
 export type WorkspaceView = z.infer<typeof WorkspaceView>;
 
+/** What a machine that already existed before wsp says about itself, read off the machine at every status poll: the
+ * operating system as its maker names it with its version, how long it has been up, and the folder its commands
+ * start in. A fork wsp made carries none; its image and size say what it is. */
+export const MachineFacts = z.object({ os: z.string(), uptimeMs: z.number(), folder: z.string() });
+export type MachineFacts = z.infer<typeof MachineFacts>;
+
 /** WorkspaceView enriched with what the rail and meta panel render live. */
 export const WorkspaceStatus = WorkspaceView.extend({
   machineState: MachineState,
@@ -246,6 +252,7 @@ export const WorkspaceStatus = WorkspaceView.extend({
   size: WorkspaceSize,
   /** Awake burn rate for this size; 0 never appears here (napping costs ride the cost event). */
   rateUsdPerHour: z.number(),
+  facts: MachineFacts.optional(),
   /** Why the runtime pushed this status outside the poll: a wake that had to retry or replace the machine, or "idle 20 min". */
   reason: z.string().optional(),
   /** Epoch ms when the runtime's idle policy naps this workspace; absent while napping, held by a running session, or with auto-nap off. */
