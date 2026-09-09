@@ -1122,9 +1122,11 @@ export interface Ended {
 export type Waited = { ended: Ended } | { timedOutMs: number };
 
 /** The thread's latest turn as its transcript ended it, by the protocol's one reading of a transcript; a thread the
- * transcript no longer holds a turn of answers with its row's status alone. */
-async function endedOf(client: HostClient, workspaceId: string, threadId: string, status: TurnStatus): Promise<Ended> {
-  return { threadId, result: threadResult(await history(client, workspaceId), threadId) ?? { status } };
+ * transcript holds no turn of answers with `ended`, what the end that woke this wait carried. A turn the runtime
+ * gave up before it opened is the case with no rows behind it: it never wrote any, since it never ran, and the
+ * reason it did not is on that end and nowhere else. */
+async function endedOf(client: HostClient, workspaceId: string, threadId: string, ended: TurnResult): Promise<Ended> {
+  return { threadId, result: threadResult(await history(client, workspaceId), threadId) ?? ended };
 }
 
 /** The workspace's transcript as the host holds it, the rows every read and every wait folds. */
@@ -1149,17 +1151,21 @@ const threadIdOf = (t: ThreadView): string => t.threadId ?? t.id;
 
 /** Blocks until one of the named threads leaves running and answers with that thread's end: at once for one already
  * over, else on the first done or end the host pushes for any of them; the deadline when `timeoutMs` passes first.
- * The rows are listed after the subscription, so an end between the two is a held frame and not a gap. A done
- * carries its result; an end without one in hand is read off the transcript, since the reply may have landed before
- * this call. Fails when the host goes away first. */
+ * The rows are listed after the subscription, so an end between the two is a held frame and not a gap. A named
+ * thread the listing no longer holds is over too: its only turn was given up before it opened, between the naming
+ * and this call, and its end went out before the subscription, so it is answered failed off what the transcript
+ * holds of it, which is nothing but the status. A done carries its result; an end without one in hand is read off
+ * the transcript, since the reply may have landed before this call. Fails when the host goes away first. */
 export async function firstEnded(client: HostClient, named: readonly ThreadView[], timeoutMs?: number): Promise<Waited> {
   const pushed = pushedFrames(client);
   let timer: NodeJS.Timeout | undefined;
   try {
     await client.events();
     const rows = await threads(client);
+    const gone = named.find(t => rows.every(r => threadIdOf(r) !== threadIdOf(t)));
+    if (gone !== undefined) return { ended: await endedOf(client, gone.workspaceId, threadIdOf(gone), { status: "failed" }) };
     const over = named.map(t => rows.find(r => r.id === t.id)).find((r): r is ThreadView & { status: TurnStatus } => r !== undefined && r.status !== "running");
-    if (over !== undefined) return { ended: await endedOf(client, over.workspaceId, threadIdOf(over), over.status) };
+    if (over !== undefined) return { ended: await endedOf(client, over.workspaceId, threadIdOf(over), { status: over.status }) };
     const ids = new Set(named.map(threadIdOf));
     const ended = new Promise<Waited>(done => {
       pushed.follow(
@@ -1168,7 +1174,7 @@ export async function firstEnded(client: HostClient, named: readonly ThreadView[
           const e = f as unknown as SessionEvent & { threadId: string };
           pushed.stop();
           if (e.type === "session.done") done({ ended: { threadId: e.threadId, result: e.result } });
-          else done(endedOf(client, e.workspaceId, e.threadId, "failed").then(ended => ({ ended })));
+          else done(endedOf(client, e.workspaceId, e.threadId, { status: "failed", ...(e.type === "session.end" && e.reason !== undefined ? { error: e.reason } : {}) }).then(ended => ({ ended })));
         },
       );
     });

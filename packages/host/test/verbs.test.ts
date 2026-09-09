@@ -15,7 +15,7 @@ import { WebSocketServer } from "ws";
 import { HELP, cli, localWiring, localWorkFolder, serve } from "../src/cli.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
-import { PLAN_ONLY, deleteQuestion, deletedLine, dialHost, messageTo, threadRows } from "../src/verbs.js";
+import { PLAN_ONLY, deleteQuestion, deletedLine, dialHost, firstEnded, messageTo, threadRows, threadsOf } from "../src/verbs.js";
 import { withRefused } from "../../runtime/test/fs-refusal.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { guestAnswer, stubBackend, type StubBackend } from "./stub-backend.js";
@@ -1509,6 +1509,147 @@ describe("wsp verbs over the host", () => {
     const stray = await run("threads", "nope");
     expect(stray.code).toBe(3);
     expect(stray.io.errors[0]).toContain("wsp threads takes no positional arguments; wsp threads wait is its one subcommand");
+  });
+
+  it("threads wait on a thread whose first turn has not reached the machine blocks for that turn; the same thread once its turn is over comes back at once with its finished line", async () => {
+    const held = heldAgent(false);
+    let letProbe!: () => void;
+    const probed = new Promise<void>(r => (letProbe = r));
+    // The harness's own lists come off the machine before the turn is launched: seconds on a real machine, and the
+    // window this case is about.
+    await restartHost({ claude: ctx => ({ ...held.adapter(ctx), probeCatalog: async () => (await probed, null) }) });
+    await run("new", "alpha");
+    const [ws] = await rt.workspaces.list();
+    const starting = rt.sessions.start(ws!.id, { prompt: "build it", startedBy: "cli" });
+    await vi.waitFor(async () => expect(await rt.sessions.list()).toHaveLength(1), { timeout: 10_000, interval: 10 });
+    const thread = (await rt.sessions.list())[0]!.threadId!;
+    expect(held.starts).toHaveLength(0);
+
+    let answered = false;
+    const waiting = run("threads", "wait", thread, "--timeout", "3600").then(r => ((answered = true), r));
+    await new Promise(r => setTimeout(r, 50));
+    expect(answered).toBe(false);
+    letProbe();
+    await starting;
+    expect(held.starts.map(s => s.prompt)).toEqual(["build it"]);
+    // Still nothing: the turn the wait was told to wait for is only now running.
+    await new Promise(r => setTimeout(r, 50));
+    expect(answered).toBe(false);
+    held.release(0, "all green");
+    const finished = await waiting;
+    expect(finished.code).toBe(0);
+    expect(finished.io.lines).toEqual([`thread ${thread.slice(0, 8)} finished (completed): all green`]);
+
+    const again = await run("threads", "wait", thread);
+    expect(again.io.lines).toEqual([`thread ${thread.slice(0, 8)} finished (completed): all green`]);
+
+    // A thread whose launch never reached the machine has no turn and never will; the wait answers at once for it too.
+    await restartHost({ claude: bornDeadAgent(prompt => `re: ${prompt}`).adapter });
+    await run("thread", "new", "--in", "alpha", "--detach", "never lands");
+    const stillborn = (await rt.sessions.list()).find(r => r.prompt === "never lands")!;
+    const atOnce = await run("threads", "wait", stillborn.threadId!);
+    expect(atOnce.code).toBe(0);
+    expect(atOnce.io.lines).toEqual([`thread ${stillborn.threadId!.slice(0, 8)} finished (failed): ${UNREACHED_LINE}`]);
+  });
+
+  it("a wait in flight on a thread whose launch gives up gets that thread's finished line, with the reason the start failed with", async () => {
+    let letProbe!: () => void;
+    const probed = new Promise<void>(r => (letProbe = r));
+    const WOULD_NOT_LAUNCH = "the agent binary is not on this machine";
+    await restartHost({
+      claude: () => ({
+        steers: false,
+        probeCatalog: async () => (await probed, null),
+        start: () => {
+          throw new Error(WOULD_NOT_LAUNCH);
+        },
+      }),
+    });
+    await run("new", "alpha");
+    const [ws] = await rt.workspaces.list();
+    const giving = rt.sessions.start(ws!.id, { prompt: "build it", startedBy: "cli" });
+    await vi.waitFor(async () => expect(await rt.sessions.list()).toHaveLength(1), { timeout: 10_000, interval: 10 });
+    const thread = (await rt.sessions.list())[0]!.threadId!;
+
+    let answered = false;
+    const waiting = run("threads", "wait", thread, "--timeout", "3600").then(r => ((answered = true), r));
+    await new Promise(r => setTimeout(r, 50));
+    expect(answered).toBe(false);
+    letProbe();
+    await expect(giving).rejects.toThrow(WOULD_NOT_LAUNCH);
+    // The turn will never run, so the wait is answered rather than left holding a thread that went away under it.
+    const finished = await waiting;
+    expect(finished.code).toBe(0);
+    expect(finished.io.lines).toEqual([`thread ${thread.slice(0, 8)} finished (failed): ${WOULD_NOT_LAUNCH}`]);
+    expect(finished.io.errors).toEqual([]);
+    // No turn ran under it, so the thread is not one the sidebar lists or a later wait can name.
+    expect(await threadRows(await dialHost(statePath))).toEqual([]);
+    const later = await run("threads", "wait", thread);
+    expect(later.code).toBe(1);
+    expect(later.io.errors).toEqual([`wsp threads wait: no thread ${thread}`]);
+  });
+
+  it("a wait whose thread gives up between naming it and subscribing to it answers finished (failed) at once: a named thread with no row on the second read is over", async () => {
+    let letProbe!: () => void;
+    const probed = new Promise<void>(r => (letProbe = r));
+    await restartHost({
+      claude: () => ({
+        steers: false,
+        probeCatalog: async () => (await probed, null),
+        start: () => {
+          throw new Error("the agent binary is not on this machine");
+        },
+      }),
+    });
+    await run("new", "alpha");
+    const [ws] = await rt.workspaces.list();
+    const giving = rt.sessions.start(ws!.id, { prompt: "build it", startedBy: "cli" });
+    await vi.waitFor(async () => expect(await rt.sessions.list()).toHaveLength(1), { timeout: 10_000, interval: 10 });
+    const thread = (await rt.sessions.list())[0]!.threadId!;
+    const client = await dialHost(statePath);
+    try {
+      // The verb's two steps, with the give-up between them: the thread is named off one listing, and by the time
+      // the wait subscribes and lists again, the row and the end that answered for it are both gone.
+      const named = await threadsOf(client, [thread]);
+      expect(named.map(t => t.status)).toEqual(["running"]);
+      letProbe();
+      await expect(giving).rejects.toThrow("the agent binary is not on this machine");
+      expect(await firstEnded(client, named, 1_000)).toEqual({ ended: { threadId: thread, result: { status: "failed" } } });
+    } finally {
+      client.close();
+    }
+  });
+
+  it("a send that never launches on a thread that has worked leaves every reading of its last turn alone: the table, the read, the reply and the wait all say what that turn came to", async () => {
+    const held = heldAgent(false);
+    let launches = 0;
+    await restartHost({
+      claude: ctx => {
+        const inner = held.adapter(ctx);
+        return {
+          ...inner,
+          start: o => {
+            if (++launches > 1) throw new Error("the harness would not launch");
+            return inner.start(o);
+          },
+        };
+      },
+    });
+    await run("new", "alpha");
+    await run("thread", "new", "--in", "alpha", "--detach", "build it");
+    const thread = (await rt.sessions.list())[0]!.threadId!;
+    held.release(0, "the build is green\nall green");
+    await vi.waitFor(async () => expect((await rt.sessions.list())[0]!.status).toBe("completed"), { timeout: 10_000, interval: 10 });
+
+    const [ws] = await rt.workspaces.list();
+    await expect(rt.sessions.start(ws!.id, { prompt: "and then this", thread })).rejects.toThrow("the harness would not launch");
+
+    // One fact, how the thread's last turn went, and every door still gives the same answer.
+    const listed = await threadRows(await dialHost(statePath));
+    expect(listed.map(t => [t.id, t.status, t.turns])).toEqual([[thread, "completed", 1]]);
+    expect((await run("thread", "read", thread, "--last")).io.lines[0]).toContain("the build is green\nall green");
+    expect((await run("thread", "read", thread)).io.lines[0]).toContain("the build is green\nall green");
+    expect((await run("threads", "wait", thread)).io.lines).toEqual([`thread ${thread.slice(0, 8)} finished (completed): all green`]);
   });
 
   it("threads wait on a turn the runtime ended says failed with the runtime's reason, as the notify line would; a turn the transport cut says the cut line", async () => {
