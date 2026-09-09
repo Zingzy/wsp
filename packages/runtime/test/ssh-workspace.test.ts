@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import { SSH_READ_SCRIPT, parseSshMachineId } from "@wsp/engine";
-import { OVER_SSH, alreadyRecorded, machineWord, noMachineHomeLine, relayedRecordRefusal, relayedRefusal, sshHostKeyNotice, undrivenRefusal, type AdapterEvent, type TurnResult } from "@wsp/protocol";
+import { OVER_SSH, TURN_TOKEN_ENV, alreadyRecorded, machineWord, noMachineHomeLine, relayedRecordRefusal, relayedRefusal, sshHostKeyNotice, undrivenRefusal, type AdapterEvent, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterContext, type HarnessAdapterFactory, type Runtime, type SshWiring } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { fakeSsh } from "./fake-ssh.js";
@@ -118,6 +118,24 @@ describe("ssh workspace", () => {
     // The second machine's turn reads the second machine's facts: the seam is per workspace, not per kind.
     expect((await (await rt.sessions.start(other.id, { prompt: "hi" })).finished).text).toBe("/root/.claude under /root/.bun/bin:/usr/bin");
     expect(seen.every(c => c.env["USER"] === "dev" || c.env["USER"] === "root")).toBe(true);
+  });
+
+  it("a turn over ssh launches with a one-turn token laid over that machine's own login, and no other road on it carries one", async () => {
+    const { wiring } = fakeSsh();
+    const seen: HarnessAdapterContext[] = [];
+    const rt = runtime(wiring, memoryStore(), seen);
+    const box = await rt.workspaces.createSsh("dev@box");
+    await (await rt.sessions.start(box.id, { prompt: "coordinate" })).finished;
+    const launched = seen.filter(c => c.env[TURN_TOKEN_ENV] !== undefined);
+    expect(launched).toHaveLength(1);
+    expect(launched[0]!.env[TURN_TOKEN_ENV]).toMatch(/^[0-9a-f]{32}$/);
+    // The machine's own login is still under it: the token is laid over what the ssh read answered with, not instead.
+    expect(launched[0]!.env["HOME"]).toBe("/home/dev");
+    expect(launched[0]!.env["PATH"]).toBe("/home/dev/.local/bin:/usr/bin");
+    // Two turns on one machine get two tokens, so neither can be read as the other's thread.
+    await (await rt.sessions.start(box.id, { prompt: "coordinate again" })).finished;
+    const tokens = seen.map(c => c.env[TURN_TOKEN_ENV]).filter(t => t !== undefined);
+    expect(new Set(tokens).size).toBe(2);
   });
 
   it("a turn reads the store its harness reads on that machine, not the one under its home", async () => {

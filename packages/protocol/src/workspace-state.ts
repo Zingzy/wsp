@@ -159,7 +159,7 @@ const BLOCK_WORDS: Record<SendBlock, string> = {
 
 /** Why a turn cannot be sent, one sentence per kind; null while running. The composer draws every row; the runtime
  * throws the state rows, so the two say the same thing about a machine. A thread whose turn replied but still runs
- * has stillWorkingRefusal, which names it. */
+ * has stillWorkingLine, which says the message waits for it. */
 export function sendRefusal(kind: SendRefusalKind, goneWords?: string): string | null {
   return isBlock(kind) ? BLOCK_WORDS[kind] : actionRefusal(kind, "send", goneWords);
 }

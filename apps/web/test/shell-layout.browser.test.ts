@@ -41,7 +41,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, ConsoleMessage, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { accessFromNextMessage, FREE_WORD, PROVIDER_UNREACHED_LINE, sendRefusal, stillWorkingRefusal, THIS_COMPUTER } from "@wsp/protocol";
+import { accessFromNextMessage, FREE_WORD, PROVIDER_UNREACHED_LINE, sendRefusal, stillWorkingLine, THIS_COMPUTER } from "@wsp/protocol";
 import { WAKE_AND_SEND_LABEL } from "../src/components/chat/ComposerPrimaryActions";
 import { LOCKUP_OPTICAL_CENTRE } from "../src/brand/optical";
 import { SPACE_SLIDE_MS } from "../src/sidebar/SpaceSlide";
@@ -1473,7 +1473,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       expect(paused.box).toEqual(idle.box);
       expect(paused.shell).toEqual(idle.shell);
       expect(gone.text).toBe(sendRefusal("gone"));
-      expect(working.text).toBe(stillWorkingRefusal("thr_linger"));
+      expect(working.text).toBe(stillWorkingLine("thr_linger"));
       for (const state of [gone, working]) {
         // The words in mono, painted on nothing: no fill, no border, no icon, no panel anywhere in the composer.
         expect(state.line).toEqual({ mono: true, background: "rgba(0, 0, 0, 0)", border: "0px 0px", icons: 0 });

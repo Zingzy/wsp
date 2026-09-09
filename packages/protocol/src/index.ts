@@ -704,13 +704,25 @@ export const SessionQueuedEvent = z.object({
 });
 export type SessionQueuedEvent = z.infer<typeof SessionQueuedEvent>;
 
-/** The word a start's notify carries to mean the person who ran it, not a thread. */
+/** The word a start's notify carries to mean the caller: the thread the request came out of when it came out of one,
+ * and otherwise the person who ran it. */
 export const NOTIFY_ME = "me";
 
+/** The variable a turn's launch environment carries so wsp run inside that turn can say which thread it is: one
+ * turn's token, minted by the host at the launch and forgotten when the turn's process exits. The host is the only
+ * thing that maps it to a thread, so a caller cannot name a thread it did not come from. */
+export const TURN_TOKEN_ENV = "WSP_TURN";
+
+/** The token a client puts on its requests, off its own environment; nothing when it is not running inside a turn. */
+export function turnTokenOf(env: Readonly<Record<string, string | undefined>>): string | undefined {
+  const token = env[TURN_TOKEN_ENV];
+  return token === undefined || token === "" ? undefined : token;
+}
+
 /** The turn ended and its one line (notifyLine) went where the thread's start said: into the named thread as a send
- * would go, steered or queued, or, for me, to the person, whom the CLI and the app tell from this event. Recorded in
- * the ending thread's transcript, before its session.done, so the line's source is visible and a follower that ends
- * on the done still sees it. */
+ * would go, steered or queued, or, for me, to the person, whom the CLI and the app tell from this event. One row per
+ * target, so a start that named two threads is two rows. Recorded in the ending thread's transcript, before its
+ * session.done, so the line's source is visible and a follower that ends on the done still sees it. */
 export const SessionNotifyEvent = z.object({
   type: z.literal("session.notify"),
   ...sessionScope,
@@ -2061,9 +2073,14 @@ const RuntimeOp = z.discriminatedUnion("op", [
     startedBy: SessionOrigin.optional(),
     /** Minted by the client per send and echoed on the turn's session.start, so the client knows which start is its own. */
     requestId: z.string().optional(),
-    /** A thread id, or NOTIFY_ME: registered on the thread this start opens, so every turn's end on it sends one line
-     * there (a session.notify event in this thread's transcript). Refused when no thread has that id. */
-    notify: z.string().optional(),
+    /** Who the end of every turn on the thread this start opens is told, each a thread id or NOTIFY_ME: registered on
+     * the thread, and each target gets one line (a session.notify event per target in this thread's transcript).
+     * Refused when a target names no thread, and refused when one names the thread this start opens. */
+    notify: z.array(z.string()).min(1).optional(),
+    /** The TURN_TOKEN_ENV of the turn this request came out of, when it came out of one: what NOTIFY_ME is resolved
+     * against. Refused when no turn on this host carries it, since a token nothing carries names a turn the caller
+     * is not. */
+    turnToken: z.string().optional(),
     /** The name the thread is opened under, as a person's: it stands in every client at once, the harness is told it
      * too so its own UI says the same, and no generated title ever replaces it. Refused when it is blank. */
     title: z.string().optional(),

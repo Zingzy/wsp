@@ -36,7 +36,7 @@
 // start, so a change mid-thread applies at the next turn.
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent } from "react";
 import { ImageIcon } from "lucide-react";
-import { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, noImagesLine, readsImages, sendNowFailedLine, sendRefusal, stillWorkingRefusal, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
+import { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, noImagesLine, readsImages, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { useStore, useWorkspaceState } from "../../protocol/store";
 import { onComposerFocusRequest } from "../../shell/shellRequests";
@@ -175,8 +175,8 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   // The catalog answers before the click: a harness that steers takes the row into the turn, any other gets the turn stopped.
   const canSteer = canStop && harnessCatalog?.steers === true && api?.steerSession !== undefined;
   // One line in the slot above the box: the newest failure, else what blocks a send, else the turn that replied but
-  // still runs, in the runtime's own words, since no new turn can start until its process exits, else an access pick
-  // the running turn's harness would not take mid-turn.
+  // still runs, in the runtime's own words, since a message sent now waits for that process and runs as the next
+  // turn, else an access pick the running turn's harness would not take mid-turn.
   const line =
     imageRefusal !== null
       ? imageRefusal
@@ -187,7 +187,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
         : unavailable !== null
           ? unavailable
           : runningTurn?.replied === true
-            ? stillWorkingRefusal(threadKey)
+            ? stillWorkingLine(threadKey)
             : accessPick.line;
 
   const trigger = useMemo(() => detectComposerTrigger(draft.prompt, draft.cursor), [draft]);

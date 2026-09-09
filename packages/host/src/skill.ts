@@ -19,6 +19,11 @@ export const SETUP_HEADING = "## Setting a person up from nothing";
  * once and what wastes it, which a caller holding only the tools has nowhere else to read. */
 export const RULES_HEADING = "## Running work on a workspace well";
 
+/** The verbs table an agent reads, and the section holding the one verb that blocks, which is a shell script's. A
+ * verb whose row sits in the wrong one of these teaches the wrong road, so the parity test pins where each is. */
+export const VERBS_HEADING = "## Verbs and tools";
+export const SHELL_HEADING = "### For a shell script";
+
 /** What a caller holding only the tools cannot read off them: where the whole procedure lives, and that the setup
  * verbs are on the command line alone, so a caller with a shell should reach for that instead. */
 const BEYOND_THE_TOOLS =

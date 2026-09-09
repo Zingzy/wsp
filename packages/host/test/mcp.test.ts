@@ -12,7 +12,7 @@ import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/s
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG, THREAD_AGENTS } from "@wsp/catalog";
-import { EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, ProjectGolden, Recipe, ThreadView, WorkspaceView, noProjectLine, workspaceKind, type ExitClass } from "@wsp/protocol";
+import { EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, NO_SUCH_TURN, ProjectGolden, Recipe, TURN_TOKEN_ENV, ThreadView, WorkspaceView, noProjectLine, workspaceKind, type ExitClass } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localWiring, serve } from "../src/cli.js";
@@ -738,7 +738,7 @@ describe("the MCP server over the host", () => {
     const parent = call("thread_new", { workspace: "alpha", task: "orchestrate" });
     await vi.waitFor(() => expect(held.starts).toHaveLength(1));
     const [parentRow] = await rt.sessions.list();
-    const kid = call("thread_new", { workspace: "alpha", task: "build it", notify: parentRow!.threadId!.slice(0, 8) });
+    const kid = call("thread_new", { workspace: "alpha", task: "build it", notify: [parentRow!.threadId!.slice(0, 8)] });
     await vi.waitFor(() => expect(held.starts).toHaveLength(2));
     const kidRow = (await rt.sessions.list()).find(r => r.threadId !== parentRow!.threadId)!;
     held.release(1, "all green");
@@ -752,13 +752,37 @@ describe("the MCP server over the host", () => {
     expect(history.find(e => e.type === "session.steer")).toMatchObject({ threadId: parentRow!.threadId, prompt: line });
     expect(held.starts).toHaveLength(2);
 
-    const missing = await call("thread_new", { workspace: "alpha", task: "x", notify: "nope" });
+    const missing = await call("thread_new", { workspace: "alpha", task: "x", notify: ["nope"] });
     expect(missing).toEqual(failedWith("no thread nope"));
+  });
+
+  it("thread_new with notify me, called by an agent inside a turn, names that turn's thread: the server reads the token off its own environment", async () => {
+    const held = heldAgent(true);
+    await restartHost({ claude: held.adapter });
+    await call("new", { name: "alpha" });
+    const parent = call("thread_new", { workspace: "alpha", task: "orchestrate" });
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    const [parentRow] = await rt.sessions.list();
+    // The MCP server this agent runs is a child of that turn's process, so it holds the turn's own variable.
+    vi.stubEnv(TURN_TOKEN_ENV, held.envs[0]![TURN_TOKEN_ENV]!);
+    const kid = call("thread_new", { workspace: "alpha", task: "build it", notify: ["me"] });
+    await vi.waitFor(() => expect(held.starts).toHaveLength(2));
+    const kidRow = (await rt.sessions.list()).find(r => r.threadId !== parentRow!.threadId)!;
+    held.release(1, "Ran the gate.\nAll 12 tests green.");
+    const line = `thread ${kidRow.threadId!.slice(0, 8)} finished (completed): Ran the gate.\nAll 12 tests green.`;
+    await vi.waitFor(() => expect(held.steered).toEqual([line]));
+    expect((await kid).isError).toBe(false);
+    expect((await rt.sessions.history(kidRow.workspaceId)).find(e => e.type === "session.notify")).toMatchObject({ threadId: kidRow.threadId, notify: parentRow!.threadId, text: line });
+    held.release(0, "read it");
+    await parent;
+    // A token no turn carries is refused on this door in the contract's own shape.
+    vi.stubEnv(TURN_TOKEN_ENV, "f".repeat(32));
+    expect(await call("thread_new", { workspace: "alpha", task: "x", notify: ["me"] })).toEqual(failedWith(NO_SUCH_TURN));
   });
 
   it("fork with a task and notify me records the first turn's end in the new thread for the person", async () => {
     await call("new", { name: "alpha" });
-    const sent = await call("fork", { workspace: "alpha", name: "worker", task: "build it", notify: "me" });
+    const sent = await call("fork", { workspace: "alpha", name: "worker", task: "build it", notify: ["me"] });
     expect(sent.isError).toBe(false);
     const worker = (await rt.workspaces.list()).find(w => w.name === "worker")!;
     const [row] = await rt.sessions.list(worker.id);
