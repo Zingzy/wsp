@@ -2,7 +2,10 @@
 // union fanned out by the runtime, and the wire types for both servers (the
 // runtime's serveRuntime and the in-VM daemon). The daemon package has no
 // exported wire types, so these schemas are their one home; @wsp/daemon's
-// handlers are the reference implementation they mirror.
+// handlers are the reference implementation they mirror. A few readings of a
+// machine are parsed here too (ps-time.ts): the runtime and the daemon both
+// read them and neither may import the other, so this package is the only
+// home a second copy cannot grow beside.
 
 import { z } from "zod";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
@@ -229,6 +232,9 @@ export const WorkspaceView = z.object({
    * rule: the kind's own (the work folder on this computer). Absent where the kind names none and the machine's own
    * home is where the shell lands (a fork, a machine over ssh). Published so a client shows what the runtime will do. */
   folder: z.string().optional(),
+  /** The machine's own home, where its shell shortens paths to `~`: /root on a fork, the person's home on this
+   * computer, the login's on a machine over ssh once it has answered. Absent where the kind has not read one. */
+  home: z.string().optional(),
   /** Claude session id of the last session, so the next send can --resume it. */
   claudeSessionId: z.string().optional(),
   /** Present when the machine streams a display (desktop kind); sandbox machines are headless. */
@@ -270,7 +276,7 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
  * facts, and nothing the provider minted. Picked rather than omitted, so a route added to the view later is not
  * handed over by having been forgotten, which is how the display stream rode these doors until now. */
 const WORKSPACE_OUT = {
-  id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, projects: true, folder: true,
+  id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, projects: true, folder: true, home: true,
   claudeSessionId: true, gone: true, tint: true, glyph: true, daemonNote: true,
 } as const;
 
@@ -1233,6 +1239,8 @@ export interface DesktopBridge {
   localFonts(family: string): Promise<LocalFontFace[]>;
   /** The system folder picker; the absolute path chosen, or nothing when it was dismissed. */
   pickFolder(): Promise<string | undefined>;
+  /** The absolute path of a file or folder dropped on the window from the desktop, which the page itself cannot read. */
+  droppedPath(file: File): string;
   /** The native context menu at the pointer, built from the items; resolves with the chosen item's id, or null when it was dismissed. */
   contextMenu(items: ContextMenuItem[]): Promise<string | null>;
   /** Photographs the page as it is now and keeps it under this workspace, replacing what that workspace held. Asked
@@ -1714,7 +1722,9 @@ export const ProcInspectReply = z.object({
   pid: z.number().int(),
   cwd: z.string().nullable(),
   ports: z.array(z.number().int()),
-  threads: z.number().int(),
+  /** Absent where the machine's own processes module cannot count them: this computer reads its processes with ps,
+   * which has no thread column on macOS. */
+  threads: z.number().int().optional(),
   children: z.array(z.number().int()),
 });
 export type ProcInspectReply = z.infer<typeof ProcInspectReply>;
@@ -1789,6 +1799,7 @@ export const DaemonRequest = z.discriminatedUnion("op", [
 export type DaemonRequest = z.infer<typeof DaemonRequest>;
 
 export const DaemonErrorCode = z.enum([
+  "unsupported",
   "outside-root",
   "not-found",
   "not-a-directory",
@@ -1850,6 +1861,7 @@ const DAEMON_CONTENTS = [
   "cae44a68bd72d81717b52a71c3890da918025cbd0d071db884102936e5cf4345",
   "c5c3b15cad1b45ed110b072a18d0d895f661c489f73828de78a3b9f3589f05c6",
   "f90fd16f8e5d15707cda18e58524da66fb6ed6b890632fff90d396792dc5604d",
+  "9ebea6a49390fd5b1af911f413e77c3e46db091812b55b41515e881e93433292",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -1862,7 +1874,9 @@ const DAEMON_CONTENTS = [
  * curl function. Version 6 puts itself last for the kernel's memory killer and starts every shell it opens at the
  * work score instead. Version 7 picks the road to the listening ports by platform, so the same daemon serves them
  * on a Linux guest and on the person's own Mac. Version 8 runs under a systemd unit that restarts it, so a
- * daemon the kernel kills comes back on its own. */
+ * daemon the kernel kills comes back on its own. Version 9 reads the utilisation and the processes it serves
+ * through a module per kind of machine, and answers a watch only once that module has read the machine, so a
+ * pane is refused where it would otherwise wait for a stream that never comes. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the daemon's sources, the dependency
@@ -2322,7 +2336,9 @@ export type SnapshotLineage = z.infer<typeof SnapshotLineage>;
  * Lineage section lists it under that version; `version` is that version's number when a manifest knows the snapshot. */
 export const ProjectGolden = z.object({
   snapshotId: z.string(),
-  project: WorkspaceProject,
+  /** Every project on the disk when it was taken, oldest import first: a snapshot is the whole machine, so a fork of
+   * it starts with all of them. The snapshot is named after the one the default folder rule would start a thread in. */
+  projects: z.array(WorkspaceProject),
   golden: z.string(),
   version: z.number().int().optional(),
   workspaceId: z.string(),
@@ -2369,9 +2385,10 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
-export { actionRefusal, computerOffline, goneRefusal, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, kindWords, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, type SendBlock, sendRefusal, type SendRefusalKind, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
+export { actionRefusal, computerOffline, goneRefusal, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, type SendBlock, sendRefusal, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
+export { psCpuSeconds } from "./ps-time.js";
 export { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS, IMAGE_TYPES, IMAGE_TYPE_WORDS, ImageAttachment, ImageRecord, imageBytes, imageLine, imagePathIn, imageRecord, imageTypeOf, imagesBlocked, imagesRefusal, noImagesLine, notAFileLine, notAnImageLine, threadImagesDir, turnImagesDir } from "./attachments.js";
 export * from "./oom.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
@@ -2380,7 +2397,7 @@ export { inFolder, shellLine, shellQuote } from "./shell-quote.js";
 export { LOOK_PARTS, WORKSPACE_GLYPHS, WORKSPACE_TINTS, WorkspaceGlyph, WorkspaceLook, WorkspaceTint, type LookPart } from "./workspace-look.js";
 export { rootsPathIn, underProject } from "./project-path.js";
 export * from "./projects.js";
-export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
+export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, registerRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";
 export * from "./app-ports.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";

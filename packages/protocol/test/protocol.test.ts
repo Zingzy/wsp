@@ -1122,10 +1122,10 @@ describe("the project export", () => {
 });
 
 describe("project goldens", () => {
-  it("a project golden names its snapshot, the project, the golden version it stands on and the workspace it was taken from", () => {
+  it("a project golden names its snapshot, the projects it carries, the golden version it stands on and the workspace it was taken from", () => {
     const golden = {
       snapshotId: "snap_project-proj",
-      project: { name: "proj", dest: "/root/work/proj", importedAt: "2026-09-06T10:00:00.000Z" },
+      projects: [{ name: "proj", dest: "/root/work/proj", importedAt: "2026-09-06T10:00:00.000Z" }],
       golden: "snap_golden-v12",
       version: 12,
       workspaceId: "ws_1",
@@ -1135,7 +1135,7 @@ describe("project goldens", () => {
     expect(ProjectGolden.parse(golden)).toEqual(golden);
     const { version: _v, ...unversioned } = golden;
     expect(ProjectGolden.parse(unversioned)).toEqual(unversioned);
-    expect(ProjectGolden.safeParse({ ...golden, project: undefined }).success).toBe(false);
+    expect(ProjectGolden.safeParse({ ...golden, projects: undefined }).success).toBe(false);
     expect(ProjectGolden.safeParse({ ...golden, version: "12" }).success).toBe(false);
   });
 

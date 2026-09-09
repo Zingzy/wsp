@@ -8,7 +8,7 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, NO_SUCH_TURN, TURN_TOKEN_ENV, ThreadView, WorkspaceView, effortsFor, markedDefault, noProjectLine, noReplyLine, notifyLine, unknownAgentLine, workspaceKind, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { effortsFor, EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -843,6 +843,50 @@ describe("wsp verbs over the host", () => {
     expect(claude.starts).toHaveLength(3);
   });
 
+  it("thread new with no --in, run from inside a registered repo, starts on the workspace that project last ran on and says so on the first line; outside a repo, or in one no workspace holds, it is refused in one line and nothing starts", async () => {
+    await run("new", "alpha");
+    await run("new", "beta");
+    const [alpha, beta] = await rt.workspaces.list();
+    for (const ws of [alpha!, beta!]) await rt.projects.import({ workspaceId: ws.id, source: "/Users/dev/spoo", dest: "/root/spoo", bundler: projectBundler() });
+    // The repo on this computer: its git root is what is matched, from anywhere inside it.
+    const repo = join(dir, "code", "spoo");
+    mkdirSync(join(repo, ".git"), { recursive: true });
+    mkdirSync(join(repo, "packages", "api"), { recursive: true });
+    const cwd = vi.spyOn(process, "cwd");
+    // beta is where a thread last ran in spoo, so that is where the run goes.
+    await run("thread", "new", "--in", "beta", "--project", "spoo", "warm up");
+    cwd.mockReturnValue(join(repo, "packages", "api"));
+    const inferred = await run("thread", "new", "hello from the repo");
+    expect(inferred.io.errors).toEqual([]);
+    expect(inferred.code).toBe(0);
+    const threads = await rt.sessions.list();
+    const opened = threads.find(t => t.prompt === "hello from the repo")!;
+    expect(opened.workspaceId).toBe(beta!.id);
+    expect(inferred.io.lines[0]).toBe(threadOpenedLine(opened.threadId!, "beta", "~/spoo"));
+    expect(inferred.io.lines).toEqual([inferred.io.lines[0], "re: hello from the repo"]);
+    expect(claude.starts.at(-1)!.cwd).toBe("/root/spoo");
+    expect(inferred.io.errors).toEqual([]);
+    // --in still wins over the folder the run is in.
+    const named = await run("thread", "new", "--in", "alpha", "named anyway");
+    expect(named.code).toBe(0);
+    expect((await rt.sessions.list()).find(t => t.prompt === "named anyway")!.workspaceId).toBe(alpha!.id);
+    expect(named.io.lines).toEqual([expect.stringMatching(/^thread [0-9a-f-]{36}$/), "re: named anyway"]);
+
+    const before = (await rt.sessions.list()).length;
+    const other = join(dir, "code", "other");
+    mkdirSync(join(other, ".git"), { recursive: true });
+    cwd.mockReturnValue(other);
+    const unheld = await run("thread", "new", "nowhere to go");
+    expect(unheld.code).toBe(1);
+    expect(unheld.io.errors).toEqual([`wsp thread new: ${noWorkspaceForFolderLine(other, "--in <workspace>")}`]);
+    cwd.mockReturnValue(join(dir, "code"));
+    const noRepo = await run("thread", "new", "nowhere to go");
+    expect(noRepo.code).toBe(EXIT_CODES.usage);
+    expect(noRepo.io.errors[0]).toContain(noThreadTargetLine("--in <workspace>"));
+    expect((await rt.sessions.list()).length).toBe(before);
+    cwd.mockRestore();
+  });
+
   it("projects lists a workspace's projects, name, folder, size and import date, oldest first, and workspaces carries the count", async () => {
     await run("new", "alpha");
     await run("new", "beta");
@@ -982,7 +1026,7 @@ describe("wsp verbs over the host", () => {
     await run("new", "alpha");
     const relative = await run("thread", "new", "--in", "alpha", "--cwd", "packages/host", "look here");
     expect(relative.code).toBe(3);
-    expect(relative.io.errors).toEqual(['--cwd is a path on the machine, absolute: got "packages/host"\n\nusage: wsp thread new --in <workspace> [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, --title, --image <path>, --detach] "<task>"']);
+    expect(relative.io.errors).toEqual(['--cwd is a path on the machine, absolute: got "packages/host"\n\nusage: wsp thread new [--in <workspace>] [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, --title, --image <path>, --detach] "<task>"']);
     const forked = await run("fork", "alpha", "--send", "build it", "--cwd", "packages/host");
     expect(forked.code).toBe(3);
     expect(forked.io.errors[0]).toMatch(/^--cwd is a path on the machine, absolute: got "packages\/host"\n\nusage: wsp fork /);
@@ -1679,13 +1723,13 @@ describe("wsp verbs over the host", () => {
     const { code, io } = await run("snapshot", "alpha");
     expect(code).toBe(0);
     const [golden] = await rt.golden.projects();
-    expect(golden).toMatchObject({ project: { name: "proj", dest: "/root/work/proj" }, golden: "snap_gold", version: 1, workspaceId: alpha!.id, workspaceName: "alpha" });
-    expect(io.lines).toEqual([`project golden ${golden!.snapshotId}: golden v1 plus proj as imported ${golden!.project.importedAt.slice(0, 10)}, taken from alpha\nfork it with: wsp new <name> --from proj`]);
+    expect(golden).toMatchObject({ projects: [{ name: "proj", dest: "/root/work/proj" }], golden: "snap_gold", version: 1, workspaceId: alpha!.id, workspaceName: "alpha" });
+    expect(io.lines).toEqual([`project golden ${golden!.snapshotId}: golden v1 plus proj imported ${golden!.projects[0]!.importedAt.slice(0, 10)}, taken from alpha\nfork it with: wsp new <name> --from proj`]);
     expect(io.errors).toEqual([]);
 
     const asJson = await run("snapshot", alpha!.id, "--json");
     expect(asJson.code).toBe(0);
-    expect(json(asJson.io)).toEqual([{ projectGolden: expect.objectContaining({ project: golden!.project, golden: "snap_gold" }) }]);
+    expect(json(asJson.io)).toEqual([{ projectGolden: expect.objectContaining({ projects: golden!.projects, golden: "snap_gold" }) }]);
 
     await rt.workspaces.nap(alpha!.id);
     await rt.workspaces.wake(alpha!.id);
@@ -1696,29 +1740,37 @@ describe("wsp verbs over the host", () => {
     expect(await rt.golden.projects()).toHaveLength(2);
   });
 
-  it("new --from forks a project golden by project name (the newest) or snapshot id, and names what it cannot find", async () => {
+  it("new --from forks a project golden by any project name it carries (the newest) or snapshot id, says what the fork gets, and names what it cannot find", async () => {
     await run("new", "alpha");
     const [alpha] = await rt.workspaces.list();
     await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/proj", dest: "/root/work/proj", bundler: projectBundler() });
     const first = await rt.workspaces.snapshot(alpha!.id);
     await new Promise(r => setTimeout(r, 2));
+    await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/spoo", dest: "/root/spoo", bundler: projectBundler() });
     const second = await rt.workspaces.snapshot(alpha!.id);
     expect(second.snapshotId).not.toBe(first.snapshotId);
+    expect(second.projects.map(p => p.name)).toEqual(["proj", "spoo"]);
 
     const byName = await run("new", "task-a", "--from", "proj");
     expect(byName.code).toBe(0);
     const taskA = (await rt.workspaces.list()).find(w => w.name === "task-a")!;
-    expect(taskA).toMatchObject({ golden: second.snapshotId, projects: [first.project] });
-    expect(byName.io.lines).toEqual([`created task-a ${taskA.id}`]);
+    expect(taskA).toMatchObject({ golden: second.snapshotId, projects: second.projects });
+    expect(byName.io.lines).toEqual([`created task-a ${taskA.id} with proj, spoo in place`]);
 
     const byId = await run("new", "task-b", "--from", first.snapshotId);
     expect(byId.code).toBe(0);
-    expect((await rt.workspaces.list()).find(w => w.name === "task-b")).toMatchObject({ golden: first.snapshotId, projects: [first.project] });
+    const taskB = (await rt.workspaces.list()).find(w => w.name === "task-b")!;
+    expect(taskB).toMatchObject({ golden: first.snapshotId, projects: first.projects });
+    expect(byId.io.lines).toEqual([`created task-b ${taskB.id} with proj in place`]);
+    // A name only the newer golden carries finds it too.
+    const bySecondName = await run("new", "task-d", "--from", "spoo");
+    expect(bySecondName.code).toBe(0);
+    expect((await rt.workspaces.list()).find(w => w.name === "task-d")).toMatchObject({ golden: second.snapshotId });
 
     const missing = await run("new", "task-c", "--from", "nope");
     expect(missing.code).toBe(1);
     expect(missing.io.errors).toEqual(["wsp new: no project golden named nope; wsp snapshot <workspace> takes one"]);
-    expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "task-a", "task-b"]);
+    expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "task-a", "task-b", "task-d"]);
   });
 
   /** A folder on this computer with one source file and one secret-shaped file, not a repository. */
@@ -1730,6 +1782,47 @@ describe("wsp verbs over the host", () => {
     return proj;
   }
   const landings = (): string[] => backend.machines[0]!.runLog.filter(s => s.includes("mv "));
+
+  it("import with no --to goes to the workspace the last thread started on and says so; before any thread it is refused in one line", async () => {
+    const proj = projectFolder();
+    const none = await run("import", proj, "--yes");
+    expect(none.code).toBe(EXIT_CODES.usage);
+    expect(none.io.errors[0]).toContain(noLastTargetLine("--to <workspace>"));
+    await run("new", "alpha");
+    await run("new", "beta");
+    await run("thread", "new", "--in", "beta", "warm up");
+    const [, beta] = await rt.workspaces.list();
+    const { code, io } = await run("import", proj, "--yes");
+    expect(code).toBe(0);
+    expect(io.errors).toEqual([lastTargetLine("beta")]);
+    expect((await rt.workspaces.get(beta!.id)).projects?.map(p => p.name)).toEqual(["proj"]);
+    expect(landings()).toHaveLength(0);
+    expect(backend.machines.find(m => m.id === beta!.machineId)!.runLog.some(s => s.includes("mv "))).toBe(true);
+  });
+
+  it("import --to this computer registers the folder at its own path with no plan, no question and no copy, says so, and projects lists it", async () => {
+    await run("new", "--local", "mac");
+    const proj = projectFolder();
+    const { code, io } = await run("import", proj, "--to", "mac");
+    expect(code).toBe(0);
+    expect(io.streamed).toBe(`${REGISTERING_LINE}\n`);
+    expect(io.lines).toEqual([registeredLine(proj)]);
+    expect(io.errors).toEqual([]);
+    expect(asked).toEqual([]);
+    const [mac] = await rt.workspaces.list();
+    expect(mac!.projects).toEqual([{ name: "proj", dest: proj, importedAt: expect.any(String), size: expect.any(Number) }]);
+    const listed = await run("projects", "mac");
+    expect(listed.io.lines[0]!.split("\n")[1]!.split(/ {2,}/)[0]).toBe("proj");
+    // The consent flags mean nothing where nothing is carried, so they are refused rather than swallowed.
+    const kept = await run("import", proj, "--to", "mac", "--keep", ".env", "--agents", "claude");
+    expect(kept.code).toBe(EXIT_CODES.usage);
+    expect(kept.io.errors[0]).toContain(registerTakesNoConsentLine(["--keep", "--agents"]));
+    expect(mac!.projects).toHaveLength(1);
+    // --json prints what landed alone: there was no plan to print first.
+    const raw = await run("import", proj, "--to", "mac", "--json");
+    expect(raw.code).toBe(0);
+    expect(json(raw.io)).toEqual([{ imported: expect.objectContaining({ dest: proj, parts: 0, cut: [], agents: [] }) }]);
+  });
 
   it("folders lists one level of this computer's folders with the repository marked and the hidden ones counted, and refuses a path outside the roots", async () => {
     const home = join(dir, "user");
@@ -2013,9 +2106,7 @@ describe("wsp verbs over the host", () => {
     expect(proto.io.errors[0]).not.toContain("belongs to");
     const half = await run("thread");
     expect(half.code).toBe(3);
-    expect(half.io.errors).toEqual([
-      'usage: wsp thread new --in <workspace> [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, --title, --image <path>, --detach] "<task>"\nusage: wsp thread read <thread> [--last]\nusage: wsp thread rename <thread> "<title>"',
-    ]);
+    expect(half.io.errors).toEqual(['usage: wsp thread new [--in <workspace>] [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, --title, --image <path>, --detach] "<task>"\nusage: wsp thread read <thread> [--last]\nusage: wsp thread rename <thread> "<title>"']);
   });
 
   it("without a host serving the state file every verb refuses in one line before dialling anything", async () => {

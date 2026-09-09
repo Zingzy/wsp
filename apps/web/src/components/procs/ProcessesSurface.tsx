@@ -3,9 +3,11 @@
 // machine in one dense mono table, a tree by parent with the harness pieces
 // named, sortable by cpu or memory, filtered by a box. The selected row is
 // the only lit one and opens into the daemon's inspect fields with the kill
-// controls. A workspace with only the daemon running shows the daemon.
+// controls. A workspace with only the daemon running shows the daemon, and a
+// kind whose machines list no processes says so where the count sits, rather
+// than waiting on a stream that will never come.
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import type { ProcEntry, ProcInspectReply, ProcSignal } from "@wsp/protocol";
+import { NOT_ON_THIS_KIND, servesReading, workspaceKind, type ProcEntry, type ProcInspectReply, type ProcSignal } from "@wsp/protocol";
 import { useDaemonVersion } from "../../files/wire.js";
 import { cn, errorText } from "../../lib/utils.js";
 import { daemonBehindLine } from "../../machine/daemon.js";
@@ -46,6 +48,7 @@ export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
   const snapshot = procs.snapshot;
   const rows = useMemo(() => procRows(snapshot?.procs ?? [], sort, filter), [snapshot, sort, filter]);
   const stale: Stale = workspace?.phase === "napping" || workspace?.phase === "pausing" ? "napping" : procs.reach === "live" ? null : "unreachable";
+  const served = workspace === null || servesReading(workspaceKind(workspace), "processes");
 
   // A process that went away takes its selection with it.
   useEffect(() => {
@@ -53,7 +56,7 @@ export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
   }, [snapshot, selected]);
 
   const count = snapshot === null ? "pending" : snapshot.procs.length < snapshot.total ? `${snapshot.procs.length} of ${snapshot.total}` : `${snapshot.total} processes`;
-  const unavailable = stale === null && snapshot === null ? procs.unavailable : null;
+  const unavailable = served && stale === null && snapshot === null ? procs.unavailable : null;
   const unavailableLine = unavailable === null ? null : daemonBehindLine(version, "procs") ?? unavailable;
 
   return (
@@ -66,8 +69,8 @@ export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
           onChange={e => setFilter(e.target.value)}
           className="h-6 min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-placeholder"
         />
-        <span className={cn("shrink-0 tabular-nums", stale !== null ? "text-muted-foreground/60" : "text-muted-foreground")} data-procs-count>
-          {stale ?? (unavailable !== null ? "unavailable" : count)}
+        <span className={cn("shrink-0 tabular-nums", !served || stale !== null ? "text-muted-foreground/60" : "text-muted-foreground")} data-procs-count>
+          {!served ? NOT_ON_THIS_KIND : (stale ?? (unavailable !== null ? "unavailable" : count))}
         </span>
       </div>
       <div className={cn(COLUMNS, "h-6 shrink-0 border-b border-border/50 text-[.65rem] uppercase tracking-wider text-muted-foreground")} role="row">
@@ -184,7 +187,7 @@ function Details({ workspaceId, proc, stale }: { workspaceId: string; proc: Proc
         <Field k="user">{proc.user}</Field>
         <Field k="state">{proc.state}</Field>
         <Field k="started">{clockLabel(new Date(proc.startedAt).toISOString())}</Field>
-        <Field k="threads">{detail ? String(detail.threads) : ""}</Field>
+        <Field k="threads">{detail?.threads === undefined ? "" : String(detail.threads)}</Field>
         <Field k="cwd">{detail ? (detail.cwd ?? "unreadable") : ""}</Field>
         <Field k="ports">{list(detail?.ports)}</Field>
         <Field k="children">{list(detail?.children)}</Field>

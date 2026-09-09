@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The machine surface of the right panel: facts, the workspace's own colour
-// and icon, live utilisation, spend, lineage with rollback, pause, wake,
+// and icon, the projects on the machine with the import and the snapshot that
+// images them, live utilisation, spend, lineage with rollback, pause, wake,
 // upgrade, rebuild and forget for one workspace's machine. Pause, wake,
-// rebuild, forget and copy id read the workspace registry; the tab keeps its
-// own confirmations for the two that ask. A button is offered only where its
-// verb can run and its capability is there; the panel ends where its content
-// ends, with no sentence explaining what is not on it.
+// rebuild, forget, import and copy id read the workspace registry; the tab
+// keeps its own confirmations for the two that ask. A button is offered only
+// where its verb can run and its capability is there; the panel ends where its
+// content ends, with no sentence explaining what is not on it.
 import { CopyIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { runAction } from "../../actions/contextMenu.js";
@@ -13,7 +14,8 @@ import { CLIENT_CANNOT_REBUILD } from "../../actions/format.js";
 import { actionById, resolveActions, rowLabelOf } from "../../actions/registry.js";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { workspaceActions, workspaceTarget } from "../../actions/workspaceActions.js";
-import { FREE_WORD, LINEAGE_MARKS, LOOK_PARTS, NOT_ON_THIS_KIND, behindGoldenLine, biggerSizeLine, fmtRate, fmtSize, fmtUptime, foldThreads, goldenImage, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, sizeWord, workspaceKind, workspaceProjects, workspaceState, workspaceStateOf, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, LINEAGE_MARKS, LOOK_PARTS, NOT_ON_THIS_KIND, behindGoldenLine, biggerSizeLine, fmtBytes, fmtRate, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, sizeWord, workspaceKind, workspaceProjects, workspaceState, workspaceStateOf, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { isDesktopShell } from "../../lib/desktopShell.js";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, useOutOfMemoryReading, useWorkspaceLive } from "../../machine/live.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type Upgrade } from "../../protocol/machine.js";
@@ -74,15 +76,17 @@ function Surface({ workspace, series }: { workspace: WorkspaceView; series: Work
   // say what it is instead.
   const kind = kindWords(workspaceKind(workspace));
   const labs = useLabs();
+  const goldens = useProjectGoldens(kind.machine === null);
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Header workspace={workspace} status={status} />
       <ScrollArea className="min-h-0 flex-1">
         <Facts workspace={workspace} status={status} awakeMs={last ? last.awakeMs : null} pendingSize={pendingSize} kind={kind} />
         {labs ? <Look workspace={workspace} /> : null}
+        <Projects workspace={workspace} status={status} kind={kind} onTaken={goldens.add} />
         <Live workspace={workspace} kind={kind} />
         {kind.driven && <Usage workspace={workspace} status={status} series={series} />}
-        {kind.machine === null && <GoldenLineage workspace={workspace} />}
+        {kind.machine === null && <GoldenLineage workspace={workspace} projects={goldens.list} />}
       </ScrollArea>
       <Actions workspace={workspace} status={status} upgrade={upgrade} />
     </div>
@@ -233,6 +237,96 @@ function Facts({ workspace, status, awakeMs, pendingSize, kind }: FactsProps) {
   );
 }
 
+/** Every project golden this host took, read once for the tab: the lineage lists them under their versions and the
+ * projects section adds the one it takes, so the two never read two lists. Read only where a lineage draws, since a
+ * machine with no image behind it neither lists goldens nor takes one. */
+function useProjectGoldens(wanted: boolean): { list: ProjectGolden[]; add: (taken: ProjectGolden) => void } {
+  const api = useStore(s => s.api);
+  const [list, setList] = useState<ProjectGolden[]>([]);
+  useEffect(() => {
+    if (!api || !wanted) return () => {};
+    let current = true;
+    api.listProjectGoldens?.().then(
+      p => {
+        if (current) setList(p);
+      },
+      () => {},
+    );
+    return () => {
+      current = false;
+    };
+  }, [api, wanted]);
+  return { list, add: taken => setList(p => [...p, taken]) };
+}
+
+/** The projects on the machine, oldest import first, one mono row each: the name, the folder it landed at, its size
+ * where the import measured one and the day it landed. Under them the two roads that change the list: the import
+ * the row's menu offers, through the registry so it is refused where that is, and the snapshot that images the disk
+ * with every project on it, offered only where the Lineage section draws: a machine with an image behind it. */
+function Projects({ workspace, status, kind, onTaken }: { workspace: WorkspaceView; status: WorkspaceStatus | null; kind: WorkspaceKindWords; onTaken: (taken: ProjectGolden) => void }) {
+  const api = useStore(s => s.api);
+  const verbs = useWorkspaceVerbs();
+  const projects = workspaceProjects(workspace);
+  const importAction = actionById(resolveActions(workspaceActions, workspaceTarget(workspace, status), verbs, false), "import-project");
+  const images = kind.machine === null && api?.snapshotWorkspace !== undefined;
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const snapshot = async (): Promise<void> => {
+    if (!api?.snapshotWorkspace) return;
+    setBusy(true);
+    try {
+      const taken = await api.snapshotWorkspace(workspace.id);
+      onTaken(taken);
+      setNote(`Project golden of ${taken.projects.map(p => p.name).join(", ")} taken. New forks of it start with the projects in place.`);
+    } catch (e) {
+      setNote(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Section label="Projects" aside={projects.length > 0 ? plural(projects.length, "project") : undefined}>
+      {projects.length === 0 ? (
+        <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground" data-k="projects-none">
+          {isDesktopShell() ? "No projects yet. Import a folder, or drop one on the workspace's row." : "No projects yet. Import a folder."}
+        </p>
+      ) : (
+        <ul className="mt-1 divide-y divide-border/40">
+          {projects.map(p => (
+            <li key={p.dest} data-k={`project-${p.name}`} className="grid h-7 grid-cols-[minmax(0,1fr)_minmax(0,2fr)_4.5rem_5.5rem] items-center gap-3 font-mono text-xs tabular-nums">
+              <span data-cell="name" className="truncate text-foreground" title={p.name}>
+                {p.name}
+              </span>
+              <span data-cell="folder" className="truncate text-muted-foreground" title={p.dest}>
+                {p.dest}
+              </span>
+              <span data-cell="size" className="text-right text-muted-foreground">
+                {p.size === undefined ? "" : fmtBytes(p.size)}
+              </span>
+              <span data-cell="imported" className="text-right text-muted-foreground">
+                {p.importedAt.slice(0, 10)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-2 flex items-center gap-1.5">
+        <Button size="xs" variant="outline" disabled={importAction.refusal !== null} title={importAction.refusal ?? importAction.hint ?? undefined} onClick={() => void runAction(importAction)}>
+          Import a folder
+        </Button>
+        {images && (
+          <Button size="xs" variant="outline" disabled={busy || projects.length === 0 || workspace.phase !== "running"} aria-label={`snapshot ${workspace.name} as a project golden`} onClick={() => void snapshot()}>
+            Snapshot as image
+          </Button>
+        )}
+      </div>
+      <p className="mt-1 min-h-4 text-[11px] text-muted-foreground" data-k="projects-note">
+        {busy ? "Taking the snapshot…" : note}
+      </p>
+    </Section>
+  );
+}
+
 /** The workspace's own hue and glyph, the same rows the row's menu opens in a dialog, each under the tab's own
  * section heading rather than a label style of its own. */
 function Look({ workspace }: { workspace: WorkspaceView }) {
@@ -322,23 +416,25 @@ function Rebuild({ workspace, status }: { workspace: WorkspaceView; status: Work
 
 type Stale = "napping" | "unreachable" | null;
 
-/** cpu, memory and disk from the guest, one sparkline each. A napping workspace, or a running one whose link is
+/** cpu, memory and disk from the machine, one sparkline each. A napping workspace, or a running one whose link is
  * down, keeps the last values dim under the word for it; the daemon says nothing about a machine it is not on. A
  * daemon that refused the stream puts the word unavailable in the slots, and the runtime replaces a daemon too old
- * to serve them without anyone here asking: the machine's row says so while it does. A kind of machine with no road
- * to the stream yet says so in the slots rather than pending forever. */
+ * to serve them without anyone here asking: the machine's row says so while it does. A kind whose machines read no
+ * metrics at all says so in the slots instead, rather than pending forever: no slot waits on a stream that will
+ * never come. */
 function Live({ workspace, kind }: { workspace: WorkspaceView; kind: WorkspaceKindWords }) {
   const live = useWorkspaceLive(workspace.id);
   const last = live.samples[live.samples.length - 1];
   const stale: Stale = workspace.phase === "napping" || workspace.phase === "pausing" ? "napping" : live.reach === "live" ? null : "unreachable";
-  const kindWord = kind.live ? null : NOT_ON_THIS_KIND;
+  const kindWord = kind.metrics ? null : NOT_ON_THIS_KIND;
   const share = (m: { used: number; total: number }): number => (m.total > 0 ? (m.used / m.total) * 100 : 0);
+  const row = { kindWord, stale, unavailable: live.unavailable, samples: live.samples };
   return (
-    <Section label="Live" aside={last !== undefined && stale === null ? `load ${last.load1.toFixed(2)}` : undefined}>
+    <Section label="Live" aside={kindWord === null && last !== undefined && stale === null ? `load ${last.load1.toFixed(2)}` : undefined}>
       <div className="mt-1 divide-y divide-border/40">
-        <LiveRow label="cpu" k="cpu" samples={live.samples} y={s => s.cpu} text={s => percentLabel(s.cpu)} stale={stale} unavailable={live.unavailable} kindWord={kindWord} />
-        <LiveRow label="memory" k="mem" samples={live.samples} y={s => share(s.mem)} text={s => bytesOfLabel(s.mem.used, s.mem.total)} stale={stale} unavailable={live.unavailable} kindWord={kindWord} />
-        <LiveRow label="disk" k="disk" samples={live.samples} y={s => share(s.disk)} text={s => bytesOfLabel(s.disk.used, s.disk.total)} tier={s => diskTier(share(s.disk))} stale={stale} unavailable={live.unavailable} kindWord={kindWord} />
+        <LiveRow {...row} label="cpu" k="cpu" y={s => s.cpu} text={s => percentLabel(s.cpu)} />
+        <LiveRow {...row} label="memory" k="mem" y={s => share(s.mem)} text={s => bytesOfLabel(s.mem.used, s.mem.total)} />
+        <LiveRow {...row} label="disk" k="disk" y={s => share(s.disk)} text={s => bytesOfLabel(s.disk.used, s.disk.total)} tier={s => diskTier(share(s.disk))} />
       </div>
     </Section>
   );
@@ -375,7 +471,8 @@ interface LiveRowProps {
   stale: Stale;
   /** The daemon's refusal of the stream; the slot reads unavailable and carries it as the title. */
   unavailable: string | null;
-  /** The kind table's word for a kind with no stream at all, read into the slot as it is; null on a kind with one. */
+  /** The kind table's word for a kind that reads none of this, put in the slot as it is; null on a kind that reads
+   * it, where the slot is a value's or a fault's to fill. */
   kindWord: string | null;
 }
 
@@ -400,8 +497,8 @@ function LiveRow({ label, k, samples, y, text, tier, stale, unavailable, kindWor
     <div
       className="grid h-7 grid-cols-[3.25rem_minmax(0,1fr)_10rem] items-center gap-2 text-xs"
       data-live-row={k}
-      {...(stale !== null ? { "data-stale": stale } : {})}
-      {...(unavailable !== null ? { "data-unavailable": unavailable } : {})}
+      {...(kindWord === null && stale !== null ? { "data-stale": stale } : {})}
+      {...(kindWord === null && unavailable !== null ? { "data-unavailable": unavailable } : {})}
       {...(kindWord !== null ? { "data-kind-word": kindWord } : {})}
     >
       <span className="text-muted-foreground">{label}</span>
@@ -454,16 +551,15 @@ function Usage({ workspace, status, series }: { workspace: WorkspaceView; status
   );
 }
 
-function GoldenLineage({ workspace }: { workspace: WorkspaceView }) {
+function GoldenLineage({ workspace, projects }: { workspace: WorkspaceView; projects: ProjectGolden[] }) {
   const api = useStore(s => s.api);
   const createWorkspace = useStore(s => s.createWorkspace);
   const applyWorkspace = useStore(s => s.applyWorkspace);
   const [lineage, setLineage] = useState<SnapshotLineage | null>(null);
-  const [projects, setProjects] = useState<ProjectGolden[]>([]);
   /** Version whose rollback awaits the confirm dialog. */
   const [armed, setArmed] = useState<GoldenVersion | null>(null);
   /** The action in flight, so the buttons wait for each other and the note names it. */
-  const [busy, setBusy] = useState<"rollback" | "snapshot" | "image" | null>(null);
+  const [busy, setBusy] = useState<"rollback" | "image" | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -472,12 +568,6 @@ function GoldenLineage({ workspace }: { workspace: WorkspaceView }) {
     api.listSnapshots().then(
       l => {
         if (current) setLineage(l);
-      },
-      () => {},
-    );
-    api.listProjectGoldens?.().then(
-      p => {
-        if (current) setProjects(p);
       },
       () => {},
     );
@@ -497,7 +587,6 @@ function GoldenLineage({ workspace }: { workspace: WorkspaceView }) {
     ),
   );
 
-  const projectsHeld = workspaceProjects(workspace);
   const rollback = async (version: number): Promise<void> => {
     if (!api) return;
     setArmed(null);
@@ -506,20 +595,6 @@ function GoldenLineage({ workspace }: { workspace: WorkspaceView }) {
       const result = await api.rollbackSnapshot(version);
       setLineage(result.lineage);
       setNote(`New forks use v${version}. Existing workspaces keep their image.`);
-    } catch (e) {
-      setNote(errorText(e));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const snapshot = async (): Promise<void> => {
-    if (!api?.snapshotWorkspace || projectsHeld.length === 0) return;
-    setBusy("snapshot");
-    try {
-      const taken = await api.snapshotWorkspace(workspace.id);
-      load();
-      setNote(`Project golden of ${taken.project.name} taken. New forks of it start with the project.`);
     } catch (e) {
       setNote(errorText(e));
     } finally {
@@ -541,13 +616,11 @@ function GoldenLineage({ workspace }: { workspace: WorkspaceView }) {
   };
 
   const fork = (g: ProjectGolden): void => {
-    void createWorkspace(`${g.project.name}-fork`, g.snapshotId);
+    void createWorkspace(`${goldenForkName(g)}-fork`, g.snapshotId);
   };
 
   const under = (snapshotId: string): ReactNode => <ProjectGoldens goldens={projects.filter(p => p.golden === snapshotId)} forkOf={workspace.golden} busy={busy !== null} onFork={fork} />;
   const versions = lineage ? [...lineage.versions].sort((a, b) => b.version - a.version) : [];
-  // What the lineage row says of the projects on this disk: the one project as imported, or how many there are.
-  const projectsWord = projectsHeld.length === 1 ? `${projectsHeld[0]!.name} imported ${projectsHeld[0]!.importedAt.slice(0, 10)}` : projectsHeld.length > 1 ? plural(projectsHeld.length, "project") : null;
   // The head version, when this workspace is forked from an older one: what the offer moves it to.
   const onVersion = versions.find(v => v.snapshotId === workspace.golden);
   const behind = onVersion !== undefined && lineage?.head !== null && lineage?.head !== undefined && onVersion.version !== lineage.head ? lineage.head : null;
@@ -564,16 +637,8 @@ function GoldenLineage({ workspace }: { workspace: WorkspaceView }) {
         <LineageRow
           dot={workspace.phase === "running" ? "bg-success" : "border border-muted-foreground/60"}
           title={<span className="font-medium">Live disk</span>}
-          detail={`forked ${workspace.createdAt.slice(0, 10)}${projectsWord !== null ? ` · ${projectsWord}` : ""}`}
+          detail={`forked ${workspace.createdAt.slice(0, 10)}`}
           marks={["now"]}
-          aside={
-            projectsHeld.length > 0 &&
-            api?.snapshotWorkspace !== undefined && (
-              <Button size="xs" variant="outline" disabled={busy !== null || workspace.phase !== "running"} aria-label={`snapshot ${workspace.name} as a project golden`} onClick={() => void snapshot()}>
-                Snapshot
-              </Button>
-            )
-          }
         />
         {versions.length === 0 ? (
           <LineageRow
@@ -633,7 +698,7 @@ function GoldenLineage({ workspace }: { workspace: WorkspaceView }) {
         )}
       </ul>
       <p className="min-h-4 text-[11px] text-muted-foreground" data-k="lineage-note">
-        {busy === "rollback" ? "Rolling back…" : busy === "snapshot" ? "Taking the snapshot…" : busy === "image" ? "Moving to the newer image…" : (note ?? (behind !== null && moveRefusal !== null ? moveRefusal : null))}
+        {busy === "rollback" ? "Rolling back…" : busy === "image" ? "Moving to the newer image…" : (note ?? (behind !== null && moveRefusal !== null ? moveRefusal : null))}
       </p>
       <AlertDialog open={armed !== null} onOpenChange={open => !open && setArmed(null)}>
         <AlertDialogPopup>
@@ -687,8 +752,8 @@ function Mark({ kind }: { kind: LineageMark }) {
   );
 }
 
-/** The project goldens taken on forks of one version, newest first: the version's disk plus a project as it stood, each a
- * fork away from a task with no upload. */
+/** The project goldens taken on forks of one version, newest first: the version's disk plus every project as it stood,
+ * each a fork away from a task with no upload. */
 function ProjectGoldens({ goldens, forkOf, busy, onFork }: { goldens: ProjectGolden[]; forkOf: string; busy: boolean; onFork: (g: ProjectGolden) => void }) {
   if (goldens.length === 0) return null;
   const rows = [...goldens].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -701,13 +766,13 @@ function ProjectGoldens({ goldens, forkOf, busy, onFork }: { goldens: ProjectGol
           dot="border border-muted-foreground/60"
           title={
             <span className="truncate font-mono" data-k={`pg-${g.snapshotId}`}>
-              {g.project.name}
+              {g.projects.map(p => p.name).join(", ")}
             </span>
           }
-          detail={`snapshot ${g.createdAt.slice(0, 10)} · imported ${g.project.importedAt.slice(0, 10)} · from ${g.workspaceName}`}
+          detail={`snapshot ${g.createdAt.slice(0, 10)} · imported ${g.projects.at(-1)?.importedAt.slice(0, 10) ?? "never"} · from ${g.workspaceName}`}
           marks={g.snapshotId === forkOf ? ["fork"] : []}
           aside={
-            <Button size="xs" variant="outline" disabled={busy} aria-label={`fork ${g.project.name} from ${g.snapshotId}`} onClick={() => onFork(g)}>
+            <Button size="xs" variant="outline" disabled={busy} aria-label={`fork ${goldenForkName(g)} from ${g.snapshotId}`} onClick={() => onFork(g)}>
               Fork
             </Button>
           }

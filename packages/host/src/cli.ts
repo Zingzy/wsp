@@ -432,11 +432,12 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
     backend,
     execStream: o => localExecStream({ root: backend.workFolder(), ...o }),
     home: id => agentHome(home, id, env),
+    homeDir: home,
     env: login,
     daemonRoad: async () => {
       // The panes stay on the person's home: the files and terminal tabs are theirs to look around in, where a
       // turn's own folder is the workspace's.
-      const started = await (daemon ??= import("./local-daemon.js").then(m => m.LocalDaemon.start({ root: home })));
+      const started = await (daemon ??= import("./local-daemon.js").then(m => m.LocalDaemon.start({ root: home, workFolder: backend.workFolder() })));
       // A dial that lands while the host is closing must leave no socket behind: a listening one keeps this process up.
       if (shutting) {
         await started.close().catch(() => {});
@@ -1134,7 +1135,8 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
   }
   const statePath = statePathOf(values.state);
   if (words.length === 0) {
-    await serveMcp(statePath, { alsoHere });
+    // The agent starts the server in its own folder, which is the folder a thread opened with no workspace is placed by.
+    await serveMcp(statePath, { alsoHere, cwd: process.cwd() });
     return 0;
   }
   const json = values.json === true;
@@ -1207,7 +1209,7 @@ export const COMMAND_LINES: readonly CommandLine[] = [
 export async function cli(argv: string[], io: CliIO = terminalIO(), run: RunningWsp = runningWsp()): Promise<number> {
   const verb = findVerb(argv);
   // The one verb that runs with no host serving, new --local, builds the runtime over the state file in this process.
-  if (verb !== undefined) return runVerb(verb, argv, io, statePathFrom, { alsoHere, runtime: async statePath => makeRuntime(await loadKeys(io, undefined, { anthropic: false, noSolari: "local" }), statePath) });
+  if (verb !== undefined) return runVerb(verb, argv, io, statePathFrom, { alsoHere, cwd: process.cwd(), runtime: async statePath => makeRuntime(await loadKeys(io, undefined, { anthropic: false, noSolari: "local" }), statePath) });
   if (argv[0] === MCP_COMMAND) return mcp(io, argv.slice(1), statePathFrom, run);
   let values: SharedFlags;
   let positionals: string[];

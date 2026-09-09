@@ -4,8 +4,8 @@
 // traversal; the new-workspace dialog; the zombie rebuild and the gone forget.
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DEFAULT_PREFERENCES, FREE_WORD, PROVIDER_UNREACHED_LINE, exportFromLine, importIntoLine, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DEFAULT_PREFERENCES, DROP_A_FOLDER_LINE, FREE_WORD, PROVIDER_UNREACHED_LINE, exportFromLine, importIntoLine, registerRequest, registeredLine, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { WORKSPACE_WORDS } from "../src/actions/format.js";
 import { onOpenCommandPalette } from "../src/commandPaletteBus.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
@@ -738,6 +738,95 @@ describe("new thread", () => {
     await mount(fakeApi([API], [status(API, { reach: { state: "zombie" } })]), "api");
     await waitFor(() => expect(screen.getByRole("button", { name: "Rebuild api" })).toBeDefined());
     expect(screen.queryByRole("button", { name: "New thread in api" })).toBeNull();
+  });
+});
+
+describe("a folder dragged from the desktop", () => {
+  const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
+  const PLAN = { source: "/Users/dev/spoo", repo: true, files: 3, bytes: 900, secrets: [], excluded: [], skipped: [], agents: [] };
+  /** A drag event as the window sees one: jsdom builds no DragEvent, so the transfer rides the event as a property. */
+  const drag = (type: string, dataTransfer: Record<string, unknown>): Event => Object.assign(new Event(type, { bubbles: true, cancelable: true }), { dataTransfer });
+  const carrying = { types: ["Files"], items: [{ kind: "file", type: "" }] };
+  const folder = (name: string) => ({ types: ["Files"], files: [new File([], name)], items: [{ kind: "file", type: "", webkitGetAsEntry: () => ({ isDirectory: true }) }] });
+  const tiles = (): string[] => Array.from(document.querySelectorAll<HTMLElement>("[data-drop-tile]")).map(t => t.textContent ?? "");
+  const tileOf = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-drop-tile][data-row-id="ws:${id}"]`)!;
+
+  async function mountWithBridge() {
+    window.wsp = { droppedPath: file => `/Users/dev/${file.name}` };
+    const api = fakeApi([API, WEB, MAC], [status(API), status(WEB), { ...status(MAC), kind: "local", rateUsdPerHour: 0 }]);
+    api.planProject = vi.fn(async () => PLAN);
+    api.importProject = vi.fn(async (o: { dest: string }) => ({ dest: o.dest, files: 3, bytes: 900, parts: 0, cut: [], rewritten: [], agents: [] }));
+    await mount(api, "api");
+    return api;
+  }
+  afterEach(() => {
+    delete window.wsp;
+  });
+
+  it("turns every workspace row into a dotted drop tile in the row's muted mono with the kind's words, and gives the rows back when the drag leaves the window or drops", async () => {
+    await mountWithBridge();
+    expect(tiles()).toEqual([]);
+    act(() => void window.dispatchEvent(drag("dragenter", carrying)));
+    expect(tiles().sort()).toEqual(["import to api", "import to web", "register on this computer"]);
+    const tile = tileOf("ws_a");
+    expect(tile.className).toContain("border-dashed");
+    expect(tile.className).toContain("font-mono");
+    expect(tile.className).toContain("h-15");
+    expect(tile.dataset["sidebarRow"]).toBeDefined();
+    expect(screen.queryByText("api")).toBeNull();
+    // A drag walks into child elements and out again: only leaving the last one it entered ends it.
+    act(() => void window.dispatchEvent(drag("dragenter", carrying)));
+    act(() => void window.dispatchEvent(drag("dragleave", carrying)));
+    expect(tiles()).toHaveLength(3);
+    act(() => void window.dispatchEvent(drag("dragleave", carrying)));
+    expect(tiles()).toEqual([]);
+    expect(screen.getByText("api")).toBeDefined();
+    act(() => void window.dispatchEvent(drag("dragenter", carrying)));
+    expect(tiles()).toHaveLength(3);
+    act(() => void window.dispatchEvent(drag("drop", carrying)));
+    expect(tiles()).toEqual([]);
+  });
+
+  it("a drag that carries no files, text say, moves nothing", async () => {
+    await mountWithBridge();
+    act(() => void window.dispatchEvent(drag("dragenter", { types: ["text/plain"], items: [{ kind: "string", type: "text/plain" }] })));
+    expect(tiles()).toEqual([]);
+  });
+
+  it("dropped on a box's tile the folder opens the import dialog already reading it; on this computer's it is registered at once with no plan, and the toast says so; a file is refused in the toast", async () => {
+    const api = await mountWithBridge();
+    act(() => void window.dispatchEvent(drag("dragenter", carrying)));
+    fireEvent(tileOf("ws_b"), drag("drop", folder("spoo")));
+    const importing = await screen.findByRole("dialog", { name: "Import a project" });
+    expect(within(importing).getByText(importIntoLine("web"))).toBeDefined();
+    await waitFor(() => expect(api.planProject).toHaveBeenCalledWith("/Users/dev/spoo"));
+    expect(api.importProject).not.toHaveBeenCalled();
+    expect(tiles()).toEqual([]);
+    fireEvent.click(within(importing).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    act(() => void window.dispatchEvent(drag("dragenter", carrying)));
+    fireEvent(tileOf("ws_m"), drag("drop", folder("spoo")));
+    await waitFor(() => expect(api.importProject).toHaveBeenCalledWith({ workspaceId: "ws_m", ...registerRequest("/Users/dev/spoo") }));
+    expect(api.planProject).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(useStore.getState().toast).toBe(registeredLine("/Users/dev/spoo")));
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    act(() => void window.dispatchEvent(drag("dragenter", carrying)));
+    fireEvent(tileOf("ws_a"), drag("drop", { types: ["Files"], files: [new File(["x"], "notes.txt")], items: [{ kind: "file", type: "text/plain", webkitGetAsEntry: () => ({ isDirectory: false }) }] }));
+    await waitFor(() => expect(useStore.getState().toast).toBe(DROP_A_FOLDER_LINE));
+    expect(api.importProject).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("a browser tab cannot read a dropped folder's path, so its rows stay rows", async () => {
+    const api = fakeApi([API, WEB], [status(API), status(WEB)]);
+    api.planProject = vi.fn(async () => PLAN);
+    api.importProject = vi.fn();
+    await mount(api, "api");
+    act(() => void window.dispatchEvent(drag("dragenter", carrying)));
+    expect(tiles()).toEqual([]);
+    expect(screen.getByText("api")).toBeDefined();
   });
 });
 

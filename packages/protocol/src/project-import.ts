@@ -63,6 +63,12 @@ export function importRequest(plan: ProjectPlan, source: string, ticked: Readonl
   return { source, dest: plan.source, ...consentRequest(plan.secrets, ticked), ...(travelling !== undefined ? { agents: travelling } : {}), ...(replace === true ? { replace: true } : {}) };
 }
 
+/** The request that registers a folder already on this computer: it stays at its own path, so nothing is carried,
+ * rewritten or sent, and no plan is read for it. */
+export function registerRequest(source: string): ProjectImportRequest {
+  return { source, dest: source, carry: [], rewrite: [] };
+}
+
 /** The row's words for its tick, short for the row's end and full for its title: left out, travels as is, or rewritten
  * without its keys, the full form naming what the remote then reads and which config keys are left out. */
 export function secretOffer(s: ProjectSecret, ticked: boolean): { short: string; full: string } {

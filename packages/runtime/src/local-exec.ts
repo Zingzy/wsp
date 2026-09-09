@@ -27,7 +27,7 @@
 // launched it, so the factory offers no attach and no sweep.
 
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { RUN_STOP_MS, TURN_IDLE_MS, TURN_WALL_MS } from "@wsp/protocol";
+import { psCpuSeconds, RUN_STOP_MS, TURN_IDLE_MS, TURN_WALL_MS } from "@wsp/protocol";
 import type { ExecStream, ExecStreamFactory } from "@wsp/protocol";
 import { readsWork, turnActivity, turnCut, type MachineExecOptions } from "./machine-exec.js";
 
@@ -73,14 +73,10 @@ export async function endLocalRuns(graceMs = RUN_STOP_MS): Promise<readonly numb
   return killed;
 }
 
-/** Cumulative CPU as ps prints it, in the ticks the activity clock counts: `[dd-][hh:]mm:ss[.cc]`, where this Mac's
- * ps carries hundredths and Linux's whole seconds. Anything else reads as no CPU at all. */
+/** Cumulative CPU as ps prints it, in the ticks the activity clock counts. The column is parsed in one place, which
+ * the daemon's processes module reads too. */
 function cpuTicks(time: string): number {
-  const dash = time.indexOf("-");
-  const days = dash === -1 ? 0 : Number(time.slice(0, dash));
-  let seconds = 0;
-  for (const part of time.slice(dash + 1).split(":")) seconds = seconds * 60 + Number(part);
-  const ticks = Math.round((days * 86_400 + seconds) * 100);
+  const ticks = Math.round(psCpuSeconds(time) * 100);
   return Number.isSafeInteger(ticks) ? ticks : 0;
 }
 

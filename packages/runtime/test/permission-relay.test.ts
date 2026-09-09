@@ -15,6 +15,7 @@ import { PERMISSION_ALLOW, PERMISSION_DENY, PERMISSION_DENIED_LINE, permissionUn
 import { createRuntime, type HarnessAdapterFactory, type LocalWiring, type Runtime, type SessionHandle } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore, type Store } from "../src/store.js";
+import { fakeClock } from "./fake-clock.js";
 import { stubBackend } from "./stub-backend.js";
 
 const SESSION = "22222222-2222-4222-8222-222222222222";
@@ -105,9 +106,10 @@ describe("a permission prompt relayed into the chat", () => {
   let turns: Turn[];
   let localWiring: LocalWiring;
   let rt: Runtime;
-  const WAIT_MS = 40;
+  let wait: ReturnType<typeof fakeClock>;
+  const WAIT_MS = 60_000;
 
-  const runtime = (): Runtime => createRuntime({ backend: stubBackend(), store, adapters: { claude: askingAdapter(turns) }, local: localWiring, permissionWaitMs: WAIT_MS });
+  const runtime = (): Runtime => createRuntime({ backend: stubBackend(), store, adapters: { claude: askingAdapter(turns) }, local: localWiring, permissionWaitMs: WAIT_MS, clock: wait.clock });
 
   /** A started turn on the one local workspace, with the fake turn it opened. */
   const started = async (): Promise<{ handle: SessionHandle; turn: Turn; workspaceId: string }> => {
@@ -123,10 +125,13 @@ describe("a permission prompt relayed into the chat", () => {
     root = mkdtempSync(join(tmpdir(), "wsp-perm-"));
     store = memoryStore();
     turns = [];
+    // The prompt's wait runs on this clock: on a busy machine it must not fire between one step of a test and the next.
+    wait = fakeClock();
     localWiring = {
       backend: new LocalBackend({ root }),
       execStream: o => localExecStream({ root, ...o }),
       home: () => join(root, ".claude"),
+      homeDir: root,
       env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
     };
     rt = runtime();
@@ -198,7 +203,12 @@ describe("a permission prompt relayed into the chat", () => {
   it("nobody answering it denies it after the wait, in words that say so rather than blaming a person", async () => {
     const { handle, turn, workspaceId } = await started();
     turn.raise();
-    await vi.waitFor(async () => expect(closes(await history(workspaceId))).toHaveLength(1), { timeout: 5_000 });
+    await vi.waitFor(async () => expect(prompts(await history(workspaceId))).toHaveLength(1));
+    // A hair under the wait the row is still open, and the harness is still blocked on it.
+    wait.advance(WAIT_MS - 1);
+    expect(closes(await history(workspaceId))).toHaveLength(0);
+    wait.advance(1);
+    await vi.waitFor(async () => expect(closes(await history(workspaceId))).toHaveLength(1));
     expect(turn.answers).toEqual([{ askId: "ask_1", optionId: PERMISSION_DENY, outcome: "unanswered", denyMessage: permissionUnansweredLine(WAIT_MS) }]);
     expect(closes(await history(workspaceId))).toMatchObject([{ askId: "ask_1", outcome: "unanswered", optionId: PERMISSION_DENY }]);
     // The turn is still running: the wait denies the call, it does not end the thread.
@@ -212,7 +222,8 @@ describe("a permission prompt relayed into the chat", () => {
     turn.raise();
     await vi.waitFor(async () => expect(prompts(await history(workspaceId))).toHaveLength(1));
     await rt.sessions.answer(handle.id, { askId: "ask_1", optionId: PERMISSION_ALLOW });
-    await new Promise(resolve => setTimeout(resolve, WAIT_MS * 4));
+    // The pick took the wait with it: the clock runs well past it and nothing denies the prompt a second time.
+    wait.advance(WAIT_MS * 4);
     expect(turn.answers).toHaveLength(1);
     expect(closes(await history(workspaceId))).toHaveLength(1);
     turn.reply();
@@ -241,6 +252,7 @@ describe("a permission prompt relayed into the chat", () => {
     await vi.waitFor(async () => expect(prompts(await history(cloud.id))).toHaveLength(1));
 
     await rt.workspaces.nap(cloud.id);
+    await vi.waitFor(async () => expect(closes(await history(cloud.id))).toHaveLength(1));
     const cut = await history(cloud.id);
     expect(closes(cut)).toMatchObject([{ askId: "ask_1", outcome: "cancelled" }]);
     expect(closes(cut)[0]).not.toHaveProperty("optionId");
@@ -250,7 +262,7 @@ describe("a permission prompt relayed into the chat", () => {
     await expect(rt.sessions.answer(handle.id, { askId: "ask_1", optionId: PERMISSION_ALLOW })).rejects.toThrow("Workspace is paused; wake it to send");
 
     // The wait went with it: nothing denies a prompt on a turn that is over, and no second row lands.
-    await new Promise(resolve => setTimeout(resolve, WAIT_MS * 4));
+    wait.advance(WAIT_MS * 4);
     expect(turn.answers).toHaveLength(0);
     expect(closes(await history(cloud.id))).toHaveLength(1);
   });
@@ -280,6 +292,7 @@ describe("the access a thread starts at", () => {
       backend: new LocalBackend({ root }),
       execStream: o => localExecStream({ root, ...o }),
       home: () => join(root, ".claude"),
+      homeDir: root,
       env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
     };
   });
@@ -475,6 +488,7 @@ describe("an access picked while a turn runs", () => {
       backend: new LocalBackend({ root }),
       execStream: o => localExecStream({ root, ...o }),
       home: () => join(root, ".claude"),
+      homeDir: root,
       env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
     };
     return { rt: createRuntime({ backend: stubBackend(), store, adapters: { claude: adapter }, local }), turns, picks };

@@ -80,7 +80,7 @@ describe("a project golden", () => {
     const golden = await rt.workspaces.snapshot(ws.id);
     const expected: ProjectGolden = {
       snapshotId: "snap_wsp-h1-project-proj-2026-09-06T10-06-00-000Z",
-      project: PROJECT,
+      projects: [PROJECT],
       golden: "snap_golden-v12",
       version: 12,
       workspaceId: ws.id,
@@ -127,7 +127,7 @@ describe("a project golden", () => {
     expect(sibling).toMatchObject({ golden: golden.snapshotId, projects: [PROJECT] });
     advance(60_000);
     const again = await rt.workspaces.snapshot(fork.id);
-    expect(again).toMatchObject({ golden: "snap_golden-v12", version: 12, project: PROJECT, workspaceId: fork.id, workspaceName: "task-a" });
+    expect(again).toMatchObject({ golden: "snap_golden-v12", version: 12, projects: [PROJECT], workspaceId: fork.id, workspaceName: "task-a" });
     expect(again.snapshotId).not.toBe(golden.snapshotId);
   });
 
@@ -138,7 +138,7 @@ describe("a project golden", () => {
     const client = await WsClient.connect(srv.port, { token: "t" });
     try {
       const taken = await client.request("workspaces.snapshot", { workspaceId: ws.id });
-      expect(taken).toMatchObject({ ok: true, projectGolden: { project: PROJECT, golden: "snap_golden-v12", version: 12, workspaceId: ws.id } });
+      expect(taken).toMatchObject({ ok: true, projectGolden: { projects: [PROJECT], golden: "snap_golden-v12", version: 12, workspaceId: ws.id } });
       const listed = await client.request("projectGoldens.list", {});
       expect(listed).toMatchObject({ ok: true, projectGoldens: [taken["projectGolden"]] });
       await rt.workspaces.nap(ws.id);

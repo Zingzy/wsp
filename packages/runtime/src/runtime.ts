@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join, posix } from "node:path";
-import { DEFAULT_AGENT } from "@wsp/catalog";
+import { DEFAULT_AGENT, GUEST_HOME } from "@wsp/catalog";
 import {
   BUILDER_IDLE_MS,
   DAEMON_PORT,
@@ -162,7 +162,7 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
-import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, machineCapRefusal, machineWord, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, workspaceProjects, workspaceState } from "@wsp/protocol";
+import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, machineCapRefusal, machineWord, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noSshImportLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, workspaceProjects, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
@@ -604,6 +604,9 @@ export interface LocalWiring {
    * by default, none for the exec verb), so a local turn is cut the way a cloud turn is. */
   execStream: (opts?: MachineExecOptions) => ExecStreamFactory;
   home: (agentId: string) => string;
+  /** The person's own home: where this computer's daemon browses from and keeps its roots file, and what a path
+   * under it is shortened against. */
+  homeDir: string;
   env: Readonly<Record<string, string>>;
   /** Where this computer's daemon listens and the token that opens it, in the shape a cloud fork's preview route
    * arrives in, so the panes and the status probe read one view. The host starts that daemon on the first call and
@@ -1402,8 +1405,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     /** Where the harness keeps its sessions on this workspace's machine: a fixed folder on a kind whose machines
      * wsp makes alike, the record's own on a machine that already existed and answered with its home. */
     home: (entry: LiveWorkspace, agentId: string) => string;
+    /** The machine's own home, published on the view so a client shortens a folder under it to ~; undefined where
+     * the kind has not read one. */
+    homeDir: (record: WorkspaceRecord) => string | undefined;
     /** The login environment a turn runs under there, read the same way. */
     env: (entry: LiveWorkspace) => Readonly<Record<string, string>>;
+    /** How a folder on this computer gets onto a machine of this kind: packed and landed on a fork, its path recorded
+     * with nothing copied on this computer, refused where no road exists yet. Answers what landed, the project the
+     * record gains and the done line; the caller keeps the record and the roots file, which every road shares. */
+    import: (entry: LiveWorkspace, o: ProjectImportOptions, report: ImportReport) => Promise<ImportLanded>;
+    /** Names the project folders the machine's daemon may browse beside its home, where the kind has a daemon. */
+    roots: (entry: LiveWorkspace, dests: readonly string[]) => Promise<void>;
     /** Whether a request relayed from a machine may drive this workspace; a local one answers only this computer,
      * and so does a machine of another kind whose dial names this computer. The machine id is absent on the one
      * road that asks before a machine exists, a fork's create, where only the kind can answer. */
@@ -1417,6 +1429,31 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
      * with the token it holds in memory. Throws with the backend's own words when the machine has no road. */
     daemonRoad: (entry: LiveWorkspace) => Promise<DaemonReachView>;
   }
+  type ImportReport = (stage: ProjectImportStage, message: string, progress?: { bytes: number; total: number }) => void;
+  interface ImportLanded {
+    result: ProjectImportResult;
+    project: WorkspaceProject;
+    done: string;
+  }
+  const projectOf = (dest: string, size: number): WorkspaceProject => ({ name: folderName(dest), dest, importedAt: new Date(clock.now()).toISOString(), size });
+  /** The import road on this computer: the folder is here already, so its path is recorded at once and nothing is
+   * packed or sent. The plan is still read, since it is the one measure of the folder and the one check that it is
+   * there, and its bytes are the size the record shows. */
+  const registerImport = async (o: ProjectImportOptions, report: ImportReport): Promise<ImportLanded> => {
+    report("landing", REGISTERING_LINE);
+    const plan = await o.bundler.plan();
+    return {
+      result: { dest: o.dest, files: plan.files, bytes: plan.bytes, parts: 0, cut: [], rewritten: [], agents: [] },
+      project: projectOf(o.dest, plan.bytes),
+      done: registeredLine(o.dest),
+    };
+  };
+  /** The roots file as the machine's daemon reads it, written through the machine so the guest and this computer
+   * take one script; a machine that will not take it fails the import before the record names the folder. */
+  const writeRoots = async (entry: LiveWorkspace, dests: readonly string[], rootsPath?: string): Promise<void> => {
+    const browsable = await entry.machine.exec(writeDaemonRootsScript(dests, rootsPath), { timeoutMs: INLINE_EXEC_MS });
+    if (browsable.exitCode !== 0) throw new Error(`could not make ${dests.at(-1)} browsable on the machine: ${browsable.stderr.slice(-200)}`);
+  };
   const cloudHome = (id: string): string => {
     const home = guestAgentHomes()[id];
     if (home === undefined) throw new Error(`the catalog has no home for ${id}`);
@@ -1433,29 +1470,54 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
   /** The login a machine that already existed answered with, off its own record. A record written before its kind
    * read one is a record no such kind ever wrote. */
-  const loginOf = (entry: LiveWorkspace): Readonly<Record<string, string>> => entry.record.login ?? {};
+  const loginOf = (record: WorkspaceRecord): Readonly<Record<string, string>> => record.login ?? {};
   /** The home the machine answered with, which every path a turn uses over ssh is built from: the run folder and
    * each harness's store. Read in one place and refused when a record carries none, since the roads below would
    * otherwise each pick a folder of their own, and a run folder guessed under /tmp is the shared one this kind's
    * own folder exists to avoid. The dial that records a workspace refuses a machine whose home is not a plain
    * absolute path, so a record without one is one no ssh road wrote. */
   const sshHomeDir = (entry: LiveWorkspace): string => {
-    const home = loginOf(entry)["HOME"];
+    const home = loginOf(entry.record)["HOME"];
     if (home === undefined) throw new Error(noMachineHomeLine(entry.record.name));
     return home;
   };
   /** Where a harness keeps its sessions on a machine reached over ssh: the folder that machine's own login names
    * for it, else the catalog's default under the home it answered with. */
-  const sshHome = (entry: LiveWorkspace, agentId: string): string => agentHome(sshHomeDir(entry), agentId, loginOf(entry));
+  const sshHome = (entry: LiveWorkspace, agentId: string): string => agentHome(sshHomeDir(entry), agentId, loginOf(entry.record));
   const sshRoad = async (entry: LiveWorkspace): Promise<DaemonReachView> => {
     throw new Error(noSshDaemonLine(entry.record.name));
   };
   const modules: Record<WorkspaceKind, KindModule | undefined> = {
-    cloud: { backend, execStream: (entry, o) => machineExecStream(entry.machine, o), folder: undefined, home: (_entry, id) => cloudHome(id), env: () => GUEST_LOGIN_ENV, relayed: () => true, hasDaemon: entry => Boolean(entry.machine.previewUrl), daemonRoad: cloudRoad },
+    cloud: {
+      backend,
+      execStream: (entry, o) => machineExecStream(entry.machine, o),
+      folder: undefined,
+      home: (_entry, id) => cloudHome(id),
+      homeDir: () => GUEST_HOME,
+      env: () => GUEST_LOGIN_ENV,
+      relayed: () => true,
+      hasDaemon: entry => Boolean(entry.machine.previewUrl),
+      daemonRoad: cloudRoad,
+      import: (entry, o, report) => copyImport(entry, o, report),
+      roots: (entry, dests) => writeRoots(entry, dests),
+    },
     local:
       local === undefined
         ? undefined
-        : { backend: local.backend, execStream: (_entry, o) => local.execStream(o), folder: local.backend.folder, home: (_entry, id) => local.home(id), env: () => local.env, relayed: () => false, hasDaemon: () => local.daemonRoad !== undefined, daemonRoad: localRoad },
+        : {
+            backend: local.backend,
+            execStream: (_entry, o) => local.execStream(o),
+            folder: local.backend.folder,
+            home: (_entry, id) => local.home(id),
+            homeDir: () => local.homeDir,
+            env: () => local.env,
+            relayed: () => false,
+            hasDaemon: () => local.daemonRoad !== undefined,
+            daemonRoad: localRoad,
+            import: (_entry, o, report) => registerImport(o, report),
+            // This computer's daemon browses from the person's home, so its roots file sits beside that home.
+            roots: (entry, dests) => writeRoots(entry, dests, rootsPathIn(local.homeDir)),
+          },
     ssh:
       ssh === undefined
         ? undefined
@@ -1472,7 +1534,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // their store variable names on that machine when it named one, else the default under the home it
             // answered with. The catalog's rule for both is agentHomes, the same call the local kind makes.
             home: (entry, id) => sshHome(entry, id),
-            env: loginOf,
+            homeDir: record => loginOf(record)["HOME"],
+            env: entry => loginOf(entry.record),
             // A machine wsp reaches is a machine, so a request relayed from one drives it as it drives a fork. The
             // one exception is a dial that names the computer wsp runs on: that is this computer under another
             // kind's name, and the local kind's refusal is the whole reason the rule exists.
@@ -1482,6 +1545,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             },
             hasDaemon: () => false,
             daemonRoad: sshRoad,
+            import: async entry => {
+              throw new Error(noSshImportLine(entry.record.name));
+            },
+            roots: async () => {},
           },
   };
   const moduleOf = (kind: WorkspaceKind): KindModule => {
@@ -1505,12 +1572,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return projectFor(projects, { named: o.project, last })?.dest ?? moduleOf(entry.record.kind).folder;
   };
   /** What a start that opened a thread leaves on the preferences record: the project the thread landed in, by
-   * workspace, the second branch of threadFolder for the next thread there. Written only when it moves the record,
-   * so a start outside every project, or on the project the last one used, pushes no record to any socket. */
-  const rememberProject = async (record: WorkspaceRecord, cwd: string | undefined): Promise<void> => {
+   * workspace, the second branch of threadFolder for the next thread there, and the target, the workspace and project
+   * a thread or an import asked for from nowhere goes to. Written only when it moves the record, so a second thread
+   * on the same project pushes no record to any socket. */
+  const rememberTarget = async (record: WorkspaceRecord, cwd: string | undefined): Promise<void> => {
     const used = projectAt(workspaceProjects(record), cwd);
-    if (used === null || (await preferences.get()).project[record.id] === used.name) return;
-    await preferences.set({ project: { [record.id]: used.name } });
+    const current = await preferences.get();
+    const target = { workspace: record.id, ...(used !== null ? { project: used.name } : {}) };
+    const patch: PreferencesPatch = {
+      ...(used !== null && current.project[record.id] !== used.name ? { project: { [record.id]: used.name } } : {}),
+      ...(current.target?.workspace !== target.workspace || current.target?.project !== target.project ? { target } : {}),
+    };
+    if (Object.keys(patch).length > 0) await preferences.set(patch);
   };
   /** The capability a verb reads before it runs: a machine whose capability is false refuses the verb with the one
    * sentence, which reads for the local computer, the only machine short of these capabilities today. */
@@ -1790,8 +1863,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * is doing, not what the workspace is. */
   const daemonNotes = new Map<string, string>();
 
+  /** The machine's home for the view, where the kind knows it. */
+  const homeOf = (r: WorkspaceRecord): { home?: string } => {
+    const home = moduleOf(r.kind).homeDir(r);
+    return home !== undefined ? { home } : {};
+  };
+
   const view = (r: WorkspaceRecord): WorkspaceView => ({
     ...(moduleOf(r.kind).folder !== undefined ? { folder: moduleOf(r.kind).folder } : {}),
+    ...homeOf(r),
     id: r.id,
     name: r.name,
     machineId: r.machineId,
@@ -1867,13 +1947,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** What stands behind a snapshot a workspace forks from: a golden version, or a project golden and the version at
    * the root of its lineage. `golden` is that root's snapshot id, the one a snapshot taken from the fork records. */
-  const imageOf = async (snapshotId: string): Promise<{ golden: string; version?: GoldenVersion; project?: WorkspaceProject }> => {
+  const imageOf = async (snapshotId: string): Promise<{ golden: string; version?: GoldenVersion; projects?: WorkspaceProject[] }> => {
     const version = await goldenVersionOf(snapshotId);
     if (version !== undefined) return { golden: snapshotId, version };
-    const project = (await store.get(PROJECT_GOLDENS, snapshotId)) as ProjectGolden | undefined;
-    if (project === undefined) return { golden: snapshotId };
+    const stored = await store.get(PROJECT_GOLDENS, snapshotId);
+    if (stored === undefined) return { golden: snapshotId };
+    const project = projectGoldenOf(stored);
     const root = await goldenVersionOf(project.golden);
-    return { golden: project.golden, ...(root !== undefined ? { version: root } : {}), project: project.project };
+    return { golden: project.golden, ...(root !== undefined ? { version: root } : {}), projects: project.projects };
+  };
+
+  /** A project golden as stored, read as one of today: a manifest from before a snapshot carried every project on
+   * the disk named the one it was taken for under `project`, and reads as a golden of that one. */
+  const projectGoldenOf = (raw: unknown): ProjectGolden => {
+    const { project: single, ...rest } = raw as Omit<ProjectGolden, "projects"> & { projects?: WorkspaceProject[]; project?: WorkspaceProject };
+    return { ...rest, projects: rest.projects ?? (single !== undefined ? [single] : []) };
   };
 
   /** A status pushed outside the poll, for a phase change the poller would show
@@ -2237,7 +2325,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const image = await imageOf(record.golden);
       const golden = image.version;
       // A project golden's snapshot is the image; only a version's own snapshot may stand behind a template.
-      const spec = forkSpec(record, golden?.kind ?? "sandbox", goldenImage(image.project === undefined && golden !== undefined ? golden : { snapshotId: record.golden }).spec, override);
+      const spec = forkSpec(record, golden?.kind ?? "sandbox", goldenImage(image.projects === undefined && golden !== undefined ? golden : { snapshotId: record.golden }).spec, override);
       const machine = await b.create(spec);
       // Named by its record before the claim is released, so no sweep sees it unclaimed.
       bind(machine);
@@ -2791,7 +2879,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       phase: "running",
       golden: o.golden,
       createdAt: new Date().toISOString(),
-      ...(image.project !== undefined ? { projects: [image.project] } : {}),
+      ...(image.projects !== undefined ? { projects: image.projects } : {}),
       spec: {
         ...(o.envs !== undefined ? { envs: o.envs } : {}),
         ...(o.labels !== undefined ? { labels: o.labels } : {}),
@@ -3152,7 +3240,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const entry = await entryOf(id, origin);
       refuseCannot(entry, "liveCloneForks", "be snapshotted");
       const { name } = entry.record;
-      // The project the rule would start a thread in, else the newest import: a project golden carries one today.
+      // The snapshot is the whole disk and carries every project on it; it is named after the one the rule would
+      // start a thread in, else the newest import.
       const projects = workspaceProjects(entry.record);
       const project = projectFor(projects, { named: undefined, last: (await preferences.get()).project[id] }) ?? projects.at(-1);
       if (project === undefined) throw new Error(`${name} has no project loaded; import one before snapshotting it`);
@@ -3162,7 +3251,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const image = await imageOf(entry.record.golden);
       const golden: ProjectGolden = {
         snapshotId,
-        project,
+        projects,
         golden: image.golden,
         ...(image.version !== undefined ? { version: image.version.version } : {}),
         workspaceId: id,
@@ -3678,9 +3767,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // and the persisted row read it whether the harness emits its result synchronously in start() (before the entry
     // exists) or later from its stream.
     const turnLive: TurnLive = t.turnLive ?? {};
-    /** The permission prompts of this turn nobody has answered, each with the timer that denies it when nobody
-     * does. The harness is blocked on every one of them, so this map is what the thread is waiting on. */
-    const open = new Map<string, { ask: PermissionAsk; timer: ReturnType<typeof setTimeout> }>();
+    /** The permission prompts of this turn nobody has answered, each with the end of the wait that denies it when
+     * nobody does. The harness is blocked on every one of them, so this map is what the thread is waiting on. */
+    const open = new Map<string, { ask: PermissionAsk; endWait: () => void }>();
     /** The harness's own answer road, once the turn is open; a prompt raised inside start() is answered through it
      * too, since its wait outlasts the synchronous run that raised it by minutes. */
     let answerAsk: HarnessSession["answer"];
@@ -3700,7 +3789,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const closeAsk = (askId: string, outcome: PermissionOutcome, optionId?: string): void => {
       const held = open.get(askId);
       if (held === undefined) return;
-      clearTimeout(held.timer);
+      held.endWait();
       open.delete(askId);
       record({
         type: "session.permission.closed",
@@ -3819,11 +3908,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           const ask = { ...event.ask, options: named(event.ask) };
           // The turn stops here until an option comes back, and nobody may be reading: the wait is the policy for
           // an unattended thread, and it denies rather than let the wait reach the turn's idle cut.
-          const timer = setTimeout(() => {
-            void answer(ask.askId, { optionId: PERMISSION_DENY, by: "wait" });
-          }, permissionWaitMs);
-          timer.unref?.();
-          open.set(ask.askId, { ask, timer });
+          const endWait = clock.schedule(() => void answer(ask.askId, { optionId: PERMISSION_DENY, by: "wait" }), permissionWaitMs, { unref: true });
+          open.set(ask.askId, { ask, endWait });
           record({ type: "session.permission", workspaceId, sessionId, turnId, threadId, ...ask, options: [...ask.options], waitMs: permissionWaitMs });
           return;
         }
@@ -4155,7 +4241,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         });
         handedOver = true;
         // The turn is running; what the record failed to remember must not read as a start that failed.
-        if (resume === undefined) await rememberProject(entry.record, cwd).catch((e: unknown) => console.warn(`last project for ${workspaceId} not remembered: ${e instanceof Error ? e.message : String(e)}`));
+        if (resume === undefined) await rememberTarget(entry.record, cwd).catch((e: unknown) => console.warn(`last target for ${workspaceId} not remembered: ${e instanceof Error ? e.message : String(e)}`));
         return handle;
       } finally {
         if (!handedOver && imagesDir !== undefined) dropImages(entry, imagesDir);
@@ -4953,8 +5039,88 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async projects() {
       await ready();
-      return ((await store.list(PROJECT_GOLDENS)) as ProjectGolden[]).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      return (await store.list(PROJECT_GOLDENS)).map(projectGoldenOf).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     },
+  };
+
+  /** The import road onto a fork: the plan, what was consented, the pack, the upload in parts, the landing at the
+   * path and the agents' state keyed to it there. */
+  const copyImport = async (entry: LiveWorkspace, o: ProjectImportOptions, report: ImportReport): Promise<ImportLanded> => {
+    const plan = await o.bundler.plan();
+    report("planned", `${plural(plan.files, "file")}, ${fmtBytes(plan.bytes)}${plan.repo ? " and the repository" : ""}; ${plural(plan.secrets.length, "secret-shaped file")}; ${plural(plan.excluded.length, "cache")} left behind.`);
+    const carry = new Set(o.carry ?? []);
+    const rewrite = new Set(o.rewrite ?? []);
+    const rewriting = plan.secrets.flatMap(s => (s.rewrite !== undefined && rewrite.has(s.path) ? [{ path: s.path, ...s.rewrite }] : []));
+    const rewritten = new Set(rewriting.map(r => r.path));
+    const carried = plan.secrets.filter(s => carry.has(s.path) && !rewritten.has(s.path)).map(s => s.path);
+    const cut = plan.secrets.filter(s => !carry.has(s.path) && !rewritten.has(s.path)).map(s => s.path);
+    const clauses = [
+      ...(carried.length > 0 ? [`carrying ${carried.join(", ")}`] : []),
+      ...(rewriting.length > 0 ? [`rewriting ${rewriting.map(r => `${r.path}${r.urls.length > 0 ? ` to ${r.urls.join(", ")}` : ""}${r.drop.length > 0 ? ` without ${r.drop.join(", ")}` : ""}`).join(", ")}`] : []),
+      ...(carried.length === 0 && rewriting.length === 0 ? ["no secret-shaped file travels"] : []),
+      cut.length === 0 ? "nothing cut" : `cut ${cut.join(", ")}`,
+    ].join("; ");
+    const named = new Set(o.agents ?? []);
+    const readable = plan.agents.filter(a => a.error === undefined);
+    const unreadable = plan.agents.filter(a => a.error !== undefined);
+    const travelling = readable.filter(a => named.has(a.agent));
+    const staying = readable.filter(a => !named.has(a.agent));
+    const withCount = (a: ProjectPlan["agents"][number]): string => `${a.name} (${plural(a.sessions, "session")})`;
+    const notes = [
+      ...(plan.agents.length === 0 ? [] : travelling.length === 0 ? ["No agent sessions travel"] : [`Sessions travel for ${travelling.map(withCount).join(", ")}`]),
+      ...(travelling.length > 0 && staying.length > 0 ? [`${staying.map(a => a.name).join(", ")} ${staying.length === 1 ? "stays" : "stay"}`] : []),
+      ...unreadable.map(a => `${a.name} could not be read (${a.error})`),
+    ];
+    const agentsLine = notes.length === 0 ? "" : ` ${notes.join("; ")}.`;
+    report("consented", `${plan.secrets.length === 0 ? "No secret-shaped files." : `${clauses.charAt(0).toUpperCase()}${clauses.slice(1)}.`}${agentsLine}`);
+    report("packing", `Packing ${plural(plan.files - cut.length, "file")}.`);
+    const packed = await o.bundler.pack(carry, rewrite);
+    let state: PackedState | undefined;
+    if (travelling.length > 0) {
+      const present = await agentsOnMachine(entry.machine, travelling.map(a => a.agent));
+      const homes = guestAgentHomes();
+      state = await o.bundler.packState({
+        dest: o.dest,
+        agents: travelling.map(a => {
+          const home = homes[a.agent];
+          if (home === undefined) throw new Error(`${a.agent} is not an agent the catalog knows`);
+          return { agent: a.agent, home, present: present.has(a.agent) };
+        }),
+      });
+    }
+    report("uploading", `Uploading ${fmtBytes(packed.tar.length)}.`, { bytes: 0, total: packed.tar.length });
+    const { parts } = await landBundle(entry.machine, packed.tar, o.dest, {
+      ...(o.replace !== undefined ? { replace: o.replace } : {}),
+      timeoutMs: 600_000,
+      onPart: p => report("uploading", `Part ${p.part} of ${p.parts}, ${fmtBytes(p.bytes)} of ${fmtBytes(p.total)}.`, { bytes: p.bytes, total: p.total }),
+      onLanding: () => report("landing", `Landing at ${o.dest}.`),
+    });
+    const nameOf = (id: string): string => plan.agents.find(a => a.agent === id)?.name ?? id;
+    const agents = [...(state?.agents ?? [])];
+    const outcomes = (): string => agents.map(a => `${nameOf(a.agent)} ${outcomeWords(a)}`).join(", ");
+    if (state !== undefined && (agents.some(a => a.files > 0) || state.merges.length > 0)) {
+      const files = agents.reduce((n, a) => n + a.files, 0);
+      const what = [...(files > 0 ? [plural(files, "session file")] : []), ...(state.merges.length > 0 ? ["the rows to merge"] : [])].join(" and ");
+      report("uploading", `Uploading ${what}, ${fmtBytes(state.tar.length)}.`, { bytes: 0, total: state.tar.length });
+      await importInto(entry.machine, state.tar, "/", {
+        overlay: true,
+        timeoutMs: 600_000,
+        onPart: p => report("uploading", `Part ${p.part} of ${p.parts}, ${fmtBytes(p.bytes)} of ${fmtBytes(p.total)}.`, { bytes: p.bytes, total: p.total }),
+      });
+      if (state.merges.length > 0) {
+        report("landing", `Merging rows into ${state.merges.map(m => nameOf(m.agent)).join(", ")}.`);
+        for (const m of state.merges) {
+          const at = agents.findIndex(a => a.agent === m.agent);
+          if (at >= 0) agents[at] = await mergeOnMachine(entry.machine, m.script, agents[at]!);
+        }
+      }
+      report("landing", `Landing sessions: ${outcomes()}.`);
+    }
+    return {
+      result: { dest: o.dest, files: packed.files, bytes: packed.bytes, parts, cut: packed.cut, rewritten: packed.rewritten, agents },
+      project: projectOf(o.dest, packed.bytes),
+      done: `${plural(packed.files, "file")}, ${fmtBytes(packed.bytes)}, landed at ${o.dest}${parts > 1 ? ` in ${parts} parts` : ""}${agents.length > 0 ? `; sessions: ${outcomes()}` : ""}.`,
+    };
   };
 
   const projects: Runtime["projects"] = {
@@ -4963,87 +5129,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const refusal = actionRefusal(workspaceState({ phase: entry.record.phase }), "import", entry.record.gone);
       if (refusal !== null) throw new Error(refusal);
       const began = clock.now();
-      const report = (stage: ProjectImportStage, message: string, progress?: { bytes: number; total: number }): void => {
+      const report: ImportReport = (stage, message, progress) => {
         bus.emit({ type: "project.import", workspaceId: o.workspaceId, source: o.source, dest: o.dest, stage, message, elapsedMs: clock.now() - began, ...progress });
       };
       try {
-        const plan = await o.bundler.plan();
-        report("planned", `${plural(plan.files, "file")}, ${fmtBytes(plan.bytes)}${plan.repo ? " and the repository" : ""}; ${plural(plan.secrets.length, "secret-shaped file")}; ${plural(plan.excluded.length, "cache")} left behind.`);
-        const carry = new Set(o.carry ?? []);
-        const rewrite = new Set(o.rewrite ?? []);
-        const rewriting = plan.secrets.flatMap(s => (s.rewrite !== undefined && rewrite.has(s.path) ? [{ path: s.path, ...s.rewrite }] : []));
-        const rewritten = new Set(rewriting.map(r => r.path));
-        const carried = plan.secrets.filter(s => carry.has(s.path) && !rewritten.has(s.path)).map(s => s.path);
-        const cut = plan.secrets.filter(s => !carry.has(s.path) && !rewritten.has(s.path)).map(s => s.path);
-        const clauses = [
-          ...(carried.length > 0 ? [`carrying ${carried.join(", ")}`] : []),
-          ...(rewriting.length > 0 ? [`rewriting ${rewriting.map(r => `${r.path}${r.urls.length > 0 ? ` to ${r.urls.join(", ")}` : ""}${r.drop.length > 0 ? ` without ${r.drop.join(", ")}` : ""}`).join(", ")}`] : []),
-          ...(carried.length === 0 && rewriting.length === 0 ? ["no secret-shaped file travels"] : []),
-          cut.length === 0 ? "nothing cut" : `cut ${cut.join(", ")}`,
-        ].join("; ");
-        const named = new Set(o.agents ?? []);
-        const readable = plan.agents.filter(a => a.error === undefined);
-        const unreadable = plan.agents.filter(a => a.error !== undefined);
-        const travelling = readable.filter(a => named.has(a.agent));
-        const staying = readable.filter(a => !named.has(a.agent));
-        const withCount = (a: ProjectPlan["agents"][number]): string => `${a.name} (${plural(a.sessions, "session")})`;
-        const notes = [
-          ...(plan.agents.length === 0 ? [] : travelling.length === 0 ? ["No agent sessions travel"] : [`Sessions travel for ${travelling.map(withCount).join(", ")}`]),
-          ...(travelling.length > 0 && staying.length > 0 ? [`${staying.map(a => a.name).join(", ")} ${staying.length === 1 ? "stays" : "stay"}`] : []),
-          ...unreadable.map(a => `${a.name} could not be read (${a.error})`),
-        ];
-        const agentsLine = notes.length === 0 ? "" : ` ${notes.join("; ")}.`;
-        report("consented", `${plan.secrets.length === 0 ? "No secret-shaped files." : `${clauses.charAt(0).toUpperCase()}${clauses.slice(1)}.`}${agentsLine}`);
-        report("packing", `Packing ${plural(plan.files - cut.length, "file")}.`);
-        const packed = await o.bundler.pack(carry, rewrite);
-        let state: PackedState | undefined;
-        if (travelling.length > 0) {
-          const present = await agentsOnMachine(entry.machine, travelling.map(a => a.agent));
-          const homes = guestAgentHomes();
-          state = await o.bundler.packState({
-            dest: o.dest,
-            agents: travelling.map(a => {
-              const home = homes[a.agent];
-              if (home === undefined) throw new Error(`${a.agent} is not an agent the catalog knows`);
-              return { agent: a.agent, home, present: present.has(a.agent) };
-            }),
-          });
-        }
-        report("uploading", `Uploading ${fmtBytes(packed.tar.length)}.`, { bytes: 0, total: packed.tar.length });
-        const { parts } = await landBundle(entry.machine, packed.tar, o.dest, {
-          ...(o.replace !== undefined ? { replace: o.replace } : {}),
-          timeoutMs: 600_000,
-          onPart: p => report("uploading", `Part ${p.part} of ${p.parts}, ${fmtBytes(p.bytes)} of ${fmtBytes(p.total)}.`, { bytes: p.bytes, total: p.total }),
-          onLanding: () => report("landing", `Landing at ${o.dest}.`),
-        });
-        const nameOf = (id: string): string => plan.agents.find(a => a.agent === id)?.name ?? id;
-        const agents = [...(state?.agents ?? [])];
-        const outcomes = (): string => agents.map(a => `${nameOf(a.agent)} ${outcomeWords(a)}`).join(", ");
-        if (state !== undefined && (agents.some(a => a.files > 0) || state.merges.length > 0)) {
-          const files = agents.reduce((n, a) => n + a.files, 0);
-          const what = [...(files > 0 ? [plural(files, "session file")] : []), ...(state.merges.length > 0 ? ["the rows to merge"] : [])].join(" and ");
-          report("uploading", `Uploading ${what}, ${fmtBytes(state.tar.length)}.`, { bytes: 0, total: state.tar.length });
-          await importInto(entry.machine, state.tar, "/", {
-            overlay: true,
-            timeoutMs: 600_000,
-            onPart: p => report("uploading", `Part ${p.part} of ${p.parts}, ${fmtBytes(p.bytes)} of ${fmtBytes(p.total)}.`, { bytes: p.bytes, total: p.total }),
-          });
-          if (state.merges.length > 0) {
-            report("landing", `Merging rows into ${state.merges.map(m => nameOf(m.agent)).join(", ")}.`);
-            for (const m of state.merges) {
-              const at = agents.findIndex(a => a.agent === m.agent);
-              if (at >= 0) agents[at] = await mergeOnMachine(entry.machine, m.script, agents[at]!);
-            }
-          }
-          report("landing", `Landing sessions: ${outcomes()}.`);
-        }
-        const projects = [...workspaceProjects(entry.record).filter(p => p.dest !== o.dest), { name: posix.basename(o.dest), dest: o.dest, importedAt: new Date(clock.now()).toISOString(), size: packed.bytes }];
-        const browsable = await entry.machine.exec(writeDaemonRootsScript(projects.map(p => p.dest)), { timeoutMs: INLINE_EXEC_MS });
-        if (browsable.exitCode !== 0) throw new Error(`could not make ${o.dest} browsable on the machine: ${browsable.stderr.slice(-200)}`);
+        const kind = moduleOf(entry.record.kind);
+        const landed = await kind.import(entry, o, report);
+        const projects = [...workspaceProjects(entry.record).filter(p => p.dest !== landed.project.dest), landed.project];
+        await kind.roots(entry, projects.map(p => p.dest));
         entry.record.projects = projects;
         await persist(entry.record);
-        report("done", `${plural(packed.files, "file")}, ${fmtBytes(packed.bytes)}, landed at ${o.dest}${parts > 1 ? ` in ${parts} parts` : ""}${agents.length > 0 ? `; sessions: ${outcomes()}` : ""}.`);
-        return { dest: o.dest, files: packed.files, bytes: packed.bytes, parts, cut: packed.cut, rewritten: packed.rewritten, agents };
+        report("done", landed.done);
+        return landed.result;
       } catch (e) {
         report("failed", e instanceof Error ? e.message : String(e));
         throw e;

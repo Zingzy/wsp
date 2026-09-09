@@ -39,8 +39,9 @@ export function fmtSize(size: WorkspaceSize): string {
 /** What a machine wsp neither forks nor pays for costs, on its row's cost line and the Machine tab's Cost row. */
 export const FREE_WORD = "free";
 
-/** What a Machine tab row reads on a kind of machine that has no road to that reading yet, in place of a pending
- * that would never settle. */
+/** What a pane prints in the slot a reading would fill on a kind whose machines serve that reading on no road: the
+ * Machine tab's Live rows and the Processes table both read it, in place of a pending that would never settle. The
+ * kind table says which kinds serve which reading, so a pane says this within one probe window. */
 export const NOT_ON_THIS_KIND = "not on this kind";
 
 /** A size as the --size flag and the fork tools spell it: vCPUs, an x, memory in GB ("2x4", "2x0.5"). */
@@ -900,6 +901,7 @@ export const THIS_COMPUTER = "this computer";
  * that wsp reaches and never runs. */
 export const OVER_SSH = "a machine over ssh";
 
+
 /** The one sentence a local workspace refuses a request relayed from a machine with. A local workspace is this
  * computer; it answers only its own person, so a request that reached the host from a machine wsp runs cannot drive
  * it. Today no machine has a road into the host, so nothing relays yet; the rule and its test land now. */
@@ -936,6 +938,12 @@ export function noMachineHomeLine(name: string): string {
  * command and nothing else yet, so the panes that ride a daemon have nothing to dial. */
 export function noSshDaemonLine(name: string): string {
   return `${name} is reached over ssh, which carries no daemon yet: its terminal, files and ports are not served`;
+}
+
+/** What import is refused with on a machine reached over ssh: no road lands a folder there yet, so the verb says
+ * so before the folder is read. */
+export function noSshImportLine(name: string): string {
+  return `${name} is reached over ssh, which lands no folder yet; import to a fork, or register the folder on this computer`;
 }
 
 /** The one sentence a socket a machine's requests arrive on is refused a ticket with. A ticket authenticates the

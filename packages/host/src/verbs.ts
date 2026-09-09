@@ -126,14 +126,28 @@ import {
   type TurnResult,
   type WorkspaceCreateResult,
   type WorkspaceCreatingEvent,
+  Preferences,
   WorkspaceProject,
   type WorkspaceSize,
+  homeShortened,
+  lastTargetLine,
+  noLastTargetLine,
   noProjectLine,
+  noSshImportLine,
+  noThreadTargetLine,
+  noWorkspaceForFolderLine,
   projectCountCell,
+  goldenForkName,
+  projectsInPlace,
+  registerRequest,
+  registerTakesNoConsentLine,
   shellQuote,
+  threadOpenedLine,
+  workspaceForFolder,
   workspaceProjects,
 } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
+import { gitRootOf } from "./repo-root.js";
 import { hostTokenPath, servingHost } from "./host-lock.js";
 import { colourDepth, isTTY, wrap } from "./init-layout.js";
 import { RecipeAnswer, RecipeScan, recipePrintout, scanPrintout } from "./recipe-answer.js";
@@ -319,6 +333,10 @@ type Flags = Record<string, string | boolean | string[] | undefined>;
 export interface VerbDeps {
   statePath: string;
   alsoHere?: ScanInput["alsoHere"];
+  /** The folder the caller runs in: the shell's for the command line, the client's for the tool server, which the
+   * agent starts in its own folder. What a thread opened with no workspace named is placed by. Absent where the
+   * caller has none. */
+  cwd?: string;
   /** The socket to the host: a verb's own dial, closed when it returns; a tool server's one dial across calls. */
   client(): Promise<HostClient>;
   /** The runtime over the state file in this process, for the one verb that runs with no host serving (new --local
@@ -705,7 +723,7 @@ export async function projectGoldenOf(client: HostClient, ref: string): Promise<
   const { projectGoldens } = await client.request<{ projectGoldens: ProjectGolden[] }>("projectGoldens.list");
   const byId = projectGoldens.find(g => g.snapshotId === ref);
   if (byId !== undefined) return byId;
-  const byName = projectGoldens.filter(g => g.project.name === ref).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const byName = projectGoldens.filter(g => g.projects.some(p => p.name === ref)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   if (byName[0] !== undefined) return byName[0];
   throw new Error(`no project golden named ${ref}; wsp snapshot <workspace> takes one`);
 }
@@ -718,7 +736,8 @@ export async function snapshot(client: HostClient, ref: string): Promise<Project
 
 export function projectGoldenLine(g: ProjectGolden): string {
   const version = g.version !== undefined ? `golden v${g.version}` : `golden ${g.golden}`;
-  return `project golden ${g.snapshotId}: ${version} plus ${g.project.name} as imported ${g.project.importedAt.slice(0, 10)}, taken from ${g.workspaceName}\nfork it with: wsp new <name> --from ${g.project.name}`;
+  const carried = g.projects.map(p => `${p.name} imported ${p.importedAt.slice(0, 10)}`).join(", ");
+  return `project golden ${g.snapshotId}: ${version} plus ${carried}, taken from ${g.workspaceName}\nfork it with: wsp new <name> --from ${goldenForkName(g)}`;
 }
 
 /** `size` is the --size word; absent, the workspace takes the golden's size. */
@@ -739,7 +758,7 @@ export async function create(client: HostClient, out: Out, golden: string, name:
   try {
     const { workspace, notice } = await client.request<{ workspace: WorkspaceOut; notice?: string }>("workspaces.create", { golden, name, ...chosen });
     const created: WorkspaceCreateResult = { workspace, ...(notice !== undefined ? { notice } : {}) };
-    out.emit(created, `created ${workspace.name} ${workspace.id}${notice !== undefined ? `\n${notice}` : ""}`);
+    out.emit(created, `created ${workspace.name} ${workspace.id}${projectsInPlace(workspaceProjects(workspace))}${notice !== undefined ? `\n${notice}` : ""}`);
     return created;
   } finally {
     pushed.stop();
@@ -890,6 +909,63 @@ export async function checkedStart(client: HostClient, task: string, harness: st
   } catch (e) {
     throw usageRefusal(e instanceof Error ? e.message : String(e));
   }
+}
+
+/** The person's view preferences as the host keeps them: the last project per workspace and the last target. */
+async function preferencesOf(client: HostClient): Promise<Preferences> {
+  return Preferences.parse((await client.request<{ preferences: unknown }>("preferences.get")).preferences);
+}
+
+/** Where a thread goes and what the first line says it did: the workspace named, else the one holding the project the
+ * caller's folder is a repo of, in that project. `named` is the caller's word for naming a workspace, for the refusal
+ * outside a repo; a repo no workspace holds is refused naming both roads. Nothing is woken by asking. */
+export async function threadTarget(client: HostClient, ref: string | undefined, cwd: string | undefined, named: string): Promise<{ workspace: WorkspaceOut; project?: string; opened?: (threadId: string, folder: string) => string }> {
+  if (ref !== undefined) return { workspace: await workspaceOf(client, ref) };
+  const root = cwd === undefined ? undefined : gitRootOf(cwd);
+  if (root === undefined) throw usageRefusal(noThreadTargetLine(named));
+  const held = workspaceForFolder(await workspaces(client), root, await preferencesOf(client));
+  if (held === null) throw new Error(noWorkspaceForFolderLine(root, named));
+  const { workspace, project } = held;
+  return { workspace, project: project.name, opened: (threadId, folder) => threadOpenedLine(threadId, workspace.name, homeShortened(folder, workspace.home)) };
+}
+
+/** How a folder gets onto this workspace's machine, by its kind; a kind with no road yet is refused here, before the
+ * folder is read, with the runtime's own sentence for it. */
+function importRoad(workspace: WorkspaceView): "copies" | "registers" {
+  const road = kindWords(workspaceKind(workspace)).imports;
+  if (road === null) throw new Error(noSshImportLine(workspace.name));
+  return road;
+}
+
+/** The register road as both doors take it: the folder at its own path with no plan and nothing asked, each stage's
+ * line through `tell` as the command line streams it, and what landed with the done line. */
+async function registerOnThisComputer(client: HostClient, workspace: WorkspaceView, source: string, tell: (line: string) => void = () => {}): Promise<{ imported: ProjectImportResult; done: string }> {
+  let done = "";
+  const imported = await importProject(client, workspace.id, registerRequest(source), e => {
+    if (e.stage === "done") done = e.message;
+    else if (e.stage !== "failed") tell(e.message);
+  });
+  return { imported, done };
+}
+
+/** The workspace an import with none named goes to: the one the last thread anywhere started on, said in one line
+ * through `tell`; refused before any thread has started. */
+export async function lastTarget(client: HostClient, named: string, tell: (line: string) => void): Promise<WorkspaceOut> {
+  const target = (await preferencesOf(client)).target;
+  const workspace = target === undefined ? undefined : (await workspaces(client)).find(w => w.id === target.workspace);
+  if (workspace === undefined) throw usageRefusal(noLastTargetLine(named));
+  tell(lastTargetLine(workspace.name));
+  return workspace;
+}
+
+/** The first line for a thread whose workspace was inferred: the folder it starts in is the one named outright, else
+ * the inferred project's; nothing where a workspace was named, which keeps the plain `thread <id>` line. */
+function openedLine(target: Awaited<ReturnType<typeof threadTarget>>, workspace: WorkspaceView, project: string | undefined, cwd: string | undefined): ((threadId: string) => string) | undefined {
+  if (target.opened === undefined) return undefined;
+  const folder = cwd ?? workspaceProjects(workspace).find(p => p.name === project)?.dest;
+  if (folder === undefined) return undefined;
+  const say = target.opened;
+  return threadId => say(threadId, folder);
 }
 
 /** The start that opens a new thread in a workspace, under the named agent or the runtime's default, in the folder
@@ -1125,12 +1201,15 @@ function turnStream(ctx: VerbContext): { text(t: string): void; line(l: string):
 /** The verbs' way through a turn: text, the tool calls behind it and what each answered stream to stderr as they
  * arrive, the last message is printed on stdout when the reply is complete, with --json every event of the turn up
  * to its done is printed instead; a turn that did not complete is the verb's failure, in the harness's words. */
-async function followVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, announce: boolean, picks: Picks = {}): Promise<Turn> {
+/** The first line a thread's opening prints: its id, and where it went when no workspace was named. */
+const openedThreadLine = (threadId: string, opened: ((threadId: string) => string) | undefined): string => (opened === undefined ? `thread ${threadId}` : opened(threadId));
+
+async function followVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, announce: boolean, picks: Picks = {}, opened?: (threadId: string) => string): Promise<Turn> {
   const stream = turnStream(ctx);
   const turn = await follow(client, start, "cli", {
     queued: () => ctx.io.error(WAITING),
     started: (t: Turn) => {
-      if (announce) ctx.out.emit({ type: "thread", id: t.threadId, workspaceId: t.session.workspaceId, harness: t.session.harness, startedBy: t.session.startedBy }, `thread ${t.threadId}`);
+      if (announce) ctx.out.emit({ type: "thread", id: t.threadId, workspaceId: t.session.workspaceId, harness: t.session.harness, startedBy: t.session.startedBy }, openedThreadLine(t.threadId, opened));
       if (t.outcome !== "started") ctx.io.error(JOINED[t.outcome](picks));
     },
     event: e => {
@@ -1156,10 +1235,10 @@ async function followVerb(ctx: VerbContext, client: HostClient, start: Record<st
 /** The verbs' way through a detached start: the queued and joined lines on stderr as a follow prints them, then the
  * thread's id on stdout the moment the runtime names it, and nothing of the reply, which the thread's finished line
  * carries to whoever its start named. */
-async function detachVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, picks: Picks = {}): Promise<void> {
+async function detachVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, picks: Picks = {}, opened?: (threadId: string) => string): Promise<void> {
   const turn = await startDetached(client, start, "cli", () => ctx.io.error(WAITING));
   if (turn.outcome !== "started") ctx.io.error(JOINED[turn.outcome](picks));
-  ctx.out.emit(turnView(turn), `thread ${turn.threadId}`);
+  ctx.out.emit(turnView(turn), openedThreadLine(turn.threadId, opened));
 }
 
 export type ExecExit = Extract<ExecEvent, { type: "exec.exit" }>;
@@ -1383,7 +1462,7 @@ const turnView = (turn: Turn): z.infer<typeof TurnOut> => ({
 const turnText = (out: z.infer<typeof TurnOut>): string => (out.afterCut === true ? `${AFTER_CUT_LINE}\n${out.text ?? ""}` : out.text ?? "");
 
 /** A detached start's answer on the tool door: the thread's id, as the command line's first line prints it. */
-const detachedOut = (turn: Turn): CallToolResult => asText(`thread ${turn.threadId}`, turnView(turn));
+const detachedOut = (turn: Turn, opened?: (threadId: string) => string): CallToolResult => asText(openedThreadLine(turn.threadId, opened), turnView(turn));
 
 const endView = (ended: Ended): z.infer<typeof ThreadEndOut> => {
   const reply = notifyTail(ended.result);
@@ -1422,6 +1501,7 @@ function turnOut(turn: Turn): z.infer<typeof TurnOut> {
 const PLAN_ONLY_TOOL = "nothing imported; call import again with yes true to take these defaults, or keep and cut per secret-shaped row";
 
 const WorkspaceIn = z.string().describe("the workspace's name, or its id when two share a name");
+const ThreadWorkspaceIn = z.string().optional().describe("the workspace's name, or its id when two share a name; absent, the thread goes to the workspace holding the project the client's own folder is a repo of, in that project, and the reply's first line says where it went");
 const AgentIn = z.string().optional().describe(`the agent to run in the thread, one of ${THREAD_AGENTS.join(", ")}; absent means the host's default`);
 const NotifyIn = z
   .array(z.string())
@@ -1964,40 +2044,43 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "thread new",
-    usage: 'wsp thread new --in <workspace> [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, --title, --image <path>, --detach] "<task>"',
-    about: "opens a thread with the agent, model, effort and access the app offers, in the project named or the one the app's pick would take; follows its first turn, or with --detach prints the id and returns",
+    usage: 'wsp thread new [--in <workspace>] [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, --title, --image <path>, --detach] "<task>"',
+    about: "opens a thread with the agent, model, effort and access the app offers, in the project named or the one the app's pick would take; without --in, run from inside a registered repo, on the workspace that project last ran on; follows its first turn, or with --detach prints the id and returns",
     options: { in: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, project: { type: "string" }, cwd: { type: "string" }, notify: { type: "string", multiple: true }, title: { type: "string" }, image: { type: "string", multiple: true }, detach: { type: "boolean" } },
     run: async ctx => {
       const [task] = ctx.args;
-      const within = flag(ctx.flags, "in");
-      if (within === undefined) throw usageRefusal("wsp thread new needs --in <workspace>");
       if (task === undefined || ctx.args.length !== 1) throw usageRefusal("wsp thread new takes one task");
       const client = await ctx.client();
-      const found = await workspaceOf(client, within);
+      const target = await threadTarget(client, flag(ctx.flags, "in"), ctx.cwd, "--in <workspace>");
+      const found = target.workspace;
       const harness = flag(ctx.flags, "agent");
       const picks = pickFlags(ctx.flags);
       await checkedStart(client, task, harness, picks, found.id);
-      const project = projectNamed(found, flag(ctx.flags, "project"));
+      const project = projectNamed(found, flag(ctx.flags, "project") ?? target.project);
+      const cwd = flag(ctx.flags, "cwd");
+      const opened = openedLine(target, found, project, cwd);
       const workspace = await awake(client, found, "send", line => ctx.io.error(line));
-      const opening = openingOf(workspace, task, { harness, ...picks, project, cwd: flag(ctx.flags, "cwd"), notify: await notifyOf(client, flagList(ctx.flags, "notify")), title: flag(ctx.flags, "title"), images: flagList(ctx.flags, "image") });
-      if (ctx.flags["detach"] === true) await detachVerb(ctx, client, opening);
-      else ctx.out.emit(turnView(await followVerb(ctx, client, opening, true)));
+      const opening = openingOf(workspace, task, { harness, ...picks, project, cwd, notify: await notifyOf(client, flagList(ctx.flags, "notify")), title: flag(ctx.flags, "title"), images: flagList(ctx.flags, "image") });
+      if (ctx.flags["detach"] === true) await detachVerb(ctx, client, opening, {}, opened);
+      else ctx.out.emit(turnView(await followVerb(ctx, client, opening, true, {}, opened)));
       return 0;
     },
     tool: tool({
       description: `Opens a thread in the workspace under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), in the folder cwd names, else the project named, else the project the last thread there used, else the workspace's only project, else the workspace's own folder, and follows its first turn; returns the reply text as soon as it is complete, with the thread id for send. With detach true it returns the thread id the moment the turn is started, without the reply: the road for a turn that runs for minutes or an hour. ${TURN_END_WORDS}. With notify, each turn of the thread sends one line (outcome, duration, cost, and the reply whole into a thread or its last line to the person) to every target named, so a caller need not wait here or poll. ${NOTIFY_WORDS}. ${NOTIFY_CALLER}.`,
-      input: { workspace: WorkspaceIn, task: z.string(), agent: AgentIn, ...PICK_INPUTS, project: ProjectIn, cwd: CwdIn, notify: NotifyIn, title: TitleIn, images: ImagesIn, detach: DetachIn },
+      input: { workspace: ThreadWorkspaceIn, task: z.string(), agent: AgentIn, ...PICK_INPUTS, project: ProjectIn, cwd: CwdIn, notify: NotifyIn, title: TitleIn, images: ImagesIn, detach: DetachIn },
       output: TurnOut.shape,
       call: async ({ workspace: ref, task, agent: harness, project: named, cwd: folder, notify: tell, title, images, detach, ...input }, deps) => {
         const client = await deps.client();
-        const found = await workspaceOf(client, ref);
+        const target = await threadTarget(client, ref, deps.cwd, "workspace");
+        const found = target.workspace;
         await checkedStart(client, task, harness, input, found.id);
-        const project = projectNamed(found, named);
-        const target = await awake(client, found, "send", QUIET_LINE);
-        const opening = openingOf(target, task, { harness, ...input, project, cwd: folder, notify: await notifyOf(client, tell ?? []), title, images });
-        if (detach === true) return detachedOut(await startDetached(client, opening, "agent"));
+        const project = projectNamed(found, named ?? target.project);
+        const opened = openedLine(target, found, project, folder);
+        const awoken = await awake(client, found, "send", QUIET_LINE);
+        const opening = openingOf(awoken, task, { harness, ...input, project, cwd: folder, notify: await notifyOf(client, tell ?? []), title, images });
+        if (detach === true) return detachedOut(await startDetached(client, opening, "agent"), opened);
         const out = turnOut(await follow(client, opening, "agent", QUIET_TURN));
-        return asText(turnText(out), out);
+        return asText(opened === undefined ? turnText(out) : `${opened(out.threadId)}\n${turnText(out)}`, out);
       },
     }),
   },
@@ -2180,20 +2263,26 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "import",
-    usage: "wsp import <folder> --to <workspace> [--yes] [--keep, --cut <path>] [--agents <ids>] [--replace]",
-    about: "lands a folder on the machine at its path here; the plan first, then --yes or one question",
+    usage: "wsp import <folder> [--to <workspace>] [--yes] [--keep, --cut <path>] [--agents <ids>] [--replace]",
+    about: "lands a folder on the machine at its path here; the plan first, then --yes or one question; on this computer it registers the path and copies nothing; without --to, the workspace the last thread started on",
     options: { to: { type: "string" }, yes: { type: "boolean" }, keep: { type: "string", multiple: true }, cut: { type: "string", multiple: true }, agents: { type: "string" }, replace: { type: "boolean" } },
     run: async ctx => {
       const [folder] = ctx.args;
       const to = flag(ctx.flags, "to");
-      if (to === undefined) throw usageRefusal("wsp import needs --to <workspace>");
       if (folder === undefined || ctx.args.length !== 1) throw usageRefusal("wsp import takes one folder on this computer");
       const source = resolve(folder);
       const named = agentsFlag(flag(ctx.flags, "agents"));
       const client = await ctx.client();
-      const workspace = await workspaceOf(client, to);
+      const workspace = to === undefined ? await lastTarget(client, "--to <workspace>", line => ctx.io.error(line)) : await workspaceOf(client, to);
       const refusal = actionRefusal(workspaceState({ phase: workspace.phase }), "import", workspace.gone);
       if (refusal !== null) throw new Error(refusal);
+      if (importRoad(workspace) === "registers") {
+        const meaningless = ["keep", "cut", "agents", "replace"].filter(f => ctx.flags[f] !== undefined).map(f => `--${f}`);
+        if (meaningless.length > 0) throw usageRefusal(registerTakesNoConsentLine(meaningless));
+        const { imported, done } = await registerOnThisComputer(client, workspace, source, line => ctx.out.stream(`${line}\n`));
+        ctx.out.emit({ imported }, done);
+        return 0;
+      }
       const plan = await planProject(client, source);
       const keep = flagList(ctx.flags, "keep");
       const cut = flagList(ctx.flags, "cut");
@@ -2223,31 +2312,38 @@ export const VERBS: readonly Verb[] = [
       description:
         "Lands a project folder from this computer on the workspace's machine at the same path, as the app's import dialog does, with the sessions of the agents named keyed to it there. Called without yes, keep or cut it uploads nothing and answers with the plan: the repository, files and size, the caches left behind, each secret-shaped file with its default (cut, unless a rewrite that removes the credential is offered) and each agent with sessions for the folder; put those rows to the person, then call again with yes true for the defaults or keep and cut per row. Refused in one line while the workspace is not running.",
       input: {
-        workspace: WorkspaceIn,
-        folder: z.string().describe("the folder on this computer, absolute; it lands at this path on the machine"),
+        workspace: WorkspaceIn.optional().describe("the workspace's name, or its id when two share a name; absent, the workspace the last thread anywhere started on, named in the reply's first line"),
+        folder: z.string().describe("the folder on this computer, absolute; it lands at this path on the machine, or on this computer's own workspace is registered at its path with nothing copied and no plan to answer"),
         yes: z.boolean().optional().describe("true imports with the plan's defaults; absent or false answers with the plan and imports nothing unless keep or cut is given"),
         keep: z.array(z.string()).optional().describe("secret-shaped paths from the plan, relative to the folder, that travel (as they are, or rewritten when the plan offers it)"),
         cut: z.array(z.string()).optional().describe("secret-shaped paths from the plan that stay behind, for rows the plan would carry rewritten"),
         agents: z.array(z.string()).optional().describe("catalog ids of the agents whose sessions travel, each with sessions in the plan; absent means every agent the plan lists with readable sessions"),
         replace: z.boolean().optional().describe("remove what is at the path on the machine first; without it an existing folder there is refused"),
       },
-      output: { plan: ProjectPlan, imported: ProjectImportResult.optional() },
+      output: { plan: ProjectPlan.optional(), imported: ProjectImportResult.optional() },
       stream: ["plan"],
       call: async ({ workspace: ref, folder, yes, keep = [], cut = [], agents, replace }, deps) => {
         const client = await deps.client();
-        const target = await workspaceOf(client, ref);
+        let said = "";
+        const target = ref === undefined ? await lastTarget(client, "workspace", line => (said = `${line}\n`)) : await workspaceOf(client, ref);
         const refusal = actionRefusal(workspaceState({ phase: target.phase }), "import", target.gone);
         if (refusal !== null) throw new Error(refusal);
+        if (importRoad(target) === "registers") {
+          const meaningless = Object.entries({ keep: keep.length > 0, cut: cut.length > 0, agents: agents !== undefined, replace: replace === true }).flatMap(([f, on]) => (on ? [f] : []));
+          if (meaningless.length > 0) throw usageRefusal(registerTakesNoConsentLine(meaningless));
+          const { imported, done } = await registerOnThisComputer(client, target, folder);
+          return asText(`${said}${done}`, { imported });
+        }
+        let done = "";
         const plan = await planProject(client, folder);
         const ticked = secretsChosen(plan, keep, cut);
         const chosen = agentsChosen(plan, agents);
         const lines = planLines(plan, ticked, chosen).join("\n");
-        if (!importConsented({ yes, keep, cut })) return asText(`${lines}\n${PLAN_ONLY_TOOL}`, { plan });
-        let done = "";
+        if (!importConsented({ yes, keep, cut })) return asText(`${said}${lines}\n${PLAN_ONLY_TOOL}`, { plan });
         const imported = await importProject(client, target.id, importRequest(plan, folder, ticked, chosen, replace), e => {
           if (e.stage === "done") done = e.message;
         });
-        return asText(done, { plan, imported });
+        return asText(`${said}${done}`, { plan, imported });
       },
     }),
   },
@@ -2395,7 +2491,7 @@ export function jsonAsked(argv: ReadonlyArray<string>): boolean {
   return argv.slice(0, cut === -1 ? argv.length : cut).includes("--json");
 }
 
-export async function runVerb(verb: CliVerb, argv: ReadonlyArray<string>, io: CliIO, statePathOf: (flag?: string) => string, deps: Pick<VerbDeps, "alsoHere" | "runtime"> = {}): Promise<number> {
+export async function runVerb(verb: CliVerb, argv: ReadonlyArray<string>, io: CliIO, statePathOf: (flag?: string) => string, deps: Pick<VerbDeps, "alsoHere" | "cwd" | "runtime"> = {}): Promise<number> {
   let flags: Flags;
   let args: string[];
   try {
@@ -2419,6 +2515,7 @@ export async function runVerb(verb: CliVerb, argv: ReadonlyArray<string>, io: Cl
     out: formatter(io, flags["json"] === true),
     statePath,
     ...(deps.alsoHere !== undefined ? { alsoHere: deps.alsoHere } : {}),
+    ...(deps.cwd !== undefined ? { cwd: deps.cwd } : {}),
     ...(deps.runtime !== undefined ? { runtime: deps.runtime } : {}),
     client: async () => (client ??= await dialHost(statePath)),
   };

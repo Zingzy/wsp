@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { AgentHere, AgentSessions, InstallReport } from "@wsp/host";
 import type { ContextMenuItem, DesktopBridge, LocalFontFace, ShellChord, ThemePreference } from "@wsp/protocol";
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { htmlClassFrom } from "./html-class.js";
 
 /** What the first launch's page can ask the shell, answered only while that page is up. */
@@ -23,6 +23,7 @@ const bridge: DesktopBridge & OnboardingBridge = {
   finish: () => ipcRenderer.invoke("onboarding:finish"),
   localFonts: (family: string): Promise<LocalFontFace[]> => ipcRenderer.invoke("fonts:local", family),
   pickFolder: (): Promise<string | undefined> => ipcRenderer.invoke("folder:pick"),
+  droppedPath: (file: File): string => webUtils.getPathForFile(file),
   contextMenu: (items: ContextMenuItem[]): Promise<string | null> => ipcRenderer.invoke("menu:context", items),
   capturePreview: (workspaceId: string): Promise<void> => ipcRenderer.invoke("preview:capture", workspaceId),
   workspacePreview: (workspaceId: string): Promise<string | undefined> => ipcRenderer.invoke("preview:read", workspaceId),
