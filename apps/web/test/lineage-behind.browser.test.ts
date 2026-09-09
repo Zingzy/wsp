@@ -9,6 +9,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { IMAGE_MOVE_CONFIRM, imageKeptLine } from "@wsp/protocol";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
 import { startVite, type ViteChild } from "./vite-child";
 
@@ -62,5 +63,32 @@ describe.skipIf(renderSkipped !== undefined)("the offer to a workspace behind th
     }
     await page!.locator("[data-testid=machine-tab]").screenshot({ path: join(SHOTS, `lineage-behind-${theme}.png`) });
     expect(existsSync(join(SHOTS, `lineage-behind-${theme}.png`))).toBe(true);
+  }, 30_000);
+
+  it.each(["dark", "light"] as const)("in the %s theme the move asks first, in one sentence about the files, and the note it leaves names what stayed this workspace's without leaving the tab", async theme => {
+    await page!.goto(`${base}?theme=${theme}`);
+    await page!.waitForSelector("[data-k=v11]");
+    await page!.getByRole("button", { name: "update api to v12" }).click();
+    const dialog = page!.getByRole("alertdialog");
+    await dialog.waitFor();
+    const asked = (await dialog.textContent()) ?? "";
+    expect(asked).toContain("Move api to v12?");
+    expect(asked).toContain(IMAGE_MOVE_CONFIRM);
+    // The popup fades in; the shot is taken once it is fully there, not while it is arriving.
+    await page!.waitForFunction(() => {
+      const el = document.querySelector("[role=alertdialog]");
+      return el !== null && getComputedStyle(el).opacity === "1";
+    });
+    await page!.screenshot({ path: join(SHOTS, `image-move-confirm-${theme}.png`) });
+    expect(existsSync(join(SHOTS, `image-move-confirm-${theme}.png`))).toBe(true);
+
+    await page!.getByRole("button", { name: "Move" }).click();
+    const kept = imageKeptLine([".zshrc"]);
+    await page!.waitForFunction(text => document.querySelector("[data-k=lineage-note]")?.textContent?.includes(text) === true, kept);
+    const note = (await page!.locator("[data-k=lineage-note]").boundingBox())!;
+    const tab = (await page!.locator("[data-testid=machine-tab]").boundingBox())!;
+    expect(note.x + note.width).toBeLessThanOrEqual(tab.x + tab.width);
+    await page!.locator("[data-testid=machine-tab]").screenshot({ path: join(SHOTS, `image-move-kept-${theme}.png`) });
+    expect(existsSync(join(SHOTS, `image-move-kept-${theme}.png`))).toBe(true);
   }, 30_000);
 });

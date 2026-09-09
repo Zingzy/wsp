@@ -14,7 +14,7 @@ import { CLIENT_CANNOT_REBUILD } from "../../actions/format.js";
 import { actionById, resolveActions, rowLabelOf } from "../../actions/registry.js";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { workspaceActions, workspaceTarget } from "../../actions/workspaceActions.js";
-import { FREE_WORD, LINEAGE_MARKS, LOOK_PARTS, NOT_ON_THIS_KIND, behindGoldenLine, biggerSizeLine, fmtBytes, fmtRate, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, sizeWord, workspaceKind, workspaceProjects, workspaceState, workspaceStateOf, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, IMAGE_MOVE_CONFIRM, LINEAGE_MARKS, LOOK_PARTS, NOT_ON_THIS_KIND, behindGoldenLine, biggerSizeLine, fmtBytes, fmtRate, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageKeptLine, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, sizeWord, workspaceKind, workspaceProjects, workspaceState, workspaceStateOf, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { isDesktopShell } from "../../lib/desktopShell.js";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, useOutOfMemoryReading, useWorkspaceLive } from "../../machine/live.js";
@@ -558,6 +558,8 @@ function GoldenLineage({ workspace, projects }: { workspace: WorkspaceView; proj
   const [lineage, setLineage] = useState<SnapshotLineage | null>(null);
   /** Version whose rollback awaits the confirm dialog. */
   const [armed, setArmed] = useState<GoldenVersion | null>(null);
+  /** Version this workspace's move onto the head awaits the confirm dialog for. */
+  const [moving, setMoving] = useState<number | null>(null);
   /** The action in flight, so the buttons wait for each other and the note names it. */
   const [busy, setBusy] = useState<"rollback" | "image" | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -604,10 +606,12 @@ function GoldenLineage({ workspace, projects }: { workspace: WorkspaceView; proj
 
   const updateImage = async (to: number): Promise<void> => {
     if (!api?.updateImage) return;
+    setMoving(null);
     setBusy("image");
     try {
-      applyWorkspace(await api.updateImage(workspace.id));
-      setNote(`${workspace.name} is on v${to}. Its files came across; anything running in it stopped with the old machine.`);
+      const moved = await api.updateImage(workspace.id);
+      applyWorkspace(moved.workspace);
+      setNote(`${workspace.name} is on v${to}: ${imageKeptLine(moved.kept, moved.fallback)}.`);
     } catch (e) {
       setNote(errorText(e));
     } finally {
@@ -681,7 +685,7 @@ function GoldenLineage({ workspace, projects }: { workspace: WorkspaceView; proj
                   // golden's head for every fork after it. Neither stands in for the other.
                   <>
                     {fork && behind !== null && offered && (
-                      <Button size="xs" variant="outline" disabled={busy !== null || moveRefusal !== null} aria-label={`update ${workspace.name} to v${behind}`} onClick={() => void updateImage(behind)}>
+                      <Button size="xs" variant="outline" disabled={busy !== null || moveRefusal !== null} aria-label={`update ${workspace.name} to v${behind}`} onClick={() => setMoving(behind)}>
                         Update
                       </Button>
                     )}
@@ -700,6 +704,18 @@ function GoldenLineage({ workspace, projects }: { workspace: WorkspaceView; proj
       <p className="min-h-4 text-[11px] text-muted-foreground" data-k="lineage-note">
         {busy === "rollback" ? "Rolling back…" : busy === "image" ? "Moving to the newer image…" : (note ?? (behind !== null && moveRefusal !== null ? moveRefusal : null))}
       </p>
+      <AlertDialog open={moving !== null} onOpenChange={open => !open && setMoving(null)}>
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Move {workspace.name} to v{moving}?</AlertDialogTitle>
+            <AlertDialogDescription>{IMAGE_MOVE_CONFIRM}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <Button onClick={() => moving !== null && void updateImage(moving)}>Move</Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
       <AlertDialog open={armed !== null} onOpenChange={open => !open && setArmed(null)}>
         <AlertDialogPopup>
           <AlertDialogHeader>

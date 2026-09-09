@@ -8,7 +8,7 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { effortsFor, EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { effortsFor, EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -377,6 +377,40 @@ describe("wsp verbs over the host", () => {
     const extra = await run("rebuild", "alpha", "beta");
     expect(extra.code).toBe(EXIT_CODES.usage);
     expect(extra.io.errors).toEqual(["wsp rebuild: wsp rebuild takes one workspace"]);
+  });
+
+  it("image move puts the workspace on the newest version, says up front what moves, and names the files of the image's own it kept", async () => {
+    const sha = (c: string): string => c.repeat(64);
+    const v1 = { ...head(SEALED_GOLDEN), owned: [{ path: ".zshrc", sha256: sha("1") }, { path: ".gitconfig", sha256: sha("2") }] };
+    await store.put("goldens", "default", { head: 1, versions: [v1] });
+    await run("new", "alpha");
+    const [alpha] = await rt.workspaces.list();
+    // The fork rewrote its own gitconfig and left the image's zshrc as it was.
+    backend.execImpl = (m, cmd) =>
+      cmd.includes("xargs -0 -r sha256sum") ? { exitCode: 0, stdout: `${sha("1")}  .zshrc\n${sha("f")}  .gitconfig\n`, stderr: "" } : guestAnswer(cmd);
+    await store.put("goldens", "default", {
+      head: 2,
+      versions: [v1, { ...v1, version: 2, snapshotId: "snap_gold2", owned: [{ path: ".zshrc", sha256: sha("9") }, { path: ".gitconfig", sha256: sha("2") }] }],
+    });
+
+    const moved = await run("image", "move", "alpha");
+    expect(moved.io.errors).toEqual([IMAGE_MOVE_CONFIRM]);
+    expect(moved.code).toBe(0);
+    // Said once the workspace resolved, so a name nothing here holds hears the refusal alone.
+    expect((await run("image", "move", "nope")).io.errors).toEqual(["wsp image move: no workspace nope"]);
+    const after = await rt.workspaces.get(alpha!.id);
+    expect(after).toMatchObject({ id: alpha!.id, name: "alpha", phase: "running", golden: "snap_gold2" });
+    expect(moved.io.lines).toEqual([`alpha running on ${after.machineId}; ${imageKeptLine([".gitconfig"])}`]);
+
+    const asJson = await run("image", "move", "alpha", "--json");
+    expect(json(asJson.io)).toEqual([{ workspace: expect.objectContaining({ golden: "snap_gold2" }), kept: [] }]);
+    // Nothing to move to now, and the line says that rather than claiming the image's files came across.
+    const again = await run("image", "move", "alpha");
+    expect(again.code).toBe(0);
+    expect(again.io.lines).toEqual([`alpha running on ${after.machineId}; ${IMAGE_ALREADY_NEWEST}`]);
+    const extra = await run("image", "move", "alpha", "beta");
+    expect(extra.code).toBe(EXIT_CODES.usage);
+    expect(extra.io.errors.at(-1)).toBe("wsp image move: wsp image move takes one workspace");
   });
 
   it("fork's help says it makes a new machine from the source's golden version, in wsp --help and wsp fork --help", async () => {

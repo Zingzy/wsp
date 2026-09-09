@@ -6295,8 +6295,8 @@ describe("a workspace behind the golden's head", () => {
     rt.events.on("*", e => events.push(e));
     const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
     const moved = await rt.workspaces.updateImage(ws.id);
-    expect(moved.golden).toBe("snap_golden-v2");
-    expect(moved.machineId).toBe("m2");
+    expect(moved.workspace.golden).toBe("snap_golden-v2");
+    expect(moved.workspace.machineId).toBe("m2");
     expect(backend.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([["snap_golden-v1", true], ["snap_golden-v2", false]]);
     expect(await store.get("workspaces", ws.id)).toMatchObject({ golden: "snap_golden-v2", machineId: "m2" });
     expect(events.filter(e => e.type === "workspace.upgraded")).toMatchObject([{ workspaceId: ws.id, machineId: "m2" }]);
@@ -6307,7 +6307,7 @@ describe("a workspace behind the golden's head", () => {
   it("one already on the head is handed back untouched: no machine is replaced", async () => {
     const { backend, rt } = await seeded();
     const ws = await rt.workspaces.create({ golden: "snap_golden-v2", name: "api" });
-    expect(await rt.workspaces.updateImage(ws.id)).toMatchObject({ golden: "snap_golden-v2", machineId: "m1" });
+    expect(await rt.workspaces.updateImage(ws.id)).toMatchObject({ workspace: { golden: "snap_golden-v2", machineId: "m1" }, kept: [] });
     expect(backend.machines).toHaveLength(1);
     expect(backend.machines[0]!.killed).toBe(false);
   });
@@ -6378,5 +6378,107 @@ describe("a workspace behind the golden's head", () => {
     const { rt } = await seeded();
     const ws = await rt.workspaces.create({ golden: "snap_elsewhere", name: "api" });
     await expect(rt.workspaces.updateImage(ws.id)).rejects.toThrow("api's image is not a version of any golden this host knows");
+  });
+});
+
+describe("what a move onto a newer image does with the files the image itself wrote", () => {
+  const sha = (c: string): string => c.repeat(64);
+  /** What the fork's home holds at the top level, as the vault enumerates it. */
+  const HOME = [".zshrc", ".gitconfig", ".claude", "proj"];
+  const V1 = [
+    { path: ".zshrc", sha256: sha("1") },
+    { path: ".gitconfig", sha256: sha("2") },
+    { path: ".claude/settings.json", sha256: sha("3") },
+    // Rewritten by the tool as it runs, so its bytes on the fork say nothing about a person.
+    { path: ".claude.json", sha256: sha("4"), volatile: true },
+  ];
+  const V2 = [
+    { path: ".zshrc", sha256: sha("9") },
+    { path: ".gitconfig", sha256: sha("2") },
+    { path: ".claude/settings.json", sha256: sha("8") },
+    { path: ".config/gh/hosts.yml", sha256: sha("7") },
+  ];
+  /** The fork left .zshrc and the agent's settings as v1 wrote them and rewrote its gitconfig. */
+  const ON_FORK: Record<string, string> = { ".zshrc": sha("1"), ".gitconfig": sha("f"), ".claude/settings.json": sha("3") };
+
+  const version = (n: number, owned?: { path: string; sha256: string }[]): Record<string, unknown> => ({
+    version: n,
+    snapshotId: `snap_golden-v${n}`,
+    baseTemplate: "base",
+    setupSha: `s${n}`,
+    createdAt: `2026-09-0${n}T00:00:00.000Z`,
+    smoke: { cmd: "true", exitCode: 0 },
+    ...(owned !== undefined ? { owned } : {}),
+  });
+
+  const seeded = async (versions: Record<string, unknown>[]) => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    await store.put("goldens", "default", { head: 2, versions });
+    backend.execImpl = (_m, cmd) => {
+      if (cmd.startsWith("ls -A /root")) return { exitCode: 0, stdout: `${HOME.join("\n")}\n`, stderr: "" };
+      if (cmd.includes("sha256sum")) return { exitCode: 0, stdout: `${Object.entries(ON_FORK).map(([p, h]) => `${h}  ${p}`).join("\n")}\n`, stderr: "" };
+      return { exitCode: 0, stdout: cmd.includes("echo WSP_CTX") ? "WSP_CTX\nWSP_CTX_END\n" : "", stderr: "" };
+    };
+    return { backend, store, rt: createRuntime({ backend, store, adapters: {} }) };
+  };
+  const tarScript = (m: StubMachine): string => m.runLog.find(r => r.includes("tar czf"))!;
+  /** The read of the fork's own copies, told from the hash the vault upload checks itself with. */
+  const READ = "xargs -0 -r sha256sum";
+
+  it("the files it never touched are left to the new image, its own edits travel and are named, and a directory holding one of them travels as its contents", async () => {
+    const { backend, rt } = await seeded([version(1, V1), version(2, V2)]);
+    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    const moved = await rt.workspaces.updateImage(ws.id);
+    expect(moved.kept).toEqual([".gitconfig"]);
+    expect(moved.fallback).toBeUndefined();
+    expect(moved.workspace.golden).toBe("snap_golden-v2");
+    const script = tarScript(backend.machines[0]!);
+    // Dropped: the two the fork left as v1 wrote them, and the path only v2 writes.
+    expect(script).toContain("-path 'root/.zshrc'");
+    expect(script).toContain("-path 'root/.claude/settings.json'");
+    expect(script).toContain("-path 'root/.config/gh/hosts.yml'");
+    expect(script).not.toContain("-path 'root/.gitconfig'");
+    // .claude and .config hold a dropped path, so their own entries stay out of the archive and their contents travel.
+    expect(script).toContain("printf '%s\\0' 'root/.gitconfig' 'root/proj' >");
+    expect(script).toContain("-o \\( -path 'root/.claude' \\) -o -print0");
+  });
+
+  it("a version sealed before the manifest existed falls back: nothing is read off the fork, nothing is dropped, and the result says so", async () => {
+    const { backend, rt } = await seeded([version(1), version(2, V2)]);
+    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    const moved = await rt.workspaces.updateImage(ws.id);
+    expect(moved).toMatchObject({ kept: [], fallback: true });
+    expect(backend.machines[0]!.execLog.some(c => c.includes(READ))).toBe(false);
+    expect(tarScript(backend.machines[0]!)).toContain("-C '/' 'root/.zshrc' 'root/.gitconfig' 'root/.claude' 'root/proj'");
+  });
+
+  it("a fork that changed nothing of the image's keeps nothing and every one of those files comes from the new image", async () => {
+    const { backend, rt } = await seeded([version(1, V1.map(f => ({ ...f, sha256: ON_FORK[f.path] ?? f.sha256 }))), version(2, V2)]);
+    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    expect((await rt.workspaces.updateImage(ws.id)).kept).toEqual([]);
+    const script = tarScript(backend.machines[0]!);
+    for (const path of [".zshrc", ".gitconfig", ".claude/settings.json"]) expect(script).toContain(`-path 'root/${path}'`);
+    expect(script).toContain("printf '%s\\0' 'root/proj' >");
+  });
+
+  it("a volatile file is never read off the fork and never named: its bytes move on their own, so the line stays the person's own edits", async () => {
+    const { backend, rt } = await seeded([version(1, V1), version(2, V2)]);
+    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    expect((await rt.workspaces.updateImage(ws.id)).kept).toEqual([".gitconfig"]);
+    const read = backend.machines[0]!.execLog.find(c => c.includes(READ))!;
+    expect(read).not.toContain(".claude.json");
+    // It is not dropped either: the fork's own copy is the one that travels.
+    expect(tarScript(backend.machines[0]!)).not.toContain("-path 'root/.claude.json'");
+  });
+
+  it("the comparison is read off the machine before it is killed, so the fork's own copies are what the archive judges", async () => {
+    const { backend, rt } = await seeded([version(1, V1), version(2, V2)]);
+    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    await rt.workspaces.updateImage(ws.id);
+    const log = backend.machines[0]!.execLog;
+    expect(log.findIndex(c => c.includes(READ))).toBeGreaterThan(-1);
+    expect(log.findIndex(c => c.includes(READ))).toBeLessThan(log.findIndex(c => c.includes("tar czf")));
+    expect(backend.machines[0]!.killed).toBe(true);
   });
 });

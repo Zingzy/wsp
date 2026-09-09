@@ -292,6 +292,13 @@ export type WorkspaceOut = z.infer<typeof WorkspaceOut>;
 export const WorkspaceListing = WorkspaceStatus.pick({ ...WORKSPACE_OUT, machineState: true, size: true, rateUsdPerHour: true, reason: true, idleAt: true }).extend({ reach: ReachView });
 export type WorkspaceListing = z.infer<typeof WorkspaceListing>;
 
+/** What moving a workspace onto a newer image came to: the workspace as it now stands, and which of the files the
+ * image's own recipe writes into home this workspace had changed, so its copies travelled instead of the new
+ * image's. `fallback` is the image it stood on listing no files of its own, which is every image sealed before they
+ * were recorded: nothing was left to the new image and the whole home came across. */
+export const UpgradeResult = z.object({ workspace: WorkspaceView, kept: z.array(z.string()), fallback: z.boolean().optional() });
+export type UpgradeResult = z.infer<typeof UpgradeResult>;
+
 export const SessionStatus = z.enum(["running", "completed", "interrupted", "failed"]);
 export type SessionStatus = z.infer<typeof SessionStatus>;
 
@@ -1292,6 +1299,18 @@ export type GoldenBaseTool = z.infer<typeof GoldenBaseTool>;
 export const GoldenRetired = z.object({ id: z.string(), name: z.string() });
 export type GoldenRetired = z.infer<typeof GoldenRetired>;
 
+/** One file the recipe wrote into the image's home: where it sits under the guest home and the sha256 of the bytes
+ * the builder had when the version sealed. The upgrade reads it to tell a file a fork never touched, whose new copy
+ * comes with the new image, from one the fork changed, which travels. */
+export const RecipeOwnedFile = z.object({
+  path: z.string(),
+  sha256: z.string(),
+  /** The recipe marks this row volatile: a tool rewrites it as it runs, or the machine renders it. Its bytes differ
+   * on any fork that has run anything, so an upgrade carries the fork's copy and never names it as a person's edit. */
+  volatile: z.boolean().optional(),
+});
+export type RecipeOwnedFile = z.infer<typeof RecipeOwnedFile>;
+
 /** One sealed image. `kind` is the machine kind the snapshot was taken from and
  * therefore restores as; entries sealed before kind was recorded were all
  * sandboxes, so readers treat a missing kind as sandbox. */
@@ -1334,6 +1353,10 @@ export const GoldenVersion = z.object({
   /** Every row on this version's image that its recipe no longer asks for, carried from the version before it.
    * Absent when the recipe asks for everything the image carries. */
   retired: z.array(GoldenRetired).optional(),
+  /** Every file this version's recipe wrote into the guest home, hashed on the builder at seal. Absent on a version
+   * sealed before the manifest existed and on one built from no recipe; a fork of such a version upgrades under the
+   * old rule, its whole home landing over the new image. */
+  owned: z.array(RecipeOwnedFile).optional(),
 });
 export type GoldenVersion = z.infer<typeof GoldenVersion>;
 

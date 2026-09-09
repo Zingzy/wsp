@@ -250,9 +250,11 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.upgrade(msg.workspaceId, spec, origin)) });
               return;
             }
-            case "workspaces.updateImage":
-              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.updateImage(msg.workspaceId, origin)) });
+            case "workspaces.updateImage": {
+              const moved = await rt.workspaces.updateImage(msg.workspaceId, origin);
+              send({ id: msg.id, ok: true, workspace: handed(moved.workspace), kept: moved.kept, ...(moved.fallback === true ? { fallback: true } : {}) });
               return;
+            }
             case "workspaces.rename":
               send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.rename(msg.workspaceId, msg.name, origin)) });
               return;
