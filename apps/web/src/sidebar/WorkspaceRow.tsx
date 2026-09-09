@@ -3,8 +3,10 @@
 // row has the same shape and height. Line one: the kind's glyph in the lead,
 // the name, and at the right edge a slot as wide as two glyphs holding the
 // state's word in muted mono while the state is not running, empty while it
-// is; the glyph dims while the machine is paused, and no hue changes with the
-// state. Line two: what the machine is, in words. Line three: what it cost
+// is; the glyph is the one thing in the row whose hue says the state: the
+// app's success green while the machine runs, muted otherwise and dimmed while
+// paused, by the rule in workspaceRows.ts, in a box that never moves. Line
+// two: what the machine is, its size in the kind's words. Line three: what it cost
 // today, free for a machine wsp does not pay for; the one sentence a person may
 // be waiting on takes that line while it lasts. The row's actions, the collapse
 // chevron and new thread on a live row, forget and rebuild on a dead one, show
@@ -29,7 +31,7 @@ import { cn } from "../lib/utils.js";
 import { workspaceKindGlyph } from "../workspaceKindGlyph.js";
 import { RowNameInput } from "./RowNameInput.js";
 import { ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, THREE_LINE_ROW_CLASS, workspaceRowId } from "./rowGrammar.js";
-import { NEW_THREAD_TITLE, leadDimClass, machineLine, metaSentences, stateSlotWord, workspaceMetaLine } from "./workspaceRows.js";
+import { NEW_THREAD_TITLE, glyphStateClass, machineLine, metaSentences, stateSlotWord, workspaceMetaLine } from "./workspaceRows.js";
 
 /** The glyphs sit on line one inside the state slot, the inner one and the one at the row's inset; the kit's own place is the row's middle and edge. */
 const GLYPH_CLASS = "peer-data-[size=lg]/menu-button:top-1 right-2";
@@ -37,7 +39,7 @@ const INNER_GLYPH_CLASS = cn(GLYPH_CLASS, "right-7");
 /** The row's text runs to the row's own inset; the glyphs land in the state slot on hover. */
 const ROW_CLASS = "group-has-data-[sidebar=menu-action]/menu-item:pe-2";
 const STATE_SLOT_CLASS = "min-w-11 shrink-0 text-right transition-opacity group-hover/menu-item:opacity-0 group-focus-within/menu-item:opacity-0";
-/** The kind's glyph reads at the weight of the muted meta beside it, and half that while the machine is paused. */
+/** The kind's glyph reads at the weight of the muted meta beside it until the state's own class takes the ink over. */
 const LEAD_GLYPH_CLASS = "text-muted-foreground/60";
 
 /** What a drop on this row does, in the kind's words, and the drop itself. */
@@ -139,7 +141,7 @@ export function WorkspaceRow({
         {...(renaming ? {} : { onClick: onSelect })}
       >
         <span aria-hidden className={ROW_LEAD_CLASS} data-workspace-lead>
-          <KindGlyph className={cn("size-3.5", LEAD_GLYPH_CLASS, leadDimClass(project))} />
+          <KindGlyph className={cn("size-3.5", LEAD_GLYPH_CLASS, glyphStateClass(project))} />
         </span>
         <span className="flex min-w-0 flex-1 flex-col gap-px leading-tight">
           <span className="flex items-center gap-2">

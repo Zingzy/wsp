@@ -16,7 +16,7 @@ import { statusOf } from "./workspace-status.js";
 import { onNewThreadRequest, requestProjectTrip, requestRenameWorkspace } from "../src/shell/shellRequests.js";
 import { useSpaceTheme } from "../src/sidebar/sidebarMode.js";
 import { SWIPE_GAP_MS } from "../src/sidebar/spaceSwipe.js";
-import { leadDimClass } from "../src/sidebar/workspaceRows.js";
+import { glyphStateClass, leadDimClass } from "../src/sidebar/workspaceRows.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 
 // The triggers keep their elements, and no popup mounts: this file focuses and
@@ -523,32 +523,48 @@ describe("rows from the fixture wire", () => {
     await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("$0.29 today · $0.110/hr · active"));
   });
 
-  it("every row leads with its kind's glyph and no state dot: the laptop for this computer, the cloud for a fork; line two says what the machine is, line three what it costs, and the state is a word on the right", async () => {
+  it("every row leads with its kind's glyph and no state dot: the laptop for this computer, the cloud for a fork, green while the machine runs and muted otherwise; line two says what the machine is, line three what it costs, and the state is a word on the right", async () => {
     const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
-    await mount(fakeApi([API, WEB, MAC], [status(API, { idleAt: iso(14.5 * 60_000) }), status(WEB), { ...status(MAC), kind: "local", rateUsdPerHour: 0 }]), "api");
+    const OLD = view("ws_c", "old", "gone");
+    await mount(fakeApi([API, WEB, MAC, OLD], [status(API, { idleAt: iso(14.5 * 60_000) }), status(WEB), { ...status(MAC), kind: "local", size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }, status(OLD, { machineState: "gone", reach: { state: "gone" } })]), "api");
     await waitFor(() => expect(rowOf("zingzy-mac")).toBeDefined());
+    await waitFor(() => expect(rowOf("old")).toBeDefined());
     const lead = (row: HTMLElement) => row.querySelector<HTMLElement>("[data-workspace-lead]")!;
     const glyphClass = (row: HTMLElement) => lead(row).querySelector("svg")!.getAttribute("class") ?? "";
+    const glyphClasses = (row: HTMLElement) => glyphClass(row).split(" ");
     expect(glyphClass(rowOf("zingzy-mac"))).toContain("lucide-laptop");
     expect(glyphClass(rowOf("api"))).toContain("lucide-cloud");
     expect(glyphClass(rowOf("web"))).toContain("lucide-cloud");
-    for (const name of ["zingzy-mac", "api", "web"]) {
+    for (const name of ["zingzy-mac", "api", "web", "old"]) {
       expect(lead(rowOf(name)).querySelector(".rounded-full")).toBeNull();
-      // One ink for every glyph, no hue with the state; the paused one dims and nothing else about it changes.
-      expect(glyphClass(rowOf(name))).toContain("text-muted-foreground/60");
-      expect(glyphClass(rowOf(name))).not.toMatch(/success|destructive|warning|info/);
+      expect(glyphClass(rowOf(name))).not.toMatch(/destructive|warning|info/);
     }
-    expect(glyphClass(rowOf("web"))).toContain("opacity-50");
-    expect(glyphClass(rowOf("api"))).not.toContain("opacity-50");
+    // The glyph's hue is the machine's state and only that: the success green while it runs, on a fork and on this
+    // computer alike, in place of the muted ink; paused dims the muted ink to half; gone keeps it whole. One rule.
+    for (const name of ["api", "zingzy-mac"]) {
+      expect(glyphClasses(rowOf(name))).toContain(glyphStateClass({ state: "running" }));
+      expect(glyphClasses(rowOf(name))).not.toContain("text-muted-foreground/60");
+      expect(glyphClasses(rowOf(name))).not.toContain("opacity-50");
+    }
+    for (const name of ["web", "old"]) {
+      expect(glyphClasses(rowOf(name))).toContain("text-muted-foreground/60");
+      expect(glyphClasses(rowOf(name))).not.toContain(glyphStateClass({ state: "running" }));
+    }
+    expect(glyphClasses(rowOf("web"))).toContain("opacity-50");
+    expect(glyphClasses(rowOf("old"))).not.toContain("opacity-50");
+    // The class the glyph wears is the only thing that changes with the state: the box it sits in is one for every row.
+    const glyphBox = (row: HTMLElement) => glyphClasses(row).filter(c => /^(size-|mt-)/.test(c)).sort();
+    for (const name of ["zingzy-mac", "web", "old"]) expect(glyphBox(rowOf(name))).toEqual(glyphBox(rowOf("api")));
     const machineOf = (row: HTMLElement) => row.querySelector<HTMLElement>("[data-workspace-machine]")!;
-    expect(machineOf(rowOf("zingzy-mac")).textContent).toBe("this computer");
+    // This computer's second line is its cores and memory, in the grammar a fork's row reads its size in.
+    expect(machineOf(rowOf("zingzy-mac")).textContent).toBe("10 cores · 16 GB");
     expect(machineOf(rowOf("api")).textContent).toBe("2 vCPU · 4 GB");
     expect(metaOf(rowOf("zingzy-mac")).textContent).toBe(FREE_WORD);
     expect(stateSlot(rowOf("zingzy-mac")).textContent).toBe("");
     // The cloud rows beside it: the spend, the countdown and the paused word all read in their own slots.
     expect(metaOf(rowOf("api")).textContent).toBe("$0.00 today · $0.110/hr · naps in 14m");
     expect(stateSlot(rowOf("web")).textContent).toBe("Paused");
-    for (const name of ["zingzy-mac", "api", "web"]) {
+    for (const name of ["zingzy-mac", "api", "web", "old"]) {
       expect(machineOf(rowOf(name)).className).toContain("font-mono");
       expect(machineOf(rowOf(name)).getAttribute("title")).toBe(machineOf(rowOf(name)).textContent);
     }
@@ -1221,7 +1237,7 @@ describe("a workspace's own theme and glyph", () => {
     return api;
   }
 
-  it("the space bar is one icon per workspace and a plus: the kind's glyph by default, the picked icon where one is, the current one in the theme's ink, the others muted, a paused one dimmed, and no name on any of them", async () => {
+  it("the space bar is one icon per workspace and a plus: the kind's glyph by default, the picked icon where one is, the current one in the theme's ink, the others muted, a paused one dimmed, no state colour on any glyph, and no name on any of them", async () => {
     await mountSpaces(fakeApi(all(), [status(THEMED), status(PLAIN), { ...status(MAC), kind: "local", size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }], threads()));
     await waitFor(() => expect(icons()).toHaveLength(3));
     // The sidebar's own order: the running ones first, so this computer sits before the paused fork.
@@ -1235,8 +1251,14 @@ describe("a workspace's own theme and glyph", () => {
     expect(api.className).toContain("--space-tint");
     expect(web.className).not.toContain("--space-tint");
     expect(web.className).toContain("text-sidebar-muted-foreground");
-    expect(web.className.split(" ")).toContain("opacity-50");
+    // The paused fork dims by the one rule its row's lead dims by, and that is all the state does here: the bar's
+    // colour is the space's own, so no glyph in it wears the row's running green.
+    expect(leadDimClass({ state: "paused" })).toBe("opacity-50");
+    expect(leadDimClass({ state: "running" })).toBeUndefined();
+    expect(web.className.split(" ")).toContain(leadDimClass({ state: "paused" }));
     expect(mac.className.split(" ")).not.toContain("opacity-50");
+    const glyphClasses = (icon: HTMLElement) => icon.querySelector("svg")!.getAttribute("class")!.split(" ");
+    for (const icon of [api, mac, web]) expect(glyphClasses(icon)).not.toContain(glyphStateClass({ state: "running" }));
     // One row of one height, centred, and the plus at its right end makes a new workspace. The icons sit in a
     // group of their own that scrolls sideways once they outgrow the footer, and the plus stays outside it, so
     // neither the first icon nor the plus is ever cut.
@@ -1249,10 +1271,6 @@ describe("a workspace's own theme and glyph", () => {
     expect(Array.from(group.querySelectorAll("[data-space-icon]"))).toEqual(icons());
     expect(bar.lastElementChild!.hasAttribute("data-space-new")).toBe(true);
     expect(group.contains(bar.lastElementChild)).toBe(false);
-    // The paused fork dims by the one rule its row's lead dims by.
-    expect(leadDimClass({ state: "paused" })).toBe("opacity-50");
-    expect(leadDimClass({ state: "running" })).toBeUndefined();
-    expect(web.className.split(" ")).toContain(leadDimClass({ state: "paused" }));
     expect(screen.queryByRole("button", { name: "Workspaces" })).toBeNull();
     fireEvent.click(bar.querySelector("[data-space-new]")!);
     expect(await screen.findByRole("dialog")).toBeDefined();
@@ -1263,7 +1281,7 @@ describe("a workspace's own theme and glyph", () => {
     const header = spaceHeader()!;
     expect(leadOf(header).querySelector("[data-space-glyph='flask']")!.getAttribute("class")).toContain("--space-tint");
     const state = header.querySelector<HTMLElement>("[data-space-state]")!;
-    expect(state.querySelector(".bg-success")).not.toBeNull();
+    expect(state.querySelector(".bg-success-foreground")).not.toBeNull();
     expect(state.textContent).toBe("");
   });
 
@@ -1303,9 +1321,9 @@ describe("a workspace's own theme and glyph", () => {
     );
     await waitFor(() => expect(workspaceRowIds()).toEqual(["ws:ws_a", "ws:ws_m", "ws:ws_b"]));
     expect(document.querySelector("[data-theme-probe]")!.textContent).toBe("none");
-    // The paused row's lead glyph dims by the same rule the bar's icon does.
+    // The paused row's lead glyph dims by the same rule the bar's icon does, and the running one is green, which the bar's never is.
     expect(rowOf("web").querySelector("[data-workspace-lead] svg")!.getAttribute("class")!.split(" ")).toContain(leadDimClass({ state: "paused" }));
-    expect(rowOf("api").querySelector("[data-workspace-lead] svg")!.getAttribute("class")!.split(" ")).not.toContain("opacity-50");
+    expect(rowOf("api").querySelector("[data-workspace-lead] svg")!.getAttribute("class")!.split(" ")).toContain(glyphStateClass({ state: "running" }));
     expect(document.querySelector("[data-space-glyph], [data-space-icon], [data-space-bar]")).toBeNull();
   });
 });
@@ -1396,19 +1414,19 @@ describe("Spaces mode", () => {
     expect(icons().map(d => d.getAttribute("aria-current"))).toEqual([null, "true", null]);
   });
 
-  it("this computer's header says what the machine is where a fork's size reads, through the one machine line, and free where a fork's spend reads", async () => {
+  it("this computer's header reads its cores and memory where a fork's size reads, through the one machine line, and free where a fork's spend reads", async () => {
     const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
     useStore.setState({ selectedId: "ws_m" });
     await mountSpaces(fakeApi([API, MAC], [status(API), { ...status(MAC), kind: "local", size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }]));
     await waitFor(() => expect(within(spaceHeader()!).getByText("zingzy-mac")).toBeDefined());
     // The machine words and the word free: nothing wsp pays for, so no figure and no rate under them.
-    expect(headerLines()).toEqual(["this computer", FREE_WORD]);
+    expect(headerLines()).toEqual(["10 cores · 16 GB", FREE_WORD]);
     expect(spaceHeader()!.querySelector("[data-space-state]")!.textContent).toBe("");
     // A tick on this computer's meter changes nothing there either.
     act(() =>
       useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_m", phase: "running", rateUsdPerHour: 0, awakeMs: 120_000, accruedUsd: 0, at: new Date(NOW).toISOString() }),
     );
-    await waitFor(() => expect(headerLines()).toEqual(["this computer", FREE_WORD]));
+    await waitFor(() => expect(headerLines()).toEqual(["10 cores · 16 GB", FREE_WORD]));
     // The fork beside it keeps every line it had: the size, then the spend with its rate. Both bodies carry a
     // header while one travels out, so the lines are read once the body asked for is there alone.
     fireEvent.click(icons()[0]!);

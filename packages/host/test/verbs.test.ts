@@ -8,7 +8,7 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { effortsFor, EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { effortsFor, EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -181,22 +181,24 @@ describe("wsp verbs over the host", () => {
     expect(Object.values(written.workspaces).map(w => [w.name, w.kind, w.machineId])).toEqual([["mac", "local", "local"]]);
   });
 
-  it("workspaces lists this computer beside a fork, its machine cell the kind's own words and its state cell empty, and thread new --in takes it by name like any workspace", async () => {
+  it("workspaces lists this computer beside a fork, its machine cell the size line its sidebar row reads and its state cell empty, and thread new --in takes it by name like any workspace", async () => {
     await run("new", "alpha");
     await run("new", "--local", "mac");
     const listed = await run("workspaces");
     expect(listed.code).toBe(0);
     const [heading, ...rows] = listed.io.lines[0]!.split("\n");
     expect(heading!.split(/ {2,}/)).toEqual(["WORKSPACE", "ID", "MACHINE", "STATE", "PROJECTS"]);
-    // The fork names its machine and its state; this computer names neither, so both cells fall off the end of the row.
+    // The fork names its provider machine and its state; this computer's machine cell is its cores and memory, the
+    // one size line the app's row reads, and it has no state to name, so that cell falls off the end of the row.
     expect(rows.map(r => r.split(/ {2,}/))).toEqual([
       ["alpha", expect.stringMatching(/^ws_/), expect.stringMatching(/^m\d+$/), "Running"],
-      ["mac", expect.stringMatching(/^ws_/), "this computer"],
+      ["mac", expect.stringMatching(/^ws_/), expect.stringMatching(/^\d+ cores · \d+ GB$/)],
     ]);
     expect(listed.io.errors).toEqual([]);
 
     const raw = await run("workspaces", "--json");
-    const rawRows = (json(raw.io)[0] as { workspaces: WorkspaceView[] }).workspaces;
+    const rawRows = (json(raw.io)[0] as { workspaces: (WorkspaceView & { size: { cpu: number; memMb: number } })[] }).workspaces;
+    expect(rows[1]!.split(/ {2,}/)[2]).toBe(fmtSize(rawRows[1]!.size, kindWords("local").cpu));
     expect(rawRows.map(w => [w.name, workspaceKind(w), w.golden])).toEqual([
       ["alpha", "cloud", head(SEALED_GOLDEN).snapshotId],
       ["mac", "local", ""],

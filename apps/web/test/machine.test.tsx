@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, DAEMON_VERSION, FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, NOT_ON_THIS_KIND, fmtBytes, imageKeptLine } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, DAEMON_VERSION, FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, NOT_ON_THIS_KIND, fmtBytes, fmtSize, imageKeptLine, kindWords, workspaceKind } from "@wsp/protocol";
 import type {
   Capabilities,
   EventUnion,
@@ -163,7 +163,8 @@ async function mount(workspaces: WorkspaceView[], capabilities: Capabilities = C
   render(<MachineSurface workspaceId={workspaces[0]!.id} />);
   await waitFor(() => expect(useStore.getState().ready).toBe(true));
   await waitFor(() => expect(useStore.getState().capabilities).not.toBeNull());
-  await waitFor(() => expect(fact("size")).toBe("2 vCPU · 4 GB"));
+  // The fixture's status carries one size for every kind, and the tab says it in the kind's own word for a cpu.
+  await waitFor(() => expect(fact("size")).toBe(fmtSize({ cpu: 2, memMb: 4096 }, kindWords(workspaceKind(workspaces[0]!)).cpu)));
   return api;
 }
 
@@ -1339,11 +1340,11 @@ describe("this computer as a workspace", () => {
     api.watchStatuses = vi.fn(async () => [{ ...status(MAC), kind: "local" as const, size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0, ...(facts === null ? {} : { facts }) }]);
     useStore.getState().bind(api);
     render(<MachineSurface workspaceId={MAC.id} />);
-    await waitFor(() => expect(fact("size")).toBe("10 vCPU · 16 GB"));
+    await waitFor(() => expect(fact("size")).toBe("10 cores · 16 GB"));
     return api;
   }
 
-  it("shows this computer's CPU and memory the way it shows a fork's, and its state and reach beside them", async () => {
+  it("shows this computer's cores and memory the way it shows a fork's size, in its own word for a cpu, and its state and reach beside them", async () => {
     await mountLocal();
     expect(fact("state")).toBe("Running");
     expect(fact("reach")).toBe("reachable");

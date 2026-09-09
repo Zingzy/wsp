@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { serve, shimPath, startHost, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
-import { CLOUD_SETUP_WORDS, kindWords } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, fmtSize, kindWords } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -493,7 +493,8 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     const row = win.locator(`[data-row-id='${workspaceRowId(LOCAL_WORKSPACE.id)}']`);
     await row.waitFor();
     expect(await row.locator("[data-workspace-name]").textContent()).toBe(LOCAL_WORKSPACE.name);
-    expect(await row.locator("[data-workspace-machine]").textContent()).toBe(kindWords("local").machine);
+    // Line two is the seeded record's size in the local kind's word for a cpu, as every row reads its machine.
+    expect(await row.locator("[data-workspace-machine]").textContent()).toBe(fmtSize(LOCAL_WORKSPACE.size, kindWords("local").cpu));
     // The seeded record is the whole list: nothing was recorded on the way in.
     expect(await win.locator("[data-workspace-name]").count()).toBe(1);
     expect(appWindows(launched.app).filter(w => ONBOARDING_URL.test(w.url()))).toHaveLength(0);
