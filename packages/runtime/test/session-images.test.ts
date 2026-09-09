@@ -344,19 +344,15 @@ describe("a send that landed its images and is then refused", () => {
     const first = await rt.sessions.start(ws.id, { harness: "codex", prompt: "A" });
     const threadId = first.view().threadId!;
     const dirOf = (requestId: string): string => turnImagesDir(threadId, requestId, "unused");
-    // B queues behind A, wakes when A's process exits, and is landing its images when the next turn opens.
+    // B queues behind A, wakes when A's process exits, and is landing its images when the workspace naps.
     const second = rt.sessions.start(ws.id, { harness: "codex", thread: threadId, prompt: "B", attachments: [png(0xbb)], requestId: "req_b" });
     codex.reply();
     codex.exit();
     await first.finished;
     await until(() => backend.machines[0]!.execLog.some(cmd => cmd.includes("tar xzf")));
-    // A turn opens on the thread while B's bytes are still going up, so B queues behind that one instead.
-    await rt.sessions.start(ws.id, { harness: "codex", thread: threadId, prompt: "C" });
-    release();
-    // The workspace naps, which ends C's turn and leaves nothing on this machine for B to run as: B is refused
-    // once C's process is gone, after its own images landed.
+    // The nap leaves nothing on this machine for B to run as: B is refused once its own images have landed.
     await rt.workspaces.nap(ws.id);
-    codex.exit();
+    release();
     await expect(second).rejects.toThrow(sendRefusal("paused")!);
     // B's images were on the machine before the refusal was known, and B has no turn to take them off, so B does.
     await until(() => backend.machines[0]!.execLog.includes(`rm -rf ${quoted(dirOf("req_b"))}`));
@@ -374,8 +370,7 @@ describe("a send that landed its images and is then refused", () => {
     expect(since().execs.filter(cmd => cmd.startsWith("rm -rf "))).toEqual([]);
   });
 
-  it("a send whose message a turn steers takes its folder too: the words went into that turn and the images nowhere", async () => {
-    // A harness that takes a message mid-turn, as Claude Code's does; a steer carries the words and not the bytes.
+  it("no turn opens under a send that is landing its images: a send that arrives then waits for it and runs after it, as the thread's next turn", async () => {
     const claude = lingering("file", true);
     const { backend, arm, release } = heldLanding();
     const { rt, ws } = await workspaceOn({ claude: claude.factory }, backend);
@@ -385,17 +380,24 @@ describe("a send that landed its images and is then refused", () => {
     claude.reply();
     claude.exit();
     await first.finished;
-    // B lands into a thread with nothing running, and a turn opens under it while it is landing.
+    // B lands into a thread with nothing running; the thread is B's from that moment, so C finds it taken.
     const second = rt.sessions.start(ws.id, { thread: threadId, prompt: "B", attachments: [png(0xbb)], requestId: "req_b" });
     await until(() => backend.machines[0]!.execLog.some(cmd => cmd.includes("tar xzf")));
-    const third = await rt.sessions.start(ws.id, { thread: threadId, prompt: "C" });
+    let opened = false;
+    const third = rt.sessions.start(ws.id, { thread: threadId, prompt: "C" }).then(t => ((opened = true), t));
+    await new Promise(r => setTimeout(r, 50));
+    expect(opened).toBe(false);
+    expect(claude.starts.map(s => s.prompt)).toEqual(["A"]);
     release();
-    expect((await second).outcome).toBe("steered");
-    expect(claude.steered).toEqual(["B"]);
-    await until(() => backend.machines[0]!.execLog.includes(`rm -rf ${quoted(turnImagesDir(threadId, "req_b", "unused"))}`));
+    const b = await second;
+    expect(b.outcome).toBe("started");
+    expect(claude.starts.map(s => [s.prompt, s.resume])).toEqual([["A", undefined], ["B", SESSION_ID]]);
+    // C reached the running turn B opened and steered into it.
+    expect((await third).outcome).toBe("steered");
+    expect(claude.steered).toEqual(["C"]);
     claude.reply();
     claude.exit();
-    await third.finished;
+    await b.finished;
   });
 });
 

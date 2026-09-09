@@ -216,6 +216,21 @@ describe("deriveSession: streaming states", () => {
     expect(m.messages.map(x => [x.turnId, x.role])).toEqual([["turn_x", "assistant"], ["turn_y", "user"]]);
   });
 
+  it("a session.end with no turn of its own is a wake for whoever waits on the thread, not a turn: the settled turn stays the latest and the timeline gains nothing", () => {
+    const scoped = { ...scope, turnId: "turn_1" };
+    const m = deriveSession([
+      { type: "session.start", ...scoped, prompt: "build it" },
+      { type: "session.delta", ...scoped, kind: "text", text: "all green" },
+      { type: "session.done", ...scoped, result: { status: "completed", text: "all green" } },
+      { type: "session.end", ...scoped, exitCode: 0, sawResult: true },
+      { type: "session.end", workspaceId: scope.workspaceId, sessionId: "turn_2", turnId: "turn_2", exitCode: null, sawResult: false, reason: "the harness would not launch" },
+    ]);
+    expect(m.turns.map(t => [t.turnId, t.state])).toEqual([["turn_1", "completed"]]);
+    expect(m.latestTurn?.turnId).toBe("turn_1");
+    expect(m.running).toBe(false);
+    expect(m.timeline.map(e => e.kind)).toEqual(["message", "message"]);
+  });
+
   it("a fence-only tool result carries no detail", () => {
     const m = deriveSession([start, tool("Bash", { command: "cat x" }), result("```")]);
     expect(m.workEntries[0]?.detail).toBeUndefined();

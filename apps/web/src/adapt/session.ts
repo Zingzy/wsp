@@ -242,7 +242,11 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
         continue;
       }
       case "session.end": {
-        const t = turnFor(event, at);
+        // An end for a turn nothing here opened is the runtime's word that a send never became a turn, sent so a wait
+        // on the thread is answered; it is not a turn and opens none. An end whose turn a delta or a done opened above
+        // still settles that turn.
+        if (turn === null || (event.turnId !== undefined && event.turnId !== turn.summary.turnId)) continue;
+        const t = turn;
         if (t.summary.state !== "running") continue;
         if (t.reply !== null) {
           setState(t, t.reply.status);
