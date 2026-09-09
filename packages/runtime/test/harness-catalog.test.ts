@@ -143,6 +143,9 @@ describe("the access a kept machine's threads start at", () => {
     expect(markedDefault(kept.permissionModes)?.value).toBe("default");
     expect(kept.permissionModes.filter(o => o.isDefault)).toHaveLength(1);
     expect(kept.permissionModes.find(o => o.value === "bypassPermissions")?.label).toBe("Bypass on this computer");
+    // The CLI's own word stays as the short form the picker's button wears; no other row has one.
+    expect(kept.permissionModes.find(o => o.value === "bypassPermissions")?.short).toBe("Bypass");
+    expect(kept.permissionModes.filter(o => o.short !== undefined).map(o => o.value)).toEqual(["bypassPermissions"]);
     // Same modes, same order, same descriptions: bypass is one pick away, where it was.
     expect(kept.permissionModes.map(o => o.value)).toEqual(harnessCatalog("claude")!.permissionModes.map(o => o.value));
     expect(kept.permissionModes.map(o => o.description)).toEqual(harnessCatalog("claude")!.permissionModes.map(o => o.description));
@@ -150,6 +153,7 @@ describe("the access a kept machine's threads start at", () => {
     const codex = keptAccess(harnessCatalog("codex")!, THIS_COMPUTER);
     expect(markedDefault(codex.permissionModes)?.value).toBe("workspace-write");
     expect(codex.permissionModes.find(o => o.value === "danger-full-access")?.label).toBe("Full access on this computer");
+    expect(codex.permissionModes.find(o => o.value === "danger-full-access")?.short).toBe("Full access");
   });
 
   it("a catalog with no access mode of its own comes back untouched, so nothing invents one for it", () => {

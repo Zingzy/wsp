@@ -11,7 +11,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, accessFromNextMessage, applyPreferencesPatch, type HarnessCatalog, type PreferencesPatch, type SessionAccessOutcome, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, accessFromNextMessage, applyPreferencesPatch, keptAccess, THIS_COMPUTER, type HarnessCatalog, type PreferencesPatch, type SessionAccessOutcome, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../src/components/ui/menu.js", () => {
   const Ctx = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
@@ -528,6 +528,21 @@ describe("composer pickers", () => {
     expect(picker("permissionMode")?.textContent).toContain("Plan");
   });
 
+  it("on a kept machine the access button wears the mode's short form and its menu row names the machine", async () => {
+    const kept = keptAccess({ ...CLAUDE, keptMode: "plan", bypassMode: "bypassPermissions" }, THIS_COMPUTER);
+    const { api } = fixtureApi({ table: [kept] });
+    await setup(api);
+    await waitFor(() => expect(pickerValue("permissionMode")).toBe("plan"));
+    expect(picker("permissionMode")?.textContent).toBe("Plan");
+    fireEvent.click(picker("permissionMode")!);
+    expect(option("bypassPermissions")?.textContent).toContain(`Bypass on ${THIS_COMPUTER}`);
+    fireEvent.click(option("bypassPermissions")!);
+    await waitFor(() => expect(pickerValue("permissionMode")).toBe("bypassPermissions"));
+    // The button says the CLI's word; whose computer it is stays in the menu and in the button's accessible name.
+    expect(picker("permissionMode")?.textContent).toBe("Bypass");
+    expect(picker("permissionMode")?.getAttribute("aria-label")).toBe(`Access: Bypass on ${THIS_COMPUTER}`);
+  });
+
   it("a pick made while a turn runs reaches that turn, and says when it lands where the harness will not take it", async () => {
     const running: SessionView = { id: "s9", workspaceId: WS, harness: "claude", status: "running", claudeSessionId: "sess_0001", model: "claude-opus-5", permissionMode: "bypassPermissions" };
     const took = fixtureApi({ table: [CLAUDE], history: CHAT_STREAM.slice(0, 2), sessions: [running], access: "set" });
@@ -565,8 +580,9 @@ describe("composer pickers", () => {
     const footer = document.querySelector("[data-chat-composer-footer]")!;
     expect(footer.contains(picker("project"))).toBe(true);
     expect(footer.contains(picker("permissionMode"))).toBe(true);
-    // The two triggers are one button: same size and the same muted label class, the project's name in mono.
-    expect(picker("project")!.className).toBe(picker("permissionMode")!.className);
+    // The two triggers are one button: same size and the same muted label class, the project's name in mono; the
+    // project's alone is capped at the row, since its name is as long as the person made the folder's.
+    expect(picker("project")!.className).toBe(`${picker("permissionMode")!.className} max-w-full`);
     expect(picker("project")!.querySelector("[data-composer-project-name]")!.className).toContain("font-mono");
     expect(folderLine()).toBe("/root/spoo");
 

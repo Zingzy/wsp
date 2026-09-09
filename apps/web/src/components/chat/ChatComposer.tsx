@@ -510,9 +510,9 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
                   </div>
                   <div
                     data-chat-composer-footer="true"
-                    className="flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-visible px-3 pb-3 sm:gap-0 sm:px-4 sm:pb-4"
+                    className="flex min-w-0 flex-nowrap items-end justify-between gap-2 overflow-visible px-3 pb-3 sm:gap-0 sm:px-4 sm:pb-4"
                   >
-                    <div className="-m-1 -ms-3.5 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 ps-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                    <div className="-m-1 -ms-3.5 flex min-w-0 flex-1 flex-wrap items-center gap-1 p-1 ps-3.5">
                       <Button
                         type="button"
                         size="icon-xs"

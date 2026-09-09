@@ -33,16 +33,19 @@
 // cloud machines, so a mixed list of both kinds can be measured; ?projects=1
 // gives the first workspace two projects, its threads folders inside them and
 // the record a last project for it, so the composer's project pick, the folder
-// line under the box and the thread rows' project word can be measured;
-// ?drop=1 holds the page mid-drag of a folder from the desktop, with the
-// desktop bridge that reads a dropped path, so every workspace row's drop tile
-// can be measured; ?import=1 opens the import dialog on ws_a already reading a
-// folder, as a drop on its tile leaves it; ?panel=machine opens the right
-// panel on the Machine tab of the workspace ?ws names, so its PROJECTS
-// section can be measured with two projects (ws_a under ?projects=1) and
-// with none.
+// line under the box and the thread rows' project word can be measured, and
+// this computer the same two and a third with a long name; ?efforts=1 gives
+// the claude row its effort and context lists so the composer's row carries
+// every picker; ?panel=preview opens the right panel inline with nothing in
+// it, the narrowest the centre column gets at a width; ?drop=1 holds the page
+// mid-drag of a folder from the desktop, with the desktop bridge that reads a
+// dropped path, so every workspace row's drop tile can be measured; ?import=1
+// opens the import dialog on ws_a already reading a folder, as a drop on its
+// tile leaves it; ?panel=machine opens the right panel on the Machine tab of
+// the workspace ?ws names, so its PROJECTS section can be measured with two
+// projects (ws_a under ?projects=1) and with none.
 import { createRoot } from "react-dom/client";
-import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DESKTOP_MAC_CLASS, THIS_COMPUTER, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DESKTOP_MAC_CLASS, keptAccess, THIS_COMPUTER, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api } from "../../src/protocol/client";
@@ -91,7 +94,11 @@ const PROJECTS = [
 const projects = params.get("projects") === "1";
 if (projects) Object.assign(cloud[0]!, { projects: PROJECTS });
 // ?local=1 adds this computer to the list, so a mixed list can be measured: two cloud rows and one local beside them.
-const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
+// With ?projects=1 it holds the same two projects and a third with a name longer than the composer's picker row is
+// wide in a narrow window, so the composer on a kept machine draws every picker it has and the one label a person
+// names, which no width bounds.
+const LONG_PROJECT = { name: "customer-billing-service-platform", dest: "/Users/zingzy/customer-billing-service-platform", importedAt: "2026-09-06T08:00:00Z", size: 912_000_000 };
+const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "", ...(projects ? { projects: [...PROJECTS, LONG_PROJECT] } : {}) };
 const workspaces = params.get("local") === "1" ? [...cloud, MAC] : cloud;
 // ?tint=1 gives the first two workspaces a hue and a glyph and leaves the third with neither, so one page holds two
 // tinted spaces and a plain one.
@@ -123,18 +130,40 @@ const sessions: SessionView[] = [
 // Two agents the composer can start a thread on, so its picker draws a coloured mark and a monochrome one. Codex
 // carries the effort lists its app-server reports, each model with the effort that model runs at, so the effort
 // picker draws its default against a pick rather than against the binary.
-// The access modes are the kept-machine list, as the runtime hands it for a workspace on this computer: the mode
-// the harness asks in marked, and bypass named after the machine it would touch. One list serves every workspace
-// here, which is what a fixture can do; the runtime decides per machine.
+// The access modes are the CLI's own list, and keptAccess turns it into the kept-machine list the runtime hands out
+// for a workspace on this computer: the mode the harness asks in marked, and bypass named after the machine it would
+// touch. One list serves every workspace here, which is what a fixture can do; the runtime decides per machine.
 const ACCESS_MODES = [
-  { value: "default", label: "Default", description: "Every tool that needs permission is asked about in the chat", isDefault: true },
+  { value: "default", label: "Default", description: "Every tool that needs permission is asked about in the chat" },
   { value: "acceptEdits", label: "Accept edits", description: "Edits land without asking; commands that need permission are asked about" },
   { value: "plan", label: "Plan", description: "Read and plan only; no changes" },
-  { value: "bypassPermissions", label: `Bypass on ${THIS_COMPUTER}`, description: "Run every tool without asking" },
+  { value: "bypassPermissions", label: "Bypass", description: "Run every tool without asking", isDefault: true },
 ];
+// ?efforts=1 gives the claude row the effort levels and context windows the runtime's table lists for it, so the
+// composer's row carries the effort picker beside the others and is as wide as it gets.
+const efforts = params.get("efforts") === "1";
+const CLAUDE_EFFORTS = ["Low", "Medium", "High", "Extra high", "Max"].map(label => ({ value: label.toLowerCase().replace(" ", ""), label, ...(label === "High" ? { isDefault: true } : {}) }));
+const CLAUDE_CONTEXT_WINDOWS = [{ value: "200k", label: "200k" }, { value: "1m", label: "1M", isDefault: true }];
 
 const catalogs: HarnessCatalog[] = [
-  { harness: "claude", label: "Claude Code", source: "harness", version: "2.1.257", models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, contextWindows: [] }], efforts: [], contextWindows: [], permissionModes: ACCESS_MODES, steers: true, renames: true, images: true },
+  keptAccess(
+    {
+      harness: "claude",
+      label: "Claude Code",
+      source: "harness",
+      version: "2.1.257",
+      models: [{ value: "claude-opus-5", label: "Opus 5", isDefault: true, contextWindows: efforts ? ["200k", "1m"] : [] }],
+      efforts: efforts ? CLAUDE_EFFORTS : [],
+      contextWindows: efforts ? CLAUDE_CONTEXT_WINDOWS : [],
+      permissionModes: ACCESS_MODES,
+      steers: true,
+      renames: true,
+      images: true,
+      keptMode: "default",
+      bypassMode: "bypassPermissions",
+    },
+    THIS_COMPUTER,
+  ),
   {
     harness: "codex",
     label: "Codex",
@@ -354,7 +383,7 @@ useStore.setState({ conn: "live", ...(toast !== null ? { toast } : {}), ...(show
 // preferences op, so the record is put in place here as the host's answer would put it. The shell is where the
 // surfaces behind labs are shot, so labs is on unless ?labs=0 asks for the record a host without it serves.
 const sidebarWidth = params.get("sidebar");
-useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme, labs: params.get("labs") !== "0", ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(params.get("spaces") === "1" ? { sidebarMode: "spaces" as const } : {}), ...(params.get("size") === "file" ? { terminalSize: "file" as const } : {}), ...(projects ? { project: { ws_a: "spoo" } } : {}) } });
+useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme, labs: params.get("labs") !== "0", ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(params.get("spaces") === "1" ? { sidebarMode: "spaces" as const } : {}), ...(params.get("size") === "file" ? { terminalSize: "file" as const } : {}), ...(projects ? { project: { ws_a: "spoo", ws_m: "spoo" } } : {}) } });
 const settings = params.get("settings") === "1";
 if (settings) useStore.setState({ settingsOpen: true });
 function ThemeRule() {
@@ -364,6 +393,11 @@ function ThemeRule() {
 useStore.getState().bind(api);
 // The meter's tick for the running machine, so its row's second line reads cost, rate and countdown together.
 useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 2 * 3_600_000, accruedUsd: 0.29, at: new Date().toISOString() });
+// ?panel=preview opens the right panel inline with nothing in it, the narrowest the centre column gets at a width.
+if (params.get("panel") === "preview" && shown !== null) {
+  useRightPanelStore.setState({ byWorkspaceId: {} });
+  useRightPanelStore.getState().open(shown, "preview");
+}
 if (params.get("panel") === "machine" && shown !== null) {
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useRightPanelStore.getState().open(shown, "machine");

@@ -409,6 +409,9 @@ export const HarnessOption = z.object({
   label: z.string(),
   description: z.string().optional(),
   isDefault: z.boolean().optional(),
+  /** What a picker's button says once this option is picked, where the label says more than a button has room for
+   * (a mode named after the machine it touches); the menu row keeps the label. Absent, the button says the label. */
+  short: z.string().optional(),
 });
 export type HarnessOption = z.infer<typeof HarnessOption>;
 
@@ -475,15 +478,18 @@ export type HarnessCatalog = z.infer<typeof HarnessCatalog>;
 /** The catalog a kept machine's composer shows and its starts are checked against: the same lists, with the default
  * mark moved from what a throwaway machine runs to keptMode, and the row's own bypassMode named after the machine it
  * is about to touch, so the pick that skips the prompts says whose computer it skips them on. One pick away, in the
- * same list, in the same order. A catalog with no keptMode (a CLI that takes no access mode) comes back as it went
- * in. `machine` is the machine in words, the one phrase every local surface uses.
+ * same list, in the same order. The CLI's own word for the mode stays as the row's short form, which is what the
+ * picker's button says once it is picked: the long name is read in the menu and in every line about the pick, and a
+ * button that carried it crushed the model's name beside it in a narrow window (measured 2026-09-09, 316 px of row at
+ * a 1200 px viewport with the right panel open). A catalog with no keptMode (a CLI that takes no access mode) comes
+ * back as it went in. `machine` is the machine in words, the one phrase every local surface uses.
  */
 export function keptAccess(catalog: HarnessCatalog, machine: string): HarnessCatalog {
   if (catalog.keptMode === undefined) return catalog;
   const permissionModes = catalog.permissionModes.map(({ isDefault: _throwaway, ...mode }) => ({
     ...mode,
     ...(mode.value === catalog.keptMode ? { isDefault: true } : {}),
-    ...(mode.value === catalog.bypassMode ? { label: `${mode.label} on ${machine}` } : {}),
+    ...(mode.value === catalog.bypassMode ? { label: `${mode.label} on ${machine}`, short: mode.label } : {}),
   }));
   return { ...catalog, permissionModes };
 }

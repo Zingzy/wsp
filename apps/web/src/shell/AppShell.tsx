@@ -28,7 +28,7 @@ import { SignInBanner } from "./SignInBanner.js";
 import { ThreadBreadcrumb } from "./ThreadBreadcrumb.js";
 
 const SIDEBAR_MIN_WIDTH = 220;
-const SIDEBAR_MAX_WIDTH = 480;
+export const SIDEBAR_MAX_WIDTH = 480;
 /** The dragged width goes onto the host's preferences record, so a browser tab on the same host opens at it and
  * the settings page's reset reaches this window. */
 const sidebarWidthStore: SidebarWidthStore = {
