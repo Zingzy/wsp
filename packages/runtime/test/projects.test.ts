@@ -157,7 +157,7 @@ describe("the default folder rule, in the runtime", () => {
     await rt.close();
   });
 
-  it("a start remembers the project it landed in on the preferences record, once per change and only when it landed in one, so a plain start pushes no record", async () => {
+  it("a start remembers the project it landed in and the last target on the preferences record, once per change, so a second start on the same project pushes no record", async () => {
     const { rt, store } = await setup();
     const changed: number[] = [];
     rt.events.on("*", e => {
@@ -165,30 +165,33 @@ describe("the default folder rule, in the runtime", () => {
     });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "b2" });
     expect((await rt.preferences.get()).project).toEqual({});
-    // No project on the workspace: nothing to remember, and no socket hears a record that did not move.
+    // No project on the workspace: nothing to remember of a project, but the workspace is now the target an import
+    // or a thread asked for from nowhere goes to.
     await (await rt.sessions.start(ws.id, { prompt: "zero" })).finished;
-    expect(changed).toHaveLength(0);
+    expect((await rt.preferences.get()).target).toEqual({ workspace: ws.id });
+    expect(changed).toHaveLength(1);
     await importOf(rt, ws.id, SPOO);
     await importOf(rt, ws.id, WSP);
     await (await rt.sessions.start(ws.id, { prompt: "one", project: "wsp" })).finished;
     let preferences = await rt.preferences.get();
     expect(preferences.project).toEqual({ [ws.id]: "wsp" });
-    expect(changed).toHaveLength(1);
-    // The same project again moves nothing.
+    expect(preferences.target).toEqual({ workspace: ws.id, project: "wsp" });
+    expect(changed).toHaveLength(2);
+    // The same project again moves nothing, so no socket hears a record that did not move.
     await (await rt.sessions.start(ws.id, { prompt: "again", project: "wsp" })).finished;
-    expect(changed).toHaveLength(1);
+    expect(changed).toHaveLength(2);
     // A folder deep inside a project counts as that project's.
     await (await rt.sessions.start(ws.id, { prompt: "two", cwd: "/root/spoo/packages/api" })).finished;
     preferences = await rt.preferences.get();
     expect(preferences.project).toEqual({ [ws.id]: "spoo" });
-    expect(changed).toHaveLength(2);
-    // Outside every project: the last project stands and nothing is written.
+    expect(preferences.target).toEqual({ workspace: ws.id, project: "spoo" });
+    expect(changed).toHaveLength(3);
+    // Outside every project: the last project stands, the target is the workspace alone.
     await (await rt.sessions.start(ws.id, { prompt: "three", cwd: "/root/elsewhere" })).finished;
     preferences = await rt.preferences.get();
     expect(preferences.project).toEqual({ [ws.id]: "spoo" });
-    expect(changed).toHaveLength(2);
-    // The target entry is the record's seam for a thread asked for from nowhere; nothing writes it yet.
-    expect(preferences).not.toHaveProperty("target");
+    expect(preferences.target).toEqual({ workspace: ws.id });
+    expect(changed).toHaveLength(4);
     // What the record holds is what a fresh runtime reads.
     expect(((await store.get("preferences", "default")) as { project: unknown }).project).toEqual({ [ws.id]: "spoo" });
     await rt.close();
@@ -225,18 +228,34 @@ describe("the default folder rule, in the runtime", () => {
     await rt.close();
   });
 
-  it("a snapshot carries the project the rule picks, and a fork of it starts with that one project", async () => {
-    const { rt } = await setup();
+  it("a snapshot is named after the project the rule picks and carries every project on the disk, and a fork of it starts with all of them", async () => {
+    const { rt, backend } = await setup();
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "b2" });
+    // A fork's home is the guest's, published so a client shortens folders under it to ~.
+    expect(ws.home).toBe("/root");
     await importOf(rt, ws.id, SPOO);
     await importOf(rt, ws.id, WSP);
     await rt.preferences.set({ project: { [ws.id]: "wsp" } });
     const golden = await rt.workspaces.snapshot(ws.id);
-    expect(golden.project.name).toBe("wsp");
+    expect(golden.projects.map(p => p.name)).toEqual(["spoo", "wsp"]);
+    expect(backend.snapshots.at(-1)!.name).toContain("-project-wsp-");
     const fork = await rt.workspaces.create({ golden: golden.snapshotId, name: "task" });
-    expect(fork.projects).toEqual([golden.project]);
+    expect(fork.projects).toEqual(golden.projects);
     expect((await rt.preferences.get()).project).toEqual({ [ws.id]: "wsp" });
     expect(DEFAULT_PREFERENCES.project).toEqual({});
+    await rt.close();
+  });
+
+  it("a project golden stored with the one project of before lists and forks as a golden of that one project", async () => {
+    const store = memoryStore();
+    const { rt } = await setup(store);
+    const spoo: WorkspaceProject = { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z" };
+    await store.put("project-goldens", "snap_old", { snapshotId: "snap_old", project: spoo, golden: "snap_g", workspaceId: "ws_gone", workspaceName: "b1", createdAt: "2026-09-01T01:00:00Z" });
+    const [listed] = await rt.golden.projects();
+    expect(listed).toEqual({ snapshotId: "snap_old", projects: [spoo], golden: "snap_g", workspaceId: "ws_gone", workspaceName: "b1", createdAt: "2026-09-01T01:00:00Z" });
+    expect(listed).not.toHaveProperty("project");
+    const fork = await rt.workspaces.create({ golden: "snap_old", name: "task" });
+    expect(fork.projects).toEqual([spoo]);
     await rt.close();
   });
 });

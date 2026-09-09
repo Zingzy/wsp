@@ -50,18 +50,24 @@ describe.skipIf(renderSkipped !== undefined)("the lineage's project goldens laid
     expect(await page!.locator("[data-k=pg-snap_project-spoo-2]").textContent()).toBe("spoo");
     expect(await page!.locator("[data-k=pg-snap_project-spoo-2]").locator("xpath=ancestor::li[1]").locator(":scope > span [data-mark]").allTextContents()).toEqual(["this fork"]);
     expect(await page!.locator("[data-k=v12]").textContent()).toBe("v12");
-    expect(await page!.locator("[data-k=v12]").locator("xpath=ancestor::li[1]").locator(":scope > span [data-mark]").allTextContents()).toEqual(["head"]);
+    // The version stands on its snapshot alone, no template recorded, so it wears the volatile word beside head.
+    expect(await page!.locator("[data-k=v12]").locator("xpath=ancestor::li[1]").locator(":scope > span [data-mark]").allTextContents()).toEqual(["head", "volatile"]);
     expect(await page!.locator("[data-slot=badge]").count()).toBe(0);
+    // The snapshot is the PROJECTS section's, which lists what is on the disk; the Live disk row carries neither the
+    // button nor the project's word any more.
     expect(await page!.getByRole("button", { name: "snapshot spoo-fork as a project golden" }).count()).toBe(1);
+    expect(await page!.getByRole("button", { name: "snapshot spoo-fork as a project golden" }).textContent()).toBe("Snapshot as image");
+    expect(await page!.locator("text=Live disk").locator("xpath=ancestor::li[1]").getByRole("button").count()).toBe(0);
+    expect(await page!.locator("[data-k=project-spoo] [data-cell=imported]").textContent()).toBe("2026-09-06");
     expect(await page!.getByRole("button", { name: /^fork / }).count()).toBe(3);
     for (const button of await page!.getByRole("button", { name: /^fork / }).all()) {
       const box = await button.boundingBox();
       expect(box!.x + box!.width).toBeLessThanOrEqual(tab!.x + tab!.width);
     }
-    expect(await page!.locator("text=forked 2026-09-06 · spoo imported 2026-09-06").count()).toBe(1);
+    expect(await page!.locator("text=forked 2026-09-06").count()).toBe(1);
+    expect(await page!.locator("text=spoo imported 2026-09-06").count()).toBe(0);
     const middle = (box: { y: number; height: number }): number => box.y + box.height / 2;
     for (const [title, button] of [
-      ["text=Live disk", "snapshot spoo-fork as a project golden"],
       ["[data-k=pg-snap_project-spoo-2]", "fork spoo from snap_project-spoo-2"],
       ["[data-k=pg-snap_project-wsp-1]", "fork wsp from snap_project-wsp-1"],
     ] as const) {
@@ -76,12 +82,13 @@ describe.skipIf(renderSkipped !== undefined)("the lineage's project goldens laid
     }
     // The marks are one column for the whole section: the live disk's, the version's and the nested fork's words start
     // at the same x, and so do the buttons after them.
-    const wordAt = async (title: string): Promise<number> => (await page!.locator(title).locator("xpath=ancestor::li[1]").locator(":scope > span [data-mark]").boundingBox())!.x;
+    // The version wears two words, head and volatile; the column is where the first begins.
+    const wordAt = async (title: string): Promise<number> => (await page!.locator(title).locator("xpath=ancestor::li[1]").locator(":scope > span [data-mark]").first().boundingBox())!.x;
     const nowX = await wordAt("text=Live disk");
     expect(await wordAt("[data-k=v12]")).toBe(nowX);
     expect(await wordAt("[data-k=pg-snap_project-spoo-2]")).toBe(nowX);
-    const snapshotX = (await page!.getByRole("button", { name: "snapshot spoo-fork as a project golden" }).boundingBox())!.x;
-    expect((await page!.getByRole("button", { name: "fork spoo from snap_project-spoo-2" }).boundingBox())!.x).toBe(snapshotX);
+    const forkX = (await page!.getByRole("button", { name: "fork spoo from snap_project-spoo-2" }).boundingBox())!.x;
+    expect((await page!.getByRole("button", { name: "fork wsp from snap_project-wsp-1" }).boundingBox())!.x).toBe(forkX);
     await page!.locator("[data-testid=machine-tab]").screenshot({ path: join(SHOTS, `lineage-projects-${theme}.png`) });
     expect(existsSync(join(SHOTS, `lineage-projects-${theme}.png`))).toBe(true);
   }, 30_000);

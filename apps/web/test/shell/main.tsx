@@ -33,7 +33,14 @@
 // cloud machines, so a mixed list of both kinds can be measured; ?projects=1
 // gives the first workspace two projects, its threads folders inside them and
 // the record a last project for it, so the composer's project pick, the folder
-// line under the box and the thread rows' project word can be measured.
+// line under the box and the thread rows' project word can be measured;
+// ?drop=1 holds the page mid-drag of a folder from the desktop, with the
+// desktop bridge that reads a dropped path, so every workspace row's drop tile
+// can be measured; ?import=1 opens the import dialog on ws_a already reading a
+// folder, as a drop on its tile leaves it; ?panel=machine opens the right
+// panel on the Machine tab of the workspace ?ws names, so its PROJECTS
+// section can be measured with two projects (ws_a under ?projects=1) and
+// with none.
 import { createRoot } from "react-dom/client";
 import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DESKTOP_MAC_CLASS, THIS_COMPUTER, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
@@ -48,6 +55,7 @@ import { AppShell } from "../../src/shell/AppShell";
 import { openPanelTerminal } from "../../src/shell/shellCommands";
 import { WorkspaceThread } from "../../src/shell/WorkspaceThread";
 import { useComposerImagesStore } from "../../src/components/chat/composerImages";
+import { requestProjectTrip } from "../../src/shell/shellRequests";
 import { GhosttyTerminalSurface } from "../../src/terminal/ghostty/surface";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../../src/terminal/link";
 import "../../src/index.css";
@@ -62,6 +70,9 @@ document.documentElement.classList.toggle(DESKTOP_MAC_CLASS, params.get("mac") =
 if (params.get("shell") === "desktop") {
   window.wsp = { capturePreview: async () => undefined, workspacePreview: async () => undefined };
 }
+// ?drop=1 and ?import=1 are the desktop's roads: the bridge that reads a dropped folder's path is what lets the rows
+// become tiles at all, and the picker is what the dialog draws for the folder there.
+if (params.get("drop") === "1" || params.get("import") === "1") window.wsp = { ...window.wsp, droppedPath: file => `/Users/dev/${file.name}`, pickFolder: async () => undefined };
 
 const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running"): WorkspaceView => ({
   id,
@@ -220,6 +231,28 @@ const chatHistory: SessionEvent[] = [
   { type: "session.done", ...chatTurn, result: { status: "completed", durationMs: 2400, costUsd: 0.004 } },
 ];
 
+// The import ops ride the api only where a case reads them (the tiles, the dialog, the Machine tab), so the rows'
+// menu the shell case counts keeps the import refused as a client without the ops has it.
+const importOps: Pick<Api, "planProject" | "importProject"> = {
+  // The import dialog's plan for the folder a drop hands it: a repository of some files, two caches left behind, one
+  // secret-shaped file cut and one offered rewritten, so every row of the plan draws.
+  planProject: async source => ({
+    source,
+    repo: true,
+    files: 412,
+    bytes: 48_200_000,
+    secrets: [
+      { path: ".env", bytes: 120, signals: ["name", "keys"] },
+      { path: ".git/config", bytes: 300, signals: ["url"], rewrite: { urls: ["https://github.com/zingzy/spoo"], drop: [] } },
+    ],
+    excluded: ["node_modules", ".next"],
+    skipped: [],
+    agents: [],
+  }),
+  importProject: async o => ({ dest: o.dest, files: 412, bytes: 48_200_000, parts: 1, cut: [".env"], rewritten: [".git/config"], agents: [] }),
+};
+const withImport = params.get("drop") === "1" || params.get("import") === "1" || params.get("panel") === "machine";
+
 const api: Api = {
   listWorkspaces: async () => workspaces,
   getWorkspace: async id => workspaces.find(w => w.id === id)!,
@@ -288,6 +321,9 @@ const api: Api = {
   subscribe: () => () => {},
   getGolden: async () => undefined,
   hostTerminalConfig: async () => TRANSLUCENT,
+  ...(withImport ? importOps : {}),
+  listProjectGoldens: async () => [],
+  snapshotWorkspace: async id => ({ snapshotId: "snap_taken", projects: PROJECTS, golden: "snap_g", workspaceId: id, workspaceName: "api", createdAt: new Date().toISOString() }),
 };
 
 /** A Ghostty config with a background-opacity under 1, the shape whose translucency belongs to the canvas alone, and a
@@ -328,6 +364,10 @@ function ThemeRule() {
 useStore.getState().bind(api);
 // The meter's tick for the running machine, so its row's second line reads cost, rate and countdown together.
 useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 2 * 3_600_000, accruedUsd: 0.29, at: new Date().toISOString() });
+if (params.get("panel") === "machine" && shown !== null) {
+  useRightPanelStore.setState({ byWorkspaceId: {} });
+  useRightPanelStore.getState().open(shown, "machine");
+}
 if (params.get("panel") === "terminal" && shown !== null) {
   const surfaces: GhosttyTerminalSurface[] = [];
   const create = GhosttyTerminalSurface.create.bind(GhosttyTerminalSurface);
@@ -368,3 +408,11 @@ createRoot(document.getElementById("root")!).render(
     <AppShell>{settings ? <SettingsPage /> : shown === null ? <div /> : <WorkspaceThread workspaceId={shown} />}</AppShell>
   </TooltipProvider>,
 );
+// ?import=1: the dialog as a drop on the first workspace's tile leaves it, asked for once the sidebar is listening.
+if (params.get("import") === "1") {
+  const ask = (): void => {
+    if (document.querySelector("[data-sidebar-row]") === null) setTimeout(ask, 20);
+    else requestProjectTrip({ workspaceId: "ws_a", trip: "import", source: "/Users/dev/spoo" });
+  };
+  ask();
+}

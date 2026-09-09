@@ -39,7 +39,7 @@ interface Fake {
 /** This computer as the run holds it: a real local backend over a scratch folder and the provider module a keyless
  * host wires, so every road this test does not take refuses the way it does on a person's machine. */
 function localWiring(root: string): LocalWiring {
-  return { backend: new LocalBackend({ root }), execStream: o => localExecStream({ root, ...o }), home: () => join(root, ".claude"), env: {} };
+  return { backend: new LocalBackend({ root }), execStream: o => localExecStream({ root, ...o }), home: () => join(root, ".claude"), homeDir: root, env: {} };
 }
 
 function fake(over: { tty?: boolean; nonInteractive?: boolean; yes?: boolean; json?: boolean } = {}): Fake {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { alreadyRecorded, inFolder, NO_SUCH_TURN, NOTIFY_ME, type PortForward, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type TurnResult } from "@wsp/protocol";
+import { alreadyRecorded, inFolder, NO_SUCH_TURN, NOTIFY_ME, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, rootsPathIn, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type EventUnion, type PortForward, type ProjectImportEvent, type TurnResult } from "@wsp/protocol";
 import type { MachineExecOptions } from "../src/machine-exec.js";
 import { createRuntime, type HarnessAdapterFactory, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
@@ -136,6 +136,7 @@ describe("local workspace", () => {
         return localExecStream({ root, ...o });
       },
       home: () => join(root, ".claude"),
+      homeDir: root,
       env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
     };
   });
@@ -150,6 +151,8 @@ describe("local workspace", () => {
     expect(ws.name).toBe("my-mac");
     expect(ws.golden).toBe("");
     expect(ws.phase).toBe("running");
+    // The view carries the person's home, so a client shows a folder under it as their shell would.
+    expect(ws.home).toBe(root);
     const listed = await rt.workspaces.list();
     expect(listed.map(w => ({ name: w.name, kind: w.kind }))).toEqual([{ name: "my-mac", kind: "local" }]);
   });
@@ -314,6 +317,40 @@ describe("local workspace", () => {
     // Nothing was driven: the workspace is still there under its own name, and a request from this computer runs.
     expect((await rt.workspaces.get(ws.id)).name).toBe("mac");
     expect((await rt.sessions.start(ws.id, { prompt: "hi" }, "here").then(h => h.finished)).status).toBe("completed");
+  });
+
+  it("import on this computer registers the folder at its own path and copies nothing: the record lists it with the size the plan read, the events say so, and the daemon's roots file names it", async () => {
+    const rt = runtime();
+    const ws = await rt.workspaces.createLocal("mac");
+    const folder = join(root, "spoo");
+    mkdirSync(folder);
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const calls: string[] = [];
+    const bundler: ProjectImportOptions["bundler"] = {
+      plan: async () => {
+        calls.push("plan");
+        return { source: folder, repo: true, files: 3, bytes: 900, secrets: [], excluded: ["node_modules"], skipped: [], agents: [] };
+      },
+      pack: async () => {
+        throw new Error("nothing is packed on this computer");
+      },
+      packState: async () => {
+        throw new Error("no agent state travels on this computer");
+      },
+    };
+    const landed = await rt.projects.import({ workspaceId: ws.id, source: folder, dest: folder, bundler });
+    expect(landed).toEqual({ dest: folder, files: 3, bytes: 900, parts: 0, cut: [], rewritten: [], agents: [] });
+    expect(calls).toEqual(["plan"]);
+    const stages = events.filter((e): e is ProjectImportEvent => e.type === "project.import");
+    expect(stages.map(e => [e.stage, e.message])).toEqual([
+      ["landing", REGISTERING_LINE],
+      ["done", registeredLine(folder)],
+    ]);
+    expect((await rt.workspaces.get(ws.id)).projects).toEqual([{ name: "spoo", dest: folder, importedAt: expect.any(String), size: 900 }]);
+    // The roots file sits beside this computer's daemon's home, the person's, not the guest constant's.
+    expect(readFileSync(rootsPathIn(root), "utf8")).toBe(`${folder}\n`);
+    await rt.close();
   });
 
   it("a cloud workspace takes a relayed request, so the rule is the kind's and not the verb's", async () => {
@@ -577,6 +614,7 @@ describe("a local turn and a host restart", () => {
       backend: new LocalBackend({ root }),
       execStream: o => localExecStream({ root, ...o }),
       home: () => join(root, ".claude"),
+      homeDir: root,
       env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
     };
   });

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import { SSH_READ_SCRIPT, parseSshMachineId } from "@wsp/engine";
-import { OVER_SSH, TURN_TOKEN_ENV, alreadyRecorded, machineWord, noMachineHomeLine, relayedRecordRefusal, relayedRefusal, sshHostKeyNotice, undrivenRefusal, type AdapterEvent, type TurnResult } from "@wsp/protocol";
-import { createRuntime, type HarnessAdapterContext, type HarnessAdapterFactory, type Runtime, type SshWiring } from "../src/runtime.js";
+import { alreadyRecorded, machineWord, noMachineHomeLine, noSshImportLine, OVER_SSH, relayedRecordRefusal, relayedRefusal, sshHostKeyNotice, TURN_TOKEN_ENV, undrivenRefusal, type AdapterEvent, type TurnResult } from "@wsp/protocol";
+import { createRuntime, type HarnessAdapterContext, type HarnessAdapterFactory, type ProjectImportOptions, type Runtime, type SshWiring } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { fakeSsh } from "./fake-ssh.js";
 import { stubBackend } from "./stub-backend.js";
@@ -44,6 +44,10 @@ describe("ssh workspace", () => {
     expect(ws.name).toBe("box");
     expect(ws.golden).toBe("");
     expect(ws.phase).toBe("running");
+    // The home the machine answered with rides the view, so a client shortens its folders as that login's shell would.
+    expect(ws.home).toBe("/home/dev");
+    // Nothing lands a folder on a machine wsp only reaches yet; the kind's import road says so before anything is read.
+    await expect(rt.projects.import({ workspaceId: ws.id, source: "/Users/dev/spoo", dest: "/home/dev/spoo", bundler: {} as ProjectImportOptions["bundler"] })).rejects.toThrow(noSshImportLine("box"));
     // The size on the row is what the machine answered with, not a default: nothing here bills, so nothing offers one.
     expect((await rt.status.list()).find(r => r.id === ws.id)?.size).toEqual({ cpu: 8, memMb: 16_000 });
     // The record's machine id is the dial itself, so a later host process reaches the same machine from it alone.

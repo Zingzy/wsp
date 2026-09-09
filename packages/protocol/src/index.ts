@@ -232,6 +232,9 @@ export const WorkspaceView = z.object({
    * rule: the kind's own (the work folder on this computer). Absent where the kind names none and the machine's own
    * home is where the shell lands (a fork, a machine over ssh). Published so a client shows what the runtime will do. */
   folder: z.string().optional(),
+  /** The machine's own home, where its shell shortens paths to `~`: /root on a fork, the person's home on this
+   * computer, the login's on a machine over ssh once it has answered. Absent where the kind has not read one. */
+  home: z.string().optional(),
   /** Claude session id of the last session, so the next send can --resume it. */
   claudeSessionId: z.string().optional(),
   /** Present when the machine streams a display (desktop kind); sandbox machines are headless. */
@@ -273,7 +276,7 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
  * facts, and nothing the provider minted. Picked rather than omitted, so a route added to the view later is not
  * handed over by having been forgotten, which is how the display stream rode these doors until now. */
 const WORKSPACE_OUT = {
-  id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, projects: true, folder: true,
+  id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, projects: true, folder: true, home: true,
   claudeSessionId: true, gone: true, tint: true, glyph: true, daemonNote: true,
 } as const;
 
@@ -1236,6 +1239,8 @@ export interface DesktopBridge {
   localFonts(family: string): Promise<LocalFontFace[]>;
   /** The system folder picker; the absolute path chosen, or nothing when it was dismissed. */
   pickFolder(): Promise<string | undefined>;
+  /** The absolute path of a file or folder dropped on the window from the desktop, which the page itself cannot read. */
+  droppedPath(file: File): string;
   /** The native context menu at the pointer, built from the items; resolves with the chosen item's id, or null when it was dismissed. */
   contextMenu(items: ContextMenuItem[]): Promise<string | null>;
   /** Photographs the page as it is now and keeps it under this workspace, replacing what that workspace held. Asked
@@ -2331,7 +2336,9 @@ export type SnapshotLineage = z.infer<typeof SnapshotLineage>;
  * Lineage section lists it under that version; `version` is that version's number when a manifest knows the snapshot. */
 export const ProjectGolden = z.object({
   snapshotId: z.string(),
-  project: WorkspaceProject,
+  /** Every project on the disk when it was taken, oldest import first: a snapshot is the whole machine, so a fork of
+   * it starts with all of them. The snapshot is named after the one the default folder rule would start a thread in. */
+  projects: z.array(WorkspaceProject),
   golden: z.string(),
   version: z.number().int().optional(),
   workspaceId: z.string(),
@@ -2389,7 +2396,7 @@ export { inFolder, shellLine, shellQuote } from "./shell-quote.js";
 export { LOOK_PARTS, WORKSPACE_GLYPHS, WORKSPACE_TINTS, WorkspaceGlyph, WorkspaceLook, WorkspaceTint, type LookPart } from "./workspace-look.js";
 export { rootsPathIn, underProject } from "./project-path.js";
 export * from "./projects.js";
-export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
+export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, registerRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";
 export * from "./app-ports.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";

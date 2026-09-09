@@ -19,7 +19,7 @@ const version = (n: number) => ({ version: n, snapshotId: `snap_golden-v${n}`, b
 const lineage: SnapshotLineage = { name: "default", head: 12, versions: [version(11), version(12)] };
 const golden = (snapshotId: string, root: number, createdAt: string, workspaceName: string, name = project.name): ProjectGolden => ({
   snapshotId,
-  project: { ...project, name, dest: `/root/work/${name}` },
+  projects: [{ ...project, name, dest: `/root/work/${name}` }],
   golden: `snap_golden-v${root}`,
   version: root,
   workspaceId: "ws_src",

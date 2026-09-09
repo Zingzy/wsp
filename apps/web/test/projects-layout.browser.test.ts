@@ -6,7 +6,12 @@
 // the box names the folder that project lands in, and each thread row's
 // second line carries the project its folder sits in beside the agent's
 // mark, in the meta line's muted mono, every row one height whether or not
-// it has one; photographed in both themes. Vite serves test/shell to
+// it has one; photographed in both themes. Then the roads a project takes onto
+// a workspace: every workspace row a dotted drop tile in the row's muted mono
+// while a folder is dragged over the window, the import dialog a drop on a box
+// opens with the plan read and one Import button, and the Machine tab's
+// PROJECTS section with two projects and with none, its rows one height in
+// mono with no chip. Vite serves test/shell to
 // Playwright's browser, so like the shell layout test it runs only when asked
 // for (WSP_RENDER=1) and skips without Playwright's Chromium on the machine.
 import { mkdirSync } from "node:fs";
@@ -14,6 +19,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
+import { fmtBytes } from "@wsp/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
 import { startVite, type ViteChild } from "./vite-child";
@@ -154,6 +160,125 @@ describe.skipIf(renderSkipped !== undefined)("the project pick and the thread ro
       const shot = join(SHOTS_DIR, `thread-rows-project-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path: shot });
       console.info(`thread rows project word screenshot: ${shot}`);
+    }
+  }, 60_000);
+
+  it("while a folder is dragged over the window every workspace row is a dotted drop tile at the row's height in the meta line's mono, a box saying import to it and this computer saying register, in both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&local=1&drop=1`);
+      await page!.waitForSelector("[data-sidebar-row]");
+      // The drag is a window event the page holds as one flag; the fixture puts the bridge on the page and the test drags.
+      await page!.evaluate(() => {
+        const transfer = { types: ["Files"], items: [{ kind: "file", type: "" }] };
+        window.dispatchEvent(Object.assign(new Event("dragenter", { bubbles: true, cancelable: true }), { dataTransfer: transfer }));
+      });
+      await page!.waitForSelector("[data-drop-tile]");
+      const read = await page!.locator("[data-slot=sidebar]").first().evaluate(el => {
+        const tiles = [...el.querySelectorAll<HTMLElement>("[data-drop-tile]")];
+        const meta = el.querySelector<HTMLElement>("[data-thread-meta]");
+        return {
+          words: tiles.map(t => t.textContent),
+          heights: tiles.map(t => Math.round(t.getBoundingClientRect().height)),
+          skins: tiles.map(t => {
+            const s = getComputedStyle(t);
+            return { border: s.borderTopStyle, mono: /mono/i.test(s.fontFamily), size: s.fontSize, color: s.color, background: s.backgroundColor };
+          }),
+          metaSize: meta === null ? null : getComputedStyle(meta).fontSize,
+          metaColor: meta === null ? null : getComputedStyle(meta).color,
+          rows: [...el.querySelectorAll<HTMLElement>("[data-sidebar-row]:not([data-drop-tile])")].filter(r => (r.dataset["rowId"] ?? "").startsWith("ws:")).length,
+        };
+      });
+      // The gone workspace's import is refused, so its row stays a row rather than offering a drop that cannot land.
+      expect(read.words).toEqual(["import to api", "register on this computer", "import to web"]);
+      expect(new Set(read.heights).size).toBe(1);
+      expect(read.heights[0]).toBe(60);
+      for (const skin of read.skins) {
+        expect(skin.border).toBe("dashed");
+        expect(skin.mono).toBe(true);
+        expect(skin.size).toBe(read.metaSize);
+        expect(skin.color).toBe(read.metaColor);
+        expect(skin.background).toBe("rgba(0, 0, 0, 0)");
+      }
+      // The tile is the row while the drag lasts; the one row left is the gone workspace's.
+      expect(read.rows).toBe(1);
+      const shot = join(SHOTS_DIR, `drop-tiles-${theme}.png`);
+      await page!.locator("[data-slot=sidebar]").first().screenshot({ path: shot });
+      console.info(`drop tiles screenshot: ${shot}`);
+    }
+  }, 60_000);
+
+  it("a drop on a box opens the import dialog on that folder with the plan read, size, files, caches left behind and the secret-shaped rows, and one Import button, in both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&import=1`);
+      const dialog = page!.locator("[role=dialog]");
+      await dialog.waitFor();
+      await page!.waitForSelector("[data-k='files']:not(:empty)");
+      const read = await dialog.evaluate(el => ({
+        title: el.querySelector("h2")?.textContent ?? "",
+        folder: el.querySelector<HTMLElement>("[data-k='folder'] [data-k='path'], [data-k='folder'] input")?.textContent || (el.querySelector<HTMLInputElement>("input")?.value ?? ""),
+        files: el.querySelector("[data-k='files']")?.textContent ?? "",
+        caches: el.querySelector("[data-k='caches']")?.textContent ?? "",
+        secrets: [...el.querySelectorAll<HTMLElement>("[data-k='offer']")].map(o => o.textContent),
+        buttons: [...el.querySelectorAll<HTMLButtonElement>("button")].map(b => b.textContent?.trim()).filter(t => t !== "" && t !== undefined),
+      }));
+      expect(read.title).toBe("Import a project");
+      expect(read.folder).toContain("/Users/dev/spoo");
+      expect(read.files).toBe(`412 files · ${fmtBytes(48_200_000)}`);
+      expect(read.caches).toContain("2 folders");
+      expect(read.secrets).toEqual(["left out", "rewritten without keys"]);
+      expect(read.buttons.filter(b => b === "Import")).toHaveLength(1);
+      const shot = join(SHOTS_DIR, `import-dialog-${theme}.png`);
+      await dialog.screenshot({ path: shot });
+      console.info(`import dialog screenshot: ${shot}`);
+    }
+  }, 60_000);
+
+  it("the Machine tab's PROJECTS section lists two projects as one-height mono rows with no chip, name, folder, size and day, with import a folder and snapshot as image under them; a workspace with none says so, in both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&projects=1&ws=ws_a&panel=machine`);
+      await page!.waitForSelector("[data-k='project-wsp']");
+      const read = await page!.evaluate(() => {
+        const rows = [...document.querySelectorAll<HTMLElement>("[data-k^='project-']")];
+        const section = rows[0]!.closest("section")!;
+        return {
+          names: rows.map(r => r.querySelector("[data-cell='name']")?.textContent),
+          heights: rows.map(r => Math.round(r.getBoundingClientRect().height)),
+          mono: rows.map(r => /mono/i.test(getComputedStyle(r).fontFamily)),
+          badges: section.querySelectorAll("[data-slot='badge']").length,
+          cellBackgrounds: [...section.querySelectorAll<HTMLElement>("[data-cell]")].map(c => getComputedStyle(c).backgroundColor),
+          buttons: [...section.querySelectorAll<HTMLButtonElement>("button")].map(b => ({ text: b.textContent?.trim(), height: Math.round(b.getBoundingClientRect().height), disabled: b.disabled })),
+          heading: section.querySelector("div > span")?.textContent,
+        };
+      });
+      expect(read.heading).toBe("Projects");
+      expect(read.names).toEqual(["spoo", "wsp"]);
+      expect(new Set(read.heights).size).toBe(1);
+      expect(read.mono).toEqual([true, true]);
+      expect(read.badges).toBe(0);
+      for (const bg of read.cellBackgrounds) expect(bg).toBe("rgba(0, 0, 0, 0)");
+      expect(read.buttons).toEqual([
+        { text: "Import a folder", height: read.buttons[0]!.height, disabled: false },
+        { text: "Snapshot as image", height: read.buttons[0]!.height, disabled: false },
+      ]);
+      const two = join(SHOTS_DIR, `projects-section-two-${theme}.png`);
+      await page!.locator("[data-k='project-spoo']").locator("xpath=ancestor::section").screenshot({ path: two });
+      console.info(`projects section screenshot: ${two}`);
+
+      await page!.goto(`${base}?theme=${theme}&ws=ws_b&panel=machine`);
+      await page!.waitForSelector("[data-k='projects-none']");
+      const none = await page!.evaluate(() => {
+        const line = document.querySelector<HTMLElement>("[data-k='projects-none']")!;
+        const section = line.closest("section")!;
+        return { line: line.textContent, buttons: [...section.querySelectorAll<HTMLButtonElement>("button")].map(b => ({ text: b.textContent?.trim(), disabled: b.disabled })) };
+      });
+      expect(none.line).toBe("No projects yet. Import a folder.");
+      expect(none.buttons).toEqual([
+        { text: "Import a folder", disabled: false },
+        { text: "Snapshot as image", disabled: true },
+      ]);
+      const empty = join(SHOTS_DIR, `projects-section-none-${theme}.png`);
+      await page!.locator("[data-k='projects-none']").locator("xpath=ancestor::section").screenshot({ path: empty });
+      console.info(`projects section (none) screenshot: ${empty}`);
     }
   }, 60_000);
 });
