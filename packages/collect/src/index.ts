@@ -26,3 +26,4 @@ export { CLAUDE_KEY_ENV, apiKeyHelperOf, detectLogins } from "./detect/logins.js
 export { FISH_CONF_D, RC_NAMES, RC_PATHS, isRcPath, isSecretName, rcFiles, simpleCommands, sourcedPaths, stripExports } from "./detect/shell-rc.js";
 export { type Signal, MAX_BYTES, bareUrls, fileSignals, keysSignal, modeSignal, nameSignal, pemSignal, topLevelKeys, urlSignal } from "./credential-signals.js";
 export { CACHE_DIRS, FINDER_METADATA } from "./cache-names.js";
+export { SSH_CONFIG_PATH, SSH_IGNORE_UNKNOWN_DETAIL, withIgnoreUnknown } from "./ssh-config.js";

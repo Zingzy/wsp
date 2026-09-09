@@ -93,8 +93,17 @@ export async function probeReach(url: string, o: ProbeOptions, now: () => number
   }
 }
 
+/** Whose run of probes a status read joins. The dampening rule wants two silences in a row before a row's word
+ * turns, so every read is dampened by the run it belongs to and moves that run on: the app keeps the one a sidebar
+ * row rides, and every listing door shares another. An agent polling `wsp workspaces` therefore cannot spend the
+ * silence the person's row is granted, and a table on a host with no app open is still dampened by its own last
+ * read rather than calling a machine dark on one blip. */
+export type StatusReader = "app" | "table";
+
 export interface StatusListOptions {
   probeTimeoutMs?: number;
+  /** Which run of probes this read joins; the app's when unsaid, since the poller and its snapshot do not say. */
+  reader?: StatusReader;
   promptMs?: number;
   /** "always" asks the provider for every machine (an explicit refresh; what a
    * bare list() does). "on-failure" asks only after a failed reach and reuses
@@ -244,7 +253,8 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   /** The words behind a gone answer, per workspace, so the status that reports it can quote the provider. */
   const goneReasons = new Map<string, string>();
   const suspects = new Map<string, Suspect>();
-  const probes = new Map<string, Probes>();
+  /** One run of probes per reader, per workspace; a reader that has never read a machine starts clean. */
+  const probes = new Map<StatusReader, Map<string, Probes>>();
   /** Per workspace, the machine whose metrics 404 was logged while its guest still answered, so the line lands once per spell. */
   const doubted = new Map<string, string>();
   /** The awake stretch a gone verdict closed, per workspace, until a record leaves gone and reopens it or a rebuild
@@ -316,7 +326,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     reconciled.delete(e.workspaceId);
     goneReasons.delete(e.workspaceId);
     suspects.delete(e.workspaceId);
-    probes.delete(e.workspaceId);
+    for (const book of probes.values()) book.delete(e.workspaceId);
     doubted.delete(e.workspaceId);
   });
 
@@ -406,13 +416,16 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     }
   };
 
-  /** The probes of this workspace's current machine; a replaced machine starts clean, and a machine never probed is
-   * given the word the runtime claims for a running one until a probe says otherwise. */
-  const probesOf = (r: StatusRecord): Probes => {
-    const known = probes.get(r.id);
+  /** This reader's probes of this workspace's current machine; a replaced machine starts clean, and a machine never
+   * probed is given the word the runtime claims for a running one until a probe says otherwise. Kept per reader, so
+   * one door's probe is never counted as the silence another door's row was waiting out. */
+  const probesOf = (r: StatusRecord, reader: StatusReader): Probes => {
+    let book = probes.get(reader);
+    if (book === undefined) probes.set(reader, (book = new Map()));
+    const known = book.get(r.id);
     if (known !== undefined && known.machineId === r.machineId) return known;
     const fresh: Probes = { machineId: r.machineId, shown: "reachable" };
-    probes.set(r.id, fresh);
+    book.set(r.id, fresh);
     return fresh;
   };
 
@@ -496,7 +509,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
         }
         if (!daemonReach) return done(await machineState(r, reconcile, false), { state: "unsupported" });
 
-        const memory = probesOf(r);
+        const memory = probesOf(r, opts?.reader ?? "app");
         let route: Pick<PreviewReach, "url" | "expiresAt"> | undefined;
         let probed: Probed;
         try {

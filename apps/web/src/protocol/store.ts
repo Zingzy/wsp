@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { NOTIFY_ME, applyPreferencesPatch, foldThreads, isLocalWorkspace, threadFromHash, workspaceFromHash, type Capabilities, type HarnessCatalog, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { NOTIFY_ME, applyPreferencesPatch, foldThreads, isLocalWorkspace, threadFromHash, workspaceFromHash, workspaceStateOf, type Capabilities, type HarnessCatalog, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { sidebarWorkspaceOrder } from "../adapt/workspaces.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
@@ -614,6 +614,15 @@ export function useWorkspace(id: string | null): WorkspaceView | null {
 }
 export function useStatus(id: string | null): WorkspaceStatus | null {
   return useStore(s => (id ? s.statuses[id] ?? null : null));
+}
+/** The one state word for a workspace as this app knows it: its status when one has arrived, and the record's phase
+ * alone until then, which reads a paused or unreachable machine as running. null while neither is known, which is
+ * how a surface tells a workspace it has not been given yet from one it has. */
+export function useWorkspaceState(id: string | null): WorkspaceState | null {
+  const workspace = useWorkspace(id);
+  const status = useStatus(id);
+  const view = status ?? workspace;
+  return view === null ? null : workspaceStateOf(view, status);
 }
 export function useCost(id: string | null): CostTick | null {
   return useStore(s => (id ? s.costs[id] ?? null : null));
