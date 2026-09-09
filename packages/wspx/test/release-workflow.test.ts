@@ -3,11 +3,19 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { bundleNames } from "../scripts/release-notes.mjs";
+import { bundleEnv, bundleNames, STABLE_NAMES } from "../scripts/bundles.mjs";
 
 const repo = fileURLToPath(new URL("../../..", import.meta.url));
 const workflow = readFileSync(join(repo, ".github", "workflows", "release.yml"), "utf8");
 const desktopScripts = JSON.parse(readFileSync(join(repo, "apps", "desktop", "package.json"), "utf8")).scripts as Record<string, string>;
+const builderConfig = readFileSync(join(repo, "apps", "desktop", "electron-builder.yml"), "utf8");
+const macJob = workflow.slice(workflow.indexOf("\n  mac:\n"), workflow.indexOf("\n  linux:\n"));
+const linuxJob = workflow.slice(workflow.indexOf("\n  linux:\n"), workflow.indexOf("\n  npm:\n"));
+/** The names bundle-env.mjs writes into a job's environment, which is where every job reads them from. */
+const envNames = bundleEnv("0.1.5")
+  .trim()
+  .split("\n")
+  .map(line => line.slice(0, line.indexOf("=")));
 /** What signs and notarizes the mac bundles, by the names electron-builder reads them under. */
 const SIGNING_SECRETS = ["CSC_LINK", "CSC_KEY_PASSWORD", "APPLE_ID", "APPLE_APP_SPECIFIC_PASSWORD", "APPLE_TEAM_ID"];
 
@@ -31,8 +39,8 @@ describe("the release workflow", () => {
     expect(workflow).toContain("--draft=false");
   });
 
-  it("asks the scripts in the repo for the version and the notes", () => {
-    for (const script of ["packages/wspx/scripts/tag-version.mjs", "packages/wspx/scripts/release-notes.mjs"]) {
+  it("asks the scripts in the repo for the version, the notes and every asset name", () => {
+    for (const script of ["packages/wspx/scripts/tag-version.mjs", "packages/wspx/scripts/release-notes.mjs", "packages/wspx/scripts/bundle-env.mjs"]) {
       expect(workflow).toContain(`node ${script}`);
       expect(existsSync(join(repo, script))).toBe(true);
     }
@@ -44,7 +52,7 @@ describe("the release workflow", () => {
     // checked there instead, and the smoke stays in the merge gate on a Mac.
     expect(workflow).not.toContain("pnpm --filter @wsp/desktop smoke");
     for (const file of ["test/signing.test.ts", "test/pty-native.test.ts"]) expect(workflow).toContain(file);
-    expect(desktopScripts["build:mac"]).toContain("--mac --arm64 --x64");
+    expect(desktopScripts["build:mac"]).toContain("--mac");
     expect(desktopScripts["build:linux"]).toContain("--linux");
     // node-pty's native module only exists for the machine that installed it, so the plain build packages the machine
     // it runs on and the workflow's two jobs are what make both platforms. A build that named the other platform
@@ -52,8 +60,14 @@ describe("the release workflow", () => {
     expect(desktopScripts["build"]).toBe("pnpm run build:deps && pnpm run build:app && electron-builder --config electron-builder.yml --publish never");
   });
 
+  it("makes one mac bundle for both chips, so no download depends on reading the chip", () => {
+    expect(desktopScripts["build:mac"]).not.toMatch(/--(arm64|x64)\b/);
+    expect(/^mac:\n((?: .*\n)+)/m.exec(builderConfig)?.[1]).toContain("arch: [universal]");
+    expect(macJob).not.toContain("mac-arm64");
+    expect(macJob).not.toContain("dist/mac");
+  });
+
   it("hands the signing secrets by name to the step that builds, the certificate's to the step that checks, and no value anywhere", () => {
-    const macJob = workflow.slice(workflow.indexOf("\n  mac:\n"), workflow.indexOf("\n  linux:\n"));
     const [header, ...steps] = macJob.split("\n      - ");
     const secretOf = (name: string) => `${name}: \${{ secrets.${name} }}`;
     const build = steps.find(step => step.startsWith("name: Build the bundles"));
@@ -77,8 +91,18 @@ describe("the release workflow", () => {
     expect(workflow).toContain(`release-notes.mjs "$GITHUB_REF_NAME" \${{ secrets.CSC_LINK != '' && '--signed' || '' }} > notes.md`);
   });
 
-  it("uploads the bundles under the names the notes promise", () => {
-    for (const name of Object.values(bundleNames("$VERSION"))) expect(workflow).toContain(name);
+  it("takes every asset name from the one formatter and spells none of its own", () => {
+    for (const job of [macJob, linuxJob]) expect(job).toContain('node packages/wspx/scripts/bundle-env.mjs "$VERSION" >> "$GITHUB_ENV"');
+    for (const name of [...Object.values(bundleNames("$VERSION")), ...Object.values(STABLE_NAMES)]) expect(workflow).not.toContain(name);
+    expect(workflow).not.toMatch(/wsp-[^"\s]*\.(dmg|AppImage|zip)/);
+    for (const name of envNames) expect(workflow).toContain(`$${name}`);
+  });
+
+  it("uploads each bundle under the release's own name and under the name a link can hold", () => {
+    expect(macJob).toContain('gh release upload "$GITHUB_REF_NAME" "$MAC_DMG" "$MAC_STABLE" --clobber');
+    expect(macJob).toContain('cp "$MAC_DMG" "$MAC_STABLE"');
+    expect(linuxJob).toContain('gh release upload "$GITHUB_REF_NAME" "$APPIMAGE" "$APPIMAGE_STABLE" --clobber');
+    expect(linuxJob).toContain('cp "$APPIMAGE" "$APPIMAGE_STABLE"');
   });
 
   it("never lets the packager upload a release of its own", () => {

@@ -128,7 +128,9 @@ async function launch(env: Record<string, string | undefined>, prepare: (home: s
   const inherited = { ...process.env };
   delete inherited["SOLARI_API_KEY"];
   delete inherited["ANTHROPIC_API_KEY"];
-  const merged = { ...inherited, HOME: home, WSP_HOME: home, WSP_PORT: "0", WSP_WS_PORT: "0", ...env };
+  // The app reads WSP_DESKTOP_SMOKE to know it is driven: the bundle runs out of dist, and the move to Applications
+  // it would otherwise offer has nobody to press a button.
+  const merged = { ...inherited, HOME: home, WSP_HOME: home, WSP_PORT: "0", WSP_WS_PORT: "0", WSP_DESKTOP_SMOKE: "1", ...env };
   const clean: Record<string, string> = {};
   for (const [k, v] of Object.entries(merged)) if (v !== undefined) clean[k] = v;
   // Playwright emulates a light prefers-color-scheme in the renderer unless told not to; the page's system theme has to
