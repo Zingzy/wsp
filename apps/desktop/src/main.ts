@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { existsSync } from "node:fs";
-import { homedir, hostname } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { agentHistories, agentsHere, assetDir, currentHome, installEach, mcpServerSpec, runningWsp, shimPath, wspHome, type CliIO } from "@wsp/host";
@@ -161,17 +161,6 @@ async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
 
 const ONBOARDING_CHANNELS = ["onboarding:agents", "onboarding:history", "onboarding:install", "onboarding:finish"] as const;
 
-/** The operating system as a person names it, with its major version. */
-const OS_NAMES: Partial<Record<NodeJS.Platform, string>> = { darwin: "macOS", linux: "Linux", win32: "Windows" };
-function computerLine(): string {
-  const name = hostname().replace(/\.local$/, "");
-  const os = OS_NAMES[process.platform] ?? process.platform;
-  return `${name} · ${os} ${process.getSystemVersion().split(".")[0]}`;
-}
-
-/** The chord the app opens a new thread with: mod+n in the web's keybinding defaults, in the platform's spelling. */
-const threadKey = (): string => (process.platform === "darwin" ? "⌘N" : "Ctrl+N");
-
 /** The ids the page asked to install, as strings and nothing else; the catalog refuses an id it does not know. */
 function agentIds(raw: unknown): string[] {
   return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === "string") : [];
@@ -214,7 +203,7 @@ async function showOnboarding(located: Located): Promise<void> {
   });
   // The page follows the Mac's appearance: no preference record exists yet for it to read.
   nativeTheme.themeSource = "system";
-  await page.loadFile(ONBOARDING_PAGE, { query: { computer: computerLine(), threadKey: threadKey() } });
+  await page.loadFile(ONBOARDING_PAGE);
 }
 
 let stopping: Promise<void> | undefined;

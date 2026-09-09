@@ -326,7 +326,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     await win.keyboard.up("Control");
   });
 
-  it("first launch with no key: the welcome, the agents found here with an install, Esc to the recap, the recap's own install, then the app on this computer with the cloud row, and the shim runs", async () => {
+  it("first launch with no key: the welcome, the agents found here with the MCP to add, Esc to the recap's one line, then the app on this computer with the cloud row, and the shim runs", async () => {
     // Labs on, since the settings page that picks the light side for the photograph is a labs surface.
     launched = await launch({ PATH: "/usr/bin:/bin", WSP_LABS: "1" }, twoAgents);
     const { app, home } = launched;
@@ -350,9 +350,11 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(await page.$eval(".ground", el => getComputedStyle(el).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)");
     expect(await page.textContent("#welcome h1")).toBe("Welcome to wsp");
     expect(await page.textContent("#start")).toContain("Get started");
-    if (process.platform === "darwin") expect(await page.textContent("#computer")).toMatch(/^[^.]+ · macOS \d+$/);
+    expect(await page.$("#computer")).toBeNull();
     expect(await page.isHidden("#agents")).toBe(true);
     expect(await fits()).toBe(true);
+    // The entrance plays once from CSS; the photograph is the screen at rest after it.
+    await page.waitForFunction(() => document.getAnimations().length === 0);
     console.info(`welcome: ${(await photograph(app, page, "onboarding-welcome")).join(" ")}`);
 
     // Enter advances.
@@ -360,9 +362,14 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     await page.waitForSelector("#agents:not([hidden])");
     expect(await page.isHidden("#welcome")).toBe(true);
     expect(await page.textContent("#agents h1")).toBe("Let your agents drive wsp");
-    // Every catalog agent is a row, in catalog order: the two found with a keycap, the rest with the state word.
-    const rows = await page.$$eval("#rows li", rows => rows.map(r => [r.getAttribute("data-agent"), r.querySelector(".name")?.textContent, r.querySelector(".slot")?.textContent]));
-    expect(rows).toEqual(CATALOG_AGENTS.map(a => [a.id, a.name, a.id === "claude" || a.id === "codex" ? "Install" : "not found"]));
+    // Every catalog agent is a row: the two found first with the keycap, then, dimmed and with the state word in place
+    // of a button, those whose command is not on this computer; each group in catalog order, no version anywhere.
+    const here = (a: { id: string }): boolean => a.id === "claude" || a.id === "codex";
+    const rows = await page.$$eval("#rows li", rows => rows.map(r => [r.getAttribute("data-agent"), r.querySelector(".name")?.textContent, r.querySelector(".slot")?.textContent, r.classList.contains("absent")]));
+    expect(rows).toEqual([...CATALOG_AGENTS.filter(here), ...CATALOG_AGENTS.filter(a => !here(a))].map(a => [a.id, a.name, here(a) ? "Add MCP" : "not installed", !here(a)]));
+    expect(await page.$$eval("#rows li.absent button", els => els.length)).toBe(0);
+    for (const meta of await page.$$eval("#rows li .meta", els => els.map(e => e.textContent))) expect(meta).not.toMatch(/^v\d/);
+    expect(await page.textContent("#all")).toContain("Add to all");
     // The marks are the web app's vendored svgs, masked in the current colour; an agent without one gets its initial.
     expect(await page.$eval("#rows li[data-agent=claude] .glyph", el => (el as HTMLElement).style.getPropertyValue("--mark"))).toContain("agents/claude.svg");
     expect(await page.$eval("#rows li[data-agent=hermes] .initial", el => el.textContent)).toBe("H");
@@ -384,20 +391,17 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(existsSync(join(home, ".claude", "skills", "wsp", "SKILL.md"))).toBe(true);
     expect(existsSync(join(home, ".codex", "skills"))).toBe(false);
 
-    // Esc is Skip: the recap, with the install that was skipped still offered on its row.
+    // Esc is Skip: the recap says what happened in one line, and since one agent was left, the sentence about later.
     await page.keyboard.press("Escape");
     await page.waitForSelector("#recap:not([hidden])");
     expect(await page.textContent("#recap h1")).toBe("This computer is your first workspace");
+    expect(await page.textContent("#happened")).toBe("Recorded as your workspace, with the wsp tools added to 1 agent.");
+    expect(await page.isVisible("#later")).toBe(true);
     expect(await page.textContent("#open")).toContain("Open wsp");
-    if (process.platform === "darwin") expect(await page.textContent("#thread-key")).toBe("⌘N");
-    expect(await page.textContent("#recap-agents button")).toBe("Install");
-    expect(await page.textContent("#next li:nth-child(3) .state")).toBe("in the sidebar");
+    expect(await page.$("#next")).toBeNull();
+    expect(await page.$("#computer")).toBeNull();
     expect(await fits()).toBe(true);
     console.info(`recap: ${(await photograph(app, page, "onboarding-recap")).join(" ")}`);
-    await page.click("#recap-agents button");
-    await page.waitForFunction(() => document.querySelector("#recap-agents .state")?.textContent === "MCP added");
-    expect(readFileSync(join(home, ".codex", "config.toml"), "utf8")).toContain("[mcp_servers.wsp]");
-    expect(existsSync(join(home, ".codex", "skills", "wsp", "SKILL.md"))).toBe(true);
 
     // Enter opens the app. An event asked for after it has fired never arrives, and the finish closes this window while the key is in flight.
     const closed = page.waitForEvent("close");
@@ -470,8 +474,9 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     await page.waitForSelector("#agents:not([hidden])");
     await page.keyboard.press("Enter");
     await page.waitForSelector("#recap:not([hidden])");
-    expect(await page.$$eval("#rows li .state", els => els.map(e => e.textContent))).toEqual(CATALOG_AGENTS.map(a => (a.id === "claude" || a.id === "codex" ? "MCP added" : "not found")));
-    expect(await page.textContent("#recap-agents .state")).toBe("MCP added");
+    expect(await page.$$eval("#rows li .state", els => els.map(e => e.textContent))).toEqual(CATALOG_AGENTS.map(a => (a.id === "claude" || a.id === "codex" ? "MCP added" : "not installed")).sort((a, b) => Number(b === "MCP added") - Number(a === "MCP added")));
+    expect(await page.textContent("#happened")).toBe("Recorded as your workspace, with the wsp tools added to 2 agents.");
+    expect(await page.isHidden("#later")).toBe(true);
     expect(JSON.parse(readFileSync(join(home, ".claude.json"), "utf8")).mcpServers.wsp.command).toBe(shimPath(home));
     expect(readFileSync(join(home, ".codex", "config.toml"), "utf8")).toContain("[mcp_servers.wsp]");
   });
