@@ -167,6 +167,7 @@ export function screensOf(reading: Reading, a: ScreenAnswers, at: ScreensAt): In
       title: ALSO_TITLE,
       top: scan.length > 0 ? ALSO_TOP : ALSO_EMPTY_TOP,
       counter: screenCounter("also"),
+      tally: "more",
       items: alsoItems(scan, recipe, row => buildLine(manifest, row, reading.brew)).map(i => item(i, scan.find(r => r.id === i.id)?.size ?? null)),
       ticks: [...scannedTicks(recipe, scan)],
       answers: {},

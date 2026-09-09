@@ -21,7 +21,7 @@ export function SetupChoice({ agents, pick, onPick, onContinue, refusal }: { age
   const canAgent = agents.length > 0;
   const agent = agents.find(a => a.id === harness);
   return (
-    <SetupScreen k="choice" label={words.label} headline={words.headline} top={words.top} refusal={refusal} primary={{ word: words.keycap, onPress: onContinue, disabled: pick.road === "agent" && !canAgent }}>
+    <SetupScreen k="choice" headline={words.headline} top={words.top} refusal={refusal} primary={{ word: words.keycap, onPress: onContinue, disabled: pick.road === "agent" && !canAgent }}>
       <RadioGroup aria-label={words.headline} value={pick.road} onValueChange={value => onPick(value === "agent" ? { road: "agent", ...(harness !== undefined ? { harness } : {}) } : { road: "manual" })} className={cn(CARD, "gap-0")}>
         <label className={cn(ROW, ROW_LINE, "cursor-pointer hover:bg-accent/40")}>
           <Radio value="manual" data-k="road-manual" />
@@ -33,7 +33,7 @@ export function SetupChoice({ agents, pick, onPick, onContinue, refusal }: { age
           <Slot>
             {canAgent ? (
               <>
-                {harness !== undefined ? <RowMark id={harness} label={agent?.name ?? harness} /> : null}
+                {harness !== undefined ? <RowMark id={harness} /> : null}
                 <RowPicker k="harness" label={words.agentWith} value={harness} choices={agents.map(a => ({ value: a.id, label: a.name }))} onPick={value => onPick({ road: "agent", harness: value })} />
               </>
             ) : (
