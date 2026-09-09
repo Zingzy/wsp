@@ -5,7 +5,7 @@ import type { IncomingMessage } from "node:http";
 import { connect as connectTcp, type Socket } from "node:net";
 import { homedir, platform } from "node:os";
 import { resolve } from "node:path";
-import { DAEMON_ROOTS_PATH, DAEMON_VERSION, DaemonAuthRequest, type DaemonEvent, type WorkspaceKind } from "@wsp/protocol";
+import { DAEMON_ROOTS_PATH, DAEMON_VERSION, DaemonAuthRequest, callbackPortOf, type DaemonEvent, type WorkspaceKind } from "@wsp/protocol";
 import { WebSocketServer, type WebSocket } from "ws";
 import { listDir, readFileBounded, type FsReadEncoding } from "./fs-ops.js";
 import { gitDiff, gitStatus, type GitDiffScope } from "./git-ops.js";
@@ -18,7 +18,7 @@ import { readingsFor, type ReadingsOptions } from "./readings.js";
 import { PtyManager } from "./pty-manager.js";
 import { SysSampler, type SysSource } from "./sys.js";
 import { localhostPortOf, settledLocalPorts } from "./local-urls.js";
-import { CallbackSpotter, TerminalUrlScanner, callbackPortOf, listenOpenSocket, type OpenSocket } from "./relay.js";
+import { CallbackSpotter, TerminalUrlScanner, listenOpenSocket, type OpenSocket } from "./relay.js";
 import { OpError, resolveInside } from "./workspace-paths.js";
 
 export const DEFAULT_PORT = 7070;

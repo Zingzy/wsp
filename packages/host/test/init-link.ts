@@ -7,7 +7,8 @@ import { fakePtyLink, type FakePtyLink } from "./fake-pty-link.js";
 export const DEVICE_URL = "https://github.com/login/device";
 export const CLAUDE_URL = "https://claude.com/cai/oauth/authorize?code=true&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback";
 
-/** Ptys on the fake builder: a login prints its page's URL and exits (or waits for Ctrl-C when held). */
+/** Ptys on the fake builder: a login prints its page's URL and exits (or waits for Ctrl-C, or for a code typed into
+ * it, when held). */
 export function scriptedLink(state: { signedIn: boolean; hold: boolean; missing: boolean }): FakePtyLink {
   const link = fakePtyLink();
   link.script = (pty, line) => {
@@ -20,6 +21,11 @@ export function scriptedLink(state: { signedIn: boolean; hold: boolean; missing:
     if (state.missing && line.startsWith("exec ")) {
       link.data(pty, `bash: exec: ${line.split(" ")[1]}: not found\r\n`);
       link.exit(pty, 127);
+      return;
+    }
+    // A held login that is typed into: the code from its page, which the tool takes before it ends.
+    if (state.hold && !line.startsWith("exec ")) {
+      link.exit(pty, 0);
       return;
     }
     if (line.includes("exec claude")) link.data(pty, `Opening browser to sign in...\r\nIf the browser didn't open, visit: \x1b]8;;${CLAUDE_URL}\x1b\\${CLAUDE_URL}\x1b]8;;\x1b\\\r\nPaste code here if prompted > `);

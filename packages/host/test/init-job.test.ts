@@ -18,6 +18,7 @@ import { localWiring, type Keys } from "../src/cli.js";
 import { InitJobs, type InitJobDeps } from "../src/init-job.js";
 import { smallRecipePath } from "../src/recipe-file.js";
 import { workspaceRoads } from "../src/server.js";
+import type { FakePtyLink } from "./fake-pty-link.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
 import { CLAUDE_URL, DEVICE_URL, scriptedLink } from "./init-link.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
@@ -38,6 +39,8 @@ afterEach(async () => {
 interface Fake {
   jobs: InitJobs;
   rt: Runtime;
+  /** The builder's scripted daemon link, for what each sign-in's pty was asked and typed. */
+  link: FakePtyLink;
   backend: StubBackend;
   statePath: string;
   events: InitJobEvent[];
@@ -48,7 +51,7 @@ interface Fake {
   settled(): Promise<void>;
 }
 
-function fake(over: { keys?: Keys; configured?: boolean } = {}): Fake {
+function fake(over: { keys?: Keys; configured?: boolean; hold?: boolean } = {}): Fake {
   const dir = mkdtempSync(join(tmpdir(), "wsp-init-job-"));
   dirs.push(dir);
   const home = mkdtempSync(join(tmpdir(), "wsp-init-job-home-"));
@@ -69,7 +72,7 @@ function fake(over: { keys?: Keys; configured?: boolean } = {}): Fake {
   });
   const rt = createRuntime({ backend, store, adapters: { claude: claude.adapter }, local: localWiring(dir), hostId: "box:h1" });
   runtimes.push(rt);
-  const link = scriptedLink({ signedIn: true, hold: false, missing: false });
+  const link = scriptedLink({ signedIn: true, hold: over.hold ?? false, missing: false });
   const saved: Record<string, string>[] = [];
   const swapped: Keys[] = [];
   const installed: string[][] = [];
@@ -116,7 +119,7 @@ function fake(over: { keys?: Keys; configured?: boolean } = {}): Fake {
     // Every view on the wire parses as the protocol's.
     InitJob.parse(e.job);
   });
-  return { jobs, rt, backend, statePath, events, saved, swapped, installed, prompts, settled: () => jobs.settled() };
+  return { jobs, rt, link, backend, statePath, events, saved, swapped, installed, prompts, settled: () => jobs.settled() };
 }
 
 const phases = (f: Fake): string[] => f.events.map(e => e.job.phase).filter((p, i, all) => i === 0 || all[i - 1] !== p);
@@ -196,6 +199,40 @@ describe("the init job, manual road", () => {
     expect(done.log.some(l => l.includes("Golden v1 sealed"))).toBe(true);
     // Done: the setup carries the job for a client opening late, and a new start is allowed again.
     expect((await f.jobs.get()).job?.phase).toBe("done");
+  });
+
+  it("a sign-in whose page hands a code back takes it from the app: the code reaches that login's own pty on the machine, the row signs in, and nothing of the code is kept", async () => {
+    const PASTED = "4/0AfakeCodeFromThePage";
+    const f = fake({ hold: true });
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    // Claude Code's login alone: its page prints a code to paste, which is the road with no terminal to paste into.
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "machine", "logins/codex": "skip" } });
+    await expect(f.jobs.signInCode({ tool: "claude", code: PASTED })).rejects.toThrow(/no init job is running|waiting for a code/);
+    await f.jobs.build({});
+    const waiting = async () => {
+      for (let i = 0; i < 600; i++) {
+        const row = f.jobs.view()?.rows.find(r => r.id === "sign-in/claude");
+        if (row?.state === SIGN_IN_OPEN_STATE && row.finish === "code") return row;
+        await new Promise(r => setTimeout(r, 10));
+      }
+      throw new Error("the sign-in row never opened on the code road");
+    };
+    expect(await waiting()).toMatchObject({ page: CLAUDE_URL, finish: "code" });
+    // A login on the callback road runs with a browser to find, so its page can return to the machine instead.
+    expect(f.link.ptys.some(p => (p.created["env"] as Record<string, string> | undefined)?.["DISPLAY"] !== undefined)).toBe(true);
+    await f.jobs.signInCode({ tool: "claude", code: PASTED });
+    const login = f.link.ptys.find(p => p.writes[0]?.includes("exec claude auth login"))!;
+    expect(login.writes.slice(1)).toContain(`${PASTED}\r`);
+    await f.settled();
+    const done = f.jobs.view()!;
+    expect(done.phase).toBe("done");
+    expect(done.rows.find(r => r.id === "sign-in/claude")).toMatchObject({ state: LOGIN_STATE_WORDS["signed-in"] });
+    // The row is over: no page left to open and no code left to take.
+    expect(done.rows.find(r => r.id === "sign-in/claude")).not.toHaveProperty("finish");
+    // The code went to the machine and nowhere else: not a row, not the log, not an event.
+    expect(JSON.stringify(f.events)).not.toContain(PASTED);
+    await expect(f.jobs.signInCode({ tool: "claude", code: PASTED })).rejects.toThrow(/no init job is running/);
   });
 
   it("cancel while the screens wait drops the job; a build cannot start without answers", async () => {

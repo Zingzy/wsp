@@ -19,7 +19,6 @@ import {
   OPEN_URL_RE,
   isOpenUrl,
   TerminalUrlScanner,
-  callbackPortOf,
   callbackPortsIn,
   listenOpenSocket,
   stripOsc8,
@@ -33,38 +32,11 @@ const TOKEN = "relay-token";
 // URLs as the tools build them (measurement 2026-09-03); state and challenge values are placeholders.
 const WRANGLER =
   "https://dash.cloudflare.com/oauth2/auth?response_type=code&client_id=54d11594&redirect_uri=http%3A%2F%2Flocalhost%3A8976%2Foauth%2Fcallback&scope=account%3Aread&state=S&code_challenge=C&code_challenge_method=S256";
-const CLAUDE_BROWSER =
-  "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A45543%2Fcallback&scope=user%3Ainference&code_challenge=C&code_challenge_method=S256&state=S";
 const CLAUDE_TERMINAL =
   "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=user%3Ainference&code_challenge=C&code_challenge_method=S256&state=S";
-const AWS = "https://d-1234.awsapps.com/start/authorize?response_type=code&client_id=abc&redirect_uri=http%3A%2F%2F127.0.0.1%3A53211%2Foauth%2Fcallback&state=S";
 const MCP_REMOTE =
   "https://mcp.linear.app/authorize?response_type=code&client_id=X&code_challenge=C&code_challenge_method=S256&redirect_uri=http%3A%2F%2Flocalhost%3A22227%2Foauth%2Fcallback&state=S&scope=read+write&resource=https%3A%2F%2Fmcp.linear.app%2Fmcp";
-const IPV6 = "https://example.com/authorize?redirect_uri=http%3A%2F%2F%5B%3A%3A1%5D%3A8976%2Foauth%2Fcallback&state=S";
 const GH_DEVICE = "https://github.com/login/device";
-const AWS_BARE = "https://d-1234.awsapps.com/start/authorize?response_type=code&redirect_uri=http%3A%2F%2F127.0.0.1%2Foauth%2Fcallback&state=S";
-const KEYCHAIN_STYLE = "https://accounts.example.com/oauth2/auth?client_id=keychain&scope=openid";
-const REMOTE_PORT = "https://example.com/authorize?redirect_uri=https%3A%2F%2Fapp.example.com%3A8443%2Fcb";
-
-describe("callbackPortOf", () => {
-  it.each([
-    ["wrangler, redirect_uri on localhost:8976", WRANGLER, 8976],
-    ["Claude Code's browser URL, random localhost port", CLAUDE_BROWSER, 45543],
-    ["aws sso, 127.0.0.1 with a port", AWS, 53211],
-    ["mcp-remote, port derived from the server URL", MCP_REMOTE, 22227],
-    ["an IPv6 loopback host", IPV6, 8976],
-    ["Claude Code's printed URL: the hosted paste-code callback", CLAUDE_TERMINAL, undefined],
-    ["gh's device page: no redirect_uri at all", GH_DEVICE, undefined],
-    ["aws's registered redirect without a port", AWS_BARE, undefined],
-    ["a bare authorize URL with neither redirect_uri nor port", KEYCHAIN_STYLE, undefined],
-    ["a redirect_uri on another host, even with a port", REMOTE_PORT, undefined],
-    ["a loopback port below 1024, which the laptop could not bind", "https://x.test/a?redirect_uri=http%3A%2F%2Flocalhost%3A80%2Fcb", undefined],
-    ["not a URL", "paste code here", undefined],
-    ["a redirect_uri that is not a URL", "https://x.test/a?redirect_uri=nonsense", undefined],
-  ])("%s", (_name, url, port) => {
-    expect(callbackPortOf(url)).toBe(port);
-  });
-});
 
 describe("terminal URL detection", () => {
   it("strips OSC 8 hyperlinks (BEL and ESC backslash terminated) so a linked URL is seen once", () => {
@@ -282,7 +254,7 @@ describe("the shim and its socket", () => {
 });
 
 describe("pty environment", () => {
-  it("drops the image's DISPLAY and points BROWSER at the shim unless the caller set one", () => {
+  it("drops the image's DISPLAY and points BROWSER at the shim unless the caller set one, and keeps a DISPLAY the caller named", () => {
     const saved = { DISPLAY: process.env["DISPLAY"], BROWSER: process.env["BROWSER"] };
     process.env["DISPLAY"] = ":0";
     delete process.env["BROWSER"];
@@ -292,6 +264,8 @@ describe("pty environment", () => {
       expect(env["BROWSER"]).toBe(OPEN_SHIM_PATH);
       expect(env["TERM"]).toBe("xterm");
       expect(ptyEnv({ BROWSER: "true" })["BROWSER"]).toBe("true");
+      // A caller that names a DISPLAY keeps it: a sign-in whose page must return to this machine wants the browser road.
+      expect(ptyEnv({ DISPLAY: ":0" })["DISPLAY"]).toBe(":0");
     } finally {
       if (saved.DISPLAY === undefined) delete process.env["DISPLAY"];
       else process.env["DISPLAY"] = saved.DISPLAY;

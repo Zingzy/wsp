@@ -365,6 +365,9 @@ export interface Api {
   initAnswer?(o: { screen: InitScreenId; ticks?: string[]; answers?: Record<string, string> }): Promise<InitJob>;
   /** Writes the recipe as answered and starts the build, which rides on after the reply. */
   initBuild?(o: { firstWorkspace?: string; importFolder?: string }): Promise<InitJob>;
+  /** The code a sign-in's page handed back, typed into the tool waiting for it on the machine. Nothing of it is kept
+   * here or on the host; refused when that sign-in is not waiting for one. */
+  initSignInCode?(o: { tool: string; code: string }): Promise<InitJob>;
   /** Stops the job where it stands; refused once the machine is up. */
   initCancel?(): Promise<InitJob>;
   subscribe(fn: (e: ProtocolEvent) => void): () => void;
@@ -515,6 +518,7 @@ export function makeApi(c: ProtocolClient): Api {
     initStart: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.start", { ...o })).job),
     initAnswer: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.answer", { ...o })).job),
     initBuild: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.build", { ...o })).job),
+    initSignInCode: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.signInCode", { ...o })).job),
     initCancel: async () => InitJob.parse((await c.request<{ job?: unknown }>("init.cancel")).job),
     subscribe: fn => c.subscribe(fn),
     getGolden: async (name = "default") => (await c.request<{ manifest?: GoldenManifest }>("golden.get", { name })).manifest,

@@ -107,6 +107,10 @@ function fakeApi(over: { setup?: InitSetup; refuse?: string } = {}) {
       return JOB;
     }),
     initBuild: vi.fn(async () => ({ ...JOB, phase: "building" as const })),
+    initSignInCode: vi.fn(async () => {
+      if (over.refuse === "code") throw new Error("no sign-in for gcloud is waiting for a code from you");
+      return { ...JOB, phase: "signing-in" as const };
+    }),
     initCancel: vi.fn(async () => ({ ...JOB, phase: "cancelled" as const })),
   } satisfies Api;
   const emit = (job: InitJob): void => act(() => listeners.forEach(fn => fn({ type: "init.job", job })));
@@ -325,6 +329,29 @@ describe("the cloud setup modal", () => {
     fireEvent.click(k(dialog, "primary"));
     expect(useStore.getState().selectedId).toBe("ws_first");
     expect(useStore.getState().hasGolden).toBe(true);
+  });
+
+  it("a sign-in whose page hands a code back takes it on its row and sends it to the host for that tool; a refused submit says so and the row stays", async () => {
+    const PASTED = "4/0AfakeCodeFromThePage";
+    const building: InitJob = {
+      ...JOB,
+      phase: "signing-in",
+      screens: [],
+      rows: [{ id: "sign-in/gcloud", kind: "sign-in", tool: "gcloud", label: "Google Cloud login", state: SIGN_IN_OPEN_STATE, page: "https://accounts.google.com/o/oauth2/auth", finish: "code" }],
+      progress: { done: 0, total: 1 },
+      log: [],
+    };
+    useStore.setState({ initJob: building });
+    const { api, dialog } = await open({ setup: { ...SETUP, keys: { solari: true, anthropic: false }, job: building }, refuse: "code" });
+    await waitFor(() => expect(k(dialog, "build")).toBeDefined());
+    const code = k(dialog, "code-field") as HTMLInputElement;
+    fireEvent.change(code, { target: { value: PASTED } });
+    fireEvent.click(k(dialog, "code-submit"));
+    await waitFor(() => expect(api.initSignInCode).toHaveBeenCalledWith({ tool: "gcloud", code: PASTED }));
+    // The host refused this one: its words show under the keycap and the field is still there to try again.
+    await waitFor(() => expect(k(dialog, "refusal").textContent).toBe("no sign-in for gcloud is waiting for a code from you"));
+    expect(k(dialog, "code-field")).toBeDefined();
+    expect(dialog.textContent).not.toContain(PASTED);
   });
 
   it("opened from the row, the modal outlives the seal: the done screen stays, Open workspace selects the fork, and only then does the row go", async () => {

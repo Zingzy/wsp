@@ -135,6 +135,7 @@ export function CloudSetupDialog({ onClose, openAt = 0 }: { onClose: () => void;
         refusal={refusal}
         onHide={onClose}
         onCancel={() => void attempt(() => api!.initCancel!())}
+        onCode={o => void attempt(() => api!.initSignInCode!(o))}
         onOpenWorkspace={() => {
           if (job.workspace !== undefined) select(job.workspace.id);
           onClose();

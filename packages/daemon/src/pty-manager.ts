@@ -117,13 +117,15 @@ function passwdRow(): PasswdRow | undefined {
 
 /** The image ships DISPLAY=:0 with no X server behind it, which gcloud, gemini
  * and railway read as "a browser exists" and skip their paste-code paths; the
- * shim as BROWSER is what makes a sign-in land in the laptop's browser.
+ * shim as BROWSER is what makes a sign-in land in the laptop's browser. A
+ * caller that names a DISPLAY keeps the one it named: a sign-in with nobody at
+ * this terminal wants that road, since its callback returns to the machine.
  * HOME and USER come off the passwd row of the daemon's own uid when the
  * daemon was started without them (a guest daemon inherited PATH and nothing
  * else, measured 2026-09-05): git, Go and every rc file read them. */
 export function ptyEnv(extra?: Record<string, string>, me: PasswdRow | undefined = passwdRow()): Record<string, string> {
   const env: Record<string, string> = { ...(process.env as Record<string, string>), ...extra };
-  delete env["DISPLAY"];
+  if (extra?.["DISPLAY"] === undefined) delete env["DISPLAY"];
   env["BROWSER"] ??= OPEN_SHIM_PATH;
   // A uid with no passwd row has no home to give; the shell still opens, without the blank ones and with whatever was inherited.
   for (const [name, value] of [["HOME", me?.homedir], ["USER", me?.username]] as const) {

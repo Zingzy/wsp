@@ -242,6 +242,11 @@ export interface WatchOptions {
   onData?(text: string): void;
   /** Each URL the tool printed, once. */
   onUrl?(url: string): void;
+  /** Rides the pty's environment on the machine, where the daemon's own defaults would otherwise decide. */
+  env?: Record<string, string>;
+  /** Handed the pty's own input once it is attached, and nothing once it is gone: what a code from a page is typed
+   * with, from wherever the person pasted it. A refused write rejects, so the caller can say so. */
+  onTyping?(write: ((data: string) => Promise<void>) | undefined): void;
   /** The pty is killed after this long. */
   timeoutMs: number;
   /** Settles when the caller wants the pty ended early. */
@@ -250,13 +255,14 @@ export interface WatchOptions {
   flushMs?: number;
 }
 
-/** The same pty as relayPty with nobody at this terminal: nothing is typed
- * back and nothing is drawn, the tool's output goes to the caller and each page
- * it prints is reported as it arrives. What the sign-in hand-off runs, where
- * the person opens the page on their own computer instead. */
+/** The same pty as relayPty with nobody at this terminal: nothing is drawn, the
+ * tool's output goes to the caller and each page it prints is reported as it
+ * arrives, and the only thing typed back is what onTyping's holder sends. What
+ * the sign-in hand-off runs, where the person opens the page on their own
+ * computer instead. */
 export async function watchPty(o: WatchOptions): Promise<WatchOutcome> {
   // Wide, so a printed URL is never wrapped onto two lines before the scanner reads it.
-  const ptyId = ptyIdOf(await o.link.op("pty.create", { cols: 200, rows: 50, shell: "bash" }));
+  const ptyId = ptyIdOf(await o.link.op("pty.create", { cols: 200, rows: 50, shell: "bash", ...(o.env !== undefined ? { env: o.env } : {}) }));
   const scanner = new UrlScanner();
   const outcome: WatchOutcome = { exitCode: -1, timedOut: false, dropped: false, stopped: false };
   let ended = false;
@@ -291,12 +297,14 @@ export async function watchPty(o: WatchOptions): Promise<WatchOutcome> {
   timer.unref();
   try {
     okOrThrow("pty.attach", await o.link.op("pty.attach", { ptyId }));
+    o.onTyping?.(async data => void okOrThrow("pty.write", await o.link.op("pty.write", { ptyId, data })));
     const line = shellLine(o.command);
     if (line !== undefined) await o.link.op("pty.write", { ptyId, data: line });
     await exited;
   } finally {
     clearTimeout(timer);
     if (flush) clearTimeout(flush);
+    o.onTyping?.(undefined);
     detach();
     await o.link.op("pty.kill", { ptyId }).catch(() => {});
   }

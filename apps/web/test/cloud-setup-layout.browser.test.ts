@@ -12,6 +12,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
+import { CLOUD_SETUP_WORDS } from "@wsp/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { textContrast } from "./contrast";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
@@ -100,10 +101,10 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup modal laid out in 
     }
   }, 120_000);
 
-  it.each(["dark", "light"] as const)("in the %s theme the sign-in rows carry a bundled mark each, the open one a link to its page and its code, the rest a state word", async theme => {
+  it.each(["dark", "light"] as const)("in the %s theme the sign-in rows carry a bundled mark each, the open one a link to its page and its code, the row whose page hands a code back a mono field under it, the rest a state word", async theme => {
     await page!.goto(`${base}/test/cloud-setup/index.html?theme=${theme}&screen=signing`);
     await page!.waitForSelector("[role=dialog] [data-k=sign-ins]");
-    expect(await page!.locator("[role=dialog] [data-sign-in-mark]").count()).toBe(2);
+    expect(await page!.locator("[role=dialog] [data-sign-in-mark]").count()).toBe(3);
     const marks = await boxes("[role=dialog] [data-sign-in-mark]");
     expect(new Set(marks.map(m => Math.round(m.width))).size).toBe(1);
     expect(await page!.locator('[role=dialog] [data-row="sign-in/gh"] [data-k=open]').getAttribute("href")).toBe("https://github.com/login/device");
@@ -111,6 +112,16 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup modal laid out in 
     expect(await page!.locator('[role=dialog] [data-row="sign-in/claude"] [data-k=state]').textContent()).toBe("signed in");
     expect(await page!.locator("[role=dialog] [data-k=progress-line]").textContent()).toBe("sign in to GitHub CLI login");
     expect(await page!.locator("[role=dialog] img").count()).toBe(0);
+    // The code field is the line under the row that takes one, and no other row has one.
+    expect(await page!.locator("[role=dialog] [data-k=code-line]").count()).toBe(1);
+    const codeField = await box('[role=dialog] [data-row="sign-in/gcloud"] + [data-k=code-line] [data-k=code-field]');
+    const gcloudRow = await box('[role=dialog] [data-row="sign-in/gcloud"]');
+    expect(codeField.y, "the field sits under its row").toBeGreaterThanOrEqual(gcloudRow.y + gcloudRow.height - 1);
+    const [codeFamily = ""] = await style("[role=dialog] [data-k=code-field]", "font-family");
+    expect(codeFamily.toLowerCase(), "mono, as a code is read").toMatch(/mono|menlo|consolas/);
+    const [placeholder] = await textContrast(page!, "[role=dialog] [data-k=code-line]");
+    expect(placeholder, "the ask reads").toBeGreaterThanOrEqual(4.5);
+    expect(await page!.locator("[role=dialog] [data-k=code-submit]").textContent()).toBe(CLOUD_SETUP_WORDS.build.codeSubmit);
   });
 
   it.each(["dark", "light"] as const)("in the %s theme the button is alive while the job runs: the spinner in the glyph's place, the stage word and count, a 2 px line inside the bottom edge at the stages done over the total, paused and waiting for you at a sign-in, the line kept under reduced motion", async theme => {

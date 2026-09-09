@@ -966,6 +966,8 @@ export const CLOUD_SETUP_WORDS = {
     computer: "THIS COMPUTER",
     workspace: "WORKSPACE",
     open: "Open",
+    codeAsk: "Paste the code from the page",
+    codeSubmit: "Submit",
     hide: "Hide",
     cancel: "Cancel",
     done: "Cloud machines are ready",

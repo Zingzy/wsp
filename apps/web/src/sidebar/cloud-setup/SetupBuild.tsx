@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The build as rows: the image's stages, the sign-ins with the page each one
-// waits on and the company's mark, the first workspace and its project. Each
+// waits on, the company's mark and, for a sign-in whose page hands a code
+// back, the field that takes it, the first workspace and its project. Each
 // group folds under its caps label; the one line above them reads the phase
 // and the count over a thin bar. Nothing here blocks: Hide shuts the modal and
 // the sidebar's row carries the same line.
@@ -10,9 +11,10 @@ import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, LOGIN_STATE_WORDS, initJobBuilding,
 import { Button } from "../../components/ui/button.js";
 import { cn } from "../../lib/utils.js";
 import { CARD, MICRO_LABEL, ROW, ROW_LINE, STATE_WORD, SetupFrame } from "./grammar.js";
+import { SignInCode } from "./SignInCode.js";
 import { SignInMark } from "./SignInMark.js";
 
-export function SetupBuild({ job, onHide, onCancel, onOpenWorkspace, onAgain, refusal }: { job: InitJob; onHide: () => void; onCancel: () => void; onOpenWorkspace: () => void; onAgain: () => void; refusal: string | null }) {
+export function SetupBuild({ job, onHide, onCancel, onOpenWorkspace, onAgain, onCode, refusal }: { job: InitJob; onHide: () => void; onCancel: () => void; onOpenWorkspace: () => void; onAgain: () => void; onCode: (o: { tool: string; code: string }) => void; refusal: string | null }) {
   const words = CLOUD_SETUP_WORDS.build;
   const stages = job.rows.filter(r => r.kind === "stage");
   const signIns = job.rows.filter(r => r.kind === "sign-in");
@@ -46,7 +48,7 @@ export function SetupBuild({ job, onHide, onCancel, onOpenWorkspace, onAgain, re
       </div>
       <div className={CARD}>
         <Section k="image" label={words.image} rows={stages} open={!over && signIns.every(r => r.state !== INIT_ROW_STATES.open)} />
-        {signIns.length > 0 ? <Section k="sign-ins" label={words.signIns} rows={signIns} open /> : null}
+        {signIns.length > 0 ? <Section k="sign-ins" label={words.signIns} rows={signIns} open onCode={onCode} /> : null}
         {agents.length > 0 ? <Section k="computer" label={words.computer} rows={agents} open /> : null}
         {rest.length > 0 ? <Section k="workspace" label={words.workspace} rows={rest} open /> : null}
       </div>
@@ -63,7 +65,7 @@ export function SetupBuild({ job, onHide, onCancel, onOpenWorkspace, onAgain, re
 
 /** A group of rows under its caps label, folded or open. The fold follows the job as it moves (the image folds
  * when a sign-in's page arrives) and a click moves it until the job moves again. */
-function Section({ k, label, rows, open: follow }: { k: string; label: string; rows: readonly InitRow[]; open: boolean }) {
+function Section({ k, label, rows, open: follow, onCode }: { k: string; label: string; rows: readonly InitRow[]; open: boolean; onCode?: (o: { tool: string; code: string }) => void }) {
   const [open, setOpen] = useState(follow);
   useEffect(() => setOpen(follow), [follow]);
   const done = rows.filter(r => initRowOver(r.state)).length;
@@ -78,17 +80,22 @@ function Section({ k, label, rows, open: follow }: { k: string; label: string; r
       </button>
       {open ? (
         <ul>
-          {rows.map(row => (
-            <BuildRow key={row.id} row={row} />
-          ))}
+          {rows.flatMap(row => {
+            const tool = row.tool;
+            const takesCode = waitingOn(row) && row.finish === "code" && tool !== undefined && onCode !== undefined;
+            return [<BuildRow key={row.id} row={row} />, ...(takesCode ? [<SignInCode key={`${row.id}:code`} label={row.label} onCode={code => onCode({ tool, code })} />] : [])];
+          })}
         </ul>
       ) : null}
     </section>
   );
 }
 
+/** A sign-in still waiting on the person: its page is open and its state has not turned. */
+const waitingOn = (row: InitRow): boolean => row.kind === "sign-in" && row.state === INIT_ROW_STATES.open;
+
 function BuildRow({ row }: { row: InitRow }) {
-  const open = row.kind === "sign-in" && row.state === INIT_ROW_STATES.open;
+  const open = waitingOn(row);
   return (
     <li data-k="row" data-row={row.id} data-state={row.state} className={cn(ROW, "border-t border-border/40")} title={row.detail}>
       <span aria-hidden className="flex size-4 shrink-0 items-center justify-center text-foreground">

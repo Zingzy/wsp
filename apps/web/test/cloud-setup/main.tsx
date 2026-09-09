@@ -110,6 +110,8 @@ const JOBS: Record<string, InitJob> = {
       ...done(STAGES.slice(0, 9)),
       { id: "sign-in/claude", kind: "sign-in", tool: "claude", label: "Claude Code login", state: LOGIN_STATE_WORDS["signed-in"] },
       { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "GitHub CLI login", state: SIGN_IN_OPEN_STATE, page: "https://github.com/login/device", code: "8F4A-C21B" },
+      // The row whose page hands a code back: the field for it sits under the row.
+      { id: "sign-in/gcloud", kind: "sign-in", tool: "gcloud", label: "Google Cloud login", state: SIGN_IN_OPEN_STATE, page: "https://accounts.google.com/o/oauth2/auth", finish: "code" },
       ...STAGES.slice(9),
     ],
     progress: { done: 10, total: 16 },
@@ -178,6 +180,7 @@ const api: Api = {
   initStart: async () => base,
   initAnswer: async () => base,
   initBuild: async () => JOBS["building"]!,
+  initSignInCode: async () => JOBS["signing"]!,
   initCancel: async () => ({ ...base, phase: "cancelled" }),
 };
 

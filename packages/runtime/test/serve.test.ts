@@ -825,6 +825,10 @@ describe("serveRuntime init door (the host's init job, read and driven from the 
         calls.push(["build", o]);
         return { ...JOB, phase: "building" as const };
       },
+      signInCode: async o => {
+        calls.push(["signInCode", o]);
+        return { ...JOB, phase: "signing-in" as const };
+      },
       cancel: async () => {
         calls.push(["cancel"]);
         return { ...JOB, phase: "cancelled" as const };
@@ -848,12 +852,14 @@ describe("serveRuntime init door (the host's init job, read and driven from the 
     expect((await c.request("init.start", { road: "agent", harness: "claude" }))["job"]).toMatchObject({ road: "agent", phase: "reading" });
     expect((await c.request("init.answer", { screen: "tools", ticks: ["gh"], answers: { "logins/gh": "machine" } }))["job"]).toEqual(JOB);
     expect((await c.request("init.build", { firstWorkspace: "first" }))["job"]).toMatchObject({ phase: "building" });
+    expect((await c.request("init.signInCode", { tool: "gcloud", code: "4/0Afake" }))["job"]).toMatchObject({ phase: "signing-in" });
     expect((await c.request("init.cancel"))["job"]).toMatchObject({ phase: "cancelled" });
     expect(calls).toEqual([
       ["keys", { solari: "slr_live_fake", anthropic: "sk-ant-x" }],
       ["start", { road: "agent", harness: "claude" }],
       ["answer", { screen: "tools", ticks: ["gh"], answers: { "logins/gh": "machine" } }],
       ["build", { firstWorkspace: "first" }],
+      ["signInCode", { tool: "gcloud", code: "4/0Afake" }],
       ["cancel"],
     ]);
     c.close();

@@ -10,7 +10,7 @@
 import { z } from "zod";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
 import { openingTitle, titleLine } from "./format.js";
-import { InitJob, InitJobEvent, InitAgent, InitKeys, InitRoad, InitScreenId } from "./init-job.js";
+import { InitJob, InitJobEvent, InitAgent, InitKeys, InitRoad, InitScreenId, SIGN_IN_CODE_MAX } from "./init-job.js";
 import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
 import { WorkspaceGlyph, WorkspaceLook, WorkspaceTheme } from "./workspace-look.js";
@@ -80,6 +80,37 @@ export function hostOf(url: string): string | undefined {
 
 /** A callback port the laptop can bind without root; the host refuses anything else before it listens. */
 export const RelayPort = z.number().int().min(1024).max(65535);
+
+/** Hosts a sign-in's redirect comes back to on the machine itself; anything else is a page the person finishes. */
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/** A sign-in URL's redirect_uri as a URL, or nothing when it carries none and when either fails to parse. */
+function redirectOf(url: string): URL | undefined {
+  try {
+    const redirect = new URL(url).searchParams.get("redirect_uri");
+    return redirect === null ? undefined : new URL(redirect);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether a sign-in's page comes back to the machine that asked for it: its redirect_uri names a loopback host,
+ * port or no port (aws registers http://127.0.0.1/oauth/callback bare and binds its port at the time). This is what
+ * tells the two roads apart, since a page that returns to the machine hands the person nothing to carry back. */
+export function redirectsToMachine(url: string): boolean {
+  const target = redirectOf(url);
+  return target !== undefined && LOOPBACK_HOSTS.has(target.hostname);
+}
+
+/** Which port on the machine that redirect names, for the forward to bind here: the daemon reads it to name the port
+ * on a browser.open. Absent when the page does not come back to the machine at all, when the redirect names no
+ * explicit port, or when the port is one this computer could not bind. */
+export function callbackPortOf(url: string): number | undefined {
+  const target = redirectOf(url);
+  if (target === undefined || !LOOPBACK_HOSTS.has(target.hostname) || target.port === "") return undefined;
+  const port = Number(target.port);
+  return RelayPort.safeParse(port).success ? port : undefined;
+}
 
 /** A guest port the host forwards to this computer's loopback (localhost:<port>
  * here reaches the workspace's listener). The host holds them; the app lists
@@ -1913,6 +1944,7 @@ const DAEMON_CONTENTS = [
   "c5c3b15cad1b45ed110b072a18d0d895f661c489f73828de78a3b9f3589f05c6",
   "f90fd16f8e5d15707cda18e58524da66fb6ed6b890632fff90d396792dc5604d",
   "9ebea6a49390fd5b1af911f413e77c3e46db091812b55b41515e881e93433292",
+  "da0d618fd27965a77c8c15e389fea39c8f3ae691326af0212a8f1c62b9c8499f",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -1927,7 +1959,9 @@ const DAEMON_CONTENTS = [
  * on a Linux guest and on the person's own Mac. Version 8 runs under a systemd unit that restarts it, so a
  * daemon the kernel kills comes back on its own. Version 9 reads the utilisation and the processes it serves
  * through a module per kind of machine, and answers a watch only once that module has read the machine, so a
- * pane is refused where it would otherwise wait for a stream that never comes. */
+ * pane is refused where it would otherwise wait for a stream that never comes. Version 10 keeps a DISPLAY the
+ * caller names on a pty it opens, so a sign-in whose page must return to the machine can be handed a browser to
+ * find there. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the daemon's sources, the dependency
@@ -2247,6 +2281,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("init.answer"), screen: InitScreenId, ticks: z.array(z.string()).optional(), answers: z.record(z.string()).optional() }),
   /** Writes the recipe as answered and starts the build; replies with { job: InitJob } at once, the build riding on. */
   z.object({ id: reqId, op: z.literal("init.build"), firstWorkspace: z.string().optional(), importFolder: z.string().optional() }),
+  /** Types the code a sign-in's page handed back into the tool waiting for it on the machine, as the person would at
+   * that terminal; replies with { job: InitJob }. The code is never logged, kept or carried on the view. Refused when
+   * no sign-in for that tool is waiting for one. */
+  z.object({ id: reqId, op: z.literal("init.signInCode"), tool: z.string(), code: z.string().min(1).max(SIGN_IN_CODE_MAX) }),
   /** Stops the job where it is: a thread interrupted, a builder killed; replies with { job: InitJob }. */
   z.object({ id: reqId, op: z.literal("init.cancel") }),
   /** Replies with { preferences: Preferences }: the record on this host's state, the defaults until a client set something. */

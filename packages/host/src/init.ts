@@ -67,7 +67,7 @@ import { retentionOffer } from "./storage.js";
 import { DONE_LINE, appUrl, askFirst, checkImportFolder, runFirst, runLocal, type FirstResult } from "./init-first.js";
 import type { Tone } from "./init-select.js";
 import { diskLine, diskTone } from "./init-weight.js";
-import { builderLink, flowHooks, keyAsks, noteOutcomes, signInStage, stageLogins, type BuilderLink, type HostHooks, type LoginOutcome, type SignInFlow } from "./init-signin.js";
+import { builderLink, flowHooks, keyAsks, noteOutcomes, signInStage, stageLogins, type BuilderLink, type HostHooks, type LoginOutcome, type SignInCodes, type SignInFlow } from "./init-signin.js";
 import { handoffStage } from "./init-handoff.js";
 import { type PortProbes } from "./ports.js";
 import { openApp, pickPorts } from "./init-serve.js";
@@ -160,6 +160,9 @@ export interface InitOptions {
   host(rt: Runtime, ports: AppPorts): Promise<HostHandle>;
   /** A pty link to the builder's daemon for the sign-in and secrets steps, dialled before each command; the real one dials its reach. */
   daemon?(rt: Runtime, builder: GoldenBuilderView): Promise<BuilderLink>;
+  /** Where a code from a sign-in's page reaches the tool waiting for it, for a run whose client can submit one (the
+   * app's build screen). A terminal run needs none: the person types into the pty they are watching. */
+  codes?: SignInCodes;
   /** How long to wait when the account is at its machine cap, and how often. */
   retry?: { waitMs: number; attempts: number };
   /** This computer as already read by the caller, so the run reads it once: the init job reads for its screens and
@@ -1310,6 +1313,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
         output: io.output,
         platform: opts.platform,
         flow,
+        ...(opts.codes !== undefined ? { codes: opts.codes } : {}),
         ...(io.json !== undefined ? { json: io.json } : {}),
       })
     : await signInStage({

@@ -7,16 +7,27 @@ import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import type { ManifestEntry } from "@wsp/collect";
 import { describe, expect, it } from "vitest";
-import { cadence, codeIn, handoffStage, type HandoffOptions } from "../src/init-handoff.js";
-import { flowHooks, type SignInFlow } from "../src/init-signin.js";
+import { CALLBACK_DISPLAY, cadence, codeIn, handoffStage, rowFinish, signInEnv, type HandoffOptions } from "../src/init-handoff.js";
+import { SignInCodes, flowHooks, type SignInFlow } from "../src/init-signin.js";
 import { signInFor } from "../src/signin-table.js";
 import { fakePtyLink, type FakePty, type FakePtyLink } from "./fake-pty-link.js";
 
 const GH: ManifestEntry = { rung: "logins", id: "logins/gh", label: "GitHub CLI login", group: "CLI logins", paths: [], bytes: 0, default: "bring", choice: "machine" };
 const CLAUDE: ManifestEntry = { rung: "logins", id: "logins/claude", label: "Claude Code login", group: "Agent logins", paths: [], bytes: 0, default: "bring", choice: "copy" };
 const KUBE: ManifestEntry = { rung: "logins", id: "logins/kube", label: "kubeconfig", group: "CLI logins", paths: [], bytes: 0, default: "bring", choice: "machine" };
+const GCLOUD: ManifestEntry = { rung: "logins", id: "logins/gcloud", label: "Google Cloud login", group: "CLI logins", paths: [], bytes: 0, default: "bring", choice: "machine" };
 const DEVICE = "https://github.com/login/device";
 const CODE = "8F4A-C21B";
+/** gcloud's own two pages (client id cut, state and challenge placeholders): with a browser to reach it redirects to
+ * a port on the machine, and with none it redirects to the page that shows a code to paste. */
+const GCLOUD_PAGE =
+  "https://accounts.google.com/o/oauth2/auth?response_type=code&client_id=32555940559&redirect_uri=http%3A%2F%2Flocalhost%3A8085%2F&scope=openid+email&state=S&code_challenge=C&code_challenge_method=S256";
+const GCLOUD_PASTE =
+  "https://accounts.google.com/o/oauth2/auth?response_type=code&client_id=32555940559&redirect_uri=https%3A%2F%2Fsdk.cloud.google.com%2FauthCode.html&scope=openid+email&state=S&code_challenge=C&code_challenge_method=S256";
+/** aws sso's page: its redirect comes back to the machine without naming a port, which its listener gives later. */
+const AWS_BARE = "https://d-1234.awsapps.com/start/authorize?response_type=code&redirect_uri=http%3A%2F%2F127.0.0.1%2Foauth%2Fcallback&state=S";
+/** Shaped like a Google authorization code; nothing real. */
+const PASTED = "4/0AfakeCodeFromThePage";
 /** The page the machine asks the host to open, which returns through the forwarded port. */
 const PAGE = "https://github.com/login/oauth/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A42485%2Fcallback";
 const BANNER = "https://cli.github.com/upgrade";
@@ -75,6 +86,24 @@ describe("the code beside a page", () => {
   });
 });
 
+describe("the road a login's row is on", () => {
+  it("is read off the page the tool asked for: a redirect back to the machine is the callback road, a page that hands something back takes a code", () => {
+    // gcloud's two pages, whatever the forward is doing: the road is in the URL, so no row asks for a code it will not need.
+    expect(rowFinish("callback", GCLOUD_PAGE)).toBe("callback");
+    expect(rowFinish("callback", GCLOUD_PASTE)).toBe("code");
+    expect(rowFinish("callback", DEVICE)).toBe("code");
+    // aws registers its callback on 127.0.0.1 with no port and binds one at the time: the page still comes back.
+    expect(rowFinish("callback", AWS_BARE)).toBe("callback");
+    expect(rowFinish("code", GCLOUD_PAGE)).toBe("code");
+    expect(rowFinish("none", GCLOUD_PASTE)).toBe("none");
+    expect(rowFinish("none", GCLOUD_PAGE)).toBe("none");
+    // Only the callback road hands the tool a browser to find; the others take the pty as it comes.
+    expect(signInEnv("callback")).toEqual({ DISPLAY: CALLBACK_DISPLAY });
+    expect(signInEnv("code")).toBeUndefined();
+    expect(signInEnv("none")).toBeUndefined();
+  });
+});
+
 describe("how often the status is asked", () => {
   it("every pollMs for the first minute, then every twenty seconds or the caller's slower cadence", () => {
     expect(cadence(0, 5_000)).toBe(5_000);
@@ -92,7 +121,7 @@ describe("the sign-in hand-off", () => {
     const [r] = await st.run;
     expect(r).toMatchObject({ id: "logins/gh", state: "signed-in", command: "gh auth login", note: "gh auth status says signed in" });
     expect(st.json).toEqual([
-      { event: "sign-in", tool: "gh", label: "GitHub CLI login", browserUrl: DEVICE, code: CODE, nextCommand: `open '${DEVICE}'`, waitSeconds: 2 },
+      { event: "sign-in", tool: "gh", label: "GitHub CLI login", browserUrl: DEVICE, code: CODE, finish: "none", nextCommand: `open '${DEVICE}'`, waitSeconds: 2 },
       { event: "sign-in-result", tool: "gh", label: "GitHub CLI login", state: "signed-in", note: "gh auth status says signed in" },
     ]);
     const text = st.text();
@@ -245,6 +274,77 @@ describe("the sign-in hand-off", () => {
     expect(Date.now() - t0).toBeLessThan(5_000);
     // The login's pty alone was asked for: a status check on a login that never ran answers nothing.
     expect(creates).toBe(1);
+  });
+
+  it("a login whose row finishes by callback runs with a browser to reach, and the page that returns through the forwarded port is handed over with no code beside it", async () => {
+    const link = fakePtyLink();
+    let pty: FakePty | undefined;
+    link.script = (p, line) => {
+      if (line.includes("WSP_STATUS")) {
+        link.data(p, `someone@example.com\r\nWSP_STATUS 0\r\n`);
+        link.exit(p, 0);
+        return;
+      }
+      pty = p;
+      link.data(p, `Your browser has been opened to visit:\r\n\r\n    ${GCLOUD_PAGE}\r\n\r\n`);
+    };
+    const flow: SignInFlow = { armed: false };
+    const hooks = flowHooks(flow, BUILDER);
+    const st = stage(link, { logins: [GCLOUD], flow, deadlineMs: 1_000, pollMs: 20 });
+    for (let i = 0; i < 200 && pty === undefined; i++) await new Promise(r => setTimeout(r, 5));
+    // A DISPLAY on the login's pty is what makes gcloud open a browser at all instead of printing a code to paste.
+    expect(link.ptys[0]!.created["env"]).toEqual({ DISPLAY: CALLBACK_DISPLAY });
+    // The shim: the machine asks the host to open the same page, this time naming the port its redirect returns to.
+    expect(hooks.autoOpen(BUILDER.id, GCLOUD_PAGE, 8085)).toBe(false);
+    const [r] = await st.run;
+    expect(r).toMatchObject({ state: "signed-in" });
+    const announced = st.json.filter(j => j["event"] === "sign-in");
+    // The whole sequence, not its end: the row never asks for a code while its callback forward is on its way.
+    expect(announced.map(j => j["finish"])).toEqual(["callback"]);
+    expect(announced.at(-1)).toMatchObject({ browserUrl: GCLOUD_PAGE });
+    expect(announced.every(j => j["code"] === undefined)).toBe(true);
+  });
+
+  it("a callback login whose page came back with no forwarded port takes the code the person pastes: it reaches the tool's own pty as a typed line and is printed nowhere", async () => {
+    const link = fakePtyLink();
+    let pty: FakePty | undefined;
+    link.script = (p, line) => {
+      if (line.includes("WSP_STATUS")) {
+        link.data(p, `No credentialed accounts.\r\nWSP_STATUS 0\r\n`);
+        link.exit(p, 0);
+        return;
+      }
+      if (pty !== undefined) {
+        // The code the person pasted: gcloud takes it and the login ends.
+        link.exit(p, 0);
+        return;
+      }
+      pty = p;
+      link.data(p, `Go to the following link in your browser:\r\n\r\n    ${GCLOUD_PASTE}\r\n\r\nEnter authorization code: `);
+    };
+    const codes = new SignInCodes();
+    const st = stage(link, { logins: [GCLOUD], codes, deadlineMs: 2_000, pollMs: 20 });
+    for (let i = 0; i < 200 && pty === undefined; i++) await new Promise(r => setTimeout(r, 5));
+    const asked = st.json.filter(j => j["event"] === "sign-in");
+    expect(asked.map(j => j["finish"])).toEqual(["code"]);
+    expect(asked.at(-1)).toMatchObject({ browserUrl: GCLOUD_PASTE });
+    await codes.submit("gcloud", PASTED);
+    expect(link.typed(pty!, `${PASTED}\r`)).toBe(true);
+    const [r] = await st.run;
+    expect(r).toMatchObject({ state: "signed-in", exit: 0, note: "gcloud auth login exited 0" });
+    // The code goes to the machine and nowhere else: not the lines, not the objects, not the row.
+    expect(st.text()).not.toContain(PASTED);
+    expect(JSON.stringify(st.json)).not.toContain(PASTED);
+    // The login is gone, so its writer is closed with it.
+    await expect(codes.submit("gcloud", PASTED)).rejects.toThrow(/waiting for a code/);
+  });
+
+  it("a login on neither road opens no writer at all: a code submitted for it is refused and its row says so", async () => {
+    const codes = new SignInCodes();
+    const st = stage(ghLink({ after: 99, hold: true }), { codes, deadlineMs: 200, pollMs: 20 });
+    await expect(codes.submit("gh", CODE)).rejects.toThrow(/no sign-in for gh is waiting for a code/);
+    await st.run;
+    expect(st.json.filter(j => j["event"] === "sign-in").at(-1)).toMatchObject({ finish: "none" });
   });
 
   it("with no --json nothing is printed as an object and the lines still say the page and the outcome", async () => {

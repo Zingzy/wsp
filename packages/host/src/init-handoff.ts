@@ -5,15 +5,19 @@
 // flow shows when it has one, and the command that opens that page on this
 // computer; then it waits, asking the tool's own status on the machine, until
 // the person finishes, the command ends, or the deadline passes. With --json
-// each of those is one object on stdout for whoever is driving the run.
+// each of those is one object on stdout for whoever is driving the run. A
+// login whose row says it finishes by callback runs with a browser to reach,
+// so its page returns through the forwarded port and no code comes back; one
+// whose page hands a code back takes that code from the client and types it
+// into the tool. A code is never read out of the output, kept or printed.
 import type { Writable } from "node:stream";
 import { stripVTControlCharacters, styleText } from "node:util";
 import type { StatusCheck } from "@wsp/catalog";
 import type { ManifestEntry } from "@wsp/collect";
-import { fmtDuration, shellQuote } from "@wsp/protocol";
+import { fmtDuration, redirectsToMachine, shellQuote, type SignInFinish } from "@wsp/protocol";
 import { S_BAR, log } from "@clack/prompts";
 import { agentName } from "./init-recipe.js";
-import { SIGN_IN_CAP_MS, copiedOutcomes, signInCapMs, stateLine, toolOf, type BuilderLink, type LoginOutcome, type SignInFlow } from "./init-signin.js";
+import { SIGN_IN_CAP_MS, copiedOutcomes, signInCapMs, stateLine, toolOf, type BuilderLink, type LoginOutcome, type SignInCodes, type SignInFlow } from "./init-signin.js";
 import { openerCommand } from "./relay.js";
 import { runQuiet, stripOsc8, urlsIn, watchPty, type WatchOutcome } from "./signin-relay.js";
 import { hasLogin, signInFor } from "./signin-table.js";
@@ -43,6 +47,9 @@ export interface HandoffOptions {
   /** The host relay's flow for the builder: the pages the machine asks to open arrive here, and a page that names a
    * callback port is the one that works, so it is handed over in place of anything the tool printed. */
   flow?: SignInFlow;
+  /** Where a code from a page reaches the login waiting for it: each login that can take one opens its writer here
+   * while its command runs. Without it no row takes a code, which is what a run with no client to submit one is. */
+  codes?: SignInCodes;
   now?: () => number;
 }
 
@@ -66,6 +73,26 @@ export function codeIn(text: string, shape: RegExp | undefined): string | undefi
   const plain = stripVTControlCharacters(stripOsc8(text));
   const words = urlsIn(plain).reduce((s, url) => s.replaceAll(url, " "), plain);
   return shape.exec(words)?.[0];
+}
+
+/** A callback sign-in's pty runs with a DISPLAY, which the daemon otherwise drops so a tool takes its paste-code
+ * road instead (see ptyEnv): gcloud, gemini and railway read an empty DISPLAY as "no browser here". Nothing ever
+ * connects to it; the shim as BROWSER is what carries the page to this computer, and the forwarded port carries the
+ * redirect back. Written here rather than imported: the host mirrors the guest's constants (see doctor.ts) so
+ * node-pty stays out of this bundle. */
+export const CALLBACK_DISPLAY = ":0";
+
+/** The environment a login's pty runs with, by the road its row finishes on; nothing added on the other roads. */
+export function signInEnv(finish: SignInFinish): Record<string, string> | undefined {
+  return finish === "callback" ? { DISPLAY: CALLBACK_DISPLAY } : undefined;
+}
+
+/** The road the row is on, read off the page the tool asked for: a page that redirects back to the machine is the
+ * callback road, whose forward may still be on its way, so the row shows that page and asks for nothing. A callback
+ * login whose page returns somewhere else fell back to its own paste-code page, so the person's code is what
+ * finishes it, and the row says so at once rather than after a forward that is never coming. */
+export function rowFinish(declared: SignInFinish, url: string): SignInFinish {
+  return declared === "callback" && !redirectsToMachine(url) ? "code" : declared;
 }
 
 /** How long until the status is next asked: pollMs through the first minute, then the slower of it and SLOW_POLL_MS. */
@@ -118,7 +145,7 @@ export async function handoffStage(o: HandoffOptions): Promise<LoginOutcome[]> {
     }
   };
 
-  const announce = (r: LoginOutcome, tool: string, command: string, url: string, code: string | undefined, capMs: number): void => {
+  const announce = (r: LoginOutcome, tool: string, command: string, url: string, code: string | undefined, capMs: number, finish: SignInFinish): void => {
     const opener = `${openerCommand(o.platform)} ${shellQuote(url)}`;
     o.json?.({
       event: "sign-in",
@@ -126,12 +153,14 @@ export async function handoffStage(o: HandoffOptions): Promise<LoginOutcome[]> {
       label: r.label,
       browserUrl: url,
       ...(code !== undefined ? { code } : {}),
+      finish,
       nextCommand: opener,
       waitSeconds: Math.round(capMs / 1000),
     });
     log.step(
       [
         `${r.label}: open ${url} on this computer${code === undefined ? "" : `, then enter the code ${code}`}`,
+        ...(finish === "code" ? [dim("a code that page hands back goes in the field under this row; it is typed on the machine for you")] : []),
         dim(opener),
         dim(`${command} is running on the machine; this run waits up to ${fmtDuration(capMs)} for you`),
       ].join("\n"),
@@ -168,22 +197,36 @@ export async function handoffStage(o: HandoffOptions): Promise<LoginOutcome[]> {
       if (url === told || (forwarded && port === undefined)) return;
       if (port !== undefined) forwarded = true;
       told = url;
-      announce(r, tool, command, url, codeIn(seen, s.code), capMs);
+      announce(r, tool, command, url, codeIn(seen, s.code), capMs, rowFinish(s.finish, url));
     };
     if (o.flow !== undefined) {
       o.flow.show = line => log.message(dim(line), { output: o.output, symbol: dim(S_BAR) });
       o.flow.openWords = "its sign-in page is the one handed to you above";
       o.flow.onPage = page;
     }
+    const env = signInEnv(s.finish);
+    const codes = s.finish === "none" ? undefined : o.codes;
+    /** Closes this login's code writer; only a login that can take one ever opens it. */
+    let closeCode: (() => void) | undefined;
     const watching = watchPty({
       link: daemon.link,
       command,
       timeoutMs: capMs,
       stop,
+      ...(env !== undefined ? { env } : {}),
       onData: chunk => {
         if (seen.length < TEXT_CAP) seen += chunk;
       },
       onUrl: url => page(url),
+      ...(codes !== undefined
+        ? {
+            onTyping: write => {
+              closeCode?.();
+              // The Enter the person would press: the tool reads the code as one typed line.
+              closeCode = write === undefined ? undefined : codes.open(tool, code => write(`${code}\r`));
+            },
+          }
+        : {}),
     }).then(
       w => (run = w),
       (e: unknown) => void (failure = e instanceof Error ? e.message : String(e)),
@@ -253,6 +296,7 @@ export async function handoffStage(o: HandoffOptions): Promise<LoginOutcome[]> {
       r.note = answer === true ? `${status.command} says signed in` : `${command} exited ${w.exitCode}; ${answer}`;
     } finally {
       settle?.();
+      closeCode?.();
       daemon.close();
       if (o.flow !== undefined) {
         delete o.flow.show;

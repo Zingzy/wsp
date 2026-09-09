@@ -13,13 +13,14 @@ import { PassThrough, Writable } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
 import type { BackendPricing } from "@wsp/engine";
-import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, LOGIN_STATE_WORDS, THIS_COMPUTER, initAgentPrompt, initJobOver, initRowOver, isLocalWorkspace, type GoldenStep, type InitJob, type InitJobEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type LoginState } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, LOGIN_STATE_WORDS, SignInFinish, THIS_COMPUTER, initAgentPrompt, initJobOver, initRowOver, isLocalWorkspace, type GoldenStep, type InitJob, type InitJobEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type LoginState } from "@wsp/protocol";
 import { harnessCatalog, smallestModel, type GoldenRecipe, type InitDoor, type Runtime, type SessionHandle } from "@wsp/runtime";
 import type { AgentHere } from "./agents-here.js";
 import type { Keys } from "./cli.js";
 import { wspToolsAgent, wspToolsItems } from "./init-pick.js";
 import { recipeWithAnswers } from "./init-recipe.js";
 import { answerScreen, screensOf, type ScreenAnswers } from "./init-screens.js";
+import { SignInCodes } from "./init-signin.js";
 import { GOLDEN_NAME, PREPARE_STEPS, SEAL_STEPS, readThisComputer, reduceStages, runInit, type InitIO, type InitOptions, type Reading, type StageFrame, type StageWords } from "./init.js";
 import type { InstallReport } from "./mcp-install.js";
 import { saveSmallRecipe, smallRecipePath } from "./recipe-file.js";
@@ -136,6 +137,8 @@ export class InitJobs implements InitDoor {
   private count = 0;
   /** Set while a start is opening its thread, before the job stands: a second start meanwhile is refused too. */
   private starting = false;
+  /** The sign-ins waiting for a code from the client, opened and closed by the hand-off as each login runs. */
+  private readonly codes = new SignInCodes();
 
   constructor(private readonly deps: InitJobDeps) {}
 
@@ -279,6 +282,7 @@ export class InitJobs implements InitDoor {
       upCommand: "wsp up",
       forkCommand: `wsp new ${o.firstWorkspace ?? "first"}`,
       relay: this.deps.build.relay,
+      codes: this.codes,
       roads: () => this.deps.build.roads(),
       host: () => Promise.reject(new Error("the init job serves nothing; the host it runs on already does")),
       ...(this.deps.build.daemon !== undefined ? { daemon: this.deps.build.daemon } : {}),
@@ -296,6 +300,15 @@ export class InitJobs implements InitDoor {
         for (const off of offs) off();
       }
     });
+    return this.view()!;
+  }
+
+  /** The code a sign-in's page handed back, typed into the tool waiting for it on the machine. The code passes
+   * straight to that pty: it is never kept here, logged, or carried on the view. */
+  async signInCode(o: { tool: string; code: string }): Promise<InitJob> {
+    const s = this.state;
+    if (s === undefined || initJobOver(s.phase)) throw new Error("no init job is running");
+    await this.codes.submit(o.tool, o.code);
     return this.view()!;
   }
 
@@ -426,7 +439,17 @@ export class InitJobs implements InitDoor {
       case "sign-in": {
         const tool = text("tool") ?? "";
         const id = `sign-in/${tool}`;
-        const next: InitRow = { id, kind: "sign-in", tool, label: text("label") ?? tool, state: STATE.open, ...(text("browserUrl") !== undefined ? { page: text("browserUrl")! } : {}), ...(text("code") !== undefined ? { code: text("code")! } : {}) };
+        const finish = SignInFinish.safeParse(record["finish"]);
+        const next: InitRow = {
+          id,
+          kind: "sign-in",
+          tool,
+          label: text("label") ?? tool,
+          state: STATE.open,
+          ...(text("browserUrl") !== undefined ? { page: text("browserUrl")! } : {}),
+          ...(text("code") !== undefined ? { code: text("code")! } : {}),
+          ...(finish.success ? { finish: finish.data } : {}),
+        };
         const had = row(id);
         if (had === undefined) s.rows.push(next);
         else Object.assign(had, next);
@@ -444,6 +467,7 @@ export class InitJobs implements InitDoor {
         else {
           delete had.page;
           delete had.code;
+          delete had.finish;
           Object.assign(had, next);
         }
         break;
