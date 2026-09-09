@@ -48,6 +48,7 @@ import {
   TURN_END_WORDS,
   TerminalConfig,
   TerminalScheme,
+  ThreadMessage,
   ThreadView,
   TurnStatus,
   WorkspaceListing,
@@ -80,6 +81,8 @@ import {
   machineWord,
   needsRebuild,
   noAdapterLine,
+  noMessagesLine,
+  noReplyLine,
   NO_PROVIDER_LINE,
   notAFileLine,
   notAnImageLine,
@@ -93,6 +96,10 @@ import {
   startPicks,
   stillWorkingLine,
   terminalConfigLines,
+  threadMessages,
+  threadReplyRows,
+  threadReadText,
+  threadResult,
   toolActivityLine,
   toolResultLine,
   turnSettledLine,
@@ -1017,30 +1024,28 @@ export interface Ended {
 /** What a wait came to: the thread that left running, or the deadline that passed first. */
 export type Waited = { ended: Ended } | { timedOutMs: number };
 
-/** A turn that ended with no result and no reason, in the words a follow's failure uses. */
-const NO_RESULT = "turn ended without a result";
-
-/** The thread's latest turn as its transcript ended it: the done's result when the turn replied, else failed with
- * the runtime's reason when the runtime ended it, else failed as the harness left it. A thread the transcript no
- * longer holds a turn of answers with its row's status alone. Read newest first, since the end may follow the done
- * by minutes and an older turn's done must not stand in for a newer turn's. */
+/** The thread's latest turn as its transcript ended it, by the protocol's one reading of a transcript; a thread the
+ * transcript no longer holds a turn of answers with its row's status alone. */
 async function endedOf(client: HostClient, workspaceId: string, threadId: string, status: TurnStatus): Promise<Ended> {
-  const { events } = await client.request<{ events: SessionEvent[] }>("sessions.history", { workspaceId });
-  let end: Extract<SessionEvent, { type: "session.end" }> | undefined;
-  for (let i = events.length - 1; i >= 0; i--) {
-    const e = events[i]!;
-    if (e.threadId !== threadId) continue;
-    if (e.type === "session.end") {
-      if (end !== undefined) break;
-      end = e;
-      continue;
-    }
-    if (e.type === "session.done" && (end === undefined || e.turnId === end.turnId)) return { threadId, result: e.result };
-    if (e.type === "session.start" && end !== undefined && e.turnId === end.turnId) break;
-  }
-  if (end !== undefined) return { threadId, result: { status: "failed", error: end.reason ?? NO_RESULT } };
-  return { threadId, result: { status } };
+  return { threadId, result: threadResult(await history(client, workspaceId), threadId) ?? { status } };
 }
+
+/** The workspace's transcript as the host holds it, the rows every read and every wait folds. */
+async function history(client: HostClient, workspaceId: string): Promise<SessionEvent[]> {
+  return (await client.request<{ events: SessionEvent[] }>("sessions.history", { workspaceId })).events;
+}
+
+/** A thread's messages as the app lists them, or its final reply alone: the transcript is the host's, so nothing is
+ * woken for a read and a napping machine reads the same as a running one. */
+async function readThread(client: HostClient, thread: ThreadView, last: boolean): Promise<{ threadId: string; messages: ThreadMessage[] }> {
+  const threadId = threadIdOf(thread);
+  const events = await history(client, thread.workspaceId);
+  return { threadId, messages: last ? threadReplyRows(events, threadId) : threadMessages(events, threadId) };
+}
+
+/** What a read prints when the transcript holds nothing to print: which of the two silences it is. */
+const readLine = (read: { threadId: string; messages: readonly ThreadMessage[] }, last: boolean): string =>
+  read.messages.length === 0 ? (last ? noReplyLine(read.threadId) : noMessagesLine(read.threadId)) : threadReadText(read.messages);
 
 /** The runtime's thread id of a row, the one its events carry; a row from before threads had ids is its own. */
 const threadIdOf = (t: ThreadView): string => t.threadId ?? t.id;
@@ -1993,6 +1998,36 @@ export const VERBS: readonly Verb[] = [
         if (detach === true) return detachedOut(await startDetached(client, opening, "agent"));
         const out = turnOut(await follow(client, opening, "agent", QUIET_TURN));
         return asText(turnText(out), out);
+      },
+    }),
+  },
+  {
+    name: "thread read",
+    usage: "wsp thread read <thread> [--last]",
+    about:
+      "the thread's messages as the app lists them, oldest first: who each one is, when the runtime recorded it and the text, with every tool call folded to the one line the app's row reads; --last prints the final reply alone, the whole message its finished line carries. A tool's output and the agent's reasoning are no rows of it",
+    options: { last: { type: "boolean" } },
+    run: async ctx => {
+      const [ref] = ctx.args;
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp thread read takes one thread");
+      const last = ctx.flags["last"] === true;
+      const client = await ctx.client();
+      const read = await readThread(client, await threadOf(client, ref), last);
+      ctx.out.emit(read, readLine(read, last));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "The thread's messages as the app lists them, oldest first: each one's who (person for the message that opened or steered a turn, agent for the agent's own words, tool for one call of its folded to a line, turn for the outcome, duration and cost the turn ended with), at, the ms epoch the runtime recorded it, and its text. With last true, the final reply alone, the whole message the thread's finished line carries, and a row under it saying so when the thread has started another turn since, so a report is never read as the one being written. This is how you read a thread you did not open, and how you read the report behind a line that reached you; the transcript is the host's, so nothing on a machine is touched and a paused workspace reads the same as a running one. A thread of many turns answers with all of them, so read one with last true when the report is what you are after. A call's output and the agent's reasoning are no rows of it. A thread whose rows the transcript's cap has dropped answers with none, which is an answer and not an error.",
+      input: {
+        thread: z.string().describe("the thread's id, or a prefix of it that names one, as threads lists them"),
+        last: z.boolean().optional().describe("true answers with the final reply alone, the whole message the thread's finished line carries, with a row under it where the thread has started another turn since; absent answers with every message"),
+      },
+      output: { threadId: z.string(), messages: z.array(ThreadMessage) },
+      call: async ({ thread: ref, last }, deps) => {
+        const client = await deps.client();
+        const read = await readThread(client, await threadOf(client, ref), last === true);
+        return asText(readLine(read, last === true), read);
       },
     }),
   },

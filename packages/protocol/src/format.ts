@@ -5,6 +5,7 @@
 // rule are the exception list in the protocol format test, each with its reason.
 import type { GoldenMissingTool, HarnessCatalog, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceTint } from "./index.js";
 import { shellLine } from "./shell-quote.js";
+import type { ThreadMessage } from "./thread-read.js";
 const KIB = 1024;
 const MIB = KIB * 1024;
 const GIB = MIB * 1024;
@@ -142,12 +143,19 @@ export function fmtCost(usd: number): string {
  * on without reading the transcript again. */
 export type NotifyLength = "tail" | "whole";
 
+/** The agent's own words at the length asked for, and nothing else: nothing at all where the turn left no text,
+ * which a completed turn does (a harness that spent its tokens and answered with an empty message). A reader that
+ * has to say whose words it is holding asks this beside notifyBody rather than reading the text twice. */
+export function notifyReply(result: TurnResult, length: NotifyLength = "tail"): string | undefined {
+  const text = result.text ?? "";
+  return length === "tail" ? lastLine(text) : text.trim() === "" ? undefined : text.trim();
+}
+
 /** What the notify line ends with, and what a wait answers as the reply: the reply at the length asked for, or the
  * error when there is no reply. A turn that did not complete says its error first, since that is what whoever waits
  * needs. One rule for both lengths, so a tail can never say something the whole message does not. */
 export function notifyBody(result: TurnResult, length: NotifyLength = "tail"): string | undefined {
-  const text = result.text ?? "";
-  const reply = length === "tail" ? lastLine(text) : text.trim() === "" ? undefined : text.trim();
+  const reply = notifyReply(result, length);
   return result.status === "completed" ? reply ?? result.error : result.error ?? reply;
 }
 
@@ -184,6 +192,42 @@ export function turnSettledParts(turn: { durationMs?: number | null; costUsd?: n
 export function turnSettledLine(result: TurnResult): string {
   return [result.status, ...turnSettledParts(result)].join(" · ");
 }
+
+/** The row a turn's end leaves in a read transcript: the footer above, and why it did not complete where it did
+ * not, since a reader of a failed turn needs the reason with the word. */
+export function turnEndLine(result: TurnResult): string {
+  const failure = result.status === "completed" ? undefined : result.error;
+  return failure === undefined ? turnSettledLine(result) : `${turnSettledLine(result)}: ${failure}`;
+}
+
+/** The clock a read prints beside a row, to the second, in the zone of the computer reading it, which is the
+ * computer the app shows the same thread on; nothing for a row the runtime stamped no time on. */
+export function fmtClock(at: number | undefined): string {
+  return at === undefined ? "" : new Date(at).toTimeString().slice(0, 8);
+}
+
+/** One row of a read: who spoke and when on its own line, then the text under it, so a reply of many lines reads as
+ * the agent wrote it and a row with no text of its own is still one row. */
+export function threadRowLines(row: ThreadMessage): string[] {
+  const clock = fmtClock(row.at);
+  return [clock === "" ? row.who : `${row.who} ${clock}`, ...row.text.split("\n")];
+}
+
+/** A thread's messages as one printout, a blank line between rows. */
+export function threadReadText(rows: readonly ThreadMessage[]): string {
+  return rows.map(row => threadRowLines(row).join("\n")).join("\n\n");
+}
+
+/** What a read prints for a thread the transcript this host holds carries no message of: the cap dropped its rows,
+ * or its turns are older than the stamp that names a thread. */
+export const noMessagesLine = (threadId: string): string => `thread ${threadId.slice(0, 8)} has no messages in the transcript this host holds`;
+
+/** What a read of the final reply alone prints for a thread whose first turn has not ended yet. */
+export const noReplyLine = (threadId: string): string => `thread ${threadId.slice(0, 8)} has not replied yet`;
+
+/** The row under a final reply the thread has already moved past: the turn that gave it is over and another is
+ * working, so what is above is the report before this one, not the one being written. */
+export const NEWER_TURN_LINE = "a newer turn is running; the reply above is the one before it";
 
 /** One tool call's input, as the wire's delta carries it: the JSON the harness reported, already parsed. */
 type ToolInput = Readonly<Record<string, unknown>>;
