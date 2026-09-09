@@ -331,14 +331,14 @@ function Live({ workspace, kind }: { workspace: WorkspaceView; kind: WorkspaceKi
   const live = useWorkspaceLive(workspace.id);
   const last = live.samples[live.samples.length - 1];
   const stale: Stale = workspace.phase === "napping" || workspace.phase === "pausing" ? "napping" : live.reach === "live" ? null : "unreachable";
-  const unavailable = kind.live ? live.unavailable : NOT_ON_THIS_KIND;
+  const kindWord = kind.live ? null : NOT_ON_THIS_KIND;
   const share = (m: { used: number; total: number }): number => (m.total > 0 ? (m.used / m.total) * 100 : 0);
   return (
     <Section label="Live" aside={last !== undefined && stale === null ? `load ${last.load1.toFixed(2)}` : undefined}>
       <div className="mt-1 divide-y divide-border/40">
-        <LiveRow label="cpu" k="cpu" samples={live.samples} y={s => s.cpu} text={s => percentLabel(s.cpu)} stale={stale} unavailable={unavailable} />
-        <LiveRow label="memory" k="mem" samples={live.samples} y={s => share(s.mem)} text={s => bytesOfLabel(s.mem.used, s.mem.total)} stale={stale} unavailable={unavailable} />
-        <LiveRow label="disk" k="disk" samples={live.samples} y={s => share(s.disk)} text={s => bytesOfLabel(s.disk.used, s.disk.total)} tier={s => diskTier(share(s.disk))} stale={stale} unavailable={unavailable} />
+        <LiveRow label="cpu" k="cpu" samples={live.samples} y={s => s.cpu} text={s => percentLabel(s.cpu)} stale={stale} unavailable={live.unavailable} kindWord={kindWord} />
+        <LiveRow label="memory" k="mem" samples={live.samples} y={s => share(s.mem)} text={s => bytesOfLabel(s.mem.used, s.mem.total)} stale={stale} unavailable={live.unavailable} kindWord={kindWord} />
+        <LiveRow label="disk" k="disk" samples={live.samples} y={s => share(s.disk)} text={s => bytesOfLabel(s.disk.used, s.disk.total)} tier={s => diskTier(share(s.disk))} stale={stale} unavailable={live.unavailable} kindWord={kindWord} />
       </div>
     </Section>
   );
@@ -373,18 +373,19 @@ interface LiveRowProps {
   text: (s: SysSample) => string;
   tier?: (s: SysSample) => DiskTier;
   stale: Stale;
-  /** Why there is no stream: the daemon's refusal, which the slot reads as unavailable and carries as the title, or
-   * the kind's own word, which the slot reads as it is. */
+  /** The daemon's refusal of the stream; the slot reads unavailable and carries it as the title. */
   unavailable: string | null;
+  /** The kind table's word for a kind with no stream at all, read into the slot as it is; null on a kind with one. */
+  kindWord: string | null;
 }
 
 /** One fixed-height row: label, sparkline, value. The value slot has a fixed width so a word in place of a number
  * moves nothing; a single sample draws as a dot through the round cap. Hovering reads that sample into the slot. */
-function LiveRow({ label, k, samples, y, text, tier, stale, unavailable }: LiveRowProps) {
+function LiveRow({ label, k, samples, y, text, tier, stale, unavailable, kindWord }: LiveRowProps) {
   const [hover, setHover] = useState<number | null>(null);
   const points = sparkPoints(samples, y);
   const shown = hover !== null ? samples[hover] : samples[samples.length - 1];
-  const word = unavailable === NOT_ON_THIS_KIND ? unavailable : (stale ?? (unavailable !== null ? "unavailable" : shown === undefined ? "pending" : null));
+  const word = kindWord ?? stale ?? (unavailable !== null ? "unavailable" : shown === undefined ? "pending" : null);
   const tone = word === null && shown !== undefined && tier ? TIER_CLASS[tier(shown)] : undefined;
 
   const track = (e: ReactMouseEvent<SVGSVGElement>): void => {
@@ -401,6 +402,7 @@ function LiveRow({ label, k, samples, y, text, tier, stale, unavailable }: LiveR
       data-live-row={k}
       {...(stale !== null ? { "data-stale": stale } : {})}
       {...(unavailable !== null ? { "data-unavailable": unavailable } : {})}
+      {...(kindWord !== null ? { "data-kind-word": kindWord } : {})}
     >
       <span className="text-muted-foreground">{label}</span>
       <svg className="block h-4 w-full" viewBox={`0 0 ${SPARK_W} ${SPARK_H}`} preserveAspectRatio="none" role="img" aria-label={`${label} over the last two minutes, one line`} onMouseMove={track} onMouseLeave={() => setHover(null)}>

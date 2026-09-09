@@ -48,9 +48,7 @@ async function osName(exec: (cmd: string) => Promise<ExecResult>): Promise<strin
     try {
       const pretty = /^PRETTY_NAME="?([^"\n]+?)"?$/m.exec(readFileSync("/etc/os-release", "utf8"))?.[1];
       if (pretty !== undefined) return pretty;
-    } catch {
-      // no os-release: the kernel names the system below
-    }
+    } catch {}
   }
   return `${type()} ${release()}`;
 }

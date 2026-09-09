@@ -1230,6 +1230,10 @@ describe("this computer as a workspace", () => {
       expect(el.textContent).toBe(NOT_ON_THIS_KIND);
       expect(el.className).toContain("font-mono");
       expect(el.className).not.toMatch(/border|bg-|badge|destructive|warning/);
+      // The kind's word is not a daemon's refusal: the row carries no refusal and the slot no title for one.
+      expect(liveRow(k).hasAttribute("data-unavailable")).toBe(false);
+      expect(el.getAttribute("title")).toBeNull();
+      expect(liveRow(k).getAttribute("data-kind-word")).toBe(NOT_ON_THIS_KIND);
     }
     // A fork's rows read the link's own word instead: with no daemon link in this fixture, unreachable.
     cleanup();
