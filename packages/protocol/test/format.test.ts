@@ -18,7 +18,7 @@ import {
   memoryNearFull,
   outOfMemoryLine,
   outOfMemoryRowLine,
-  stillWorkingRefusal,
+  stillWorkingLine,
   stopFailedLine,
   sendNowFailedLine,
   TURN_IN_FLIGHT,
@@ -65,6 +65,7 @@ import {
   moveTimedOutLine,
   nameList,
   nextInsideAgentLine,
+  notifyBody,
   notifyLine,
   notifyTail,
   offeredSize,
@@ -363,6 +364,26 @@ describe("notifyLine", () => {
     expect(notifyTail({ status: "failed", text: "Waiting for the gate.", error: "ended with 1 background task running" })).toBe("ended with 1 background task running");
     expect(notifyTail({ status: "completed", text: "All green.", error: "[ede_diagnostic] noise" })).toBe("All green.");
     expect(notifyTail({ status: "interrupted" })).toBeUndefined();
+  });
+
+  it("the whole length carries the final message entire, line breaks and all, under the same facts and the same rule about the error", () => {
+    expect(notifyLine(THREAD, { status: "completed", durationMs: 492_000, costUsd: 1.94, text: "Ran the gate.\n\nAll 12 tests green.\n" }, "whole")).toBe(
+      "thread c452d1e8 finished (completed, 8m 12s, $1.94): Ran the gate.\n\nAll 12 tests green.",
+    );
+    // A turn that did not complete still says why first, and a reply with nothing in it still leaves the line bare.
+    expect(notifyLine(THREAD, { status: "failed", durationMs: 12_000, text: "Waiting for the gate.\nStill waiting.", error: "ended with 1 background task running" }, "whole")).toBe(
+      "thread c452d1e8 finished (failed, 12s): ended with 1 background task running",
+    );
+    expect(notifyLine(THREAD, { status: "completed", text: "   \n\n  " }, "whole")).toBe("thread c452d1e8 finished (completed)");
+    // Tail is the length a line takes when none is named, so every reader that had one keeps it.
+    expect(notifyLine(THREAD, { status: "completed", text: "one\ntwo" })).toBe(notifyLine(THREAD, { status: "completed", text: "one\ntwo" }, "tail"));
+  });
+
+  it("notifyBody is the one rule both lengths read: the tail is the whole cut to its last line", () => {
+    const result = { status: "completed", text: "Ran the gate.\n\nAll 12 tests   green.\n" } as const;
+    expect(notifyBody(result, "whole")).toBe("Ran the gate.\n\nAll 12 tests   green.");
+    expect(notifyBody(result, "tail")).toBe("All 12 tests green.");
+    expect(notifyBody(result)).toBe(notifyTail(result));
   });
 });
 
@@ -789,11 +810,13 @@ describe("a record the sweep restored, and a name a fork cannot take", () => {
   });
 });
 
-describe("stillWorkingRefusal", () => {
-  it("names the thread by its first eight characters and says the reply is in but the agent is still working", () => {
-    expect(stillWorkingRefusal("5ffc2c96-1111-4222-8333-444455556666")).toBe(
-      "thread 5ffc2c96 replied, still working; wait for its turn to finish before sending",
+describe("stillWorkingLine", () => {
+  it("names the thread by its first eight characters, says the reply is in but the agent is still working, and says where a message sent now goes", () => {
+    expect(stillWorkingLine("5ffc2c96-1111-4222-8333-444455556666")).toBe(
+      "thread 5ffc2c96 replied, still working; the message runs as its next turn once that process exits",
     );
+    // Nothing in it tells the caller to wait or says the send was refused: the send is never refused.
+    expect(stillWorkingLine("5ffc2c96")).not.toMatch(/wait|refus/);
   });
 });
 

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -7,7 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { alreadyRecorded, inFolder, type PortForward, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, THIS_COMPUTER, TICKET_ORIGIN } from "@wsp/protocol";
+import { alreadyRecorded, inFolder, NO_SUCH_TURN, NOTIFY_ME, type PortForward, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type TurnResult } from "@wsp/protocol";
 import type { MachineExecOptions } from "../src/machine-exec.js";
 import { createRuntime, type HarnessAdapterFactory, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
@@ -60,6 +61,47 @@ const pwdAdapter: HarnessAdapterFactory = ctx => ({
     return { localId: sessionId, finished, interrupt: async () => {} };
   },
 });
+
+/** An adapter that says what the launch environment named this turn's token, read out of a real child process on
+ * this computer, and whose turn runs on until it is ended: the token means something only while the turn does. It
+ * steers, so a line sent into one of its running turns lands there rather than opening another. */
+function tokenAdapter(): { factory: HarnessAdapterFactory; said: string[]; steered: string[]; end: (nth: number) => void } {
+  const ends: (() => void)[] = [];
+  const said: string[] = [];
+  const steered: string[] = [];
+  const factory: HarnessAdapterFactory = ctx => ({
+    steers: true,
+    start: ({ resume, onEvent }) => {
+      const sessionId = resume ?? randomUUID();
+      const result: TurnResult = { status: "completed", text: "handed off" };
+      const finished = new Promise<TurnResult>(resolve => {
+        ends.push(() => {
+          onEvent({ type: "turn.done", sessionId, result });
+          onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+          resolve(result);
+        });
+      });
+      void (async () => {
+        const stream = ctx.execStream(`printf %s "$${TURN_TOKEN_ENV}"`, { env: { ...ctx.env } });
+        let out = "";
+        for await (const line of stream.lines) out += line;
+        await stream.exited;
+        said.push(out);
+        onEvent({ type: "session.start", sessionId });
+      })();
+      return {
+        localId: sessionId,
+        finished,
+        interrupt: async () => {},
+        steer: async (prompt: string) => {
+          steered.push(prompt);
+          return "accepted" as const;
+        },
+      };
+    },
+  });
+  return { factory, said, steered, end: (nth: number) => ends[nth]!() };
+}
 
 describe("local workspace", () => {
   let root: string;
@@ -125,6 +167,33 @@ describe("local workspace", () => {
     const result = await handle.finished;
     expect(result.status).toBe("completed");
     expect(result.text).toBe("pong");
+  });
+
+  it("a turn on this computer launches its real child process with its own token, and that token resolves notify me to its thread", async () => {
+    const held = tokenAdapter();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: held.factory }, local: localWiring });
+    const ws = await rt.workspaces.createLocal("mac");
+    const turn = await rt.sessions.start(ws.id, { prompt: "coordinate" });
+    const until = async (has: () => boolean): Promise<void> => {
+      for (let i = 0; i < 200 && !has(); i++) await new Promise(r => setTimeout(r, 10));
+      if (!has()) throw new Error("the turn never got there");
+    };
+    // The token the real child process read out of its own environment, not one this test handed the adapter.
+    await until(() => held.said.length === 1);
+    const token = held.said[0]!;
+    expect(token).toMatch(/^[0-9a-f]{32}$/);
+    // Anything else for a token is refused, so what the host resolves is this launch's own variable and nothing else.
+    await expect(rt.sessions.start(ws.id, { prompt: "build it", notify: [NOTIFY_ME], turnToken: "not-a-token" })).rejects.toThrow(NO_SUCH_TURN);
+    const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: [NOTIFY_ME], turnToken: token });
+    expect(kid.view().threadId).not.toBe(turn.view().threadId);
+    held.end(1);
+    await kid.finished;
+    // The child's end reached the thread that launched it, which is what me resolved to.
+    await until(() => held.steered.length === 1);
+    expect(held.steered[0]).toContain(`thread ${kid.view().threadId!.slice(0, 8)} finished (completed)`);
+    held.end(0);
+    await turn.finished;
+    await rt.close();
   });
 
   it("the registry hands the local factory the same limits a cloud turn gets: the turn's own by default, none for the exec verb", async () => {
