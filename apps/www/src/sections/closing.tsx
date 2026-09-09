@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { ArrowUpRight } from "lucide-react";
 import { CopyCommand } from "@/components/copy-command";
 import clouds from "@/assets/clouds.webp";
 import { Dither } from "@/components/dither";
+import { Download } from "@/components/download";
 import { AUTHOR, DOCS, EMAIL, INSTALL, ISSUES, NPM, README, RELEASES, REPO, SOLARI, X } from "@/links";
 import { Wordmark } from "./nav";
 
@@ -30,15 +30,11 @@ export function Closing() {
             account for the machines, and a way for Claude Code or Codex to sign in. Twenty minutes to the first thread,
             most of it the image building.
           </p>
-          <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row">
+          <div className="mt-8 flex flex-col items-center gap-5 sm:flex-row">
+            <Download />
+          </div>
+          <div className="mt-6">
             <CopyCommand command={INSTALL} size="lg" />
-            <a
-              href={RELEASES}
-              className="inline-flex h-12 items-center gap-1.5 px-4 text-base text-muted-foreground transition-colors hover:text-foreground"
-            >
-              Desktop app for macOS and Linux
-              <ArrowUpRight className="size-4" />
-            </a>
           </div>
         </div>
       </div>

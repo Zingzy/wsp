@@ -6,6 +6,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { bundleNames } from "./bundles.mjs";
 import { isReleaseTag, versionFromTag } from "./tag-version.mjs";
 
 // The README owns this text so the page a stranger reads and the notes they get
@@ -56,15 +57,6 @@ export function changeLines(subjects) {
   return kept;
 }
 
-/** What each bundle on the release page is called, for the notes and the workflow alike. */
-export function bundleNames(version) {
-  return {
-    macArm64: `wsp-${version}-mac-arm64.zip`,
-    macX64: `wsp-${version}-mac-x64.zip`,
-    appImage: `wsp-${version}.AppImage`,
-  };
-}
-
 /** The README's lines on opening a downloaded bundle, so the notes say what the page says. The paragraph on unsigned
  * bundles, marked on its own inside them, is left out once an identity signs the bundles; the README keeps it until
  * the person deletes it. */
@@ -91,8 +83,7 @@ export function releaseNotes({ version, previous, changes, bundles }) {
     "",
     "## Downloads",
     "",
-    `- \`${names.macArm64}\`: macOS on Apple silicon.`,
-    `- \`${names.macX64}\`: macOS on Intel.`,
+    `- \`${names.mac}\`: macOS on Apple silicon and on Intel, one disk image for both.`,
     `- \`${names.appImage}\`: Linux on x64.`,
     `- The command line: \`npm i -g ${PACKAGE}@${version}\`.`,
     "",

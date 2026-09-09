@@ -10,6 +10,7 @@ import { BrowserWindow, Menu, app, dialog, ipcMain, nativeTheme, shell, type Ipc
 import { chooseFrom, parseContextMenuItems } from "./context-menu.js";
 import { fontDirs, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { locateHost, openHost, statePathIn, type HostSession, type Located } from "./host-lifecycle.js";
+import { offerMove, type MoveGate } from "./move.js";
 import { fromAppPage, fromOnboardingPage } from "./origin.js";
 import { pagePreviews } from "./previews.js";
 import { checkSetup, recordThisComputer } from "./setup.js";
@@ -239,9 +240,28 @@ function installCommand(): void {
   }
 }
 
+/** Where this launch stands against the move: only a packaged mac bundle outside Applications is asked, and never
+ * the smoke, which runs the bundle out of dist and has nobody to press a button. */
+function moveGate(): MoveGate {
+  const darwin = process.platform === "darwin";
+  return {
+    platform: process.platform,
+    packaged: app.isPackaged,
+    inApplications: darwin && app.isInApplicationsFolder(),
+    driven: process.env["WSP_DESKTOP_SMOKE"] === "1",
+  };
+}
+
 app
   .whenReady()
   .then(async () => {
+    const moved = await offerMove(moveGate(), {
+      ask: prompt => dialog.showMessageBox(prompt).then(picked => picked.response),
+      move: () => app.moveToApplicationsFolder(),
+      warn: line => io.error(line),
+    });
+    // Electron quits this process and starts the moved bundle, which writes the command from its settled path.
+    if (moved === "moving") return;
     installCommand();
     const located = await locate();
     if (located.stalePointer !== undefined) io.error(`~/.wsp/current-home names ${located.stalePointer}, but no host is serving it; opening ${located.home}`);

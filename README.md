@@ -65,6 +65,8 @@ The command line and the MCP tools are the same verbs: `new`, `fork`, `snapshot`
 <!-- bundles:start -->
 ### Opening a downloaded bundle
 
+Open the macOS disk image and drag wsp onto the Applications folder it shows. One image holds both Apple silicon and Intel.
+
 <!-- unsigned:start -->
 The bundles are not signed yet, so the first open of `wsp.app` is refused: right click it in Finder, pick Open, and pick Open again in the dialog. Every open after that is a double click.
 <!-- unsigned:end -->
