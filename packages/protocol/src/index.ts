@@ -1844,6 +1844,7 @@ const DAEMON_CONTENTS = [
   "cae44a68bd72d81717b52a71c3890da918025cbd0d071db884102936e5cf4345",
   "c5c3b15cad1b45ed110b072a18d0d895f661c489f73828de78a3b9f3589f05c6",
   "f90fd16f8e5d15707cda18e58524da66fb6ed6b890632fff90d396792dc5604d",
+  "9ebea6a49390fd5b1af911f413e77c3e46db091812b55b41515e881e93433292",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -1856,7 +1857,9 @@ const DAEMON_CONTENTS = [
  * curl function. Version 6 puts itself last for the kernel's memory killer and starts every shell it opens at the
  * work score instead. Version 7 picks the road to the listening ports by platform, so the same daemon serves them
  * on a Linux guest and on the person's own Mac. Version 8 runs under a systemd unit that restarts it, so a
- * daemon the kernel kills comes back on its own. */
+ * daemon the kernel kills comes back on its own. Version 9 reads the utilisation and the processes it serves
+ * through a module per kind of machine, and answers a watch only once that module has read the machine, so a
+ * pane is refused where it would otherwise wait for a stream that never comes. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the daemon's sources, the dependency

@@ -7,9 +7,11 @@
 // modules ask for, the macOS ps rows hand-written in the same documented
 // order, which is what makes them the fixtures worth keeping.
 import { spawn } from "node:child_process";
-import { cpus, freemem, platform, totalmem, userInfo } from "node:os";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpus, freemem, platform, tmpdir, totalmem, userInfo } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { kindWords, servesReading, WorkspaceKind } from "@wsp/protocol";
+import { kindWords, servesReading, WorkspaceKind, type ProcEntry } from "@wsp/protocol";
 import { LocalProcSource, parsePs, parsePsNames } from "../src/proc-local.js";
 import { CMDLINE_BYTES } from "../src/proc.js";
 import { KIND_READINGS, readingsFor } from "../src/readings.js";
@@ -107,11 +109,32 @@ describe("this computer's metrics module", () => {
 
 describe("this computer's processes module", () => {
   let burning: ReturnType<typeof spawn> | undefined;
+  let burnDir: string | undefined;
   afterEach(() => {
     // Only a pid this test started, held from the spawn itself.
     burning?.kill("SIGKILL");
     burning = undefined;
+    if (burnDir !== undefined) rmSync(burnDir, { recursive: true, force: true });
+    burnDir = undefined;
   });
+
+  /** Scans until a reading answers, since what a scan reports is what the test is waiting for: a fixed sleep buys
+   * less on a loaded box than on an idle one, and the reading is the thing either way. Each scan is handed the wall
+   * time since the last, which is the window the module divides its cpu by. */
+  async function scanUntil(source: LocalProcSource, pid: number, what: string, ready: (row: ProcEntry | undefined) => boolean, ms = 30_000): Promise<ProcEntry> {
+    const deadline = Date.now() + ms;
+    let at = Date.now();
+    let last: ProcEntry | undefined;
+    for (;;) {
+      const now = Date.now();
+      const scan = await source.scan({ at: now, elapsedMs: now - at, pty: () => undefined });
+      at = now;
+      last = scan.procs.find(p => p.pid === pid);
+      if (ready(last)) return last!;
+      if (Date.now() >= deadline) throw new Error(`pid ${pid} never read as ${what} in ${ms} ms; last cpu ${last === undefined ? "no row" : last.cpu}`);
+      await new Promise(r => setTimeout(r, 100));
+    }
+  }
 
   it("reads ps rows into the columns the pane shows, on either platform's spelling", () => {
     const rows = parsePs(LINUX_PS);
@@ -171,16 +194,13 @@ describe("this computer's processes module", () => {
     // A loop, not a simple command: bash execs itself away for the latter, and it is bash's own long argv this reads.
     const long = spawn("bash", ["-c", `while :; do sleep 5; done # ${"x".repeat(100)} ${tail}`]);
     burning = long;
-    await new Promise(r => setTimeout(r, 300));
     const source = new LocalProcSource({ ports: async () => [] });
     const before = process.env["COLUMNS"];
     process.env["COLUMNS"] = "79";
     try {
-      const scan = await source.scan({ at: Date.now(), elapsedMs: 0, pty: () => undefined });
-      const row = scan.procs.find(p => p.pid === long.pid);
-      expect(row).toBeDefined();
-      expect(row!.cmdline).toContain(tail);
-      expect(row!.cmdline.length).toBeGreaterThan(120);
+      const row = await scanUntil(source, long.pid!, "a row at all", r => r !== undefined);
+      expect(row.cmdline).toContain(tail);
+      expect(row.cmdline.length).toBeGreaterThan(120);
     } finally {
       if (before === undefined) delete process.env["COLUMNS"];
       else process.env["COLUMNS"] = before;
@@ -199,21 +219,25 @@ describe("this computer's processes module", () => {
     const first = await source.scan({ at: Date.now(), elapsedMs: 0, pty: () => undefined });
     expect(first.procs.find(p => p.pid === process.pid)!.cpu).toBe(0);
 
-    // A child that burns a core, then stops: busy in the window it burned in, idle in the next one.
-    const burn = spawn("bash", ["-c", "end=$((SECONDS+3)); while [ $SECONDS -lt $end ]; do :; done; sleep 30"]);
+    // A child that burns a core until this test stops it, so the burn lasts exactly as long as it takes to show up
+    // in a reading, however much of this box the rest of it is using.
+    burnDir = mkdtempSync(join(tmpdir(), "wsp-burn-"));
+    const stop = join(burnDir, "stop");
+    const burn = spawn("bash", ["-c", `while [ ! -f ${stop} ]; do :; done; sleep 300`]);
     burning = burn;
-    const scanAfter = async (ms: number) => {
-      await new Promise(r => setTimeout(r, ms));
-      return source.scan({ at: Date.now(), elapsedMs: ms, pty: () => undefined });
-    };
-    await scanAfter(500);
-    const busy = await scanAfter(2_500);
-    const spent = busy.procs.find(p => p.pid === burn.pid);
-    expect(spent).toBeDefined();
-    expect(spent!.cpu).toBeGreaterThan(20);
-    const idle = await scanAfter(2_000);
-    expect(idle.procs.find(p => p.pid === burn.pid)!.cpu).toBeLessThan(5);
-  }, 30_000);
+
+    // Busy in the window it burned in.
+    const spent = await scanUntil(source, burn.pid!, "busy in a window", row => row !== undefined && row.cpu > 0);
+    expect(spent.cpu).toBeGreaterThan(0);
+
+    // And nothing in a window it did not: the delta is zero once it stops, whatever it burned before.
+    writeFileSync(stop, "");
+    const idle = await scanUntil(source, burn.pid!, "idle in a window", row => row !== undefined && row.cpu === 0);
+    expect(idle.cpu).toBe(0);
+    // Still zero in the window after that, where a whole-life average would still be reporting the burn.
+    const after = await scanUntil(source, burn.pid!, "a row at all", row => row !== undefined);
+    expect(after.cpu).toBe(0);
+  }, 60_000);
 
   it("inspects one of them: its ports off the ports road, its children out of the scan, and nothing for a pid that is gone", async () => {
     const source = new LocalProcSource({ ports: async () => [{ port: 8080, pid: process.pid, uid: 0, loopback: false }, { port: 22, pid: 1, uid: 0, loopback: false }] });
