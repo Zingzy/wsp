@@ -5,9 +5,9 @@
 // section menu, the chords, the settings page and the sidebar itself read one
 // value, every surface follows a toggle at once, and a browser tab on the same
 // host shows the same body. The current workspace is resolved here too, since
-// the shell paints its hue on a surface the sidebar does not own.
+// the shell paints its theme on a surface the sidebar does not own.
 import { useMemo } from "react";
-import type { SidebarMode, WorkspaceTint } from "@wsp/protocol";
+import type { SidebarMode, WorkspaceTheme } from "@wsp/protocol";
 import { sidebarWorkspaceOrder } from "../adapt/workspaces.js";
 import { useStore } from "../protocol/store.js";
 
@@ -39,12 +39,12 @@ export function useSpaceWorkspaceId(): string | null {
   return spaceWorkspaceId(ordered, selectedId);
 }
 
-/** The hue the shell paints the sidebar's surface with: the current space's, and none outside Spaces mode, where the
- * hue draws on the rails alone. */
-export function useSpaceTint(): WorkspaceTint | undefined {
+/** The theme the shell paints the sidebar with: the current space's, and none outside Spaces mode, where no
+ * workspace's colour reaches the chrome. */
+export function useSpaceTheme(): WorkspaceTheme | undefined {
   const [mode] = useSidebarMode();
   const current = useSpaceWorkspaceId();
   const workspaces = useStore(s => s.workspaces);
   if (mode !== "spaces") return undefined;
-  return workspaces.find(w => w.id === current)?.tint;
+  return workspaces.find(w => w.id === current)?.theme;
 }

@@ -3,7 +3,7 @@
 // under each, over the adapter's SidebarProjectSnapshot. The search row, the
 // Workspaces section row that shuts them all and opens the new-workspace
 // dialog, the settled shelf with the archive nested in it, the Spaces body
-// with one workspace's rows under its header and a dot per workspace at the
+// with one workspace's rows under its header and an icon per workspace at the
 // bottom, the slide and the two-finger swipe that move between them,
 // keyboard traversal, the
 // rebuild of a zombie or gone machine, the forget of a gone one and the
@@ -14,7 +14,7 @@
 // sidebar-glass: nothing here paints a background.
 import { ChevronDownIcon, MessageSquarePlusIcon, PlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type WheelEvent } from "react";
-import { DROP_A_FOLDER_LINE, PROVIDER_UNREACHED_LINE, computerOffline, dropTileLine, goldenHead, isLocalWorkspace, kindWords, registerRequest, registeredLine, workspaceKind, workspaceState, type WorkspaceSize, type WorkspaceState, type WorkspaceTint } from "@wsp/protocol";
+import { DROP_A_FOLDER_LINE, PROVIDER_UNREACHED_LINE, computerOffline, dropTileLine, goldenHead, isLocalWorkspace, kindWords, registerRequest, registeredLine, workspaceKind, workspaceState, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry.js";
 import { sidebarActions } from "../actions/sidebarActions.js";
@@ -24,7 +24,7 @@ import { workspaceActions, workspaceTarget } from "../actions/workspaceActions.j
 import { deriveSidebarProjects, type SidebarProjectSnapshot, type SidebarThreadSnapshot } from "../adapt/index.js";
 import { useOutOfMemoryReadings } from "../machine/live.js";
 import { ForgetWorkspaceDialog } from "../components/ForgetWorkspaceDialog.js";
-import { WorkspaceLookDialog, tintAttr } from "../components/workspaceLook.js";
+import { WorkspaceLookPopover } from "../components/look/WorkspaceLookPopover.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
 import { SidebarContent, SidebarGroup, SidebarGroupAction, SidebarGroupContent, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarMenuSub, SidebarMenuSubItem } from "../components/ui/sidebar.js";
 import { Spinner } from "../components/ui/spinner.js";
@@ -48,7 +48,7 @@ import { foldArchivedThreads, resolveAdjacentThreadId, resolveSettledTimestamp, 
 import { CloudSetupRow } from "./CloudSetupRow.js";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
 import { useSidebarMode, useSpaceWorkspaceId } from "./sidebarMode.js";
-import { SpaceDots } from "./SpaceDots.js";
+import { SpaceBar } from "./SpaceBar.js";
 import { SpaceHeader } from "./SpaceHeader.js";
 import { SPACE_LEAVING_SELECTOR, SpaceSlide } from "./SpaceSlide.js";
 import { NO_SWIPE, readSwipe } from "./spaceSwipe.js";
@@ -144,8 +144,9 @@ export function WorkspaceSidebar() {
   /** Workspace id to the machine id a rebuild was asked for; the action stays disabled while that machine is still the one reported. */
   const [rebuilding, setRebuilding] = useState<Readonly<Record<string, string>>>({});
   const [forgetting, setForgetting] = useState<string | null>(null);
-  /** The look picker open for one workspace, on the fact the menu named; keyed per opening so it reopens fresh. */
-  const [looking, setLooking] = useState<(WorkspaceLookRequest & { key: number }) | null>(null);
+  /** The look picker open for one workspace, on the fact the menu named, anchored to the element that stands for the
+   * workspace when it opened: its space icon, else its row, else the sidebar itself; keyed per opening so it reopens fresh. */
+  const [looking, setLooking] = useState<(WorkspaceLookRequest & { key: number; anchor: HTMLElement | null }) | null>(null);
   /** The row whose name is being typed, by the row id every row already carries, and whether that name is on its way;
    * one row at a time whatever its kind, the row is the only editor, and the field stays until the store has the name. */
   const [renaming, setRenaming] = useState<{ rowId: string; saving: boolean } | null>(null);
@@ -198,7 +199,16 @@ export function WorkspaceSidebar() {
       }),
     [],
   );
-  useEffect(() => onWorkspaceLookRequest(request => setLooking({ ...request, key: Date.now() })), []);
+  useEffect(
+    () =>
+      onWorkspaceLookRequest(request => {
+        const root = rootRef.current;
+        const icon = Array.from(root?.querySelectorAll<HTMLElement>("[data-space-icon]") ?? []).find(el => el.dataset["spaceIcon"] === request.workspaceId);
+        const row = Array.from(root?.querySelectorAll<HTMLElement>("[data-sidebar-row]") ?? []).find(el => el.dataset["rowId"] === workspaceRowId(request.workspaceId));
+        setLooking({ ...request, key: Date.now(), anchor: icon ?? row ?? root });
+      }),
+    [],
+  );
   useEffect(() => onProjectTripRequest(request => setTrip({ ...request, key: Date.now() })), []);
 
   const create = async (name: string, start: WorkspaceStart, size?: WorkspaceSize): Promise<void> => {
@@ -315,9 +325,8 @@ export function WorkspaceSidebar() {
 
   /** The rows under one workspace, whichever body draws them: the line that opens its first thread while it has
    * none, the working rows, then the idle shelf under its own header with the archive nested inside it. The list
-   * and Spaces both read this, so the row grammar has one home. The rail takes the workspace's hue in the list,
-   * where it is the one place the hue draws; Spaces passes none, since there the whole surface carries it. */
-  const threadsOf = ({ project, active, settled, archived }: VisibleProject, newThreadAction: ResolvedAction, machine: RowMachine, shut: boolean, rail?: WorkspaceTint | undefined) => {
+   * and Spaces both read this, so the row grammar has one home. */
+  const threadsOf = ({ project, active, settled, archived }: VisibleProject, newThreadAction: ResolvedAction, machine: RowMachine, shut: boolean) => {
     const settledOpen = !settledCollapsed.includes(project.id);
     const archivedOpen = archivedOpenIds.includes(project.id);
     /** Everything the shelf holds, the archived rows included, since shutting it hides the archive with them: the
@@ -342,7 +351,7 @@ export function WorkspaceSidebar() {
           </SidebarMenuSub>
         ) : null}
         {!shut && active.length + shelved > 0 ? (
-          <SidebarMenuSub {...tintAttr(rail)}>
+          <SidebarMenuSub>
             {active.map(thread => threadRow(thread, compactTimeLabel(thread.startedAt), machine))}
             {shelved > 0 ? (
               <ThreadGroupRow rowId={groupRowId("settled", project.id)} label="Idle" count={shelved} open={settledOpen} onToggle={() => toggleSettled(project.id)} />
@@ -393,7 +402,7 @@ export function WorkspaceSidebar() {
           onRenameOpen={openerOf(actionById(actions, "rename"))}
         />
         )}
-        {threadsOf(visibleProject, newThreadAction, machine, isCollapsed, project.workspace.tint)}
+        {threadsOf(visibleProject, newThreadAction, machine, isCollapsed)}
       </SidebarMenuItem>
     );
   };
@@ -461,9 +470,10 @@ export function WorkspaceSidebar() {
     e.preventDefault();
   };
 
-  /** A two-finger swipe over the workspaces moves a space, and it lands where the arrows land, through the one verb
-   * they run: the swipe is another way to ask, not another rule. It rides that group alone, so the search row above
-   * it and the forwards under it still scroll as they are, and the gesture it belongs to lives across the wheel
+  /** A two-finger swipe over the sidebar moves a space, and it lands where the arrows land, through the one verb
+   * they run: the swipe is another way to ask, not another rule. It rides the whole body under the search row, the
+   * empty room under the rows and the space bar included, since a hand swipes where it is and not on a row; a
+   * scroll is left alone, since the read never takes the event. The gesture it belongs to lives across the wheel
    * events that make it up, so a swipe that keeps going moves one space and no more. */
   const swipe = useRef(NO_SWIPE);
   const onWheel = (e: WheelEvent<HTMLElement>): void => {
@@ -508,34 +518,36 @@ export function WorkspaceSidebar() {
   return (
     <>
       <SidebarChromeHeader />
-      <div ref={rootRef} onKeyDown={onKeyDown} className="flex min-h-0 flex-1 flex-col">
+      <div ref={rootRef} onKeyDown={onKeyDown} onWheel={mode === "spaces" ? onWheel : undefined} className="flex min-h-0 flex-1 flex-col">
         <SidebarContent fixedHeader={search}>
-          <SidebarGroup className="pt-0" onWheel={mode === "spaces" ? onWheel : undefined}>
-            <SectionRow
-              label="Workspaces"
-              count={projects.length + creations.length}
-              collapsed={allCollapsed}
-              onToggle={() => setAllCollapsed(c => !c)}
-              onContextMenu={event => void openContextMenu(event, sectionActions)}
-              action={
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <SidebarGroupAction
-                        className="top-1.5 text-sidebar-muted-foreground transition-colors duration-150 disabled:pointer-events-none disabled:opacity-50"
-                        aria-label="New workspace"
-                        disabled={api === null}
-                        onClick={openDialog}
-                      />
-                    }
-                  >
-                    <PlusIcon />
-                  </TooltipTrigger>
-                  <TooltipPopup side="bottom">New workspace</TooltipPopup>
-                </Tooltip>
-              }
-            />
-            {allCollapsed ? null : (
+          <SidebarGroup className="pt-0" {...(mode === "spaces" ? { onContextMenu: (event: MouseEvent<HTMLElement>) => void openContextMenu(event, sectionActions) } : {})}>
+            {mode === "spaces" ? null : (
+              <SectionRow
+                label="Workspaces"
+                count={projects.length + creations.length}
+                collapsed={allCollapsed}
+                onToggle={() => setAllCollapsed(c => !c)}
+                onContextMenu={event => void openContextMenu(event, sectionActions)}
+                action={
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <SidebarGroupAction
+                          className="top-1.5 text-sidebar-muted-foreground transition-colors duration-150 disabled:pointer-events-none disabled:opacity-50"
+                          aria-label="New workspace"
+                          disabled={api === null}
+                          onClick={openDialog}
+                        />
+                      }
+                    >
+                      <PlusIcon />
+                    </TooltipTrigger>
+                    <TooltipPopup side="bottom">New workspace</TooltipPopup>
+                  </Tooltip>
+                }
+              />
+            )}
+            {allCollapsed && mode !== "spaces" ? null : (
               <SidebarGroupContent>
                 <SidebarMenu>
                   {creations.map(creation => (
@@ -561,21 +573,30 @@ export function WorkspaceSidebar() {
           </SidebarGroup>
           <ForwardsList />
         </SidebarContent>
+        <SidebarChromeFooter items={[]}>
+          {toast ? (
+            <div
+              role="status"
+              aria-label={toast}
+              onClick={clearToast}
+              className="mb-1 cursor-pointer rounded-lg border border-sidebar-border bg-sidebar-control-surface px-3 py-2 text-xs break-words text-sidebar-foreground"
+            >
+              {toast}
+            </div>
+          ) : null}
+          {mode === "spaces" ? (
+            <SpaceBar
+              projects={visible.map(v => v.project)}
+              currentId={currentSpace?.project.id ?? null}
+              canCreate={api !== null}
+              onSelect={select}
+              onContextMenu={(project, event) => void openContextMenu(event, blockOf(project).actions)}
+              onCreate={openDialog}
+            />
+          ) : null}
+          <CloudSetupRow />
+        </SidebarChromeFooter>
       </div>
-      <SidebarChromeFooter items={[]}>
-        {toast ? (
-          <div
-            role="status"
-            aria-label={toast}
-            onClick={clearToast}
-            className="mb-1 cursor-pointer rounded-lg border border-sidebar-border bg-sidebar-control-surface px-3 py-2 text-xs break-words text-sidebar-foreground"
-          >
-            {toast}
-          </div>
-        ) : null}
-        {mode === "spaces" && visible.length > 0 ? <SpaceDots projects={visible.map(v => v.project)} currentId={currentSpace?.project.id ?? null} onSelect={select} /> : null}
-        <CloudSetupRow />
-      </SidebarChromeFooter>
       {dialog ? (
         <NewWorkspaceDialog
           key={dialog.key}
@@ -594,7 +615,7 @@ export function WorkspaceSidebar() {
         )
       ) : null}
       {looking !== null && lookTarget !== undefined ? (
-        <WorkspaceLookDialog key={looking.key} workspace={lookTarget} part={looking.part} onClose={() => setLooking(null)} />
+        <WorkspaceLookPopover key={looking.key} workspace={lookTarget} part={looking.part} anchor={looking.anchor} onClose={() => setLooking(null)} />
       ) : null}
       {forgetTarget !== undefined ? (
         <ForgetWorkspaceDialog

@@ -21,8 +21,9 @@
 // config, so the pane's material can be measured with each tab active;
 // ?sidebar=<px> opens the sidebar at that remembered width so the rows can
 // be measured at several; ?spaces=1 opens it in the Spaces body, one
-// workspace under its header with a dot per workspace at the bottom;
-// ?tint=1 gives the first two workspaces a hue and a glyph of their own;
+// workspace under its header with an icon per workspace at the bottom;
+// ?look=1 gives the first two workspaces a theme and the first a glyph of its own, ?ssh=1 adds a machine over ssh,
+// ?many=<n> adds n more running forks so the space bar overflows;
 // ?archived=1 gives the first workspace two threads quiet for days, so the
 // Archived group nested in its idle shelf can be measured shut and opened;
 // ?images=<n> puts n images in the composer so the thumbnail row above the
@@ -47,7 +48,7 @@
 // ?init=building puts the init job mid-build so the cloud row's progress line
 // can be measured.
 import { createRoot } from "react-dom/client";
-import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DESKTOP_MAC_CLASS, keptAccess, THIS_COMPUTER, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DESKTOP_MAC_CLASS, keptAccess, THEME_PRESETS, THIS_COMPUTER, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api } from "../../src/protocol/client";
@@ -102,12 +103,17 @@ if (projects) Object.assign(cloud[0]!, { projects: PROJECTS });
 const LONG_PROJECT = { name: "customer-billing-service-platform", dest: "/Users/zingzy/customer-billing-service-platform", importedAt: "2026-09-06T08:00:00Z", size: 912_000_000 };
 const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "", ...(projects ? { projects: [...PROJECTS, LONG_PROJECT] } : {}) };
 const workspaces = params.get("local") === "1" ? [...cloud, MAC] : cloud;
-// ?tint=1 gives the first two workspaces a hue and a glyph and leaves the third with neither, so one page holds two
-// tinted spaces and a plain one.
-if (params.get("tint") === "1") {
-  Object.assign(workspaces[0]!, { tint: "cyan", glyph: "flask" });
-  Object.assign(workspaces[1]!, { tint: "violet", glyph: "rocket" });
+// ?look=1 gives the first two workspaces a theme and the first a glyph of its own, and leaves the rest with neither, so
+// one page holds two themed spaces, a plain one and, with ?local=1 and ?ssh=1, every kind's own glyph on the bar. The
+// first theme is a preset at the default grain and opacity; the second has three colours, grain and its own side pinned.
+if (params.get("look") === "1") {
+  Object.assign(workspaces[0]!, { theme: { ...DEFAULT_THEME, dots: [...THEME_PRESETS[1]!.dots], harmony: THEME_PRESETS[1]!.harmony }, glyph: "flask" });
+  Object.assign(workspaces[1]!, { theme: { ...DEFAULT_THEME, dots: [...THEME_PRESETS[2]!.dots], harmony: THEME_PRESETS[2]!.harmony, grain: 0.5, opacity: 0.7, mode: "dark" } });
 }
+// ?ssh=1 adds a machine over ssh, the third kind, so the space bar can be shot with every kind's own glyph.
+if (params.get("ssh") === "1") workspaces.push({ ...view("ws_s", "build-box"), kind: "ssh", machineId: "ssh:build-box", golden: "" });
+// ?many=<n> adds n more running forks, so the space bar can be measured once its icons outgrow the footer.
+for (let i = 0; i < Number(params.get("many") ?? 0); i++) workspaces.push(view(`ws_x${i}`, `extra-${i}`));
 // The ticket's rows: long titles with the agent and both opener words. ws_a mixes a working thread with an idle
 // one; ws_b has only idle ones, the shape that used to draw no Idle header at all, one of them on Codex so both a
 // coloured and a monochrome agent mark sit in the shots.
@@ -338,9 +344,9 @@ const api: Api = {
   // The look sits on the record beside the name, so the fixture writes it there and answers with the row.
   setWorkspaceLook: async (id, look) => {
     const row = workspaces.find(w => w.id === id)!;
-    if (look.tint !== undefined) {
-      if (look.tint === null) delete row.tint;
-      else row.tint = look.tint;
+    if (look.theme !== undefined) {
+      if (look.theme === null) delete row.theme;
+      else row.theme = look.theme;
     }
     if (look.glyph !== undefined) {
       if (look.glyph === null) delete row.glyph;

@@ -29,7 +29,7 @@ import { cn } from "../lib/utils.js";
 import { workspaceKindGlyph } from "../workspaceKindGlyph.js";
 import { RowNameInput } from "./RowNameInput.js";
 import { ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, THREE_LINE_ROW_CLASS, workspaceRowId } from "./rowGrammar.js";
-import { NEW_THREAD_TITLE, machineLine, metaSentences, stateSlotWord, workspaceMetaLine } from "./workspaceRows.js";
+import { NEW_THREAD_TITLE, leadDimClass, machineLine, metaSentences, stateSlotWord, workspaceMetaLine } from "./workspaceRows.js";
 
 /** The glyphs sit on line one inside the state slot, the inner one and the one at the row's inset; the kit's own place is the row's middle and edge. */
 const GLYPH_CLASS = "peer-data-[size=lg]/menu-button:top-1 right-2";
@@ -139,7 +139,7 @@ export function WorkspaceRow({
         {...(renaming ? {} : { onClick: onSelect })}
       >
         <span aria-hidden className={ROW_LEAD_CLASS} data-workspace-lead>
-          <KindGlyph className={cn("size-3.5", LEAD_GLYPH_CLASS, project.state === "paused" && "opacity-50")} />
+          <KindGlyph className={cn("size-3.5", LEAD_GLYPH_CLASS, leadDimClass(project))} />
         </span>
         <span className="flex min-w-0 flex-1 flex-col gap-px leading-tight">
           <span className="flex items-center gap-2">

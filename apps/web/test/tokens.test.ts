@@ -27,48 +27,25 @@ describe("index.css", () => {
     expect(appTerminalFontSize()).toBe(14);
   });
 
-  // The hues are the one palette a person paints a workspace with, so they must never say what a state says and
-  // must not read alike in a picker. The two colours they have to stay clear of are the app's own tokens, read
-  // from the ramp rather than written down here, so a palette change on either side is what moves these numbers.
-  describe("the workspace hues", () => {
-    const ramp = readFileSync(join(__dirname, "../node_modules/tailwindcss/theme.css"), "utf8");
-    const hueOfRamp = (name: string): number => Number(/oklch\([\d.]+% [\d.]+ ([\d.]+)\)/.exec(new RegExp(`--color-${name}:\\s*(oklch\\([^)]*\\))`).exec(ramp)![1]!)![1]);
-    const STATE_GREEN = hueOfRamp("emerald-500");
-    const DANGER_RED = hueOfRamp("red-500");
-    const apart = (a: number, b: number): number => { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); };
-    /** Every --space-tint-<id> the stylesheet declares, light theme and dark, as [id, hue]. */
-    const declared = (): Array<[string, number]> =>
-      Array.from(css.matchAll(/--space-tint-([a-z]+): oklch\([\d.]+ [\d.]+ ([\d.]+)\);/g)).map(m => [m[1]!, Number(m[2]!)]);
-
-    it("are declared twice each, one step for the light theme and one for the dark", () => {
-      const ids = declared().map(([id]) => id);
-      const once = [...new Set(ids)];
-      expect(once).toEqual(["cyan", "azure", "blue", "violet", "purple", "magenta"]);
-      expect(ids).toHaveLength(once.length * 2);
-      // The dark step is the lighter one: no single lightness clears the readable floor on both a near-white and a
-      // near-black sidebar, which is the whole reason there are two.
-      const lightness = Array.from(css.matchAll(/--space-tint-([a-z]+): oklch\(([\d.]+) /g)).map(m => [m[1]!, Number(m[2]!)] as const);
-      for (const id of once) {
-        const [light, dark] = lightness.filter(([name]) => name === id).map(([, l]) => l) as [number, number];
-        expect(dark).toBeGreaterThan(light);
-      }
+  // A workspace's theme is painted by one formatter's custom properties; the stylesheet keys on the mark the
+  // formatter's caller sets and nothing else, so no colour id lives in CSS and no old hue rule lingers.
+  describe("the workspace theme", () => {
+    it("keys the gradient and the grain on the theme mark alone, with one pre-rendered tile and no per-hue rule", () => {
+      expect(css).not.toMatch(/data-space-tint/);
+      expect(css).not.toMatch(/--space-tint-[a-z]+:/);
+      expect(css.match(/--space-grain-tile: url\("data:image\/svg\+xml,/g)).toHaveLength(1);
+      expect(css).toContain("feTurbulence");
+      expect(css).toMatch(/\[data-app-sidebar\]\[data-space-theme\] > \[data-slot="sidebar-inner"\] \{[^}]*background-image: var\(--space-gradient\);/);
+      expect(css).toMatch(/\[data-app-sidebar\]\[data-space-theme\] > \[data-slot="sidebar-inner"\]::before \{[^}]*opacity: var\(--space-grain, 0\);/);
+      // The grain layer never filters the surface: it is a tile laid at an opacity, under the rows.
+      const grain = /::before \{([^}]*)\}/.exec(css.slice(css.indexOf("[data-space-theme]")))![1]!;
+      expect(grain).not.toMatch(/filter:/);
+      expect(grain).toContain("z-index: -1");
     });
 
-    it("keep 30 degrees from the green that means running and the red that means danger, in both steps", () => {
-      for (const [id, hue] of declared()) {
-        expect({ id, toGreen: apart(hue, STATE_GREEN) >= 30 }).toEqual({ id, toGreen: true });
-        expect({ id, toRed: apart(hue, DANGER_RED) >= 30 }).toEqual({ id, toRed: true });
-      }
-    });
-
-    it("keep 25 degrees from each other, so no two read alike in the picker", () => {
-      const hues = declared();
-      for (const [a, aHue] of hues) {
-        for (const [b, bHue] of hues) {
-          if (a === b) continue;
-          expect({ a, b, apart: apart(aHue, bHue) >= 25 }).toEqual({ a, b, apart: true });
-        }
-      }
+    it("a theme pinned to one side takes that side's sidebar tokens whatever the app draws, with one copy of each set", () => {
+      expect(css).toContain(':is(:where(.dark, .dark *):not([data-space-scheme="light"]), [data-space-scheme="dark"])');
+      expect(css.match(/--sidebar-row-selected: color-mix\(in srgb, var\(--contrast-foreground\) 7%, transparent\);/g)).toHaveLength(1);
     });
   });
 
@@ -136,12 +113,21 @@ describe("index.css", () => {
            percent lands at 4.47:1, and at 4.14:1 over the search row's tint, so light takes the ink
            whole. Zinc-600 whole still reads a step behind the zinc-800 a selected row's name takes. */
         --sidebar-row-rest: var(--contrast-sidebar-muted-foreground);
+        /* The glyphs' quiet ink, mixed from the sidebar's own tokens; declared here beside the tiers for the same
+           reason, so a sidebar whose theme pins its side mixes it from that side's tokens. */
+        --sidebar-icon-color: color-mix(
+          in srgb,
+          var(--contrast-sidebar-muted-foreground) 60%,
+          var(--sidebar)
+        );
+      }
 
-        @variant dark {
-          /* oklab, not srgb: this is the space the utility's own 80 percent mixed in, and the dark side
-             is meant to come out of this pass with the pixels it went in with. */
-          --sidebar-row-rest: color-mix(in oklab, var(--contrast-sidebar-muted-foreground) 80%, transparent);
-        }
+      /* oklab, not srgb: this is the space the utility's own 80 percent mixed in, and the dark side
+         is meant to come out of this pass with the pixels it went in with. The sidebar takes the dark
+         step on the app's dark side unless its theme pins light, and wherever its theme pins dark. */
+      :root:where(.dark, .dark *),
+      [data-app-sidebar]:is(:where(.dark, .dark *):not([data-space-scheme="light"]), [data-space-scheme="dark"]) {
+        --sidebar-row-rest: color-mix(in oklab, var(--contrast-sidebar-muted-foreground) 80%, transparent);
       }
 
       /* Over the glass the sidebar's quiet text and glyphs have no solid card
@@ -179,83 +165,39 @@ describe("index.css", () => {
         background: var(--background);
       }
 
-      /* One workspace's own hue, by the id its record carries. Six one-word ids, each
-         a token with a step per theme: no one lightness clears the readable floor
-         against both a near-white and a near-black sidebar, so the light theme takes
-         the darker step and the dark theme the lighter one. The six sit 27 degrees
-         apart and none comes within 43 of the green that means running or 44 of the
-         red that means danger, so a workspace's colour never speaks the state
-         language. Every surface drawn in a workspace's colour reads --space-tint, so
-         a component names no colour and the hue has one home. */
+      /* One workspace's theme, in Spaces mode, on the sidebar's own surface. The
+         theme object is read by one formatter, which writes these custom
+         properties onto the sidebar element: the gradient, the grain and the ink.
+         The inner layer is the one both the glass recipe and the macOS vibrancy
+         leave to the app, so the gradient lies over the glass or the window's
+         material rather than replacing it; its stops carry the theme's opacity as
+         their alpha. The grain is one tile, an SVG turbulence filter the browser
+         rasterises once and repeats, laid under the rows at the slider's opacity:
+         never a filter over the whole surface, so the rows scroll over a still
+         layer. The inner isolates its stacking so the tile sits above the gradient
+         and under everything the sidebar draws. */
       :root {
-        --space-tint-cyan: oklch(0.501 0.077 206);
-        --space-tint-azure: oklch(0.504 0.094 233);
-        --space-tint-blue: oklch(0.517 0.19 260);
-        --space-tint-violet: oklch(0.537 0.246 287);
-        --space-tint-purple: oklch(0.541 0.241 314);
-        --space-tint-magenta: oklch(0.537 0.209 341);
-        /* How much of the hue goes into the sidebar's own colour in Spaces mode:
-           enough to tell two spaces apart, quiet enough to leave the rows their
-           contrast. The dark theme takes far more because its sidebar is black and
-           the mix runs in oklab, where a few percent off black paints nothing. The
-           second number is the alpha the hue lies at over the macOS window material,
-           which has no colour to mix into. */
-        --space-wash: 10%;
-        --space-wash-material: 7%;
-
-        @variant dark {
-          --space-tint-cyan: oklch(0.625 0.096 206);
-          --space-tint-azure: oklch(0.629 0.117 233);
-          --space-tint-blue: oklch(0.64 0.174 260);
-          --space-tint-violet: oklch(0.65 0.178 287);
-          --space-tint-purple: oklch(0.664 0.234 314);
-          --space-tint-magenta: oklch(0.67 0.261 341);
-          --space-wash: 30%;
-          --space-wash-material: 11%;
-        }
+        --space-grain-tile: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
       }
 
-      [data-space-tint="cyan"] {
-        --space-tint: var(--space-tint-cyan);
+      [data-app-sidebar][data-space-theme] > [data-slot="sidebar-inner"] {
+        position: relative;
+        isolation: isolate;
+        background-image: var(--space-gradient);
+        background-repeat: no-repeat;
+        background-size: 100% 100%;
       }
 
-      [data-space-tint="azure"] {
-        --space-tint: var(--space-tint-azure);
-      }
-
-      [data-space-tint="blue"] {
-        --space-tint: var(--space-tint-blue);
-      }
-
-      [data-space-tint="violet"] {
-        --space-tint: var(--space-tint-violet);
-      }
-
-      [data-space-tint="purple"] {
-        --space-tint: var(--space-tint-purple);
-      }
-
-      [data-space-tint="magenta"] {
-        --space-tint: var(--space-tint-magenta);
-      }
-
-      /* Spaces mode tints the sidebar's own surface. The inner layer is the one both
-         the glass recipe and the macOS vibrancy leave to the app, so the mix happens
-         in one place; over the window's own material there is no token to mix into,
-         only the material behind it. The mix runs in oklab, which keeps the paint
-         inside sRGB where a mix in sRGB leaves it and the screen clamps. */
-      [data-app-sidebar][data-space-tint] > [data-slot="sidebar-inner"] {
-        background: color-mix(in oklab, var(--space-tint) var(--space-wash), var(--sidebar));
-      }
-
-      .desktop-mac [data-app-sidebar][data-space-tint] > [data-slot="sidebar-inner"] {
-        background: color-mix(in oklab, var(--space-tint) var(--space-wash-material), transparent);
-      }
-
-      /* In the list body the hue draws in one place only: the rail the thread rows of
-         a tinted workspace hang from. */
-      [data-slot="sidebar-menu-sub"][data-space-tint] {
-        border-color: var(--space-tint);
+      [data-app-sidebar][data-space-theme] > [data-slot="sidebar-inner"]::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+        pointer-events: none;
+        background-image: var(--space-grain-tile);
+        background-size: 160px 160px;
+        opacity: var(--space-grain, 0);
+        mix-blend-mode: soft-light;
       }
       "
     `);

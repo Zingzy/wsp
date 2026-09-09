@@ -13,7 +13,7 @@ import { openingTitle, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitRoad, InitScreenId } from "./init-job.js";
 import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
-import { WorkspaceGlyph, WorkspaceLook, WorkspaceTint } from "./workspace-look.js";
+import { WorkspaceGlyph, WorkspaceLook, WorkspaceTheme } from "./workspace-look.js";
 
 /** The one rule for a URL a guest may hand to the laptop: http or https in any
  * case, no whitespace or control characters, at most HTTP_URL_MAX bytes, and
@@ -253,8 +253,8 @@ export const WorkspaceView = z.object({
   screen: z.object({ streamUrl: z.string() }).optional(),
   /** With phase gone: the provider's words when it stopped knowing the machine; every refusal quotes them. */
   gone: z.string().optional(),
-  /** The hue a person picked for this workspace; absent is none, and nothing is tinted. */
-  tint: WorkspaceTint.optional(),
+  /** The theme a person gave this workspace; absent is none, and the sidebar keeps its own surface. */
+  theme: WorkspaceTheme.optional(),
   /** The glyph a person picked for this workspace; absent is none, and the state dot stands alone. */
   glyph: WorkspaceGlyph.optional(),
   /** One line for the machine's row while the runtime is doing something to the machine's daemon, or why the last
@@ -289,7 +289,7 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
  * handed over by having been forgotten, which is how the display stream rode these doors until now. */
 const WORKSPACE_OUT = {
   id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, projects: true, folder: true, home: true,
-  claudeSessionId: true, gone: true, tint: true, glyph: true, daemonNote: true,
+  claudeSessionId: true, gone: true, theme: true, glyph: true, daemonNote: true,
 } as const;
 
 /** A workspace as every verb answers with it: the view without the display stream a desktop machine carries, which
@@ -877,12 +877,12 @@ export const WorkspaceUpgradedEvent = z.object({
 /** A person named the workspace: its record alone changed, and every client puts the name on the row it holds. The
  * machine was not touched, so nothing that meters it reads this. */
 export const WorkspaceRenamedEvent = z.object({ type: z.literal("workspace.renamed"), workspaceId: z.string(), name: z.string() });
-/** A person picked the workspace's hue or its glyph: the record alone changed, and both facts travel whole so a
+/** A person set the workspace's theme or its glyph: the record alone changed, and both facts travel whole so a
  * client never has to merge one key into what it holds. null on either is none picked. */
 export const WorkspaceLookEvent = z.object({
   type: z.literal("workspace.look"),
   workspaceId: z.string(),
-  tint: WorkspaceTint.nullable(),
+  theme: WorkspaceTheme.nullable(),
   glyph: WorkspaceGlyph.nullable(),
 });
 export const WorkspaceDeletedEvent = z.object({ type: z.literal("workspace.deleted"), workspaceId: z.string() });
@@ -2452,7 +2452,45 @@ export * from "./oom.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
 export { ThreadMessage, threadMessages, threadReplyRows, threadResult, ThreadVoice } from "./thread-read.js";
 export { inFolder, shellLine, shellQuote } from "./shell-quote.js";
-export { LOOK_PARTS, WORKSPACE_GLYPHS, WORKSPACE_TINTS, WorkspaceGlyph, WorkspaceLook, WorkspaceTint, type LookPart } from "./workspace-look.js";
+export {
+  DEFAULT_THEME,
+  INK_FLOOR,
+  LOOK_PARTS,
+  SIDE_INK,
+  THEME_GRAIN_STEPS,
+  THEME_HARMONIES,
+  THEME_MAX_DOTS,
+  THEME_MIN_OPACITY,
+  THEME_PRESETS,
+  WORD_FLOOR,
+  ThemeDot,
+  ThemeHarmony,
+  ThemeMode,
+  WORKSPACE_GLYPHS,
+  WorkspaceGlyph,
+  WorkspaceLook,
+  WorkspaceTheme,
+  applyPreset,
+  contrastRatio,
+  cycleHarmony,
+  dotColour,
+  effectiveOpacity,
+  harmoniesOf,
+  harmonyDots,
+  harmonySize,
+  hslToRgb,
+  isPreset,
+  moveFirstDot,
+  opacityCap,
+  resizeDots,
+  rgbToHsl,
+  snapGrain,
+  themeInk,
+  themeScheme,
+  type LookPart,
+  type Rgb,
+  type ThemePreset,
+} from "./workspace-look.js";
 export { rootsPathIn, underProject } from "./project-path.js";
 export * from "./projects.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, registerRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
