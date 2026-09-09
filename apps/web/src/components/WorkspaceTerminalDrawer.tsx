@@ -7,10 +7,10 @@
 // closing the last never respawns.
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { workspaceState, type DaemonLinkStatus } from "@wsp/protocol";
+import type { DaemonLinkStatus } from "@wsp/protocol";
 import { terminalPaneHints, terminalPaneState, type TerminalPaneState } from "../adapt/index.js";
 import { useOutOfMemoryReading } from "../machine/live.js";
-import { useCapabilities, useStatus, useStore, useWorkspace } from "../protocol/store.js";
+import { useCapabilities, useStatus, useStore, useWorkspace, useWorkspaceState } from "../protocol/store.js";
 import { selectPanelTerminalIds, useRightPanelStore } from "../rightPanelStore.js";
 import { openDrawerTerminal, reportTerminalFailure, splitDrawerTerminal, type SplitDirection } from "../shell/shellCommands.js";
 import { selectTerminalUiState, useTerminalDrawerStore } from "../terminal/drawerStore.js";
@@ -51,13 +51,10 @@ export function useTerminalPane(workspaceId: string, socket: DaemonLinkStatus): 
   const capabilities = useCapabilities();
   const wake = useStore(s => s.wake);
   const phase = status?.phase ?? workspace?.phase ?? "running";
-  const machineState = status?.machineState ?? null;
   const reach = status?.reach.state ?? null;
+  const state = useWorkspaceState(workspaceId) ?? "running";
   const outOfMemory = useOutOfMemoryReading(workspaceId, phase);
-  const pane = useMemo(
-    () => terminalPaneState({ state: workspaceState({ phase, machineState, reach }), reach, socket, outOfMemory }),
-    [phase, machineState, reach, socket, outOfMemory],
-  );
+  const pane = useMemo(() => terminalPaneState({ state, reach, socket, outOfMemory }), [state, reach, socket, outOfMemory]);
   const size = status?.size ?? null;
   const sizes = capabilities?.sizes ?? null;
   const hints = useMemo(() => terminalPaneHints(pane, size, sizes), [pane, size, sizes]);

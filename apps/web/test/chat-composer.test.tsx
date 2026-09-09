@@ -386,22 +386,20 @@ describe("a new thread while another thread of the workspace works", () => {
 });
 
 describe("composerSendBlock", () => {
-  const live = { conn: "live" as const, hasApi: true, phase: "running" as const, machineState: "running" as const, reach: "reachable" as const, hydrated: true };
+  const live = { conn: "live" as const, hasApi: true, state: "running" as const, hydrated: true };
   it("names the first thing in the way, socket first, as the kind the refusal table gives words for", () => {
     expect(composerSendBlock(live)).toBeNull();
     expect(composerSendBlock({ ...live, hasApi: false })).toBe("connecting");
     expect(composerSendBlock({ ...live, conn: "connecting" })).toBe("connecting");
-    expect(composerSendBlock({ ...live, conn: "reconnecting", phase: "napping" })).toBe("reconnecting");
+    expect(composerSendBlock({ ...live, conn: "reconnecting", state: "paused" })).toBe("reconnecting");
     expect(composerSendBlock({ ...live, conn: "closed" })).toBe("closed");
-    expect(composerSendBlock({ ...live, phase: null })).toBe("not-found");
-    expect(composerSendBlock({ ...live, machineState: "gone" })).toBe("gone");
-    expect(composerSendBlock({ ...live, phase: "napping" })).toBe("paused");
-    expect(composerSendBlock({ ...live, phase: "pausing" })).toBe("pausing");
-    expect(composerSendBlock({ ...live, machineState: "paused" })).toBe("paused");
-    expect(composerSendBlock({ ...live, phase: "waking" })).toBe("waking");
-    expect(composerSendBlock({ ...live, reach: "unreachable" })).toBe("unreachable");
-    expect(composerSendBlock({ ...live, reach: "slow" })).toBeNull();
+    // No workspace and no status: the app has nothing to name a state of, which is the row a missing workspace gets.
+    expect(composerSendBlock({ ...live, state: null })).toBe("not-found");
+    expect(composerSendBlock({ ...live, state: "gone" })).toBe("gone");
+    expect(composerSendBlock({ ...live, state: "paused" })).toBe("paused");
+    expect(composerSendBlock({ ...live, state: "pausing" })).toBe("pausing");
+    expect(composerSendBlock({ ...live, state: "waking" })).toBe("waking");
+    expect(composerSendBlock({ ...live, state: "unreachable" })).toBe("unreachable");
     expect(composerSendBlock({ ...live, hydrated: false })).toBe("loading");
-    expect(composerSendBlock({ ...live, machineState: null, reach: null })).toBeNull();
   });
 });

@@ -49,6 +49,7 @@ import {
   ThreadView,
   TurnStatus,
   WorkspaceListing,
+  WorkspaceOut,
   WorkspaceView,
   actionRefusal,
   authRefusal,
@@ -397,8 +398,8 @@ const PICK_OPTIONS: NonNullable<ParseArgsConfig["options"]> = Object.fromEntries
 const flag = (flags: Flags, name: string): string | undefined => (typeof flags[name] === "string" ? (flags[name] as string) : undefined);
 const flagList = (flags: Flags, name: string): string[] => (Array.isArray(flags[name]) ? (flags[name] as string[]) : []);
 
-export async function workspaces(client: HostClient): Promise<WorkspaceView[]> {
-  return (await client.request<{ workspaces: WorkspaceView[] }>("workspaces.list")).workspaces;
+export async function workspaces(client: HostClient): Promise<WorkspaceOut[]> {
+  return (await client.request<{ workspaces: WorkspaceOut[] }>("workspaces.list")).workspaces;
 }
 
 /** Every workspace with what the app's rail reads live beside it: the provider's word for the machine and the daemon
@@ -414,7 +415,7 @@ async function threads(client: HostClient, workspaceId?: string): Promise<Thread
 }
 
 /** A workspace as a person names it: by id, else by its name when exactly one carries it. */
-export async function workspaceOf(client: HostClient, ref: string): Promise<WorkspaceView> {
+export async function workspaceOf(client: HostClient, ref: string): Promise<WorkspaceOut> {
   const all = await workspaces(client);
   const byId = all.find(w => w.id === ref);
   if (byId !== undefined) return byId;
@@ -461,18 +462,18 @@ export function stateLine(workspace: WorkspaceView): string {
 }
 
 /** Naps the workspace a person names; the view after, as every director shows it. */
-export async function nap(client: HostClient, ref: string): Promise<WorkspaceView> {
+export async function nap(client: HostClient, ref: string): Promise<WorkspaceOut> {
   const source = await workspaceOf(client, ref);
-  return (await client.request<{ workspace: WorkspaceView }>("workspaces.nap", { workspaceId: source.id })).workspace;
+  return (await client.request<{ workspace: WorkspaceOut }>("workspaces.nap", { workspaceId: source.id })).workspace;
 }
 
 /** Replaces the machine under a workspace the provider no longer has, the road out of gone that the app's row
  * action takes. The record is read here so a machine that still answers is refused in the row's own words; the
  * runtime alone knows the machine is replaced, and the view it returns carries the new one. */
-export async function rebuild(client: HostClient, ref: string): Promise<WorkspaceView> {
+export async function rebuild(client: HostClient, ref: string): Promise<WorkspaceOut> {
   const source = await workspaceOf(client, ref);
   if (!needsRebuild(source)) throw new Error(NO_REBUILD_NEEDED);
-  return (await client.request<{ workspace: WorkspaceView }>("workspaces.rebuild", { workspaceId: source.id })).workspace;
+  return (await client.request<{ workspace: WorkspaceOut }>("workspaces.rebuild", { workspaceId: source.id })).workspace;
 }
 
 /** The state line every director prints after a rebuild, with the machine now under the workspace: the id changed,
@@ -484,14 +485,14 @@ export function rebuiltLine(workspace: WorkspaceView): string {
 /** What a workspace rename came to, as every director prints it: the name it went in under and the record after. */
 export interface RenamedWorkspace {
   was: string;
-  workspace: WorkspaceView;
+  workspace: WorkspaceOut;
 }
 
 /** Names the workspace a person names, through the runtime, which holds the name on this computer. The name is
  * unique here, so a duplicate and a blank one come back as the runtime's own refusal. */
 export async function renameWorkspace(client: HostClient, ref: string, name: string): Promise<RenamedWorkspace> {
   const source = await workspaceOf(client, ref);
-  const { workspace } = await client.request<{ workspace: WorkspaceView }>("workspaces.rename", { workspaceId: source.id, name });
+  const { workspace } = await client.request<{ workspace: WorkspaceOut }>("workspaces.rename", { workspaceId: source.id, name });
   return { was: source.name, workspace };
 }
 
@@ -502,11 +503,11 @@ export function renamedWorkspaceLine(r: RenamedWorkspace): string {
 /** Every verb that needs the machine goes through here, so a paused or waking workspace is a wait and never the
  * provider's error. The runtime is asked even when the view says running: only its state read catches a provider-side
  * pause. The runtime refuses a gone workspace too; the refusal here exists to carry the verb's own action word. */
-export async function awake(client: HostClient, workspace: WorkspaceView, action: string, tell: (line: string) => void): Promise<WorkspaceView> {
+export async function awake(client: HostClient, workspace: WorkspaceView, action: string, tell: (line: string) => void): Promise<WorkspaceOut> {
   const state = workspaceState({ phase: workspace.phase });
   if (state === "gone") throw new Error(goneRefusal(action, workspace.gone));
   if (state !== "running") tell(`waking ${workspace.name}`);
-  return (await client.request<{ workspace: WorkspaceView }>("workspaces.wake", { workspaceId: workspace.id })).workspace;
+  return (await client.request<{ workspace: WorkspaceOut }>("workspaces.wake", { workspaceId: workspace.id })).workspace;
 }
 
 /** What a stop came to, as every director prints it: the runtime's three answers, none an error. */
@@ -703,7 +704,7 @@ export async function create(client: HostClient, out: Out, golden: string, name:
     },
   );
   try {
-    const { workspace, notice } = await client.request<{ workspace: WorkspaceView; notice?: string }>("workspaces.create", { golden, name, ...chosen });
+    const { workspace, notice } = await client.request<{ workspace: WorkspaceOut; notice?: string }>("workspaces.create", { golden, name, ...chosen });
     const created: WorkspaceCreateResult = { workspace, ...(notice !== undefined ? { notice } : {}) };
     out.emit(created, `created ${workspace.name} ${workspace.id}${notice !== undefined ? `\n${notice}` : ""}`);
     return created;
@@ -715,7 +716,7 @@ export async function create(client: HostClient, out: Out, golden: string, name:
 /** The one local workspace: this computer. It forks nothing, so there is no image and no size to pick; the host
  * refuses a second one and a name another workspace holds. The name defaults to this computer's own. */
 export async function createLocalWorkspace(client: HostClient, out: Out, name?: string): Promise<WorkspaceCreateResult> {
-  const { workspace } = await client.request<{ workspace: WorkspaceView }>("workspaces.createLocal", name === undefined ? {} : { name });
+  const { workspace } = await client.request<{ workspace: WorkspaceOut }>("workspaces.createLocal", name === undefined ? {} : { name });
   return createdExisting(out, workspace);
 }
 
@@ -732,7 +733,7 @@ export async function createLocalWorkspaceHere(rt: LocalRuntime, out: Out, name?
 /** A workspace on a machine the person already has, reached over ssh. It forks nothing, so there is no image and no
  * size to pick; the dial is made before the record exists, so a machine that does not answer leaves nothing behind. */
 export async function createSshWorkspace(client: HostClient, out: Out, address: string, asked: SshAsked = {}): Promise<WorkspaceCreateResult> {
-  const { workspace, notice } = await client.request<{ workspace: WorkspaceView; notice?: string }>("workspaces.createSsh", { address, ...asked });
+  const { workspace, notice } = await client.request<{ workspace: WorkspaceOut; notice?: string }>("workspaces.createSsh", { address, ...asked });
   return createdExisting(out, workspace, notice);
 }
 
@@ -1291,7 +1292,7 @@ const QUIET: Out = { emit: () => {}, stream: () => {} };
 const QUIET_LINE = (): void => {};
 const QUIET_TURN = { event: () => {} };
 
-const Created = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
+const Created = z.object({ workspace: WorkspaceOut, notice: z.string().optional() });
 
 /** What a send meets on its thread, in the runtime's own words: the outcome it answers with on a free or a running
  * turn, and the line it refuses with when the last turn replied but its agent process has not exited. */
@@ -1691,7 +1692,7 @@ export const VERBS: readonly Verb[] = [
       description:
         "Names the workspace on this computer, the name the sidebar and every listing show and the one workspace takes. A name is unique here, since that is how a workspace is addressed, so a name another workspace holds and a blank one are refused in one line and nothing is renamed. Threads on the machine are addressed by id and run on through it, and the machine at the provider keeps the metadata name it was forked under until it is next forked or rebuilt.",
       input: { workspace: WorkspaceIn, name: z.string() },
-      output: { was: z.string(), workspace: WorkspaceView },
+      output: { was: z.string(), workspace: WorkspaceOut },
       call: async ({ workspace: ref, name }, deps) => {
         const renamed = await renameWorkspace(await deps.client(), ref, name);
         return asText(renamedWorkspaceLine(renamed), { ...renamed });
@@ -1782,7 +1783,7 @@ export const VERBS: readonly Verb[] = [
     tool: tool({
       description: "Naps the workspace's machine; it wakes on the next thread or command.",
       input: { workspace: WorkspaceIn },
-      output: { workspace: WorkspaceView },
+      output: { workspace: WorkspaceOut },
       call: async ({ workspace: ref }, deps) => asJson({ workspace: await nap(await deps.client(), ref) }),
     }),
   },
@@ -1802,7 +1803,7 @@ export const VERBS: readonly Verb[] = [
     tool: tool({
       description: "Wakes the workspace's machine and returns its view once the runtime has answered; one already running comes back unchanged. thread_new, send and exec do this themselves, so it is only needed to wake a machine ahead of them.",
       input: { workspace: WorkspaceIn },
-      output: { workspace: WorkspaceView },
+      output: { workspace: WorkspaceOut },
       call: async ({ workspace: ref }, deps) => {
         const client = await deps.client();
         return asJson({ workspace: await awake(client, await workspaceOf(client, ref), "wake", QUIET_LINE) });
@@ -1825,7 +1826,7 @@ export const VERBS: readonly Verb[] = [
       description:
         "Replaces the machine of a workspace the provider no longer has, forking it afresh from the image the workspace was made on and importing the vault its last nap left; the workspace keeps its id, its name and its threads, and the new machine's id and state come back once the runtime has them. Anything written on the old machine's disk since that nap is not there. This is the road out of the refusal every other verb gives a gone workspace, and it is refused in one line on a machine that still answers.",
       input: { workspace: WorkspaceIn },
-      output: { workspace: WorkspaceView },
+      output: { workspace: WorkspaceOut },
       call: async ({ workspace: ref }, deps) => {
         const workspace = await rebuild(await deps.client(), ref);
         return asText(rebuiltLine(workspace), { workspace });
