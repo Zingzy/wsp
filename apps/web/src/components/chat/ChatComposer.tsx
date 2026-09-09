@@ -36,9 +36,9 @@
 // start, so a change mid-thread applies at the next turn.
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent } from "react";
 import { ImageIcon } from "lucide-react";
-import { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, noImagesLine, readsImages, sendNowFailedLine, sendRefusal, stillWorkingRefusal, stopFailedLine, workspaceState, type MachineState, type ReachState, type SendRefusalKind, type WorkspacePhase } from "@wsp/protocol";
+import { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, noImagesLine, readsImages, sendNowFailedLine, sendRefusal, stillWorkingRefusal, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
-import { useStatus, useStore, useWorkspace } from "../../protocol/store";
+import { useStore, useWorkspaceState } from "../../protocol/store";
 import { onComposerFocusRequest } from "../../shell/shellRequests";
 import { useThreadFolder } from "../../files/root";
 import { composerSubmissionIntentForEnter, detectComposerTrigger, replaceTextRange } from "../../composer-logic";
@@ -63,21 +63,18 @@ const PLACEHOLDER = "Ask anything, or / for commands";
 const noop = () => {};
 
 /** What blocks a send right now, or null; the refusal table gives its words. The socket comes first: with it down
- * every other reading is stale. */
+ * every other reading is stale, and a state the app has no workspace for at all is one it cannot name. */
 export function composerSendBlock(input: {
   conn: ConnStatus;
   hasApi: boolean;
-  phase: WorkspacePhase | null;
-  machineState: MachineState | null;
-  reach: ReachState | null;
+  state: WorkspaceState | null;
   hydrated: boolean;
 }): SendRefusalKind | null {
   if (!input.hasApi || input.conn === "connecting") return "connecting";
   if (input.conn === "reconnecting") return "reconnecting";
   if (input.conn === "closed") return "closed";
-  if (input.phase === null) return "not-found";
-  const state = workspaceState({ phase: input.phase, machineState: input.machineState, reach: input.reach });
-  if (state !== "running") return state;
+  if (input.state === null) return "not-found";
+  if (input.state !== "running") return input.state;
   if (!input.hydrated) return "loading";
   return null;
 }
@@ -100,8 +97,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const api = useStore(s => s.api);
   const conn = useStore(s => s.conn);
   const sessions = useStore(s => s.sessions[workspaceId]);
-  const workspace = useWorkspace(workspaceId);
-  const status = useStatus(workspaceId);
+  const state = useWorkspaceState(workspaceId);
   const [stop, setStop] = useState<StopAttempt | null>(null);
   const [steering, setSteering] = useState<string | null>(null);
   const [steered, setSteered] = useState<SteerAttempt | null>(null);
@@ -138,14 +134,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const [highlightedSearchKey, setHighlightedSearchKey] = useState<string | null>(null);
   const [dismissedSearchKey, setDismissedSearchKey] = useState<string | null>(null);
 
-  const blocked = composerSendBlock({
-    conn,
-    hasApi: api !== null,
-    phase: status?.phase ?? workspace?.phase ?? null,
-    machineState: status?.machineState ?? null,
-    reach: status?.reach.state ?? null,
-    hydrated: thread.hydrated,
-  });
+  const blocked = composerSendBlock({ conn, hasApi: api !== null, state, hydrated: thread.hydrated });
   const unavailable = blocked === null ? null : sendRefusal(blocked);
   const sendDisabledReason = unavailable ?? (thread.busy ? TURN_IN_FLIGHT : null);
   const hasText = draft.prompt.trim().length > 0;

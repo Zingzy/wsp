@@ -282,7 +282,9 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
         return;
       }
       if (req.method === "GET" && path === "/api/workspaces") {
-        sendJson(res, 200, { workspaces: await rt.status.list({ probeTimeoutMs }) });
+        // A listing, not the app's own socket, so it joins the listing doors' run of probes and not the one a
+        // sidebar row's word rides.
+        sendJson(res, 200, { workspaces: await rt.status.list({ probeTimeoutMs, reader: "table" }) });
         return;
       }
       if (req.method === "POST" && path === "/api/workspaces") {
