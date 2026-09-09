@@ -5,7 +5,15 @@
 // empty does not exist. The effort button reads "<effort> · <context>", the
 // context alone for a model that takes no effort, and its menu has a Reasoning
 // and a Context Window section, each default marked and checked until a pick;
-// the access button carries the mode's icon and each mode its one line. A
+// the access button carries the mode's icon and the mode's short form where
+// it has one (its label names the machine on a kept one; the menu row keeps
+// the label), and each mode its one line. No button shrinks: the row wraps
+// before any of them is cut, so every pick reads whole down to a centre column
+// of about 300 px (measured 2026-09-09: an 1100 px viewport with the sidebar
+// at its widest and the right panel inline); the shell lets the column go
+// narrower than any row of four can use, which is the shell's own gap. The
+// one label a person writes, the project's name, has no bound, so its button
+// alone is capped at the row and cuts the name; the menu row says it whole. A
 // pick rides the next sessions.start and is remembered per workspace; a turn
 // already running keeps its flags and shows them meanwhile. The access pick is
 // the exception: it is remembered on the host's own record, so the next thread
@@ -207,7 +215,7 @@ function AccessPicker({ modes, value, onPick }: { modes: ReadonlyArray<HarnessOp
         data-value={value ?? undefined}
       >
         <Icon className="size-3.5 shrink-0" aria-hidden />
-        <span className="truncate">{label}</span>
+        <span className="truncate">{current?.short ?? label}</span>
         <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
       </MenuTrigger>
       <MenuPopup align="start" side="top" className="w-72">
@@ -230,7 +238,8 @@ export const OTHER_FOLDER = "other folder";
 
 /** The project pick: the default project's name, or the chosen folder's last segment, or the word Project while two
  * or more projects wait for a pick. A project pick lands on the host's record and clears any chosen folder, so the
- * rule's answer is the folder shown; other folder hands the pick to the folder picker under the box. */
+ * rule's answer is the folder shown; other folder hands the pick to the folder picker under the box. The button is
+ * capped at the row's width, since a folder's name is as long as the person made it. */
 function ProjectPicker({ workspaceId, projects, onOtherFolder }: { workspaceId: string; projects: readonly WorkspaceProject[]; onOtherFolder: () => void }) {
   const project = useDefaultProject(workspaceId);
   const chosen = useChosenFolder(workspaceId);
@@ -244,13 +253,13 @@ function ProjectPicker({ workspaceId, projects, onOtherFolder }: { workspaceId: 
     <Menu>
       <MenuTrigger
         render={<Button type="button" variant="ghost" size="xs" />}
-        className={triggerClass}
+        className={`${triggerClass} max-w-full`}
         aria-label={`Project: ${label}`}
         data-composer-picker="project"
         data-value={value ?? undefined}
       >
         <Icon className="size-3.5 shrink-0" aria-hidden />
-        <span data-composer-project-name className="truncate font-mono">{label}</span>
+        <span data-composer-project-name className="min-w-0 truncate font-mono">{label}</span>
         <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
       </MenuTrigger>
       <MenuPopup align="start" side="top" className="w-72">

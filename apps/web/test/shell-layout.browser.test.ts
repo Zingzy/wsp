@@ -1530,7 +1530,8 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       console.info(`composer access line screenshot: ${shot} (${read.width} px of line in ${read.slot} px of slot)`);
 
       expect(read.text).toBe(accessFromNextMessage(`Bypass on ${THIS_COMPUTER}`));
-      expect(read.trigger).toContain(`Bypass on ${THIS_COMPUTER}`);
+      // The button wears the mode's short form; the machine is named in the menu and in the line.
+      expect(read.trigger).toBe("Bypass");
       // Whole at the width this app is smallest in: the clause that says when the pick lands is the point of it.
       expect(read.cut).toBe(false);
       expect(read.width).toBeLessThan(read.slot);

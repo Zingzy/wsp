@@ -106,7 +106,7 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, onPickHa
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         render={<Button type="button" variant="ghost" size="xs" />}
-        className="min-w-0 shrink font-medium text-muted-foreground/70 hover:text-foreground/80"
+        className="shrink-0 font-medium text-muted-foreground/70 hover:text-foreground/80"
         aria-label={model === null ? "Model" : `Model: ${label}`}
         data-composer-picker="model"
         data-value={model?.value}
