@@ -8,7 +8,7 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { effortsFor, EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { effortsFor, EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -1530,6 +1530,45 @@ describe("wsp verbs over the host", () => {
     expect(cutWait.io.lines).toEqual([`thread ${cut.threadId!.slice(0, 8)} finished (failed): ${CUT_LINE}`]);
   });
 
+  it("thread read prints the thread's messages as the app lists them, one line per tool call, --last the whole final message alone, and a thread that has not replied says so", async () => {
+    await run("new", "alpha");
+    await run("thread", "new", "--in", "alpha", "build it");
+    const [row] = await rt.sessions.list();
+    const id = row!.threadId!;
+    const read = await run("thread", "read", id.slice(0, 8));
+    expect(read.code).toBe(0);
+    expect(read.io.errors).toEqual([]);
+    const blocks = read.io.lines[0]!.split("\n\n").map(block => block.split("\n"));
+    // Who spoke and the clock head each block; the text of the block is what was said.
+    expect(blocks.map(block => block[0])).toEqual(["person", "agent", "tool", "agent", "turn"].map(who => expect.stringMatching(new RegExp(`^${who} \\d\\d:\\d\\d:\\d\\d$`))));
+    expect(blocks.map(block => block.slice(1).join("\n"))).toEqual(["build it", "re: ", "$ ls", "build it", "completed"]);
+    // The events the app reads are the events this read folded: nothing on the machine was asked for it.
+    expect(launchedScripts(backend).filter(script => script.includes("sessions"))).toEqual([]);
+
+    const last = await run("thread", "read", id, "--last", "--json");
+    expect(json(last.io)).toEqual([{ threadId: id, messages: [{ who: "agent", at: expect.any(Number), text: "re: build it" }] }]);
+    // The whole final message is the one the finished line carries, so a read of the reply and a wait on it agree.
+    expect(notifyLine(id, { status: "completed", text: "re: build it" }, "whole")).toContain("re: build it");
+
+    const held = heldAgent(false);
+    await restartHost({ claude: held.adapter });
+    await run("thread", "new", "--in", "alpha", "--detach", "hold on");
+    const pending = (await rt.sessions.list()).find(session => session.prompt === "hold on")!;
+    const nothing = await run("thread", "read", pending.threadId!, "--last");
+    expect(nothing.code).toBe(0);
+    expect(nothing.io.lines).toEqual([noReplyLine(pending.threadId!)]);
+    const running = await run("thread", "read", pending.threadId!, "--json");
+    expect(json(running.io)).toEqual([{ threadId: pending.threadId, messages: [{ who: "person", at: expect.any(Number), text: "hold on" }] }]);
+    held.release(0, "held no longer");
+
+    const none = await run("thread", "read");
+    expect(none.code).toBe(3);
+    expect(none.io.errors[0]).toContain("wsp thread read takes one thread");
+    const missing = await run("thread", "read", "nope");
+    expect(missing.code).toBe(1);
+    expect(missing.io.errors).toEqual(["wsp thread read: no thread nope"]);
+  });
+
   it("thread new, send and fork --send return with the reply on the turn's session.done; a session.end that never comes is not waited for", async () => {
     const agent = doneOnlyAgent(prompt => `re: ${prompt}`);
     await restartHost({ claude: agent.adapter });
@@ -2101,7 +2140,7 @@ describe("wsp verbs over the host", () => {
     expect(proto.io.errors[0]).not.toContain("belongs to");
     const half = await run("thread");
     expect(half.code).toBe(3);
-    expect(half.io.errors).toEqual(['usage: wsp thread new [--in <workspace>] [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, --title, --image <path>, --detach] "<task>"\nusage: wsp thread rename <thread> "<title>"']);
+    expect(half.io.errors).toEqual(['usage: wsp thread new [--in <workspace>] [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, --title, --image <path>, --detach] "<task>"\nusage: wsp thread read <thread> [--last]\nusage: wsp thread rename <thread> "<title>"']);
   });
 
   it("without a host serving the state file every verb refuses in one line before dialling anything", async () => {

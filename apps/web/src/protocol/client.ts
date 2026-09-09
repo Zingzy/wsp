@@ -20,6 +20,10 @@ import {
   type GoldenManifest,
   type GoldenVersion,
   HostFolderListing,
+  InitJob,
+  InitSetup,
+  type InitRoad,
+  type InitScreenId,
   type ImageAttachment,
   TerminalConfig,
   type TerminalScheme,
@@ -348,6 +352,21 @@ export interface Api {
    * events, this resolves with what landed. An existing dest is refused (kind "exists") unless replace. Optional so
    * fixtures that never export need not fake it; the sidebar offers no export without it. */
   exportProject?(opts: ExportProjectOptions): Promise<ProjectExportResult>;
+  /** The cloud setup as the host serves it: which keys it holds (never their values), the agents on this computer,
+   * what a machine costs, and the init job when one runs or ran. Optional so fixtures without the modal need not fake
+   * it; without it the sidebar's cloud row opens nothing that can start a build. */
+  initGet?(): Promise<InitSetup>;
+  /** Saves the keys typed into the wsp home's .env on the host's computer and wires the provider; the reply says they
+   * are held and never carries them back. */
+  initKeys?(keys: { solari?: string; anthropic?: string }): Promise<InitSetup>;
+  /** Starts the init job on a road; every change after rides init.job events. */
+  initStart?(o: { road: InitRoad; harness?: string }): Promise<InitJob>;
+  /** Answers one of the five screens; the reply carries the screens recomputed. */
+  initAnswer?(o: { screen: InitScreenId; ticks?: string[]; answers?: Record<string, string> }): Promise<InitJob>;
+  /** Writes the recipe as answered and starts the build, which rides on after the reply. */
+  initBuild?(o: { firstWorkspace?: string; importFolder?: string }): Promise<InitJob>;
+  /** Stops the job where it stands; refused once the machine is up. */
+  initCancel?(): Promise<InitJob>;
   subscribe(fn: (e: ProtocolEvent) => void): () => void;
   /** The named golden manifest, undefined on a fresh install: that absence is what points the page at wsp init. */
   getGolden(name?: string): Promise<GoldenManifest | undefined>;
@@ -490,6 +509,13 @@ export function makeApi(c: ProtocolClient): Api {
     planProject: async source => ProjectPlan.parse((await c.request<{ plan?: unknown }>("project.plan", { source })).plan),
     importProject: async opts => ProjectImportResult.parse((await c.request<{ imported?: unknown }>("project.import", { ...opts })).imported),
     exportProject: async opts => ProjectExportResult.parse((await c.request<{ exported?: unknown }>("project.export", { ...opts })).exported),
+    // Parsed, not trusted: the modal draws screens and rows only as the wire type vouches for them.
+    initGet: async () => InitSetup.parse((await c.request<{ setup?: unknown }>("init.get")).setup),
+    initKeys: async keys => InitSetup.parse((await c.request<{ setup?: unknown }>("init.keys", { ...keys })).setup),
+    initStart: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.start", { ...o })).job),
+    initAnswer: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.answer", { ...o })).job),
+    initBuild: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.build", { ...o })).job),
+    initCancel: async () => InitJob.parse((await c.request<{ job?: unknown }>("init.cancel")).job),
     subscribe: fn => c.subscribe(fn),
     getGolden: async (name = "default") => (await c.request<{ manifest?: GoldenManifest }>("golden.get", { name })).manifest,
     listSnapshots: async name =>

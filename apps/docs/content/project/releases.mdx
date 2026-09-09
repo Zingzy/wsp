@@ -5,7 +5,7 @@ A release is a version tag, the command line package on npm, and the desktop bun
 ## Where to get one
 
 - **The command line**: `npm i -g @zingzy/wsp`. `wsp --version` prints the number.
-- **The desktop app**: bundles for macOS on Apple silicon, macOS on Intel, and Linux as an AppImage, on the [releases page](https://github.com/Zingzy/wsp/releases). The bundles are unsigned; the release notes say how to open them.
+- **The desktop app**: the two buttons on [the site](https://wspx.vercel.app/), which link the newest release directly. One macOS disk image carries both Apple silicon and Intel; Linux is an AppImage. Both also sit on the [releases page](https://github.com/Zingzy/wsp/releases). The bundles are unsigned; the release notes say how to open them.
 
 One tag, one `wsp --version` line, one package on npm. Every `package.json` under `packages/` and `apps/` that carries a version says the same number.
 
@@ -16,8 +16,8 @@ One tag, one `wsp --version` line, one package on npm. Every `package.json` unde
 3. **Doctor.** `pnpm wsp doctor` once, and its table goes into the release notes.
 4. **Publish the command line package.** `pnpm release <version>` renumbers every manifest, builds everything but the desktop bundle, packs the package and publishes it. A bump name works too: `pnpm release patch`. Between the build and the publish it runs a smoke test that installs the tarball into an empty folder on a clean environment and runs `wsp --version`, `wsp recipe --out` and `wsp mcp install --agent claude` under a throwaway `HOME`, so nothing reaches npm that has not been installed and run.
 5. **Commit the version.** The renumbered manifests are staged by the paths the release printed and committed as `chore: v<version>`.
-6. **Desktop bundles.** `pnpm --filter @wsp/desktop build` produces the two macOS apps and the AppImage, the packaged smoke runs, and each app is zipped.
-7. **Tag and release.** `git tag v<version> && git push origin v<version>`, then a GitHub Release on that tag with the two zips and the AppImage attached, notes on what changed, and the doctor table.
+6. **Desktop bundles.** `pnpm --filter @wsp/desktop build` produces the universal macOS bundle, its drag-to-Applications disk image and the AppImage, and the packaged smoke runs.
+7. **Tag and release.** `git tag v<version> && git push origin v<version>`, then a GitHub Release on that tag with the disk image and the AppImage attached under their versioned names and under `wsp-mac.dmg` and `wsp-linux.AppImage`, notes on what changed, and the doctor table.
 8. **Check from outside.** A bundle is downloaded from the release page as a stranger would and opened on a computer that never built wsp. The README's install command, version and release link must match what was just published.
 
 ## The canary

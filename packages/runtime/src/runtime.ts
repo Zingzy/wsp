@@ -116,6 +116,11 @@ import type {
   HarnessCatalog,
   HarnessCatalogAnswer,
   HostFolderListing,
+  InitJob,
+  InitJobEvent,
+  InitRoad,
+  InitScreenId,
+  InitSetup,
   Preferences,
   PreferencesPatch,
   RecipeDigest,
@@ -422,6 +427,19 @@ export interface HostFolders {
  * the disk itself, the host that owns it does. */
 export interface HostTerminalConfig {
   read(scheme?: TerminalScheme): Promise<TerminalConfig>;
+}
+
+/** The init job on the computer running the host: wsp init's run, read and driven from the app over the wire. The
+ * host owns it (this computer's files, its Keychain, the sign-ins' terminal link are all the host's); the runtime
+ * serves its ops and relays its events beside its own, as it does the host's forwards. */
+export interface InitDoor {
+  get(): Promise<InitSetup>;
+  keys(keys: { solari?: string; anthropic?: string }): Promise<InitSetup>;
+  start(o: { road: InitRoad; harness?: string }): Promise<InitJob>;
+  answer(o: { screen: InitScreenId; ticks?: string[]; answers?: Record<string, string> }): Promise<InitJob>;
+  build(o: { firstWorkspace?: string; importFolder?: string }): Promise<InitJob>;
+  cancel(): Promise<InitJob>;
+  on(fn: (e: InitJobEvent) => void): () => void;
 }
 
 /** One agent's result with its catalog name, for the sentence the runtime says about it. */
@@ -1071,7 +1089,7 @@ export interface Runtime {
      * Once `signal` aborts the call rejects with PrepareStoppedError: a machine this prepare made is killed by its
      * recorded id and its record dropped (a create still in flight is killed as it lands); a builder it attached to
      * keeps its first life, its hold is released and its record stays reusable. */
-    prepare(opts?: { name?: string; kind?: MachineKind; signal?: AbortSignal }): Promise<GoldenBuilderView>;
+    prepare(opts?: { name?: string; kind?: MachineKind; signal?: AbortSignal; recipe?: GoldenRecipe }): Promise<GoldenBuilderView>;
     /** Snapshot, smoke-fork, append a version. A builder built from a recipe is kept running for GRACE_MS after a
      * successful seal so one more change re-snapshots it; any other builder, and every failed or refused seal, consumes
      * it, except a snapshot the provider refused: that builder is left as it was and stays recorded for the next init
@@ -1083,7 +1101,7 @@ export interface Runtime {
     recipe(name?: string): Promise<RecipeDigest | undefined>;
     /** The next version from the recipe delta: on the builder kept since the save when there is one, else on a
      * fresh fork of the head. Seals it, repoints the head, and drops the previous version's snapshot when asked. */
-    upgrade(opts: { name?: string; delta: GoldenDelta; keepPrevious?: boolean; logins?: GoldenLogin[] }): Promise<GoldenUpgradeResult>;
+    upgrade(opts: { name?: string; delta: GoldenDelta; keepPrevious?: boolean; logins?: GoldenLogin[]; recipe?: GoldenRecipe }): Promise<GoldenUpgradeResult>;
     /** How a browser dials the builder's daemon; the builder is not a workspace, so it has its own road. */
     builderReach(builderId: string): Promise<DaemonReachView>;
     builders(): Promise<GoldenBuilderView[]>;
@@ -1310,6 +1328,8 @@ interface LiveBuilder {
    * host that runs on keeps what it read, and host.lock keeps a second init from starting beside it. */
   life: "own" | "reusable" | "stale" | "foreign" | "held";
   reach?: PreviewReach;
+  /** The recipe the prepare that made or attached to it carried, when it named one; the seal reads it back. */
+  recipe?: GoldenRecipe;
 }
 
 /** What prepare rejects with once its signal aborted. `builderId` is the machine it had, when one existed: killed
@@ -4490,9 +4510,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const stageOf = (name: string) => (stage: GoldenStage, detail?: string, step?: GoldenStep) =>
     bus.emit({ type: "golden.stage", name, stage, ...(detail !== undefined ? { detail } : {}), ...(step !== undefined ? { step } : {}) });
 
-  const recipeOrThrow = (): GoldenRecipe => {
-    if (!opts.goldenRecipe) throw new Error("this runtime has no golden recipe; the host wires one (setup + smoke) before the wizard can run");
-    return opts.goldenRecipe;
+  /** The recipe a golden road builds from: the one the call names, else the one the runtime was wired with. A host
+   * serving the app names it per call, since the init job's recipe is answered while the runtime already serves. */
+  const recipeOrThrow = (named?: GoldenRecipe): GoldenRecipe => {
+    const recipe = named ?? opts.goldenRecipe;
+    if (!recipe) throw new Error("this runtime has no golden recipe; the host wires one (setup + smoke) before the wizard can run");
+    return recipe;
   };
 
   const builderLabels = (extra: Record<string, string> | undefined): Record<string, string> => ({ ...extra, [WSP_LABEL]: "1", [BUILDER_LABEL]: "1", [OWNER_LABEL]: owner, [CREATED_AT_LABEL]: new Date().toISOString() });
@@ -4564,7 +4587,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** Snapshot, smoke fork, manifest. A kept builder stays recorded with the version it was saved as and its grace
    * armed; every other road drops the record, so a machine that outlived its kills is exactly what reap sweeps. */
   const sealEntry = async (entry: LiveBuilder, keep: boolean, logins?: GoldenLogin[]): Promise<SealResult> => {
-    const recipe = recipeOrThrow();
+    const recipe = recipeOrThrow(entry.recipe);
     const name = entry.record.name;
     const prior = (await store.get(GOLDENS, name)) as GoldenManifest | undefined;
     try {
@@ -4645,7 +4668,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async prepare(o) {
       await ready();
-      const recipe = recipeOrThrow();
+      const recipe = recipeOrThrow(o?.recipe);
       const name = o?.name ?? "default";
       const signal = o?.signal;
       const { deployDaemon, smoke, import: imp, ...size } = recipe;
@@ -4720,6 +4743,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             if (stopping !== undefined) throw await stopping;
             same.record.import = applied.ledger;
             same.life = "own";
+            same.recipe = recipe;
             await hold(same);
           } catch (e) {
             if (stopping !== undefined) throw e;
@@ -4755,6 +4779,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           // A last exec that outran the kill must not leave a finished record for a machine the stop is killing.
           if (stopping !== undefined) throw await stopping;
           const entry = await settleBuilder(name, builder, mine);
+          entry.recipe = recipe;
           return builderView(entry.record, entry);
         };
         try {
@@ -4790,7 +4815,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async upgrade(o) {
       await ready();
-      const recipe = recipeOrThrow();
+      const recipe = recipeOrThrow(o.recipe);
       const name = o.name ?? "default";
       const prior = (await store.get(GOLDENS, name)) as GoldenManifest | undefined;
       const head = goldenHead(prior);
@@ -4865,6 +4890,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         }
         return settleBuilder(name, builder, placeholder);
       });
+      entry.recipe = recipe;
       // The update keeps the golden's disk, so what was signed in stays signed in: the caller passes the previous
       // version's outcomes, with the rows it re-imported as copies rewritten.
       const sealed = await sealEntry(entry, true, o.logins);

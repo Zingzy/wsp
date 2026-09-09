@@ -101,6 +101,7 @@ describe("the agent contract on the command line and the tool door", () => {
     const alpha = created.workspace.id;
     await last("workspaces", "workspaces");
     await last("threads", "threads");
+    await last("setup", "setup");
     // One level of this computer's own folders: the home folder this test stubbed, with a folder inside it to list.
     mkdirSync(join(dir, "user", "code"), { recursive: true });
     await last("folders", "folders");
@@ -129,6 +130,9 @@ describe("the agent contract on the command line and the tool door", () => {
     await last("send", "send", opened.threadId, "again");
     // The turn is over, so the wait answers off the transcript at once.
     expect(await last("threads wait", "threads", "wait", opened.threadId)).toEqual({ finished: { threadId: opened.threadId, status: "completed", reply: "re: again" } });
+    // The read is off the transcript the host holds: the same turn, its rows, and its reply whole under --last.
+    expect(await last("thread read", "thread", "read", opened.threadId, "--last")).toEqual({ threadId: opened.threadId, messages: [{ who: "agent", at: expect.any(Number), text: "re: again" }] });
+    await last("thread read", "thread", "read", opened.threadId);
     await last("stop", "stop", opened.threadId);
     await last("thread rename", "thread", "rename", opened.threadId, "the name he typed");
     await last("export", "export", "alpha", join(dir, "out", "proj"), "--from", EXPORT_SOURCE);

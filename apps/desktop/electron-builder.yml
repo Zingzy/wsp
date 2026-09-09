@@ -12,9 +12,15 @@ files:
   - package.json
 afterPack: scripts/after-pack.mjs
 mac:
+  # One bundle for both chips: reading the chip from a browser is unreliable, and a wrong pick is a dead first run.
   target:
+    - target: dmg
+      arch: [universal]
     - target: dir
-      arch: [arm64, x64]
+      arch: [universal]
+  # node-pty's two native builds are staged into both arch trees so the merge sees one file list, which leaves them
+  # byte for byte the same on both sides; the merge refuses an identical Mach-O it was not told to take once.
+  x64ArchFiles: "**/node-pty/prebuilds/**"
   # No identity is named: a Developer ID Application certificate in the keychain (CSC_LINK imports one) signs, and
   # without one electron-builder skips signing and scripts/after-pack.mjs signs ad hoc.
   hardenedRuntime: true
@@ -24,6 +30,21 @@ mac:
   notarize: true
   category: public.app-category.developer-tools
   icon: build/icon.icns
+dmg:
+  # The drag window: the app on the left, the Applications folder on the right, one image behind them carrying the
+  # arrow. dmg-builder reads the window's size off that image, so the two coordinates below are in its pixels.
+  background: dmg-background.png
+  # Named without the arch suffix electron-builder adds by default: the window says wsp 1.2.3, not the build's shape.
+  title: wsp ${version}
+  iconSize: 128
+  contents:
+    - x: 172
+      y: 186
+      type: file
+    - x: 488
+      y: 186
+      type: link
+      path: /Applications
 win:
   icon: build/icon.ico
 linux:

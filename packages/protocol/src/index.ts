@@ -10,6 +10,7 @@
 import { z } from "zod";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
 import { openingTitle, titleLine } from "./format.js";
+import { InitJob, InitJobEvent, InitAgent, InitKeys, InitRoad, InitScreenId } from "./init-job.js";
 import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
 import { WorkspaceGlyph, WorkspaceLook, WorkspaceTint } from "./workspace-look.js";
@@ -94,6 +95,17 @@ export type PortForward = z.infer<typeof PortForward>;
 
 export const WorkspaceSize = z.object({ cpu: z.number(), memMb: z.number() });
 export type WorkspaceSize = z.infer<typeof WorkspaceSize>;
+
+/** What the cloud setup modal opens on: which keys the host holds (their presence, never a value), the agents on this
+ * computer the agent road can start, the price of the machine the build boots, and the init job when one is running
+ * or over. */
+export const InitSetup = z.object({
+  keys: InitKeys,
+  agents: z.array(InitAgent),
+  pricing: z.object({ size: WorkspaceSize, rateUsdPerHour: z.number() }).nullable(),
+  job: InitJob.nullable(),
+});
+export type InitSetup = z.infer<typeof InitSetup>;
 
 /** One size a create may ask for, with what it costs awake. */
 export const MachineSizeOffer = WorkspaceSize.extend({ rateUsdPerHour: z.number() });
@@ -1630,6 +1642,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   ProjectImportEvent.extend(sequenced),
   ProjectExportEvent.extend(sequenced),
   PreferencesChangedEvent.extend(sequenced),
+  InitJobEvent.extend(sequenced),
 ]);
 export type EventUnion = z.infer<typeof EventUnion>;
 
@@ -2213,6 +2226,20 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * again on every ask so a saved change reaches the next terminal opened; `scheme` picks the theme of a
    * light:...,dark:... value and is dark when absent. */
   z.object({ id: reqId, op: z.literal("host.terminalConfig"), scheme: TerminalScheme.optional() }),
+  /** Replies with { setup: InitSetup }: the cloud setup as the modal opens on it, the init job included when one runs. */
+  z.object({ id: reqId, op: z.literal("init.get") }),
+  /** Saves the keys given into the wsp home's .env on the computer running the host and wires the provider they name;
+   * replies with { setup: InitSetup }, which says the keys are held and never says what they are. */
+  z.object({ id: reqId, op: z.literal("init.keys"), solari: z.string().optional(), anthropic: z.string().optional() }),
+  /** Starts the init job on the road named, an agent's harness on the agent road; replies with { job: InitJob } and
+   * every change after rides init.job events. One job runs at a time; a second start while one runs is refused. */
+  z.object({ id: reqId, op: z.literal("init.start"), road: InitRoad, harness: z.string().optional() }),
+  /** Answers one screen: the rows ticked, the answers chosen; replies with { job: InitJob }, its screens recomputed. */
+  z.object({ id: reqId, op: z.literal("init.answer"), screen: InitScreenId, ticks: z.array(z.string()).optional(), answers: z.record(z.string()).optional() }),
+  /** Writes the recipe as answered and starts the build; replies with { job: InitJob } at once, the build riding on. */
+  z.object({ id: reqId, op: z.literal("init.build"), firstWorkspace: z.string().optional(), importFolder: z.string().optional() }),
+  /** Stops the job where it is: a thread interrupted, a builder killed; replies with { job: InitJob }. */
+  z.object({ id: reqId, op: z.literal("init.cancel") }),
   /** Replies with { preferences: Preferences }: the record on this host's state, the defaults until a client set something. */
   z.object({ id: reqId, op: z.literal("preferences.get") }),
   /** Lands the patch on the record, keeps it, pushes preferences.changed to every socket and replies with { preferences: Preferences }. */
@@ -2421,6 +2448,7 @@ export { psCpuSeconds } from "./ps-time.js";
 export { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS, IMAGE_TYPES, IMAGE_TYPE_WORDS, ImageAttachment, ImageRecord, imageBytes, imageLine, imagePathIn, imageRecord, imageTypeOf, imagesBlocked, imagesRefusal, noImagesLine, notAFileLine, notAnImageLine, threadImagesDir, turnImagesDir } from "./attachments.js";
 export * from "./oom.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
+export { ThreadMessage, threadMessages, threadReplyRows, threadResult, ThreadVoice } from "./thread-read.js";
 export { inFolder, shellLine, shellQuote } from "./shell-quote.js";
 export { LOOK_PARTS, WORKSPACE_GLYPHS, WORKSPACE_TINTS, WorkspaceGlyph, WorkspaceLook, WorkspaceTint, type LookPart } from "./workspace-look.js";
 export { rootsPathIn, underProject } from "./project-path.js";
@@ -2428,5 +2456,6 @@ export * from "./projects.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, registerRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";
 export * from "./app-ports.js";
+export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";
 export type { AdapterAttachOptions, AdapterEvent, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";

@@ -11,7 +11,7 @@ import type { Writable } from "node:stream";
 import { styleText } from "node:util";
 import type { ManifestEntry } from "@wsp/collect";
 import { catalogEntry } from "@wsp/catalog";
-import type { LoginState } from "@wsp/protocol";
+import { LOGIN_STATE_WORDS, type LoginState } from "@wsp/protocol";
 import type { GoldenBuilderView, Runtime } from "@wsp/runtime";
 import { S_BAR, log, note } from "@clack/prompts";
 import { connectDaemonSocket, type ConnectOptions, type DaemonSocket } from "./doctor.js";
@@ -152,13 +152,6 @@ export function signInCapMs(s: SignIn, capMs: number): number {
   return hasLogin(s) && s.toolTimeoutMs !== undefined ? s.toolTimeoutMs + 60_000 : capMs;
 }
 
-const STATE_WORDS: Record<LoginState, string> = {
-  "signed-in": "signed in",
-  "not-signed-in": "not signed in",
-  copied: "copied",
-  "not-verified": "not verified",
-  skipped: "skipped",
-};
 
 function minutes(ms: number): string {
   return `${Math.round(ms / 60_000)} min`;
@@ -171,7 +164,7 @@ function detailOf(o: LoginOutcome): string {
 
 /** The row's state and detail; the detail cut to `width` cells for the row as a whole. */
 export function stateLine(o: LoginOutcome, width = Infinity): string {
-  const word = STATE_WORDS[o.state];
+  const word = LOGIN_STATE_WORDS[o.state];
   const colored = o.state === "signed-in" ? styleText("green", word) : o.state === "not-signed-in" ? styleText("yellow", word) : dim(word);
   const detail = ellipsize(detailOf(o), width - o.label.length - word.length - 5);
   return `${o.label}: ${colored}${detail !== "" ? dim(` (${detail})`) : ""}`;
@@ -197,9 +190,9 @@ export function copiedOutcomes(logins: readonly ManifestEntry[], left: ReadonlyM
 /** Label, state, detail per login; the detail is cut so the note frame (6 columns) never wraps a row. */
 function summaryRows(outcomes: readonly LoginOutcome[], width: number): string[] {
   const labelW = Math.max(...outcomes.map(r => r.label.length));
-  const stateW = Math.max(...outcomes.map(r => STATE_WORDS[r.state].length));
+  const stateW = Math.max(...outcomes.map(r => LOGIN_STATE_WORDS[r.state].length));
   const room = Math.max(12, width - 6 - labelW - stateW - 2 * GUTTER.length);
-  return table(outcomes.map(r => [r.label, STATE_WORDS[r.state], ellipsize(detailOf(r), room)]));
+  return table(outcomes.map(r => [r.label, LOGIN_STATE_WORDS[r.state], ellipsize(detailOf(r), room)]));
 }
 
 export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]> {

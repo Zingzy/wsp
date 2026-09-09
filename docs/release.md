@@ -36,21 +36,27 @@ checkout of `main` on a computer with the Solari key in `.env`.
    whole desktop road: it checks the tag against every `package.json` that
    carries a version and stops with both numbers in the line when they
    disagree, so a tag pushed before step 5 fails here instead of shipping the
-   wrong number. Then a macOS runner builds `apps/desktop` for arm64 and x64,
-   signs each app (see [Signing the mac bundles](#signing-the-mac-bundles)),
-   checks its signature and its packaged tree, and zips it as
-   `wsp-<version>-mac-<arch>.zip`; a Linux runner builds
-   `wsp-<version>.AppImage`. All three land on a draft release on the tag,
-   whose notes are the commits since the previous tag plus the README's lines
-   on opening a downloaded bundle. Nothing else on the workflow reaches npm:
-   step 4 stays a person's, because of the one time password.
+   wrong number. Then a macOS runner builds `apps/desktop` as one universal
+   bundle carrying both chips, signs it (see
+   [Signing the mac bundles](#signing-the-mac-bundles)), checks both slices of
+   its signature and its packaged tree, and wraps it in the drag-to-Applications
+   disk image `wsp-<version>-mac.dmg`; a Linux runner builds
+   `wsp-<version>.AppImage`. Each also goes up as an unversioned copy,
+   `wsp-mac.dmg` and `wsp-linux.AppImage`, which is what GitHub serves at
+   `releases/latest/download/<name>` and what the site's two download buttons
+   link. Every one of those names comes from
+   `packages/wspx/scripts/bundles.mjs`; the workflow spells none of them. They
+   land on a draft release on the tag, whose notes are the commits since the
+   previous tag plus the README's lines on opening a downloaded bundle. Nothing
+   else on the workflow reaches npm: step 4 stays a person's, because of the one
+   time password.
 7. **Publish the draft.** Read the notes, paste the doctor table from step 3
    under them, and press publish. Nothing publishes itself. If a runner is
    down, the same bundles come from a Mac by hand:
    `pnpm --filter @wsp/desktop build`, then
-   `pnpm --filter @wsp/desktop smoke`, then
-   `ditto -c -k --keepParent apps/desktop/dist/mac-arm64/wsp.app wsp-<version>-mac-arm64.zip`
-   and the same for `dist/mac` as `-mac-x64`, attached to the draft by hand.
+   `pnpm --filter @wsp/desktop smoke`, then the disk image electron-builder
+   left in `apps/desktop/dist`, renamed to `wsp-<version>-mac.dmg` and copied
+   to `wsp-mac.dmg`, both attached to the draft by hand.
    A Mac whose login keychain holds the Developer ID Application certificate
    signs them with it, and notarizes when `APPLE_ID`,
    `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` are set in the shell;

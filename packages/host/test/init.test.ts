@@ -30,7 +30,8 @@ import type { ConnectOptions, DaemonSocket } from "../src/doctor.js";
 import { appendCommand, readCommand } from "../src/init-secrets.js";
 import { importResultPath } from "../src/init-import.js";
 import { noteOutcomes } from "../src/init-signin.js";
-import { fakePtyLink, type FakePtyLink } from "./fake-pty-link.js";
+import type { FakePtyLink } from "./fake-pty-link.js";
+import { CLAUDE_URL, DEVICE_URL, scriptedLink } from "./init-link.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
 import { runRecipe } from "../src/recipe-command.js";
 import { saveSmallRecipe } from "../src/recipe-file.js";
@@ -102,9 +103,6 @@ interface Fake {
   records: Record<string, unknown>[];
 }
 
-const DEVICE_URL = "https://github.com/login/device";
-const CLAUDE_URL = "https://claude.com/cai/oauth/authorize?code=true&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback";
-
 /** The saved manifest as the next run reads it. */
 const loadManifest = (path: string): Manifest => parseManifest(JSON.parse(readFileSync(path, "utf8")));
 /** The small recipe with these catalog ids ticked on top of RECIPE's own, a row added for one RECIPE has none for. */
@@ -119,34 +117,6 @@ const ticking = (...ids: string[]): Recipe => ({
 const without = (recipe: Recipe, ...ids: string[]): Recipe => ({ ...recipe, rows: recipe.rows.map(r => (ids.includes(r.id) ? { ...r, on: false } : r)) });
 /** The small recipe with a login answered copy: under --yes a saved answer is kept, where the default would sign in on the machine. */
 const answeredCopy = (id: string, recipe: Recipe = RECIPE): Recipe => ({ ...recipe, rows: recipe.rows.map(r => (r.id === id ? { ...r, signIn: "copy" } : r)) });
-
-/** Ptys on the fake builder: a login prints its page's URL and exits (or waits for Ctrl-C when held). */
-function scriptedLink(state: { signedIn: boolean; hold: boolean; missing: boolean }): FakePtyLink {
-  const link = fakePtyLink();
-  link.script = (pty, line) => {
-    // The secrets step's quiet runs: nothing set on the machine yet, no fish.
-    if (line.includes("WSP_STATUS")) {
-      link.data(pty, "\r\nWSP_STATUS 0\r\n");
-      link.exit(pty, 0);
-      return;
-    }
-    if (state.missing && line.startsWith("exec ")) {
-      link.data(pty, `bash: exec: ${line.split(" ")[1]}: not found\r\n`);
-      link.exit(pty, 127);
-      return;
-    }
-    if (line.includes("exec claude")) link.data(pty, `Opening browser to sign in...\r\nIf the browser didn't open, visit: \x1b]8;;${CLAUDE_URL}\x1b\\${CLAUDE_URL}\x1b]8;;\x1b\\\r\nPaste code here if prompted > `);
-    else link.data(pty, `Press Enter to open ${DEVICE_URL} in your browser...\r\n`);
-    if (!state.hold) link.exit(pty, state.signedIn ? 0 : 1);
-  };
-  const op = link.op.bind(link);
-  link.op = async (name, extra = {}) => {
-    const r = await op(name, extra);
-    if (name === "pty.write" && extra["data"] === "\x03") link.exit(link.ptys.find(x => x.id === extra["ptyId"])!, 130);
-    return r;
-  };
-  return link;
-}
 
 function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string, string>; columns?: number; signedIn?: boolean; hold?: boolean; missing?: boolean; json?: boolean } = {}): Fake {
   const input = new PassThrough();

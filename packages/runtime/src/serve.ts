@@ -9,7 +9,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import { HOST_STOPPING_CLOSE, RELAY_TICKET_REFUSAL, RuntimeRequest, TICKET_ORIGIN, WorkspaceListing, WorkspaceOut, type ExecEvent, type ForwardEvent, type PortForward, type WorkspaceOrigin, type WorkspaceView } from "@wsp/protocol";
-import type { HostFolders, HostTerminalConfig, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
+import type { HostFolders, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
 
 /** The port forwards a host holds, as the app lists and stops them. The
  * runtime keeps none itself: the host that owns the daemon links supplies this. */
@@ -40,6 +40,8 @@ export interface ServeOptions {
   folders?: HostFolders;
   /** How the person's terminal config is read off this computer for host.terminalConfig; without it the op is refused. */
   terminalConfig?: HostTerminalConfig;
+  /** The init job the host runs on this computer, for the init.* ops and the init.job events; without it the ops are refused. */
+  init?: InitDoor;
 }
 
 export interface RuntimeServer {
@@ -85,6 +87,13 @@ function foldersFrom(opts: ServeOptions): () => HostFolders {
   };
 }
 
+function initFrom(opts: ServeOptions): () => InitDoor {
+  return () => {
+    if (opts.init === undefined) throw new Error("this runtime has no init job; the host that serves the app wires one");
+    return opts.init;
+  };
+}
+
 function terminalConfigFrom(opts: ServeOptions): () => HostTerminalConfig {
   return () => {
     if (opts.terminalConfig === undefined) throw new Error("this runtime cannot read the terminal config on this computer");
@@ -102,6 +111,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
   const lander = landerFrom(opts);
   const folders = foldersFrom(opts);
   const terminalConfig = terminalConfigFrom(opts);
+  const init = initFrom(opts);
   if (!opts.authToken) throw new Error("serveRuntime refuses to start without an auth token");
   const now = opts.now ?? Date.now;
   const ticketTtlMs = opts.ticketTtlMs ?? 300_000;
@@ -191,6 +201,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               const { stream, head, events, gap } = rt.events.since(msg.after, msg.stream);
               detaches.push(rt.events.on("*", e => send(e as unknown as Record<string, unknown>)));
               if (opts.forwards) detaches.push(opts.forwards.on(e => send(e)));
+              if (opts.init) detaches.push(opts.init.on(e => send(e)));
               send({ id: msg.id, ok: true, seq: head, stream, ...(gap ? { gap: true } : {}) });
               for (const e of events) send(e as unknown as Record<string, unknown>);
               return;
@@ -420,6 +431,24 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             case "host.terminalConfig":
               send({ id: msg.id, ok: true, config: await terminalConfig().read(msg.scheme) });
+              return;
+            case "init.get":
+              send({ id: msg.id, ok: true, setup: await init().get() });
+              return;
+            case "init.keys":
+              send({ id: msg.id, ok: true, setup: await init().keys({ ...(msg.solari !== undefined ? { solari: msg.solari } : {}), ...(msg.anthropic !== undefined ? { anthropic: msg.anthropic } : {}) }) });
+              return;
+            case "init.start":
+              send({ id: msg.id, ok: true, job: await init().start({ road: msg.road, ...(msg.harness !== undefined ? { harness: msg.harness } : {}) }) });
+              return;
+            case "init.answer":
+              send({ id: msg.id, ok: true, job: await init().answer({ screen: msg.screen, ...(msg.ticks !== undefined ? { ticks: msg.ticks } : {}), ...(msg.answers !== undefined ? { answers: msg.answers } : {}) }) });
+              return;
+            case "init.build":
+              send({ id: msg.id, ok: true, job: await init().build({ ...(msg.firstWorkspace !== undefined ? { firstWorkspace: msg.firstWorkspace } : {}), ...(msg.importFolder !== undefined ? { importFolder: msg.importFolder } : {}) }) });
+              return;
+            case "init.cancel":
+              send({ id: msg.id, ok: true, job: await init().cancel() });
               return;
             case "preferences.get":
               send({ id: msg.id, ok: true, preferences: await rt.preferences.get() });
