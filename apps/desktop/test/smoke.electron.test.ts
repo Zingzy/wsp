@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { serve, shimPath, startHost, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
-import { CLOUD_SETUP_WORDS } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, kindWords } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -15,6 +15,7 @@ import { stubBackend } from "../../../packages/host/test/stub-backend.js";
 import { WORKSPACE_WORDS } from "../../web/src/actions/format.js";
 import { LOCKUP_OPTICAL_CENTRE } from "../../web/src/brand/optical.js";
 import { THEME_WORDS } from "../../web/src/settings/format.js";
+import { workspaceRowId } from "../../web/src/sidebar/rowGrammar.js";
 import { VERSION } from "../../../packages/host/src/version.js";
 import { executableIn, treeHere } from "./packaged.js";
 import { menuShapeOf, workspaceMenuShape } from "./workspace-menu.js";
@@ -41,6 +42,26 @@ const GOLDEN = {
 /** What wsp init leaves behind once a golden is sealed, in the store's on-disk shape. */
 function seedGolden(home: string): void {
   writeFileSync(join(home, "state.json"), JSON.stringify({ goldens: { default: GOLDEN } }));
+}
+
+/** One local workspace record as the first launch and wsp new --local leave it, in the store's on-disk shape: the
+ * whole of what a computer that never held a provider key has. */
+const LOCAL_WORKSPACE = {
+  id: "ws_1",
+  name: "seeded-mac",
+  kind: "local",
+  machineId: "local",
+  phase: "running",
+  golden: "",
+  createdAt: "2026-09-01T00:00:00.000Z",
+  spec: {},
+  size: { cpu: 8, memMb: 16384 },
+  firstLife: false,
+  idleWindowMs: null,
+};
+
+function seedLocalWorkspace(home: string): void {
+  writeFileSync(join(home, "state.json"), JSON.stringify({ workspaces: { [LOCAL_WORKSPACE.id]: LOCAL_WORKSPACE } }));
 }
 
 interface Launched {
@@ -450,6 +471,30 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(await page.textContent("#recap-agents .state")).toBe("MCP added");
     expect(JSON.parse(readFileSync(join(home, ".claude.json"), "utf8")).mcpServers.wsp.command).toBe(shimPath(home));
     expect(readFileSync(join(home, ".codex", "config.toml"), "utf8")).toContain("[mcp_servers.wsp]");
+  });
+
+  it("with no provider key the welcome opens while nothing is recorded, and a recorded local workspace opens the app on it instead", async () => {
+    // The two launches differ by the seed alone, so what decides the window is the record and not the missing key.
+    launched = await launch({});
+    const welcome = await windowAt(launched.app, ONBOARDING_URL);
+    await welcome.waitForLoadState("domcontentloaded");
+    expect(await welcome.textContent("#welcome h1")).toBe("Welcome to wsp");
+    expect(appWindows(launched.app).filter(w => APP_URL.test(w.url()))).toHaveLength(0);
+    await launched.app.close();
+    rmSync(launched.home, { recursive: true, force: true });
+
+    launched = await launch({}, seedLocalWorkspace);
+    const win = await windowAt(launched.app, APP_URL);
+    const boot = await bootOf(win);
+    expect(boot.token).toMatch(TOKEN);
+    const row = win.locator(`[data-row-id='${workspaceRowId(LOCAL_WORKSPACE.id)}']`);
+    await row.waitFor();
+    expect(await row.locator("[data-workspace-name]").textContent()).toBe(LOCAL_WORKSPACE.name);
+    expect(await row.locator("[data-workspace-machine]").textContent()).toBe(kindWords("local").machine);
+    // The seeded record is the whole list: nothing was recorded on the way in.
+    expect(await win.locator("[data-workspace-name]").count()).toBe(1);
+    expect(appWindows(launched.app).filter(w => ONBOARDING_URL.test(w.url()))).toHaveLength(0);
+    expect(existsSync(join(launched.home, ".env"))).toBe(false);
   });
 
   it("attaches to a host already on the port with an empty ~/.wsp and no key, skipping the gate, and leaves it running after quit", async () => {
