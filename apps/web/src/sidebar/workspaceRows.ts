@@ -3,7 +3,7 @@
 // adapter names the state; this file turns it into the words and classes a
 // row shows.
 import { agentName } from "@wsp/catalog";
-import { FREE_WORD, fmtSize, isBilling, kindWords, outOfMemoryRowLine, workspaceKind, workspaceStateOf, type MemoryReading, type ReachState, type SessionOrigin, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
+import { FREE_WORD, fmtSize, isBilling, kindWords, outOfMemoryRowLine, vaultStaleLine, workspaceKind, workspaceStateOf, type MemoryReading, type ReachState, type SessionOrigin, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
@@ -45,13 +45,15 @@ export function daemonGoneLine(reach: ReachState | null, kind: WorkspaceKindWord
 
 /** The sentences a meta line can carry in place of its counts, in the order a surface draws them: what the
  * runtime is doing to the machine's daemon, then a drop with memory near full, then a daemon that is not there at
- * all. Written once because two surfaces draw them and both have to tell them from a figure: prose takes the ink
- * that reads at AA, the counts beside it keep the whisper. */
+ * all, then a nap whose vault was refused. Written once because two surfaces draw them and both have to tell them
+ * from a figure: prose takes the ink that reads at AA, the counts beside it keep the whisper. The vault comes last
+ * of them: the other three are what a person is waiting on now, and this one holds until the next nap. */
 export function metaSentences({ project, outOfMemory }: Pick<WorkspaceMetaInput, "project" | "outOfMemory">): string[] {
   return [
     daemonNote(project),
     outOfMemory === undefined ? undefined : outOfMemoryRowLine(outOfMemory),
     daemonGoneLine(project.reach, kindWords(workspaceKind(project.workspace))),
+    vaultStaleLine(project.status ?? project.workspace) ?? undefined,
   ].filter((line): line is string => line !== undefined);
 }
 

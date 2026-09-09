@@ -3,7 +3,7 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { GoldenMissingTool, HarnessCatalog, InitJob, InitPhase, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize } from "./index.js";
+import type { GoldenMissingTool, HarnessCatalog, InitJob, InitPhase, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
 import { shellLine } from "./shell-quote.js";
 import type { ThreadMessage } from "./thread-read.js";
@@ -822,6 +822,21 @@ export function storeUnreadLine(store: string, why: string): string {
  * to rebuild the machine restores older files than the person left, so they are told at the nap, not at the wake. */
 export function vaultKeptLine(why: string): string {
   return `nap kept the previous vault; ${why}`;
+}
+
+/** The day of a stamp in UTC, which is as far as this fact goes: the vault that stands can be days old, and the
+ * time of day is noise on a row about thirty characters wide. */
+const onDay = (iso: string): string => iso.slice(0, 10);
+
+const staleWord = (w: Pick<WorkspaceView, "vaultedAt">): string => (w.vaultedAt === undefined ? "no backup" : `no backup since ${onDay(w.vaultedAt)}`);
+
+/** The row's and the Machine tab's word for a machine whose last nap could not store a fresh vault: a rebuild
+ * restores the vault that still stands, which is as old as this says, and a machine that never stored one has
+ * nothing to restore at all. Null while the last nap stored its vault, which is every machine's steady state. One
+ * form on every surface, short enough that the sidebar row shows all of it: the sizes it was refused for are on
+ * the Machine tab's own line, not in here. */
+export function vaultStaleLine(w: Pick<WorkspaceView, "vaultedAt" | "vaultRefused">): string | null {
+  return w.vaultRefused === undefined ? null : staleWord(w);
 }
 
 /** What moving a workspace onto a newer image does, the words every client shows before it runs. The home travels,

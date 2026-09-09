@@ -178,6 +178,25 @@ describe("workspace row labels", () => {
     expect(workspaceMetaLine({ project: project({}, { daemonNote: "updating the helper" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("$0.00 today · $0.110/hr · active");
   });
 
+  it("a nap that could not store a vault says the machine's files are not backed up, on the row and in the Spaces header", () => {
+    const refused = { vaultedAt: "2026-09-08T07:10:04.444Z", vaultRefused: "the export was 645.8 MB, over the 200.0 MB cap" };
+    const napped = { phase: "napping" as const, machineState: "paused" as const, reach: { state: "napping" as const } };
+    const line = (over: Partial<WorkspaceStatus>) => workspaceMetaLine({ project: project(over), cost: tick(0.18, 0), outOfMemory: undefined, nowMs: now });
+    expect(line({ ...napped, ...refused })).toBe("no backup since 2026-09-08");
+    // A vault the last nap stored leaves the row's figures alone.
+    expect(line({ ...napped, vaultedAt: refused.vaultedAt })).toBe("$0.18 today");
+    // Before a status arrives the record's own fact is the line, as the daemon note is.
+    expect(workspaceMetaLine({ project: { ...project(napped, refused), status: null }, cost: null, outOfMemory: undefined, nowMs: now })).toBe("no backup since 2026-09-08");
+    // What the runtime is doing to the daemon leads: that is what a person is waiting on, this holds until the next nap.
+    expect(line({ ...napped, ...refused, daemonNote: "updating the helper" })).toBe("updating the helper");
+    // The header says it under what the machine is, since the header draws every sentence.
+    expect(spaceHeaderLines({ project: project({ ...napped, ...refused }), cost: tick(0.18, 0), outOfMemory: undefined, nowMs: now })).toEqual([
+      "no backup since 2026-09-08",
+      "2 vCPU · 4 GB",
+      "$0.18 today",
+    ]);
+  });
+
   it("the state slot says nothing while running, since the dot says it, and the state's word otherwise", () => {
     const slot = (state: WorkspaceState, label: string, tone: "running" | "paused" | "neutral", pulse = false) =>
       stateSlotWord({ state, indicator: { label, tone, pulse }, workspace: project({}).workspace });

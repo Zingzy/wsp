@@ -3533,19 +3533,29 @@ describe("runtime verified wake", () => {
     }
   });
 
-  it("every nap replaces the stashed vault; one over the cap is refused with a warning, the previous stays, and the napping status says so once", async () => {
+  it("every nap replaces the stashed vault; one over the cap is refused with a warning, the previous stays, the napping status says so once and the record keeps saying it", async () => {
     const { backend, tars, setTgzBytes } = guestBackend();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const store = memoryStore();
-      const rt = createRuntime({ backend, store, adapters: {}, wake: { vaultCapBytes: 5_000 }, vaultCaches: { dirs: ["node_modules", "dist"], files: [".DS_Store"], markers: [".git"] } });
+      // The stamp on the record is the runtime's clock, so this test holds one: two naps a millisecond apart under a
+      // busy box would otherwise write the same ISO string and the refresh could not be told from a stale write.
+      const fc = fakeClock(Date.UTC(2026, 8, 8, 7, 10, 4, 444));
+      const rt = createRuntime({ backend, store, adapters: {}, clock: fc.clock, wake: { vaultCapBytes: 5_000 }, vaultCaches: { dirs: ["node_modules", "dist"], files: [".DS_Store"], markers: [".git"] } });
       const events: EventUnion[] = [];
       rt.events.on("*", e => events.push(e));
-      const napReason = (): string | undefined => (events.filter(e => e.type === "workspace.status").at(-1) as { status: { phase: string; reason?: string } }).status.reason;
       const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+      // This workspace's own last status and its own warnings. Another workspace's line landing in the window would
+      // otherwise decide both reads, which is the kind of thing that shows up only when the whole suite runs.
+      const napReason = (): string | undefined =>
+        (events.filter(e => e.type === "workspace.status" && (e as { status: { id: string } }).status.id === ws.id).at(-1) as { status: { reason?: string } }).status.reason;
+      const vaultWarnings = (): string[] => warn.mock.calls.map(c => String(c[0])).filter(l => l.startsWith(`nap vault for ${ws.id}`));
       await rt.workspaces.nap(ws.id);
       expect(await store.getBlob("vaults", ws.id)).toEqual(Buffer.from("tarbytes"));
       expect(napReason()).toBeUndefined();
+      const stored = "2026-09-08T07:10:04.444Z";
+      expect((await rt.workspaces.get(ws.id)).vaultedAt).toBe(stored);
+      expect((await rt.workspaces.get(ws.id)).vaultRefused).toBeUndefined();
       const script = backend.machines[0]!.runLog.find(s => s.includes("tar czf"))!;
       expect(script).toContain(`find 'root/notes.md' -mindepth 1 -path '*/.git' -prune -o \\( \\( -type d \\( -name 'node_modules' -o -name 'dist' \\) \\) -o \\( -type f \\( -name '.DS_Store' \\) \\) -o \\( -type d -exec test -f '{}/.git' \\; \\) \\) -prune -print > `);
       expect(script).toMatch(/tar czf '[^']+' --no-recursion --null -T '[^']+\.keep'/);
@@ -3554,13 +3564,23 @@ describe("runtime verified wake", () => {
       await rt.workspaces.nap(ws.id);
       expect(tars).toEqual(["m1", "m1"]);
       expect(await store.getBlob("vaults", ws.id)).toEqual(Buffer.from("tarbytes"));
-      expect(warn.mock.calls.map(c => String(c[0])).filter(l => l.startsWith("nap vault"))).toEqual([`nap vault for ${ws.id} not stored, previous kept: the export was 5.9 KB, over the 4.9 KB cap`]);
+      expect(vaultWarnings()).toEqual([`nap vault for ${ws.id} not stored, previous kept: the export was 5.9 KB, over the 4.9 KB cap`]);
       expect((await rt.workspaces.get(ws.id)).phase).toBe("napping");
       expect(napReason()).toBe("nap kept the previous vault; the export was 5.9 KB, over the 4.9 KB cap");
+      // The status says it once; the record says it until a nap stores one, which is what the row and the tab read.
+      const refused = await rt.workspaces.get(ws.id);
+      expect(refused.vaultRefused).toBe("the export was 5.9 KB, over the 4.9 KB cap");
+      expect(refused.vaultedAt).toBe(stored);
+      expect((await store.get("workspaces", ws.id))).toMatchObject({ vaultRefused: "the export was 5.9 KB, over the 4.9 KB cap", vaultedAt: stored });
       await rt.workspaces.wake(ws.id);
       setTgzBytes(1_000);
+      // Well inside the status poll's interval, so the only thing that moves is the stamp the next stash writes.
+      fc.advance(1_000);
       await rt.workspaces.nap(ws.id);
       expect(napReason()).toBeUndefined();
+      const fresh = await rt.workspaces.get(ws.id);
+      expect(fresh.vaultRefused).toBeUndefined();
+      expect(fresh.vaultedAt).toBe("2026-09-08T07:10:05.444Z");
       await rt.workspaces.delete(ws.id);
       expect(await store.getBlob("vaults", ws.id)).toBeUndefined();
     } finally {

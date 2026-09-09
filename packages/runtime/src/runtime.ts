@@ -674,8 +674,8 @@ export interface RuntimeOptions {
    * /root except golden-provided dirs (VAULT_SKIP), enumerated at export time.
    */
   vaultPaths?: string[];
-  /** What a vault export leaves behind under those paths: the project bundle's cache rule, so a checkout's installs,
-   * build output and nested worktrees never travel and never count against the nap-time cap. */
+  /** What a vault export leaves behind, at those paths and under them: the project bundle's cache rule, so a
+   * checkout's installs, build output and nested worktrees never travel and never count against the nap-time cap. */
   vaultCaches?: CacheRule;
   /** Defaults for the status poller / cost ticker (tests shrink the intervals). */
   status?: StatusWatchOptions;
@@ -1930,6 +1930,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     ...(r.theme !== undefined ? { theme: r.theme } : {}),
     ...(r.glyph !== undefined ? { glyph: r.glyph } : {}),
     ...(daemonNotes.has(r.id) ? { daemonNote: daemonNotes.get(r.id)! } : {}),
+    ...(r.vaultedAt !== undefined ? { vaultedAt: r.vaultedAt } : {}),
+    ...(r.vaultRefused !== undefined ? { vaultRefused: r.vaultRefused } : {}),
   });
 
   /** One fact of a workspace's look: a value sets it, null clears it back to none, and undefined leaves what the
@@ -2432,8 +2434,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         stashVault: async m => {
           try {
             await store.putBlob(VAULTS, record.id, await vaultExport(m, { maxBytes: vaultCapBytes }));
+            record.vaultedAt = new Date(clock.now()).toISOString();
+            delete record.vaultRefused;
           } catch (e) {
             const why = e instanceof Error ? e.message : String(e);
+            // The record carries it, not only the nap's status: the files stay unbacked until a nap stores one.
+            record.vaultRefused = why;
             entry.vaultNote = vaultKeptLine(why);
             console.warn(`nap vault for ${record.id} not stored, previous kept: ${why}`);
           }

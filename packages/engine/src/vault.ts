@@ -212,14 +212,37 @@ const rooted = (p: string): string => p.replace(/^\//, "");
 /** No cache is left behind: the rule a drop list alone travels under. */
 const NO_CACHES: CacheRule = { dirs: [], files: [], markers: [] };
 
+/** The paths the rule keeps, judged by name: find judges nothing at a path it is handed (a folder export's own root
+ * would prune the whole folder), so a caller that hands over whole paths has them judged here. A machine used for
+ * builds carries the install its worktrees share at the top of the home, and that is a path, not something under
+ * one. By name alone, since a caller hands paths and not what they are: find's own predicate also asks the type,
+ * so a file named as a cache directory goes with it here. Refuses an export whose every named path is a cache,
+ * which would otherwise run find with no starting point; a caller that named none is answered above. */
+function keptPaths(paths: readonly string[], rule: CacheRule): string[] {
+  const kept = paths.filter(p => {
+    const name = p.replace(/\/+$/, "").split("/").pop() ?? p;
+    return !rule.dirs.includes(name) && !rule.files.includes(name);
+  });
+  if (kept.length === 0) throw new Error(`vault export: every path named is a cache under the rule (${paths.join(", ")}), so there is nothing to archive`);
+  return kept;
+}
+
+/** Nothing named, nothing archived. An empty archive rather than a tar with no operand, which refuses, or a find
+ * with no starting point, which reads the directory it runs in: from the root the export runs in, that is the whole
+ * filesystem. The enumeration behind both real roads always names a path, so this is what a caller with nothing to
+ * say gets. */
+const emptyArchiveScript = (out: string): string => `tar czf ${shellQuote(out)} --no-recursion --null -T /dev/null`;
+
 // Signed-URL transport on both directions: exec stdout could carry base64 for small exports but hits response-size limits.
 export const exportPaths = (machine: Machine, paths: string[], opts: VaultOptions = {}): Promise<Buffer> =>
   archiveOf(
     machine,
-    out =>
-      opts.exclude === undefined && (opts.drop === undefined || opts.drop.length === 0)
-        ? groupArchiveScript([{ root: "/", paths }], out)
-        : excludingArchiveScript("/", paths.map(rooted), opts.exclude ?? NO_CACHES, out, (opts.drop ?? []).map(rooted)),
+    out => {
+      if (paths.length === 0) return emptyArchiveScript(out);
+      if (opts.exclude === undefined && (opts.drop === undefined || opts.drop.length === 0)) return groupArchiveScript([{ root: "/", paths }], out);
+      const rule = opts.exclude ?? NO_CACHES;
+      return excludingArchiveScript("/", keptPaths(paths, rule).map(rooted), rule, out, (opts.drop ?? []).map(rooted));
+    },
     opts,
     tmp => downloadBuffer(machine, tmp, opts),
   );

@@ -215,6 +215,22 @@ describe("machine facts", () => {
     }
   });
 
+  it("a nap whose vault was refused reads as a muted word in the facts with the cap under them; a machine whose vault stands has no such row", async () => {
+    const w = { ...view("ws_a", "api", "napping"), vaultedAt: "2026-09-08T07:10:04.444Z", vaultRefused: "the export was 645.8 MB, over the 200.0 MB cap" };
+    const api = await mount([w]);
+    expect(fact("vault")).toBe("no backup since 2026-09-08");
+    const cell = document.querySelector('[data-k="vault"]')!;
+    expect(cell.getAttribute("title")).toBe("no backup since 2026-09-08");
+    expect(cell.className).toContain("font-mono");
+    expect(cell.querySelector("span")!.className).toContain("text-muted-foreground");
+    expect(document.querySelector('[data-slot="badge"]')).toBeNull();
+    expect(fact("vault-refused")).toBe("the export was 645.8 MB, over the 200.0 MB cap");
+    // A nap that stores one clears both: the row goes, and nothing about backups is said.
+    act(() => api.emit({ type: "workspace.status", status: { ...status(w), vaultedAt: "2026-09-09T08:00:00.000Z", vaultRefused: undefined } }));
+    await waitFor(() => expect(document.querySelector('[data-k="vault"]')).toBeNull());
+    expect(document.querySelector('[data-k="vault-refused"]')).toBeNull();
+  });
+
   it("a machine id hundreds of characters long is cut inside its cell and rides its title in full", async () => {
     const id = "ZGVza3Rvc".repeat(25);
     await mount([{ ...view("ws_a", "api"), machineId: id }]);

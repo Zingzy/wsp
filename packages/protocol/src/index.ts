@@ -260,6 +260,13 @@ export const WorkspaceView = z.object({
   /** One line for the machine's row while the runtime is doing something to the machine's daemon, or why the last
    * attempt failed; absent whenever there is nothing to say. Not persisted: it says what this process is doing. */
   daemonNote: z.string().optional(),
+  /** When the last nap stored a vault of this machine's files, ISO; absent where no nap ever stored one. What a
+   * rebuild would restore, so it is what says how old the restored files would be. */
+  vaultedAt: z.string().optional(),
+  /** Why the last nap could not store a fresh vault, in the words that name the export's size and the cap; absent
+   * once a nap stores one. Persisted, unlike the nap's own status line: the files stay unbacked until the next nap
+   * stores one, so every row keeps saying it rather than the person having to have seen the nap. */
+  vaultRefused: z.string().optional(),
 });
 export type WorkspaceView = z.infer<typeof WorkspaceView>;
 
@@ -289,7 +296,7 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
  * handed over by having been forgotten, which is how the display stream rode these doors until now. */
 const WORKSPACE_OUT = {
   id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, projects: true, folder: true, home: true,
-  claudeSessionId: true, gone: true, theme: true, glyph: true, daemonNote: true,
+  claudeSessionId: true, gone: true, theme: true, glyph: true, daemonNote: true, vaultedAt: true, vaultRefused: true,
 } as const;
 
 /** A workspace as every verb answers with it: the view without the display stream a desktop machine carries, which
