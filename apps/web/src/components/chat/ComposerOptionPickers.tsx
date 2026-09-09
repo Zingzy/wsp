@@ -9,12 +9,11 @@
 // it has one (its label names the machine on a kept one; the menu row keeps
 // the label), and each mode its one line. No button shrinks: the row wraps
 // before any of them is cut, so every pick reads whole down to a centre column
-// of about 300 px (measured 2026-09-09: an 1100 px viewport with the sidebar
-// at its widest and the right panel inline); the shell lets the column go
-// narrower than any row of four can use, which is the shell's own gap. The
-// one label a person writes, the project's name, has no bound, so its button
-// alone is capped at the row and cuts the name; the menu row says it whole. A
-// pick rides the next sessions.start and is remembered per workspace; a turn
+// of about 300 px (measured 2026-09-09); the shell keeps the column wider
+// than that beside the inline panel. The one label a person writes, the
+// project's name, has no bound, so its button alone is capped at the row and
+// cuts the name; the menu row says it whole. A pick rides the next
+// sessions.start and is remembered per workspace; a turn
 // already running keeps its flags and shows them meanwhile. The access pick is
 // the exception: it is remembered on the host's own record, so the next thread
 // here starts at it whichever client or CLI opens it, and where the harness

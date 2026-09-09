@@ -40,7 +40,8 @@ type SidebarContextProps = {
 };
 
 /** Where a dragged width is kept and read back, and how a width kept elsewhere (a reset, another client of the same
- * host) reaches this window: the rail re-applies it on every change. */
+ * host) reaches this window: the rail re-applies it on every change. A drag writes the width the pointer asked for,
+ * not the one shown: the rail's bounds may cap the display under the record, and the record has bounds of its own. */
 export interface SidebarWidthStore {
   read(): number | null;
   write(width: number): void;
@@ -372,6 +373,8 @@ function SidebarRail({
     moved: boolean;
     pointerId: number;
     pendingWidth: number;
+    /** startWidth plus the pointer's travel, before any clamp: the width the person asked for. */
+    askedWidth: number;
     rail: HTMLButtonElement;
     rafId: number | null;
     sidebarRoot: HTMLElement;
@@ -399,7 +402,8 @@ function SidebarRail({
       resizeState.transitionTargets.forEach((element) => {
         element.style.removeProperty("transition-duration");
       });
-      resolvedResizable?.width?.write(resizeState.width);
+      // A press with no travel is not a choice; the record keeps the person's width.
+      if (resizeState.moved) resolvedResizable?.width?.write(resizeState.askedWidth);
       resolvedResizable?.onResize?.(resizeState.width);
       resizeStateRef.current = null;
       if (resizeState.rail.hasPointerCapture(pointerId)) {
@@ -446,6 +450,7 @@ function SidebarRail({
         moved: false,
         pointerId: event.pointerId,
         pendingWidth: initialWidth,
+        askedWidth: initialWidth,
         rail: event.currentTarget,
         rafId: null,
         sidebarRoot,
@@ -479,8 +484,9 @@ function SidebarRail({
       if (Math.abs(delta) > 2) {
         resizeState.moved = true;
       }
+      resizeState.askedWidth = resizeState.startWidth + delta;
       resizeState.pendingWidth = clampSidebarWidth(
-        resizeState.startWidth + delta,
+        resizeState.askedWidth,
         resolvedResizable,
       );
       if (resizeState.rafId !== null) {

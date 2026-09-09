@@ -2,46 +2,41 @@
 import {
   type ReactNode,
   type RefObject,
-  useEffect,
   useLayoutEffect,
   useRef,
   useState,
 } from "react";
 
 import { useResizableWidth } from "../../hooks/useResizableWidth";
+import { useViewportWidth } from "../../hooks/useViewportWidth";
 import { cn } from "../../lib/utils";
+import { CENTER_COLUMN_MIN_WIDTH, RIGHT_PANEL_MIN_WIDTH } from "../../rightPanelLayout";
 import { RIGHT_PANEL_WIDTH_STORAGE_KEY } from "../../rightPanelStore";
 
 import { RightPanelResizeHandle } from "./RightPanelResizeHandle";
 
 export type PreviewPanelMode = "inline" | "sheet" | "sidebar" | "embedded";
 
-const PREVIEW_PANEL_MIN_WIDTH = 360;
 /**
  * Upper bound as a fraction of the viewport; only binds on wide screens.
  * On narrow windows the container clamp below is what preserves the
- * sibling column's space.
+ * centre column's space: the app sidebar sits outside the row, so the
+ * viewport fraction alone left the column below its width and the composer
+ * overflowed.
  */
 const PREVIEW_PANEL_MAX_WIDTH_FRACTION = 0.7;
 const PREVIEW_PANEL_DEFAULT_WIDTH = 540;
-/**
- * Width reserved for the sibling column (chat, pull-request list) sharing the
- * panel's flex row. The viewport fraction alone is not enough: the app
- * sidebar sits outside the row, so on narrow windows (any MacBook, even
- * fullscreen) the remaining 30% of the viewport minus the sidebar left the
- * sibling below its usable width and the composer overflowed.
- */
-const SIBLING_COLUMN_MIN_WIDTH = 360;
 
 export function getPreviewPanelMaxWidth(viewportWidth: number, containerWidth?: number): number {
   const fractionCap = Math.floor(viewportWidth * PREVIEW_PANEL_MAX_WIDTH_FRACTION);
   const containerCap =
-    containerWidth === undefined ? Infinity : Math.floor(containerWidth) - SIBLING_COLUMN_MIN_WIDTH;
-  // Never below the panel's own minimum: when the row cannot fit both
-  // columns' minimums the sibling yields, and useResizableWidth's clamp
-  // must not see max < min (it would resolve the inversion to min and,
-  // via drag-end persistence, overwrite the user's stored width).
-  return Math.max(PREVIEW_PANEL_MIN_WIDTH, Math.min(fractionCap, containerCap));
+    containerWidth === undefined ? Infinity : Math.floor(containerWidth) - CENTER_COLUMN_MIN_WIDTH;
+  // The shell sizes the sidebar so the row holds both minimums once it has
+  // given way; the frames of its width transition are narrower, and
+  // useResizableWidth's clamp must not see max < min (it would resolve the
+  // inversion to min and, via drag-end persistence, overwrite the user's
+  // stored width).
+  return Math.max(RIGHT_PANEL_MIN_WIDTH, Math.min(fractionCap, containerCap));
 }
 
 /**
@@ -71,7 +66,7 @@ export function PreviewPanelShell(props: {
   const { width, handlers } = useResizableWidth({
     storageKey: props.widthStorageKey ?? RIGHT_PANEL_WIDTH_STORAGE_KEY,
     defaultWidth: props.defaultWidth ?? PREVIEW_PANEL_DEFAULT_WIDTH,
-    minWidth: PREVIEW_PANEL_MIN_WIDTH,
+    minWidth: RIGHT_PANEL_MIN_WIDTH,
     maxWidth,
     edge: "left",
   });
@@ -107,25 +102,8 @@ export function PreviewPanelShell(props: {
  * never apply the resulting width, so they skip the observer entirely.
  */
 function useClampedMaxWidth(hostRef: RefObject<HTMLDivElement | null>, enabled: boolean): number {
-  const [vw, setVw] = useState(() => (typeof window === "undefined" ? 1280 : window.innerWidth));
+  const vw = useViewportWidth();
   const [containerWidth, setContainerWidth] = useState<number | undefined>(undefined);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    let frame = 0;
-    const onResize = () => {
-      // Coalesce rapid resize events into one rAF tick.
-      if (frame !== 0) return;
-      frame = window.requestAnimationFrame(() => {
-        frame = 0;
-        setVw(window.innerWidth);
-      });
-    };
-    window.addEventListener("resize", onResize);
-    return () => {
-      window.removeEventListener("resize", onResize);
-      if (frame !== 0) window.cancelAnimationFrame(frame);
-    };
-  }, []);
   useLayoutEffect(() => {
     if (!enabled) return;
     const parent = hostRef.current?.parentElement;
