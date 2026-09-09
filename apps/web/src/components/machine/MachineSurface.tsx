@@ -8,13 +8,13 @@
 // where its verb can run and its capability is there; the panel ends where its
 // content ends, with no sentence explaining what is not on it.
 import { CopyIcon } from "lucide-react";
-import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { runAction } from "../../actions/contextMenu.js";
 import { CLIENT_CANNOT_REBUILD } from "../../actions/format.js";
 import { actionById, resolveActions, rowLabelOf } from "../../actions/registry.js";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { workspaceActions, workspaceTarget } from "../../actions/workspaceActions.js";
-import { FREE_WORD, IMAGE_MOVE_CONFIRM, LINEAGE_MARKS, LOOK_PARTS, NOT_ON_THIS_KIND, behindGoldenLine, biggerSizeLine, fmtBytes, fmtRate, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageKeptLine, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, sizeWord, workspaceKind, workspaceProjects, workspaceState, workspaceStateOf, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, LINEAGE_MARKS, LOOK_PARTS, NOT_ON_THIS_KIND, behindGoldenLine, biggerSizeLine, fmtBytes, fmtRate, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageKeptLine, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, sizeWord, workspaceKind, workspaceProjects, workspaceState, workspaceStateOf, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { isDesktopShell } from "../../lib/desktopShell.js";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, useOutOfMemoryReading, useWorkspaceLive } from "../../machine/live.js";
@@ -563,6 +563,12 @@ function GoldenLineage({ workspace, projects }: { workspace: WorkspaceView; proj
   /** The action in flight, so the buttons wait for each other and the note names it. */
   const [busy, setBusy] = useState<"rollback" | "image" | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const noteRef = useRef<HTMLParagraphElement>(null);
+  // The note is the last thing in a tab that scrolls, and after a move it is the only place that says which of the
+  // person's own files did not follow the image, so it is brought into view instead of left below the fold.
+  useEffect(() => {
+    if (note !== null) noteRef.current?.scrollIntoView({ block: "nearest" });
+  }, [note]);
 
   const load = useCallback(() => {
     if (!api) return () => {};
@@ -611,7 +617,7 @@ function GoldenLineage({ workspace, projects }: { workspace: WorkspaceView; proj
     try {
       const moved = await api.updateImage(workspace.id);
       applyWorkspace(moved.workspace);
-      setNote(`${workspace.name} is on v${to}: ${imageKeptLine(moved.kept, moved.fallback)}.`);
+      setNote(`${workspace.name} is on v${to}: ${moved.moved ? imageKeptLine(moved.kept, moved.fallback) : IMAGE_ALREADY_NEWEST}.`);
     } catch (e) {
       setNote(errorText(e));
     } finally {
@@ -701,7 +707,7 @@ function GoldenLineage({ workspace, projects }: { workspace: WorkspaceView; proj
           })
         )}
       </ul>
-      <p className="min-h-4 text-[11px] text-muted-foreground" data-k="lineage-note">
+      <p ref={noteRef} className="min-h-4 text-[11px] text-muted-foreground" data-k="lineage-note">
         {busy === "rollback" ? "Rolling back…" : busy === "image" ? "Moving to the newer image…" : (note ?? (behind !== null && moveRefusal !== null ? moveRefusal : null))}
       </p>
       <AlertDialog open={moving !== null} onOpenChange={open => !open && setMoving(null)}>

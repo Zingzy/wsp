@@ -540,9 +540,6 @@ interface LiveWorkspace {
   creating?: true;
   /** Why the nap in flight kept the previous vault, for the napping status it pushes; said once. */
   vaultNote?: string;
-  /** Guest paths the vault export of the move in flight leaves behind, so the new image's copy of each stands; the
-   * export hook reads it, since the engine's upgrade holds the only moment between reading the fork and killing it. */
-  vaultDrop?: readonly string[];
 }
 
 /** One pause or wake's time: the word its row uses, when the verb started, and the instant its provider calls stop
@@ -1723,8 +1720,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * where the whole home lands over the new image. */
   const imageMovePlan = async (m: Machine, from: GoldenVersion | undefined, to: GoldenVersion): Promise<UpgradePlan> => {
     if (from?.owned === undefined) return upgradePlan(undefined, to.owned, []);
-    // A volatile path travels whatever its bytes say, so the fork is never asked for its hash.
-    return upgradePlan(from.owned, to.owned, await readOwnedFiles(m, from.owned.filter(f => f.volatile !== true).map(f => f.path)));
+    const was = new Set(from.owned.map(f => f.path));
+    // What the comparison actually judges by the fork's bytes: the version's own rows, less the volatile ones, whose
+    // bytes never stand for an edit; and the volatile rows only the new image writes, where the comparison asks
+    // whether the fork holds a live copy of its own to leave alone.
+    const read = [
+      ...from.owned.filter(f => f.volatile !== true).map(f => f.path),
+      ...(to.owned ?? []).filter(f => f.volatile === true && !was.has(f.path)).map(f => f.path),
+    ];
+    return upgradePlan(from.owned, to.owned, await readOwnedFiles(m, read));
   };
   const live = new Map<string, LiveWorkspace>();
   const builders = new Map<string, LiveBuilder>();
@@ -2417,7 +2421,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           fork(record, m => {
             entry.machine = m;
           }, override),
-        vaultExport: m => vaultExport(m, entry.vaultDrop === undefined ? {} : { drop: entry.vaultDrop }),
+        vaultExport: (m, drop) => vaultExport(m, drop === undefined ? {} : { drop }),
         vaultImport: async (m, payload) => {
           await importInto(m, payload, "/");
         },
@@ -3215,7 +3219,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const to = head!;
       const was = entry.record.golden;
       const from = manifest!.versions.find(v => v.snapshotId === was);
-      if (to.snapshotId === was) return { workspace: view(entry.record), kept: [] };
+      if (to.snapshotId === was) return { workspace: view(entry.record), moved: false, kept: [] };
       // The archive is what lands and --recursive-unlink cannot merge, so which of the image's own files the fork
       // keeps is settled here, off the machine that is still running, before anything is replaced.
       const plan = await imageMovePlan(entry.machine, from, to);
@@ -3223,20 +3227,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // work across the way a resize does. A move that throws puts the record back, so a retry forks what the
       // workspace is actually running.
       entry.record.golden = to.snapshotId;
-      entry.vaultDrop = plan.drop.map(path => `${GUEST_HOME}/${path}`);
       try {
-        await entry.ws.upgrade();
+        await entry.ws.upgrade(undefined, { drop: plan.drop.map(path => `${GUEST_HOME}/${path}`) });
       } catch (e) {
         entry.record.golden = was;
         throw e;
-      } finally {
-        delete entry.vaultDrop;
       }
       followMachine(entry);
       await persist(entry.record);
       bus.emit({ type: "workspace.upgraded", workspaceId: id, machineId: entry.record.machineId });
       await emitStatus(entry, reachOf(entry), `moved from image v${from?.version ?? "?"} to v${to.version}`);
-      return { workspace: view(entry.record), kept: plan.kept, ...(plan.fallback ? { fallback: true } : {}) };
+      return { workspace: view(entry.record), moved: true, kept: plan.kept, ...(plan.fallback ? { fallback: true } : {}) };
     },
 
     async rebuild(id, origin) {

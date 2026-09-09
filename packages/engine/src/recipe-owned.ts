@@ -4,7 +4,7 @@
 // comparison says which of them travel. One read of the recipe's file list, one rule for the comparison.
 import { GUEST_HOME } from "@wsp/catalog";
 import { shellQuote, type RecipeDigest, type RecipeOwnedFile } from "@wsp/protocol";
-import { INLINE_EXEC_MS } from "./exec-detached.js";
+import { INLINE_EXEC_MS, execFits } from "./exec-detached.js";
 import type { Machine } from "./machine.js";
 
 /** The paths the recipe writes into the guest home and the ones it marks volatile: a tool rewrites those as it runs,
@@ -21,27 +21,6 @@ export interface WrittenPaths {
 export function recipeWrittenPaths(recipe: RecipeDigest): WrittenPaths {
   const paths = [...new Set(recipe.files.map(f => f.dest))].sort();
   return { paths, volatile: paths.filter(p => recipe.files.some(f => f.dest === p && f.volatile === true)) };
-}
-
-/** How many bytes of paths one read carries. A recipe's config rows name whole directories (the skills, agents and
- * commands trees), so a real version records on the order of a thousand files; the read goes in batches of this
- * size rather than betting on what one exec payload or one argument list takes. */
-export const READ_PATH_BYTES = 32 * 1024;
-
-/** The paths in batches no bigger than the budget; a path longer than the budget is a batch of its own. */
-function batched(paths: readonly string[]): string[][] {
-  const out: string[][] = [];
-  let bytes = READ_PATH_BYTES;
-  for (const path of paths) {
-    const cost = Buffer.byteLength(path) + 3;
-    if (bytes + cost > READ_PATH_BYTES) {
-      out.push([]);
-      bytes = 0;
-    }
-    out[out.length - 1]!.push(path);
-    bytes += cost;
-  }
-  return out;
 }
 
 /** The one command that hashes the files: every regular file at or under the paths, from the home they are relative
@@ -66,9 +45,19 @@ const byPath = (a: RecipeOwnedFile, b: RecipeOwnedFile): number => (a.path < b.p
 /** Every file at or under the paths on the machine, with its hash: the seal reads the recipe's paths on the builder,
  * the upgrade reads the version's paths on the fork. */
 export async function readOwnedFiles(machine: Machine, paths: readonly string[], home: string = GUEST_HOME): Promise<RecipeOwnedFile[]> {
+  // A version's own manifest is a thousand files on a real image (the recipe's config rows name whole directories),
+  // whose paths pass the exec body cap in one command and would be refused whole, so the read goes a page at a time
+  // under the same rule every other road that builds a command out of a list reads.
+  const pages: string[][] = [[]];
+  for (const path of paths) {
+    const last = pages.at(-1)!;
+    if (last.length > 0 && !execFits(ownedFilesScript(home, [...last, path]))) pages.push([path]);
+    else last.push(path);
+  }
   const found: RecipeOwnedFile[] = [];
-  for (const batch of batched(paths)) {
-    const read = await machine.exec(ownedFilesScript(home, batch), { timeoutMs: INLINE_EXEC_MS });
+  for (const page of pages) {
+    if (page.length === 0) continue;
+    const read = await machine.exec(ownedFilesScript(home, page), { timeoutMs: INLINE_EXEC_MS });
     if (read.exitCode !== 0) throw new Error(`reading the recipe's files on ${machine.id} failed (exit ${read.exitCode}): ${read.stderr.slice(-200)}`);
     found.push(...parseOwnedFiles(read.stdout));
   }
@@ -114,7 +103,8 @@ export function upgradePlan(from: readonly RecipeOwnedFile[] | undefined, to: re
   }
   // New in the image: the fork was forked before this path existed, so whatever it holds there is nobody's edit of
   // it, and the archive has to leave the path alone even when the fork holds nothing, or the directory it sits in
-  // would land over the image's copy.
-  for (const f of to ?? []) if (!was.has(f.path)) drop.push(f.path);
+  // would land over the image's copy. A volatile row the recipe newly ticks is the one exception, since the fork's
+  // own copy is state no image can stand in for; it is dropped only when the fork holds none.
+  for (const f of to ?? []) if (!was.has(f.path) && !(f.volatile === true && here.has(f.path))) drop.push(f.path);
   return { drop: drop.sort(), kept: kept.sort(), fallback: false };
 }

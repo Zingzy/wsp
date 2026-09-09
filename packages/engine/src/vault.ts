@@ -120,11 +120,13 @@ function excludingArchiveScript(cwd: string, targets: readonly string[], rule: C
   ];
   const cache = `\\( ${named.length === 0 ? "-false" : named.join(" -o ")} \\)`;
   const skip = drop.length === 0 ? cache : `\\( ${cache} -o ${paths(drop)} \\)`;
-  // Matched so it is never printed, never pruned: the directory itself stays out of the archive while everything
+  // Every directory the archive would carry that holds a dropped path: it stays out of the archive while everything
   // under it travels, which is how a dropped file's neighbours land without --recursive-unlink taking the copy the
-  // destination keeps.
+  // destination keeps. One that is a starting point leaves by not being on the list tar is handed; only one below a
+  // starting point needs a predicate, since -mindepth 1 means find never tests a starting point at all.
   const held = ancestorsOf(drop).filter(h => targets.some(t => t === h || h.startsWith(`${t}/`)));
-  const flat = held.length === 0 ? "" : `${paths(held)} -o `;
+  const walked = held.filter(h => targets.some(t => h.startsWith(`${t}/`)));
+  const flat = walked.length === 0 ? "" : `${paths(walked)} -o `;
   const gone = new Set([...drop, ...held]);
   const where = targets.map(shellQuote).join(" ");
   const carried = targets.filter(t => !gone.has(t));

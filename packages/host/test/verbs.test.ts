@@ -402,8 +402,10 @@ describe("wsp verbs over the host", () => {
     expect(after).toMatchObject({ id: alpha!.id, name: "alpha", phase: "running", golden: "snap_gold2" });
     expect(moved.io.lines).toEqual([`alpha running on ${after.machineId}; ${imageKeptLine([".gitconfig"])}`]);
 
+    // The answer says for itself whether a machine was replaced, so an agent reading the object never has to compare
+    // the image it read a moment before against the one it got back.
     const asJson = await run("image", "move", "alpha", "--json");
-    expect(json(asJson.io)).toEqual([{ workspace: expect.objectContaining({ golden: "snap_gold2" }), kept: [] }]);
+    expect(json(asJson.io)).toEqual([{ workspace: expect.objectContaining({ golden: "snap_gold2" }), moved: false, kept: [] }]);
     // Nothing to move to now, and the line says that rather than claiming the image's files came across.
     const again = await run("image", "move", "alpha");
     expect(again.code).toBe(0);

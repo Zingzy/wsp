@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, DAEMON_VERSION, FREE_WORD, IMAGE_MOVE_CONFIRM, NOT_ON_THIS_KIND, fmtBytes, imageKeptLine } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, DAEMON_VERSION, FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, NOT_ON_THIS_KIND, fmtBytes, imageKeptLine } from "@wsp/protocol";
 import type {
   Capabilities,
   EventUnion,
@@ -101,7 +101,7 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
       return taken;
     }),
     upgrade: vi.fn(async (id: string, _size: WorkspaceSize) => view(id, "?", "running")),
-    updateImage: vi.fn(async (id: string) => ({ workspace: { ...view(id, "?", "running"), golden: `snap_golden-v${current.head ?? 0}` }, kept: [] })),
+    updateImage: vi.fn(async (id: string) => ({ workspace: { ...view(id, "?", "running"), golden: `snap_golden-v${current.head ?? 0}` }, moved: true, kept: [] })),
     capabilities: vi.fn(async () => capabilities),
     portReach: vi.fn(async (_id: string, port: number) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 })),
     daemonReach: vi.fn(async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 })),
@@ -740,16 +740,25 @@ describe("a workspace behind the golden's head", () => {
 
   it("the note names the files of the image's own this workspace had changed, so a person sees what did not follow the image", async () => {
     const api = await mount([onV11()], CAPS, twoVersions);
-    api.updateImage.mockResolvedValueOnce({ workspace: { ...onV11(), golden: "snap_golden-v12" }, kept: [".zshrc", ".claude/settings.json"] });
+    api.updateImage.mockResolvedValueOnce({ workspace: { ...onV11(), golden: "snap_golden-v12" }, moved: true, kept: [".zshrc", ".claude/settings.json"] });
     await waitFor(() => expect(marks("v11")).toEqual(["this fork", "volatile"]));
     fireEvent.click(screen.getByRole("button", { name: "update api to v12" }));
     fireEvent.click(await screen.findByRole("button", { name: "Move" }));
     await waitFor(() => expect(fact("lineage-note")).toContain("kept 2 changed files: .claude/settings.json, .zshrc"));
   });
 
+  it("a move that replaced no machine says so rather than claiming the image's files came across", async () => {
+    const api = await mount([onV11()], CAPS, twoVersions);
+    api.updateImage.mockResolvedValueOnce({ workspace: onV11(), moved: false, kept: [] });
+    await waitFor(() => expect(marks("v11")).toEqual(["this fork", "volatile"]));
+    fireEvent.click(screen.getByRole("button", { name: "update api to v12" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Move" }));
+    await waitFor(() => expect(fact("lineage-note")).toContain(IMAGE_ALREADY_NEWEST));
+  });
+
   it("a move off an image that lists no files of its own says the whole home came across", async () => {
     const api = await mount([onV11()], CAPS, twoVersions);
-    api.updateImage.mockResolvedValueOnce({ workspace: { ...onV11(), golden: "snap_golden-v12" }, kept: [], fallback: true });
+    api.updateImage.mockResolvedValueOnce({ workspace: { ...onV11(), golden: "snap_golden-v12" }, moved: true, kept: [], fallback: true });
     await waitFor(() => expect(marks("v11")).toEqual(["this fork", "volatile"]));
     fireEvent.click(screen.getByRole("button", { name: "update api to v12" }));
     fireEvent.click(await screen.findByRole("button", { name: "Move" }));

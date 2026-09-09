@@ -124,7 +124,7 @@ describe("the agent contract on the command line and the tool door", () => {
     await last("pause", "pause", "alpha");
     await last("wake", "wake", "alpha");
     // Already on the golden's head, so the move is the answer alone: the workspace untouched and nothing kept.
-    expect(await last("image move", "image", "move", "alpha")).toEqual({ workspace: expect.objectContaining({ name: "alpha" }), kept: [] });
+    expect(await last("image move", "image", "move", "alpha")).toEqual({ workspace: expect.objectContaining({ name: "alpha" }), moved: false, kept: [] });
     const opened = (await last("thread new", "thread", "new", "--in", "alpha", "hello")) as { threadId: string; text: string };
     expect(opened).toMatchObject({ threadId: expect.any(String), text: "re: hello", outcome: "started" });
     await last("send", "send", opened.threadId, "again");

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import type { RecipeDigest, RecipeOwnedFile } from "@wsp/protocol";
-import { READ_PATH_BYTES, ownedFilesScript, parseOwnedFiles, readOwnedFiles, recipeOwnedFiles, recipeWrittenPaths, upgradePlan } from "../src/recipe-owned.js";
+import { EXEC_BODY_MAX } from "@wsp/protocol";
+import { execFits } from "../src/exec-detached.js";
+import { ownedFilesScript, parseOwnedFiles, readOwnedFiles, recipeOwnedFiles, recipeWrittenPaths, upgradePlan } from "../src/recipe-owned.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 
 const owned = (rows: Record<string, string>): RecipeOwnedFile[] => Object.entries(rows).map(([path, sha256]) => ({ path, sha256 }));
@@ -64,13 +66,12 @@ describe("the recipe's own files", () => {
     expect(ownedFilesScript("/root", [".zshrc"])).not.toContain("|| true");
   });
 
-  it("a thousand paths go in batches under one byte budget, so no read bets on what a single exec payload takes", async () => {
+  it("a thousand paths go a page at a time under the one measured exec cap, so the provider refuses none of them with a 413", async () => {
     const paths = Array.from({ length: 1_000 }, (_, i) => `.claude/skills/skill-${i}/SKILL.md`);
     const { machine, cmds } = reader({ exitCode: 0, stdout: "", stderr: "" });
     await readOwnedFiles(machine, paths);
     expect(cmds.length).toBeGreaterThan(1);
-    for (const cmd of cmds) expect(cmd.length).toBeLessThan(READ_PATH_BYTES * 2);
-    // Every path is read exactly once across the batches.
+    for (const cmd of cmds) expect(execFits(cmd), `${Buffer.byteLength(cmd)} bytes against ${EXEC_BODY_MAX}`).toBe(true);
     expect(paths.filter(p => cmds.filter(c => c.includes(`'${p}'`)).length === 1)).toHaveLength(paths.length);
   });
 
@@ -117,6 +118,12 @@ describe("what an upgrade does with them", () => {
   it("a path only the new image writes is dropped whether or not the fork holds one, so the image's copy is what lands", () => {
     expect(upgradePlan(from, to, owned({})).drop).toContain(".config/gh/hosts.yml");
     expect(upgradePlan(from, to, owned({ ".config/gh/hosts.yml": "forks-own" })).drop).toContain(".config/gh/hosts.yml");
+  });
+
+  it("a volatile row the new image adds leaves the fork's own copy alone when it has one, and is dropped when it has none so the folder it sits in cannot land over the image's", () => {
+    const gains = [...to, { path: ".claude.json", sha256: "fresh", volatile: true as const }];
+    expect(upgradePlan(from, gains, owned({ ".claude.json": "the fork's own state" })).drop).not.toContain(".claude.json");
+    expect(upgradePlan(from, gains, owned({})).drop).toContain(".claude.json");
   });
 
   it("a path in no manifest is nobody's but the fork's and never appears in the plan", () => {

@@ -263,7 +263,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             }
             case "workspaces.updateImage": {
               const moved = await rt.workspaces.updateImage(msg.workspaceId, origin);
-              send({ id: msg.id, ok: true, workspace: handed(moved.workspace), kept: moved.kept, ...(moved.fallback === true ? { fallback: true } : {}) });
+              send({ id: msg.id, ok: true, workspace: handed(moved.workspace), moved: moved.moved, kept: moved.kept, ...(moved.fallback === true ? { fallback: true } : {}) });
               return;
             }
             case "workspaces.rename":

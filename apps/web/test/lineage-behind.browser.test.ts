@@ -88,6 +88,17 @@ describe.skipIf(renderSkipped !== undefined)("the offer to a workspace behind th
     const note = (await page!.locator("[data-k=lineage-note]").boundingBox())!;
     const tab = (await page!.locator("[data-testid=machine-tab]").boundingBox())!;
     expect(note.x + note.width).toBeLessThanOrEqual(tab.x + tab.width);
+    // The one place the outcome is named is brought into view, so a person reads it without scrolling for it: its box
+    // against the box of the region that actually scrolls, which a bounding box alone would not catch.
+    const inView = await page!.locator("[data-k=lineage-note]").evaluate(el => {
+      const rect = el.getBoundingClientRect();
+      let scroller = el.parentElement;
+      while (scroller !== null && scroller.scrollHeight <= scroller.clientHeight) scroller = scroller.parentElement;
+      if (scroller === null) return true;
+      const box = scroller.getBoundingClientRect();
+      return rect.top >= box.top - 1 && rect.bottom <= box.bottom + 1;
+    });
+    expect(inView).toBe(true);
     await page!.locator("[data-testid=machine-tab]").screenshot({ path: join(SHOTS, `image-move-kept-${theme}.png`) });
     expect(existsSync(join(SHOTS, `image-move-kept-${theme}.png`))).toBe(true);
   }, 30_000);

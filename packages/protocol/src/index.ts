@@ -304,11 +304,13 @@ export type WorkspaceOut = z.infer<typeof WorkspaceOut>;
 export const WorkspaceListing = WorkspaceStatus.pick({ ...WORKSPACE_OUT, machineState: true, size: true, rateUsdPerHour: true, reason: true, idleAt: true }).extend({ reach: ReachView });
 export type WorkspaceListing = z.infer<typeof WorkspaceListing>;
 
-/** What moving a workspace onto a newer image came to: the workspace as it now stands, and which of the files the
- * image's own recipe writes into home this workspace had changed, so its copies travelled instead of the new
- * image's. `fallback` is the image it stood on listing no files of its own, which is every image sealed before they
- * were recorded: nothing was left to the new image and the whole home came across. */
-export const UpgradeResult = z.object({ workspace: WorkspaceView, kept: z.array(z.string()), fallback: z.boolean().optional() });
+/** What moving a workspace onto a newer image came to: the workspace as it now stands, whether a machine was
+ * actually replaced, and which of the files the image's own recipe writes into home this workspace had changed, so
+ * its copies travelled instead of the new image's. `moved` is false for a workspace already on the newest version,
+ * which is answered untouched and whose empty `kept` means nothing was judged rather than nothing was changed.
+ * `fallback` is the image it stood on listing no files of its own, which is every image sealed before they were
+ * recorded: nothing was left to the new image and the whole home came across. */
+export const UpgradeResult = z.object({ workspace: WorkspaceView, moved: z.boolean(), kept: z.array(z.string()), fallback: z.boolean().optional() });
 export type UpgradeResult = z.infer<typeof UpgradeResult>;
 
 export const SessionStatus = z.enum(["running", "completed", "interrupted", "failed"]);

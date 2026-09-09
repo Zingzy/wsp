@@ -6307,7 +6307,8 @@ describe("a workspace behind the golden's head", () => {
   it("one already on the head is handed back untouched: no machine is replaced", async () => {
     const { backend, rt } = await seeded();
     const ws = await rt.workspaces.create({ golden: "snap_golden-v2", name: "api" });
-    expect(await rt.workspaces.updateImage(ws.id)).toMatchObject({ workspace: { golden: "snap_golden-v2", machineId: "m1" }, kept: [] });
+    // The one place that knows no machine was replaced says so, rather than leaving every client to work it out.
+    expect(await rt.workspaces.updateImage(ws.id)).toMatchObject({ workspace: { golden: "snap_golden-v2", machineId: "m1" }, moved: false, kept: [] });
     expect(backend.machines).toHaveLength(1);
     expect(backend.machines[0]!.killed).toBe(false);
   });
@@ -6401,7 +6402,7 @@ describe("what a move onto a newer image does with the files the image itself wr
   /** The fork left .zshrc and the agent's settings as v1 wrote them and rewrote its gitconfig. */
   const ON_FORK: Record<string, string> = { ".zshrc": sha("1"), ".gitconfig": sha("f"), ".claude/settings.json": sha("3") };
 
-  const version = (n: number, owned?: { path: string; sha256: string }[]): Record<string, unknown> => ({
+  const version = (n: number, owned?: { path: string; sha256: string; volatile?: boolean }[]): Record<string, unknown> => ({
     version: n,
     snapshotId: `snap_golden-v${n}`,
     baseTemplate: "base",
@@ -6411,13 +6412,20 @@ describe("what a move onto a newer image does with the files the image itself wr
     ...(owned !== undefined ? { owned } : {}),
   });
 
-  const seeded = async (versions: Record<string, unknown>[]) => {
+  const seeded = async (versions: Record<string, unknown>[], on: { home?: string[]; fork?: Record<string, string> } = {}) => {
     const backend = stubBackend();
     const store = memoryStore();
+    const home = on.home ?? HOME;
+    const fork = on.fork ?? ON_FORK;
     await store.put("goldens", "default", { head: 2, versions });
     backend.execImpl = (_m, cmd) => {
-      if (cmd.startsWith("ls -A /root")) return { exitCode: 0, stdout: `${HOME.join("\n")}\n`, stderr: "" };
-      if (cmd.includes("sha256sum")) return { exitCode: 0, stdout: `${Object.entries(ON_FORK).map(([p, h]) => `${h}  ${p}`).join("\n")}\n`, stderr: "" };
+      if (cmd.startsWith("ls -A /root")) return { exitCode: 0, stdout: `${home.join("\n")}\n`, stderr: "" };
+      // The guest hashes what it was asked for and nothing else, so a path the read never names cannot reach the
+      // comparison however much the fork holds.
+      if (cmd.includes("sha256sum")) {
+        const asked = Object.entries(fork).filter(([p]) => cmd.includes(`'${p}'`));
+        return { exitCode: 0, stdout: asked.length === 0 ? "" : `${asked.map(([p, h]) => `${h}  ${p}`).join("\n")}\n`, stderr: "" };
+      }
       return { exitCode: 0, stdout: cmd.includes("echo WSP_CTX") ? "WSP_CTX\nWSP_CTX_END\n" : "", stderr: "" };
     };
     return { backend, store, rt: createRuntime({ backend, store, adapters: {} }) };
@@ -6431,6 +6439,7 @@ describe("what a move onto a newer image does with the files the image itself wr
     const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
     const moved = await rt.workspaces.updateImage(ws.id);
     expect(moved.kept).toEqual([".gitconfig"]);
+    expect(moved.moved).toBe(true);
     expect(moved.fallback).toBeUndefined();
     expect(moved.workspace.golden).toBe("snap_golden-v2");
     const script = tarScript(backend.machines[0]!);
@@ -6439,9 +6448,10 @@ describe("what a move onto a newer image does with the files the image itself wr
     expect(script).toContain("-path 'root/.claude/settings.json'");
     expect(script).toContain("-path 'root/.config/gh/hosts.yml'");
     expect(script).not.toContain("-path 'root/.gitconfig'");
-    // .claude and .config hold a dropped path, so their own entries stay out of the archive and their contents travel.
+    // .claude holds a dropped path, so its own entry stays out of the archive and its contents travel. It is a
+    // starting point, so it leaves by not being on the list tar is handed and not by a predicate find never tests.
     expect(script).toContain("printf '%s\\0' 'root/.gitconfig' 'root/proj' >");
-    expect(script).toContain("-o \\( -path 'root/.claude' \\) -o -print0");
+    expect(script).not.toContain("-path 'root/.claude'");
   });
 
   it("a version sealed before the manifest existed falls back: nothing is read off the fork, nothing is dropped, and the result says so", async () => {
@@ -6470,6 +6480,31 @@ describe("what a move onto a newer image does with the files the image itself wr
     expect(read).not.toContain(".claude.json");
     // It is not dropped either: the fork's own copy is the one that travels.
     expect(tarScript(backend.machines[0]!)).not.toContain("-path 'root/.claude.json'");
+  });
+
+  it("a volatile row the new image adds is asked of the fork, so the live copy the fork keeps is the one that travels", async () => {
+    // v1 never wrote .claude.json; v2 starts owning it as a volatile row, and the fork has been running with its own.
+    const v1 = version(1, [{ path: ".zshrc", sha256: sha("1") }]);
+    const v2 = version(2, [
+      { path: ".zshrc", sha256: sha("9") },
+      { path: ".claude.json", sha256: sha("7"), volatile: true },
+    ]);
+    const { backend, rt } = await seeded([v1, v2], {
+      home: [".zshrc", ".claude.json", "proj"],
+      fork: { ".zshrc": sha("1"), ".claude.json": sha("b") },
+    });
+    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    const moved = await rt.workspaces.updateImage(ws.id);
+    const read = backend.machines[0]!.execLog.find(c => c.includes(READ))!;
+    expect(read).toContain("'.claude.json'");
+    const script = tarScript(backend.machines[0]!);
+    // The fork's own copy travels: the archive neither prunes the path nor holds it off the list tar is handed.
+    expect(script).not.toContain("-path 'root/.claude.json'");
+    expect(script).toContain("'root/.claude.json'");
+    // It is live state, not a person's edit, so it is never named.
+    expect(moved.kept).toEqual([]);
+    // The untouched one still goes the other way, so the new image's .zshrc stands.
+    expect(script).toContain("-path 'root/.zshrc'");
   });
 
   it("the comparison is read off the machine before it is killed, so the fork's own copies are what the archive judges", async () => {
