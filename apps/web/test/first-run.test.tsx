@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The window with no golden: the shell as always, since this computer is a
-// workspace of its own, and at the sidebar's bottom one quiet row that opens
-// the way to cloud machines; with a golden sealed the row is not there.
+// workspace of its own, and at the sidebar's bottom one keycap button that
+// opens the way to cloud machines; with a golden sealed the button is not there.
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLOUD_SETUP_WORDS, type GoldenManifest, type WorkspaceView } from "@wsp/protocol";
@@ -60,14 +60,15 @@ async function mount(opts: Parameters<typeof fakeApi>[0]) {
 }
 
 describe("the window before a golden exists", () => {
-  it("is the shell on this computer, with one muted mono row at the sidebar's bottom for the cloud", async () => {
+  it("is the shell on this computer, with one muted mono keycap at the sidebar's bottom for the cloud", async () => {
     await mount({ workspaces: [local] });
     await waitFor(() => expect(screen.getByText("Workspaces")).toBeDefined());
     await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_local"));
     const row = await screen.findByRole("button", { name: CLOUD_SETUP_WORDS.row });
     expect(row.closest("[data-slot=sidebar-footer]")).not.toBeNull();
-    // A hairline above parts it from the list; the words are centred mono, muted, one tone up on hover.
-    expect(row.parentElement?.className).toContain("border-t");
+    // The kit's keycap parts it from the list by its own border, no hairline over it; the words are centred mono, muted, one tone up on hover.
+    expect(row.getAttribute("data-slot")).toBe("button");
+    expect(row.parentElement?.className).not.toContain("border-t");
     expect(row.className).toContain("justify-center");
     expect(row.className).toContain("font-mono");
     expect(row.className).toContain("text-sidebar-muted-foreground");

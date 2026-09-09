@@ -7,7 +7,7 @@
 // it and the build goes on; the one link stops the job after asking once.
 import { ChevronDownIcon } from "lucide-react";
 import { useState } from "react";
-import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, initJobBuilding, initJobOver, initRowOver, type InitJob, type InitRow } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, initJobBuilding, initJobOver, initProgressState, initRowOver, type InitJob, type InitRow } from "@wsp/protocol";
 import { Button } from "../../components/ui/button.js";
 import { cn } from "../../lib/utils.js";
 import { CARD, META, NAME, ROW, ROW_LINE, RowState, Slot } from "./rows.js";
@@ -20,7 +20,7 @@ export function SetupBuild({ job, onCancel, onRetry, onOpenWorkspace, onAgain, r
   const over = initJobOver(job.phase);
   const building = initJobBuilding(job.phase);
   const headline = job.phase === "done" ? words.done : over ? words.failed : words.headline;
-  const fraction = job.progress.total > 0 ? job.progress.done / job.progress.total : 0;
+  const { fraction } = initProgressState(job);
   const primary: ScreenAction | undefined = job.phase === "done" && job.workspace !== undefined ? { word: words.keycap, onPress: onOpenWorkspace } : job.phase === "failed" || job.phase === "cancelled" ? { word: words.again, onPress: onAgain } : undefined;
   const secondary: ScreenAction | undefined = building
     ? asking

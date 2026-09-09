@@ -14,11 +14,13 @@ import {
   INIT_ROW_STATES,
   SOLARI_CONSOLE,
   initAgentPrompt,
+  initButtonLine,
   initCostLine,
   initJobBuilding,
   initJobOver,
   initPhaseWord,
   initProgressLine,
+  initProgressState,
   initRowOver,
   initSetupLines,
   initTallyLine,
@@ -135,6 +137,18 @@ describe("the words the clients print for the job", () => {
     expect(initProgressLine(waiting)).toBe("sign in to GitHub CLI login");
     expect(initProgressLine({ ...JOB, phase: "answering", rows: [] })).toBe("waiting for you");
     expect(initProgressLine({ ...JOB, phase: "failed", rows: [] })).toBe("failed");
+  });
+
+  it("the sidebar button's facts: the rows over as a fraction of the total, whether the person is waited on, and its words", () => {
+    expect(initProgressState(JOB)).toEqual({ fraction: 1 / 3, waitingOnYou: false });
+    expect(initButtonLine(JOB)).toBe("building · 1/3");
+    const waiting = { ...JOB, phase: "signing-in" as const, progress: { done: 2, total: 4 }, rows: [...JOB.rows, row({ id: "sign-in/gh", kind: "sign-in", label: "GitHub CLI login", state: INIT_ROW_STATES.open, page: "https://github.com/login/device", code: "8F4A-C21B" })] };
+    expect(initProgressState(waiting)).toEqual({ fraction: 0.5, waitingOnYou: true });
+    expect(initButtonLine(waiting)).toBe("waiting for you");
+    const answering = { ...JOB, phase: "answering" as const, rows: [], progress: { done: 0, total: 0 } };
+    expect(initProgressState(answering)).toEqual({ fraction: 0, waitingOnYou: true });
+    expect(initButtonLine(answering)).toBe("waiting for you");
+    expect(initButtonLine({ ...JOB, phase: "sealing", progress: { done: 3, total: 3 } })).toBe("sealing · 3/3");
   });
 
   it("the cost line names the size and the rate once, from the backend's own number", () => {

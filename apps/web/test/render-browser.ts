@@ -2,7 +2,7 @@
 import type { ChildProcess } from "node:child_process";
 import { existsSync, statfsSync } from "node:fs";
 import { chromium, type Browser, type LaunchOptions } from "playwright";
-import { stopVite } from "./vite-child";
+import { stopVite } from "./vite-child.js";
 
 // Playwright's default --disable-dev-shm-usage puts Chromium's shared memory in
 // files under /tmp, which on a 20 GB box is the root disk. Uncapped, one render
