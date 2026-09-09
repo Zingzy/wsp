@@ -802,6 +802,14 @@ export const NOTHING_TO_SERVE_LINE = "nothing to serve yet; wsp new --local make
  * The provider module a keyless host wires says it, and so does the command line before it asks for anything. */
 export const NO_PROVIDER_LINE = "no machine provider is set up on this computer, so wsp forks no machines here; set SOLARI_API_KEY and run wsp init again to seal a golden";
 
+/** The quiet row at the sidebar's bottom while no golden is sealed, and what it opens: the way to cloud machines.
+ * For now that is wsp init in a terminal, said in the one line the window before a golden used to be. */
+export const CLOUD_SETUP_WORDS = {
+  row: "Set up cloud machines",
+  title: "Cloud machines",
+  noGolden: "No golden image yet. Run wsp init in a terminal; it opens this app when the machine is ready.",
+} as const;
+
 /** What a local workspace's machine is, in every sentence and every row that names it: the refusals below, the
  * sidebar row's second line and the Machine tab's lineage all read this one phrase. */
 export const THIS_COMPUTER = "this computer";

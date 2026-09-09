@@ -15,7 +15,7 @@ export { detectToolchains } from "./detect/toolchains.js";
 export { detectTools, parseBrewfile, parseBunGlobals, parseCargoInstalls, parseGoVersionM, parseNpmGlobals, parsePipxList, parsePnpmGlobals, parseUvToolList, type BrewLine, type GoModule, type Pkg } from "./detect/tools.js";
 export { classifyFormulae, linuxSupport, renderSnapshot, type BottleSnapshot } from "./brew-bottles.js";
 export { LINUX_BOTTLES } from "./data/linux-bottles.js";
-export { AGENTS, detectAgents } from "./detect/agents.js";
+export { AGENTS, agentRowId, detectAgents } from "./detect/agents.js";
 export { type Presence, presenceOf } from "./detect/presence.js";
 export * from "./history/index.js";
 export { type CommandCount, type RecipeOptions, computeRecipe, floorApplies, unknownCommands, withProject } from "./recipe.js";

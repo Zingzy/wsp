@@ -23,12 +23,15 @@ const AIDER: Agent = { id: "aider", label: "Aider", bin: "aider", config: ["~/.a
 /** The catalog's agents in its order, each with the config that travels, then Aider. */
 export const AGENTS: readonly Agent[] = [...CATALOG_AGENTS.map((a): Agent => ({ id: a.id, label: a.name, bin: a.bin, config: a.configPaths, ...(a.volatile !== undefined ? { volatile: a.volatile } : {}) })), AIDER];
 
+/** The manifest row id of an agent, the one spelling readers match on. */
+export const agentRowId = (id: string): string => `agents/${id}`;
+
 export async function detectAgents(host: Host): Promise<ManifestEntry[]> {
   const rows: ManifestEntry[] = [];
   for (const a of AGENTS) {
     const p = await presenceOf(host, { configPaths: a.config, bin: a.bin });
     if (p === undefined) continue;
-    rows.push(entry({ rung: "agents", id: `agents/${a.id}`, label: a.label, paths: p.paths, bytes: p.bytes, ...(a.volatile !== undefined ? { volatile: a.volatile } : {}) }));
+    rows.push(entry({ rung: "agents", id: agentRowId(a.id), label: a.label, paths: p.paths, bytes: p.bytes, ...(a.volatile !== undefined ? { volatile: a.volatile } : {}) }));
   }
   return rows;
 }

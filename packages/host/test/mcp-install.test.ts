@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HELP, JSON_COMMANDS, PROSE_COMMANDS, cli, type CliIO } from "../src/cli.js";
 import { SECTION_BEGIN, sectionText } from "../src/agents-md.js";
 import { agentsOnPath, installEach, installLines, installMcp, mcpServerSpec, removeLines, runningWsp, type RunningWsp } from "../src/mcp-install.js";
+import { shimPath } from "../src/shim.js";
 import { SKILL_NAME, WSP_SKILL } from "../src/skill.js";
 import { VERSION } from "../src/version.js";
 
@@ -84,6 +85,24 @@ describe("installing the MCP server for a local agent", () => {
     symlinkSync(join(home, ".local", "bin"), join(home, "link"));
     const linked = { ...global, PATH: `${join(home, "link")}:/usr/bin` };
     expect(mcpServerSpec(statePath, linked)).toEqual({ command: join(home, "link", "wsp"), args: ["mcp", "--state", statePath] });
+  });
+
+  it("run behind the shim the desktop app wrote, the server's command is that shim and the word mcp, never the app bundle the process runs from", () => {
+    const shim = shimPath(join(home, ".wsp"));
+    expect(shim).toBe(join(home, ".wsp", "bin", "wsp"));
+    const app = "/Applications/wsp.app/Contents/MacOS/wsp";
+    const bundled: RunningWsp = { ...PROC, execPath: app, argv: [app, "/Applications/wsp.app/Contents/Resources/app/main/cli.mjs", "mcp", "install"], shim };
+    expect(mcpServerSpec(statePath, bundled)).toEqual({ command: shim, args: ["mcp", "--state", statePath] });
+    // The shim on PATH or not, the rule reads the shim the process was told about, not a lookup.
+    expect(mcpServerSpec(statePath, { ...bundled, PATH: undefined })).toEqual({ command: shim, args: ["mcp", "--state", statePath] });
+  });
+
+  it("the command line takes the running process as a parameter, so the bundled command installs the shim's command", async () => {
+    const shim = shimPath(join(home, ".wsp"));
+    const out = io();
+    expect(await cli(["mcp", "install", "--agent", "claude", "--json", "--state", statePath], out, { ...PROC, shim })).toBe(0);
+    expect(JSON.parse(out.lines[0]!)).toMatchObject({ server: { command: shim, args: ["mcp", "--state", statePath] } });
+    expect(JSON.parse(readFileSync(join(home, ".claude.json"), "utf8"))).toEqual({ mcpServers: { wsp: { command: shim, args: ["mcp", "--state", statePath] } } });
   });
 
   it("run any other way, the server's command is this node with the flags and script it was started with, against this state file, wherever the agent's cwd is", () => {

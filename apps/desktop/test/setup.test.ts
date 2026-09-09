@@ -3,11 +3,12 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LocalBackend, NoProviderBackend, type GoldenManifest } from "@wsp/engine";
+import { isLocalWorkspace } from "@wsp/protocol";
 import { createRuntime, localExecStream, memoryStore, type LocalWiring, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { fakeSsh } from "../../../packages/runtime/test/fake-ssh.js";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
-import { checkSetup } from "../src/setup.js";
+import { checkSetup, recordThisComputer } from "../src/setup.js";
 import type { Keys } from "@wsp/host";
 
 const SOLARI = "slr_live_fake_desktop_key";
@@ -58,8 +59,8 @@ describe("checkSetup", () => {
     return keys.solari === undefined ? keyless : keyed;
   };
 
-  it("reports the key missing, with nothing asked, when there is no key and nothing to show either", async () => {
-    expect(await checkSetup({ statePath: join(dir, "state.json"), sources, runtimeFor })).toEqual({ ready: false, missing: "key" });
+  it("is not ready, with nothing asked, when there is no key and nothing to show either", async () => {
+    expect(await checkSetup({ statePath: join(dir, "state.json"), sources, runtimeFor })).toEqual({ ready: false });
     // A missing provider key is not a missing answer: the state was read anyway, with no key handed to the runtime.
     expect(made).toEqual([{ keys: {}, statePath: join(dir, "state.json") }]);
   });
@@ -81,21 +82,46 @@ describe("checkSetup", () => {
     expect(made).toEqual([{ keys: { anthropic: "sk-ant-x-fake-desktop-key" }, statePath: join(dir, "state.json") }]);
   });
 
-  it("reports the golden missing when the key exists but the store has none", async () => {
+  it("is not ready when the key exists but the store has no golden and no workspace", async () => {
     sources.env = { SOLARI_API_KEY: SOLARI };
-    expect(await checkSetup({ statePath: join(dir, "state.json"), sources, runtimeFor })).toEqual({ ready: false, missing: "golden" });
+    expect(await checkSetup({ statePath: join(dir, "state.json"), sources, runtimeFor })).toEqual({ ready: false });
     expect(made).toEqual([{ keys: { solari: SOLARI }, statePath: join(dir, "state.json") }]);
   });
 
-  it("reports the golden missing when the manifest has no head version", async () => {
+  it("is not ready when the manifest has no head version", async () => {
     sources.env = { SOLARI_API_KEY: SOLARI };
     await store.put("goldens", "default", { ...GOLDEN, head: 2 });
-    expect(await checkSetup({ statePath: join(dir, "state.json"), sources, runtimeFor })).toEqual({ ready: false, missing: "golden" });
+    expect(await checkSetup({ statePath: join(dir, "state.json"), sources, runtimeFor })).toEqual({ ready: false });
   });
 
   it("is ready with a key and a golden, handing back the runtime it built", async () => {
     sources.env = { SOLARI_API_KEY: SOLARI };
     await store.put("goldens", "default", GOLDEN);
     expect(await checkSetup({ statePath: join(dir, "state.json"), sources, runtimeFor })).toEqual({ ready: true, runtime: keyed });
+  });
+
+  describe("recordThisComputer", () => {
+    it("records this computer as the one local workspace with no key, the road wsp new --local takes, and hands back the runtime to serve", async () => {
+      const made = await recordThisComputer({ statePath: join(dir, "state.json"), sources, runtimeFor });
+      expect(made.runtime).toBe(keyless);
+      expect(isLocalWorkspace(made.workspace)).toBe(true);
+      expect((await keyless.workspaces.list()).map(w => w.id)).toEqual([made.workspace.id]);
+      // The state now has something to show, so the next launch opens without this step.
+      expect(await checkSetup({ statePath: join(dir, "state.json"), sources, runtimeFor })).toEqual({ ready: true, runtime: keyless });
+    });
+
+    it("keeps a local workspace already recorded rather than refusing a second", async () => {
+      const first = await keyless.workspaces.createLocal("thisbox");
+      const made = await recordThisComputer({ statePath: join(dir, "state.json"), sources, runtimeFor });
+      expect(made.workspace.id).toBe(first.id);
+      expect(await keyless.workspaces.list()).toHaveLength(1);
+    });
+
+    it("takes the same road with a provider key and no golden: this computer first, the cloud later", async () => {
+      sources.env = { SOLARI_API_KEY: SOLARI };
+      const made = await recordThisComputer({ statePath: join(dir, "state.json"), sources, runtimeFor });
+      expect(made.runtime).toBe(keyed);
+      expect(isLocalWorkspace(made.workspace)).toBe(true);
+    });
   });
 });
