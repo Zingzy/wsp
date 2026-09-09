@@ -7,7 +7,7 @@
 // A rename takes the same rule the fork's name takes, keeps the record's id
 // and machine, and leaves the threads on that machine alone.
 import { describe, expect, it, vi } from "vitest";
-import { BLANK_NAME_REFUSAL, RECORD_RESTORED, nameDeletingRefusal, nameTakenRefusal, type EventUnion } from "@wsp/protocol";
+import { BLANK_NAME_REFUSAL, RECORD_RESTORED, nameDeletingRefusal, nameTakenRefusal, type EventUnion, type WorkspaceTheme } from "@wsp/protocol";
 import { createRuntime } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend } from "./stub-backend.js";
@@ -239,7 +239,9 @@ describe("a name names one workspace", () => {
 });
 
 describe("a workspace's look", () => {
-  it("holds the hue and the glyph beside the name, one fact at a time, and a fresh runtime reads them back", async () => {
+  const theme: WorkspaceTheme = { dots: [{ angle: 200, radius: 0.5 }, { angle: 20, radius: 0.5 }], harmony: "complementary", grain: 0.25, opacity: 0.6, mode: "auto" };
+
+  it("holds the theme and the glyph beside the name, one fact at a time, and a fresh runtime reads them back", async () => {
     const backend = stubBackend();
     const store = memoryStore();
     const rt = createRuntime({ backend, store, adapters: {} });
@@ -247,21 +249,21 @@ describe("a workspace's look", () => {
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
 
-    expect(await rt.workspaces.look(ws.id, { tint: "cyan" })).toMatchObject({ id: ws.id, tint: "cyan" });
-    // The glyph alone: the hue it was not sent stays as it is.
-    expect(await rt.workspaces.look(ws.id, { glyph: "flask" })).toMatchObject({ tint: "cyan", glyph: "flask" });
-    expect(await store.get("workspaces", ws.id)).toMatchObject({ tint: "cyan", glyph: "flask" });
+    expect(await rt.workspaces.look(ws.id, { theme })).toMatchObject({ id: ws.id, theme });
+    // The glyph alone: the theme it was not sent stays as it is.
+    expect(await rt.workspaces.look(ws.id, { glyph: "flask" })).toMatchObject({ theme, glyph: "flask" });
+    expect(await store.get("workspaces", ws.id)).toMatchObject({ theme, glyph: "flask" });
     // Its own event, both facts whole, and never workspace.created: the machine was not touched.
     expect(events.filter(e => e.type === "workspace.look")).toMatchObject([
-      { workspaceId: ws.id, tint: "cyan", glyph: null },
-      { workspaceId: ws.id, tint: "cyan", glyph: "flask" },
+      { workspaceId: ws.id, theme, glyph: null },
+      { workspaceId: ws.id, theme, glyph: "flask" },
     ]);
     expect(events.filter(e => e.type === "workspace.created")).toEqual([]);
     expect(backend.machines[0]!.killed).toBe(false);
 
     await rt.close();
     const next = createRuntime({ backend, store, adapters: {} });
-    expect(await next.workspaces.get(ws.id)).toMatchObject({ tint: "cyan", glyph: "flask" });
+    expect(await next.workspaces.get(ws.id)).toMatchObject({ theme, glyph: "flask" });
     await next.close();
   });
 
@@ -270,14 +272,14 @@ describe("a workspace's look", () => {
     const store = memoryStore();
     const rt = createRuntime({ backend, store, adapters: {} });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "first" });
-    await rt.workspaces.look(ws.id, { tint: "violet", glyph: "rocket" });
+    await rt.workspaces.look(ws.id, { theme, glyph: "rocket" });
 
-    expect(await rt.workspaces.look(ws.id, { tint: null })).toMatchObject({ glyph: "rocket" });
-    expect(await rt.workspaces.get(ws.id)).not.toHaveProperty("tint");
-    expect(await store.get("workspaces", ws.id)).not.toHaveProperty("tint");
+    expect(await rt.workspaces.look(ws.id, { theme: null })).toMatchObject({ glyph: "rocket" });
+    expect(await rt.workspaces.get(ws.id)).not.toHaveProperty("theme");
+    expect(await store.get("workspaces", ws.id)).not.toHaveProperty("theme");
     expect(await rt.workspaces.look(ws.id, { glyph: null })).not.toHaveProperty("glyph");
-    // A default workspace has neither, so nothing is tinted until a person picks.
-    expect(await rt.workspaces.create({ golden: "snap_g", name: "second" })).not.toHaveProperty("tint");
+    // A default workspace has neither, so nothing is themed until a person picks.
+    expect(await rt.workspaces.create({ golden: "snap_g", name: "second" })).not.toHaveProperty("theme");
   });
 });
 

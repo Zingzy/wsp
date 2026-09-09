@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   WORKSPACE_GLYPHS,
-  WORKSPACE_TINTS,
   lookWord,
   Recipe,
   RecipeSource,
@@ -125,46 +124,46 @@ describe("protocol views", () => {
 
 describe("a workspace's look", () => {
   const view = { id: "ws_1", name: "task-1", machineId: "m1", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00.000Z" };
-
-  it("the six hues leave out the greens that mean running and the red that means danger, and none of them repeats", () => {
-    expect(WORKSPACE_TINTS).toHaveLength(6);
-    expect(new Set(WORKSPACE_TINTS).size).toBe(6);
-    for (const taken of ["green", "emerald", "lime", "red", "amber", "orange", "yellow"]) expect(WORKSPACE_TINTS).not.toContain(taken);
-  });
+  const theme = { dots: [{ angle: 200, radius: 0.5 }, { angle: 20, radius: 0.5 }], harmony: "complementary", grain: 0.25, opacity: 0.6, mode: "auto" };
 
   it("about two dozen glyphs, each one word so its name needs no second table, and none of them an emoji", () => {
     expect(WORKSPACE_GLYPHS.length).toBeGreaterThanOrEqual(20);
     expect(new Set(WORKSPACE_GLYPHS).size).toBe(WORKSPACE_GLYPHS.length);
     for (const glyph of WORKSPACE_GLYPHS) expect(glyph).toMatch(/^[a-z]+$/);
     expect(lookWord("terminal")).toBe("Terminal");
-    expect(lookWord("cyan")).toBe("Cyan");
   });
 
-  it("the view carries both, absent is none, and a hue outside the six is refused", () => {
+  it("the view carries the theme and the glyph, absent is none, and a theme outside the shape is refused", () => {
     expect(WorkspaceView.parse(view)).toEqual(view);
-    const looked = { ...view, tint: "cyan", glyph: "flask" };
+    const looked = { ...view, theme, glyph: "flask" };
     expect(WorkspaceView.parse(looked)).toEqual(looked);
-    expect(() => WorkspaceView.parse({ ...view, tint: "emerald" })).toThrow();
+    expect(() => WorkspaceView.parse({ ...view, theme: { ...theme, dots: [] } })).toThrow();
+    expect(() => WorkspaceView.parse({ ...view, theme: { ...theme, dots: [...theme.dots, ...theme.dots] } })).toThrow();
+    expect(() => WorkspaceView.parse({ ...view, theme: { ...theme, opacity: 0 } })).toThrow();
+    expect(() => WorkspaceView.parse({ ...view, theme: { ...theme, grain: 2 } })).toThrow();
+    expect(() => WorkspaceView.parse({ ...view, theme: { ...theme, mode: "sepia" } })).toThrow();
+    expect(() => WorkspaceView.parse({ ...view, tint: "cyan" })).not.toThrow();
+    expect(WorkspaceView.parse({ ...view, tint: "cyan" })).toEqual(view);
     expect(() => WorkspaceView.parse({ ...view, glyph: "🚀" })).toThrow();
   });
 
-  it("the op takes one fact at a time, null to clear it, and refuses a hue the list does not hold", () => {
+  it("the op takes one fact at a time, null to clear it, and refuses a theme outside the shape", () => {
     for (const req of [
-      { id: 1, op: "workspaces.look", workspaceId: "ws_1", tint: "violet" },
+      { id: 1, op: "workspaces.look", workspaceId: "ws_1", theme },
       { id: 2, op: "workspaces.look", workspaceId: "ws_1", glyph: null },
-      { id: 3, op: "workspaces.look", workspaceId: "ws_1", tint: null, glyph: "rocket" },
+      { id: 3, op: "workspaces.look", workspaceId: "ws_1", theme: null, glyph: "rocket" },
       { id: 4, op: "workspaces.look", workspaceId: "ws_1" },
     ]) {
       expect(RuntimeRequest.parse(req)).toEqual(req);
     }
-    expect(() => RuntimeRequest.parse({ id: 5, op: "workspaces.look", workspaceId: "ws_1", tint: "red" })).toThrow();
-    expect(() => RuntimeRequest.parse({ id: 6, op: "workspaces.look", tint: "cyan" })).toThrow();
+    expect(() => RuntimeRequest.parse({ id: 5, op: "workspaces.look", workspaceId: "ws_1", theme: "red" })).toThrow();
+    expect(() => RuntimeRequest.parse({ id: 6, op: "workspaces.look", theme })).toThrow();
   });
 
   it("the event carries both facts whole, so a cleared one reads null rather than going missing", () => {
-    const e = { type: "workspace.look", workspaceId: "ws_1", tint: "cyan", glyph: null };
+    const e = { type: "workspace.look", workspaceId: "ws_1", theme, glyph: null };
     expect(EventUnion.parse(e)).toEqual(e);
-    expect(() => EventUnion.parse({ type: "workspace.look", workspaceId: "ws_1", tint: "cyan" })).toThrow();
+    expect(() => EventUnion.parse({ type: "workspace.look", workspaceId: "ws_1", theme })).toThrow();
   });
 });
 

@@ -5,7 +5,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DEFAULT_PREFERENCES, DROP_A_FOLDER_LINE, FREE_WORD, PROVIDER_UNREACHED_LINE, exportFromLine, importIntoLine, registerRequest, registeredLine, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DROP_A_FOLDER_LINE, FREE_WORD, PROVIDER_UNREACHED_LINE, exportFromLine, harmonyDots, importIntoLine, registerRequest, registeredLine, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceTheme, type WorkspaceView } from "@wsp/protocol";
 import { WORKSPACE_WORDS } from "../src/actions/format.js";
 import { onOpenCommandPalette } from "../src/commandPaletteBus.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
@@ -14,8 +14,9 @@ import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { statusOf } from "./workspace-status.js";
 import { onNewThreadRequest, requestProjectTrip, requestRenameWorkspace } from "../src/shell/shellRequests.js";
-import { useSpaceTint } from "../src/sidebar/sidebarMode.js";
+import { useSpaceTheme } from "../src/sidebar/sidebarMode.js";
 import { SWIPE_GAP_MS } from "../src/sidebar/spaceSwipe.js";
+import { leadDimClass } from "../src/sidebar/workspaceRows.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 
 // The triggers keep their elements, and no popup mounts: this file focuses and
@@ -85,9 +86,9 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     // The look sits on the record beside the name, so the fixture writes it there and answers with the row.
     setWorkspaceLook: vi.fn(async (id: string, look: WorkspaceLook) => {
       const row = workspaces.find(w => w.id === id)!;
-      if (look.tint !== undefined) {
-        if (look.tint === null) delete row.tint;
-        else row.tint = look.tint;
+      if (look.theme !== undefined) {
+        if (look.theme === null) delete row.theme;
+        else row.theme = look.theme;
       }
       if (look.glyph !== undefined) {
         if (look.glyph === null) delete row.glyph;
@@ -120,7 +121,7 @@ const stateSlot = (row: HTMLElement): HTMLElement => row.querySelector<HTMLEleme
 const metaOf = (row: HTMLElement): HTMLElement => row.querySelector<HTMLElement>("[data-workspace-meta]")!;
 const spaceHeader = (): HTMLElement | null => document.querySelector<HTMLElement>("[data-space-header]");
 const headerLines = (): string[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-header] [data-space-meta]")).map(l => l.textContent ?? "");
-const dots = (): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-dot]"));
+const icons = (): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-icon]"));
 const panes = (): HTMLElement[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-pane]"));
 const paneNames = (): string[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-pane] [data-space-name]")).map(n => n.textContent ?? "");
 /** What React says when one body is drawn as both panes: the one console line the reversal case is about. */
@@ -1193,23 +1194,26 @@ describe("Solari out of reach from this computer", () => {
 });
 
 /** What the shell reads to wash its own surface, mounted beside the body so one render answers for both. */
-function TintProbe() {
-  return <span data-tint-probe>{useSpaceTint() ?? "none"}</span>;
+/** The first dot's angle of the theme the shell would paint, or none. */
+function ThemeProbe() {
+  return <span data-theme-probe>{useSpaceTheme()?.dots[0]?.angle ?? "none"}</span>;
 }
+const themed = (angle: number): WorkspaceTheme => ({ ...DEFAULT_THEME, dots: harmonyDots({ angle, radius: 0.5 }, "complementary"), harmony: "complementary" });
 
-describe("a workspace's own colour and glyph", () => {
-  const TINTED: WorkspaceView = { ...view("ws_a", "api"), tint: "cyan", glyph: "flask" };
-  const PLAIN = view("ws_b", "web");
-  const both = () => [{ ...TINTED }, { ...PLAIN }];
+describe("a workspace's own theme and glyph", () => {
+  const THEMED: WorkspaceView = { ...view("ws_a", "api"), theme: themed(200), glyph: "flask" };
+  const PLAIN = view("ws_b", "web", "napping");
+  const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
+  const all = () => [{ ...THEMED }, { ...PLAIN }, { ...MAC }];
   const threads = () => [session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) }), session("s2", "ws_b", { prompt: "bump the lockfile", startedAt: iso(-4 * 60_000) })];
   const leadOf = (el: HTMLElement): HTMLElement => el.querySelector<HTMLElement>("span[aria-hidden]")!;
-  const tinted = (): string[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-tint]")).map(el => el.getAttribute("data-space-tint") ?? "");
 
   async function mountSpaces(api: FakeApi): Promise<FakeApi> {
     useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarMode: "spaces" } });
     useStore.getState().bind(api);
     render(
       <SidebarProvider defaultOpen>
+        <ThemeProbe />
         <WorkspaceSidebar />
       </SidebarProvider>,
     );
@@ -1217,33 +1221,47 @@ describe("a workspace's own colour and glyph", () => {
     return api;
   }
 
-  it("in the dots row every dot keeps its state colour, and the hue reaches the current one's name alone", async () => {
-    await mountSpaces(fakeApi(both(), [status(TINTED), status(PLAIN)], threads()));
-    const [tint, plain] = dots() as [HTMLElement, HTMLElement];
-    // Both workspaces are running, so both dots are the green that says so, hue or no hue.
-    expect(leadOf(tint).className).toContain("bg-success");
-    expect(leadOf(plain).className).toContain("bg-success");
-    expect(tint.getAttribute("data-space-tint")).toBeNull();
-    // The name of the one on screen is where the hue shows, and only there.
-    const name = tint.querySelector<HTMLElement>("[data-space-tint]")!;
-    expect(name.getAttribute("data-space-tint")).toBe("cyan");
-    expect(name.textContent).toBe("api");
-    expect(name.className).toContain("text-[var(--space-tint)]");
-    // The glyph rides the current dot alone, since only that one has the room for it, and takes the row's own ink.
-    expect(tint.querySelector("[data-space-glyph='flask']")).not.toBeNull();
-    expect(tint.querySelector("[data-space-glyph]")!.getAttribute("class") ?? "").not.toContain("--space-tint");
-    fireEvent.click(plain);
-    await waitFor(() => expect(within(spaceHeader()!).getByText("web")).toBeDefined());
-    expect(document.querySelector("[data-space-dots] [data-space-glyph]")).toBeNull();
-    // The workspace with no hue puts no hue on its name either.
-    expect(document.querySelector("[data-space-dots] [data-space-tint]")).toBeNull();
+  it("the space bar is one icon per workspace and a plus: the kind's glyph by default, the picked icon where one is, the current one in the theme's ink, the others muted, a paused one dimmed, and no name on any of them", async () => {
+    await mountSpaces(fakeApi(all(), [status(THEMED), status(PLAIN), { ...status(MAC), kind: "local", size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }], threads()));
+    await waitFor(() => expect(icons()).toHaveLength(3));
+    // The sidebar's own order: the running ones first, so this computer sits before the paused fork.
+    const [api, mac, web] = icons() as [HTMLElement, HTMLElement, HTMLElement];
+    expect(icons().map(i => i.getAttribute("aria-label"))).toEqual(["api", "zingzy-mac", "web"]);
+    expect(icons().map(i => i.textContent)).toEqual(["", "", ""]);
+    expect(api.querySelector("[data-space-glyph='flask']")).not.toBeNull();
+    expect(web.querySelector("[data-space-kind-glyph]")!.getAttribute("class")).toContain("lucide-cloud");
+    expect(mac.querySelector("[data-space-kind-glyph]")!.getAttribute("class")).toContain("lucide-laptop");
+    expect(api.getAttribute("aria-current")).toBe("true");
+    expect(api.className).toContain("--space-tint");
+    expect(web.className).not.toContain("--space-tint");
+    expect(web.className).toContain("text-sidebar-muted-foreground");
+    expect(web.className.split(" ")).toContain("opacity-50");
+    expect(mac.className.split(" ")).not.toContain("opacity-50");
+    // One row of one height, centred, and the plus at its right end makes a new workspace. The icons sit in a
+    // group of their own that scrolls sideways once they outgrow the footer, and the plus stays outside it, so
+    // neither the first icon nor the plus is ever cut.
+    const bar = document.querySelector<HTMLElement>("[data-space-bar]")!;
+    expect(bar.className).toContain("justify-center");
+    expect(bar.className).toContain("h-7");
+    for (const icon of icons()) expect(icon.className).toContain("size-7");
+    const group = bar.querySelector<HTMLElement>("[data-space-icons]")!;
+    expect(group.className).toContain("overflow-x-auto");
+    expect(Array.from(group.querySelectorAll("[data-space-icon]"))).toEqual(icons());
+    expect(bar.lastElementChild!.hasAttribute("data-space-new")).toBe(true);
+    expect(group.contains(bar.lastElementChild)).toBe(false);
+    // The paused fork dims by the one rule its row's lead dims by.
+    expect(leadDimClass({ state: "paused" })).toBe("opacity-50");
+    expect(leadDimClass({ state: "running" })).toBeUndefined();
+    expect(web.className.split(" ")).toContain(leadDimClass({ state: "paused" }));
+    expect(screen.queryByRole("button", { name: "Workspaces" })).toBeNull();
+    fireEvent.click(bar.querySelector("[data-space-new]")!);
+    expect(await screen.findByRole("dialog")).toBeDefined();
   });
 
-  it("the header's lead is the glyph in the hue, and the state dot moves to the state slot so running is still said", async () => {
-    await mountSpaces(fakeApi(both(), [status(TINTED), status(PLAIN)], threads()));
+  it("the header's lead is the glyph in the theme's ink, and the state dot moves to the state slot so running is still said", async () => {
+    await mountSpaces(fakeApi(all(), [status(THEMED), status(PLAIN)], threads()));
     const header = spaceHeader()!;
-    expect(header.getAttribute("data-space-tint")).toBe("cyan");
-    expect(leadOf(header).querySelector("[data-space-glyph='flask']")).not.toBeNull();
+    expect(leadOf(header).querySelector("[data-space-glyph='flask']")!.getAttribute("class")).toContain("--space-tint");
     const state = header.querySelector<HTMLElement>("[data-space-state]")!;
     expect(state.querySelector(".bg-success")).not.toBeNull();
     expect(state.textContent).toBe("");
@@ -1251,49 +1269,44 @@ describe("a workspace's own colour and glyph", () => {
 
   it("a workspace with no glyph keeps the state dot in the lead and nothing in the state slot but its word", async () => {
     useStore.setState({ selectedId: "ws_b" });
-    await mountSpaces(fakeApi(both(), [status(TINTED), status(PLAIN)], threads()));
+    await mountSpaces(fakeApi(all(), [status(THEMED), status(PLAIN)], threads()));
     await waitFor(() => expect(within(spaceHeader()!).getByText("web")).toBeDefined());
     const header = spaceHeader()!;
-    expect(header.getAttribute("data-space-tint")).toBeNull();
     expect(leadOf(header).querySelector("[data-space-glyph]")).toBeNull();
-    expect(leadOf(header).querySelector(".bg-success")).not.toBeNull();
+    expect(leadOf(header).querySelector("span")).not.toBeNull();
     expect(header.querySelector("[data-space-state]")!.querySelector("span[aria-hidden]")).toBeNull();
   });
 
   // The store keeps its workspaces sorted by id; the sidebar draws the running ones first, so a napping workspace
   // whose id sorts first parts the two orders. A creation in flight holds its own key as the selection, which is in
-  // neither order, and both fall back to a first row: the shell's wash has to be the header's workspace even then.
-  it("the wash the shell paints and the header the body draws are the same workspace when the two orders differ", async () => {
-    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarMode: "spaces" } });
-    const napping: WorkspaceView = { ...view("ws_aaa", "old", "napping"), tint: "azure" };
-    const running: WorkspaceView = { ...view("ws_zzz", "api"), tint: "magenta" };
+  // neither order, and both fall back to a first row: the shell's theme has to be the header's workspace even then.
+  it("the theme the shell paints and the header the body draws are the same workspace when the two orders differ", async () => {
+    const napping: WorkspaceView = { ...view("ws_aaa", "old", "napping"), theme: themed(100) };
+    const running: WorkspaceView = { ...view("ws_zzz", "api"), theme: themed(300) };
     const api = fakeApi([napping, running], [status(napping), status(running)]);
     api.createFromGoldenHead.mockImplementation(() => new Promise(() => {}));
-    useStore.getState().bind(api);
-    render(
-      <SidebarProvider defaultOpen>
-        <TintProbe />
-        <WorkspaceSidebar />
-      </SidebarProvider>,
-    );
-    await waitFor(() => expect(spaceHeader()).not.toBeNull());
+    await mountSpaces(api);
     await act(async () => void useStore.getState().createWorkspace("fresh"));
     await waitFor(() => expect(useStore.getState().selectedId).toBe(useStore.getState().creations[0]!.key));
     expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_aaa", "ws_zzz"]);
     expect(within(spaceHeader()!).getByText("api")).toBeDefined();
-    expect(document.querySelector("[data-tint-probe]")!.textContent).toBe("magenta");
+    expect(document.querySelector("[data-theme-probe]")!.textContent).toBe("300");
   });
 
-  it("in the list body the hue draws on the tinted workspace's branch rail and nowhere else", async () => {
-    await mount(fakeApi(both(), [status(TINTED), status(PLAIN)], threads()), "api");
-    await waitFor(() => expect(workspaceRowIds()).toEqual(["ws:ws_a", "ws:ws_b"]));
-    // One element in the whole body wears the hue, and it is the rail the tinted workspace's threads hang from.
-    expect(tinted()).toEqual(["cyan"]);
-    const rail = document.querySelector<HTMLElement>("[data-space-tint]")!;
-    expect(rail.getAttribute("data-slot")).toBe("sidebar-menu-sub");
-    expect(rail.querySelector("[data-row-id='thread:s1']")).not.toBeNull();
-    // The row itself is untouched: no glyph, no hue on the lead, the state dot as it always was.
-    expect(rowOf("api").querySelector("[data-space-glyph]")).toBeNull();
+  it("in the list body no workspace's colour reaches the chrome: the shell paints no theme and the rows carry no glyph", async () => {
+    useStore.getState().bind(fakeApi(all(), [status(THEMED), status(PLAIN)], threads()));
+    render(
+      <SidebarProvider defaultOpen>
+        <ThemeProbe />
+        <WorkspaceSidebar />
+      </SidebarProvider>,
+    );
+    await waitFor(() => expect(workspaceRowIds()).toEqual(["ws:ws_a", "ws:ws_m", "ws:ws_b"]));
+    expect(document.querySelector("[data-theme-probe]")!.textContent).toBe("none");
+    // The paused row's lead glyph dims by the same rule the bar's icon does.
+    expect(rowOf("web").querySelector("[data-workspace-lead] svg")!.getAttribute("class")!.split(" ")).toContain(leadDimClass({ state: "paused" }));
+    expect(rowOf("api").querySelector("[data-workspace-lead] svg")!.getAttribute("class")!.split(" ")).not.toContain("opacity-50");
+    expect(document.querySelector("[data-space-glyph], [data-space-icon], [data-space-bar]")).toBeNull();
   });
 });
 
@@ -1315,14 +1328,15 @@ describe("Spaces mode", () => {
     return api;
   }
 
-  it("the list is what the sidebar draws with nothing remembered: every workspace's row and no header or dots", async () => {
+  it("the list is what the sidebar draws with nothing remembered: every workspace's row under the Workspaces header, and no space header or bar", async () => {
     await mount(fakeApi(THREE, statuses()), "api");
     await waitFor(() => expect(workspaceRowIds()).toEqual(["ws:ws_a", "ws:ws_b", "ws:ws_c"]));
     expect(spaceHeader()).toBeNull();
-    expect(dots()).toHaveLength(0);
+    expect(icons()).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "Workspaces" })).toBeDefined();
   });
 
-  it("a remembered Spaces pick draws one workspace's rows under its header, the others only as dots", async () => {
+  it("a remembered Spaces pick draws one workspace's rows under its header with no Workspaces header over it, the others only as icons on the bar", async () => {
     await mountSpaces(
       fakeApi(THREE, statuses(), [
         session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) }),
@@ -1335,11 +1349,14 @@ describe("Spaces mode", () => {
     // Only that workspace's threads, in the list's own grammar, under the header the walk starts on.
     expect(rowIds()).toEqual(["ws:ws_a", "thread:s1"]);
     expect(screen.queryByText("bump the lockfile")).toBeNull();
-    expect(dots().map(d => d.getAttribute("aria-label"))).toEqual(["api", "web", "old"]);
-    // The current dot is the only one carrying its name, so it is the wide one.
-    expect(dots().map(d => d.textContent)).toEqual(["api", "", ""]);
-    expect(dots()[0]!.getAttribute("aria-current")).toBe("true");
-    expect(dots()[1]!.getAttribute("aria-current")).toBeNull();
+    expect(icons().map(d => d.getAttribute("aria-label"))).toEqual(["api", "web", "old"]);
+    // The name is on the header alone; no icon carries one.
+    expect(icons().map(d => d.textContent)).toEqual(["", "", ""]);
+    expect(icons()[0]!.getAttribute("aria-current")).toBe("true");
+    expect(icons()[1]!.getAttribute("aria-current")).toBeNull();
+    // One workspace is on screen, so the collapse header and its chevron are gone; the plus is on the bar.
+    expect(screen.queryByRole("button", { name: "Workspaces" })).toBeNull();
+    expect(document.querySelector("[data-space-bar] [data-space-new]")).not.toBeNull();
   });
 
   it("the header's lines are the machine, what it cost today with its rate, and the nap countdown only when one is set", async () => {
@@ -1370,13 +1387,13 @@ describe("Spaces mode", () => {
     expect(spaceHeader()!.querySelector("[data-space-state]")!.textContent).toBe("Paused");
   });
 
-  it("a click on another workspace's dot moves the body to it", async () => {
+  it("a click on another workspace's icon moves the body to it", async () => {
     await mountSpaces(fakeApi(THREE, statuses(), [session("s2", "ws_b", { prompt: "bump the lockfile", startedAt: iso(-30 * 60_000) })]));
-    fireEvent.click(dots()[1]!);
+    fireEvent.click(icons()[1]!);
     await waitFor(() => expect(within(spaceHeader()!).getByText("web")).toBeDefined());
     expect(useStore.getState().selectedId).toBe("ws_b");
     expect(screen.getByText("bump the lockfile")).toBeDefined();
-    expect(dots().map(d => d.textContent)).toEqual(["", "web", ""]);
+    expect(icons().map(d => d.getAttribute("aria-current"))).toEqual([null, "true", null]);
   });
 
   it("this computer's header says what the machine is where a fork's size reads, through the one machine line, and free where a fork's spend reads", async () => {
@@ -1394,7 +1411,7 @@ describe("Spaces mode", () => {
     await waitFor(() => expect(headerLines()).toEqual(["this computer", FREE_WORD]));
     // The fork beside it keeps every line it had: the size, then the spend with its rate. Both bodies carry a
     // header while one travels out, so the lines are read once the body asked for is there alone.
-    fireEvent.click(dots()[0]!);
+    fireEvent.click(icons()[0]!);
     await waitFor(() => expect(within(spaceHeader()!).getByText("api")).toBeDefined());
     await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.00 today · $0.110/hr"]));
   });
@@ -1407,11 +1424,11 @@ describe("Spaces mode", () => {
     });
     try {
       await mountSpaces(fakeApi(THREE, statuses()));
-      fireEvent.click(dots()[1]!);
+      fireEvent.click(icons()[1]!);
       expect(paneNames()).toEqual(["api", "web"]);
       // Straight back while that travel is still running: React says "two children with the same key" if the
       // workspace now on screen is still the one the travel calls the leaver.
-      fireEvent.click(dots()[0]!);
+      fireEvent.click(icons()[0]!);
       expect(errors).toEqual([]);
       expect(paneNames()).toEqual(["api", "web"]);
       expect(document.querySelector<HTMLElement>("[data-space-leaving] [data-space-name]")!.textContent).toBe("web");
@@ -1438,7 +1455,7 @@ describe("Spaces mode", () => {
     expect(spaceName()).toBe("web");
     await waitFor(() => expect(panes()).toHaveLength(1));
     expect(screen.getByText("bump the lockfile")).toBeDefined();
-    expect(dots().map(d => d.textContent)).toEqual(["", "web", ""]);
+    expect(icons().map(d => d.getAttribute("aria-current"))).toEqual([null, "true", null]);
     // The quiet after the fingers lift ends the gesture, so the next swipe is read as its own.
     await act(async () => new Promise(resolve => setTimeout(resolve, SWIPE_GAP_MS + 10)));
     fireEvent.wheel(body(), { deltaX: -80, deltaY: 0 });
@@ -1459,9 +1476,30 @@ describe("Spaces mode", () => {
     for (const deltaY of [120, 120]) fireEvent.wheel(body(), { deltaX: 0, deltaY });
     expect(useStore.getState().selectedId).toBe("ws_b");
     expect(panes()).toHaveLength(1);
-    // The workspaces carry the swipe, not the whole sidebar: over the search row the same push moves nothing.
-    await act(async () => new Promise(resolve => setTimeout(resolve, SWIPE_GAP_MS + 10)));
-    fireEvent.wheel(document.querySelector<HTMLElement>("[data-sidebar-search]")!, { deltaX: 80, deltaY: 0 });
+  });
+
+  it("the whole sidebar carries the swipe: the empty room under the rows, the space bar and the search row all move a space, and the list body never does", async () => {
+    await mountSpaces(fakeApi(THREE, statuses()));
+    const rest = async (): Promise<void> => {
+      await waitFor(() => expect(panes()).toHaveLength(1));
+      await act(async () => new Promise(resolve => setTimeout(resolve, SWIPE_GAP_MS + 10)));
+    };
+    // The scroll area under the rows, where a hand lands when the space has few threads.
+    fireEvent.wheel(document.querySelector<HTMLElement>("[data-slot=sidebar-content]")!, { deltaX: 80, deltaY: 0 });
+    expect(useStore.getState().selectedId).toBe("ws_b");
+    await rest();
+    fireEvent.wheel(document.querySelector<HTMLElement>("[data-space-bar]")!, { deltaX: 80, deltaY: 0 });
+    expect(useStore.getState().selectedId).toBe("ws_c");
+    await rest();
+    fireEvent.wheel(document.querySelector<HTMLElement>("[data-sidebar-search]")!, { deltaX: -80, deltaY: 0 });
+    expect(useStore.getState().selectedId).toBe("ws_b");
+    await rest();
+    // The list body has no spaces to move between, so the same push over it is a scroll and nothing more.
+    await act(async () => {
+      await useStore.getState().setPreferences({ sidebarMode: "list" });
+    });
+    await waitFor(() => expect(workspaceRowIds()).toHaveLength(3));
+    fireEvent.wheel(document.querySelector<HTMLElement>("[data-slot=sidebar-content]")!, { deltaX: 80, deltaY: 0 });
     expect(useStore.getState().selectedId).toBe("ws_b");
   });
 
@@ -1528,8 +1566,8 @@ describe("Spaces mode", () => {
       // The list's own row does exactly this on a click, and the same key road reaches both.
       await waitFor(() => expect(useStore.getState().selectedThreadId).toBeNull());
       expect(useStore.getState().selectedId).toBe("ws_a");
-      // Selecting leaves it plain: the one workspace on screen has nothing to say by being tinted, and the wide
-      // dot is where the sidebar says which workspace this is. The list's rows keep their own tint.
+      // Selecting leaves it plain: the one workspace on screen has nothing to say by being tinted, and the bar's
+      // current icon is where the sidebar says which workspace this is. The list's rows keep their own tint.
       expect(spaceHeader()!.getAttribute("data-active")).toBe("false");
       // Opening a thread stays on its own roads: the menu, the palette and the new-thread chord.
       expect(asked).toEqual([]);

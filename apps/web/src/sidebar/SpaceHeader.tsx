@@ -14,8 +14,8 @@
 // and Enter both open the workspace here as they do on its row in the list,
 // and the menu key reaches the actions, since a browser sends that key as a
 // context menu on whatever has focus. The block takes no colour of its own:
-// the hue it declares is there for the glyph to draw in, and the wash that
-// says which workspace is open is painted on the sidebar, not here.
+// the glyph draws in the theme's ink the sidebar declares above it, and the
+// theme itself is painted on the sidebar, not here.
 import type { MouseEvent } from "react";
 import type { MemoryReading } from "@wsp/protocol";
 import { openContextMenu } from "../actions/contextMenu.js";
@@ -23,7 +23,7 @@ import { WORKSPACE_WORDS } from "../actions/format.js";
 import type { ResolvedAction } from "../actions/registry.js";
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
 import { SidebarMenuButton } from "../components/ui/sidebar.js";
-import { TINTED_INK, WorkspaceGlyphMark, tintAttr } from "../components/workspaceLook.js";
+import { TINTED_INK, WorkspaceGlyphMark } from "../components/workspaceLook.js";
 import { cn } from "../lib/utils.js";
 import { RowNameInput } from "./RowNameInput.js";
 import { ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, workspaceRowId } from "./rowGrammar.js";
@@ -66,7 +66,6 @@ export function SpaceHeader({
       // An input may not sit inside a button, so a header being renamed is a plain box with the same grammar.
       render={renaming ? <div /> : <button type="button" />}
       data-space-header
-      {...tintAttr(project.workspace.tint)}
       data-sidebar-row
       data-row-id={workspaceRowId(project.id)}
       // The bottom two corners stay square so the hairline under the block runs the sidebar's width; the top two
