@@ -2,7 +2,10 @@
 // union fanned out by the runtime, and the wire types for both servers (the
 // runtime's serveRuntime and the in-VM daemon). The daemon package has no
 // exported wire types, so these schemas are their one home; @wsp/daemon's
-// handlers are the reference implementation they mirror.
+// handlers are the reference implementation they mirror. A few readings of a
+// machine are parsed here too (ps-time.ts): the runtime and the daemon both
+// read them and neither may import the other, so this package is the only
+// home a second copy cannot grow beside.
 
 import { z } from "zod";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
@@ -1660,7 +1663,9 @@ export const ProcInspectReply = z.object({
   pid: z.number().int(),
   cwd: z.string().nullable(),
   ports: z.array(z.number().int()),
-  threads: z.number().int(),
+  /** Absent where the machine's own processes module cannot count them: this computer reads its processes with ps,
+   * which has no thread column on macOS. */
+  threads: z.number().int().optional(),
   children: z.array(z.number().int()),
 });
 export type ProcInspectReply = z.infer<typeof ProcInspectReply>;
@@ -1735,6 +1740,7 @@ export const DaemonRequest = z.discriminatedUnion("op", [
 export type DaemonRequest = z.infer<typeof DaemonRequest>;
 
 export const DaemonErrorCode = z.enum([
+  "unsupported",
   "outside-root",
   "not-found",
   "not-a-directory",
@@ -2305,9 +2311,10 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
-export { actionRefusal, computerOffline, goneRefusal, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, kindWords, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, type SendBlock, sendRefusal, type SendRefusalKind, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
+export { actionRefusal, computerOffline, goneRefusal, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, type SendBlock, sendRefusal, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
+export { psCpuSeconds } from "./ps-time.js";
 export { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS, IMAGE_TYPES, IMAGE_TYPE_WORDS, ImageAttachment, ImageRecord, imageBytes, imageLine, imagePathIn, imageRecord, imageTypeOf, imagesBlocked, imagesRefusal, noImagesLine, notAFileLine, notAnImageLine, threadImagesDir, turnImagesDir } from "./attachments.js";
 export * from "./oom.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";

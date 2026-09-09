@@ -61,6 +61,43 @@ describe("SysSampler", () => {
     expect(got[0]!.at).toBeGreaterThanOrEqual(before);
   });
 
+  it("a probe reads once for the first watcher and rides the running stream for the next, refusal and all", async () => {
+    let reads = 0;
+    let broken = false;
+    const sampler = new SysSampler(
+      async () => {
+        reads++;
+        if (broken) throw new Error("/proc/stat: ENOENT");
+        return readings(parseProcStat(statA));
+      },
+      { intervalMs: 60_000 },
+    );
+    // Nothing is running yet, so the first watcher pays for its own read and a machine that cannot be read refuses.
+    await sampler.probe();
+    expect(reads).toBe(1);
+    const off = sampler.subscribe(() => {});
+    expect(reads).toBe(2);
+    // The subscribe's own poll is still in flight here; a watcher that lands inside it has nothing to inherit yet
+    // and reads for itself, which is the honest answer before any poll has finished.
+    await new Promise(r => setTimeout(r, 0));
+    // A second watcher on a stream that has polled takes what that poll said instead of reading again, which also
+    // keeps its read from running beside a tick's.
+    await sampler.probe();
+    expect(reads).toBe(2);
+    // The machine stops answering: the next poll records it and the watch after that is refused rather than left
+    // waiting for a stream that no longer arrives.
+    broken = true;
+    await sampler.poll();
+    expect(reads).toBe(3);
+    await expect(sampler.probe()).rejects.toThrow("ENOENT");
+    expect(reads).toBe(3);
+    off();
+    // A stopped sampler proves nothing, so the next watcher reads for itself again.
+    broken = false;
+    await sampler.probe();
+    expect(reads).toBe(4);
+  });
+
   it("one sampler serves every subscriber: it runs from the first and stops with the last, and a stale unsubscribe is a no-op", async () => {
     // Fake timers: under load a real 5 ms sleep can be armed after the 10 ms tick it has to beat.
     vi.useFakeTimers();

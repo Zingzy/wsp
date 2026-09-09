@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   backgroundTasksLine,
+  psCpuSeconds,
   biggerSizeLine,
   catalogSourceLine,
   PERMISSION_DENIED_LINE,
@@ -216,6 +217,20 @@ describe("one copy of the rule", () => {
 
   it("each recorded exception holds exactly one formatter: a folded one leaves the list, a second one is a copy", () => {
     expect([...EXCEPTIONS].map(rel => [rel, hits(rel)])).toEqual([...EXCEPTIONS].map(rel => [rel, 1]));
+  });
+});
+
+describe("the cumulative cpu ps prints", () => {
+  it("reads days, hours, minutes, seconds and this Mac's hundredths, and nothing else as no cpu at all", () => {
+    // Fixture provenance: Linux prints whole seconds (00:02:17), macOS hundredths (12:31.07), and either adds a day
+    // field past 24 hours. The runtime's turn clock and the daemon's processes module both read this one parser.
+    expect(psCpuSeconds("00:00:03")).toBe(3);
+    expect(psCpuSeconds("00:02:17")).toBe(137);
+    expect(psCpuSeconds("12:31.07")).toBeCloseTo(751.07, 5);
+    expect(psCpuSeconds("1-18:19:15")).toBe(86_400 + 18 * 3600 + 19 * 60 + 15);
+    expect(psCpuSeconds("-")).toBe(0);
+    expect(psCpuSeconds("")).toBe(0);
+    expect(psCpuSeconds("what")).toBe(0);
   });
 });
 

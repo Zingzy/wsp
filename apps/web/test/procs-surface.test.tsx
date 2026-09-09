@@ -284,6 +284,26 @@ describe("processes surface", () => {
     expect(document.querySelector("[data-procs-count]")!.textContent).toBe("napping");
   });
 
+  it("a kind whose machines list no processes says so where the count sits, and never pending", async () => {
+    act(() => useStore.setState({ workspaces: [{ ...view, kind: "ssh" }] }));
+    render(<ProcessesSurface workspaceId={WS} />);
+    await flush();
+    expect(document.querySelector("[data-procs-count]")!.textContent).toBe("not on this kind");
+    expect(screen.queryByText("pending")).toBeNull();
+    expect(document.querySelector("[data-procs-unavailable]")).toBeNull();
+    expect(rows()).toHaveLength(0);
+  });
+
+  it("this computer lists its own: pending only until the first snapshot lands", async () => {
+    act(() => useStore.setState({ workspaces: [{ ...view, kind: "local" }] }));
+    render(<ProcessesSurface workspaceId={WS} />);
+    await flush();
+    expect(document.querySelector("[data-procs-count]")!.textContent).toBe("pending");
+    await feed(PROCS);
+    expect(document.querySelector("[data-procs-count]")!.textContent).toBe("6 processes");
+    expect(pids()).toContain(42);
+  });
+
   it("a link that comes back is asked to watch again while the pane is open", async () => {
     render(<ProcessesSurface workspaceId={WS} />);
     expect(calls("proc.watch")).toHaveLength(1);

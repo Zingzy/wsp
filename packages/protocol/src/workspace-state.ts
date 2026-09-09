@@ -31,18 +31,33 @@ export interface WorkspaceKindWords {
    * says the reach word `unsupported` is this kind's steady state rather than something missing from one machine,
    * so a row says what the machine is instead of that its daemon is not there. */
   daemon: boolean;
+  /** Whether a machine of this kind reads its own load, memory and disk for the Machine tab's Live rows. */
+  metrics: boolean;
+  /** Whether a machine of this kind lists its processes for the Processes tab. */
+  processes: boolean;
 }
+
+/** The two readings a pane waits on. Each is one module per kind: the cloud kind reads the guest's /proc, this
+ * computer reads its own host, and a machine over ssh gets both over its exec when that road exists. */
+export type KindReading = "metrics" | "processes";
 
 /** The words per kind, the one table every client reads instead of comparing a kind itself. Adding a kind (an ssh
  * machine) is a row here. */
 export const WORKSPACE_KIND_WORDS: Record<WorkspaceKind, WorkspaceKindWords> = {
-  cloud: { machine: null, driven: true, daemon: true },
-  local: { machine: THIS_COMPUTER, driven: false, daemon: true },
-  ssh: { machine: OVER_SSH, driven: false, daemon: false },
+  cloud: { machine: null, driven: true, daemon: true, metrics: true, processes: true },
+  local: { machine: THIS_COMPUTER, driven: false, daemon: true, metrics: true, processes: true },
+  ssh: { machine: OVER_SSH, driven: false, daemon: false, metrics: false, processes: false },
 };
 
 export function kindWords(kind: WorkspaceKind): WorkspaceKindWords {
   return WORKSPACE_KIND_WORDS[kind];
+}
+
+/** Whether a machine of this kind answers this reading at all. The one question a pane asks before it waits: a kind
+ * that serves it shows pending until the first value lands, and a kind that serves it on no road says so at once,
+ * so no slot sits at pending for a stream that will never come. */
+export function servesReading(kind: WorkspaceKind, reading: KindReading): boolean {
+  return WORKSPACE_KIND_WORDS[kind][reading];
 }
 
 /** What a refusal calls this workspace's machine. Only a kind wsp does not drive reaches one, since the capability

@@ -810,6 +810,11 @@ export const THIS_COMPUTER = "this computer";
  * that wsp reaches and never runs. */
 export const OVER_SSH = "a machine over ssh";
 
+/** What a pane prints in the slot a reading would fill on a kind whose machines serve that reading on no road: the
+ * Machine tab's Live rows and the Processes table both read it. The kind table says which kinds serve which
+ * reading, so a pane says this within one probe window instead of waiting on a stream that never comes. */
+export const NOT_ON_THIS_KIND = "not on this kind";
+
 /** The one sentence a local workspace refuses a request relayed from a machine with. A local workspace is this
  * computer; it answers only its own person, so a request that reached the host from a machine wsp runs cannot drive
  * it. Today no machine has a road into the host, so nothing relays yet; the rule and its test land now. */

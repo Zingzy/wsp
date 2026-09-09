@@ -436,7 +436,7 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
     daemonRoad: async () => {
       // The panes stay on the person's home: the files and terminal tabs are theirs to look around in, where a
       // turn's own folder is the workspace's.
-      const started = await (daemon ??= import("./local-daemon.js").then(m => m.LocalDaemon.start({ root: home })));
+      const started = await (daemon ??= import("./local-daemon.js").then(m => m.LocalDaemon.start({ root: home, workFolder: backend.workFolder() })));
       // A dial that lands while the host is closing must leave no socket behind: a listening one keeps this process up.
       if (shutting) {
         await started.close().catch(() => {});

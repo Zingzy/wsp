@@ -11,7 +11,7 @@ import { CLIENT_CANNOT_REBUILD } from "../../actions/format.js";
 import { actionById, resolveActions, rowLabelOf } from "../../actions/registry.js";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { workspaceActions, workspaceTarget } from "../../actions/workspaceActions.js";
-import { LINEAGE_MARKS, LOOK_PARTS, behindGoldenLine, biggerSizeLine, fmtRate, fmtSize, foldThreads, goldenImage, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, sizeWord, workspaceKind, workspaceState, workspaceStateOf, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { LINEAGE_MARKS, LOOK_PARTS, NOT_ON_THIS_KIND, behindGoldenLine, biggerSizeLine, fmtRate, fmtSize, foldThreads, goldenImage, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, servesReading, sizeWord, workspaceKind, workspaceState, workspaceStateOf, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, useOutOfMemoryReading, useWorkspaceLive } from "../../machine/live.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type Upgrade } from "../../protocol/machine.js";
@@ -323,21 +323,24 @@ function Rebuild({ workspace, status }: { workspace: WorkspaceView; status: Work
 
 type Stale = "napping" | "unreachable" | null;
 
-/** cpu, memory and disk from the guest, one sparkline each. A napping workspace, or a running one whose link is
+/** cpu, memory and disk from the machine, one sparkline each. A napping workspace, or a running one whose link is
  * down, keeps the last values dim under the word for it; the daemon says nothing about a machine it is not on. A
  * daemon that refused the stream puts the word unavailable in the slots, and the runtime replaces a daemon too old
- * to serve them without anyone here asking: the machine's row says so while it does. */
+ * to serve them without anyone here asking: the machine's row says so while it does. A kind whose machines read no
+ * metrics at all says so in the slots instead: no slot waits on a stream that will never come. */
 function Live({ workspace }: { workspace: WorkspaceView }) {
   const live = useWorkspaceLive(workspace.id);
+  const served = servesReading(workspaceKind(workspace), "metrics");
   const last = live.samples[live.samples.length - 1];
   const stale: Stale = workspace.phase === "napping" || workspace.phase === "pausing" ? "napping" : live.reach === "live" ? null : "unreachable";
   const share = (m: { used: number; total: number }): number => (m.total > 0 ? (m.used / m.total) * 100 : 0);
+  const row = { served, stale, unavailable: live.unavailable, samples: live.samples };
   return (
-    <Section label="Live" aside={last !== undefined && stale === null ? `load ${last.load1.toFixed(2)}` : undefined}>
+    <Section label="Live" aside={served && last !== undefined && stale === null ? `load ${last.load1.toFixed(2)}` : undefined}>
       <div className="mt-1 divide-y divide-border/40">
-        <LiveRow label="cpu" k="cpu" samples={live.samples} y={s => s.cpu} text={s => percentLabel(s.cpu)} stale={stale} unavailable={live.unavailable} />
-        <LiveRow label="memory" k="mem" samples={live.samples} y={s => share(s.mem)} text={s => bytesOfLabel(s.mem.used, s.mem.total)} stale={stale} unavailable={live.unavailable} />
-        <LiveRow label="disk" k="disk" samples={live.samples} y={s => share(s.disk)} text={s => bytesOfLabel(s.disk.used, s.disk.total)} tier={s => diskTier(share(s.disk))} stale={stale} unavailable={live.unavailable} />
+        <LiveRow {...row} label="cpu" k="cpu" y={s => s.cpu} text={s => percentLabel(s.cpu)} />
+        <LiveRow {...row} label="memory" k="mem" y={s => share(s.mem)} text={s => bytesOfLabel(s.mem.used, s.mem.total)} />
+        <LiveRow {...row} label="disk" k="disk" y={s => share(s.disk)} text={s => bytesOfLabel(s.disk.used, s.disk.total)} tier={s => diskTier(share(s.disk))} />
       </div>
     </Section>
   );
@@ -374,15 +377,17 @@ interface LiveRowProps {
   stale: Stale;
   /** The daemon's refusal of the stream; the slot reads unavailable and carries it as the title. */
   unavailable: string | null;
+  /** Whether this workspace's kind reads its own metrics at all; false is the kind's own words, not a fault. */
+  served: boolean;
 }
 
 /** One fixed-height row: label, sparkline, value. The value slot has a fixed width so a word in place of a number
  * moves nothing; a single sample draws as a dot through the round cap. Hovering reads that sample into the slot. */
-function LiveRow({ label, k, samples, y, text, tier, stale, unavailable }: LiveRowProps) {
+function LiveRow({ label, k, samples, y, text, tier, stale, unavailable, served }: LiveRowProps) {
   const [hover, setHover] = useState<number | null>(null);
   const points = sparkPoints(samples, y);
   const shown = hover !== null ? samples[hover] : samples[samples.length - 1];
-  const word = stale ?? (unavailable !== null ? "unavailable" : shown === undefined ? "pending" : null);
+  const word = !served ? NOT_ON_THIS_KIND : (stale ?? (unavailable !== null ? "unavailable" : shown === undefined ? "pending" : null));
   const tone = word === null && shown !== undefined && tier ? TIER_CLASS[tier(shown)] : undefined;
 
   const track = (e: ReactMouseEvent<SVGSVGElement>): void => {
@@ -397,8 +402,8 @@ function LiveRow({ label, k, samples, y, text, tier, stale, unavailable }: LiveR
     <div
       className="grid h-7 grid-cols-[3.25rem_minmax(0,1fr)_10rem] items-center gap-2 text-xs"
       data-live-row={k}
-      {...(stale !== null ? { "data-stale": stale } : {})}
-      {...(unavailable !== null ? { "data-unavailable": unavailable } : {})}
+      {...(served && stale !== null ? { "data-stale": stale } : {})}
+      {...(served && unavailable !== null ? { "data-unavailable": unavailable } : {})}
     >
       <span className="text-muted-foreground">{label}</span>
       <svg className="block h-4 w-full" viewBox={`0 0 ${SPARK_W} ${SPARK_H}`} preserveAspectRatio="none" role="img" aria-label={`${label} over the last two minutes, one line`} onMouseMove={track} onMouseLeave={() => setHover(null)}>
