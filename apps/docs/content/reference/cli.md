@@ -45,7 +45,11 @@ started:
       every workspace this host runs: what its machine is, its state as the
       sidebar shows it (running, paused, waking or unreachable, off the phase
       with the provider's word for the machine and the daemon reach beside it)
-      where the kind has one, and its project folder
+      where the kind has one, and how many projects it holds
+  wsp projects <workspace>
+      the projects on the workspace, oldest import first: name, folder on the
+      machine, size and when it landed; the name is what thread new --project
+      takes
   wsp threads [--in <workspace>]
       every thread as the sidebar lists it: agent, state, who opened it, the
       folder it works in
@@ -110,10 +114,17 @@ started:
       deletes the machine at the provider, then drops the record and threads
       from this computer
   wsp thread new --in <workspace>
-    [--agent, --model, --effort, --access, --cwd, --notify, --title, --image <p…
+    [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, -…
     "<task>"
-      opens a thread with the agent, model, effort and access the app offers;
-      follows its first turn, or with --detach prints the id and returns
+      opens a thread with the agent, model, effort and access the app offers, in
+      the project named or the one the app's pick would take; follows its first
+      turn, or with --detach prints the id and returns
+  wsp thread read <thread> [--last]
+      the thread's messages as the app lists them, oldest first: who each one
+      is, when the runtime recorded it and the text, with every tool call folded
+      to the one line the app's row reads; --last prints the final reply alone,
+      the whole message its finished line carries. A tool's output and the
+      agent's reasoning are no rows of it
   wsp thread rename <thread> "<title>"
       names the thread inside the agent's own store, so the agent shows the same
       name
@@ -126,7 +137,7 @@ started:
       up
   wsp exec <workspace> [--cwd <dir>] -- <command...>
       runs the command on the machine, each word as given, in --cwd or the
-      project folder
+      folder a thread would start in
   wsp folders [<folder>] [--hidden]
       the folders inside one folder on this computer, for naming one to import;
       the home folder and every imported project are the roots and nothing
@@ -278,7 +289,11 @@ started:
       every workspace this host runs: what its machine is, its state as the
       sidebar shows it (running, paused, waking or unreachable, off the phase
       with the provider's word for the machine and the daemon reach beside it)
-      where the kind has one, and its project folder
+      where the kind has one, and how many projects it holds
+  wsp projects <workspace>
+      the projects on the workspace, oldest import first: name, folder on the
+      machine, size and when it landed; the name is what thread new --project
+      takes
   wsp threads [--in <workspace>]
       every thread as the sidebar lists it: agent, state, who opened it, the
       folder it works in
@@ -343,10 +358,17 @@ started:
       deletes the machine at the provider, then drops the record and threads
       from this computer
   wsp thread new --in <workspace>
-    [--agent, --model, --effort, --access, --cwd, --notify, --title, --image <p…
+    [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, -…
     "<task>"
-      opens a thread with the agent, model, effort and access the app offers;
-      follows its first turn, or with --detach prints the id and returns
+      opens a thread with the agent, model, effort and access the app offers, in
+      the project named or the one the app's pick would take; follows its first
+      turn, or with --detach prints the id and returns
+  wsp thread read <thread> [--last]
+      the thread's messages as the app lists them, oldest first: who each one
+      is, when the runtime recorded it and the text, with every tool call folded
+      to the one line the app's row reads; --last prints the final reply alone,
+      the whole message its finished line carries. A tool's output and the
+      agent's reasoning are no rows of it
   wsp thread rename <thread> "<title>"
       names the thread inside the agent's own store, so the agent shows the same
       name
@@ -359,7 +381,7 @@ started:
       up
   wsp exec <workspace> [--cwd <dir>] -- <command...>
       runs the command on the machine, each word as given, in --cwd or the
-      project folder
+      folder a thread would start in
   wsp folders [<folder>] [--hidden]
       the folders inside one folder on this computer, for naming one to import;
       the home folder and every imported project are the roots and nothing
@@ -511,7 +533,11 @@ started:
       every workspace this host runs: what its machine is, its state as the
       sidebar shows it (running, paused, waking or unreachable, off the phase
       with the provider's word for the machine and the daemon reach beside it)
-      where the kind has one, and its project folder
+      where the kind has one, and how many projects it holds
+  wsp projects <workspace>
+      the projects on the workspace, oldest import first: name, folder on the
+      machine, size and when it landed; the name is what thread new --project
+      takes
   wsp threads [--in <workspace>]
       every thread as the sidebar lists it: agent, state, who opened it, the
       folder it works in
@@ -576,10 +602,17 @@ started:
       deletes the machine at the provider, then drops the record and threads
       from this computer
   wsp thread new --in <workspace>
-    [--agent, --model, --effort, --access, --cwd, --notify, --title, --image <p…
+    [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, -…
     "<task>"
-      opens a thread with the agent, model, effort and access the app offers;
-      follows its first turn, or with --detach prints the id and returns
+      opens a thread with the agent, model, effort and access the app offers, in
+      the project named or the one the app's pick would take; follows its first
+      turn, or with --detach prints the id and returns
+  wsp thread read <thread> [--last]
+      the thread's messages as the app lists them, oldest first: who each one
+      is, when the runtime recorded it and the text, with every tool call folded
+      to the one line the app's row reads; --last prints the final reply alone,
+      the whole message its finished line carries. A tool's output and the
+      agent's reasoning are no rows of it
   wsp thread rename <thread> "<title>"
       names the thread inside the agent's own store, so the agent shows the same
       name
@@ -592,7 +625,7 @@ started:
       up
   wsp exec <workspace> [--cwd <dir>] -- <command...>
       runs the command on the machine, each word as given, in --cwd or the
-      project folder
+      folder a thread would start in
   wsp folders [<folder>] [--hidden]
       the folders inside one folder on this computer, for naming one to import;
       the home folder and every imported project are the roots and nothing
@@ -734,7 +767,7 @@ usage: wsp workspaces
   every workspace this host runs: what its machine is, its state as the sidebar
   shows it (running, paused, waking or unreachable, off the phase with the
   provider's word for the machine and the daemon reach beside it) where the kind
-  has one, and its project folder
+  has one, and how many projects it holds
 
   --json         print the raw protocol values, one JSON line each
   --state PATH   the state file the host serves
@@ -881,7 +914,11 @@ started:
       every workspace this host runs: what its machine is, its state as the
       sidebar shows it (running, paused, waking or unreachable, off the phase
       with the provider's word for the machine and the daemon reach beside it)
-      where the kind has one, and its project folder
+      where the kind has one, and how many projects it holds
+  wsp projects <workspace>
+      the projects on the workspace, oldest import first: name, folder on the
+      machine, size and when it landed; the name is what thread new --project
+      takes
   wsp threads [--in <workspace>]
       every thread as the sidebar lists it: agent, state, who opened it, the
       folder it works in
@@ -946,10 +983,17 @@ started:
       deletes the machine at the provider, then drops the record and threads
       from this computer
   wsp thread new --in <workspace>
-    [--agent, --model, --effort, --access, --cwd, --notify, --title, --image <p…
+    [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, -…
     "<task>"
-      opens a thread with the agent, model, effort and access the app offers;
-      follows its first turn, or with --detach prints the id and returns
+      opens a thread with the agent, model, effort and access the app offers, in
+      the project named or the one the app's pick would take; follows its first
+      turn, or with --detach prints the id and returns
+  wsp thread read <thread> [--last]
+      the thread's messages as the app lists them, oldest first: who each one
+      is, when the runtime recorded it and the text, with every tool call folded
+      to the one line the app's row reads; --last prints the final reply alone,
+      the whole message its finished line carries. A tool's output and the
+      agent's reasoning are no rows of it
   wsp thread rename <thread> "<title>"
       names the thread inside the agent's own store, so the agent shows the same
       name
@@ -962,7 +1006,7 @@ started:
       up
   wsp exec <workspace> [--cwd <dir>] -- <command...>
       runs the command on the machine, each word as given, in --cwd or the
-      project folder
+      folder a thread would start in
   wsp folders [<folder>] [--hidden]
       the folders inside one folder on this computer, for naming one to import;
       the home folder and every imported project are the roots and nothing
@@ -1096,8 +1140,8 @@ usage: wsp stop <thread>
 
 ```text
 usage: wsp exec <workspace> [--cwd <dir>] -- <command...>
-  runs the command on the machine, each word as given, in --cwd or the project
-  folder
+  runs the command on the machine, each word as given, in --cwd or the folder a
+  thread would start in
 
   --json         print the raw protocol values, one JSON line each
   --state PATH   the state file the host serves
@@ -1180,7 +1224,11 @@ started:
       every workspace this host runs: what its machine is, its state as the
       sidebar shows it (running, paused, waking or unreachable, off the phase
       with the provider's word for the machine and the daemon reach beside it)
-      where the kind has one, and its project folder
+      where the kind has one, and how many projects it holds
+  wsp projects <workspace>
+      the projects on the workspace, oldest import first: name, folder on the
+      machine, size and when it landed; the name is what thread new --project
+      takes
   wsp threads [--in <workspace>]
       every thread as the sidebar lists it: agent, state, who opened it, the
       folder it works in
@@ -1245,10 +1293,17 @@ started:
       deletes the machine at the provider, then drops the record and threads
       from this computer
   wsp thread new --in <workspace>
-    [--agent, --model, --effort, --access, --cwd, --notify, --title, --image <p…
+    [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, -…
     "<task>"
-      opens a thread with the agent, model, effort and access the app offers;
-      follows its first turn, or with --detach prints the id and returns
+      opens a thread with the agent, model, effort and access the app offers, in
+      the project named or the one the app's pick would take; follows its first
+      turn, or with --detach prints the id and returns
+  wsp thread read <thread> [--last]
+      the thread's messages as the app lists them, oldest first: who each one
+      is, when the runtime recorded it and the text, with every tool call folded
+      to the one line the app's row reads; --last prints the final reply alone,
+      the whole message its finished line carries. A tool's output and the
+      agent's reasoning are no rows of it
   wsp thread rename <thread> "<title>"
       names the thread inside the agent's own store, so the agent shows the same
       name
@@ -1261,7 +1316,7 @@ started:
       up
   wsp exec <workspace> [--cwd <dir>] -- <command...>
       runs the command on the machine, each word as given, in --cwd or the
-      project folder
+      folder a thread would start in
   wsp folders [<folder>] [--hidden]
       the folders inside one folder on this computer, for naming one to import;
       the home folder and every imported project are the roots and nothing

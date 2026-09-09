@@ -27,10 +27,12 @@ import {
   type SshWiring,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, fmtDuration, forksNoMachines, NOTHING_TO_SERVE_LINE, type PortsAsked, portsAsked, shellQuote, THIS_COMPUTER, TURN_END_WORDS, usageRefusal, WS_PORT_OFFSET } from "@wsp/protocol";
-import { agentHome, agentHomes, LocalBackend, type MachineBackend, NoProviderBackend, parseSshAddress, SshBackend, sshIdentity, sshMachineName } from "@wsp/engine";
+import { authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, fmtDuration, forksNoMachines, NOTHING_TO_SERVE_LINE, type PortsAsked, portsAsked, shellQuote, SOLARI_CONSOLE, THIS_COMPUTER, TURN_END_WORDS, usageRefusal, WS_PORT_OFFSET } from "@wsp/protocol";
+import { agentHome, agentHomes, LocalBackend, type MachineBackend, NoProviderBackend, SOLARI_PRICING, parseSshAddress, providerSlot, type ProviderSlot, SshBackend, sshIdentity, sshMachineName } from "@wsp/engine";
 import { assetDir } from "./assets.js";
 import { claudeEnvs, deployDaemon, doctor, localDoctor } from "./doctor.js";
+import { agentsHere } from "./agents-here.js";
+import { InitJobs } from "./init-job.js";
 import { keychainReader } from "./init-import.js";
 import { CACHE_RULE } from "./project-bundle.js";
 import { readBrewTable } from "./init-brew.js";
@@ -293,7 +295,8 @@ function parseEnvFile(path: string): Record<string, string> {
   return out;
 }
 
-function writeEnvFile(path: string, set: Record<string, string>): void {
+/** The one writer of the wsp home's .env: a key line it knows is rewritten in place, the rest appended, mode 0600. */
+export function writeEnvFile(path: string, set: Record<string, string>): void {
   const pending = new Map(Object.entries(set));
   const lines: string[] = [];
   if (existsSync(path)) {
@@ -341,11 +344,10 @@ export async function loadKeys(
 ): Promise<Keys> {
   const homeEnv = join(sources.home, ".env");
   const layers = keyLayers(sources);
-  const find = (name: string): string | undefined => layers.map(l => l[name]).find(v => v !== undefined && v !== "");
-
-  let solari = find("SOLARI_API_KEY");
-  let anthropic = find("ANTHROPIC_API_KEY");
-  if (solari !== undefined) return { solari, ...(anthropic !== undefined ? { anthropic } : {}) };
+  const found = keysFound(sources, layers);
+  let solari = found.solari;
+  let anthropic = found.anthropic;
+  if (solari !== undefined) return found;
   // No key on this computer and either a road init already answered or nobody at a keyboard to type one: the local
   // road is taken without a question. Every other command still refuses through its IO's own words below. The Claude
   // key rides on either way: it is the agents' key, not the provider's, and a local thread uses it as a fork would.
@@ -354,7 +356,7 @@ export async function loadKeys(
 
   // Not wrapped: the CLI's IOs already refuse a secret as the contract's auth class, so a caller with no terminal
   // to type one on exits on that code rather than on a generic failure.
-  solari = (await io.askSecret(`Solari API key\nNo Solari key found.\nconsole.getsolari.com${ask.noSolari === "offer" ? `\nEnter with nothing skips the cloud: ${THIS_COMPUTER} alone becomes your workspace, and nothing is sealed.` : ""}`)).trim();
+  solari = (await io.askSecret(`Solari API key\nNo Solari key found.\n${SOLARI_CONSOLE}${ask.noSolari === "offer" ? `\nEnter with nothing skips the cloud: ${THIS_COMPUTER} alone becomes your workspace, and nothing is sealed.` : ""}`)).trim();
   if (!solari) {
     if (ask.noSolari === "offer") return withoutProvider();
     throw authRefusal("A Solari API key is needed to start.");
@@ -373,6 +375,15 @@ export async function loadKeys(
 
   if ((await io.ask(saveQuestion(sources.home, Object.keys(set).length))) === "yes") writeEnvFile(homeEnv, set);
   return { solari, ...(anthropic !== undefined ? { anthropic } : {}) };
+}
+
+/** The keys as the environment and the files hold them now, asking nothing: what a serving host reads when the init
+ * job asks, and where loadKeys starts before it asks. */
+export function keysFound(sources: KeySources = keySources(), layers: Array<Record<string, string | undefined>> = keyLayers(sources)): Keys {
+  const find = (name: string): string | undefined => layers.map(l => l[name]).find(v => v !== undefined && v !== "");
+  const solari = find("SOLARI_API_KEY");
+  const anthropic = find("ANTHROPIC_API_KEY");
+  return { ...(solari !== undefined ? { solari } : {}), ...(anthropic !== undefined ? { anthropic } : {}) };
 }
 
 /** Names the file only when WSP_HOME moved it off the default. */
@@ -503,9 +514,22 @@ export function providerBackend(keys: Keys): MachineBackend {
   return keys.solari === undefined ? new NoProviderBackend() : new SolariBackend({ apiKey: keys.solari });
 }
 
+/** The provider slot each runtime made here was wired with, so a host can swap the module in when a key is saved. */
+const PROVIDER_SLOTS = new WeakMap<Runtime, ProviderSlot>();
+export const providerSlotOf = (rt: Runtime): ProviderSlot | undefined => PROVIDER_SLOTS.get(rt);
+
+/** Wires the provider module the keys name into a runtime made here; a runtime made elsewhere has no slot, and a
+ * saved key it would do nothing with is refused rather than taken. */
+export function swapProvider(rt: Runtime, keys: Keys): void {
+  const slot = providerSlotOf(rt);
+  if (slot === undefined) throw new Error("this runtime has no provider slot; a key saved now would reach no machine road until the host restarts");
+  slot.swap(providerBackend(keys));
+}
+
 export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe = goldenRecipe(keys)): Runtime {
-  return createRuntime({
-    backend: providerBackend(keys),
+  const slot = providerSlot(providerBackend(keys));
+  const rt = createRuntime({
+    backend: slot.backend,
     local: localWiring(),
     ssh: sshWiring(),
     store: jsonFileStore(statePath),
@@ -513,6 +537,54 @@ export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe 
     goldenRecipe: recipe,
     hostId: hostIdentity(),
     vaultCaches: CACHE_RULE,
+  });
+  PROVIDER_SLOTS.set(rt, slot);
+  return rt;
+}
+
+/** The init job on this computer for a serving host: wsp init's own readers and build pieces, the keys read off the
+ * files at each ask, the provider module swapped into the runtime once a key is saved, and the wsp tools written by
+ * the road wsp mcp install takes, under the command this process runs as. */
+function hostInitDoor(rt: Runtime, statePath: string, run: RunningWsp, openUrl: UrlOpener, log: (line: string) => void): InitJobs {
+  const home = homedir();
+  const os = platform() === "darwin" ? "darwin" : "linux";
+  return new InitJobs({
+    rt,
+    statePath,
+    home,
+    platform: os,
+    keys: () => keysFound(),
+    saveKeys: set => writeEnvFile(join(wspHome(), ".env"), set),
+    provider: keys => swapProvider(rt, keys),
+    pricing: () => SOLARI_PRICING,
+    agents: () => agentsHere(nodeHost(), { versions: false }),
+    installTools: agents => installEach(agents, mcpServerSpec(statePath, run), home),
+    read: {
+      collect: collectThisComputer,
+      recipe: (onHistory, onProject, onHistoryProgress) => computeRecipe(nodeHost(), { threadAgents: THREAD_AGENTS, onHistory, onProject, onHistoryProgress, cache: historyCache(statePath) }),
+      scanProject: async folder => {
+        const { path, exists } = projectFolder(folder);
+        return exists ? scanProject(nodeHost(), path) : undefined;
+      },
+      brew: () => readBrewTable(nodeHost()),
+      scan: recipe => scanTools(nodeHost(), recipe),
+    },
+    build: {
+      secrets: keychainReader(),
+      relay: async (buildRt, builder, hooks) =>
+        startCallbackRelay({
+          runtime: buildRt,
+          openUrl,
+          log: line => {
+            if (!hooks.onLine(line)) log(line);
+          },
+          autoOpen: hooks.autoOpen,
+          openLine: hooks.openLine,
+          builder,
+        }),
+      roads: () => workspaceRoads(rt, agentHomes(home), workspaceEnvsFor(keysFound())),
+      recipe: recipe => ({ ...recipe, deployDaemon: async machine => `daemon on node ${(await deployDaemon(machine)).node}` }),
+    },
   });
 }
 
@@ -726,6 +798,9 @@ export interface ServeOptions {
   webDir?: string;
   runtime?: Runtime;
   openUrl?: UrlOpener;
+  /** How this process was started, which the init job's wsp tools install writes into an agent's config; the
+   * desktop hands in its shim, the npm command the default reading. */
+  running?: RunningWsp;
 }
 
 /** The road the desktop window brings a host up on, which is wsp up's: the state file it serves is one wsp init
@@ -734,7 +809,7 @@ export interface ServeOptions {
 export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   const keys = await loadKeys(io, undefined, { anthropic: false, noSolari: "local" });
   const rt = opts.runtime ?? makeRuntime(keys, opts.statePath);
-  return hostFor(rt, keys, opts, io);
+  return hostFor(rt, keys, opts, io, opts.running);
 }
 
 /** Whether the state has anything for the app to show: a sealed golden to fork from, or any workspace record, this
@@ -753,7 +828,7 @@ export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle | un
     io.error(NOTHING_TO_SERVE_LINE);
     return undefined;
   }
-  return hostFor(rt, keys, opts, io);
+  return hostFor(rt, keys, opts, io, opts.running);
 }
 
 /** What a host with no Claude key says as it starts. A host that forks machines gives each fork the key as an env,
@@ -775,6 +850,7 @@ async function hostFor(
     openUrl?: UrlOpener;
   },
   io: CliIO,
+  run: RunningWsp = runningWsp(),
 ): Promise<HostHandle> {
   const lockPath = lockPathFor(opts.statePath);
   const lock = takeLock(lockPath, opts.statePath, { port: opts.port, wsPort: opts.wsPort });
@@ -784,11 +860,13 @@ async function hostFor(
       port: opts.port,
       wsPort: opts.wsPort,
       webDir: opts.webDir ?? assetDir("web"),
-      ...workspaceEnvsFor(keys),
+      // Read at each fork, not once at start: the init job saves a key while this host serves.
+      workspaceEnvs: golden => workspaceEnvsFor(keysFound()).workspaceEnvs?.(golden) ?? {},
       ...(opts.openUrl !== undefined ? { openUrl: opts.openUrl } : {}),
       log: line => io.log(line),
       recipePath: recipePath(opts.statePath),
       statePath: opts.statePath,
+      init: hostInitDoor(rt, opts.statePath, run, opts.openUrl ?? systemOpener(), line => io.log(line)),
     });
     writeFileSync(lockPath, JSON.stringify({ ...lock, port: handle.port, wsPort: handle.wsPort }));
     // Other local tools read the token from disk; the WS never sees it in a URL.

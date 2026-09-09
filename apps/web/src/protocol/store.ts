@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { NOTIFY_ME, applyPreferencesPatch, foldThreads, goldenHead, isLocalWorkspace, threadFromHash, workspaceFromHash, workspaceStateOf, type Capabilities, type HarnessCatalog, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { NOTIFY_ME, applyPreferencesPatch, foldThreads, goldenHead, isLocalWorkspace, threadFromHash, workspaceFromHash, workspaceStateOf, type Capabilities, type HarnessCatalog, type InitJob, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { sidebarWorkspaceOrder } from "../adapt/workspaces.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
@@ -68,6 +68,9 @@ interface State {
   capabilities: Capabilities | null;
   /** Whether a golden with a head is sealed; null until the first reply. The sidebar's cloud row shows while it is false. */
   hasGolden: boolean | null;
+  /** The init job on the host as its last event or the first reply left it; null while none has run. The cloud row
+   * reads its progress while the modal is shut, and the modal opens where it stands. */
+  initJob: InitJob | null;
   /** What each harness's CLI takes at launch, from the runtime's table; empty until it answers, and the composer shows no pickers. */
   harnesses: HarnessCatalog[];
   /** The same, as the binaries on a workspace's machine reported them; set once loadHarnesses got an answer for it. */
@@ -259,6 +262,10 @@ export const useStore = create<State>((set, get) => {
       .then(forwards => set({ forwards }))
       .catch((e: unknown) => set({ forwards: [], toast: `forward list unavailable: ${e instanceof Error ? e.message : String(e)}` }));
     void api
+      .initGet?.()
+      .then(setup => set({ initJob: setup.job }))
+      .catch(() => {});
+    void api
       .preferences?.()
       .then(preferences => {
         if (preferenceSetsInFlight === 0) set({ preferences });
@@ -274,6 +281,7 @@ export const useStore = create<State>((set, get) => {
     conn: "connecting",
     capabilities: null,
     hasGolden: null,
+    initJob: null,
     harnesses: [],
     harnessesByWorkspace: {},
     workspaces: [],
@@ -592,6 +600,18 @@ export const useStore = create<State>((set, get) => {
         case "preferences.changed":
           if (preferenceSetsInFlight === 0) set({ preferences: e.preferences });
           return;
+        case "init.job": {
+          set({ initJob: e.job });
+          // A seal is what the cloud row waits on, and the provider the host wired in is what the sizes come from.
+          if (e.job.phase === "done") {
+            set({ hasGolden: true });
+            void get()
+              .api?.capabilities()
+              .then(capabilities => set({ capabilities }))
+              .catch(() => {});
+          }
+          return;
+        }
         default:
           return;
       }
@@ -649,6 +669,7 @@ export function useForwarded(workspaceId: string | null, port: number | null): b
   return useStore(s => workspaceId !== null && port !== null && s.forwards.some(f => f.workspaceId === workspaceId && f.port === port && f.kind === "url"));
 }
 export function useCapabilities(): Capabilities | null { return useStore(s => s.capabilities); }
+export function useInitJob(): InitJob | null { return useStore(s => s.initJob); }
 /** The catalogs a composer reads: the workspace's machine's once it answered, else the runtime's table. */
 export function useHarnessCatalogs(workspaceId: string | null): HarnessCatalog[] {
   return useStore(s => catalogsIn(s, workspaceId));

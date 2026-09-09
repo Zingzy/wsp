@@ -2,7 +2,8 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { bundleNames, bundleNote, changeLines, cliArgs, compareVersions, previousTag, releaseNotes } from "../scripts/release-notes.mjs";
+import { bundleNames } from "../scripts/bundles.mjs";
+import { bundleNote, changeLines, cliArgs, compareVersions, previousTag, releaseNotes } from "../scripts/release-notes.mjs";
 
 const readme = readFileSync(fileURLToPath(new URL("../../../README.md", import.meta.url)), "utf8");
 const published = JSON.parse(readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8")).name as string;
@@ -60,6 +61,7 @@ describe("the lines about opening a downloaded bundle", () => {
   it("come out of the README, so the page and the notes cannot drift", () => {
     expect(bundleNote(readme, false)).toContain("not signed yet");
     expect(bundleNote(readme, false)).toContain("right click it in Finder");
+    expect(bundleNote(readme, false)).toContain("drag wsp onto the Applications folder");
     expect(bundleNote(readme, false)).toContain("chmod +x");
     expect(bundleNote(readme, false)).not.toContain("<!--");
   });
@@ -68,7 +70,7 @@ describe("the lines about opening a downloaded bundle", () => {
     const signed = bundleNote(readme, true);
     expect(signed).not.toContain("not signed yet");
     expect(signed).not.toContain("right click");
-    expect(signed).toContain("### Opening a downloaded bundle\n\nThe Linux AppImage");
+    expect(signed).toContain("### Opening a downloaded bundle\n\nOpen the macOS disk image");
     expect(signed).toContain("chmod +x");
     expect(signed).not.toContain("<!--");
   });
@@ -100,7 +102,7 @@ describe("the notes on the draft release", () => {
 
   it("name every bundle and the command line install for this version", () => {
     const names = bundleNames("0.1.4");
-    expect(names).toEqual({ macArm64: "wsp-0.1.4-mac-arm64.zip", macX64: "wsp-0.1.4-mac-x64.zip", appImage: "wsp-0.1.4.AppImage" });
+    expect(names).toEqual({ mac: "wsp-0.1.4-mac.dmg", appImage: "wsp-0.1.4.AppImage" });
     for (const name of Object.values(names)) expect(notes()).toContain(name);
     expect(published).toBe("@zingzy/wsp");
     expect(notes()).toContain(`npm i -g ${published}@0.1.4`);

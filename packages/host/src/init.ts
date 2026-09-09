@@ -162,6 +162,9 @@ export interface InitOptions {
   daemon?(rt: Runtime, builder: GoldenBuilderView): Promise<BuilderLink>;
   /** How long to wait when the account is at its machine cap, and how often. */
   retry?: { waitMs: number; attempts: number };
+  /** This computer as already read by the caller, so the run reads it once: the init job reads for its screens and
+   * hands the same reading to the build, with the recipe as the screens answered it. */
+  reading?: Reading;
 }
 
 export type { HostHooks };
@@ -181,7 +184,8 @@ interface Earlier {
   stop: GoldenBuilderView[];
 }
 
-const GOLDEN_NAME = "default";
+/** The one golden wsp init builds; every stage frame the run draws is this name's. */
+export const GOLDEN_NAME = "default";
 const DEFAULT_RETRY = { waitMs: 30_000, attempts: 20 };
 /** What ends a builder this run could not: a record its dead holder left is stale to the next start, which stops it. */
 const SWEEP = "the next wsp or wsp init on this computer stops it, or stop it from the Solari console.";
@@ -745,24 +749,36 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 
 // --- the command -------------------------------------------------------------
 
-export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult> {
-  const out = { output: io.output };
-  // Off a terminal, and under --non-interactive on one, there is nobody to ask: it runs as if --yes were given.
-  const interactive = io.isTTY && !opts.yes && opts.nonInteractive !== true;
-  // Nobody to ask, but the sign-ins still run and each page is handed to the person; --yes is the one road that skips them.
-  const handoff = !interactive && !opts.yes;
-  // Which of the three reasons nothing is asked, in the words every taken-as-yes line uses.
-  const takenAs = opts.yes ? "--yes" : io.isTTY ? "--non-interactive" : "no terminal";
-  // A person at a terminal gets the app served at the end, --yes or not; --non-interactive says an agent is driving,
-  // and off a terminal nobody is here, so neither serves anything. Only a run that serves needs the ports.
-  const serves = io.isTTY && opts.nonInteractive !== true;
-  let ports: AppPorts = { port: opts.ports.port, wsPort: opts.ports.wsPort };
-  if (serves) {
-    const chosen = await pickPorts({ ports: opts.ports, statePath: opts.statePath, output: io.output });
-    if (chosen === undefined) return { code: 1 };
-    ports = chosen;
-  }
+/** What one run reads off this computer before any screen: the collector's rows, the catalog recipe the screens start
+ * from (the file given, else this computer's own, the saved ticks carried over), Homebrew's sizes, what the package
+ * managers here could add, and the project a flag named. The init job reads once and hands it to the run; a terminal
+ * run reads for itself. */
+export interface Reading {
+  /** The rows as the collector left them, agent tools taken out and the refused rows locked; the catalog's bare rows join later. */
+  manifest: Manifest;
+  catalogRecipe: Recipe;
+  brew: BrewTable;
+  scanned: readonly ScanRow[];
+  projectScan?: ProjectScan;
+  /** What the reading had to say for itself, printed as one warning by whoever shows it. */
+  notes: string[];
+  /** Where the rows came from, in the words of the Found card. */
+  source: string;
+}
 
+/** The manifest a run reads the recipe against: the catalog's bare rows joined to this computer's, the pins the last
+ * build saved carried, the recipe applied. The screens as data and the run itself read it here, so a tick lands on
+ * the same rows wherever it was made. */
+export function manifestFor(reading: Reading, recipe: Recipe, statePath: string): Manifest {
+  return applyRecipe(withCatalogAgents(withSavedPins(reading.manifest, readSavedManifest(recipePath(statePath)))), recipe);
+}
+
+export type ReadOptions = Pick<InitOptions, "importFolder" | "recipeFile" | "collect" | "brew" | "recipe" | "statePath" | "home" | "scan">;
+
+/** Reads this computer for a run, saying each step on the output; `interactive` says a person will see the Also
+ * screen, which is the one reason the package managers are read. */
+export async function readThisComputer(opts: ReadOptions, io: Pick<InitIO, "output" | "isTTY">, interactive: boolean): Promise<Reading | { code: 1 }> {
+  const out = { output: io.output };
   let manifest: Manifest;
   // The catalog recipe the screens start from: the file given, else read off this computer once the rows are in.
   let given: Recipe | undefined;
@@ -851,9 +867,34 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     }
     spinner.stop();
   }
+  return { manifest, catalogRecipe, brew, scanned, ...(projectScan !== undefined ? { projectScan } : {}), notes, source };
+}
+
+export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult> {
+  const out = { output: io.output };
+  // Off a terminal, and under --non-interactive on one, there is nobody to ask: it runs as if --yes were given.
+  const interactive = io.isTTY && !opts.yes && opts.nonInteractive !== true;
+  // Nobody to ask, but the sign-ins still run and each page is handed to the person; --yes is the one road that skips them.
+  const handoff = !interactive && !opts.yes;
+  // Which of the three reasons nothing is asked, in the words every taken-as-yes line uses.
+  const takenAs = opts.yes ? "--yes" : io.isTTY ? "--non-interactive" : "no terminal";
+  // A person at a terminal gets the app served at the end, --yes or not; --non-interactive says an agent is driving,
+  // and off a terminal nobody is here, so neither serves anything. Only a run that serves needs the ports.
+  const serves = io.isTTY && opts.nonInteractive !== true;
+  let ports: AppPorts = { port: opts.ports.port, wsPort: opts.ports.wsPort };
+  if (serves) {
+    const chosen = await pickPorts({ ports: opts.ports, statePath: opts.statePath, output: io.output });
+    if (chosen === undefined) return { code: 1 };
+    ports = chosen;
+  }
+
+  const computer = opts.reading ?? (await readThisComputer(opts, io, interactive));
+  if ("code" in computer) return computer;
+  let { manifest, catalogRecipe } = computer;
+  const { brew, scanned, projectScan, notes, source } = computer;
   // The card counts what the collector found; the catalog's bare rows join the manifest after it.
   const found = manifest;
-  manifest = applyRecipe(withCatalogAgents(withSavedPins(manifest, readSavedManifest(recipePath(opts.statePath)))), catalogRecipe);
+  manifest = manifestFor(computer, catalogRecipe, opts.statePath);
   if (notes.length > 0) log.warn(notes.join("\n"), out);
   card("Found on this computer", detectionNote(found, source), io.output);
   // The folder named on the command line gets the card the wizard's own question leaves, so both paths say the same.
@@ -1373,7 +1414,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     if (isCancel(ask)) {
       if (handle !== undefined) log.step(DONE_LINE, out);
     } else {
-      if (ask.fork !== undefined) first = await runFirst({ first: ask.fork, handle: roads, goldenVersion: version, output: io.output, spin: label => spin(io.output, label, io.isTTY) });
+      if (ask.fork !== undefined) first = await runFirst({ first: ask.fork, handle: roads, goldenVersion: version, output: io.output, spin: label => spin(io.output, label, io.isTTY), ...(io.json !== undefined ? { json: io.json } : {}) });
       if (ask.local) local = await runLocal(roads, io.output);
       if (first === undefined && local === undefined && handle !== undefined) log.step(DONE_LINE, out);
     }

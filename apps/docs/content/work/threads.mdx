@@ -74,6 +74,15 @@ thread 1a2b3c4d finished (completed, 12m 4s, $0.41): <last line of the reply>
 
 One thread per call. `--timeout` gives up after that many seconds with nothing on stdout and the ok exit code, since nothing failed. This is how an agent that started three builders detached reads their ends: never by polling `wsp threads`.
 
+## Read one
+
+```bash
+wsp thread read 1a2b3c4d
+wsp thread read 1a2b3c4d --last
+```
+
+The thread's messages as the app lists them, oldest first, one block each: who it is and the clock on the first line, the text under it. `person` is the message that opened or steered a turn, `agent` is the agent's own words, `tool` is one call of its folded to the line the app's row reads, and `turn` is the outcome, the duration and the cost the turn ended with. `--last` prints the final reply alone, the whole message the thread's finished line carries, which is what to read when a report is longer than the line that announced it. When the thread has started another turn since, a second row says so, so the report you are reading is never taken for the one being written. The transcript is the host's own, so a read touches no machine and a paused workspace reads the same as a running one.
+
 ## Titles
 
 A thread is titled by its opening words for the few seconds the agent takes to name it, then by that name: three to six words, asked of the agent's cheapest model as the first turn starts. A name a person gives, with `--title`, `wsp thread rename`, or by renaming in the app, is never replaced. A rename writes into the agent's own session store, so Claude Code's session list and Codex's thread list show the same name wsp does.

@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { hostTarget, ptyPackage, stagePty } from "../scripts/pty.mjs";
+import { hostTarget, MAC_TARGETS, ptyPackage, stagePty } from "../scripts/pty.mjs";
 import { packaged, ptyBuildIn, type PackagedTree } from "./packaged.js";
 
 const HERE: string = hostTarget();
@@ -35,18 +35,24 @@ afterEach(() => {
   for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-describe("staging node-pty for one target", () => {
+describe("staging node-pty for the targets one tree runs", () => {
   it("lays that target's build under the one directory node-pty's loader reads", () => {
-    const out = stagePty(NODE_PTY, tempApp(), HERE);
+    const out = stagePty(NODE_PTY, tempApp(), [HERE]);
     expect(existsSync(join(out, "prebuilds", HERE, "pty.node"))).toBe(true);
   });
 
-  it("carries the asked-for target and no other, so one build's trees cannot share a native", () => {
-    const mine = stagePty(NODE_PTY, tempApp(), HERE);
+  it("carries the asked-for targets and no other, so one build's trees cannot share a native", () => {
+    const mine = stagePty(NODE_PTY, tempApp(), [HERE]);
     expect(readdirSync(join(mine, "prebuilds"))).toEqual([HERE]);
-    const theirs = stagePty(NODE_PTY, tempApp(), "darwin-arm64");
+    const theirs = stagePty(NODE_PTY, tempApp(), ["darwin-arm64"]);
     expect(readdirSync(join(theirs, "prebuilds"))).toEqual(["darwin-arm64"]);
     expect(existsSync(join(theirs, "prebuilds", "darwin-arm64", "spawn-helper"))).toBe(true);
+  });
+
+  it("lays down every slice a universal mac bundle runs, in one staging", () => {
+    const both = stagePty(NODE_PTY, tempApp(), MAC_TARGETS);
+    expect(readdirSync(join(both, "prebuilds")).sort()).toEqual([...MAC_TARGETS].sort());
+    for (const target of MAC_TARGETS) expect(existsSync(join(both, "prebuilds", target, "pty.node"))).toBe(true);
   });
 
   it("stages this machine's target when asked for none", () => {
@@ -54,12 +60,14 @@ describe("staging node-pty for one target", () => {
   });
 
   it("takes only what the app runs out of node-pty's lib", () => {
-    const out = stagePty(NODE_PTY, tempApp(), HERE);
+    const out = stagePty(NODE_PTY, tempApp(), [HERE]);
     expect(readdirSync(join(out, "lib")).filter(f => f.endsWith(".test.js") || f.endsWith(".map"))).toEqual([]);
   });
 
-  it("refuses a target this machine has no build for instead of shipping a dead tree", () => {
-    expect(() => stagePty(NODE_PTY, tempApp(), FOREIGN)).toThrow(new RegExp(`no build for ${FOREIGN}`));
+  it("refuses a target this machine has no build for instead of shipping a dead tree, and writes nothing first", () => {
+    const app = tempApp();
+    expect(() => stagePty(NODE_PTY, app, [HERE, FOREIGN])).toThrow(new RegExp(`no build for ${FOREIGN}`));
+    expect(existsSync(join(app, "node_modules"))).toBe(false);
   });
 
   // node-pty's own build/Release answers for whichever arch compiled it, and its loader reads that directory before
@@ -70,13 +78,13 @@ describe("staging node-pty for one target", () => {
     cpSync(join(NODE_PTY, "lib"), join(source, "lib"), { recursive: true });
     mkdirSync(join(source, "build", "Release"), { recursive: true });
     writeFileSync(join(source, "build", "Release", "pty.node"), "");
-    expect(() => stagePty(source, tempApp(), FOREIGN)).toThrow(new RegExp(`no build for ${FOREIGN}`));
-    expect(readdirSync(join(stagePty(source, tempApp(), HERE), "prebuilds"))).toEqual([HERE]);
+    expect(() => stagePty(source, tempApp(), [FOREIGN])).toThrow(new RegExp(`no build for ${FOREIGN}`));
+    expect(readdirSync(join(stagePty(source, tempApp(), [HERE]), "prebuilds"))).toEqual([HERE]);
   });
 
   it("lets a bundle one directory below it resolve node-pty and run a shell in a pty", () => {
     const app = tempApp();
-    stagePty(NODE_PTY, app, HERE);
+    stagePty(NODE_PTY, app, [HERE]);
     mkdirSync(join(app, "main"), { recursive: true });
     writeFileSync(join(app, "main", "probe.mjs"), PROBE);
     expect(execFileSync(process.execPath, [join(app, "main", "probe.mjs")], { encoding: "utf8", timeout: 30_000 })).toContain("wsp-pty-ok");
@@ -84,27 +92,31 @@ describe("staging node-pty for one target", () => {
 });
 
 const built = packaged();
-const nativeIn = (tree: PackagedTree): string => join(ptyBuildIn(tree), "pty.node");
+const nativeIn = (tree: PackagedTree, target: string): string => join(ptyBuildIn(tree, target), "pty.node");
+/** Every packaged tree paired with each target it runs, which is two for the universal mac bundle. */
+const slices: { tree: PackagedTree; target: string }[] = built.flatMap(tree => tree.targets.map(target => ({ tree, target })));
 
 describe("node-pty in the packaged app", () => {
-  it.skipIf(built.length === 0)("every packaged tree carries pty.node for the arch it runs on", () => {
-    expect(Object.fromEntries(built.map(tree => [tree.target, existsSync(nativeIn(tree))]))).toEqual(Object.fromEntries(built.map(tree => [tree.target, true])));
+  it.skipIf(built.length === 0)("every packaged tree carries pty.node for every arch it runs on", () => {
+    expect(slices.filter(({ tree, target }) => !existsSync(nativeIn(tree, target))).map(({ target }) => target)).toEqual([]);
   });
 
-  it.skipIf(built.length === 0)("carries no build but its own tree's, so no tree can load another's", () => {
-    expect(Object.fromEntries(built.map(tree => [tree.target, readdirSync(dirname(dirname(nativeIn(tree))))]))).toEqual(Object.fromEntries(built.map(tree => [tree.target, [tree.target]])));
+  it.skipIf(built.length === 0)("carries the builds its own targets need and no other, so no tree can load a stranger's", () => {
+    expect(Object.fromEntries(built.map(tree => [tree.dir, readdirSync(dirname(ptyBuildIn(tree, tree.targets[0]!))).sort()]))).toEqual(
+      Object.fromEntries(built.map(tree => [tree.dir, [...tree.targets].sort()])),
+    );
   });
 
-  it.skipIf(!built.some(tree => tree.target === HERE))("ships a native module this machine can load", () => {
-    for (const tree of built.filter(tree => tree.target === HERE)) {
-      const native = createRequire(import.meta.url)(nativeIn(tree)) as { fork?: unknown };
+  it.skipIf(!slices.some(({ target }) => target === HERE))("ships a native module this machine can load", () => {
+    for (const { tree } of slices.filter(({ target }) => target === HERE)) {
+      const native = createRequire(import.meta.url)(nativeIn(tree, HERE)) as { fork?: unknown };
       expect(typeof native.fork).toBe("function");
     }
   });
 
-  it.skipIf(!built.some(tree => tree.target.startsWith("darwin")))("ships an executable spawn-helper beside every darwin build", () => {
-    for (const tree of built.filter(tree => tree.target.startsWith("darwin"))) {
-      const helper = join(dirname(nativeIn(tree)), "spawn-helper");
+  it.skipIf(!slices.some(({ target }) => target.startsWith("darwin")))("ships an executable spawn-helper beside every darwin build", () => {
+    for (const { tree, target } of slices.filter(({ target }) => target.startsWith("darwin"))) {
+      const helper = join(ptyBuildIn(tree, target), "spawn-helper");
       expect(existsSync(helper)).toBe(true);
       expect(statSync(helper).mode & 0o111).toBe(0o111);
     }

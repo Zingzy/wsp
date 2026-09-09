@@ -434,3 +434,23 @@ here are included or relied upon under their own licenses, reproduced below.
    under law; the full text is at
    https://creativecommons.org/publicdomain/zero/1.0/legalcode. simple-icons
    notes that the brand marks themselves belong to their owners.
+
+9. Sign-in marks under apps/web/src/assets/signins
+
+   Each file is one company's published mark, kept path for path and read by
+   apps/web/src/adapt/signins.ts for the sign-in rows of the cloud setup
+   modal, drawn in the row's own colour. The marks identify the companies
+   whose sign-in pages the rows open and remain their owners' trademarks; no
+   licence below grants trademark rights. OpenAI's mark is the codex.svg
+   under item 8.
+
+   github.svg: GitHub's mark, from simple-icons/simple-icons icons/github.svg
+   (release 16.30.0). CC0 1.0 Universal.
+
+   anthropic.svg: Anthropic's mark, from simple-icons/simple-icons
+   icons/anthropic.svg (release 16.30.0). CC0 1.0 Universal.
+
+   google.svg: Google's mark, from simple-icons/simple-icons icons/google.svg
+   (release 16.30.0). CC0 1.0 Universal.
+
+   CC0 1.0 Universal (simple-icons): as under item 8.

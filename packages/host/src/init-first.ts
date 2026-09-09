@@ -138,6 +138,8 @@ export interface FirstRun {
   output: Writable;
   /** Wraps a label while a promise runs; init's own spinner, already told whether to animate. */
   spin(label: string): { stop(): void };
+  /** Under --json, one object per step of the fork and the import as it starts and as it ends. */
+  json?(record: Record<string, unknown>): void;
 }
 
 /** What the plan says before anything is packed, in the wizard's one line. */
@@ -162,19 +164,23 @@ export function importedLine(result: ProjectImportResult, workspaceName: string)
 export async function runFirst(o: FirstRun): Promise<FirstResult | undefined> {
   const out = { output: o.output };
   const forking = o.spin(`Forking your first workspace, ${o.first.name}`);
+  o.json?.({ event: "first-workspace", name: o.first.name, state: "forking" });
   let workspace: CreatedWorkspace;
   try {
     workspace = await o.handle.createWorkspace(o.first.name);
     forking.stop();
   } catch (e) {
     forking.stop();
+    o.json?.({ event: "first-workspace", name: o.first.name, state: "failed", error: errorText(e) });
     log.warn(`The first workspace could not be forked: ${errorText(e)}. Create one from the app.`, out);
     return undefined;
   }
+  o.json?.({ event: "first-workspace", name: o.first.name, state: "forked", workspace: { id: workspace.id, name: workspace.name } });
   log.step(`Workspace ${workspace.name} (${workspace.id}) forked from golden v${o.goldenVersion}.${workspace.notice !== undefined ? ` ${workspace.notice}` : ""}`, out);
   if (o.first.folder === undefined) return { workspace };
   // Each line lands with the spinner stopped: a spinner redraws its own row from the first cell and would eat one printed under it.
   let spinner = o.spin(`Reading ${o.first.folder}`);
+  o.json?.({ event: "import", folder: o.first.folder, state: "importing" });
   try {
     const plan = await o.handle.planProject(o.first.folder);
     spinner.stop();
@@ -183,10 +189,12 @@ export async function runFirst(o: FirstRun): Promise<FirstResult | undefined> {
     // The app's dialog seeds its ticks from these two and sends this request; nothing is changed on the way here.
     const imported = await o.handle.importProject({ workspaceId: workspace.id, ...importRequest(plan, o.first.folder, defaultConsent(plan.secrets), defaultAgents(plan.agents)) });
     spinner.stop();
+    o.json?.({ event: "import", folder: o.first.folder, state: "imported", dest: imported.dest, files: imported.files, bytes: imported.bytes });
     log.step(importedLine(imported, workspace.name), out);
     return { workspace, imported };
   } catch (e) {
     spinner.stop();
+    o.json?.({ event: "import", folder: o.first.folder, state: "failed", error: errorText(e) });
     log.warn(`${o.first.folder} was not imported: ${errorText(e)}. The workspace is up; import it from the app.`, out);
     return { workspace };
   }

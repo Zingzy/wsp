@@ -134,7 +134,7 @@ describe("the MCP server over the host", () => {
   it("offers the verbs as tools, each described", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "folders", "forget", "fork", "import", "new", "pause", "projects", "rebuild", "recipe", "recipe_scan", "rename", "send", "snapshot", "stop", "terminal_config", "thread_new", "thread_rename", "threads", "threads_wait", "wake", "workspaces"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "folders", "forget", "fork", "import", "new", "pause", "projects", "rebuild", "recipe", "recipe_scan", "rename", "send", "setup", "snapshot", "stop", "terminal_config", "thread_new", "thread_read", "thread_rename", "threads", "threads_wait", "wake", "workspaces"]);
     expect(Object.keys((tools.find(t => t.name === "folders")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["folder", "hidden"]);
     expect(Object.keys((tools.find(t => t.name === "terminal_config")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["scheme"]);
     expect(Object.keys((tools.find(t => t.name === "import")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agents", "cut", "folder", "keep", "replace", "workspace", "yes"]);
@@ -769,6 +769,32 @@ describe("the MCP server over the host", () => {
       isError: false,
     });
     expect(await call("thread_rename", { thread: "nope", title: "the name" })).toEqual(failedWith("no thread nope"));
+  });
+
+  it("thread_read answers with the thread's messages as the app lists them, its tool call one row, and with last the whole final message alone", async () => {
+    await call("new", { name: "alpha" });
+    const opened = await call("thread_new", { workspace: "alpha", task: "build it" });
+    const [row] = await rt.sessions.list();
+    const read = await call("thread_read", { thread: row!.threadId!.slice(0, 8) });
+    expect(read.isError).toBe(false);
+    const { messages } = read.structured as { threadId: string; messages: { who: string; at: number; text: string }[] };
+    expect(messages.map(m => [m.who, m.text])).toEqual([
+      ["person", "build it"],
+      ["agent", "re: "],
+      ["tool", "$ ls"],
+      ["agent", "build it"],
+      ["turn", "completed"],
+    ]);
+    for (const m of messages) expect(m.at, m.text).toEqual(expect.any(Number));
+    expect(read.structured!["threadId"]).toBe(row!.threadId);
+    expect(read.text.split("\n\n").map(block => block.split("\n").slice(1).join("\n"))).toEqual(["build it", "re: ", "$ ls", "build it", "completed"]);
+
+    const last = await call("thread_read", { thread: row!.threadId!, last: true });
+    expect(last.structured).toEqual({ threadId: row!.threadId, messages: [{ who: "agent", at: expect.any(Number), text: "re: build it" }] });
+    // The reply the start returned and the reply a read of it gives are the same message, whole.
+    expect(last.text.split("\n").slice(1).join("\n")).toBe(opened.text);
+    expect(launchedScripts(backend).filter(script => script.includes("sessions"))).toEqual([]);
+    expect(await call("thread_read", { thread: "nope" })).toEqual(failedWith("no thread nope"));
   });
 
   it("thread_new with notify tells that thread when the new one ends, through the same start the CLI makes: the running parent is steered the line and the child's transcript names the parent", async () => {

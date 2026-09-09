@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { ArrowDownToLine, ArrowUpRight } from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CopyCommand } from "@/components/copy-command";
 import clouds from "@/assets/clouds.webp";
 import { Dither } from "@/components/dither";
-import { DOCS, INSTALL, RELEASES } from "@/links";
+import { Download } from "@/components/download";
+import { DOCS, INSTALL } from "@/links";
 
 const HERO_FADE = [0.2, 0.14] as const;
 
@@ -31,19 +32,10 @@ export function Hero() {
           seconds, with Claude Code and Codex working inside as threads.
         </p>
         <div
-          className="dither-in mt-16 flex flex-col items-center gap-4 sm:flex-row"
+          className="dither-in mt-16 flex flex-col items-center gap-5 sm:flex-row"
           style={{ "--delay": "420ms" } as React.CSSProperties}
         >
-          <CopyCommand command={INSTALL} size="lg" />
-          <Button
-            render={<a href={RELEASES} />}
-            nativeButton={false}
-            size="lg"
-            className="h-12 gap-2 rounded-none bg-sky px-5 text-base font-medium text-sky-foreground hover:bg-sky/85"
-          >
-            <ArrowDownToLine data-icon="inline-start" />
-            Download for macOS
-          </Button>
+          <Download />
           <Button
             render={<a href={DOCS} />}
             nativeButton={false}
@@ -54,6 +46,9 @@ export function Hero() {
             Read the docs
             <ArrowUpRight data-icon="inline-end" />
           </Button>
+        </div>
+        <div className="dither-in mt-6" style={{ "--delay": "500ms" } as React.CSSProperties}>
+          <CopyCommand command={INSTALL} size="lg" />
         </div>
         <p
           className="dither-in mt-12 font-mono text-[12px] tracking-wide text-muted-foreground/80 uppercase"
