@@ -33,6 +33,15 @@ describe("the landing page", () => {
     for (const entry of data.mainEntity ?? []) expect(screen.getByRole("button", { name: entry.name })).toBeTruthy();
   });
 
+  it("prints what the host costs beside the line about keys, as one measured fact", () => {
+    render(<App />);
+    const [line] = screen.getAllByText(/never touch your RAM/);
+    // The budget itself has one home, packages/host/test/memory.test.ts, which is what holds the page to the number.
+    expect(line?.textContent).toMatch(/holds more than \d+ MB/);
+    expect(line?.textContent).toContain("wsp up");
+    expect(line?.className).toContain("font-mono");
+  });
+
   it("carries no em-dash anywhere a visitor reads", () => {
     const { container } = render(<App />);
     expect(container.textContent).not.toContain("—");
