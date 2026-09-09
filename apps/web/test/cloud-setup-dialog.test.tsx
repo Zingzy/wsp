@@ -7,7 +7,7 @@
 // job running on; the sidebar row reads the same line while it is shut.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLOUD_SETUP_WORDS, LOGIN_STATE_WORDS, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, initCostLine, initProgressLine, type EventUnion, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, LOGIN_STATE_WORDS, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, initButtonLine, initCostLine, initProgressLine, type EventUnion, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { CloudSetupDialog } from "../src/sidebar/CloudSetupDialog.js";
@@ -359,5 +359,99 @@ describe("the cloud setup modal", () => {
     act(() => useStore.getState().applyEvent({ type: "init.job", job: { ...job, phase: "done" } }));
     // A sealed golden takes the row away, as a golden found at bind does.
     await waitFor(() => expect(screen.queryByRole("button", { name: CLOUD_SETUP_WORDS.row })).toBeNull());
+  });
+  it("the row is the kit's keycap button: bordered, bevelled, full width, the cloud glyph and the mono words centred inside it", async () => {
+    const { api } = fakeApi({ setup: { ...SETUP, keys: { solari: true, anthropic: false } } });
+    useStore.getState().bind(api);
+    render(<CloudSetupRow />);
+    const row = await screen.findByRole("button", { name: CLOUD_SETUP_WORDS.row });
+    expect(row.getAttribute("data-slot")).toBe("button");
+    expect(row.className).toMatch(/\bborder\b/);
+    expect(row.className).toContain("inset-shadow-");
+    expect(row.className).toContain("w-full");
+    expect(row.className).toContain("font-mono");
+    // Regular weight, like every other mono word in the sidebar; the kit's medium is dropped.
+    expect(row.className).toContain("font-normal");
+    expect(row.className).not.toContain("font-medium");
+    expect(row.className).toContain("transition-[color,background-color,box-shadow]");
+    expect(row.className).toContain("justify-center");
+    expect(row.className).toContain("focus-visible:ring-2");
+    expect(row.querySelector("svg")).not.toBeNull();
+    expect(row.querySelector("[data-cloud-setup-words]")?.textContent).toBe(CLOUD_SETUP_WORDS.row);
+  });
+
+  it("no hairline sits over the row: the button's own border and the spacing separate it", async () => {
+    const { api } = fakeApi({ setup: { ...SETUP, keys: { solari: true, anthropic: false } } });
+    useStore.getState().bind(api);
+    const { container } = render(<CloudSetupRow />);
+    await screen.findByRole("button", { name: CLOUD_SETUP_WORDS.row });
+    const foot = container.querySelector<HTMLElement>("[data-cloud-setup]");
+    expect(foot).not.toBeNull();
+    expect(foot!.className).not.toMatch(/border-t/);
+    expect(container.querySelector("hr, [data-slot=separator]")).toBeNull();
+  });
+
+  it("prominence is the keycap and the width, not colour: no accent fill, no glow on the button, one button in the foot", async () => {
+    const { api } = fakeApi({ setup: { ...SETUP, keys: { solari: true, anthropic: false } } });
+    useStore.getState().bind(api);
+    const { container } = render(<CloudSetupRow />);
+    const row = await screen.findByRole("button", { name: CLOUD_SETUP_WORDS.row });
+    expect(row.className).not.toMatch(/bg-primary|border-primary/);
+    expect(row.className).not.toContain("drop-shadow");
+    expect(row.querySelector("svg")?.getAttribute("class")).toContain("drop-shadow");
+    expect(container.querySelectorAll("button")).toHaveLength(1);
+  });
+
+  it("while the job runs the same button carries the stage word in place of the label, and a sealed golden takes it away", async () => {
+    const { api } = fakeApi({ setup: { ...SETUP, keys: { solari: true, anthropic: false } } });
+    useStore.getState().bind(api);
+    render(<CloudSetupRow />);
+    const row = await screen.findByRole("button", { name: CLOUD_SETUP_WORDS.row });
+    const job: InitJob = { ...JOB, phase: "building", screens: [], rows: [{ id: "stage/creating", kind: "stage", label: "Creating the machine", state: "running" }], progress: { done: 0, total: 1 } };
+    act(() => useStore.getState().applyEvent({ type: "init.job", job }));
+    expect(screen.getByRole("button", { name: CLOUD_SETUP_WORDS.row })).toBe(row);
+    expect(row.getAttribute("data-slot")).toBe("button");
+    expect(row.querySelector("[data-cloud-setup-words]")?.textContent).toBe(initProgressLine(job));
+    act(() => useStore.getState().applyEvent({ type: "init.job", job: { ...job, phase: "done" } }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: CLOUD_SETUP_WORDS.row })).toBeNull());
+  });
+  it("while the job runs the button is alive: the spinner in the glyph's place, the stage word and count, a line along the bottom at the stages done over the total; a sign-in waiting on the person pauses the spinner and says so", async () => {
+    const { api } = fakeApi({ setup: { ...SETUP, keys: { solari: true, anthropic: false } } });
+    useStore.getState().bind(api);
+    render(<CloudSetupRow />);
+    const row = await screen.findByRole("button", { name: CLOUD_SETUP_WORDS.row });
+    expect(row.querySelector(".animate-spin")).toBeNull();
+    expect(row.querySelector("[data-cloud-setup-progress]")).toBeNull();
+    const stages: InitJob["rows"] = [
+      { id: "stage/creating", kind: "stage", label: "Machine created", state: "done" },
+      { id: "stage/deploying-daemon", kind: "stage", label: "Installing the base", state: "running" },
+      { id: "stage/applying-setup", kind: "stage", label: "Applying your setup", state: "waiting" },
+      { id: "stage/ready", kind: "stage", label: "Waiting for the machine", state: "waiting" },
+    ];
+    const job: InitJob = { ...JOB, phase: "building", screens: [], rows: stages, progress: { done: 1, total: 4 } };
+    act(() => useStore.getState().applyEvent({ type: "init.job", job }));
+    expect(row.querySelector(".lucide-cloud")).toBeNull();
+    const spinner = row.querySelector(".animate-spin");
+    expect(spinner).not.toBeNull();
+    expect(spinner!.getAttribute("class")).not.toContain("paused");
+    expect(row.querySelector("[data-cloud-setup-words]")?.textContent).toBe("building · 1/4");
+    const line = row.querySelector<HTMLElement>("[data-cloud-setup-progress]");
+    expect(line).not.toBeNull();
+    expect(line!.getAttribute("role")).toBe("progressbar");
+    expect(line!.getAttribute("aria-valuenow")).toBe("25");
+    expect(line!.style.width).toBe("25%");
+    expect(line!.className).toContain("duration-300");
+    act(() => useStore.getState().applyEvent({ type: "init.job", job: { ...job, rows: stages.map((r, i) => (i < 2 ? { ...r, state: "done" } : r)), progress: { done: 2, total: 4 } } }));
+    expect(line!.style.width).toBe("50%");
+    expect(row.querySelector("[data-cloud-setup-words]")?.textContent).toBe("building · 2/4");
+    const waiting: InitJob = { ...job, phase: "signing-in", progress: { done: 2, total: 4 }, rows: [...stages, { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "GitHub CLI login", state: SIGN_IN_OPEN_STATE, page: "https://github.com/login/device", code: "8F4A-C21B" }] };
+    act(() => useStore.getState().applyEvent({ type: "init.job", job: waiting }));
+    expect(row.querySelector("[data-cloud-setup-words]")?.textContent).toBe(initButtonLine(waiting));
+    expect(row.querySelector("[data-cloud-setup-words]")?.textContent).toBe("waiting for you");
+    expect(row.querySelector(".animate-spin")!.getAttribute("class")).toContain("paused");
+    expect(line!.style.width).toBe("50%");
+    fireEvent.click(row);
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(k(dialog, "build")).toBeDefined());
   });
 });
