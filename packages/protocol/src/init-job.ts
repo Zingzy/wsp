@@ -112,6 +112,11 @@ export type InitRow = z.infer<typeof InitRow>;
 export const InitKeys = z.object({ solari: z.boolean() });
 export type InitKeys = z.infer<typeof InitKeys>;
 
+/** The kinds a refused `init.keys` carries, so a client tells the provider's own refusal, which the person fixes by
+ * typing another key, from a check that never got an answer, which is worth pressing again. */
+export const KEY_REFUSED = "keyRefused";
+export const KEY_UNCHECKED = "keyUnchecked";
+
 /** What the job waits on the person for while it waits: the sentence every surface says, and when the wait began.
  * The host writes it and nothing else derives it, so the sidebar's row, the toast, the window title and a system
  * notification say one thing. */
@@ -148,6 +153,9 @@ export const InitJob = z.object({
    * it is blocked on, else its own latest line. Absent before the thread's first line. */
   line: z.string().optional(),
   error: z.string().optional(),
+  /** Set when the provider refused the key already saved, which stops the build before its first stage: the way on
+   * is another key on the keys step, not another build. */
+  keyRefused: z.boolean().optional(),
   golden: z.object({ version: z.number().int() }).optional(),
   workspace: z.object({ id: z.string(), name: z.string() }).optional(),
 });

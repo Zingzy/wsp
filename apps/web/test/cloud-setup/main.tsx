@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Served by Vite to a real browser: the cloud setup sheet over a fake api at
-// each of its steps (?screen=choice|keys|agent|agent-stopped|reading|agents|
-// tools|also|logins|ask|building|signing|retry|done|failed), in either theme
+// each of its steps (?screen=choice|keys|keys-refused|agent|agent-stopped|
+// reading|agents|tools|also|logins|ask|building|signing|retry|done|failed|
+// failed-key), in either theme
 // (?theme=light), so a test
 // can lay out and photograph every state the ticket names. The screens' data
 // is what the host hands over for a small laptop: three agents, the tools with
 // the base locked on and the rest by calls, a manager's rows, three sign-ins.
 import { createRoot } from "react-dom/client";
-import { GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, initAgentNoRecipeLine, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, KEY_REFUSED, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, initAgentNoRecipeLine, keyRefusedLine, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
-import type { Api } from "../../src/protocol/client";
+import { RequestError, type Api } from "../../src/protocol/client";
+import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS } from "./keyRefusedJob";
 import { useStore } from "../../src/protocol/store";
 import { CloudSetupDialog } from "../../src/sidebar/CloudSetupDialog";
 import "../../src/index.css";
@@ -177,10 +179,13 @@ const JOBS: Record<string, InitJob> = {
     workspace: { id: "ws_first", name: "first" },
   },
   failed: { ...base, phase: "failed", screens: [], rows: [...done(STAGES.slice(0, 5)), stage("installing-harness", "failed", { lines: ["npm i -g @anthropic-ai/claude-code", "npm ERR! ENOSPC: no space left on device"] })], progress: { done: 5, total: 6 }, error: "npm i -g @anthropic-ai/claude-code exited 1: ENOSPC: no space left on device" },
+  // The saved key read before the first stage and refused, as the host leaves it: the first stage failed with the
+  // refusal on it and every row after it never reached, so the one way on is the step that takes a key.
+  "failed-key": { ...base, phase: "failed", screens: [], rows: KEY_REFUSED_ROWS, progress: { done: 0, total: KEY_REFUSED_ROWS.length }, error: KEY_REFUSED_LINE, keyRefused: true },
 };
 
 const setup: InitSetup = {
-  keys: { solari: at !== "keys" },
+  keys: { solari: at !== "keys" && at !== "keys-refused" },
   home: "/Users/zingzy",
   agents: [
     { id: "claude", name: "Claude Code", configured: true, takesTools: true },
@@ -223,7 +228,10 @@ const api: Api = {
   rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
   subscribe: () => () => {},
   initGet: async () => setup,
-  initKeys: async () => setup,
+  initKeys: async () => {
+    if (at === "keys-refused") throw new RequestError(keyRefusedLine("401 Unauthorized"), KEY_REFUSED);
+    return setup;
+  },
   initStart: async () => base,
   initAnswer: async () => base,
   initStep: async () => base,
@@ -250,13 +258,33 @@ if (at === "reading") {
 if (at === "ask") window.wsp = { ...window.wsp, pickFolder: async () => "/Users/zingzy/code/app", droppedPath: file => `/Users/zingzy/${file.name}` };
 
 // The key screen is one press past the choice, as it is for a person: the fixture presses Continue once the choice is drawn.
-if (at === "keys") {
+if (at === "keys" || at === "keys-refused") {
   const press = setInterval(() => {
     const key = document.querySelector<HTMLButtonElement>("[data-k=choice] [data-k=primary]");
     if (key !== null) {
       clearInterval(press);
       key.click();
     }
+  }, 20);
+}
+
+// The refused key is two more presses: a key typed into the field and Save, which the host answers with the
+// provider's own refusal. Never a real key: the field is fed a fake one and the shot shows dots anyway. The keycap
+// is looked up again after the typing, because it is remounted when it stops being the disabled one.
+if (at === "keys-refused") {
+  const type = setInterval(() => {
+    const field = document.querySelector<HTMLInputElement>("#setup-key-solari");
+    if (field === null) return;
+    clearInterval(type);
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    setValue.call(field, "slr_live_fake_wrong_key");
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    const press = setInterval(() => {
+      const save = document.querySelector<HTMLButtonElement>("[data-k=keys] [data-k=primary]");
+      if (save === null || save.disabled) return;
+      clearInterval(press);
+      save.click();
+    }, 20);
   }, 20);
 }
 

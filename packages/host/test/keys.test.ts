@@ -5,9 +5,10 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
-import { exitClassOf } from "@wsp/protocol";
+import { exitClassOf, keyRefusedLine, savedKeyRefusedLine } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HELP, cli, forkCommandFor, jsonCliIO, loadKeys, saveQuestion, terminalIO, upCommandFor, type CliIO } from "../src/cli.js";
+import type { KeyCheck } from "@wsp/engine";
 import { AGENT_KEY_VARIABLES, agentKeyEnvs, agentKeysIn, keysOf, savedEnv } from "../src/env-keys.js";
 
 const SOLARI = "slr_live_fake_solari_key";
@@ -226,6 +227,73 @@ describe("loadKeys", () => {
     expect(io.output[0]).not.toContain("/login");
     expect(io.output[1]).toContain("/login");
     expect(io.output.join("\n")).not.toContain("—");
+  });
+
+  it("puts a typed key to the provider before it writes it: a refused key is not saved and is asked for again in the provider's own words", async () => {
+    setup();
+    const asked: string[] = [];
+    const io = fakeIO(["slr_live_wrong", "slr_live_right", "yes"], true);
+    const keys = await loadKeys(io, { env: {}, cwd, home, checkKey: key => (asked.push(key), Promise.resolve(key === "slr_live_right" ? { state: "taken" } : { state: "refused", said: "401 Unauthorized" })) }, { anthropic: false });
+    expect(asked).toEqual(["slr_live_wrong", "slr_live_right"]);
+    expect(keys).toEqual({ solari: "slr_live_right" });
+    // The second question carries the provider's own words, which is what the app's field says too.
+    expect(stripVTControlCharacters(io.output[1]!)).toContain(keyRefusedLine("401 Unauthorized"));
+    // Only the key the provider took reached the file, and no question ever carried either key.
+    expect(readFileSync(join(home, ".env"), "utf8")).toContain("SOLARI_API_KEY=slr_live_right");
+    expect(readFileSync(join(home, ".env"), "utf8")).not.toContain("slr_live_wrong");
+    expect(io.output.join("\n")).not.toContain("slr_live_");
+  });
+
+  it("stops asking after three refused keys, with the provider's word as the reason", async () => {
+    setup();
+    const io = fakeIO(["slr_live_a", "slr_live_b", "slr_live_c", "yes"], true);
+    const sources = { env: {}, cwd, home, checkKey: async () => ({ state: "refused" as const, said: "401 Unauthorized" }) };
+    await expect(loadKeys(io, sources, { anthropic: false })).rejects.toThrow(keyRefusedLine("401 Unauthorized"));
+    expect(io.output).toHaveLength(3);
+    expect(existsSync(join(home, ".env"))).toBe(false);
+  });
+
+  it("a check nothing answered takes the typed key: a road that is down is not the key's fault", async () => {
+    setup();
+    const io = fakeIO(["slr_live_maybe", "yes"], true);
+    const keys = await loadKeys(io, { env: {}, cwd, home, checkKey: async () => ({ state: "unchecked", said: "fetch failed" }) }, { anthropic: false });
+    expect(keys).toEqual({ solari: "slr_live_maybe" });
+    expect(readFileSync(join(home, ".env"), "utf8")).toContain("SOLARI_API_KEY=slr_live_maybe");
+  });
+
+  it("the build's own road checks the saved key and asks for another one on this run; every other verb takes it as it stands", async () => {
+    setup();
+    mkdirSync(home);
+    writeFileSync(join(home, ".env"), `SOLARI_API_KEY=${SOLARI}\n`);
+    const checked: string[] = [];
+    const checkKey = (key: string): Promise<KeyCheck> => (checked.push(key), Promise.resolve(key === SOLARI ? { state: "refused", said: "401 Unauthorized" } : { state: "taken" }));
+    // wsp init, the road that is about to build with it.
+    const io = fakeIO(["slr_live_new", "yes"], true);
+    expect(await loadKeys(io, { env: {}, cwd, home, checkKey }, { anthropic: false, noSolari: "offer", checkSaved: true })).toEqual({ solari: "slr_live_new" });
+    expect(checked).toEqual([SOLARI, "slr_live_new"]);
+    expect(stripVTControlCharacters(io.output[0]!)).toContain(savedKeyRefusedLine("401 Unauthorized"));
+  });
+
+  it("every other verb takes the saved key as it stands: nothing is asked of the provider and nothing of the person", async () => {
+    setup();
+    mkdirSync(home);
+    writeFileSync(join(home, ".env"), `SOLARI_API_KEY=${SOLARI}\n`);
+    const checked: string[] = [];
+    const sources = { env: {}, cwd, home, checkKey: (key: string): Promise<KeyCheck> => (checked.push(key), Promise.resolve({ state: "refused" as const, said: "401 Unauthorized" })) };
+    for (const noSolari of ["local", "offer", undefined] as const) {
+      const quiet = fakeIO([], true);
+      expect(await loadKeys(quiet, sources, { anthropic: false, ...(noSolari !== undefined ? { noSolari } : {}) })).toEqual({ solari: SOLARI });
+      expect(quiet.output).toEqual([]);
+    }
+    expect(checked).toEqual([]);
+  });
+
+  it("a saved key the provider refused is never quietly dropped for the local road off a terminal", async () => {
+    setup();
+    mkdirSync(home);
+    writeFileSync(join(home, ".env"), `SOLARI_API_KEY=${SOLARI}\n`);
+    const sources = { env: {}, cwd, home, checkKey: async () => ({ state: "refused" as const, said: "401 Unauthorized" }) };
+    await expect(loadKeys(fakeIO([]), sources, { anthropic: false, noSolari: "offer", checkSaved: true })).rejects.toThrow(savedKeyRefusedLine("401 Unauthorized"));
   });
 
   it("refuses to start on an empty Solari key without leaking anything", async () => {

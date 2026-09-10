@@ -9,6 +9,7 @@
 // window itself never scrolls. No step pads itself.
 import { useEffect, useRef, type ReactNode } from "react";
 import { Button } from "../../components/ui/button.js";
+import { Spinner } from "../../components/ui/spinner.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { cn } from "../../lib/utils.js";
 
@@ -27,6 +28,8 @@ export interface ScreenAction {
   destructive?: boolean;
   /** Why the action is disabled, as its tooltip. */
   title?: string;
+  /** The keycap while the host is answering it: the arrow gives way to the spinner and the press does not repeat. */
+  busy?: boolean;
 }
 
 export function SetupScreen({
@@ -61,11 +64,12 @@ export function SetupScreen({
     if (focus) keycap.current?.focus({ preventScroll: true });
   }, [focus]);
   const held = primary !== undefined && primary.disabled === true;
+  const busy = primary !== undefined && primary.busy === true;
   const keycapButton =
     primary !== undefined ? (
-      <Button data-k="primary" ref={keycap} variant={held ? "outline" : "default"} onClick={primary.onPress} disabled={held} className={cn("h-10 rounded-[10px] px-[22px] text-[15px] sm:h-10 sm:text-[15px]", held && "text-muted-foreground")}>
+      <Button data-k="primary" ref={keycap} variant={held ? "outline" : "default"} onClick={primary.onPress} disabled={held || busy} data-busy={busy} className={cn("h-10 rounded-[10px] px-[22px] text-[15px] sm:h-10 sm:text-[15px]", held && "text-muted-foreground")}>
         {primary.word}
-        <span aria-hidden>→</span>
+        {busy ? <Spinner data-k="busy" className="size-4" /> : <span aria-hidden>→</span>}
       </Button>
     ) : null;
   // A disabled control cannot be hovered, so its reason rides on a wrapper the tooltip reads.

@@ -28,7 +28,7 @@ import {
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
 import { authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, NOTHING_TO_SERVE_LINE, type PortsAsked, portsAsked, shellQuote, SOLARI_CONSOLE, THIS_COMPUTER, TURN_END_WORDS, usageRefusal, WS_PORT_OFFSET } from "@wsp/protocol";
-import { agentHome, agentHomes, LocalBackend, type MachineBackend, NoProviderBackend, SOLARI_PRICING, parseSshAddress, providerSlot, type ProviderSlot, SshBackend, sshIdentity, sshMachineName } from "@wsp/engine";
+import { agentHome, agentHomes, checkProviderKey, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, NoProviderBackend, SOLARI_PRICING, parseSshAddress, providerSlot, type ProviderSlot, SshBackend, sshIdentity, sshMachineName } from "@wsp/engine";
 import { assetDir } from "./assets.js";
 import { claudeEnvs, deployDaemon, doctor, localDoctor } from "./doctor.js";
 import { agentsHere } from "./agents-here.js";
@@ -218,6 +218,10 @@ export interface KeySources {
   env: Record<string, string | undefined>;
   cwd: string;
   home: string;
+  /** Whether the provider takes a key, the one check the app's keys step also runs. Absent means this computer can
+   * answer nothing about a key, so nothing is checked and nothing is refused for it; `keySources` always carries it,
+   * and a test hands over its own answer through the same field. */
+  checkKey?(key: string): Promise<KeyCheck>;
 }
 
 const DEFAULT_HOME = join(homedir(), ".wsp");
@@ -312,8 +316,11 @@ function keyLayers(sources: KeySources): Array<Record<string, string | undefined
 /** Where a key is read from on this computer: this process's environment, the folder it runs in, and the wsp home.
  * One answer, so a test can hand a different one through the same field rather than move the process. */
 export function keySources(): KeySources {
-  return { env: process.env, cwd: process.cwd(), home: wspHome() };
+  return { env: process.env, cwd: process.cwd(), home: wspHome(), checkKey: key => checkProviderKey(providerBackend({ solari: key })) };
 }
+
+/** How many keys one run takes before it stops asking: a mistyped key is worth another go, an endless prompt is not. */
+const KEY_TRIES = 3;
 
 /** What no Solari key means for the command that asked. `refuse` is the road every command that needs a machine
  * takes: nothing it does has any meaning without one. `offer` is wsp init's: at a terminal the key is asked for with
@@ -325,26 +332,54 @@ export type NoSolari = "refuse" | "offer" | "local";
 export async function loadKeys(
   io: CliIO,
   sources: KeySources = keySources(),
-  ask: { anthropic: boolean; noSolari?: NoSolari } = { anthropic: true },
+  ask: { anthropic: boolean; noSolari?: NoSolari; checkSaved?: boolean } = { anthropic: true },
 ): Promise<Keys> {
   const homeEnv = join(sources.home, ".env");
   const layers = keyLayers(sources);
   const found = keysFound(sources, layers);
   let solari = found.solari;
   let anthropic = found.anthropic;
-  if (solari !== undefined) return found;
+  /** The provider's refusal of a key, in the words the app's keys step uses, or nothing. Only a refusal counts: a
+   * check nothing answered says nothing about the key, so it is taken and the build says its own piece if it must. */
+  const refusalOf = async (key: string, saved: boolean): Promise<string | undefined> => {
+    if (sources.checkKey === undefined) return undefined;
+    const check = await sources.checkKey(key);
+    return check.state === "refused" ? keyCheckLine(check, saved) : undefined;
+  };
+  // The key a run is about to build with is put to the provider here, so a key it refuses is typed again on this run
+  // rather than stopping the build on the far side of the confirm. Every other verb takes a saved key as it stands:
+  // one of them on a computer with no road out would otherwise refuse to do work that needs no provider at all.
+  let refusedSaved: string | undefined;
+  if (solari !== undefined) {
+    refusedSaved = ask.checkSaved === true ? await refusalOf(solari, true) : undefined;
+    if (refusedSaved === undefined) return found;
+    solari = undefined;
+  }
   // No key on this computer and either a road init already answered or nobody at a keyboard to type one: the local
   // road is taken without a question. Every other command still refuses through its IO's own words below. The Claude
   // key rides on either way: it is the agents' key, not the provider's, and a local thread uses it as a fork would.
   const withoutProvider = (): Keys => (anthropic !== undefined ? { anthropic } : {});
+  // A refused key is never quietly dropped for the local road: nobody asked for this computer, the provider did.
+  if (refusedSaved !== undefined && io.isTTY !== true) throw authRefusal(refusedSaved);
   if (ask.noSolari === "local" || (ask.noSolari === "offer" && io.isTTY !== true)) return withoutProvider();
 
   // Not wrapped: the CLI's IOs already refuse a secret as the contract's auth class, so a caller with no terminal
   // to type one on exits on that code rather than on a generic failure.
-  solari = (await io.askSecret(`Solari API key\nNo Solari key found.\n${SOLARI_CONSOLE}${ask.noSolari === "offer" ? `\nEnter with nothing skips the cloud: ${THIS_COMPUTER} alone becomes your workspace, and nothing is sealed.` : ""}`)).trim();
-  if (!solari) {
-    if (ask.noSolari === "offer") return withoutProvider();
-    throw authRefusal("A Solari API key is needed to start.");
+  let why = refusedSaved ?? "No Solari key found.";
+  for (let attempt = 1; ; attempt++) {
+    const typed = (await io.askSecret(`Solari API key\n${why}\n${SOLARI_CONSOLE}${ask.noSolari === "offer" ? `\nEnter with nothing skips the cloud: ${THIS_COMPUTER} alone becomes your workspace, and nothing is sealed.` : ""}`)).trim();
+    if (!typed) {
+      if (ask.noSolari === "offer") return withoutProvider();
+      throw authRefusal("A Solari API key is needed to start.");
+    }
+    // Checked before it is written, so a key the provider refuses never reaches the file the whole setup reads.
+    const refused = await refusalOf(typed, false);
+    if (refused === undefined) {
+      solari = typed;
+      break;
+    }
+    if (attempt >= KEY_TRIES) throw authRefusal(refused);
+    why = refused;
   }
   const set: Record<string, string> = { SOLARI_API_KEY: solari };
 
@@ -542,6 +577,7 @@ function hostInitDoor(rt: Runtime, statePath: string, run: RunningWsp, openUrl: 
     saved: () => savedEnv(wspHome()),
     saveKeys: set => writeEnvFile(join(wspHome(), ".env"), set),
     provider: keys => swapProvider(rt, keys),
+    checkKey: keys => checkProviderKey(providerBackend(keys)),
     pricing: () => SOLARI_PRICING,
     agents: () => agentsHere(nodeHost(), { versions: false }),
     installTools: agents => installEach(agents, mcpServerSpec(statePath, run), home),
@@ -703,7 +739,7 @@ async function init(
   const say = flags.json ? jsonCliIO() : io;
   const screen = terminalInitIO(flags.json);
   opening(screen, { command: "init", version: VERSION, yes: flags.yes, statePath: opts.statePath });
-  const keys = await loadKeys(say, undefined, { anthropic: false, noSolari: "offer" });
+  const keys = await loadKeys(say, undefined, { anthropic: false, noSolari: "offer", checkSaved: true });
   // A provider with no size to boot a builder on has no image to build, so the run makes this computer the workspace
   // and serves the app on it. Every flag about the golden is about a road this run does not take.
   if (forksNoMachines(providerBackend(keys).capabilities)) {

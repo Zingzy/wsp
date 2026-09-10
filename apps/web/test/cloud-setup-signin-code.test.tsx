@@ -18,7 +18,7 @@ const row = (over: Partial<InitRow> = {}): InitRow => ({ id: "sign-in/gcloud", k
 function screenWith(...rows: InitRow[]) {
   const onCode = vi.fn();
   const job: InitJob = { id: "init_1", road: "manual", phase: "signing-in", keys: { solari: true }, step: 0, stoppable: true, screens: [], rows, progress: { done: 0, total: rows.length }, log: [] };
-  render(<SetupBuild job={job} onCancel={vi.fn()} onRetry={vi.fn()} onCode={onCode} onOpenWorkspace={vi.fn()} onAgain={vi.fn()} refusal={null} />);
+  render(<SetupBuild job={job} onCancel={vi.fn()} onRetry={vi.fn()} onCode={onCode} onOpenWorkspace={vi.fn()} onAgain={vi.fn()} onChangeKey={vi.fn()} refusal={null} />);
   const build = document.querySelector<HTMLElement>("[data-k=build]");
   if (build === null) throw new Error("the build screen did not render");
   return { onCode, build };
