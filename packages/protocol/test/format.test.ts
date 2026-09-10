@@ -61,6 +61,7 @@ import {
   isCodeSearchTool,
   kindWords,
   listedName,
+  loginPathLine,
   machineCapRefusal,
   machineUnreachedLine,
   mcpServerCommandLine,
@@ -691,6 +692,13 @@ describe("harnessExitLine", () => {
   it("any other exit reads as the code, a null one as null", () => {
     expect(harnessExitLine("claude", 1, "/usr/bin")).toBe("claude exited with code 1 before emitting a result");
     expect(harnessExitLine("claude", null, "/usr/bin")).toBe("claude exited with code null before emitting a result");
+  });
+});
+
+describe("loginPathLine", () => {
+  it("names why the login shell gave no PATH and says the one the launch handed the host stands", () => {
+    expect(loginPathLine("/bin/zsh printed nothing")).toBe("login shell: no PATH read (/bin/zsh printed nothing); this host keeps the PATH it was started with");
+    expect(loginPathLine("SHELL names no login shell")).toBe("login shell: no PATH read (SHELL names no login shell); this host keeps the PATH it was started with");
   });
 });
 

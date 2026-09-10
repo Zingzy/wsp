@@ -667,6 +667,13 @@ export function harnessExitLine(bin: string, exitCode: number | null, path: stri
   return `${bin} was not found on PATH (exit 127); ${searched}`;
 }
 
+/** The host's one line when it asked the person's login shell for their PATH and got none back: why, and that the
+ * PATH the launch handed it stands. A host started from Finder or the Dock has only launchd's four system folders,
+ * so this line is what says why no agent of theirs was found afterwards. */
+export function loginPathLine(why: string): string {
+  return `login shell: no PATH read (${why}); this host keeps the PATH it was started with`;
+}
+
 /** The turn's error when a host that came back looked for the turn's run on the machine and the machine no longer
  * holds it: the run's files were swept, so nothing the agent did while the host was away can be read back. */
 export const RUN_GONE_LINE = "the machine no longer holds this turn's run, so nothing of it can be read back";
