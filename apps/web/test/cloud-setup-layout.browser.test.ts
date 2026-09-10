@@ -20,7 +20,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
-import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, NETWORK_LOST_LINE, SIGN_IN_STAGE_ID, initSignInLine, initStageCountLine, keyRefusedLine } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, MACHINE_ROW_LABEL, NETWORK_LOST_LINE, SIGN_IN_STAGE_ID, initSignInLine, initStageCountLine, keyRefusedLine } from "@wsp/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { textContrast, textHue } from "./contrast";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
@@ -264,8 +264,8 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     const listed = await page!.locator(`${frame} [data-k=row]`).evaluateAll(els => els.map(el => el.getAttribute("data-row")));
     expect(listed, "the list keeps its order and its rows").toEqual(["stage/creating", "stage/deploying-daemon", "stage/applying-setup", "stage/uploading-files", "stage/installing-harness", "stage/installing-tools", "stage/installing-mcp", "stage/ready", "stage/snapshotting", "stage/promoting", "stage/smoke-forking", "stage/sealed", "workspace/e2e"]);
     // The sentence is this computer's word; the block under the failed stage keeps the provider client's own.
-    expect(await page!.locator(`${frame} [data-row="stage/applying-setup"] [data-k=lines]`).textContent()).toContain("fetch failed; fetch failed");
-    expect(await page!.locator(`${frame} [data-row="stage/applying-setup"] [data-k=lines]`).textContent()).not.toContain(NETWORK_LOST_LINE);
+    expect(await page!.locator(`${frame} [data-row="stage/applying-setup"] [data-k=lines]`).textContent()).toMatch(new RegExp(`${NETWORK_LOST_LINE}$`));
+    expect(await page!.locator(`${frame} [data-row="stage/applying-setup"] [data-k=lines]`).textContent()).not.toContain("fetch failed");
     expect(await page!.locator(`${frame} [data-k=count]`).textContent()).toBe("2 of 12");
     await shoot("stopped", theme);
 
@@ -284,7 +284,8 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     const machine = `${frame} [data-row="machine/b_dlb9oeig"]`;
     expect(await page!.locator(machine).count()).toBe(1);
     expect(await page!.locator(`${machine} [data-k=state]`).textContent()).toBe(INIT_ROW_STATES.retrying);
-    expect(await page!.locator(machine).textContent()).toContain("Builder b_dlb9oeig");
+    expect(await page!.locator(machine).textContent()).toContain(MACHINE_ROW_LABEL);
+    expect(await page!.locator("[role=dialog]").textContent(), "no provider id on the screen").not.toMatch(/b_dlb9oeig|b_dlbauaeb/);
     expect(near((await box(`${machine} > div:first-child`)).height, SPEC.row), "the machine row is a row").toBe(true);
     expect(await page!.locator(`${frame} [data-row="machine/b_dlbauaeb"] [data-k=state]`).textContent()).toBe(INIT_ROW_STATES.gone);
     for (const ratio of await textContrast(page!, `${machine} [data-k=state]`)) expect(ratio, "the machine's word reads").toBeGreaterThanOrEqual(4.5);

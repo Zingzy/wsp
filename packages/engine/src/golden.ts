@@ -8,7 +8,7 @@
 
 import { createHash } from "node:crypto";
 import { ROAD_STEPS } from "@wsp/catalog";
-import { ALREADY_APPLIED, MCP_ID_PREFIX, SAVING_IMAGE_LINE, SNAPSHOT_GONE_REASON, fmtBytes, goldenHead, goldenImage, snapshotAttemptLine, snapshotFailedLine, snapshotStageLine, templateFailedLine, templateStatusLine, templateWaitedLine, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenStep, type GoldenVersion, type BuilderReading, type ProviderAnswer, type RecipeDigest } from "@wsp/protocol";
+import { ALREADY_APPLIED, MCP_ID_PREFIX, SAVING_IMAGE_LINE, SNAPSHOT_GONE_REASON, fmtBytes, goldenHead, goldenImage, machineLeftLine, snapshotAttemptLine, snapshotFailedLine, snapshotStageLine, templateFailedLine, templateStatusLine, templateWaitedLine, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenStep, type GoldenVersion, type BuilderReading, type ProviderAnswer, type RecipeDigest } from "@wsp/protocol";
 import { nameOf, rungOf } from "./golden-diff.js";
 import { AGENT_INSTALLERS, NODE_PATH_LINE, type AgentInstall, type LoginShell, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { PRELUDE } from "./dotfiles-presets.js";
@@ -729,8 +729,21 @@ async function sizeBuilt(machine: Machine, asked: { cpu: number; memMb: number }
   return { cpu: shape?.cpu ?? asked.cpu, memMb: shape?.memMb ?? asked.memMb };
 }
 
+/** The stage listener with the stage it last named kept beside it, so a rollback's own line lands on that stage. */
+function staged(onStage: StageListener | undefined): { stage: StageListener; current: () => GoldenStage | undefined } {
+  let current: GoldenStage | undefined;
+  const told = onStage ?? (() => {});
+  return {
+    stage: (name, detail, step) => {
+      if (name !== "failed") current = name;
+      told(name, detail, step);
+    },
+    current: () => current,
+  };
+}
+
 export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Builder> {
-  const stage = opts.onStage ?? (() => {});
+  const { stage, current } = staged(opts.onStage);
   const kind = opts.kind ?? "sandbox";
   const baseTemplate = opts.baseTemplate ?? DEFAULT_TEMPLATE[kind];
 
@@ -777,12 +790,13 @@ export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Build
       ...(opts.import !== undefined ? { import: applied.ledger } : {}),
     };
   } catch (e) {
-    // Nothing records this machine yet, so one that survives here is reap's to sweep.
-    let detail = messageOf(e);
+    // Nothing records this machine yet, so one that survives here is said on the stage's own block for reap to sweep;
+    // the failure's line stays the failure's own.
     await killUntilGone(opts.backend, machine).catch((k: unknown) => {
-      detail += `; ${messageOf(k)}`;
+      const at = current();
+      if (at !== undefined) stage(at, machineLeftLine(messageOf(k)));
     });
-    stage("failed", detail);
+    stage("failed", messageOf(e));
     throw e;
   }
 }
@@ -792,7 +806,7 @@ const isCapRefusal = (e: unknown): boolean => (e as { kind?: unknown }).kind ===
 // Sequenced for a two-machine cap: unless the builder is kept, it dies before
 // the smoke fork boots, so the seal itself never holds more than one machine.
 export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Promise<SealResult> {
-  const stage = opts.onStage ?? (() => {});
+  const { stage, current } = staged(opts.onStage);
   assertFirstLife(builder.machine.id, builder.firstLife, "seal");
   const smoke = builder.import?.smoke ?? opts.smoke;
 
@@ -899,9 +913,12 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
     stage("sealed", leak === undefined ? `v${versionNum}${kept}` : `v${versionNum}${kept}; ${leak}`);
     return { manifest: { head: versionNum, versions: [...prior, version] }, version, builderKept: builderAlive };
   } catch (e) {
-    let detail = messageOf(e);
+    const detail = messageOf(e);
+    // A rollback the provider would not take leaves a machine billing: the refusal goes on the stage's own block, and
+    // the failure's line stays the failure's own.
     const leaked = (k: unknown) => {
-      detail += `; ${messageOf(k)}`;
+      const at = current();
+      if (at !== undefined) stage(at, machineLeftLine(messageOf(k)));
     };
     // A refused snapshot changed nothing on the builder: it is left as the person set it up, for the next attach.
     if (builderAlive && !(e instanceof MachineAliveError) && !(e instanceof SnapshotFailedError)) await kill(builder.machine).catch(leaked);
@@ -1051,7 +1068,7 @@ export interface UpgradeBuilderOptions extends MachineSize {
  * everything the recipe already put there, so nothing but the delta runs. */
 export async function upgradeBuilder(opts: UpgradeBuilderOptions): Promise<Builder> {
   refusePreFloor(opts.head.base, `golden v${opts.head.version}`);
-  const stage = opts.onStage ?? (() => {});
+  const { stage, current } = staged(opts.onStage);
   const kind = opts.head.kind ?? "sandbox";
   stage("creating", `fork of golden v${opts.head.version}`);
   const asked = sizeAsked(opts.backend, opts, opts.head.size);
@@ -1091,11 +1108,11 @@ export async function upgradeBuilder(opts: UpgradeBuilderOptions): Promise<Build
       retired: opts.delta.retiredOnImage,
     };
   } catch (e) {
-    let detail = messageOf(e);
     await killUntilGone(opts.backend, machine).catch((k: unknown) => {
-      detail += `; ${messageOf(k)}`;
+      const at = current();
+      if (at !== undefined) stage(at, machineLeftLine(messageOf(k)));
     });
-    stage("failed", detail);
+    stage("failed", messageOf(e));
     throw e;
   }
 }

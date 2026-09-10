@@ -41,7 +41,9 @@ import {
   initStageCount,
   initStageCountLine,
   initSweeping,
-  initMachineRowLabel,
+  MACHINE_GONE_LINE,
+  MACHINE_ROW_LABEL,
+  machineLeftLine,
   MACHINE_SWEEP_LINE,
   initStageWhile,
   initStoppedLine,
@@ -314,7 +316,12 @@ describe("the words the clients print for the job", () => {
     // Once the provider took it the line goes back to the job the person is looking at.
     expect(initProgressLine({ ...building, rows: [...building.rows, left(INIT_ROW_STATES.gone)] })).toBe("building · 1/2");
     // A machine row's name is words, never a bare provider id in a column of sentences.
-    expect(initMachineRowLabel("b_dlb9oeig")).toBe("Builder b_dlb9oeig");
+    // No provider id in a row's name or a sentence: the builder is the builder, and a stopped build's machine is the machine.
+    expect(MACHINE_ROW_LABEL).toBe("The builder");
+    expect(MACHINE_GONE_LINE).toBe("The machine is gone; nothing is billing.");
+    expect(`${MACHINE_ROW_LABEL} ${MACHINE_GONE_LINE} ${MACHINE_SWEEP_LINE}`).not.toMatch(/b_[a-z0-9]{6,}/);
+    // A rollback the provider refused is a line on the stage's block with the provider's own words, never the headline.
+    expect(machineLeftLine("getaddrinfo ENOTFOUND api.getsolari.com")).toBe("the machine could not be removed and bills on: getaddrinfo ENOTFOUND api.getsolari.com");
   });
 
   it("a stopped build's sentence is this computer's own word for what happened, and a reason said twice is said once", () => {

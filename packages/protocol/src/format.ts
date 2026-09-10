@@ -1306,8 +1306,15 @@ export const initStoppedAt = (where: string): string => `Stopped ${where}.`;
  * how to finish it themselves, the app does not, because the host is already trying again and its row says so. */
 export const STOP_LEFT_MACHINE_LINE = "The machine did not stop yet; wsp keeps trying.";
 
-/** A machine row's name: the builder's provider id in words, so a column of sentences never holds a bare id. */
-export const initMachineRowLabel = (builderId: string): string => `Builder ${builderId}`;
+/** A machine row's name: the builder, never its provider id, which is the host's to hold and no sentence's to say. */
+export const MACHINE_ROW_LABEL = "The builder";
+
+/** What a stopped build says of its machine once the provider took the kill: the same words in the terminal and the app. */
+export const MACHINE_GONE_LINE = "The machine is gone; nothing is billing.";
+
+/** A stage's line for a machine its rollback could not remove, with the provider's own refusal: it goes in the stage's
+ * block, never in the headline, which stays the failure's own sentence; the machine's row carries the retries. */
+export const machineLeftLine = (reason: string): string => `the machine could not be removed and bills on: ${reason}`;
 
 /** What the sidebar's keycap says while a machine an earlier build left is still being removed: the one line that
  * keeps a machine from billing unseen once the setup has moved on to another job. */

@@ -11,7 +11,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
 import { SNAPSHOT_STORAGE, checkProviderKey, type BackendPricing } from "@wsp/engine";
-import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, initMachineRowLabel, initProgressLine, initStageCount, keyRefusedLine, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initStageCount, keyRefusedLine, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
 import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localWiring, type Keys } from "../src/cli.js";
@@ -641,7 +641,7 @@ describe("the init job, manual road", () => {
     await expect(f.jobs.signInCode({ tool: "claude", code: PASTED })).rejects.toThrow(/no init job is running/);
   });
 
-  it("a build the network stopped says what happened in this computer's own words, keeps every stage row in its order, and closes the failed stage's block with the error's own line", async () => {
+  it("a build the network stopped says what happened in this computer's own words, keeps every stage row in its order, and closes the failed stage's block with that sentence, never the raw error", async () => {
     const f = fake({ deployDaemon: async () => Promise.reject(new Error("fetch failed; fetch failed")) });
     await f.jobs.start({ road: "manual" });
     await f.settled();
@@ -661,10 +661,11 @@ describe("the init job, manual road", () => {
     expect(ids.at(-1)).toBe("workspace/e2e");
     // The bar reads the stages done over all of them, so two of twelve never reads as nearly there.
     expect(initStageCount(view.rows.filter(r => r.kind === "stage"))).toEqual({ done: 1, total: 12 });
-    // The stage that failed carries the error's own line at the end of its block; the ones after it wait.
+    // The stage that failed ends its block on the sentence the head shows, and the raw error reaches no row; the ones after it wait.
     const failed = view.rows.find(r => r.state === INIT_ROW_STATES.failed)!;
     expect(failed.label).toBe(GOLDEN_STAGE_WORDS["deploying-daemon"]);
-    expect(failed.lines!.at(-1)).toContain("fetch failed");
+    expect(failed.lines!.at(-1)).toBe(NETWORK_LOST_LINE);
+    expect(JSON.stringify(view.rows)).not.toContain("fetch failed");
     expect(view.rows.find(r => r.id === "stage/snapshotting")!.state).toBe(INIT_ROW_STATES.waiting);
   });
 
@@ -780,7 +781,7 @@ describe("the init job, manual road", () => {
     const said = f.events.map(e => e.job.rows.find(r => r.kind === "machine")).filter(r => r !== undefined).map(r => r.state);
     expect(said).toContain(INIT_ROW_STATES.retrying);
     // The row is words, not a bare provider id in a column of sentences.
-    expect(f.jobs.view()!.rows.find(r => r.kind === "machine")!.label).toBe(initMachineRowLabel(builder.id));
+    expect(f.jobs.view()!.rows.find(r => r.kind === "machine")!.label).toBe(MACHINE_ROW_LABEL);
     // The kill landed once the network was back, so the row says the machine is gone and nothing bills on.
     expect(f.jobs.view()!.rows.find(r => r.kind === "machine")).toMatchObject({ state: INIT_ROW_STATES.gone });
     expect(f.backend.machines.filter(m => !m.killed)).toHaveLength(0);

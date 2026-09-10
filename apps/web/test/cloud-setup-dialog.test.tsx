@@ -9,7 +9,7 @@
 // happen. Esc hides it with the job running on.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLOUD_SETUP_WORDS, KEY_REFUSED, KEY_UNCHECKED, SIGN_IN_STAGE_ID, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MACHINE_SWEEP_LINE, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initBuildRows, initDiskLine, initDiskOverLine, initMachineRowLabel, initStageCount, initStageCountLine, initTallyLine, initButtonLine, initProgressLine, initSignInLine, keyRefusedLine, keyUncheckedLine, snapshotStageLine, type EventUnion, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, KEY_REFUSED, KEY_UNCHECKED, SIGN_IN_STAGE_ID, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MACHINE_SWEEP_LINE, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initBuildRows, initDiskLine, initDiskOverLine, MACHINE_GONE_LINE, MACHINE_ROW_LABEL, initStageCount, initStoppedAt, initStageCountLine, initTallyLine, initButtonLine, initProgressLine, initSignInLine, keyRefusedLine, keyUncheckedLine, snapshotStageLine, type EventUnion, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS, keyStoppedRows } from "./cloud-setup/keyRefusedJob.js";
 import { useStore } from "../src/protocol/store.js";
@@ -772,7 +772,7 @@ describe("the cloud setup sheet", () => {
       ...JOB,
       phase: "cancelled",
       stoppable: false,
-      error: "Stopped while creating the machine. Builder b_1 is gone; nothing is billing.",
+      error: `${initStoppedAt("while creating the machine")} ${MACHINE_GONE_LINE}`,
       rows: [
         { id: "stage/creating", kind: "stage", label: GOLDEN_STAGE_WORDS.creating, state: INIT_ROW_STATES.failed, lines: ["sandbox from base"] },
         { id: "stage/snapshotting", kind: "stage", label: GOLDEN_STAGE_WORDS.snapshotting, state: INIT_ROW_STATES.waiting },
@@ -799,7 +799,7 @@ describe("the cloud setup sheet", () => {
       error: `Stopped while creating the machine. ${STOP_LEFT_MACHINE_LINE}`,
       rows: [
         { id: "stage/creating", kind: "stage", label: GOLDEN_STAGE_WORDS.creating, state: INIT_ROW_STATES.stopped, lines: ["sandbox from base"] },
-        { id: "machine/b_dlb9oeig", kind: "machine", label: initMachineRowLabel("b_dlb9oeig"), state: INIT_ROW_STATES.retrying, detail: "getaddrinfo ENOTFOUND api.getsolari.com" },
+        { id: "machine/b_dlb9oeig", kind: "machine", label: MACHINE_ROW_LABEL, state: INIT_ROW_STATES.retrying, detail: "getaddrinfo ENOTFOUND api.getsolari.com" },
       ],
       progress: { done: 0, total: 1 },
       log: [],
@@ -808,7 +808,8 @@ describe("the cloud setup sheet", () => {
     await waitFor(() => expect(k(dialog, "build")).toBeDefined());
     const row = dialog.querySelector<HTMLElement>('[data-row="machine/b_dlb9oeig"]')!;
     expect(row).not.toBeNull();
-    expect(row.textContent).toContain("Builder b_dlb9oeig");
+    expect(row.textContent).toContain(MACHINE_ROW_LABEL);
+    expect(row.textContent).not.toContain("b_dlb9oeig");
     expect(row.querySelector("[data-k=state]")!.textContent).toBe(INIT_ROW_STATES.retrying);
     // A live row, so a filled glyph and no chevron: there is nothing to open and nothing to press.
     expect(row.querySelector("svg")).toBeNull();
@@ -845,7 +846,7 @@ describe("the cloud setup sheet", () => {
     expect(k(dialog, "count").textContent).toBe(initStageCountLine(building.progress));
     expect(initProgressLine(building)).toBe(`building · ${building.progress.done}/${building.progress.total}`);
     // A machine still being removed takes the keycap's line, since that one bills while nobody looks.
-    expect(initProgressLine({ ...building, rows: [...building.rows, { id: "machine/b_1", kind: "machine", label: "Builder b_1", state: INIT_ROW_STATES.retrying }] })).toBe(MACHINE_SWEEP_LINE);
+    expect(initProgressLine({ ...building, rows: [...building.rows, { id: "machine/b_1", kind: "machine", label: MACHINE_ROW_LABEL, state: INIT_ROW_STATES.retrying }] })).toBe(MACHINE_SWEEP_LINE);
   });
 
   it("a stage waiting on the account's machine cap reads so on its row with the cap line in its block", async () => {

@@ -8,7 +8,7 @@
 // is what the host hands over for a small laptop: three agents, the tools with
 // the base locked on and the rest by calls, a manager's rows, three sign-ins.
 import { createRoot } from "react-dom/client";
-import { GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, KEY_REFUSED, MCP_ADDED_WORD, NETWORK_LOST_LINE, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initAgentNoRecipeLine, initBuildRows, initMachineRowLabel, initStageCount, keyRefusedLine, snapshotStageLine, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, KEY_REFUSED, MCP_ADDED_WORD, NETWORK_LOST_LINE, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initAgentNoRecipeLine, initBuildRows, MACHINE_GONE_LINE, MACHINE_ROW_LABEL, initStageCount, initStoppedAt, keyRefusedLine, snapshotStageLine, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import { RequestError, type Api } from "../../src/protocol/client";
 import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS } from "./keyRefusedJob";
@@ -128,10 +128,7 @@ const done = (rows: InitJob["rows"]): InitJob["rows"] => rows.map(r => (r.kind =
 /** The stages after the one a stopped build was on: still listed, still waiting, whatever they carry above. */
 const notYet = (rows: InitJob["rows"]): InitJob["rows"] => rows.map(r => (r.kind === "stage" ? { id: r.id, kind: r.kind, label: r.label, state: INIT_ROW_STATES.waiting } : r));
 /** A machine a stop could not reach the provider to kill, as the host's sweep rides it on the current job. */
-const machine = (state: string, detail?: string, id = "b_dlb9oeig"): InitJob["rows"][number] => ({ id: `machine/${id}`, kind: "machine", label: initMachineRowLabel(id), state, ...(detail !== undefined ? { detail } : {}) });
-/** The provider client's own words when nothing on this computer can reach it: what the host appends to the failed
- * stage's block, under a sentence that reads as a person would say it. */
-const RAW_FETCH_FAILURE = "fetch failed; fetch failed";
+const machine = (state: string, detail?: string, id = "b_dlb9oeig"): InitJob["rows"][number] => ({ id: `machine/${id}`, kind: "machine", label: MACHINE_ROW_LABEL, state, ...(detail !== undefined ? { detail } : {}) });
 // Every kind of row the slide draws: a page waiting with its code, a copy (whose note names the command the machine
 // ran, which no screen shows), a sign-in done, one that ran out with Retry and no mark of its own, and the row whose
 // page hands a code back, with the field for it on its action line.
@@ -192,13 +189,13 @@ const JOBS: Record<string, InitJob> = {
   // refusal on it and every row after it never reached, so the one way on is the step that takes a key.
   "failed-key": { ...base, phase: "failed", screens: [], rows: KEY_REFUSED_ROWS, error: KEY_REFUSED_LINE, keyRefused: true },
   // A build the network stopped: the list keeps its order and every row, the failed stage's block ends on the
-  // error's own line, and the stages after it still read waiting.
+  // sentence the head shows, and the stages after it still read waiting.
   stopped: {
     ...base,
     phase: "failed",
     stoppable: false,
     screens: [],
-    rows: [...done(STAGES.slice(1, 3)), stage("applying-setup", INIT_ROW_STATES.failed, { lines: ["applying your setup", RAW_FETCH_FAILURE] }), ...notYet(STAGES.slice(4, 13)), { id: "workspace/e2e", kind: "workspace", label: "e2e", state: INIT_ROW_STATES.notMade }],
+    rows: [...done(STAGES.slice(1, 3)), stage("applying-setup", INIT_ROW_STATES.failed, { lines: ["applying your setup", NETWORK_LOST_LINE] }), ...notYet(STAGES.slice(4, 13)), { id: "workspace/e2e", kind: "workspace", label: "e2e", state: INIT_ROW_STATES.notMade }],
     error: NETWORK_LOST_LINE,
   },
   // A build the person stopped: the run's own line for where it was and what became of the machine.
@@ -208,7 +205,7 @@ const JOBS: Record<string, InitJob> = {
     stoppable: false,
     screens: [],
     rows: [...done(STAGES.slice(1, 2)), stage("deploying-daemon", INIT_ROW_STATES.stopped, { lines: ["deploy wsp-daemon"] }), ...notYet(STAGES.slice(3, 13)), { id: "workspace/e2e-cancel", kind: "workspace", label: "e2e-cancel", state: INIT_ROW_STATES.notMade }],
-    error: "Stopped while installing the base tools. Builder b_dlb9oeig is gone; nothing is billing.",
+    error: `${initStoppedAt("while installing the base tools")} ${MACHINE_GONE_LINE}`,
   },
   // The stop the provider would not take: the machine's own row rides on, and it rides on the next job too.
   sweeping: {

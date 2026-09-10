@@ -19,7 +19,7 @@ import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { agentInstallsFor, brewfileFor, BUILDER_DISK_GB, estimateDisk, isMcpRow, PACK_BUDGET_BYTES, pinState, plural, recordedPins, shownOf, toolInstallsFor, TOOLS_DISK_FLOOR, type BrewTable, type ImportResult } from "@wsp/engine";
-import { ALREADY_APPLIED, BREW_ID_PREFIX, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, initStageWhile, initStoppedAt, INIT_ROW_STATES, notHereLine, packageOf, SAVED_KEY_STOPPED_LINE, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote, type AppPorts, type PortsAsked, GOLDEN_STAGE_WORDS } from "@wsp/protocol";
+import { ALREADY_APPLIED, BREW_ID_PREFIX, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, initStageWhile, initStoppedAt, INIT_ROW_STATES, MACHINE_GONE_LINE, notHereLine, packageOf, SAVED_KEY_STOPPED_LINE, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote, type AppPorts, type PortsAsked, GOLDEN_STAGE_WORDS } from "@wsp/protocol";
 import { importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
   RUNG_TITLE,
@@ -1279,8 +1279,8 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
         ? e.kept
           ? `${opening} Your earlier builder ${attach?.name ?? GOLDEN_NAME} was not stopped: it has a first life worth keeping. ${builderStaysLine(e.builderId, opts.pricing.rateUsdPerHour(attach?.size ?? opts.pricing.defaultSize), attachCommand)}`
           : e.left === undefined
-            ? `${opening} Builder ${e.builderId} is gone; nothing is billing.`
-            : `${opening} Builder ${e.builderId} did not stop (${e.left}); ${SWEEP}`
+            ? `${opening} ${MACHINE_GONE_LINE}`
+            : `${opening} The machine did not stop (${e.left}); ${SWEEP}`
         : `${opening} Nothing was booted; nothing is billing.`;
     finalLine = line;
     saidStopped(line, where, e instanceof PrepareStoppedError && e.left !== undefined ? e.builderId : undefined);
@@ -1409,7 +1409,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     let left: string | undefined;
     await rt.golden.kill(builder.id).catch((e: unknown) => (left = e instanceof Error ? e.message : String(e)));
     const where = "while signing in";
-    const line = left === undefined ? `${initStoppedAt(where)} Builder ${builder.id} is gone; nothing is billing.` : `${initStoppedAt(where)} Builder ${builder.id} did not stop (${left}); ${SWEEP}`;
+    const line = left === undefined ? `${initStoppedAt(where)} ${MACHINE_GONE_LINE}` : `${initStoppedAt(where)} The machine did not stop (${left}); ${SWEEP}`;
     saidStopped(line, where, left === undefined ? undefined : builder.id);
     cancel(line, out);
     await closeRuntime();
