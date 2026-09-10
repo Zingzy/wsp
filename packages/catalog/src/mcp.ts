@@ -5,6 +5,7 @@
 // machine, whose node runs the JavaScript the module carries. An agent entry
 // registers its format and its files. Pure text in and out: nothing here reads
 // or writes a file on this computer.
+import type { McpServerSpec } from "@wsp/protocol";
 import { JSONC_READER, readJsonc, type Jsonc } from "./jsonc.js";
 
 export type McpTransport =
@@ -18,12 +19,6 @@ export interface McpServer {
   transport: McpTransport;
   /** Variables the definition reads from the environment at run time (Codex's bearer_token_env_var); names only. */
   envRefs: string[];
-}
-
-/** An MCP server as every agent's config names it: the program and its arguments, run over stdio. */
-export interface McpServerSpec {
-  command: string;
-  args: readonly string[];
 }
 
 export interface Placed {

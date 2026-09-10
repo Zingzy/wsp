@@ -3,7 +3,7 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { GoldenMissingTool, GoldenStage, HarnessCatalog, InitJob, InitPhase, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
+import type { GoldenMissingTool, GoldenStage, HarnessCatalog, InitJob, InitPhase, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, SessionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
 import { shellLine } from "./shell-quote.js";
 import type { ThreadMessage } from "./thread-read.js";
@@ -959,6 +959,10 @@ export const CLOUD_SETUP_WORDS = {
     manual: "Choose what goes on the image",
     agent: "Let an agent choose from your usage",
     agentWith: "with",
+    /** An agent here whose thread wsp cannot hand the recipe tools at launch: shown, never offered. */
+    noTools: "no wsp tools yet",
+    /** What the agent row says with no agent on this computer at all. */
+    none: "no agent here",
     keycap: "Continue",
   },
   keys: {
@@ -1021,6 +1025,16 @@ export const CLOUD_SETUP_WORDS = {
     headline: "Reading what your agents used",
     top: "Your agent reads this computer and writes the recipe the next screens start from",
     title: "Set up cloud machines",
+    /** The link to the thread doing the work, which the sidebar focuses. */
+    open: "Open the thread",
+    /** The headline once the turn ended without the recipe, and the two ways on from there. */
+    failed: "Your agent stopped",
+    /** The sentence under it when nothing named a reason, which is a job stopped from another client. */
+    stopped: "The thread ended before the recipe was written",
+    retry: "Retry",
+    again: "Start over",
+    /** What the block under the title says before the thread's first line. */
+    waiting: "waiting for the thread's first line",
   },
   reading: {
     label: "THIS COMPUTER",
@@ -1139,6 +1153,12 @@ export const initJobOver = (phase: InitPhase): boolean => phase === "done" || ph
 /** Whether the job is on the build: from the machine booting to the first workspace, the stretch the count is over. */
 export const initJobBuilding = (phase: InitPhase): boolean => phase === "building" || phase === "signing-in" || phase === "sealing" || phase === "finishing";
 
+/** Whether the job's step is the agent's own: the agent road while its thread writes the recipe, and a job that
+ * ended there, which is the step that carries Retry. A job that ended with screens ended past this step, on the
+ * build. One rule, so the app's sheet and the terminal pick the same step for one job. */
+export const initAgentStep = (job: Pick<InitJob, "road" | "phase" | "screens">): boolean =>
+  job.road === "agent" && (job.phase === "agent" || (initJobOver(job.phase) && job.screens.length === 0));
+
 /** The one line the collapsed sidebar row shows for a running job: the sign-in waited on while one is open, the phase
  * with the count of rows over while it builds, the phase word alone otherwise. */
 export function initProgressLine(job: Pick<InitJob, "phase" | "rows" | "progress">): string {
@@ -1187,15 +1207,25 @@ export function initSetupLines(setup: InitSetup): string[] {
 
 /** The first message of the thread the agent road opens on this computer: read this computer with recipe_scan, write
  * the recipe with recipe to the path the job reads it from, and ask the person nothing, since they review every row
- * on the screens that follow. */
+ * on the screens that follow. The two tools are named as the only road on purpose: a thread that reached for the
+ * command line instead spent its turn on one permission prompt per `sed` over its own tool results (seen 2026-09-10),
+ * and the launch carries the wsp server so both tools are there to call. */
 export function initAgentPrompt(recipePath: string): string {
   return [
     "Write the recipe for this person's wsp machine image from what their agents actually used on this computer.",
+    "Use the wsp tools recipe_scan and recipe, and nothing else: run no commands and read no files.",
     "Call recipe_scan first and read every row's recommended value and its reason.",
     `Then call recipe once, with tick set to used, set for every row whose reason says it is worth changing, signin for every sign-in row at its recommended choice, and out set to ${recipePath}.`,
-    "Ask them nothing and run nothing else: they review every row in the app once the file is written.",
+    "Ask them nothing: they review every row in the app once the file is written.",
     "Reply with one line saying the recipe is written.",
   ].join(" ");
+}
+
+/** What the agent step says when the thread's turn ended and no recipe arrived at the path the brief named: the
+ * turn's own reason where it had one, and what the file was waited on for. A recipe that was already beside the
+ * state is not this thread's, so this is the line even when a file is sitting there. */
+export function initAgentNoRecipeLine(recipePath: string, reason?: string): string {
+  return `the thread ended without writing ${recipePath}${reason === undefined || reason === "" ? "" : `: ${reason}`}`;
 }
 
 /** What a local workspace's machine is, in every sentence and every row that names it: the refusals below, the
@@ -1255,6 +1285,20 @@ export function noSshImportLine(name: string): string {
  * next socket, and a socket this host minted no relay ticket for is one of the person's own, so a machine that
  * could mint one would hand itself the origin the relay stamps on it. */
 export const RELAY_TICKET_REFUSAL = "a request relayed from a machine cannot mint a ticket into this host";
+
+/** What a thread is doing, as the one line a client with no transcript shows: the tool call it is running, the
+ * prompt it is blocked on, else its own latest line of prose. Nothing for an event that says nothing about the
+ * work, so a caller keeps the line it had. */
+export function threadWorkingLine(e: SessionEvent): string | undefined {
+  switch (e.type) {
+    case "session.delta":
+      return e.kind === "text" || e.kind === "thinking" ? lastLine(e.text) : e.kind === "tool_use" ? toolActivityLine(e.toolName, e.text) : undefined;
+    case "session.permission":
+      return permissionAskLine(e.toolName, e.detail);
+    default:
+      return undefined;
+  }
+}
 
 /** The prompt row's lead, the same on every surface that shows a relayed permission prompt: the tool the harness
  * wants to run, and what it wants to run it on where the harness named one. No question mark: the options under it

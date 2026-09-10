@@ -73,7 +73,9 @@ const WSP: InitScreen = { id: "wsp", title: "wsp for your agents on this Mac", t
 
 const DISK = { fixed: 2 * GIB, total: 20 * GIB };
 const JOB: InitJob = { id: "init_1", road: "manual", phase: "answering", keys: { solari: true }, step: 0, stoppable: true, disk: DISK, screens: [AGENTS, TOOLS, ALSO, LOGINS, WSP], rows: [], progress: { done: 0, total: 0 }, log: [] };
-const SETUP: InitSetup = { keys: { solari: false }, home: "/Users/me", agents: [{ id: "claude", name: "Claude Code", configured: true }, { id: "codex", name: "Codex", configured: false }], pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 }, job: null };
+/** The agent road while its thread writes the recipe: no screens yet, the thread named. */
+const AGENT_JOB: InitJob = { ...JOB, road: "agent", phase: "agent", screens: [], thread: { id: "th_1", workspaceId: "ws_local", session: "turn_1", harness: "claude" } };
+const SETUP: InitSetup = { keys: { solari: false }, home: "/Users/me", agents: [{ id: "claude", name: "Claude Code", configured: true, takesTools: true }, { id: "codex", name: "Codex", configured: false, takesTools: false }], pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 }, job: null };
 const HELD: InitSetup = { ...SETUP, keys: { solari: true } };
 
 function fakeApi(over: { setup?: InitSetup; refuse?: string } = {}) {
@@ -223,6 +225,32 @@ describe("the cloud setup sheet", () => {
     expect(dialog.querySelector("[data-row-mark=claude]")).not.toBeNull();
     // Every step is one layout: label, title, sentence, content, footer.
     for (const key of ["label", "title", "sentence", "content", "footer"]) expect(k(dialog, key)).toBeDefined();
+  });
+
+  it("the agent picker offers only agents whose thread can be handed the wsp tools; the rest are shown disabled with their word, and with none the road itself is off", async () => {
+    const { dialog } = await open({ setup: HELD });
+    await waitFor(() => expect(k(dialog, "choice")).toBeDefined());
+    // Codex is here but its thread takes no wsp tools, so the pick lands on Claude Code and Codex cannot be chosen.
+    expect(k(dialog, "harness").getAttribute("data-value")).toBe("claude");
+    fireEvent.click(k(dialog, "harness"));
+    const options = await waitFor(() => {
+      const found = [...document.querySelectorAll<HTMLElement>('[data-k="option"]')];
+      if (found.length === 0) throw new Error("the menu is not open");
+      return found;
+    });
+    expect(options.map(o => o.dataset["value"])).toEqual(["claude", "codex"]);
+    const codex = options[1]!;
+    expect(codex.getAttribute("data-disabled")).not.toBeNull();
+    expect(codex.textContent).toContain(CLOUD_SETUP_WORDS.choice.noTools);
+    expect(options[0]!.getAttribute("data-disabled")).toBeNull();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    // With no agent here that takes them, the road is off and the row says why rather than reading as empty.
+    cleanup();
+    const none = await open({ setup: { ...HELD, agents: [{ id: "codex", name: "Codex", configured: false, takesTools: false }] } });
+    await waitFor(() => expect(k(none.dialog, "choice")).toBeDefined());
+    expect((k(none.dialog, "road-agent") as HTMLButtonElement).getAttribute("data-disabled")).not.toBeNull();
+    expect(none.dialog.querySelector("[data-k=harness]")).toBeNull();
+    expect(k(none.dialog, "choice").textContent).toContain(CLOUD_SETUP_WORDS.choice.noTools);
   });
 
   it("with no provider key held, Continue asks for the Solari key alone, saves it once, starts the job and never shows the key back", async () => {
@@ -527,6 +555,46 @@ describe("the cloud setup sheet", () => {
     fireEvent.click(k(dialog, "primary"));
     expect(useStore.getState().selectedId).toBe("ws_first");
     expect(useStore.getState().hasGolden).toBe(true);
+  });
+
+  it("the agent step shows the thread's own latest line in the mono block with the spinner, and its link focuses the thread and shuts the sheet", async () => {
+    const { emit, dialog, onClose } = await open({ setup: { ...HELD, job: AGENT_JOB } });
+    await waitFor(() => expect(k(dialog, "agent")).toBeDefined());
+    expect(k(dialog, "title").textContent).toBe(CLOUD_SETUP_WORDS.agent.headline);
+    // Before the thread's first line the block says what it waits for, and nothing fakes a step.
+    expect(k(dialog, "line").textContent).toBe(CLOUD_SETUP_WORDS.agent.waiting);
+    expect(k(dialog, "spinner")).toBeDefined();
+    expect(dialog.querySelector("[data-k=primary]")).toBeNull();
+    emit({ ...AGENT_JOB, line: "$ recipe_scan" });
+    await waitFor(() => expect(k(dialog, "line").textContent).toBe("$ recipe_scan"));
+    fireEvent.click(k(dialog, "open-thread"));
+    expect(useStore.getState().selectedId).toBe("ws_local");
+    expect(useStore.getState().selectedThreadId).toBe("th_1");
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("a turn that ended without the recipe says so on the agent step, with Retry starting the same agent again and Start over going back to the choice", async () => {
+    const stopped: InitJob = { ...AGENT_JOB, phase: "failed", line: "Permission for Bash: wsp recipe scan --json", error: "the thread ended without writing /Users/me/.wsp/recipe.json" };
+    const { api, dialog } = await open({ setup: { ...HELD, job: stopped } });
+    await waitFor(() => expect(k(dialog, "agent")).toBeDefined());
+    expect(k(dialog, "title").textContent).toBe(CLOUD_SETUP_WORDS.agent.failed);
+    expect(k(dialog, "sentence").textContent).toBe(stopped.error);
+    expect(k(dialog, "line").textContent).toBe(stopped.line);
+    expect(dialog.querySelector("[data-k=spinner]")).toBeNull();
+    expect(k(dialog, "primary").textContent).toBe(`${CLOUD_SETUP_WORDS.agent.retry}→`);
+    fireEvent.click(k(dialog, "primary"));
+    await waitFor(() => expect(api.initStart).toHaveBeenCalledWith({ road: "agent", harness: "claude" }));
+    expect(k(dialog, "secondary").textContent).toBe(CLOUD_SETUP_WORDS.agent.again);
+    fireEvent.click(k(dialog, "secondary"));
+    await waitFor(() => expect(k(dialog, "choice")).toBeDefined());
+  });
+
+  it("a job stopped from elsewhere carries no reason, so the step says the thread ended rather than falling back to the running sentence", async () => {
+    const { dialog } = await open({ setup: { ...HELD, job: { ...AGENT_JOB, phase: "cancelled" } } });
+    await waitFor(() => expect(k(dialog, "agent")).toBeDefined());
+    expect(k(dialog, "title").textContent).toBe(CLOUD_SETUP_WORDS.agent.failed);
+    expect(k(dialog, "sentence").textContent).toBe(CLOUD_SETUP_WORDS.agent.stopped);
+    expect(k(dialog, "primary").textContent).toContain(CLOUD_SETUP_WORDS.agent.retry);
   });
 
   it("a sign-in that ran out shows Retry, which runs it again on the machine; while the seal runs the cancel link is disabled with its reason as the tooltip and no amber refusal", async () => {

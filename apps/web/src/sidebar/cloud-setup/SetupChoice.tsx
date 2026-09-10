@@ -17,9 +17,12 @@ export interface RoadPick {
 
 export function SetupChoice({ agents, pick, onPick, onContinue, refusal }: { agents: readonly InitAgent[]; pick: RoadPick; onPick: (pick: RoadPick) => void; onContinue: () => void; refusal: string | null }) {
   const words = CLOUD_SETUP_WORDS.choice;
-  const harness = pick.harness ?? agents[0]?.id;
-  const canAgent = agents.length > 0;
-  const agent = agents.find(a => a.id === harness);
+  // The road hands its thread the wsp tools on the launch, so an agent whose thread cannot take them is shown with
+  // its word and never offered: picking it would open a thread that writes no recipe.
+  const usable = agents.filter(a => a.takesTools);
+  const harness = usable.find(a => a.id === pick.harness)?.id ?? usable[0]?.id;
+  const canAgent = usable.length > 0;
+  const agent = usable.find(a => a.id === harness);
   return (
     <SetupScreen k="choice" label={words.label} headline={words.headline} top={words.top} refusal={refusal} primary={{ word: words.keycap, onPress: onContinue, disabled: pick.road === "agent" && !canAgent }}>
       <RadioGroup aria-label={words.headline} value={pick.road} onValueChange={value => onPick(value === "agent" ? { road: "agent", ...(harness !== undefined ? { harness } : {}) } : { road: "manual" })} className={cn(CARD, "gap-0")}>
@@ -34,10 +37,10 @@ export function SetupChoice({ agents, pick, onPick, onContinue, refusal }: { age
             {canAgent ? (
               <>
                 {harness !== undefined ? <RowMark id={harness} label={agent?.name ?? harness} /> : null}
-                <RowPicker k="harness" label={words.agentWith} value={harness} choices={agents.map(a => ({ value: a.id, label: a.name }))} onPick={value => onPick({ road: "agent", harness: value })} />
+                <RowPicker k="harness" label={words.agentWith} value={harness} choices={agents.map(a => ({ value: a.id, label: a.name, ...(a.takesTools ? {} : { disabled: true, state: words.noTools }) }))} onPick={value => onPick({ road: "agent", harness: value })} />
               </>
             ) : (
-              <span className={STATE_WORD}>no agent here</span>
+              <span className={STATE_WORD}>{agents.length === 0 ? words.none : words.noTools}</span>
             )}
           </Slot>
         </label>

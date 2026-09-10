@@ -546,6 +546,7 @@ function hostInitDoor(rt: Runtime, statePath: string, run: RunningWsp, openUrl: 
     pricing: () => SOLARI_PRICING,
     agents: () => agentsHere(nodeHost(), { versions: false }),
     installTools: agents => installEach(agents, mcpServerSpec(statePath, run), home),
+    mcpServer: () => mcpServerSpec(statePath, run),
     read: {
       collect: collectThisComputer,
       recipe: (onHistory, onProject, onHistoryProgress) => computeRecipe(nodeHost(), { threadAgents: THREAD_AGENTS, onHistory, onProject, onHistoryProgress, cache: historyCache(statePath) }),

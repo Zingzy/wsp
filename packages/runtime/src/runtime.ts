@@ -157,6 +157,7 @@ import type {
   SnapshotStorage,
   ImageAttachment,
   ImageRecord,
+  McpServerSpec,
   TurnImage,
   TurnResult,
   TurnStatus,
@@ -172,7 +173,7 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
-import { actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, machineCapRefusal, machineWord, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noSshImportLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, workspaceProjects, workspaceState } from "@wsp/protocol";
+import { mcpServersBlocked, actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, machineCapRefusal, machineWord, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noSshImportLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, workspaceProjects, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
@@ -219,6 +220,10 @@ export interface HarnessStartOptions {
   /** The turn's images, each already on the road its adapter declared: bytes for an inline adapter, a path on the
    * machine for a file one. Empty on a turn that carries none. */
   images?: readonly TurnImage[];
+  /** MCP servers this turn gets besides the ones the harness's own config on the machine names, by the name each
+   * takes in a config; the adapter hands them to its CLI the way that CLI takes one. Absent on a turn that carries
+   * none, which is every turn a person sends. */
+  mcpServers?: Readonly<Record<string, McpServerSpec>>;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -255,6 +260,10 @@ export interface HarnessAdapter {
   /** How this harness takes an image with a turn, and that it takes one at all: absent, a turn carrying an image is
    * refused in this agent's name before the machine is asked for anything. */
   readonly attachments?: AttachmentRoad;
+  /** Whether this adapter renders the MCP servers a start names into the launch its CLI takes. Absent means it does
+   * not, and a start naming servers is refused in this agent's name before the machine is asked for anything: a
+   * launch that dropped them would open a thread whose tools are missing and whose agent looks like it ignored them. */
+  readonly mcpServers?: true;
   /** Asks the binary on the workspace's machine what it takes: its lists, its own words for why it has none, or null
    * when it does not answer at all; absent, the table alone answers and nothing runs. */
   probeCatalog?(exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer>;
@@ -1047,6 +1056,10 @@ export interface Runtime {
         /** The images the message carries. Rejects over the caps, and rejects naming the agent when that agent's
          * adapter reads no image, both before the machine is asked for anything. */
         attachments?: readonly ImageAttachment[];
+        /** MCP servers the thread this start opens gets besides the ones the harness's own config names, by the name
+         * each takes in a config: what a caller that needs a tool loaded whatever the person's config says hands
+         * over (the cloud setup's own thread, which calls the wsp recipe tools). */
+        mcpServers?: Readonly<Record<string, McpServerSpec>>;
       },
       origin?: WorkspaceOrigin,
     ): Promise<SessionHandle>;
@@ -3437,7 +3450,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // after the machine it would touch; a throwaway fork runs bypass. The one place either list is decided, so the
     // composer's picker and the start's own check cannot show different defaults.
     const forMachine = (c: HarnessCatalog): HarnessCatalog => (backendFor(entry.record.kind).capabilities.kept ? keptAccess(c, THIS_COMPUTER) : c);
-    const known: HarnessCatalog = { ...table, steers: adapter.steers, renames: adapter.renameSession !== undefined, images: adapter.attachments !== undefined };
+    const known: HarnessCatalog = { ...table, steers: adapter.steers, renames: adapter.renameSession !== undefined, images: adapter.attachments !== undefined, ...(adapter.mcpServers === true ? { mcpServers: true } : {}) };
     if (adapter.probeCatalog === undefined) return Promise.resolve(forMachine(known));
     const key = `${machine.id}:${table.harness}`;
     const hit = catalogs.get(key);
@@ -4194,7 +4207,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const turnToken = randomBytes(16).toString("hex");
       const { harness, adapter } = adapterFor(entry, o.harness, { [TURN_TOKEN_ENV]: turnToken });
       const records = (o.attachments ?? []).map(imageRecord);
-      const blocked = imagesBlocked(records, adapter.attachments, harness);
+      const blocked = imagesBlocked(records, adapter.attachments, harness) ?? mcpServersBlocked(o.mcpServers, adapter.mcpServers, harness);
       if (blocked !== null) throw new Error(blocked);
       const named = o.thread === undefined ? undefined : latestOn(o.thread);
       if (o.thread !== undefined && named?.workspaceId !== workspaceId) throw new Error(`no thread ${o.thread} on this workspace`);
@@ -4354,6 +4367,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
               ...(title !== undefined ? { title } : {}),
               ...(images.length > 0 ? { images } : {}),
+              ...(o.mcpServers !== undefined ? { mcpServers: o.mcpServers } : {}),
               onEvent,
             }),
         });
