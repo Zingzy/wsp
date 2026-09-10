@@ -201,6 +201,12 @@ let creationSeq = 0;
 /** Sets on their way to the host. While one is, a reply or a preferences.changed for an earlier set would paint an
  * older record over the one the person sees; the last reply, or the record read after a refusal, settles it. */
 let preferenceSetsInFlight = 0;
+/** Every init.job view taken so far. The setup snapshot read on a connect is a view of the moment it was asked
+ * for, so a job started or ended between the ask and the reply would be painted over by the older one; a snapshot
+ * that raced a view is dropped and the view stands. Dropping it loses nothing because the reply and the events
+ * travel one ordered socket and the host emits on every change, so the last event before a reply carries the state
+ * that reply was computed from or newer. The day they travel separate channels this needs a stamp instead. */
+let initJobViews = 0;
 
 export const useStore = create<State>((set, get) => {
   const patchCreation = (key: string, patch: (c: Creation) => Creation): void => {
@@ -280,9 +286,11 @@ export const useStore = create<State>((set, get) => {
       .listForwards?.()
       .then(forwards => set({ forwards }))
       .catch((e: unknown) => set({ forwards: [], toast: `forward list unavailable: ${e instanceof Error ? e.message : String(e)}` }));
+    const initJobsAtAsk = initJobViews;
     void api
       .initGet?.()
       .then(setup => {
+        if (initJobViews !== initJobsAtAsk) return;
         set({ initJob: setup.job });
         clearEndedNeed(setup.job?.needsYou);
       })
@@ -634,6 +642,7 @@ export const useStore = create<State>((set, get) => {
           return;
         }
         case "init.job": {
+          initJobViews++;
           set({ initJob: e.job });
           // The need's toast belongs to the need: a view that no longer carries it, because the row moved on or the
           // job is over, takes the sentence away too, so the toast cannot outlive a wait the keycap and the title

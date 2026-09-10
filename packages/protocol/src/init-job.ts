@@ -70,8 +70,8 @@ export type InitScreen = z.infer<typeof InitScreen>;
 
 /** What a row of the job is: a fact read off this computer while it is read, a stage of the image, a sign-in the
  * person finishes in their browser, a secret set on the machine, an agent here given the wsp tools, the first
- * workspace, the project landed on it. */
-export const InitRowKind = z.enum(["fact", "stage", "sign-in", "secret", "agent", "workspace", "project"]);
+ * workspace, the project landed on it, a machine a stop could not reach the provider to kill. */
+export const InitRowKind = z.enum(["fact", "stage", "sign-in", "secret", "agent", "workspace", "project", "machine"]);
 export type InitRowKind = z.infer<typeof InitRowKind>;
 
 /** How a sign-in finishes where nobody is at the machine's terminal, which is the app's case: `callback` for a page
@@ -112,6 +112,21 @@ export type InitRow = z.infer<typeof InitRow>;
 export const InitKeys = z.object({ solari: z.boolean() });
 export type InitKeys = z.infer<typeof InitKeys>;
 
+/** The step of the setup a draft belongs to that is not one of the screens: the build's own question, the first
+ * workspace's name and folder. */
+export const INIT_BUILD_STEP = "build";
+
+/** What the person changed on a step and has not sent yet, kept on the host beside the step so shutting the sheet
+ * loses nothing and reopening it comes back to what was typed and ticked. A screen's draft is spent by its Continue;
+ * the build question's stands until the build starts. Typed API keys are never drafted: they go to the key store. */
+export const InitDraft = z.object({
+  /** The screen the draft answers, or INIT_BUILD_STEP for the build's own question. */
+  at: z.string(),
+  ticks: z.array(z.string()),
+  answers: z.record(z.string()),
+});
+export type InitDraft = z.infer<typeof InitDraft>;
+
 /** The kinds a refused `init.keys` carries, so a client tells the provider's own refusal, which the person fixes by
  * typing another key, from a check that never got an answer, which is worth pressing again. */
 export const KEY_REFUSED = "keyRefused";
@@ -143,6 +158,8 @@ export const InitJob = z.object({
   progress: z.object({ done: z.number().int().nonnegative(), total: z.number().int().nonnegative() }),
   /** What the job waits on the person for, absent while it waits on the machine instead. */
   needsYou: InitNeedsYou.optional(),
+  /** The steps with something drafted on them, absent while nothing is; one entry per step at most. */
+  drafts: z.array(InitDraft).optional(),
   /** The tail of what the run said, the lines a terminal would have shown. */
   log: z.array(z.string()),
   /** The agent's thread, on the agent road: the thread a client focuses, the workspace it runs on (this computer),

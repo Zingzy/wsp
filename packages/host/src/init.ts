@@ -19,7 +19,7 @@ import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { agentInstallsFor, brewfileFor, BUILDER_DISK_GB, estimateDisk, isMcpRow, PACK_BUDGET_BYTES, pinState, plural, recordedPins, shownOf, toolInstallsFor, TOOLS_DISK_FLOOR, type BrewTable, type ImportResult } from "@wsp/engine";
-import { ALREADY_APPLIED, BREW_ID_PREFIX, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, notHereLine, packageOf, SAVED_KEY_STOPPED_LINE, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote, type AppPorts, type PortsAsked, GOLDEN_STAGE_WORDS } from "@wsp/protocol";
+import { ALREADY_APPLIED, BREW_ID_PREFIX, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, initStageWhile, initStoppedAt, INIT_ROW_STATES, notHereLine, packageOf, SAVED_KEY_STOPPED_LINE, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote, type AppPorts, type PortsAsked, GOLDEN_STAGE_WORDS } from "@wsp/protocol";
 import { importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
   RUNG_TITLE,
@@ -198,6 +198,8 @@ export const GOLDEN_NAME = "default";
 const DEFAULT_RETRY = { waitMs: 30_000, attempts: 20 };
 /** What ends a builder this run could not: a record its dead holder left is stale to the next start, which stops it. */
 const SWEEP = "the next wsp or wsp init on this computer stops it, or stop it from the Solari console.";
+/** The stage a wait on the account's machine cap belongs to: the machine is what there is no room for. */
+const CAP_WAIT_STAGE = "creating";
 const dim = (s: string): string => styleText("dim", s);
 
 
@@ -241,6 +243,9 @@ export interface StageFrame {
   step?: GoldenStep;
   /** When the frame arrived, epoch ms; stamped by the stream, absent on the wire. */
   at?: number;
+  /** Set on a frame the run itself pushed because the provider has no room for the stage yet: the stage is not
+   * working, it is queueing behind the account's machine cap. */
+  waiting?: true;
 }
 
 /** A golden.stage event off the runtime as the stream takes it. */
@@ -559,7 +564,7 @@ export class StageStream {
 function stageRecord(frame: StageFrame, view: StageView): Record<string, unknown> {
   const since = view.steps.find(s => s.stage === frame.stage)?.running?.since;
   const elapsedSeconds = frame.step === undefined ? undefined : Math.round(((frame.at ?? 0) - (since ?? frame.at ?? 0)) / 1000);
-  return { event: "stage", stage: frame.stage, ...(frame.detail !== undefined ? { detail: frame.detail } : {}), ...(frame.step !== undefined ? { step: { ...frame.step, elapsedSeconds } } : {}) };
+  return { event: "stage", stage: frame.stage, ...(frame.detail !== undefined ? { detail: frame.detail } : {}), ...(frame.step !== undefined ? { step: { ...frame.step, elapsedSeconds } } : {}), ...(frame.waiting === true ? { waiting: true } : {}) };
 }
 
 interface Spinner {
@@ -1257,20 +1262,25 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   };
   const onInt = (): void => onSignal("SIGINT");
   const onTerm = (): void => onSignal("SIGTERM");
+  /** The stop as a client reads it: the run's own line, and the machine the provider would not take the kill for,
+   * so whoever is watching can go on trying while it bills. */
+  const saidStopped = (line: string, where: string, leftId?: string): void => io.json?.({ event: "stopped", line, where, ...(leftId !== undefined ? { left: leftId } : {}) });
   const stopped = async (e: unknown, sig: "SIGINT" | "SIGTERM"): Promise<InitResult> => {
     const at = frozen?.steps.find(s => s.state === "current")?.start;
     // Once the signal is in, prepare answers with the stop; anything else here is a refusal from before a machine existed.
     const had = e instanceof PrepareStoppedError && e.builderId !== undefined;
-    const where = waiting ? "while waiting for a machine slot" : at !== undefined ? `while ${at.charAt(0).toLowerCase()}${at.slice(1)}` : had ? "between stages" : "before anything booted";
+    const where = waiting ? `while ${INIT_ROW_STATES.slot}` : at !== undefined ? initStageWhile(at) : had ? "between stages" : "before anything booted";
+    const opening = initStoppedAt(where);
     const line =
       e instanceof PrepareStoppedError && e.builderId !== undefined
         ? e.kept
-          ? `Stopped ${where}. Your earlier builder ${attach?.name ?? GOLDEN_NAME} was not stopped: it has a first life worth keeping. ${builderStaysLine(e.builderId, opts.pricing.rateUsdPerHour(attach?.size ?? opts.pricing.defaultSize), attachCommand)}`
+          ? `${opening} Your earlier builder ${attach?.name ?? GOLDEN_NAME} was not stopped: it has a first life worth keeping. ${builderStaysLine(e.builderId, opts.pricing.rateUsdPerHour(attach?.size ?? opts.pricing.defaultSize), attachCommand)}`
           : e.left === undefined
-            ? `Stopped ${where}. Builder ${e.builderId} is gone; nothing is billing.`
-            : `Stopped ${where}. Builder ${e.builderId} did not stop (${e.left}); ${SWEEP}`
-        : `Stopped ${where}. Nothing was booted; nothing is billing.`;
+            ? `${opening} Builder ${e.builderId} is gone; nothing is billing.`
+            : `${opening} Builder ${e.builderId} did not stop (${e.left}); ${SWEEP}`
+        : `${opening} Nothing was booted; nothing is billing.`;
     finalLine = line;
+    saidStopped(line, where, e instanceof PrepareStoppedError && e.left !== undefined ? e.builderId : undefined);
     cancel(line, out);
     await closeRuntime();
     const code = exitCodeOf(sig);
@@ -1287,7 +1297,9 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
         break;
       } catch (e) {
         if (halt.signal.aborted || !isCapRefusal(e) || attempt + 1 >= retry.attempts) throw e;
-        stream.note(`Solari account at its machine cap; waiting ${Math.round(retry.waitMs / 1000)}s for a slot (${attempt + 1}/${retry.attempts}). Nothing is killed.`);
+        // The wait rides the stage's own block rather than a note beside it: a row that only says what the provider
+        // last echoed reads as work, and the person cannot tell a queue from a stall.
+        stream.push({ type: "golden.stage", name: GOLDEN_NAME, stage: CAP_WAIT_STAGE, detail: `Solari account at its machine cap; waiting ${Math.round(retry.waitMs / 1000)}s for a slot (${attempt + 1}/${retry.attempts}). Nothing is killed.`, waiting: true });
         waiting = true;
         await sleep(retry.waitMs, halt.signal);
         if (halt.signal.aborted) throw e;
@@ -1393,7 +1405,10 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   if (stoppedBy !== undefined) {
     let left: string | undefined;
     await rt.golden.kill(builder.id).catch((e: unknown) => (left = e instanceof Error ? e.message : String(e)));
-    cancel(left === undefined ? `Stopped while signing in. Builder ${builder.id} is gone; nothing is billing.` : `Stopped while signing in. Builder ${builder.id} did not stop (${left}); ${SWEEP}`, out);
+    const where = "while signing in";
+    const line = left === undefined ? `${initStoppedAt(where)} Builder ${builder.id} is gone; nothing is billing.` : `${initStoppedAt(where)} Builder ${builder.id} did not stop (${left}); ${SWEEP}`;
+    saidStopped(line, where, left === undefined ? undefined : builder.id);
+    cancel(line, out);
     await closeRuntime();
     const code = exitCodeOf(stoppedBy);
     io.exit(code);

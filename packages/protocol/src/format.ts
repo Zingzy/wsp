@@ -1056,6 +1056,8 @@ export const CLOUD_SETUP_WORDS = {
     cancelKeep: "Keep building",
     done: "Cloud machines are ready",
     failed: "The build stopped",
+    /** The headline of a build the person stopped, so the screen never reads as the machine's doing. */
+    stopped: "You stopped the build",
     keycap: "Open workspace",
     again: "Start over",
   },
@@ -1141,6 +1143,16 @@ export const INIT_ROW_STATES = {
   imported: "imported",
   /** A sign-in whose page waits for the person. */
   open: "waiting for you",
+  /** A stage running only in the sense that the provider has no room yet: the account is at its machine cap. */
+  slot: "waiting for a machine slot",
+  /** A first workspace or its project the build ended before reaching. */
+  notMade: "not made",
+  /** A machine a stop could not reach the provider to kill, being killed again until it is. */
+  retrying: "machine still running, retrying",
+  /** That machine once the provider took the kill: nothing is billing. */
+  gone: "gone",
+  /** The stage a person's stop ended: over, but nothing failed, so the row never wears the failure's cross. */
+  stopped: "stopped",
   /** A sign-in answered with an API key the home held, so the machine has it and nothing is asked. */
   keySet: "key set",
   /** A step the build left out: a sign-in it never reached, or a first workspace it carried no name for. */
@@ -1198,10 +1210,55 @@ export const SIGN_IN_OPEN_STATE = INIT_ROW_STATES.open;
 /** The state word of an agent on this computer whose config carries the wsp tools. */
 export const MCP_ADDED_WORD = INIT_ROW_STATES.mcpAdded;
 
-const ROW_OVER: ReadonlySet<string> = new Set([INIT_ROW_STATES.done, INIT_ROW_STATES.failed, INIT_ROW_STATES.forked, INIT_ROW_STATES.imported, INIT_ROW_STATES.keySet, INIT_ROW_STATES.mcpAdded, INIT_ROW_STATES.skipped, ...Object.values(INIT_SIGN_IN_WORDS), ...Object.values(LOGIN_STATE_WORDS)]);
+const ROW_OVER: ReadonlySet<string> = new Set([INIT_ROW_STATES.done, INIT_ROW_STATES.failed, INIT_ROW_STATES.stopped, INIT_ROW_STATES.forked, INIT_ROW_STATES.imported, INIT_ROW_STATES.keySet, INIT_ROW_STATES.mcpAdded, INIT_ROW_STATES.skipped, INIT_ROW_STATES.notMade, INIT_ROW_STATES.gone, ...Object.values(INIT_SIGN_IN_WORDS), ...Object.values(LOGIN_STATE_WORDS)]);
+
+const ROW_UNRUN: ReadonlySet<string> = new Set([INIT_ROW_STATES.skipped, INIT_ROW_STATES.notMade, INIT_ROW_STATES.stopped]);
+
+/** Whether a row's state is one it ended on without anything having run: the build never reached it, or a person's
+ * stop ended it. The count leaves these out of its done, and a glyph gives them the ring they waited with rather
+ * than a check, which would read as work that happened. */
+export const initRowUnrun = (state: string): boolean => ROW_UNRUN.has(state);
+
+/** The end states that are not an end well: what the count leaves out of its done, so a build that failed, was
+ * stopped, or never reached a stage never reads complete. */
+const ROW_UNDONE: ReadonlySet<string> = new Set([INIT_ROW_STATES.failed, ...ROW_UNRUN]);
 
 /** Whether a row's state word is one it ends on: what the progress count and a section's count read. */
 export const initRowOver = (state: string): boolean => ROW_OVER.has(state);
+
+/** Where a stopped build was, from the stage that was running: one spelling for the terminal's stop line and the
+ * app's sentence, since the stage names read as sentence openings ("Creating the machine"). */
+export const initStageWhile = (stage: string): string => `while ${stage.charAt(0).toLowerCase()}${stage.slice(1)}`;
+
+/** The opening of every stop line, terminal and app alike: where the run was when it stopped. What follows it is
+ * what became of the machine, which differs by who is reading. */
+export const initStoppedAt = (where: string): string => `Stopped ${where}.`;
+
+/** What the app says after that opening when the provider would not take the kill: the terminal tells the person
+ * how to finish it themselves, the app does not, because the host is already trying again and its row says so. */
+export const STOP_LEFT_MACHINE_LINE = "The machine did not stop yet; wsp keeps trying.";
+
+/** A machine row's name: the builder's provider id in words, so a column of sentences never holds a bare id. */
+export const initMachineRowLabel = (builderId: string): string => `Builder ${builderId}`;
+
+/** What the sidebar's keycap says while a machine an earlier build left is still being removed: the one line that
+ * keeps a machine from billing unseen once the setup has moved on to another job. */
+export const MACHINE_SWEEP_LINE = "a machine from the last build is still being removed";
+
+/** What a build says stopped it when nothing on this computer could reach anything. */
+export const NETWORK_LOST_LINE = "This computer lost its network";
+
+/** The failures a provider client raises when the network is gone rather than when the provider refused. */
+const OFFLINE_FAILURE = /^fetch failed$|\b(ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ENETDOWN|ENETUNREACH|EHOSTUNREACH)\b/;
+
+/** The sentence a stopped build shows for what happened: this computer's own word when every part of the error is
+ * the network going away, else the error's parts said once. A run that failed the same way twice reports it twice;
+ * the person reads one reason, not a list. */
+export function initStoppedLine(error: string): string {
+  const parts = [...new Set(error.split(";").map(p => p.trim()).filter(p => p !== ""))];
+  if (parts.length === 0) return error;
+  return parts.every(p => OFFLINE_FAILURE.test(p)) ? NETWORK_LOST_LINE : parts.join("; ");
+}
 
 /** Whether the job's phase is one it ends on. */
 export const initJobOver = (phase: InitPhase): boolean => phase === "done" || phase === "failed" || phase === "cancelled";
@@ -1247,11 +1304,17 @@ export function titleWithNeed(title: string, needed: boolean): string {
   return needed ? `${NEEDS_YOU_MARK}${plain}` : plain;
 }
 
-/** The one line the collapsed sidebar row shows for a running job: the sign-in waited on while one is open, the phase
- * with the count of rows over while it builds, the phase word alone otherwise. */
+/** Whether a machine an earlier build left is still being removed: the row the host's sweep rides on whatever job
+ * is current. */
+export const initSweeping = (rows: readonly InitRow[]): boolean => rows.some(r => r.kind === "machine" && r.state === INIT_ROW_STATES.retrying);
+
+/** The one line the collapsed sidebar row shows for a running job: the sign-in waited on while one is open, then a
+ * machine still being removed, since that one bills while nobody looks, then the phase with the count of stages
+ * done while it builds, the phase word alone otherwise. */
 export function initProgressLine(job: Pick<InitJob, "phase" | "rows" | "progress">): string {
   const open = openSignIn(job.rows);
   if (open !== undefined) return signInTo(open.label);
+  if (initSweeping(job.rows)) return MACHINE_SWEEP_LINE;
   const word = initPhaseWord(job.phase);
   return initJobBuilding(job.phase) && job.progress.total > 0 ? `${word} · ${job.progress.done}/${job.progress.total}` : word;
 }
@@ -1301,12 +1364,15 @@ export function initBuildRows(rows: readonly InitRow[]): { rows: InitRow[]; sign
   return { rows: out, signIns };
 }
 
-/** How many of the build's rows ended well, of all of them: what the line along the card's top edge and the count
- * beside the title read. A row that failed and a row the build never reached are both over without having run, so a
- * build that stopped never reads complete however early it stopped. */
+/** How many of the build's stages ended well, of all of them: the one count a build has, read by the line along the
+ * card's top edge, the count beside the title and the host's own progress field, so the sidebar and the sheet can
+ * never say two things. Stages alone, so the bar measures the build and not the agents given the tools, the first
+ * workspace or its project; it takes the rows initBuildRows hands over, with the sign-ins folded into their stage.
+ * A stage that failed, that a stop ended, or that the build never reached is over without having run, so a build
+ * that stopped never reads complete however early it stopped. */
 export function initStageCount(rows: readonly InitRow[]): { done: number; total: number } {
-  const ran = (state: string): boolean => initRowOver(state) && state !== INIT_ROW_STATES.failed && state !== INIT_ROW_STATES.skipped;
-  return { done: rows.filter(r => ran(r.state)).length, total: rows.length };
+  const stages = rows.filter(r => r.kind === "stage");
+  return { done: stages.filter(r => initRowOver(r.state) && !ROW_UNDONE.has(r.state)).length, total: stages.length };
 }
 
 /** The count as words: `3 of 12`. */

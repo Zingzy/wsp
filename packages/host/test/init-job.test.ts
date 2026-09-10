@@ -11,7 +11,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
 import { SNAPSHOT_STORAGE, checkProviderKey, type BackendPricing } from "@wsp/engine";
-import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_SIGN_IN_WORDS, initBuildRows, INIT_ROW_STATES, initStageCount, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, NEVER_REACHED, NO_FIRST_WORKSPACE, SIGN_IN_NEVER_REACHED, SIGN_IN_STAGE_ID, Recipe, SIGN_IN_OPEN_STATE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, keyRefusedLine, keyUncheckedLine, noMcpServersLine, SAVED_KEY_STOPPED_LINE, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, initMachineRowLabel, initProgressLine, initStageCount, keyRefusedLine, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
 import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localWiring, type Keys } from "../src/cli.js";
@@ -34,11 +34,14 @@ const AGENT_RECIPE: Recipe = { ...RECIPE, rows: RECIPE.rows.map(r => (r.id === "
 /** The rows the host leaves when the saved key is refused, in the order a client draws them. The app's fixture and
  * its dialog test stand in for this job (apps/web/test/cloud-setup/keyRefusedJob.ts), so a change here is a change
  * there; the words themselves are the protocol's, which both sides read. */
+const waitingStage = (id: keyof typeof GOLDEN_STAGE_WORDS): unknown[] => [`stage/${id}`, INIT_ROW_STATES.waiting, undefined];
 const KEY_REFUSED_ROWS = [
   ["stage/creating", INIT_ROW_STATES.failed, savedKeyRefusedLine("401 Unauthorized")],
+  ...(["deploying-daemon", "applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp", "ready"] as const).map(waitingStage),
   ["sign-in/claude", INIT_ROW_STATES.skipped, SIGN_IN_NEVER_REACHED],
   ["sign-in/gh", INIT_ROW_STATES.skipped, SIGN_IN_NEVER_REACHED],
-  ["workspace/first", INIT_ROW_STATES.skipped, NEVER_REACHED],
+  ...(["snapshotting", "promoting", "smoke-forking", "sealed"] as const).map(waitingStage),
+  ["workspace/first", INIT_ROW_STATES.notMade, NEVER_REACHED],
 ];
 const WSP_SERVER = { command: "/usr/local/bin/node", args: ["/opt/wsp/bin.js", "mcp", "--state", "/tmp/state.json"] };
 
@@ -73,7 +76,7 @@ interface Fake {
   settled(): Promise<void>;
 }
 
-function fake(over: { env?: Record<string, string>; configured?: boolean; read?: Partial<InitJobDeps["read"]>; now?: () => number; agent?: { adapter: HarnessAdapterFactory; starts: HarnessStartOptions[] }; writesRecipe?: boolean; agents?: AgentHere[]; adapters?: Record<string, HarnessAdapterFactory> } = {}): Fake {
+function fake(over: { env?: Record<string, string>; configured?: boolean; read?: Partial<InitJobDeps["read"]>; now?: () => number; agent?: { adapter: HarnessAdapterFactory; starts: HarnessStartOptions[] }; writesRecipe?: boolean; agents?: AgentHere[]; adapters?: Record<string, HarnessAdapterFactory>; deployDaemon?: () => Promise<string> } = {}): Fake {
   const dir = mkdtempSync(join(tmpdir(), "wsp-init-job-"));
   dirs.push(dir);
   const home = mkdtempSync(join(tmpdir(), "wsp-init-job-home-"));
@@ -145,7 +148,7 @@ function fake(over: { env?: Record<string, string>; configured?: boolean; read?:
       },
       daemon: async () => ({ link: link.dial(), close: () => {} }),
       roads: () => workspaceRoads(rt, {}),
-      recipe: recipe => ({ ...recipe, deployDaemon: async () => "node v22.12.0" }),
+      recipe: recipe => ({ ...recipe, deployDaemon: over.deployDaemon ?? (async () => "node v22.12.0") }),
     },
     retry: { waitMs: 1, attempts: 3 },
     pollMs: 5,
@@ -294,6 +297,27 @@ describe("the init job, manual road", () => {
     await expect(f.jobs.step({ at: 6 })).rejects.toThrow(/no step 6/);
     await expect(f.jobs.step({ at: -1 })).rejects.toThrow(/no step/);
     expect((await f.jobs.get()).job!.step).toBe(5);
+  });
+
+  it("what a step ticked and typed and did not send is kept beside the step, so a sheet shut mid-answer reopens on it; Continue spends it and a step the job has not got is refused", async () => {
+    const f = fake();
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    // Everything ticked since the last Continue rides the job, not the client: a view taken now carries it.
+    const drafted = await f.jobs.draft({ at: "also", ticks: ["brew/jq", "brew/ripgrep"] });
+    expect(drafted.drafts).toEqual([{ at: "also", ticks: ["brew/jq", "brew/ripgrep"], answers: {} }]);
+    expect((await f.jobs.get()).job!.drafts).toEqual([{ at: "also", ticks: ["brew/jq", "brew/ripgrep"], answers: {} }]);
+    // An empty draft is an answer too: a screen whose every tick came off comes back with none on, not with the host's.
+    expect((await f.jobs.draft({ at: "agents", ticks: [] })).drafts).toContainEqual({ at: "agents", ticks: [], answers: {} });
+    // The build's own question is a step with no screen; the name typed there is kept the same way.
+    await f.jobs.draft({ at: INIT_BUILD_STEP, answers: { name: "e2e", folder: "" } });
+    // A step back and forward leaves it where it was.
+    await f.jobs.step({ at: 3 });
+    expect(f.jobs.view()!.drafts).toContainEqual({ at: INIT_BUILD_STEP, ticks: [], answers: { name: "e2e", folder: "" } });
+    // Continue is what sends a screen's ticks, and it spends that screen's draft; the others stand.
+    await f.jobs.answer({ screen: "also", ticks: ["brew/jq"] });
+    expect(f.jobs.view()!.drafts!.map(d => d.at)).toEqual(["agents", INIT_BUILD_STEP]);
+    await expect(f.jobs.draft({ at: "nowhere", ticks: [] })).rejects.toThrow(/no step nowhere/);
   });
 
   it("start reads this computer once and hands the five screens over; answers move the recipe; the build is wsp init's own run on the host's runtime, its sign-ins as rows, ending with the golden sealed and the first workspace forked", async () => {
@@ -510,8 +534,9 @@ describe("the init job, manual road", () => {
     expect(view.phase).toBe("cancelled");
     expect(view.stoppable).toBe(false);
     expect(view.rows.find(r => r.id === "sign-in/gh")).toMatchObject({ state: "not signed in" });
-    // A run stopped before the fork still ends the workspace row, so no row is left waiting on a build that is over.
-    expect(view.rows.at(-1)).toMatchObject({ id: "workspace/alpha", state: "skipped", detail: NEVER_REACHED });
+    // A run stopped before the fork still ends the workspace row, so no row is left waiting on a build that is over;
+    // it reads not made, since skipped would read as a step the build chose to pass on.
+    expect(view.rows.at(-1)).toMatchObject({ id: "workspace/alpha", state: INIT_ROW_STATES.notMade, detail: NEVER_REACHED });
     expect(view.golden).toBeUndefined();
     expect(goldenHead(await f.rt.golden.get()) ?? null).toBeNull();
     expect(f.backend.machines.filter(m => !m.killed)).toHaveLength(0);
@@ -616,6 +641,229 @@ describe("the init job, manual road", () => {
     await expect(f.jobs.signInCode({ tool: "claude", code: PASTED })).rejects.toThrow(/no init job is running/);
   });
 
+  it("a build the network stopped says what happened in this computer's own words, keeps every stage row in its order, and closes the failed stage's block with the error's own line", async () => {
+    const f = fake({ deployDaemon: async () => Promise.reject(new Error("fetch failed; fetch failed")) });
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "skip", "logins/codex": "skip" } });
+    await f.jobs.build({ firstWorkspace: "e2e" });
+    await f.settled();
+    const view = f.jobs.view()!;
+    expect(view.phase).toBe("failed");
+    // The raw error, doubled by the two fetches that failed, is not the sentence a person reads.
+    expect(view.error).toBe(NETWORK_LOST_LINE);
+    // Every stage stays, in the build's order, with the sign-ins where they happen and the first workspace last.
+    const stages = view.rows.filter(r => r.kind === "stage").map(r => r.label);
+    expect(stages).toEqual(Object.values(GOLDEN_STAGE_WORDS));
+    const ids = view.rows.map(r => r.id);
+    expect(ids.indexOf("sign-in/gh")).toBeGreaterThan(ids.indexOf("stage/ready"));
+    expect(ids.indexOf("sign-in/gh")).toBeLessThan(ids.indexOf("stage/snapshotting"));
+    expect(ids.at(-1)).toBe("workspace/e2e");
+    // The bar reads the stages done over all of them, so two of twelve never reads as nearly there.
+    expect(initStageCount(view.rows.filter(r => r.kind === "stage"))).toEqual({ done: 1, total: 12 });
+    // The stage that failed carries the error's own line at the end of its block; the ones after it wait.
+    const failed = view.rows.find(r => r.state === INIT_ROW_STATES.failed)!;
+    expect(failed.label).toBe(GOLDEN_STAGE_WORDS["deploying-daemon"]);
+    expect(failed.lines!.at(-1)).toContain("fetch failed");
+    expect(view.rows.find(r => r.id === "stage/snapshotting")!.state).toBe(INIT_ROW_STATES.waiting);
+  });
+
+  it("a build waiting on the account's machine cap says so on the stage's own row and carries the wait in its block", async () => {
+    const f = fake();
+    const made = f.backend.create.bind(f.backend);
+    let refusals = 0;
+    f.backend.create = async spec => {
+      if (refusals < 1) {
+        refusals += 1;
+        throw Object.assign(new Error("Sandbox limit reached"), { kind: "concurrency", status: 429 });
+      }
+      return made(spec);
+    };
+    const waits: { state: string; lines: string[] }[] = [];
+    f.onJob(job => {
+      const row = job.rows.find(r => r.id === "stage/creating");
+      if (row !== undefined && row.state === INIT_ROW_STATES.slot) waits.push({ state: row.state, lines: row.lines ?? [] });
+    });
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
+    await f.jobs.build({});
+    await f.settled();
+    expect(refusals).toBe(1);
+    expect(waits.length).toBeGreaterThan(0);
+    expect(waits.at(-1)!.lines.some(l => l.includes("at its machine cap"))).toBe(true);
+    // The wait is over once the slot came free: the row is the running stage again, then done.
+    expect(f.jobs.view()!.rows.find(r => r.id === "stage/creating")!.state).toBe(INIT_ROW_STATES.done);
+  });
+
+  it("a build the person stopped says it was them, with the stage it stopped at, and the first workspace reads not made", async () => {
+    const f = fake();
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "skip", "logins/codex": "skip" } });
+    f.setLink(scriptedLink({ signedIn: false, hold: true, missing: false }));
+    await f.jobs.build({ firstWorkspace: "e2e-cancel" });
+    await new Promise<void>(resolve => {
+      const off = f.onJob(job => {
+        if (job.rows.some(r => r.kind === "sign-in" && r.page !== undefined)) {
+          off();
+          resolve();
+        }
+      });
+    });
+    await f.jobs.cancel();
+    await f.settled();
+    const view = f.jobs.view()!;
+    expect(view.phase).toBe("cancelled");
+    // The run's own line for the stop, which names the stage and what became of the machine: the screen invents none.
+    expect(view.error).toMatch(/^Stopped while signing in\./);
+    expect(view.error).toContain("nothing is billing");
+    expect(view.rows.find(r => r.id === "workspace/e2e-cancel")).toMatchObject({ state: INIT_ROW_STATES.notMade });
+  });
+
+  it("a stop that lands while a stage is running leaves that stage reading stopped, not failed, so the list agrees with the headline", async () => {
+    let reached: (() => void) | undefined;
+    const atStage = new Promise<void>(r => (reached = r));
+    const f = fake({
+      deployDaemon: async () => {
+        reached!();
+        // Held open so the stop lands with this stage running, which is the case the word is for.
+        await new Promise(() => {});
+        return "";
+      },
+    });
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
+    await f.jobs.build({});
+    await atStage;
+    await f.jobs.cancel();
+    await f.settled();
+    const view = f.jobs.view()!;
+    expect(view.phase).toBe("cancelled");
+    const daemon = view.rows.find(r => r.id === "stage/deploying-daemon")!;
+    expect(daemon.state).toBe(INIT_ROW_STATES.stopped);
+    expect(view.rows.some(r => r.state === INIT_ROW_STATES.failed)).toBe(false);
+  });
+
+  it("a stop the provider would not take the kill for leaves a row saying the machine is still running, and the kill is tried again until it lands", async () => {
+    const f = fake();
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "skip", "logins/codex": "skip" } });
+    f.setLink(scriptedLink({ signedIn: false, hold: true, missing: false }));
+    await f.jobs.build({});
+    await new Promise<void>(resolve => {
+      const off = f.onJob(job => {
+        if (job.rows.some(r => r.kind === "sign-in" && r.page !== undefined)) {
+          off();
+          resolve();
+        }
+      });
+    });
+    // The network is gone for the stop's own delete, and comes back a moment later.
+    const builder = f.backend.machines.find(m => !m.killed)!;
+    const real = builder.kill.bind(builder);
+    let outage = 2;
+    builder.kill = async () => {
+      if (outage > 0) {
+        outage -= 1;
+        throw Object.assign(new Error("getaddrinfo ENOTFOUND api.getsolari.com"), { code: "ENOTFOUND" });
+      }
+      await real();
+    };
+    await f.jobs.cancel();
+    await f.settled();
+    const said = f.events.map(e => e.job.rows.find(r => r.kind === "machine")).filter(r => r !== undefined).map(r => r.state);
+    expect(said).toContain(INIT_ROW_STATES.retrying);
+    // The row is words, not a bare provider id in a column of sentences.
+    expect(f.jobs.view()!.rows.find(r => r.kind === "machine")!.label).toBe(initMachineRowLabel(builder.id));
+    // The kill landed once the network was back, so the row says the machine is gone and nothing bills on.
+    expect(f.jobs.view()!.rows.find(r => r.kind === "machine")).toMatchObject({ state: INIT_ROW_STATES.gone });
+    expect(f.backend.machines.filter(m => !m.killed)).toHaveLength(0);
+    // The stop was the person's, so the stage it ended reads stopped and wears no failure.
+    expect(f.jobs.view()!.rows.find(r => r.state === INIT_ROW_STATES.failed)).toBeUndefined();
+    // Nothing is left to remove, so the sidebar's keycap is back on the job.
+    expect(initProgressLine(f.jobs.view()!)).not.toBe(MACHINE_SWEEP_LINE);
+  });
+
+  it("the sweep belongs to the host, not to the job that died: Start over leaves the machine's row on the new job and on the sidebar's line until the provider takes it", async () => {
+    const f = fake();
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "skip", "logins/codex": "skip" } });
+    f.setLink(scriptedLink({ signedIn: false, hold: true, missing: false }));
+    await f.jobs.build({});
+    await new Promise<void>(resolve => {
+      const off = f.onJob(job => {
+        if (job.rows.some(r => r.kind === "sign-in" && r.page !== undefined)) {
+          off();
+          resolve();
+        }
+      });
+    });
+    // The stop's own delete cannot reach the provider; the sweep's next try is held open, so the machine is still
+    // running while the person starts over, which is the whole of what this has to survive.
+    const builder = f.backend.machines.find(m => !m.killed)!;
+    const real = builder.kill.bind(builder);
+    let network: (() => void) | undefined;
+    const back = new Promise<void>(r => (network = r));
+    let tried = 0;
+    builder.kill = async () => {
+      tried += 1;
+      if (tried === 1) throw Object.assign(new Error("getaddrinfo ENOTFOUND api.getsolari.com"), { code: "ENOTFOUND" });
+      await back;
+      await real();
+    };
+    await f.jobs.cancel();
+    // Waited on by hand, not through settled(): the sweep is held open on purpose, so the run's own promise is too.
+    await new Promise<void>(resolve => {
+      const off = f.onJob(job => {
+        if (job.phase === "cancelled" && job.rows.some(r => r.kind === "machine" && r.state === INIT_ROW_STATES.retrying)) {
+          off();
+          resolve();
+        }
+      });
+    });
+    expect(f.jobs.view()!.rows.find(r => r.kind === "machine")).toMatchObject({ state: INIT_ROW_STATES.retrying });
+    // Start over: a different job, and the machine that is still billing rides onto it rather than going quiet.
+    const next = await f.jobs.start({ road: "manual" });
+    expect(next.id).not.toBe("init_1");
+    expect(next.rows.find(r => r.kind === "machine")).toMatchObject({ id: `machine/${builder.id}`, state: INIT_ROW_STATES.retrying });
+    // And the sidebar's keycap says so rather than the new job's own phase.
+    expect(initProgressLine(next)).toBe(MACHINE_SWEEP_LINE);
+    network!();
+    await f.settled();
+    expect(f.jobs.view()!.rows.find(r => r.kind === "machine")).toMatchObject({ state: INIT_ROW_STATES.gone });
+    expect(f.backend.machines.filter(m => !m.killed)).toHaveLength(0);
+    // A sweep that ended belongs to the job it ended on and no further: the next job starts with a clean list.
+    await f.jobs.cancel();
+    const third = await f.jobs.start({ road: "manual" });
+    expect(third.rows.find(r => r.kind === "machine")).toBeUndefined();
+  });
+
+  it("one count for one build: the host's progress is the sheet's own bar, over the same rows", async () => {
+    const f = fake({ deployDaemon: async () => Promise.reject(new Error("the daemon would not deploy")) });
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "machine", "logins/codex": "copy" } });
+    await f.jobs.build({ firstWorkspace: "e2e" });
+    await f.settled();
+    const view = f.jobs.view()!;
+    // Sign-ins, a workspace row and a failed stage all on one job: the sheet folds the sign-ins into a stage and
+    // counts what is left, and the host's field is that same count, so the keycap and the bar cannot disagree.
+    expect(view.rows.some(r => r.kind === "sign-in")).toBe(true);
+    expect(view.rows.some(r => r.kind === "workspace")).toBe(true);
+    expect(view.rows.some(r => r.state === INIT_ROW_STATES.failed)).toBe(true);
+    expect(view.progress).toEqual(initStageCount(initBuildRows(view.rows).rows));
+    expect(view.progress.total).toBe(13);
+    // Not the row count: sixteen rows, thirteen stages, and the keycap can no longer say one while the bar says the other.
+    expect(view.rows.length).toBeGreaterThan(view.progress.total);
+    expect(initProgressLine(view)).not.toContain(`/${view.rows.length}`);
+    // Every view the job pushed said the same, not only the last.
+    for (const e of f.events) expect(e.job.progress).toEqual(initStageCount(initBuildRows(e.job.rows).rows));
+  });
+
   it("cancel while the screens wait drops the job; a build cannot start without answers", async () => {
     const f = fake();
     await f.jobs.start({ road: "manual" });
@@ -684,7 +932,8 @@ describe("the init job, manual road", () => {
     expect(stopped.rows.find(r => r.id === "stage/creating")!.lines).toEqual([savedKeyRefusedLine("401 Unauthorized")]);
     // Nothing on it reads as work done: the count is none of them, so the bar cannot read as progress.
     const { rows } = initBuildRows(stopped.rows);
-    expect(initStageCount(rows)).toEqual({ done: 0, total: rows.length });
+    expect(initStageCount(rows).done).toBe(0);
+    expect(stopped.progress).toEqual(initStageCount(rows));
     expect(rows.find(r => r.id === SIGN_IN_STAGE_ID)!.state).toBe(INIT_ROW_STATES.skipped);
     expect(rows.map(r => r.state)).not.toContain(INIT_ROW_STATES.done);
   });

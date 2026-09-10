@@ -2331,6 +2331,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("init.answer"), screen: InitScreenId, ticks: z.array(z.string()).optional(), answers: z.record(z.string()).optional() }),
   /** Moves the job to a screen the person went back to, so a setup shut there reopens there; replies with { job: InitJob }. */
   z.object({ id: reqId, op: z.literal("init.step"), at: z.number().int().nonnegative() }),
+  /** Keeps what a step has ticked, picked or typed and not sent, so a setup shut mid-step reopens on it; replies
+   * with { job: InitJob }. `at` is a screen's id or the build question's own step; a step the job does not have is
+   * refused. An empty draft is an answer of its own: a step whose every tick was taken off comes back with none on. */
+  z.object({ id: reqId, op: z.literal("init.draft"), at: z.string().min(1).max(64), ticks: z.array(z.string()).optional(), answers: z.record(z.string()).optional() }),
   /** Runs a sign-in that ran out or failed again on the machine while the build goes on; replies with { job: InitJob }. */
   z.object({ id: reqId, op: z.literal("init.retry"), tool: z.string() }),
   /** Writes the recipe as answered and starts the build; replies with { job: InitJob } at once, the build riding on. */

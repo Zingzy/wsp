@@ -7,7 +7,7 @@
 // with the disk meter inline after it on the steps that change the image's
 // size. The ticks, answers and typed keys live in the dialog's one draft until
 // Continue sends them.
-import { CLOUD_SETUP_WORDS, UNKNOWN_SIZE, fmtBytes, initTallyCount, sizeTone, type InitScreen, type InitScreenItem } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, UNKNOWN_SIZE, fmtBytes, initTallyCount, sizeTone, type InitDraft, type InitScreen, type InitScreenItem } from "@wsp/protocol";
 import { Checkbox } from "../../components/ui/checkbox.js";
 import { Input } from "../../components/ui/input.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip.js";
@@ -17,15 +17,16 @@ import { RowMark } from "./SignInMark.js";
 import { SetupScreen, type ScreenAction } from "./SetupScreen.js";
 
 /** What the person has changed on the screen and not yet sent: the rows ticked, each answering row's answer, and the
- * API keys typed under the rows that took one. */
+ * API keys typed under the rows that took one. The ticks and answers are kept on the host as they change; a typed
+ * key never is, since a key belongs in the key store and nowhere else. */
 export interface Draft {
   ticks: ReadonlySet<string>;
   answers: Readonly<Record<string, string>>;
   keys: Readonly<Record<string, string>>;
 }
 
-/** The draft a screen opens on: what the host says stands. */
-export const draftOf = (screen: InitScreen): Draft => ({ ticks: new Set(screen.ticks), answers: { ...screen.answers }, keys: {} });
+/** The draft a screen opens on: what the person left on it and the host kept, else what the host says stands. */
+export const draftOf = (screen: InitScreen, kept?: InitDraft): Draft => (kept === undefined ? { ticks: new Set(screen.ticks), answers: { ...screen.answers }, keys: {} } : { ticks: new Set(kept.ticks), answers: { ...screen.answers, ...kept.answers }, keys: {} });
 
 /** A row's answer as it stands in the draft. */
 export const answerOf = (draft: Draft, item: InitScreenItem): string | undefined => draft.answers[item.id];

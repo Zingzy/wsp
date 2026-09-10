@@ -817,6 +817,10 @@ describe("serveRuntime init door (the host's init job, read and driven from the 
         calls.push(["step", o]);
         return { ...JOB, step: o.at };
       },
+      draft: async o => {
+        calls.push(["draft", o]);
+        return { ...JOB, drafts: [{ at: o.at, ticks: o.ticks ?? [], answers: o.answers ?? {} }] };
+      },
       retry: async o => {
         calls.push(["retry", o]);
         return JOB;

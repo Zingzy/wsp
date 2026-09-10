@@ -54,7 +54,8 @@ export function SetupScreen({
   secondary?: ScreenAction;
   /** One muted line above the footer, the column wide, where a step has something the footer alone does not say. */
   note?: string;
-  /** The host's word for what it refused, under the footer, so a press that did nothing says why. */
+  /** The host's word for what it refused, above the footer as the note is, so a press that did nothing says why
+   * where the eye already is rather than under the link below the keycap. */
   refusal?: string | null;
 }) {
   // The keycap takes focus without scrolling to it: a long step opens on its title, not on its button.
@@ -135,16 +136,16 @@ export function SetupScreen({
             {note}
           </p>
         ) : null}
+        {refusal !== null ? (
+          <p data-k="refusal" className="mb-4 max-w-[440px] break-words text-center font-mono text-xs text-destructive-foreground">
+            {refusal}
+          </p>
+        ) : null}
         {primary !== undefined || secondary !== undefined ? (
           <div data-k="footer" className="flex flex-col items-center">
             {withReason("primary-reason", keycapButton, held ? primary.title : undefined)}
             {withReason("secondary-reason", secondaryLink, secondaryHeld ? secondary.title : undefined)}
           </div>
-        ) : null}
-        {refusal !== null ? (
-          <p data-k="refusal" className="mt-4 max-w-[440px] break-words text-center font-mono text-xs text-warning-foreground">
-            {refusal}
-          </p>
         ) : null}
       </div>
       <div data-k="bottom" aria-hidden className="w-full" style={{ flex: "1 1 0", minHeight: BOTTOM_MARGIN_MIN }} />

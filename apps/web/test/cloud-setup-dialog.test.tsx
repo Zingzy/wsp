@@ -9,7 +9,7 @@
 // happen. Esc hides it with the job running on.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLOUD_SETUP_WORDS, KEY_REFUSED, KEY_UNCHECKED, SIGN_IN_STAGE_ID, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, initDiskLine, initDiskOverLine, initTallyLine, initBuildRows, initButtonLine, initProgressLine, initStageCountLine, keyRefusedLine, keyUncheckedLine, type EventUnion, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, KEY_REFUSED, KEY_UNCHECKED, SIGN_IN_STAGE_ID, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MACHINE_SWEEP_LINE, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initBuildRows, initDiskLine, initDiskOverLine, initMachineRowLabel, initStageCount, initStageCountLine, initTallyLine, initButtonLine, initProgressLine, keyRefusedLine, keyUncheckedLine, type EventUnion, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS, keyStoppedRows } from "./cloud-setup/keyRefusedJob.js";
 import { useStore } from "../src/protocol/store.js";
@@ -154,12 +154,19 @@ function fakeApi(over: { setup?: InitSetup; refuse?: string; key?: KeyAnswer } =
       if (over.refuse !== undefined && o.screen === over.refuse) throw new Error(`the ${o.screen} screen was refused by the host`);
       const current = job ?? JOB;
       const index = current.screens.findIndex(s => s.id === o.screen);
-      const next: InitJob = { ...current, step: Math.min(index + 1, current.screens.length), screens: current.screens.map(s => (s.id === o.screen ? { ...s, ticks: o.ticks ?? s.ticks, answers: { ...s.answers, ...o.answers } } : s)) };
+      const next: InitJob = { ...current, step: Math.min(index + 1, current.screens.length), drafts: (current.drafts ?? []).filter(d => d.at !== o.screen), screens: current.screens.map(s => (s.id === o.screen ? { ...s, ticks: o.ticks ?? s.ticks, answers: { ...s.answers, ...o.answers } } : s)) };
       emit(next);
       return next;
     }),
     initStep: vi.fn(async (o: { at: number }) => {
       const next = { ...(job ?? JOB), step: o.at };
+      emit(next);
+      return next;
+    }),
+    initDraft: vi.fn(async (o: { at: string; ticks?: string[]; answers?: Record<string, string> }) => {
+      const current = job ?? JOB;
+      const kept = { at: o.at, ticks: o.ticks ?? [], answers: o.answers ?? {} };
+      const next = { ...current, drafts: [...(current.drafts ?? []).filter(d => d.at !== o.at), kept] };
       emit(next);
       return next;
     }),
@@ -568,7 +575,205 @@ describe("the cloud setup sheet", () => {
     await waitFor(() => expect(k(dialog, "choice")).toBeDefined());
   });
 
-  it("a refusal on a screen shows under its footer in the host's words, and the screen stays", async () => {
+  it("Start over: a view of the new job stands, and the ended job's setup snapshot landing after it never draws over the sheet", async () => {
+    const ended: InitJob = { ...JOB, phase: "cancelled", screens: [], rows: [], step: 0 };
+    const fresh: InitJob = { ...JOB, id: "init_2", phase: "reading", screens: [], rows: [{ id: "fact/identity", kind: "fact", label: "Identity", state: INIT_ROW_STATES.running }] };
+    const { api, emit } = fakeApi({ setup: { ...HELD, job: ended } });
+    // The snapshot the connect reads is of the moment it was asked for; the reply is slow.
+    // The connect reads the setup and so does the sheet; both are slow, and both come back with the older job.
+    const answers: (() => void)[] = [];
+    const asked: Promise<InitSetup>[] = [];
+    api.initGet = vi.fn(() => {
+      const reply = new Promise<void>(r => answers.push(r)).then(() => ({ ...HELD, job: ended }));
+      asked.push(reply);
+      return reply;
+    });
+    useStore.setState({ initJob: null });
+    useStore.getState().bind(api);
+    render(<CloudSetupDialog onClose={vi.fn()} />);
+    const dialog = await screen.findByRole("dialog");
+    // Start over ended one job and the next one is already reading, so its view arrives first.
+    emit(fresh);
+    await waitFor(() => expect(useStore.getState().initJob?.id).toBe("init_2"));
+    // The older snapshot lands now. It is the job Start over left, and it does not become what the sheet draws.
+    await act(async () => {
+      for (const r of answers) r();
+      await Promise.all(asked);
+      // The store's own then runs a tick after the reply it is chained to.
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(useStore.getState().initJob?.id).toBe("init_2");
+    expect(k(dialog, "title").textContent).not.toBe(CLOUD_SETUP_WORDS.build.failed);
+    expect(dialog.querySelector("[data-k=disk]"), "no ring on a step with nothing to tick").toBeNull();
+    await waitFor(() => expect(k(dialog, "reading")).toBeDefined());
+  });
+
+  it("every tick goes to the host as it happens, so a sheet shut mid-step reopens on what was ticked and not on what the host last answered", async () => {
+    const at2: InitJob = { ...JOB, step: 2 };
+    const t = await open({ setup: { ...HELD, job: at2 } });
+    await waitFor(() => expect(k(t.dialog, "screen-also")).toBeDefined());
+    fireEvent.click(k(t.dialog, "secondary"));
+    await waitFor(() => expect(k(t.dialog, "screen-tools")).toBeDefined());
+    const gh = t.dialog.querySelector<HTMLElement>('[data-row="gh"]')!;
+    expect(within(gh).getByRole("checkbox").getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(within(gh).getByRole("checkbox"));
+    // The tick is on the host before any Continue, so nothing about it lives only in this sheet.
+    await waitFor(() => expect(t.api.initDraft).toHaveBeenCalledWith({ at: "tools", ticks: ["node"], answers: {} }));
+    expect(t.api.initAnswer).not.toHaveBeenCalled();
+    // Shut and open again: the step is the host's and so is what was ticked on it.
+    cleanup();
+    const again = await open({ setup: { ...HELD, job: t.held()! } });
+    await waitFor(() => expect(k(again.dialog, "screen-tools")).toBeDefined());
+    const rows = [...again.dialog.querySelectorAll<HTMLElement>('[data-k="screen-tools"] [data-k=row]')];
+    expect(rows.map(r => r.dataset["row"])).toEqual(["node", "gh", "swift"]);
+    expect(rows.map(r => within(r).getByRole("checkbox").getAttribute("aria-checked"))).toEqual(["true", "false", "false"]);
+    expect(k(again.dialog, "tally").textContent).toContain(initTallyLine(1, "tools", 60 * MIB));
+  });
+
+  it("a key typed under a sign-in row is never drafted: it goes to the key store on Continue and nowhere else", async () => {
+    const t = await open({ setup: { ...HELD, job: { ...JOB, step: 3 } } });
+    await waitFor(() => expect(k(t.dialog, "screen-logins")).toBeDefined());
+    const claude = t.dialog.querySelector<HTMLElement>('[data-row="logins/claude"]')!;
+    fireEvent.click(claude.querySelector<HTMLElement>("[data-k=answer]")!);
+    await waitFor(() => expect(document.querySelector('[data-k=option][data-value="key"]')).not.toBeNull());
+    fireEvent.click(document.querySelector<HTMLElement>('[data-k=option][data-value="key"]')!);
+    await waitFor(() => expect(claude.querySelector("[data-k=key-field]")).not.toBeNull());
+    // The pick is an answer and is kept; what is typed into the field after it is not.
+    await waitFor(() => expect(t.api.initDraft).toHaveBeenCalledWith({ at: "logins", ticks: [], answers: expect.objectContaining({ "logins/claude": "key" }) as Record<string, string> }));
+    const before = t.api.initDraft.mock.calls.length;
+    fireEvent.change(claude.querySelector("input")!, { target: { value: "sk-ant-x-typed" } });
+    expect(t.api.initDraft.mock.calls.length).toBe(before);
+    expect(JSON.stringify(t.api.initDraft.mock.calls)).not.toContain("sk-ant-x-typed");
+  });
+
+  it("the workspace name typed on the build's question is kept on the host, so Back and a shut sheet both come back to it", async () => {
+    const t = await open({ setup: { ...HELD, job: { ...JOB, step: 4 } } });
+    await waitFor(() => expect(k(t.dialog, "ask")).toBeDefined());
+    const name = t.dialog.querySelector<HTMLInputElement>("#setup-first-name")!;
+    expect(name.value).toBe("first");
+    fireEvent.change(name, { target: { value: "e2e" } });
+    // Typing alone does not push a view to every client; leaving the field is what keeps it.
+    expect(t.api.initDraft).not.toHaveBeenCalled();
+    fireEvent.blur(name);
+    await waitFor(() => expect(t.api.initDraft).toHaveBeenCalledWith({ at: "build", ticks: [], answers: { name: "e2e", folder: "" } }));
+    // Leaving a field the person did not change keeps nothing: tabbing through pushes no view to any client.
+    const kept = t.api.initDraft.mock.calls.length;
+    fireEvent.blur(name);
+    fireEvent.blur(t.dialog.querySelector<HTMLInputElement>("#setup-first-folder")!);
+    expect(t.api.initDraft.mock.calls.length).toBe(kept);
+    // Back to the sign-ins and forward again: the name is where it was left, not back at the default.
+    fireEvent.click(k(t.dialog, "secondary"));
+    await waitFor(() => expect(k(t.dialog, "screen-logins")).toBeDefined());
+    t.emit({ ...t.held()!, step: 4 });
+    await waitFor(() => expect(k(t.dialog, "ask")).toBeDefined());
+    expect(t.dialog.querySelector<HTMLInputElement>("#setup-first-name")!.value).toBe("e2e");
+    // And a sheet shut and opened again lands on it too.
+    cleanup();
+    const again = await open({ setup: { ...HELD, job: t.held()! } });
+    await waitFor(() => expect(k(again.dialog, "ask")).toBeDefined());
+    expect(again.dialog.querySelector<HTMLInputElement>("#setup-first-name")!.value).toBe("e2e");
+  });
+
+  it("a build the person stopped says it was them with the stage it stopped at, and the first workspace reads not made", async () => {
+    const stopped: InitJob = {
+      ...JOB,
+      phase: "cancelled",
+      stoppable: false,
+      error: "Stopped while creating the machine. Builder b_1 is gone; nothing is billing.",
+      rows: [
+        { id: "stage/creating", kind: "stage", label: GOLDEN_STAGE_WORDS.creating, state: INIT_ROW_STATES.failed, lines: ["sandbox from base"] },
+        { id: "stage/snapshotting", kind: "stage", label: GOLDEN_STAGE_WORDS.snapshotting, state: INIT_ROW_STATES.waiting },
+        { id: "workspace/e2e", kind: "workspace", label: "e2e", state: INIT_ROW_STATES.notMade },
+      ],
+      progress: { done: 0, total: 3 },
+      log: [],
+    };
+    const { dialog } = await open({ setup: { ...HELD, job: stopped } });
+    await waitFor(() => expect(k(dialog, "build")).toBeDefined());
+    expect(k(dialog, "title").textContent).toBe(CLOUD_SETUP_WORDS.build.stopped);
+    expect(k(dialog, "sentence").textContent).toBe(stopped.error);
+    expect(dialog.querySelector('[data-row="workspace/e2e"] [data-k=state]')!.textContent).toBe(INIT_ROW_STATES.notMade);
+    // The stage the machine never got a slot for still stands in the list, waiting.
+    expect(dialog.querySelector('[data-row="stage/snapshotting"] [data-k=state]')!.textContent).toBe(INIT_ROW_STATES.waiting);
+    expect(k(dialog, "primary").textContent).toContain(CLOUD_SETUP_WORDS.build.again);
+  });
+
+  it("a machine the provider would not take is a row like any other, with its glyph, its name in words and its state word, and it rides on whatever job is current", async () => {
+    const sweeping: InitJob = {
+      ...JOB,
+      phase: "cancelled",
+      stoppable: false,
+      error: `Stopped while creating the machine. ${STOP_LEFT_MACHINE_LINE}`,
+      rows: [
+        { id: "stage/creating", kind: "stage", label: GOLDEN_STAGE_WORDS.creating, state: INIT_ROW_STATES.stopped, lines: ["sandbox from base"] },
+        { id: "machine/b_dlb9oeig", kind: "machine", label: initMachineRowLabel("b_dlb9oeig"), state: INIT_ROW_STATES.retrying, detail: "getaddrinfo ENOTFOUND api.getsolari.com" },
+      ],
+      progress: { done: 0, total: 1 },
+      log: [],
+    };
+    const { dialog, emit } = await open({ setup: { ...HELD, job: sweeping } });
+    await waitFor(() => expect(k(dialog, "build")).toBeDefined());
+    const row = dialog.querySelector<HTMLElement>('[data-row="machine/b_dlb9oeig"]')!;
+    expect(row).not.toBeNull();
+    expect(row.textContent).toContain("Builder b_dlb9oeig");
+    expect(row.querySelector("[data-k=state]")!.textContent).toBe(INIT_ROW_STATES.retrying);
+    // A live row, so a filled glyph and no chevron: there is nothing to open and nothing to press.
+    expect(row.querySelector("svg")).toBeNull();
+    expect(row.querySelector('[aria-hidden] > span[class*="bg-foreground"]')).not.toBeNull();
+    expect(row.getAttribute("aria-expanded")).toBeNull();
+    // The stage the person's stop ended reads stopped, not failed: no cross under a headline that says it was them.
+    const stage = dialog.querySelector<HTMLElement>('[data-row="stage/creating"]')!;
+    expect(stage.querySelector("[data-k=state]")!.textContent).toBe(INIT_ROW_STATES.stopped);
+    expect(stage.querySelector("[data-k=state]")!.className).not.toContain("text-destructive-foreground");
+    // Once the provider takes it the row says gone and wears the check every ended row wears.
+    emit({ ...sweeping, rows: sweeping.rows.map(r => (r.kind === "machine" ? { id: r.id, kind: r.kind, label: r.label, state: INIT_ROW_STATES.gone } : r)) });
+    await waitFor(() => expect(dialog.querySelector('[data-row="machine/b_dlb9oeig"] [data-k=state]')!.textContent).toBe(INIT_ROW_STATES.gone));
+    expect(dialog.querySelector('[data-row="machine/b_dlb9oeig"] svg')).not.toBeNull();
+  });
+
+  it("the sidebar's keycap and the sheet's bar are one count, and while a machine is still being removed the keycap says so", async () => {
+    const building: InitJob = {
+      ...JOB,
+      phase: "building",
+      rows: [
+        { id: "agent/claude", kind: "agent", label: "Claude Code", state: MCP_ADDED_WORD },
+        { id: "stage/creating", kind: "stage", label: GOLDEN_STAGE_WORDS.creating, state: "done" },
+        { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "Sign in to GitHub CLI", state: INIT_ROW_STATES.waiting },
+        { id: "stage/snapshotting", kind: "stage", label: GOLDEN_STAGE_WORDS.snapshotting, state: INIT_ROW_STATES.failed },
+        { id: "workspace/first", kind: "workspace", label: "first", state: INIT_ROW_STATES.notMade },
+      ],
+      progress: { done: 1, total: 3 },
+      log: [],
+    };
+    // The host's field is the sheet's own function over the sheet's own rows, so the two can never say two things.
+    expect(building.progress).toEqual(initStageCount(initBuildRows(building.rows).rows));
+    const { dialog } = await open({ setup: { ...HELD, job: building } });
+    await waitFor(() => expect(k(dialog, "build")).toBeDefined());
+    expect(k(dialog, "count").textContent).toBe(initStageCountLine(building.progress));
+    expect(initProgressLine(building)).toBe(`building · ${building.progress.done}/${building.progress.total}`);
+    // A machine still being removed takes the keycap's line, since that one bills while nobody looks.
+    expect(initProgressLine({ ...building, rows: [...building.rows, { id: "machine/b_1", kind: "machine", label: "Builder b_1", state: INIT_ROW_STATES.retrying }] })).toBe(MACHINE_SWEEP_LINE);
+  });
+
+  it("a stage waiting on the account's machine cap reads so on its row with the cap line in its block", async () => {
+    const waiting: InitJob = {
+      ...JOB,
+      phase: "building",
+      rows: [{ id: "stage/creating", kind: "stage", label: GOLDEN_STAGE_WORDS.creating, state: INIT_ROW_STATES.slot, lines: ["sandbox from base", "Solari account at its machine cap; waiting 30s for a slot (5/20). Nothing is killed."] }],
+      progress: { done: 0, total: 1 },
+      log: [],
+    };
+    const { dialog } = await open({ setup: { ...HELD, job: waiting } });
+    await waitFor(() => expect(k(dialog, "build")).toBeDefined());
+    const row = dialog.querySelector<HTMLElement>('[data-row="stage/creating"]')!;
+    expect(row.querySelector("[data-k=state]")!.textContent).toBe(INIT_ROW_STATES.slot);
+    // The wait is the running row, so its block is open on the cap line the runtime wrote.
+    expect(row.dataset["open"]).toBe("true");
+    expect(row.querySelector("[data-k=lines]")!.textContent).toContain("at its machine cap");
+  });
+
+  it("a refusal on a screen shows above the footer in the host's words and in the danger tone, and the screen stays", async () => {
     const t = await open({ setup: HELD, refuse: "agents" });
     await waitFor(() => expect(k(t.dialog, "choice")).toBeDefined());
     await walkTo(t, "agents");
@@ -576,6 +781,31 @@ describe("the cloud setup sheet", () => {
     await waitFor(() => expect(k(t.dialog, "refusal").textContent).toBe("the agents screen was refused by the host"));
     expect(k(t.dialog, "screen-agents")).toBeDefined();
     expect(t.dialog.querySelectorAll("[data-k=refusal]")).toHaveLength(1);
+    // It sits above the keycap and its link, where the note does, and not under the Back link below them.
+    const refusal = k(t.dialog, "refusal");
+    expect(refusal.compareDocumentPosition(k(t.dialog, "footer")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(refusal.className).toContain("text-destructive-foreground");
+    expect(refusal.className).not.toContain("text-warning-foreground");
+  });
+
+  it("ticking past the image's disk refuses Continue with the overshoot, above the footer and in the ring's own tone", async () => {
+    const small: InitJob = { ...JOB, step: 1, disk: { fixed: 19 * GIB, total: 20 * GIB } };
+    const { dialog, api } = await open({ setup: { ...HELD, job: small } });
+    await waitFor(() => expect(k(dialog, "screen-tools")).toBeDefined());
+    // Swift takes the image 3 GB past a disk with 1 GB to spare, and the ring says so.
+    fireEvent.click(within(dialog.querySelector<HTMLElement>('[data-row="swift"]')!).getByRole("checkbox"));
+    await waitFor(() => expect(dialog.querySelector("[data-k=disk-over]")).not.toBeNull());
+    const over = dialog.querySelector("[data-k=disk-over]")!.textContent;
+    expect(over).toBe(initDiskOverLine(19 * GIB + 208 * MIB + 60 * MIB + 12 * MIB + 3 * GIB - 20 * GIB));
+    expect(dialog.querySelector("[data-k=disk]")!.getAttribute("data-tone")).toBe("danger");
+    fireEvent.click(k(dialog, "primary"));
+    // The refusal is the ring's own words: one rule, said in one place, read in two.
+    await waitFor(() => expect(k(dialog, "refusal").textContent).toBe(over));
+    // Nothing was sent, the line is the ring's tone, and it stands above the footer.
+    expect(api.initAnswer).not.toHaveBeenCalled();
+    const refusal = k(dialog, "refusal");
+    expect(refusal.className).toContain("text-destructive-foreground");
+    expect(refusal.compareDocumentPosition(k(dialog, "footer")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("Esc and the close button hide the sheet with the job running on, and never lose the step", async () => {
@@ -609,10 +839,10 @@ describe("the cloud setup sheet", () => {
     };
     const { emit, dialog, onClose, api } = await open({ setup: { ...HELD, job: building } });
     await waitFor(() => expect(k(dialog, "build")).toBeDefined());
-    // A page waits on the person, so the screen is the sign-ins slide: its own title and sentence, the stages folded to one line with the count (two of six done), one large row per sign-in in order.
+    // A page waits on the person, so the screen is the sign-ins slide: its own title and sentence, the stages folded to one line with the count (two of the five stages done, the first workspace beside them counting for neither end), one large row per sign-in in order.
     expect(k(dialog, "title").textContent).toBe(CLOUD_SETUP_WORDS.build.slideHeadline);
     expect(k(dialog, "sentence").textContent).toBe(CLOUD_SETUP_WORDS.build.slideTop);
-    expect(k(dialog, "stages-folded").textContent).toBe(`${CLOUD_SETUP_WORDS.build.headline} · 2 of 6`);
+    expect(k(dialog, "stages-folded").textContent).toBe(`${CLOUD_SETUP_WORDS.build.headline} · 2 of 5`);
     expect(dialog.querySelector("[data-k=count]")).toBeNull();
     expect([...dialog.querySelectorAll<HTMLElement>("[data-k=signin]")].map(r => r.dataset["row"])).toEqual(["sign-in/gh", "sign-in/claude", "sign-in/codex"]);
     expect(dialog.querySelector('[data-row="agent/claude"]'), "the MCP rows are not build stages").toBeNull();
@@ -648,8 +878,8 @@ describe("the cloud setup sheet", () => {
     emit({ ...building, rows: building.rows.map(r => (r.id === "sign-in/gh" ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, state: INIT_SIGN_IN_WORDS["signed-in"] } : r)), progress: { done: 6, total: 9 } });
     // With the last sign-in settled the list is back: stages in order, the sign-ins one stage reading done and folded, the count and the line along the card's top edge.
     await waitFor(() => expect(k(dialog, "title").textContent).toBe(CLOUD_SETUP_WORDS.build.headline));
-    expect(within(dialog).getByRole("progressbar").getAttribute("aria-valuenow")).toBe("50");
-    expect(k(dialog, "count").textContent).toBe("3 of 6");
+    expect(within(dialog).getByRole("progressbar").getAttribute("aria-valuenow")).toBe("60");
+    expect(k(dialog, "count").textContent).toBe("3 of 5");
     const rows = [...dialog.querySelectorAll<HTMLElement>('[data-k="build"] [data-k=card] > * > * > ul > li[data-k=row]')];
     expect(rows.map(r => r.dataset["row"])).toEqual(["stage/creating", "stage/ready", SIGN_IN_STAGE_ID, "stage/snapshotting", "stage/sealed", "workspace/first"]);
     const signIns = dialog.querySelector<HTMLElement>(`[data-row="${SIGN_IN_STAGE_ID}"]`)!;
@@ -801,16 +1031,18 @@ describe("the cloud setup sheet", () => {
     expect(k(t.dialog, "title").textContent).toBe(CLOUD_SETUP_WORDS.build.failed);
     expect(k(t.dialog, "sentence").textContent).toBe(KEY_REFUSED_LINE);
     expect(t.dialog.textContent).not.toContain("Nothing was booted");
-    // Nothing on the screen reads as work done: the count is none of the three rows and the bar is at nothing.
+    // Nothing on the screen reads as work done: the count is none of the stages and the bar is at nothing.
     const { rows } = initBuildRows(KEY_REFUSED_ROWS);
-    expect(k(t.dialog, "count").textContent).toBe(initStageCountLine({ done: 0, total: rows.length }));
+    expect(initStageCount(rows).done).toBe(0);
+    expect(k(t.dialog, "count").textContent).toBe(initStageCountLine(initStageCount(rows)));
     expect(k(t.dialog, "progress").getAttribute("aria-valuenow")).toBe("0");
     // The first stage carries the refusal as its line; the sign-in fold and the workspace read as never reached.
     const state = (row: string): string | null => t.dialog.querySelector(`[data-row="${row}"]`)!.getAttribute("data-state");
     expect(state("stage/creating")).toBe(INIT_ROW_STATES.failed);
     expect(within(t.dialog.querySelector<HTMLElement>('[data-row="stage/creating"]')!).getByText(KEY_REFUSED_LINE)).toBeDefined();
     expect(state(SIGN_IN_STAGE_ID)).toBe(INIT_ROW_STATES.skipped);
-    expect(state("workspace/first")).toBe(INIT_ROW_STATES.skipped);
+    // A workspace nothing made reads not made; skipped would read as a step the build chose to pass on.
+    expect(state("workspace/first")).toBe(INIT_ROW_STATES.notMade);
     expect([...t.dialog.querySelectorAll("[data-row]")].map(r => r.getAttribute("data-state"))).not.toContain(INIT_ROW_STATES.done);
     // The way on is the step that takes a key, not another build off the same one.
     const keycap = k(t.dialog, "primary");
