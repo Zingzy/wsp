@@ -1019,6 +1019,9 @@ export const CLOUD_SETUP_WORDS = {
     folder: "Project folder",
     optional: "optional",
     choose: "Choose",
+    /** Why the build keycap is held while the name field is empty: without a name nothing is forked, so a folder
+     * typed beside it would have nowhere to land. */
+    needsName: "give the workspace a name",
   },
   build: {
     headline: "Building your image",
@@ -1158,6 +1161,10 @@ export const GOLDEN_STAGE_WORDS: Record<Exclude<GoldenStage, "failed">, string> 
 
 /** The id of the wsp tools screen's row for an agent, the one the app answers for it from the first launch's own answer. */
 export const wspToolsRowId = (agent: string): string => `wsp-tools/${agent}`;
+
+/** The name a first workspace takes when nobody names one: what the terminal falls back to and what the app's name
+ * field opens on, so the two roads cannot drift apart. */
+export const FIRST_WORKSPACE = "first";
 
 /** The sentence under the first workspace's title: when it comes and on what, from the recipe's own numbers. */
 export const initForkLine = (size: WorkspaceSize): string => `Forked from the image as soon as the build finishes, on a ${fmtSize(size)} machine`;

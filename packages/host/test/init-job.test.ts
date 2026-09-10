@@ -9,7 +9,7 @@
 // the run are the real ones.
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join, relative } from "node:path";
 import { SNAPSHOT_STORAGE, type BackendPricing } from "@wsp/engine";
 import { GOLDEN_STAGE_WORDS, INIT_SIGN_IN_WORDS, InitJob, Recipe, SIGN_IN_OPEN_STATE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, noMcpServersLine, type InitJobEvent } from "@wsp/protocol";
 import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime } from "@wsp/runtime";
@@ -387,6 +387,37 @@ describe("the init job, manual road", () => {
     expect(done.workspace).toBeUndefined();
     expect(done.rows.at(-1)).toMatchObject({ kind: "workspace", state: "skipped" });
     expect((await f.rt.workspaces.list()).map(w => w.name)).toEqual(["this-mac"]);
+  });
+
+  it("an empty name forks nothing and imports nothing on an empty list too, so the answer decides it and never the count of workspaces", async () => {
+    const f = fake();
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
+    // Nothing is seeded: with no workspace in the list the old rule would have asked, and a folder alone answered yes.
+    expect(await f.rt.workspaces.list()).toEqual([]);
+    const building = await f.jobs.build({ firstWorkspace: "", importFolder: f.home });
+    expect(building.rows.at(-1)).toMatchObject({ kind: "workspace", state: "skipped", detail: NO_FIRST_WORKSPACE });
+    await f.settled();
+    const done = f.jobs.view()!;
+    expect(done.phase).toBe("done");
+    expect(done.workspace).toBeUndefined();
+    expect(done.rows.filter(r => r.kind === "workspace" || r.kind === "project")).toHaveLength(1);
+    expect(await f.rt.workspaces.list()).toEqual([]);
+  });
+
+  it("one project row per import, whatever the folder was spelled as: the row the build draws is the row the import lands on", async () => {
+    const f = fake();
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
+    // A relative folder is resolved before the run reads it, so the row's id cannot drift from the import's own.
+    await f.jobs.build({ firstWorkspace: "e2e", importFolder: relative(process.cwd(), f.home) });
+    await f.settled();
+    const done = f.jobs.view()!;
+    const projects = done.rows.filter(r => r.kind === "project");
+    expect(projects.map(r => r.id)).toEqual([`project/${f.home}`]);
+    expect(projects[0]).toMatchObject({ label: basename(f.home), state: "imported" });
   });
 
   it("cancel during the sign-ins stops the job: the sign-in in flight ends not signed in, the machine goes, nothing is sealed; a cancel during the seal is refused and the view says the job cannot be stopped", async () => {

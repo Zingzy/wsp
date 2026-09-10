@@ -6,7 +6,7 @@
 // end where the desktop bridge is there; a folder dragged onto it or typed
 // works everywhere.
 import { useState, type DragEvent } from "react";
-import { CLOUD_SETUP_WORDS, initForkLine, type InitSetup } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, initForkLine, type InitSetup } from "@wsp/protocol";
 import { Button } from "../../components/ui/button.js";
 import { Input } from "../../components/ui/input.js";
 import { desktopBridge } from "../../lib/desktopShell.js";
@@ -14,9 +14,6 @@ import { cn } from "../../lib/utils.js";
 import { carriesFiles, droppedFolder } from "../folderDrag.js";
 import { FIELD_LABEL, LONE_FIELD, STATE_WORD } from "./rows.js";
 import { SetupScreen } from "./SetupScreen.js";
-
-/** The name a first workspace takes when nobody names one; the terminal's own default. */
-export const FIRST_WORKSPACE = "first";
 
 export function SetupAsk({ setup, counter, onBuild, onBack, refusal }: { setup: InitSetup; counter: string; onBuild: (o: { firstWorkspace: string; importFolder?: string }) => void; onBack: () => void; refusal: string | null }) {
   const words = CLOUD_SETUP_WORDS.ask;
@@ -38,7 +35,7 @@ export function SetupAsk({ setup, counter, onBuild, onBack, refusal }: { setup: 
   };
   const canChoose = bridge?.pickFolder !== undefined;
   return (
-    <SetupScreen k="ask" counter={counter} headline={words.headline} top={setup.pricing !== null ? initForkLine(setup.pricing.size) : words.top} refusal={refusal} primary={{ word: CLOUD_SETUP_WORDS.screen.build, onPress: build, disabled: !ready, focus: false }} secondary={{ word: CLOUD_SETUP_WORDS.screen.back, onPress: onBack }}>
+    <SetupScreen k="ask" counter={counter} headline={words.headline} top={setup.pricing !== null ? initForkLine(setup.pricing.size) : words.top} refusal={refusal} primary={{ word: CLOUD_SETUP_WORDS.screen.build, onPress: build, disabled: !ready, focus: false, title: words.needsName }} secondary={{ word: CLOUD_SETUP_WORDS.screen.back, onPress: onBack }}>
       <div className="flex w-full flex-col gap-2">
         <label htmlFor="setup-first-name" className={FIELD_LABEL}>
           {words.name}
