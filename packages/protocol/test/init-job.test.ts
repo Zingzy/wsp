@@ -52,7 +52,7 @@ import {
   initDiskOverLine,
   initImageBytes,
   initSizeTone,
-  initTallyEstimate,
+  fmtBytesOfTotal,
   initTallyOf,
   initTicksOf,
   fmtCalls,
@@ -429,8 +429,8 @@ describe("the words the clients print for the job", () => {
     expect([...initTicksOf(tools)]).toEqual(["rust", "bun"]);
     expect([...initTicksOf(tools, { ticks: ["swift"] })]).toEqual(["swift"]);
     // The estimate reads in the tone its share of the disk earns, never its weight: 4.9 GB is the danger weight and a quarter of the disk.
-    expect(initTallyEstimate(4.9 * GIB, 20 * GIB)).toBe("4.9 GB of 20 GB");
-    expect(initTallyEstimate(4.9 * GIB)).toBe("4.9 GB");
+    expect(fmtBytesOfTotal(4.9 * GIB, 20 * GIB)).toBe("4.9 GB of 20 GB");
+    expect(fmtBytesOfTotal(4.9 * GIB)).toBe("4.9 GB");
     expect(initTallyLine(0, "more", 4.9 * GIB)).toBe("0 more on the image · 4.9 GB");
     expect(diskTone(initImageBytes(job), job.disk.total)).toBe("muted");
     expect(sizeTone(initImageBytes(job))).toBe("danger");

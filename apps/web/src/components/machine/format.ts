@@ -72,19 +72,7 @@ export function idleLabel(idleAt: number | undefined, now: number): string {
   return left <= 0 ? "napping now" : `naps in ${durationLabel(left)}`;
 }
 
-export type DiskTier = "plain" | "yellow" | "orange" | "red";
-
-/** How full the workspace disk is, in percent: the number turns before the disk does. */
-export function diskTier(percent: number): DiskTier {
-  if (percent >= 75) return "red";
-  if (percent >= 65) return "orange";
-  if (percent >= 50) return "yellow";
-  return "plain";
-}
-
 export const percentLabel = (n: number): string => `${Math.round(n)}%`;
-
-export const bytesOfLabel = (used: number, total: number): string => `${fmtBytes(used)} of ${fmtBytes(total)}`;
 
 const UNITS = ["", "K", "M", "G", "T"];
 

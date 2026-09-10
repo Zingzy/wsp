@@ -28,13 +28,14 @@ export const UNKNOWN_SIZE = "size unknown";
 export const fmtCalls = (n: number): string => `${n.toLocaleString("en-US")} ${n === 1 ? "call" : "calls"}`;
 
 /** The line under a screen's card: the step's own count, then the whole image so far against the machine's disk. */
-export const initTallyLine = (count: number, noun: string, used: number, total?: number): string => `${initTallyCount(count, noun)} · ${initTallyEstimate(used, total)}`;
+export const initTallyLine = (count: number, noun: string, used: number, total?: number): string => `${initTallyCount(count, noun)} · ${fmtBytesOfTotal(used, total)}`;
 /** The tally's first half, the count of rows on the image, so a view can colour the estimate after it on its own. The
  * noun is the screen's plural ("agents", "tools"), or a word that does not count ("more") kept as it is. */
 export const initTallyCount = (count: number, noun: string): string => `${noun.endsWith("s") ? plural(count, noun.replace(/s$/, "")) : `${count} ${noun}`} on the image`;
-/** The tally's second half, the running estimate of the image against the disk ("4.9 GB of 20 GB"), read in the tone
- * its share of the disk earns, never its weight; the estimate alone where the provider reports no disk. */
-export const initTallyEstimate = (used: number, total?: number): string => (total === undefined ? fmtBytes(used) : `${fmtBytes(used)} of ${fmtBytes(total)}`);
+/** Two byte counts against each other, each under the byte rule ("4.9 GB of 20 GB"): the tally's running estimate
+ * against the disk and the machine tab's memory and disk rows, each read in the tone the share earns; the first count
+ * alone where there is no total. */
+export const fmtBytesOfTotal = (used: number, total?: number): string => (total === undefined ? fmtBytes(used) : `${fmtBytes(used)} of ${fmtBytes(total)}`);
 
 /** How many rows of a screen are on the image with these ticks and the bytes they come to: a locked row is on, a row
  * that takes an answer is not counted, and a row nothing measured adds nothing. */

@@ -8,12 +8,13 @@
 // coloured by its share, with the disk meter inline after it on the steps that
 // change the image's size. The ticks, answers and typed keys live in the
 // dialog's one draft until Continue sends them.
-import { CLOUD_SETUP_WORDS, UNKNOWN_SIZE, diskTone, fmtBytes, initSizeTone, initTallyCount, initTallyEstimate, initTallyOf, initTicksOf, type InitDraft, type InitScreen, type InitScreenItem } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, UNKNOWN_SIZE, diskTone, fmtBytes, initSizeTone, initTallyCount, fmtBytesOfTotal, initTallyOf, initTicksOf, type InitDraft, type InitScreen, type InitScreenItem } from "@wsp/protocol";
 import { Checkbox } from "../../components/ui/checkbox.js";
 import { Input } from "../../components/ui/input.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { cn } from "../../lib/utils.js";
-import { Card, FIELD, FIELD_LABEL, GroupLabel, META, Meter, NAME, ROW, ROW_LINE, RowPicker, STATE_WORD, SizeCell, Slot, TONE_TEXT } from "./rows.js";
+import { TONE_TEXT } from "../../lib/tone.js";
+import { Card, FIELD, FIELD_LABEL, GroupLabel, META, Meter, NAME, ROW, ROW_LINE, RowPicker, STATE_WORD, SizeCell, Slot } from "./rows.js";
 import { RowMark } from "./SignInMark.js";
 import { SetupScreen, type ScreenAction } from "./SetupScreen.js";
 
@@ -127,7 +128,7 @@ export function SetupAnswers({ screen, counter, draft, onDraft, primary, seconda
           <span>
             {initTallyCount(tally.count, screen.tally)} ·{" "}
             <span data-k="tally-size" data-tone={imageTone} className={TONE_TEXT[imageTone]}>
-              {initTallyEstimate(image.used, image.total)}
+              {fmtBytesOfTotal(image.used, image.total)}
             </span>
           </span>
           {image.total !== undefined ? <Meter used={image.used} total={image.total} /> : null}

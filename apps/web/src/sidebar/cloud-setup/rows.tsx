@@ -17,6 +17,7 @@ import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../
 import { ScrollArea } from "../../components/ui/scroll-area.js";
 import { Spinner } from "../../components/ui/spinner.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip.js";
+import { TONE_FILL, TONE_TEXT } from "../../lib/tone.js";
 import { cn } from "../../lib/utils.js";
 import { MICRO_LABEL } from "./SetupScreen.js";
 
@@ -49,10 +50,6 @@ function roomFor(card: HTMLElement): number | undefined {
   const margins = [...column.children].filter(el => el.getAttribute("aria-hidden") === "true").reduce((sum, el) => sum + parseFloat(getComputedStyle(el).minHeight), 0);
   return column.clientHeight - taken - margins;
 }
-
-/** The text class for a tone from the protocol's tables. */
-export const TONE_TEXT: Record<SizeTone, string> = { danger: "text-destructive-foreground", warning: "text-warning-foreground", yellow: "text-yellow-foreground", muted: "text-muted-foreground" };
-export const TONE_FILL: Record<SizeTone, string> = { danger: "bg-destructive-foreground", warning: "bg-warning-foreground", yellow: "bg-yellow-foreground", muted: "bg-muted-foreground" };
 
 /** A size cell: tabular mono in the tone the protocol gave it. */
 export function SizeCell({ tone, children, className }: { tone: SizeTone; children: ReactNode; className?: string }) {
