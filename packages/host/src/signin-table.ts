@@ -5,7 +5,7 @@
 import { LOGIN_ROWS, hasLogin, type SignIn as CatalogSignIn } from "@wsp/catalog";
 
 export type { LoginSource } from "@wsp/catalog";
-export { AWS_STATUS, CLAUDE_KEY_PATH, CLAUDE_STATUS, CLOUDFLARED_STATUS, GEMINI_STATUS, claudeSource, claudeWhy, geminiSource, hasLogin, secretNamed, signsInByDefault, typedAnswers } from "@wsp/catalog";
+export { AWS_STATUS, CLAUDE_KEY_PATH, CLAUDE_STATUS, CLOUDFLARED_STATUS, GEMINI_STATUS, asksThePerson, claudeSource, claudeWhy, geminiSource, hasLogin, loginWords, questionsOf, secretNamed, signsInByDefault } from "@wsp/catalog";
 
 /** A catalog row, or a shell for a tool with no row. */
 export type SignIn = CatalogSignIn | { kind: "shell" };

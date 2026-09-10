@@ -34,6 +34,9 @@ const PAGE = "https://github.com/login/oauth/authorize?redirect_uri=http%3A%2F%2
 const BANNER = "https://cli.github.com/upgrade";
 const BUILDER = { id: "m_builder", name: "default" };
 const GH_LOGIN = loginOf("gh");
+const AWS: ManifestEntry = { rung: "logins", id: "logins/aws", label: "AWS SSO login", group: "CLI logins", paths: [], bytes: 0, default: "bring", choice: "machine" };
+const DOPPLER: ManifestEntry = { rung: "logins", id: "logins/doppler", label: "Doppler login", group: "CLI logins", paths: [], bytes: 0, default: "bring", choice: "machine" };
+const DOPPLER_PAGE = "https://dashboard.doppler.com/workplace/auth/cli";
 const GH_CODE = (() => {
   const s = signInFor("gh");
   return s.kind === "device" ? s.code : undefined;
@@ -205,6 +208,53 @@ describe("the sign-in hand-off", () => {
     expect(login!.writes).toEqual([`exec ${GH_LOGIN} || exit\r`, "\r"]);
     // The code and the page gh printed beside that question still reach the person.
     expect(st.json[1]).toMatchObject({ browserUrl: DEVICE, code: "72F3-072B" });
+  });
+
+  it("ends a row at a question only the person can answer, in the tool's own words, instead of waiting out the cap", async () => {
+    const link = fakePtyLink();
+    link.script = (pty, line) => {
+      if (line.includes("WSP_STATUS")) {
+        link.data(pty, `\r\nWSP_STATUS 1\r\n`);
+        link.exit(pty, 0);
+        return;
+      }
+      if (!line.startsWith("exec ")) return;
+      link.data(pty, `${ASKED.awsSso}`);
+    };
+    const started = Date.now();
+    const st = stage(link, { logins: [AWS], deadlineMs: 10_000, pollMs: 2_000 });
+    const [r] = await st.run;
+    // The row is settled long before the cap, and its note names the question rather than the wait.
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(r).toMatchObject({ state: "not-signed-in", note: `${loginOf("aws")} asks "SSO session name (Recommended)", which only you can answer; sign in from the app's terminal` });
+    expect(st.text()).not.toContain("no sign-in within");
+    expect(st.json.at(-1)).toMatchObject({ event: "sign-in-result", state: "not-signed-in" });
+    expect(link.ptys[0]!.killed).toBe(true);
+    // Nothing was typed at it: the answer is the person's and no guess belongs on their terminal.
+    expect(link.ptys[0]!.writes).toEqual([`exec ${loginOf("aws")} || exit\r`]);
+  });
+
+  it("says the page again when the code lands after it, so a row whose tool prints them in that order still shows both", async () => {
+    const link = fakePtyLink();
+    link.script = (pty, line) => {
+      if (line.includes("WSP_STATUS")) {
+        link.data(pty, `\r\nWSP_STATUS 1\r\n`);
+        link.exit(pty, 0);
+        return;
+      }
+      if (!line.startsWith("exec ")) return;
+      // doppler prints its page one line before its code, and the pty hands them over as two chunks.
+      link.data(pty, "Complete authorization at https://dashboard.doppler.com/workplace/auth/cli\r\n");
+      setTimeout(() => link.data(pty, "Your auth code is:\r\narugula_backpack_termite_sea_lannister\r\n\r\nWaiting...\r\n"), 5);
+    };
+    const st = stage(link, { logins: [DOPPLER], deadlineMs: 300, pollMs: 50 });
+    await st.run;
+    const pages = st.json.filter(j => j["browserUrl"] !== undefined);
+    expect(pages).toEqual([
+      { event: "sign-in", tool: "doppler", label: "Doppler login", browserUrl: DOPPLER_PAGE, finish: "none", nextCommand: `open '${DOPPLER_PAGE}'`, waitSeconds: 0 },
+      { event: "sign-in", tool: "doppler", label: "Doppler login", browserUrl: DOPPLER_PAGE, code: "arugula_backpack_termite_sea_lannister", finish: "none", nextCommand: `open '${DOPPLER_PAGE}'`, waitSeconds: 0 },
+    ]);
+    expect(st.text()).toContain("then enter the code arugula_backpack_termite_sea_lannister");
   });
 
   it("a tool the shell cannot find is skipped with that reason and no status is asked", async () => {

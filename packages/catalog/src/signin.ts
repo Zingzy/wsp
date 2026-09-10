@@ -32,25 +32,17 @@ export type LoginSource = "keychain" | "rc-key" | "file" | "helper";
  * (device), a key pasted or exported (key), or nothing to run on a headless machine (none). */
 export type SignInKind = "oauth" | "device" | "key" | "none";
 
-/** A question the tool puts to its terminal that a run with nobody there would stop on, measured by running the
- * login command in a pty with nothing typed into it. One of three settles it: `flag` is the flag in the login
- * command that means it is never asked, `answer` is the line the relay types when the question appears, and
- * `person` is a choice nothing but they can make (which provider, whose organisation), which keeps the row one they
- * work through at the machine's terminal. A page that hands a code back is no question of this kind; `finish`
- * declares that road. */
-export interface Question {
+interface Asks {
   /** What the tool prints when it asks, matched against its output with the terminal's escapes taken out. */
   asks: RegExp;
-  /** The flag in the login command that answers it before it is ever printed. */
-  flag?: string;
-  /** What the relay types on the tool's own pty when it sees the line, the way the person at it would. */
-  answer?: string;
-  /** The answer is the person's own, so the row waits for them at the machine's terminal. */
-  person?: true;
 }
 
-/** A question the row answers itself. */
-export type TypedAnswer = Question & { answer: string };
+/** A question the tool puts to its terminal that a run with nobody there would stop on, measured by running the
+ * login command in a pty with nothing typed into it, and the one thing that settles it: `flag`, the flag in the
+ * login command that means it is never asked; `answer`, the line the relay types when the question appears;
+ * `person`, a choice nothing but they can make (which provider, whose organisation), which keeps the machine no
+ * road for that row. A page that hands a code back is no question of this kind; `finish` declares that road. */
+export type Question = (Asks & { flag: string }) | (Asks & { answer: string }) | (Asks & { person: true });
 
 /** Key files beside a login that no sign-in on the machine produces: they travel only by copy, as a row of their
  * own under the login's id plus "-keys", and the login's own status proves them once landed. */
@@ -98,9 +90,23 @@ export function hasLogin(s: SignIn | { kind: "shell" }): s is LoginSignIn {
   return s.kind !== "none" && s.kind !== "shell";
 }
 
-/** The questions this login answers itself, for the relay to watch the tool's output for. */
-export function typedAnswers(s: SignIn | { kind: "shell" }): readonly TypedAnswer[] {
-  return hasLogin(s) ? (s.questions ?? []).filter((q): q is TypedAnswer => q.answer !== undefined) : [];
+/** The questions this login is known to ask, for the relay to watch the tool's output for: it types the ones the
+ * row answers and reports the rest, so a question nobody here can answer ends its row where it stands. */
+export function questionsOf(s: SignIn | { kind: "shell" }): readonly Question[] {
+  return hasLogin(s) ? (s.questions ?? []) : [];
+}
+
+/** Whether this login stops on a question only the person can answer: the sign-ins step then never offers to run it
+ * on the machine, and the hand-off ends its row at the question instead of waiting out the cap. */
+export function asksThePerson(s: SignIn | { kind: "shell" }): boolean {
+  return questionsOf(s).some(q => "person" in q);
+}
+
+/** The login as a row names it: the command up to the flags that answer its questions, which a row has no room for
+ * and nobody has to type. */
+export function loginWords(s: LoginSignIn): string {
+  const at = s.login.indexOf(" --");
+  return at === -1 ? s.login : s.login.slice(0, at);
 }
 
 /** Whether a login starts as a sign-in on the machine: a browser or device flow the relay finishes there. A key has no
@@ -295,8 +301,9 @@ export const SIGN_IN_ROWS = {
     finish: "none",
     login: "doppler login --yes",
     questions: [{ asks: /Open the authorization page in your browser\?/, flag: "--yes" }],
-    // Lowercase words joined by underscores, as doppler prints it under "Your auth code is:".
-    code: /\b[a-z]+(?:_[a-z]+){2,}\b/,
+    // The line under "Your auth code is:", lowercase words joined by underscores; anchored on that label so no
+    // other word of its shape in the output is read as the code.
+    code: /(?<=Your auth code is:\s*)[a-z]+(?:_[a-z]+){2,}/,
     status: { command: "doppler me", signedIn: ok() },
     toolTimeoutMs: 5 * MIN,
   },

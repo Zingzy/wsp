@@ -20,7 +20,7 @@ import { agentName } from "./init-recipe.js";
 import { SIGN_IN_CAP_MS, copiedOutcomes, signInCapMs, stateLine, toolOf, type BuilderLink, type LoginOutcome, type SignInCodes, type SignInFlow } from "./init-signin.js";
 import { openerCommand } from "./relay.js";
 import { runQuiet, stripOsc8, urlsIn, watchPty, type WatchOutcome } from "./signin-relay.js";
-import { hasLogin, signInFor, typedAnswers } from "./signin-table.js";
+import { hasLogin, questionsOf, signInFor } from "./signin-table.js";
 
 export interface HandoffOptions {
   /** The logins the stage owns, the same rows the terminal stage takes: a choice of copy is recorded as copied,
@@ -196,20 +196,30 @@ export async function handoffStage(o: HandoffOptions): Promise<LoginOutcome[]> {
     const stop = new Promise<void>(resolve => (settle = resolve));
     o.signal?.addEventListener("abort", () => settle?.(), { once: true });
     let seen = "";
-    /** The last page handed over, and whether it was one that returns through a forwarded port. */
+    /** The last page handed over, the code handed over beside it, and whether that page was one that returns
+     * through a forwarded port. */
     let told: string | undefined;
+    let shownCode: string | undefined;
     let forwarded = false;
     let run: WatchOutcome | undefined;
     /** Why the pty never started, when it did not: the wait below has nothing to wait for then. */
     let failure: string | undefined;
+    /** A question only the person can answer, in the tool's own words: no answer here can be the right one, so the
+     * row says which question stopped it rather than waiting out the cap on a page that is never coming. */
+    let theirs: string | undefined;
     /** A page the tool printed, or one the machine asked the host to open. The forwarded one is what a redirect
      * back to the machine actually reaches, so once it has arrived it is the page and printed links are ignored;
-     * anything else replaces what was handed over, since a tool prints its banner before its sign-in page. */
+     * anything else replaces what was handed over, since a tool prints its banner before its sign-in page. The
+     * same page goes again when its code lands after it, which is the order doppler prints the two in. */
     const page = (url: string, port?: number): void => {
-      if (url === told || (forwarded && port === undefined)) return;
+      const fresh = url !== told;
+      if (fresh && forwarded && port === undefined) return;
+      const code = codeIn(seen, s.code);
+      if (!fresh && code === shownCode) return;
       if (port !== undefined) forwarded = true;
       told = url;
-      announce(r, tool, command, url, codeIn(seen, s.code), capMs, rowFinish(s.finish, url));
+      shownCode = code;
+      announce(r, tool, command, url, code, capMs, rowFinish(s.finish, url));
     };
     if (o.flow !== undefined) {
       o.flow.show = line => log.message(dim(line), { output: o.output, symbol: dim(S_BAR) });
@@ -225,10 +235,19 @@ export async function handoffStage(o: HandoffOptions): Promise<LoginOutcome[]> {
       command,
       timeoutMs: capMs,
       stop,
-      answers: typedAnswers(s),
+      questions: questionsOf(s),
+      onQuestion: asked => {
+        if (!("person" in asked.question)) return;
+        theirs = asked.matched;
+        settle?.();
+      },
       ...(env !== undefined ? { env } : {}),
       onData: chunk => {
         if (seen.length < TEXT_CAP) seen += chunk;
+      },
+      // A tool that prints its page one line before its code: the row goes again once the code is there to show.
+      onScanned: () => {
+        if (told !== undefined && shownCode === undefined && s.code !== undefined) page(told);
       },
       onUrl: url => page(url),
       ...(codes !== undefined
@@ -275,6 +294,11 @@ export async function handoffStage(o: HandoffOptions): Promise<LoginOutcome[]> {
       if (landed !== undefined) {
         r.state = "signed-in";
         r.note = landed;
+        return;
+      }
+      if (theirs !== undefined) {
+        r.state = "not-signed-in";
+        r.note = `${command} asks "${theirs}", which only you can answer; sign in from the app's terminal`;
         return;
       }
       if (w.stopped || w.timedOut) {
