@@ -64,6 +64,9 @@ export interface CodexAdapter {
   readonly steers: false;
   /** The CLI takes images as files on `-i`, so each one lands on the machine before the turn starts. */
   readonly attachments: "file";
+  // No mcpServers: this CLI reads its servers from `mcp_servers` in the config under CODEX_HOME, and no per-launch
+  // road for them is pinned off a help read of the binary, so a start that names servers is refused in this agent's
+  // name rather than launching a turn without them.
   /** Makes the binary describe itself under the same home as a session, without running a turn. */
   probeCatalog(exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer>;
   /** What the CLI's thread index calls a thread: the name the person gave it, or the title it derived. */

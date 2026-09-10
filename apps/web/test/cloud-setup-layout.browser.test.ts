@@ -6,9 +6,10 @@
 // card, the one thing that scrolls, scrolling inside its own border under a
 // cap of half the window or eight rows; the title (the step's count over it
 // where it has one), the sentence and the card at the first launch's numbers,
-// rows of 48 px, the disk meter inline after the tally on the steps that
-// change the image's size, sizes coloured by weight, state words that read at
-// AA, nothing animating at rest and no badge. Photographed at each. Runs only
+// rows of 48 px, the agent step's mono block with its spinner and the two ways
+// on once its turn stopped, the disk meter inline after the tally on the steps
+// that change the image's size, sizes coloured by weight, state words that read
+// at AA, nothing animating at rest and no badge. Photographed at each. Runs only
 // when asked for (WSP_RENDER=1) and skips without Playwright's Chromium.
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -33,12 +34,12 @@ interface Box {
 }
 
 /** Every step the sheet has, in the order a person meets them. */
-const STEPS = ["choice", "keys", "reading", "agents", "tools", "also", "logins", "ask", "building", "signing", "retry", "done", "failed"] as const;
+const STEPS = ["choice", "keys", "agent", "agent-stopped", "reading", "agents", "tools", "also", "logins", "ask", "building", "signing", "retry", "done", "failed"] as const;
 type StepName = (typeof STEPS)[number];
 /** The answer steps, which carry their count over the title. */
 const COUNTED: ReadonlySet<StepName> = new Set<StepName>(["agents", "tools", "also", "logins", "ask"]);
 /** The frame's data-k for each, where it differs from the step's own name. */
-const FRAME: Record<StepName, string> = { choice: "choice", keys: "keys", reading: "reading", agents: "screen-agents", tools: "screen-tools", also: "screen-also", logins: "screen-logins", ask: "ask", building: "build", signing: "build", retry: "build", done: "build", failed: "build" };
+const FRAME: Record<StepName, string> = { choice: "choice", keys: "keys", agent: "agent", "agent-stopped": "agent", reading: "reading", agents: "screen-agents", tools: "screen-tools", also: "screen-also", logins: "screen-logins", ask: "ask", building: "build", signing: "build", retry: "build", done: "build", failed: "build" };
 /** The steps whose tally carries the disk meter: the ones that change the image's size. */
 const METERED = new Set<StepName>(["agents", "tools", "also"]);
 /** The first launch's numbers: what every step is measured against. */
@@ -395,6 +396,32 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     const shot = join(SHOTS, `cloud-setup-signin-code-${theme}.png`);
     await page!.locator("[role=dialog] [data-k=middle]").screenshot({ path: shot });
     console.info(`cloud setup sign-in code ${theme}: ${shot}`);
+  }, 120_000);
+
+  it.each(["dark", "light"] as const)("in the %s theme the agent step is the thread's own line in a mono block with the spinner and the link into it; once the turn stopped the spinner goes and the two ways on stand in the footer", async theme => {
+    await page!.setViewportSize({ ...VIEWPORTS[0] });
+    let frame = await goTo("agent", theme);
+    const block = await box(`${frame} [data-k=block]`);
+    expect(near(block.width, SPEC.column), `the block is the column, ${block.width}`).toBe(true);
+    const [family = ""] = await style(`${frame} [data-k=line]`, "font-family");
+    expect(family.toLowerCase(), "mono, as the build's stage lines are").toMatch(/mono|menlo|consolas/);
+    expect(await page!.locator(`${frame} [data-k=line]`).textContent()).toBe("read /Users/zingzy/.claude/projects");
+    expect(await page!.locator(`${frame} [data-k=spinner]`).count(), "the spinner says the thread is working").toBe(1);
+    expect(await page!.locator(`${frame} [data-k=open-thread]`).textContent()).toBe(CLOUD_SETUP_WORDS.agent.open);
+    expect(await page!.locator(`${frame} [data-k=primary]`).count(), "nothing to press while it works").toBe(0);
+    const shot = join(SHOTS, `cloud-setup-agent-${theme}.png`);
+    await page!.screenshot({ path: shot });
+    console.info(`cloud setup agent ${theme}: ${shot}`);
+    // The turn stopped without the recipe: the reason is the step's sentence, the block holds the last thing it said.
+    frame = await goTo("agent-stopped", theme);
+    expect(await page!.locator(`${frame} [data-k=title]`).textContent()).toBe(CLOUD_SETUP_WORDS.agent.failed);
+    expect(await page!.locator(`${frame} [data-k=sentence]`).textContent()).toContain("recipe.json");
+    expect(await page!.locator(`${frame} [data-k=spinner]`).count()).toBe(0);
+    expect(await page!.locator(`${frame} [data-k=primary]`).textContent()).toContain(CLOUD_SETUP_WORDS.agent.retry);
+    expect(await page!.locator(`${frame} [data-k=secondary]`).textContent()).toBe(CLOUD_SETUP_WORDS.agent.again);
+    const stopped = join(SHOTS, `cloud-setup-agent-stopped-${theme}.png`);
+    await page!.screenshot({ path: stopped });
+    console.info(`cloud setup agent stopped ${theme}: ${stopped}`);
   }, 120_000);
 
   it.each(["dark", "light"] as const)("in the %s theme the button is alive while the job runs: the spinner in the glyph's place, the stage word and count, a 2 px line inside the bottom edge at the stages done over the total, paused and waiting for you at a sign-in, the line kept under reduced motion", async theme => {

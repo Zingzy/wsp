@@ -41,7 +41,8 @@ const CLAUDE_EFFORTS: HarnessOption[] = levels(["low", "medium", "high", "xhigh"
 
 // The table alone cannot say whether a harness steers, whether it keeps a person's name for a session, or whether it
 // reads an image: only its adapter, on a machine, knows any of the three. A client reads a table row as no answer
-// (keepsRename, readsImages), never as a no.
+// (keepsRename, readsImages), never as a no. mcpServers is not one of those: no binary decides it, so a row names it
+// here and harness-catalog.test.ts pins every row to its adapter's own declaration.
 const fromTable = (
   catalog: Omit<HarnessCatalog, "source" | "version" | "contextWindows" | "steers" | "renames" | "images"> & { contextWindows?: HarnessOption[]; pin?: TablePin },
 ): HarnessCatalog => {
@@ -62,6 +63,8 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     harness: "claude",
     label: "Claude Code",
     pin: { read: "--help", version: "2.1.257", date: "2026-09-05" },
+    // --mcp-config takes the servers as JSON on the launch (read off `claude --help` at 2.1.257, 2026-09-10).
+    mcpServers: true,
     // The cheapest of the three at $2/$10 per Mtok, as the CLI's own handshake prices them (read 2026-09-07).
     smallModel: "claude-sonnet-5",
     models: [

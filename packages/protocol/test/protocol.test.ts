@@ -32,6 +32,9 @@ import {
   contextWindowsFor,
   effortsFor,
   keepsRename,
+  mcpServersBlocked,
+  noMcpServersLine,
+  takesMcpServers,
   markedDefault,
   PortReachView,
   ProjectExportEvent,
@@ -43,6 +46,7 @@ import {
   RuntimeRequest,
   RuntimeResponse,
   SESSION_EVENT_TYPES,
+  isSessionEvent,
   SessionAccessResult,
   SessionAnswerResult,
   SessionEvent,
@@ -264,6 +268,9 @@ describe("a relayed permission prompt on the wire", () => {
     expect([...SESSION_EVENT_TYPES]).toContain("session.permission");
     expect([...SESSION_EVENT_TYPES]).toContain("session.permission.closed");
     expect(SESSION_EVENT_TYPES.has("session.queued" as never)).toBe(false);
+    // The one predicate every reader that folds a thread's events out of the whole channel makes.
+    expect(isSessionEvent(ask)).toBe(true);
+    expect(isSessionEvent({ type: "workspace.napped" })).toBe(false);
   });
 
   it("a prompt with nothing the harness did not name still parses, and one missing what it must name does not", () => {
@@ -629,6 +636,23 @@ describe("runtime wire types", () => {
     expect(keepsRename(row({ source: "table", renames: false }))).toBe(true);
     expect(keepsRename(null)).toBe(true);
     expect(keepsRename(undefined)).toBe(true);
+    // Whether a launch may carry MCP servers is not the machine's answer but this host's adapter, so a table row is
+    // the answer and absent is a no: a client offering an agent whose launch drops them is the fault, not the fix.
+    expect(takesMcpServers(row({ mcpServers: true }))).toBe(true);
+    expect(takesMcpServers(row({ source: "table", mcpServers: true }))).toBe(true);
+    expect(takesMcpServers(row({}))).toBe(false);
+    expect(takesMcpServers(row({ mcpServers: false }))).toBe(false);
+    expect(takesMcpServers(null)).toBe(false);
+    expect(takesMcpServers(undefined)).toBe(false);
+  });
+
+  it("servers named for an agent whose adapter renders none are refused in that agent's name, and naming none is never refused", () => {
+    const wsp = { wsp: { command: "/usr/local/bin/node", args: ["/opt/wsp/bin.js", "mcp"] } };
+    expect(mcpServersBlocked(wsp, undefined, "Codex")).toBe(noMcpServersLine("Codex"));
+    expect(mcpServersBlocked(wsp, true, "Claude Code")).toBeNull();
+    expect(mcpServersBlocked(undefined, undefined, "Codex")).toBeNull();
+    expect(mcpServersBlocked({}, undefined, "Codex")).toBeNull();
+    expect(noMcpServersLine("Codex")).toContain("Codex");
   });
 
   it("a model without its own lists takes the catalog's; a model with lists narrows them in the catalog's order; the marked default is one option or none", () => {

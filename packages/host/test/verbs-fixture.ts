@@ -3,7 +3,7 @@
 // scripted harness that answers every prompt, one whose turn never ends, and
 // the guest side of the exec stream over the stub backend.
 import { randomUUID } from "node:crypto";
-import type { SessionRenameWrite, TurnResult } from "@wsp/protocol";
+import type { AdapterEvent, SessionRenameWrite, TurnResult } from "@wsp/protocol";
 import { tarOf, type ExecResult } from "@wsp/engine";
 import type { HarnessAdapterFactory, HarnessStartOptions, ProjectBundler } from "@wsp/runtime";
 import type { CliIO } from "../src/cli.js";
@@ -52,6 +52,9 @@ export function scriptedAgent(reply: (prompt: string) => string, names?: (title:
     // Stands in for a harness that reads an image, as both the real ones do; a case about an agent that reads none
     // builds its own adapter.
     attachments: "inline",
+    // Stands in for Claude Code, whose launch takes MCP servers; a start naming them on an adapter without this is
+    // refused by the runtime.
+    mcpServers: true,
     ...(names === undefined
       ? {}
       : {
@@ -231,6 +234,37 @@ export function stuckAgent(): HarnessAdapterFactory {
       return { localId: sessionId, finished: new Promise<TurnResult>(() => {}), interrupt: async () => {} };
     },
   });
+}
+
+/** One adapter event as a case writes it, the session id left to the fixture; distributive, so each arm of the union
+ * keeps its own fields. */
+type WithoutSession<T> = T extends unknown ? Omit<T, "sessionId"> : never;
+
+/** A harness whose turn is the test's to drive: it starts, then says what the case tells it to say and ends when the
+ * case ends it, so a case can read what a client shows while a turn is still running. */
+export function holdingAgent() {
+  const starts: HarnessStartOptions[] = [];
+  let end: (result: TurnResult) => void = () => {};
+  let sessionId = "";
+  let emit: (event: AdapterEvent) => void = () => {};
+  const adapter: HarnessAdapterFactory = () => ({
+    steers: false,
+    mcpServers: true,
+    start: o => {
+      starts.push(o);
+      sessionId = randomUUID();
+      emit = o.onEvent;
+      o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-5" });
+      return { localId: sessionId, finished: new Promise<TurnResult>(r => (end = r)), interrupt: async () => end({ status: "interrupted" }) };
+    },
+  });
+  return {
+    adapter,
+    starts,
+    /** One event from the running turn, its session id filled in. */
+    say: (event: WithoutSession<AdapterEvent>) => emit({ ...event, sessionId } as AdapterEvent),
+    finish: (result: TurnResult) => end(result),
+  };
 }
 
 /** The provider's answer to a command on a paused machine, word for word. */

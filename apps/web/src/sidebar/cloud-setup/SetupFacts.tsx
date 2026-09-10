@@ -11,7 +11,7 @@ import { Card, META, NAME, ROW, ROW_LINE, RowState, Slot } from "./rows.js";
 import { SetupScreen } from "./SetupScreen.js";
 
 export function SetupFacts({ job, refusal }: { job: InitJob | null; refusal: string | null }) {
-  const words = job?.phase === "agent" ? CLOUD_SETUP_WORDS.agent : CLOUD_SETUP_WORDS.reading;
+  const words = CLOUD_SETUP_WORDS.reading;
   const landed = job?.rows ?? [];
   const rows: InitJob["rows"] = landed.length > 0 ? landed : [{ id: "fact/first", kind: "fact", label: CLOUD_SETUP_WORDS.reading.first, state: INIT_ROW_STATES.running }];
   return (

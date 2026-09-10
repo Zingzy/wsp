@@ -4,7 +4,8 @@
 // defines, places the wsp server in a fresh file or beside what the person
 // already has, once, on every run, and carries the editor the machine runs.
 import { describe, expect, it } from "vitest";
-import { CATALOG_AGENTS, CODEX_TOML, MCP_AGENTS, MCP_SERVERS_JSON, OPENCODE_JSON, catalogEntry, type McpFormat, type McpServer, type McpServerSpec } from "../src/index.js";
+import type { McpServerSpec } from "@wsp/protocol";
+import { CATALOG_AGENTS, CODEX_TOML, MCP_AGENTS, MCP_SERVERS_JSON, OPENCODE_JSON, catalogEntry, type McpFormat, type McpServer } from "../src/index.js";
 
 const HOME = "/Users/dev";
 const SERVER: McpServerSpec = { command: "/usr/local/bin/node", args: ["/opt/wsp/bin.js", "mcp", "--state", "/Users/me/.wsp/state.json"] };

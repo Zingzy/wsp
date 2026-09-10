@@ -16,6 +16,8 @@ const STATES = [
   ["choice", "choice"],
   ["keys-empty", "keys"],
   ["keys-typed", "keys", async page => page.locator("[role=dialog] input").fill("slr_live_x9k2m4p7q1w8e5r3t6y0u2i4o6p8a1s3d5f7g9h2j4k6l8")],
+  ["agent", "agent"],
+  ["agent-stopped", "agent-stopped"],
   ["reading-midway", "reading", async page => page.waitForTimeout(2600)],
   ["agents", "agents"],
   ["tools-top", "tools"],

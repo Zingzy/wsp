@@ -150,7 +150,7 @@ export function Slot({ children, className }: { children: ReactNode; className?:
 
 /** A row's picker in its slot, the composer's own control: the current choice with a chevron, the choices as a radio
  * menu. Nothing happens on a pick but the pick; a fixed row's picker is disabled and its state word stands beside it. */
-export function RowPicker({ k, label, value, choices, disabled, onPick, row }: { k: string; label: string; value: string | undefined; choices: readonly { value: string; label: string }[]; disabled?: boolean; onPick: (value: string) => void; row?: string }) {
+export function RowPicker({ k, label, value, choices, disabled, onPick, row }: { k: string; label: string; value: string | undefined; choices: readonly { value: string; label: string; disabled?: boolean; state?: string }[]; disabled?: boolean; onPick: (value: string) => void; row?: string }) {
   const current = choices.find(c => c.value === value) ?? choices[0];
   return (
     <Menu>
@@ -161,8 +161,9 @@ export function RowPicker({ k, label, value, choices, disabled, onPick, row }: {
       <MenuPopup align="end" side="bottom" className="w-56">
         <MenuRadioGroup value={current?.value} onValueChange={next => (typeof next === "string" ? onPick(next) : undefined)}>
           {choices.map(c => (
-            <MenuRadioItem key={c.value} value={c.value} data-k="option" data-value={c.value}>
+            <MenuRadioItem key={c.value} value={c.value} data-k="option" data-value={c.value} disabled={c.disabled === true}>
               {c.label}
+              {c.state !== undefined ? <span className={cn(STATE_WORD, "ml-auto pl-3")}>{c.state}</span> : null}
             </MenuRadioItem>
           ))}
         </MenuRadioGroup>
