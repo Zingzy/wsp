@@ -44,14 +44,15 @@ describe("the title a thread on this computer gets", () => {
   let record: string;
   const runtimes: Runtime[] = [];
 
-  /** Every call the fake binary took, in order: the store it saw and the argv it was handed. */
-  const calls = (): { store: string; argv: string }[] =>
+  /** Every call the fake binary took, in order: the store it saw, whether it was told it is in a sandbox, and the
+   * argv it was handed. */
+  const calls = (): { store: string; sandbox: string; argv: string }[] =>
     readFileSync(record, "utf8")
       .split("\n")
       .filter(line => line !== "")
       .map(line => {
-        const [seen = "", argv = ""] = line.split("|");
-        return { store: seen, argv };
+        const [seen = "", sandbox = "", argv = ""] = line.split("|");
+        return { store: seen, sandbox, argv };
       });
 
   beforeEach(() => {
@@ -66,7 +67,7 @@ describe("the title a thread on this computer gets", () => {
     // for ever. The prompt is small enough that the write into that pipe never blocks either.
     writeFileSync(
       join(bin, "claude"),
-      `#!/bin/sh\nprintf '%s|%s\\n' "$CLAUDE_CONFIG_DIR" "$*" >> ${JSON.stringify(record)}\nprintf '%s' '{"type":"result","is_error":false,"result":"${MADE}"}'\n`,
+      `#!/bin/sh\nprintf '%s|%s|%s\\n' "$CLAUDE_CONFIG_DIR" "$IS_SANDBOX" "$*" >> ${JSON.stringify(record)}\nprintf '%s' '{"type":"result","is_error":false,"result":"${MADE}"}'\n`,
     );
     chmodSync(join(bin, "claude"), 0o755);
   });
@@ -96,5 +97,20 @@ describe("the title a thread on this computer gets", () => {
     expect(asked.argv).not.toContain("--bare");
     // And every call this road made saw that same store, the probe the question's model comes from included.
     expect([...new Set(calls().map(call => call.store))]).toEqual([store]);
+  }, 20_000);
+
+  it("names no store and no sandbox when the person's shell names none, so the binary reads its own default and their Keychain login", async () => {
+    // Claude keys its Keychain item by whether CLAUDE_CONFIG_DIR is set, so setting it to the default folder hides a
+    // claude.ai login (measured on 2.1.257); IS_SANDBOX is a machine's fact and this computer is not one.
+    const wiring = localWiring(home, { HOME: home, PATH: `${bin}:${process.env["PATH"] ?? ""}` });
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: titlingClaude }, local: wiring });
+    runtimes.push(rt);
+    const ws = await rt.workspaces.createLocal("mac");
+    await (await rt.sessions.start(ws.id, { prompt: "read the daemon's reconnect path" })).finished;
+
+    await vi.waitFor(async () => expect((await rt.sessions.list(ws.id))[0]?.harnessTitle).toBe(MADE), { timeout: 10_000 });
+    expect(calls().length).toBeGreaterThan(0);
+    expect([...new Set(calls().map(call => call.store))]).toEqual([""]);
+    expect([...new Set(calls().map(call => call.sandbox))]).toEqual([""]);
   }, 20_000);
 });

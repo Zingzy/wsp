@@ -73,11 +73,13 @@ describe("runtime", () => {
   it("every fork carries HOME, USER and the golden's PATH in its envs, under the workspace's own", async () => {
     const backend = stubBackend();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-    expect(GUEST_LOGIN_ENV).toEqual({ HOME: "/root", USER: "root", PATH: TOOLS_PATH });
+    // IS_SANDBOX is a machine's fact, a cloud fork's here and an ssh machine's in its own test: it is what lets
+    // --dangerously-skip-permissions run as root there, and this computer never carries it.
+    expect(GUEST_LOGIN_ENV).toEqual({ HOME: "/root", USER: "root", PATH: TOOLS_PATH, IS_SANDBOX: "1" });
     await rt.workspaces.create({ golden: "snap_g", name: "plain" });
     await rt.workspaces.create({ golden: "snap_g", name: "own", envs: { FOO: "1", HOME: "/home/dev" } });
     expect(backend.machines[0]!.spec.envs).toEqual(GUEST_LOGIN_ENV);
-    expect(backend.machines[1]!.spec.envs).toEqual({ HOME: "/home/dev", USER: "root", PATH: TOOLS_PATH, FOO: "1" });
+    expect(backend.machines[1]!.spec.envs).toEqual({ HOME: "/home/dev", USER: "root", PATH: TOOLS_PATH, IS_SANDBOX: "1", FOO: "1" });
   });
 
   it("wake after the paused machine vanished resurrects a fresh golden fork", async () => {
@@ -143,13 +145,13 @@ describe("runtime", () => {
     const session = await rt.sessions.start(ws.id, { prompt: "say hi" });
     const result = await session.finished;
     expect(result.status).toBe("completed");
-    // The adapter is handed the machine's login environment: who the guest runs as and the golden's PATH, so a launch served by a bare-PATH exec still finds the binary.
+    // The adapter is handed the machine's login environment: who the guest runs as, the golden's PATH, so a launch served by a bare-PATH exec still finds the binary, and the variable that points this harness at its store on the guest.
     // Every context, not the first alone: a turn is not the only road that asks a harness something on the machine.
     // A turn's own launch carries one thing over that login, the token naming its thread; no other road carries it.
     expect(contexts.length).toBeGreaterThan(0);
     for (const ctx of contexts) {
       const { [TURN_TOKEN_ENV]: token, ...login } = ctx.env;
-      expect(login).toEqual(GUEST_LOGIN_ENV);
+      expect(login).toEqual({ ...GUEST_LOGIN_ENV, CLAUDE_CONFIG_DIR: "/root/.claude-cfg" });
       if (token !== undefined) expect(token).toMatch(/^[0-9a-f]{32}$/);
     }
     expect(contexts.filter(c => c.env[TURN_TOKEN_ENV] !== undefined)).toHaveLength(1);
@@ -237,9 +239,9 @@ describe("runtime session history", () => {
     const starts: string[] = [];
     let finish!: (r: TurnResult) => void;
     const finished = new Promise<TurnResult>(r => (finish = r));
-    const adapter: HarnessAdapterFactory = () => ({
+    const adapter: HarnessAdapterFactory = ctx => ({
       steers: false,
-      probeCatalog: exec => exec(catalogProbeCommand({ configDir: "/root/.claude-cfg" })).then(parseCatalogProbe),
+      probeCatalog: exec => exec(catalogProbeCommand({ baseEnv: ctx.env })).then(parseCatalogProbe),
       start: o => {
         onEvent = o.onEvent;
         lastStart = o;
@@ -658,7 +660,7 @@ describe("runtime session history", () => {
       expect(claude.models[0]).toMatchObject({ label: "Opus 5", isDefault: true, contextWindows: ["200k", "1m"] });
       expect(claude.permissionModes.map(o => o.value)).toEqual(["default", "acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"]);
       expect(probes(backend)).toHaveLength(1);
-      // The probe is the adapter's line, so it runs under the session's isolated config dir, never HOME.
+      // The probe is the adapter's line under the guest's login, so it runs under the guest's config dir, never HOME.
       expect(probes(backend)[0]).toContain("CLAUDE_CONFIG_DIR='/root/.claude-cfg'");
       await rt.close();
     });

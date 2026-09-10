@@ -15,7 +15,7 @@ describe("buildEnv", () => {
   };
 
   it("strips inherited CLAUDE_CODE_*, CLAUDECODE and FORCE_CODE_TERMINAL", () => {
-    const env = buildEnv({ base, configDir: "/root/.claude-cfg" });
+    const env = buildEnv({ base });
     expect(env.CLAUDECODE).toBeUndefined();
     expect(env.CLAUDE_CODE_ENTRYPOINT).toBeUndefined();
     expect(env.CLAUDE_CODE_SSE_PORT).toBeUndefined();
@@ -23,15 +23,22 @@ describe("buildEnv", () => {
     expect(env.PATH).toBe(base.PATH);
   });
 
-  it("sets CLAUDE_CONFIG_DIR and leaves HOME alone", () => {
-    const env = buildEnv({ base, configDir: "/root/.claude-cfg" });
-    expect(env.CLAUDE_CONFIG_DIR).toBe("/root/.claude-cfg");
-    expect(env.HOME).toBe("/Users/z");
+  it("never sets CLAUDE_CONFIG_DIR or IS_SANDBOX of its own: the login environment carries them where they are true", () => {
+    // Claude keys its Keychain item by whether the variable is set, so a person's own Mac must see it unset unless
+    // their shell sets it; a machine's login carries its own, the sandbox flag with it.
+    const own = buildEnv({ base });
+    expect(own.CLAUDE_CONFIG_DIR).toBeUndefined();
+    expect(own.IS_SANDBOX).toBeUndefined();
+    expect(own.HOME).toBe("/Users/z");
+    const theirs = buildEnv({ base: { ...base, CLAUDE_CONFIG_DIR: "/Users/z/elsewhere" } });
+    expect(theirs.CLAUDE_CONFIG_DIR).toBe("/Users/z/elsewhere");
+    const guest = buildEnv({ base: { HOME: "/root", CLAUDE_CONFIG_DIR: "/root/.claude-cfg", IS_SANDBOX: "1" } });
+    expect(guest.CLAUDE_CONFIG_DIR).toBe("/root/.claude-cfg");
+    expect(guest.IS_SANDBOX).toBe("1");
   });
 
-  it("sets the headless flags: IS_SANDBOX plus IDE-discovery suppression", () => {
-    const env = buildEnv({ base, configDir: "/root/.claude-cfg" });
-    expect(env.IS_SANDBOX).toBe("1");
+  it("sets the headless flags: IDE-discovery suppression", () => {
+    const env = buildEnv({ base });
     expect(env.CLAUDE_CODE_AUTO_CONNECT_IDE).toBe("0");
     expect(env.CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL).toBe("1");
     const leaked = Object.keys(env).filter(
@@ -44,13 +51,8 @@ describe("buildEnv", () => {
   });
 
   it("passes the API key through when given", () => {
-    const env = buildEnv({ base: {}, configDir: "/root/.claude-cfg", apiKey: "sk-ant-x" });
+    const env = buildEnv({ base: {}, apiKey: "sk-ant-x" });
     expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-x");
-  });
-
-  it("refuses an empty or relative configDir", () => {
-    expect(() => buildEnv({ base: {}, configDir: "" })).toThrow(/configDir/);
-    expect(() => buildEnv({ base: {}, configDir: ".claude-cfg" })).toThrow(/configDir/);
   });
 });
 

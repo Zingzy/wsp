@@ -65,6 +65,8 @@ export interface ClaudeSession {
 
 export interface AdapterDeps {
   exec: ExecStreamFactory;
+  /** Where this CLI keeps its sessions on the machine, read for transcripts and titles: the folder the login's
+   * CLAUDE_CONFIG_DIR names, else the CLI's own default under its home. Never exported from here; see buildEnv. */
   configDir: string;
   baseEnv?: Readonly<Record<string, string | undefined>>;
   apiKey?: string;
@@ -298,8 +300,9 @@ function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: strin
 }
 
 export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
+  if (!deps.configDir.trim().startsWith("/")) throw new Error(`configDir must be an absolute path, got "${deps.configDir}"`);
   const sessions = new Map<string, ClaudeSession>();
-  const env = buildEnv({ base: deps.baseEnv, configDir: deps.configDir, apiKey: deps.apiKey });
+  const env = buildEnv({ base: deps.baseEnv, apiKey: deps.apiKey });
 
   /** Everything a turn is once its stream exists. The launch and the attach differ only in where the stream came
    * from and in what is already known: an attached turn's CLI announced itself to an earlier host process, so it
@@ -517,13 +520,12 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     steers: true,
     attachments: "inline",
     mcpServers: true,
-    probeCatalog: exec => exec(catalogProbeCommand({ configDir: deps.configDir, baseEnv: deps.baseEnv })).then(parseCatalogProbe),
+    probeCatalog: exec => exec(catalogProbeCommand({ baseEnv: deps.baseEnv })).then(parseCatalogProbe),
     sessionTitle: (sessionId, exec) => exec(sessionTitleCommand({ configDir: deps.configDir, sessionId })).then(parseSessionTitle),
     renameSession: (sessionId, title, exec) => exec(renameCommand({ configDir: deps.configDir, sessionId, title })).then(parseRename),
     titleFor: (turn, exec) =>
       exec(
         titleForCommand({
-          configDir: deps.configDir,
           prompt: titlePrompt(turn.opening, turn.reply),
           ...(turn.model !== undefined ? { model: turn.model } : {}),
           ...(deps.baseEnv !== undefined ? { baseEnv: deps.baseEnv } : {}),
