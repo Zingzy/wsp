@@ -43,9 +43,13 @@ describe("wsp verbs over the host", () => {
   let handle: HostHandle | undefined;
   let claude: ReturnType<typeof scriptedAgent>;
   let codex: ReturnType<typeof scriptedAgent>;
+  /** The environment every verb here runs with: this file's, never the shell that started the run, so a builder with
+   * WSP_TURN exported does not have every start refused. A case that means a turn writes that turn's token into it. */
+  let env: Record<string, string | undefined>;
 
   beforeEach(async () => {
     asked.length = 0;
+    env = {};
     dir = mkdtempSync(join(tmpdir(), "wsp-verbs-"));
     const webDir = join(dir, "web");
     mkdirSync(join(webDir, "assets"), { recursive: true });
@@ -79,7 +83,7 @@ describe("wsp verbs over the host", () => {
     const io = captured();
     const cut = argv.indexOf("--");
     const at = cut === -1 ? argv.length : cut;
-    return { io, ended: cli([...argv.slice(0, at), "--state", statePath, ...argv.slice(at)], io) };
+    return { io, ended: cli([...argv.slice(0, at), "--state", statePath, ...argv.slice(at)], io, undefined, env) };
   }
   async function run(...argv: string[]): Promise<{ code: number; io: Captured }> {
     const { io, ended } = starting(...argv);
@@ -95,7 +99,7 @@ describe("wsp verbs over the host", () => {
       asked.push(q);
       return reply;
     };
-    return { code: await cli([...argv, "--state", statePath], io), io };
+    return { code: await cli([...argv, "--state", statePath], io, undefined, env), io };
   }
   const head = (m: typeof SEALED_GOLDEN) => m.versions.find(v => v.version === m.head)!;
 
@@ -688,7 +692,7 @@ describe("wsp verbs over the host", () => {
     await run("new", "alpha");
     const io = captured();
     io.muted = text => `~${text}~`;
-    expect(await cli(["thread", "new", "--in", "alpha", "look around", "--state", statePath], io)).toBe(0);
+    expect(await cli(["thread", "new", "--in", "alpha", "look around", "--state", statePath], io, undefined, env)).toBe(0);
     expect(io.streamed.split("\n")).toEqual([
       "~$ git status~",
       "~On branch main~",
@@ -1318,7 +1322,7 @@ describe("wsp verbs over the host", () => {
     expect(held.starts).toHaveLength(2);
   });
 
-  it("--notify me run inside a turn names that turn's thread: the command line reads the token off its own environment, and the parent is steered the child's report whole", async () => {
+  it("--notify me run inside a turn names that turn's thread: the command line reads the token off the environment it runs with, and the parent is steered the child's report whole", async () => {
     const held = heldAgent(true);
     await restartHost({ claude: held.adapter });
     await run("new", "alpha");
@@ -1328,7 +1332,7 @@ describe("wsp verbs over the host", () => {
     // The environment the host launched that turn under is the one a wsp inside it would run with.
     const token = held.envs[0]![TURN_TOKEN_ENV]!;
     expect(token).toMatch(/^[0-9a-f]{32}$/);
-    vi.stubEnv(TURN_TOKEN_ENV, token);
+    env[TURN_TOKEN_ENV] = token;
     const kid = run("thread", "new", "--in", "alpha", "--notify", "me", "build it");
     await vi.waitFor(() => expect(held.starts).toHaveLength(2));
     const kidRow = (await rt.sessions.list()).find(r => r.threadId !== parentRow!.threadId)!;
@@ -1345,6 +1349,31 @@ describe("wsp verbs over the host", () => {
     await parent;
   });
 
+  // The one command line that reads the process's own environment is the one a person runs: every case here hands
+  // its environment in, so without this case a refactor could take TURN_TOKEN_ENV away from the real command line and
+  // nothing would say so. It sets the variable it reads, in its own process, which is what the environment law asks.
+  it("cli called with no environment of its own reads this process's, which is what a shell gives it", async () => {
+    const held = heldAgent(true);
+    await restartHost({ claude: held.adapter });
+    await run("new", "alpha");
+    const parent = run("thread", "new", "--in", "alpha", "orchestrate the builders");
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    const [parentRow] = await rt.sessions.list();
+    vi.stubEnv(TURN_TOKEN_ENV, held.envs[0]![TURN_TOKEN_ENV]!);
+    // No fourth argument: the default, which is this process's environment and nothing the case handed in.
+    const io = captured();
+    const kid = cli(["thread", "new", "--in", "alpha", "--notify", "me", "build it", "--state", statePath], io);
+    await vi.waitFor(() => expect(held.starts).toHaveLength(2));
+    const kidRow = (await rt.sessions.list()).find(r => r.threadId !== parentRow!.threadId)!;
+    held.release(1, "all green");
+    const line = `thread ${kidRow.threadId!.slice(0, 8)} finished (completed): all green`;
+    // The token arrived: the runtime resolved NOTIFY_ME to the turn it named and steered that thread.
+    await vi.waitFor(() => expect(held.steered).toEqual([line]));
+    expect(await kid).toBe(0);
+    held.release(0, "read the report");
+    await parent;
+  });
+
   it("--notify repeats: a builder's end reaches the orchestrator that started it and a reviewer thread, each once", async () => {
     const held = heldAgent(true);
     await restartHost({ claude: held.adapter });
@@ -1355,7 +1384,7 @@ describe("wsp verbs over the host", () => {
     await vi.waitFor(() => expect(held.starts).toHaveLength(2));
     const rows = await rt.sessions.list();
     const [leadRow, reviewRow] = rows;
-    vi.stubEnv(TURN_TOKEN_ENV, held.envs[0]![TURN_TOKEN_ENV]!);
+    env[TURN_TOKEN_ENV] = held.envs[0]![TURN_TOKEN_ENV]!;
     const kid = run("thread", "new", "--in", "alpha", "--notify", "me", "--notify", reviewRow!.threadId!.slice(0, 8), "build it");
     await vi.waitFor(() => expect(held.starts).toHaveLength(3));
     const kidRow = (await rt.sessions.list()).find(r => r.threadId !== leadRow!.threadId && r.threadId !== reviewRow!.threadId)!;
@@ -1375,7 +1404,7 @@ describe("wsp verbs over the host", () => {
 
   it("--notify me with no token in the environment is still the person's, so a person's own shell and the app are unchanged", async () => {
     await run("new", "alpha");
-    expect(process.env[TURN_TOKEN_ENV]).toBeUndefined();
+    expect(env[TURN_TOKEN_ENV]).toBeUndefined();
     const { code, io } = await run("thread", "new", "--in", "alpha", "--notify", "me", "build it");
     expect(code).toBe(0);
     const [row] = await rt.sessions.list();
@@ -1386,7 +1415,7 @@ describe("wsp verbs over the host", () => {
 
   it("a token no turn on this host carries is refused, and nothing starts", async () => {
     await run("new", "alpha");
-    vi.stubEnv(TURN_TOKEN_ENV, "f".repeat(32));
+    env[TURN_TOKEN_ENV] = "f".repeat(32);
     const { code, io } = await run("thread", "new", "--in", "alpha", "--notify", "me", "build it");
     expect(code).toBe(EXIT_CODES.provider);
     expect(io.errors).toEqual([`wsp thread new: ${NO_SUCH_TURN}`]);
@@ -2113,7 +2142,7 @@ describe("wsp verbs over the host", () => {
         asked.push(q);
         return reply;
       };
-      return { code: await cli(["import", proj, "--to", "alpha", "--state", statePath], io), io };
+      return { code: await cli(["import", proj, "--to", "alpha", "--state", statePath], io, undefined, env), io };
     };
     const declined = await person("no");
     expect(declined.code).toBe(0);

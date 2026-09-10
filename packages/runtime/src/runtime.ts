@@ -722,6 +722,9 @@ export interface RuntimeOptions {
   /** How long a daemon gets to announce itself when an update reads the version either side of its deploy; the
    * hello lands on connect, so a daemon that is there answers in one round trip (tests shrink it). */
   daemonHelloTimeoutMs?: number;
+  /** The environment labs is read from; this process's when unset, which the entry points mean and a test does not:
+   * a test says the environment it means here rather than inheriting the shell that started it. */
+  env?: Readonly<Record<string, string | undefined>>;
 }
 
 export interface WakeOptions {
@@ -5460,7 +5463,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   // before the other's write and the later write would drop the earlier field.
   let preferenceWrites: Promise<unknown> = Promise.resolve();
   // Read once, here, and stamped on every read: a state file that holds an older labs cannot outvote the environment.
-  const labs = labsFromEnv(process.env);
+  const labs = labsFromEnv(opts.env ?? process.env);
   const preferences: Runtime["preferences"] = {
     get: async () => ({ ...preferencesFrom(await store.get(PREFERENCES, PREFERENCES_ID)), labs }),
     set: patch => {

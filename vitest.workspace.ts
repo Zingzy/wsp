@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { TEST_ENV } from "./vitest.env.js";
 
 // Paths are pinned to this file, not the cwd, so a run started inside one package sees the same tree as a root run.
 const here = (path: string) => fileURLToPath(new URL(path, import.meta.url));
@@ -37,7 +38,7 @@ export default [
       include: ["packages/*/test/**/*.test.ts", "apps/wspx/**/*.test.ts", "apps/desktop/test/**/*.test.ts"],
       environment: "node",
       // Anything a test writes to the OS-local config dir (the install id) lands here, never in the developer's own.
-      env: { XDG_CONFIG_HOME: join(tmpdir(), "wsp-test-config") },
+      env: { XDG_CONFIG_HOME: join(tmpdir(), "wsp-test-config"), ...TEST_ENV },
     },
   },
   here("./apps/web/vite.config.ts"),
