@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, cloudCreateRefusal, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, threadFromHash, workspaceFromHash, workspaceStateOf, type Capabilities, type HarnessCatalog, type InitJob, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, cloudCreateRefusal, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadFromHash, workspaceFromHash, workspaceStateOf, type Capabilities, type HarnessCatalog, type InitJob, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { sidebarWorkspaceOrder } from "../adapt/workspaces.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
@@ -277,11 +277,11 @@ export const useStore = create<State>((set, get) => {
 
   /** Takes the standing toast away when it is a need's and that need is no longer the job's: every road that lands a
    * whole job on the store passes through here, so a toast can never outlive its wait. A toast said anywhere else is
-   * left alone, since only the need's own case sets an action beside one. */
+   * left alone, which its own words are the reading of: another sentence with an action beside it is not a need's. */
   const clearEndedNeed = (need: InitJob["needsYou"]): void => {
     const s = get();
     const line = need === undefined ? null : initNeedsYouLine(need.what);
-    if (s.toastAction !== null && s.toastAction.for === s.toast && s.toast !== line) set({ toast: null, toastAction: null });
+    if (s.toast !== null && isNeedsYouLine(s.toast) && s.toast !== line) set({ toast: null, toastAction: null });
   };
 
   // What bind fetches and a reconnect fetches again: the list plus the status snapshot that also arms status.subscribe.

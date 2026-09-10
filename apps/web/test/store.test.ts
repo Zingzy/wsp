@@ -590,10 +590,18 @@ describe("store sessions", () => {
     emit({ type: "init.job", job: job({ phase: "done" }) });
     expect([useStore.getState().toast, useStore.getState().toastAction]).toEqual([null, null]);
 
-    // A toast from anywhere else has no action beside it, so a job view is not allowed to clear it.
+    // A toast from anywhere else is not a need's, so a job view is not allowed to clear it.
     useStore.setState({ toast: "runtime unreachable" });
     emit({ type: "init.job", job: job({ needsYou: need }) });
     expect(useStore.getState().toast).toBe("runtime unreachable");
+
+    // Nor one that carries an action of its own: the version line offers the releases page and outlives any build.
+    const version = "this app is 0.1.3, the host is 0.1.5: get the new app";
+    useStore.setState({ toast: version, toastAction: { for: version, word: "Get", run: () => {} } });
+    emit({ type: "init.job", job: job({ needsYou: need }) });
+    emit({ type: "init.job", job: job({ phase: "done" }) });
+    expect(useStore.getState().toast).toBe(version);
+    expect(useStore.getState().toastAction?.word).toBe("Get");
   });
 
   it("workspace.deleted drops the workspace's rows", async () => {

@@ -6,6 +6,10 @@
 
 export const REPO = "https://github.com/Zingzy/wsp";
 
+/** Where every release and its downloads are listed, which is where anything that has no one asset to point at
+ * sends a person: the site's footer, and the app's line about a shell older than the host serving it. */
+export const RELEASES = `${REPO}/releases`;
+
 /** What each download on the release page is called for one version, which is the name the notes print. */
 export function bundleNames(version) {
   return { mac: `wsp-${version}-mac.dmg`, appImage: `wsp-${version}.AppImage` };

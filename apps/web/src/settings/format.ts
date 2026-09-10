@@ -13,7 +13,17 @@ export const SETTINGS_WORDS = {
   reset: "Reset",
   terminal: "Terminal",
   textSize: "Text size",
+  about: "About",
+  version: "Version",
 } as const;
+
+/** Both halves on the about row: the shell holding the page and the host that served it, which are one release run
+ * together and two run apart. A browser tab has no shell of its own, so it shows the host's alone; a shell from
+ * before the bridge carried a version has one this page cannot name. */
+export function versionFact(app: string | undefined, host: string | undefined, inShell: boolean): string {
+  const hostPart = `host ${host ?? "unknown"}`;
+  return inShell ? `app ${app ?? "unknown"} · ${hostPart}` : hostPart;
+}
 
 /** Each theme as its segment names it. */
 export const THEME_WORDS: Record<ThemePreference, string> = { system: "System", light: "Light", dark: "Dark" };

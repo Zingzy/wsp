@@ -5,6 +5,7 @@
 // rule are the exception list in the protocol format test, each with its reason.
 import type { GoldenMissingTool, GoldenStage, HarnessCatalog, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, SessionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
+import { compareVersions } from "./semver.mjs";
 import { shellLine } from "./shell-quote.js";
 import type { ThreadMessage } from "./thread-read.js";
 const KIB = 1024;
@@ -1391,6 +1392,9 @@ export const NEEDS_YOU = "wsp needs you";
 /** The one line the toast and a system notification say for a need. */
 export const initNeedsYouLine = (what: string): string => `${NEEDS_YOU}: ${what}`;
 
+/** Whether a sentence standing in the toast is a need's, so a need ending takes its own line away and no other. */
+export const isNeedsYouLine = (line: string): boolean => line.startsWith(`${NEEDS_YOU}: `);
+
 /** What a window or tab title leads with while a need stands, so a person reading only the title sees it. */
 export const NEEDS_YOU_MARK = "• ";
 
@@ -2120,6 +2124,30 @@ export interface ThemeVars {
 /** A share as a whole percent: 0.5 reads 50%. */
 export function fmtPercent(share: number): string {
   return `${Math.round(share * 100)}%`;
+}
+
+/** What the app says about a desktop shell and the host that served it its page being of two releases. */
+export interface ShellVersionNotice {
+  /** The one line the app shows. */
+  line: string;
+  /** True while the person is being pointed at a newer app; the line asks for the app's own host instead when the
+   * shell is the newer half, since there is nothing to download for that. */
+  update: boolean;
+}
+
+/** The word on the notice's one button, which opens the releases page away from the app's window. */
+export const GET_THE_APP_WORD = "Get";
+
+/** The line for a desktop shell whose page came from a host of another release, and nothing while the two agree.
+ * The halves ship together and every call over the bridge needs both, so the older one is named with what to do
+ * about it. A shell whose bridge carries no version at all is one from before the bridge carried one, which is
+ * older than any host that reads this. */
+export function shellVersionNotice(shell: string | undefined, host: string): ShellVersionNotice | undefined {
+  if (shell === undefined) return { line: `this app is older than the host, which is ${host}: get the new app`, update: true };
+  const order = compareVersions(shell, host);
+  if (order === 0) return undefined;
+  const both = `this app is ${shell}, the host is ${host}`;
+  return order < 0 ? { line: `${both}: get the new app`, update: true } : { line: `${both}: run the app's own host`, update: false };
 }
 
 /** A colour as CSS spells it, with its alpha as a percent where one is given. */

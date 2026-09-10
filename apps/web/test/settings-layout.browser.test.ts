@@ -4,8 +4,9 @@
 // hairline-separated row per pick with its label at the left and its control
 // at the right edge, the picks as segmented controls with no sentence under
 // any of them, the sidebar width as a mono number field with a stepper, the
-// resolved text size in mono beside its pick, the page never scrolling
-// sideways, and the theme pick moving the page's theme at once, with no
+// resolved text size in mono beside its pick, the about row standing as tall
+// as a row with a control, the page never scrolling sideways, and the theme
+// pick moving the page's theme at once, with no
 // reload, the sidebar and the centre following. Photographed in each theme
 // and after the switch. Runs only when asked for (WSP_RENDER=1) and skips
 // without Playwright's Chromium.
@@ -56,7 +57,7 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
     await open(theme);
     expect(await page!.locator("[data-thread-breadcrumb]").textContent()).toBe("Settings");
     const zones = await page!.locator("[data-settings-page] h2").evaluateAll(els => els.map(el => ({ transform: getComputedStyle(el).textTransform, font: getComputedStyle(el).fontFamily, text: el.textContent })));
-    expect(zones.map(z => z.text)).toEqual(["Appearance", "Terminal"]);
+    expect(zones.map(z => z.text)).toEqual(["Appearance", "Terminal", "About"]);
     for (const z of zones) {
       expect(z.transform).toBe("uppercase");
       expect(z.font.toLowerCase()).toMatch(/mono/);
@@ -82,7 +83,7 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
       }),
     );
     console.info(`settings rows ${theme}: ${JSON.stringify(rows)}`);
-    expect(rows.map(r => r.label)).toEqual(["Theme", "Sidebar", "Sidebar width", "Text size"]);
+    expect(rows.map(r => r.label)).toEqual(["Theme", "Sidebar", "Sidebar width", "Text size", "Version"]);
     expect(new Set(rows.map(r => r.x)).size).toBe(1);
     expect(new Set(rows.map(r => r.width)).size).toBe(1);
     expect(rows[0]!.width).toBeLessThanOrEqual(576);
@@ -103,8 +104,9 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
     for (const seg of segments) expect(seg.background === "rgba(0, 0, 0, 0)").toBe(seg.checked === "false");
     expect(new Set(segments.filter(s => s.checked === "true").map(s => s.color)).size).toBe(1);
     // The width and the resolved size read in mono; the reset is offered since the record names a width.
-    const mono = await page!.locator("[data-k=sidebar-width], [data-k=terminal-size]").evaluateAll(els => els.map(el => ({ font: getComputedStyle(el).fontFamily, value: (el as HTMLInputElement).value ?? el.textContent })));
-    expect(mono.map(m => m.value)).toEqual(["312", "14 px"]);
+    const mono = await page!.locator("[data-k=sidebar-width], [data-k=terminal-size], [data-k=version]").evaluateAll(els => els.map(el => ({ font: getComputedStyle(el).fontFamily, value: (el as HTMLInputElement).value ?? el.textContent })));
+    // The about row says what this page can know: a dev page was served by no host and is held by no shell.
+    expect(mono.map(m => m.value)).toEqual(["312", "14 px", "host unknown"]);
     for (const m of mono) expect(m.font.toLowerCase()).toMatch(/mono/);
     expect(await page!.getByRole("button", { name: "Reset" }).count()).toBe(1);
     // Nothing scrolls sideways.

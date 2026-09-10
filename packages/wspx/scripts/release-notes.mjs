@@ -6,6 +6,9 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+// The version order lives with the app that also reads it; this job runs before any install, so the file is
+// imported where it sits rather than through the package it belongs to.
+import { compareVersions } from "../../protocol/src/semver.mjs";
 import { bundleNames } from "./bundles.mjs";
 import { isReleaseTag, versionFromTag } from "./tag-version.mjs";
 
@@ -16,22 +19,6 @@ const UNSIGNED = /<!-- unsigned:start -->\n([\s\S]*?)<!-- unsigned:end -->\n?/;
 const RENUMBER = /^chore: v\d/;
 // The name on npm has one home, the manifest of the package that is published under it.
 const PACKAGE = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).name;
-
-/** Semver order: 0.1.10 is above 0.1.9, and a release is above its own prereleases. */
-export function compareVersions(a, b) {
-  const split = version => {
-    const [core, pre] = version.split("-");
-    return { core: core.split(".").map(Number), pre };
-  };
-  const [left, right] = [split(a), split(b)];
-  for (let i = 0; i < 3; i++) {
-    if (left.core[i] !== right.core[i]) return left.core[i] - right.core[i];
-  }
-  if (left.pre === right.pre) return 0;
-  if (left.pre === undefined) return 1;
-  if (right.pre === undefined) return -1;
-  return left.pre < right.pre ? -1 : 1;
-}
 
 /** The release tag below this one, which is where the change list starts. */
 export function previousTag(tags, tag) {

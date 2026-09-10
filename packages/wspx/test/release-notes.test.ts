@@ -2,8 +2,9 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { compareVersions } from "../../protocol/src/semver.mjs";
 import { bundleNames } from "../scripts/bundles.mjs";
-import { bundleNote, changeLines, cliArgs, compareVersions, previousTag, releaseNotes } from "../scripts/release-notes.mjs";
+import { bundleNote, changeLines, cliArgs, previousTag, releaseNotes } from "../scripts/release-notes.mjs";
 
 const readme = readFileSync(fileURLToPath(new URL("../../../README.md", import.meta.url)), "utf8");
 const published = JSON.parse(readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8")).name as string;
@@ -19,6 +20,26 @@ const FAKE_LOG = [
 function notes(signed = false): string {
   return releaseNotes({ version: "0.1.4", previous: "v0.1.3", changes: changeLines(FAKE_LOG), bundles: bundleNote(readme, signed) });
 }
+
+describe("what the draft job can load", () => {
+  // The release workflow writes the notes on a bare checkout: node and the repo, no pnpm install and no build. So
+  // every file that job reaches has to resolve on its own, which is why the version order lives in a plain module
+  // rather than behind the protocol's package name. A bare specifier here fails the release, not the suite.
+  const GRAPH = ["../scripts/release-notes.mjs", "../scripts/bundles.mjs", "../scripts/tag-version.mjs", "../scripts/release.mjs", "../../protocol/src/semver.mjs"];
+  const IMPORTS = /(?:^|\n)\s*(?:import|export)[^\n]*?from\s+"([^"]+)"/g;
+
+  it("is node and the repo: nothing the draft job reaches imports a package that an install would have to put there", () => {
+    for (const file of GRAPH) {
+      const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), "utf8");
+      // A match with no group is a regex that stopped matching what it was written for, and reads here as a
+      // specifier that is neither node's nor the repo's, which fails rather than passing quietly.
+      for (const match of source.matchAll(IMPORTS)) {
+        const specifier = match[1] ?? "";
+        expect(specifier.startsWith("node:") || specifier.startsWith("."), `${file} imports ${specifier}`).toBe(true);
+      }
+    }
+  });
+});
 
 describe("the tag a change list starts from", () => {
   it("is the highest release tag below this one", () => {
@@ -36,11 +57,15 @@ describe("the tag a change list starts from", () => {
     expect(previousTag(["v0.2.0"], "v0.1.3")).toBeUndefined();
   });
 
-  it("puts a release above its own prereleases", () => {
+  it("puts a release above its own prereleases, on the one order the app reads too", () => {
     expect(compareVersions("1.0.0", "1.0.0-rc.1")).toBeGreaterThan(0);
     expect(compareVersions("0.1.9", "0.1.10")).toBeLessThan(0);
     expect(compareVersions("0.1.3", "0.1.3")).toBe(0);
     expect(previousTag(["v1.0.0-rc.1", "v0.9.0"], "v1.0.0")).toBe("v1.0.0-rc.1");
+    // Two prereleases of one core sort apart, whichever way they are spelled, so the tag below a tag is never a coin toss.
+    expect(previousTag(["v1.0.0-alpha", "v1.0.0-beta"], "v1.0.0")).toBe("v1.0.0-beta");
+    expect(previousTag(["v1.0.0-rc1", "v1.0.0-rc2"], "v1.0.0")).toBe("v1.0.0-rc2");
+    expect(previousTag(["v1.0.0-rc.2", "v1.0.0-rc.10"], "v1.0.0")).toBe("v1.0.0-rc.10");
   });
 });
 

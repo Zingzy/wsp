@@ -1298,6 +1298,25 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 30_000);
 
+  it("a shell older than the host that served the page says so in the footer's one sentence, with the releases page behind its button, in both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&version=behind`);
+      const status = page!.locator("[data-slot=sidebar-footer] [role=status]").first();
+      await status.waitFor();
+      expect(await status.textContent()).toContain("this app is 0.1.3, the host is 0.1.5: get the new app");
+      // One line in the footer's own box, its button beside it, nothing wider than the sidebar and no colour of its own.
+      const sidebar = await box("[data-slot=sidebar]");
+      const b = await box("[data-slot=sidebar-footer] [role=status]");
+      expect(b.x).toBeGreaterThanOrEqual(sidebar.x);
+      expect(b.x + b.width).toBeLessThanOrEqual(sidebar.x + sidebar.width);
+      expect(await status.evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0);
+      expect(await page!.locator("[data-toast-action]").textContent()).toBe("Get");
+      const path = join(SHOTS_DIR, `sidebar-version-behind-${theme}.png`);
+      await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
+      console.info(`sidebar version screenshot: ${path}`);
+    }
+  }, 30_000);
+
   it("Solari out of reach is one muted mono line under the search row, above Workspaces, with no box, badge or colour of its own, and the rows keep their words, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await page!.goto(`${base}?theme=${theme}&offline=1`);

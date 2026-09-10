@@ -25,13 +25,20 @@ export interface Located {
   stalePointer?: string;
 }
 
-export interface LocateOptions {
-  port: number;
-  /** WSP_HOME as launched; a Finder launch has none. */
+/** How this app was launched, as everything that decides where its state file sits reads it. */
+export interface Launch {
+  /** app.isPackaged. A packaged app inherits whatever folder the person launched it from, so a .env sitting there
+   * says nothing about it; only a development run out of the checkout means the checkout's state. */
+  packaged: boolean;
+  /** WSP_HOME as launched; a Finder launch has none. It names the home outright, over any launch folder. */
   env?: string;
+  cwd: string;
+}
+
+export interface LocateOptions extends Launch {
+  port: number;
   /** What ~/.wsp/current-home says, when it exists. */
   pointer?: string;
-  cwd: string;
 }
 
 export interface OpenHostOptions {
@@ -73,9 +80,15 @@ function attached(port: number): HostSession {
   return { url: `http://127.0.0.1:${port}`, port, owned: false, close: async () => {} };
 }
 
-// Same rule as the bin: a .env in cwd marks a dev checkout whose .wsp state is shared with wspx.
-export function statePathIn(home: string, cwd: string): string {
-  if (existsSync(join(cwd, ".env"))) return join(cwd, ".wsp", "state.json");
+/** The home WSP_HOME names, or nothing: unset and empty are one answer, and every road that reads the variable
+ * reads it here. */
+const homeNamed = (env: string | undefined): string | undefined => (env !== undefined && env !== "" ? env : undefined);
+
+/** Same rule as the bin: a .env in cwd marks a dev checkout whose .wsp state is shared with wspx. It holds for a
+ * development run and nothing else, since a packaged app is launched from a folder it did not choose, and WSP_HOME
+ * names the home over it in every case, which is what the locate doc says. */
+export function statePathIn(home: string, launch: Launch): string {
+  if (!launch.packaged && homeNamed(launch.env) === undefined && existsSync(join(launch.cwd, ".env"))) return join(launch.cwd, ".wsp", "state.json");
   return join(home, "state.json");
 }
 
@@ -90,16 +103,16 @@ async function lockedHost(statePath: string): Promise<HostSession | undefined> {
  * then ~/.wsp's own lock, then the port. A pointer to a dead host is reported,
  * not followed: its home may be gone, and the truth of setup left with the host. */
 export async function locateHost(opts: LocateOptions): Promise<Located> {
-  const env = opts.env !== undefined && opts.env !== "" ? opts.env : undefined;
+  const env = homeNamed(opts.env);
   const home = env !== undefined ? resolve(env) : join(homedir(), ".wsp");
   let stalePointer: string | undefined;
   if (env === undefined && opts.pointer !== undefined) {
-    const pointed = await lockedHost(statePathIn(opts.pointer, opts.cwd));
+    const pointed = await lockedHost(statePathIn(opts.pointer, opts));
     if (pointed !== undefined) return { home: opts.pointer, session: pointed };
     stalePointer = opts.pointer;
   }
   const session =
-    (await lockedHost(statePathIn(home, opts.cwd))) ??
+    (await lockedHost(statePathIn(home, opts))) ??
     (opts.port !== 0 && (await probeHost(opts.port)) === "wsp" ? attached(opts.port) : undefined);
   return { home, ...(session !== undefined ? { session } : {}), ...(stalePointer !== undefined ? { stalePointer } : {}) };
 }
