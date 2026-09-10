@@ -32,6 +32,15 @@ describe("catalogFromHarness", () => {
     expect(catalog.slashCommands.map(c => c.name)).toEqual(["compact", "context", "cost", "init", "review"]);
   });
 
+  it("keeps the commands that work only in the CLI's own terminal out of the menu, and offers every other one the CLI announced", () => {
+    const screen = [{ name: "login", control: "sign-in" as const }, { name: "model", control: "model" as const }];
+    const announced = { slashCommands: ["compact", "login", "review", "model", "my-skill"] };
+    expect(catalogFromHarness({ id: "claude", harness: announced, screen }).slashCommands.map(c => c.name)).toEqual(["compact", "review", "my-skill"]);
+    // Without a table every announced command is offered: a catalog from before the field names no screen command.
+    expect(catalogFromHarness({ id: "claude", harness: announced, screen: [] }).slashCommands.map(c => c.name)).toEqual(announced.slashCommands);
+    expect(catalogFromHarness({ id: "claude", harness: announced }).slashCommands.map(c => c.name)).toEqual(announced.slashCommands);
+  });
+
   it("falls back to the harness's registered seed when the CLI named no commands, and to nothing for a harness with no module", () => {
     const seed = harnessClient("claude")!.slashCommands;
     expect(catalogFromHarness({ id: "claude", harness: null })).toEqual({ harness: "claude", slashCommands: seed });

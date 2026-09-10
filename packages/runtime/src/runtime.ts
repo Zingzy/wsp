@@ -125,6 +125,7 @@ import type {
   Preferences,
   PreferencesPatch,
   RecipeDigest,
+  ScreenCommand,
   TerminalConfig,
   TerminalScheme,
   PortProbeView,
@@ -271,6 +272,9 @@ export interface HarnessAdapter {
    * not, and a start naming servers is refused in this agent's name before the machine is asked for anything: a
    * launch that dropped them would open a thread whose tools are missing and whose agent looks like it ignored them. */
   readonly mcpServers?: true;
+  /** The commands this CLI runs only in its own terminal, which a headless turn answers are not available; the catalog
+   * carries them so the composer lists none and sends nothing for one. Absent means none. */
+  readonly screenCommands?: ReadonlyArray<ScreenCommand>;
   /** Asks the binary on the workspace's machine what it takes: its lists, its own words for why it has none, or null
    * when it does not answer at all; absent, the table alone answers and nothing runs. */
   probeCatalog?(exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer>;
@@ -3471,7 +3475,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // after the machine it would touch; a throwaway fork runs bypass. The one place either list is decided, so the
     // composer's picker and the start's own check cannot show different defaults.
     const forMachine = (c: HarnessCatalog): HarnessCatalog => (backendFor(entry.record.kind).capabilities.kept ? keptAccess(c, THIS_COMPUTER) : c);
-    const known: HarnessCatalog = { ...table, steers: adapter.steers, renames: adapter.renameSession !== undefined, images: adapter.attachments !== undefined, ...(adapter.mcpServers === true ? { mcpServers: true } : {}) };
+    const known: HarnessCatalog = {
+      ...table,
+      steers: adapter.steers,
+      renames: adapter.renameSession !== undefined,
+      images: adapter.attachments !== undefined,
+      ...(adapter.mcpServers === true ? { mcpServers: true } : {}),
+      ...(adapter.screenCommands !== undefined ? { screenCommands: [...adapter.screenCommands] } : {}),
+    };
     if (adapter.probeCatalog === undefined) return Promise.resolve(forMachine(known));
     const key = `${machine.id}:${table.harness}`;
     const hit = catalogs.get(key);

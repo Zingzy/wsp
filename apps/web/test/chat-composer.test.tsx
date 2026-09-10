@@ -4,7 +4,7 @@
 // shape as chat.test.tsx; no live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { sendRefusal, stillWorkingLine, type EventUnion, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { screenCommandLine, sendRefusal, stillWorkingLine, type EventUnion, type HarnessCatalog, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
@@ -14,7 +14,7 @@ import { composerSendBlock } from "../src/components/chat/ChatComposer.js";
 import { SEND_LABEL, WAKE_AND_SEND_LABEL } from "../src/components/chat/ComposerPrimaryActions.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { requestComposerFocus, requestNewThread } from "../src/shell/shellRequests.js";
-import { CHAT_STREAM, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
+import { CHAT_HARNESS, CHAT_STREAM, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
 
 let restoreLayout: () => void = () => {};
 beforeAll(() => { restoreLayout = installFakeLayout(); });
@@ -32,6 +32,18 @@ const workspace: WorkspaceView = {
   createdAt: "2026-09-01T00:00:00Z",
   claudeSessionId: "e16ed170-8257-4668-879e-fe836341633c",
 };
+
+/** The runtime's row for the composer's harness, as the table serves it before a machine answers: the commands that
+ * work only in the CLI's own terminal ride it, so the menu and the send read them before any session ran. */
+const SCREEN_COMMANDS = [
+  { name: "login", control: "sign-in" as const },
+  { name: "logout", control: "sign-in" as const },
+  { name: "model", control: "model" as const },
+  { name: "permissions", control: "access" as const },
+  { name: "config", control: "settings" as const },
+  { name: "help", control: "docs" as const },
+];
+const CLAUDE_CATALOG: HarnessCatalog = { harness: "claude", label: "Claude Code", source: "table", version: null, models: [], efforts: [], contextWindows: [], permissionModes: [], steers: false, renames: false, images: false, screenCommands: SCREEN_COMMANDS };
 
 function fixtureApi(workspaces: WorkspaceView[], history: Record<string, SessionEvent[]> = {}, statuses: WorkspaceStatus[] = []) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
@@ -53,6 +65,7 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
     upgrade: async id => workspaces.find(w => w.id === id)!,
     capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, kept: false, sizes: [] }),
     listSessions: async () => [],
+    listHarnesses: async () => [CLAUDE_CATALOG],
     watchStatuses: async () => statuses,
     createFromGoldenHead: async () => workspaces[0]!,
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
@@ -174,18 +187,36 @@ describe("composer keys", () => {
   });
 });
 
+/** The session's announcement with the CLI's screen-only commands in it, as a real init lists them beside the ones that run. */
+const SCREEN_NAMES = SCREEN_COMMANDS.map(c => c.name);
+const ANNOUNCED = [...CHAT_HARNESS.slashCommands, ...SCREEN_NAMES, "my-skill"];
+const STREAM_WITH_SCREENS: SessionEvent[] = CHAT_STREAM.map(e => (e.type === "session.start" ? { ...e, harness: { ...CHAT_HARNESS, slashCommands: ANNOUNCED } } : e));
+const listed = () => [...document.querySelectorAll("[data-composer-item-id]")].map(el => el.getAttribute("data-composer-item-id")?.split(":").pop());
+
 describe("composer slash menu", () => {
-  it("opens at prompt start with the static catalog before any session, and inserts the pick", async () => {
+  it("opens at prompt start before any session with the harness's seed, which offers nothing a headless turn cannot run", async () => {
     const { api } = fixtureApi([workspace]);
     await setup(api);
     const editor = composerEditor();
     await typeInto(editor, "/");
-    await waitFor(() => expect(menuItem("model")).not.toBeNull());
-    expect(screen.getByText("Show or change the model for this session")).toBeDefined();
-    await press(editor, "Enter");
-    await waitFor(() => expect(draft()).toBe("/model "));
+    await waitFor(() => expect(menuDrawer()).not.toBeNull());
+    expect(listed()).toEqual([]);
     expect(menuItem("model")).toBeNull();
-    expect(editor.textContent).toBe("/model ");
+  });
+
+  it("offers what the session announced less the commands that work only in the CLI's own terminal, and every custom one", async () => {
+    const { api } = fixtureApi([workspace], { [WS]: STREAM_WITH_SCREENS });
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    const editor = composerEditor();
+    await typeInto(editor, "/");
+    await waitFor(() => expect(menuItem("compact")).not.toBeNull());
+    expect(listed()).toEqual([...CHAT_HARNESS.slashCommands, "my-skill"]);
+    for (const name of SCREEN_NAMES) expect(menuItem(name), name).toBeNull();
+    // Searching for one finds nothing rather than the screen command.
+    await typeInto(editor, "log");
+    await waitFor(() => expect(listed()).toEqual([]));
+    expect(screen.getByText("No matching command.")).toBeDefined();
   });
 
   it("lists the commands the session announced, filters as you type, arrows move the highlight, tab picks", async () => {
@@ -201,7 +232,6 @@ describe("composer slash menu", () => {
     // The shortest prefix match ranks first, so "co" puts cost ahead of compact and context.
     await typeInto(editor, "co");
     await waitFor(() => expect(menuItem("init")).toBeNull());
-    const listed = () => [...document.querySelectorAll("[data-composer-item-id]")].map(el => el.getAttribute("data-composer-item-id")?.split(":").pop());
     expect(listed()).toEqual(["cost", "compact", "context"]);
     expect(menuItem("cost")?.className).toContain("bg-accent!");
     await press(editor, "ArrowDown");
@@ -214,6 +244,74 @@ describe("composer slash menu", () => {
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
     expect(started[0]?.prompt).toBe("/compact");
+  });
+
+  it("typing a screen command and Enter sends nothing: the draft stays and the line names wsp's own road for it", async () => {
+    const { api, started } = fixtureApi([workspace], { [WS]: STREAM_WITH_SCREENS });
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    const editor = composerEditor();
+    await typeInto(editor, "/login");
+    await press(editor, "Enter");
+    await waitFor(() => expect(screen.queryByRole("status")).not.toBeNull());
+    expectPlainLine(screenCommandLine(SCREEN_COMMANDS[0]!, CLAUDE_CATALOG, workspace));
+    expect(screen.getByRole("status").textContent).toContain("Machine tab");
+    expect(started).toHaveLength(0);
+    expect(draft()).toBe("/login");
+    expect(isEditable(editor)).toBe(true);
+    // The pickers' commands name the row under the box; a command with words after it is still the command.
+    await typeInto(editor, " opus");
+    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+    expect(draft()).toBe("/login opus");
+    await press(editor, "Enter");
+    await waitFor(() => expect(screen.queryByRole("status")).not.toBeNull());
+    expect(started).toHaveLength(0);
+  });
+
+  it("a block on the send outranks the screen command's line, and the line is back once the block lifts", async () => {
+    const { api, started } = fixtureApi([workspace], { [WS]: STREAM_WITH_SCREENS });
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    const editor = composerEditor();
+    await typeInto(editor, "/login");
+    await press(editor, "Enter");
+    const line = screenCommandLine(SCREEN_COMMANDS[0]!, CLAUDE_CATALOG, workspace);
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(line));
+    // The socket drops with the draft still in the box: the box is disabled and the slot says so, not the command.
+    act(() => useStore.getState().setConn("reconnecting"));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(sendRefusal("reconnecting")));
+    expect(isEditable(editor)).toBe(false);
+    act(() => useStore.getState().setConn("live"));
+    await waitFor(() => expect(isEditable(editor)).toBe(true));
+    // The draft still reads /login, so the line that explains it is still true.
+    expect(screen.getByRole("status").textContent).toBe(line);
+    expect(draft()).toBe("/login");
+    expect(started).toHaveLength(0);
+  });
+
+  it("the line for a sign-in command on this computer names the person's own terminal, not the Machine tab", async () => {
+    const local: WorkspaceView = { ...workspace, kind: "local" };
+    const { api, started } = fixtureApi([local]);
+    await setup(api);
+    const editor = composerEditor();
+    await typeInto(editor, "/logout");
+    await press(editor, "Enter");
+    await waitFor(() => expect(screen.queryByRole("status")).not.toBeNull());
+    expectPlainLine(screenCommandLine(SCREEN_COMMANDS[1]!, CLAUDE_CATALOG, local));
+    expect(screen.getByRole("status").textContent).toContain("this computer");
+    expect(started).toHaveLength(0);
+  });
+
+  it("a slash command the agent never announced still goes as text, since the words may be meant", async () => {
+    const { api, started } = fixtureApi([workspace], { [WS]: STREAM_WITH_SCREENS });
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    const editor = composerEditor();
+    await typeInto(editor, "/frobnicate now");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]?.prompt).toBe("/frobnicate now");
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("stays closed for a slash after the prompt start", async () => {
@@ -231,16 +329,17 @@ describe("composer slash menu", () => {
   });
 
   it("escape dismisses the menu, keeps the draft, and the menu returns when the query changes", async () => {
-    const { api } = fixtureApi([workspace]);
+    const { api } = fixtureApi([workspace], { [WS]: CHAT_STREAM.slice() });
     await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
     const editor = composerEditor();
     await typeInto(editor, "/");
-    await waitFor(() => expect(menuItem("model")).not.toBeNull());
+    await waitFor(() => expect(menuItem("compact")).not.toBeNull());
     await press(editor, "Escape");
     await waitFor(() => expect(menuDrawer()).toBeNull());
     expect(draft()).toBe("/");
-    await typeInto(editor, "m");
-    await waitFor(() => expect(menuItem("model")).not.toBeNull());
+    await typeInto(editor, "c");
+    await waitFor(() => expect(menuItem("compact")).not.toBeNull());
   });
 });
 

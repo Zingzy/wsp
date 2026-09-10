@@ -4,9 +4,9 @@
 // recorded in solari-poc/RESULTS.md.
 
 import { PERMISSION_DENY, RUN_EXIT_MS, backgroundTasksLine, endAfterResult, endRun, fmtDuration, harnessExitLine, titlePrompt } from "@wsp/protocol";
-import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnResult, TurnStatus } from "@wsp/protocol";
+import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnResult, TurnStatus } from "@wsp/protocol";
 import { controlAnswerLine, controlErrorLine, controlLine, setModeLine } from "./permissions.js";
-import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
+import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv, newSessionId, userMessageLine } from "./landmines.js";
 import { shellCwdAfter } from "./shell-cwd.js";
@@ -89,6 +89,8 @@ export interface ClaudeAdapter {
   readonly attachments: "inline";
   /** The CLI takes MCP servers on the launch itself (--mcp-config), so a turn gets one whatever the config dir holds. */
   readonly mcpServers: true;
+  /** The commands the CLI runs only in its own terminal; the composer keeps them out of its menu and sends none. */
+  readonly screenCommands: ReadonlyArray<ScreenCommand>;
   /** Makes the binary describe itself under the same config dir as a session; null when it did not answer. The
    * handshake carries no reason of its own, so this probe has no refusal to hand the footer. */
   probeCatalog(exec: (command: string) => Promise<string>): Promise<HarnessCatalogProbe | null>;
@@ -520,6 +522,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     steers: true,
     attachments: "inline",
     mcpServers: true,
+    screenCommands: CLAUDE_SCREEN_COMMANDS,
     probeCatalog: exec => exec(catalogProbeCommand({ baseEnv: deps.baseEnv })).then(parseCatalogProbe),
     sessionTitle: (sessionId, exec) => exec(sessionTitleCommand({ configDir: deps.configDir, sessionId })).then(parseSessionTitle),
     renameSession: (sessionId, title, exec) => exec(renameCommand({ configDir: deps.configDir, sessionId, title })).then(parseRename),
