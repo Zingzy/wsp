@@ -19,7 +19,6 @@ export function SetupAgent({ job, onOpenThread, onRetry, onAgain, refusal }: { j
   return (
     <SetupScreen
       k="agent"
-      label={words.label}
       headline={over ? words.failed : words.headline}
       top={over ? (job.error ?? words.stopped) : words.top}
       refusal={refusal}
