@@ -731,6 +731,7 @@ async function init(
   flags: { yes: boolean; nonInteractive: boolean; json: boolean; noLocal: boolean; recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string; upCommand: string; forkCommand: string },
 ): Promise<number> {
   if (flags.json && flags.yes) throw usageRefusal("wsp init: --json prints the sign-ins as they are handed to you, and --yes skips the sign-ins, so there would be nothing to print. Drop one of them.");
+  await adoptLoginPath(line => io.log(line));
   const held = servingHost(opts.statePath);
   if (held !== undefined) throw Object.assign(new Error(initRefusal(held, opts.statePath)), { kind: "conflict" });
   const flag = projectFlag("init", flags.project);
@@ -831,6 +832,7 @@ export interface ServeOptions {
  * wrote, so a computer with no provider key serves the machines it does have rather than being asked for one by a
  * window that can ask nothing. */
 export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
+  await adoptLoginPath(line => io.log(line));
   const keys = await loadKeys(io, undefined, { anthropic: false, noSolari: "local" });
   const rt = opts.runtime ?? makeRuntime(keys, opts.statePath);
   return hostFor(rt, keys, opts, io, opts.running);
@@ -844,6 +846,7 @@ export async function servesNothing(rt: Runtime): Promise<boolean> {
 }
 
 export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle | undefined> {
+  await adoptLoginPath(line => io.log(line));
   // A state file with nothing but this computer in it is served with no provider key: wsp init's local road is
   // what wrote it, and asking for a key to serve it would take that road away the next morning.
   const keys = await loadKeys(io, undefined, { anthropic: false, noSolari: "local" });
@@ -876,9 +879,6 @@ async function hostFor(
   io: CliIO,
   run: RunningWsp = runningWsp(),
 ): Promise<HostHandle> {
-  // First of all, and once: every lookup and every child of this host reads process.env.PATH, and a launch from
-  // Finder or the Dock was given launchd's four system folders rather than the person's.
-  await adoptLoginPath(line => io.log(line));
   const lockPath = lockPathFor(opts.statePath);
   const lock = takeLock(lockPath, opts.statePath, { port: opts.port, wsPort: opts.wsPort });
   try {
@@ -1002,6 +1002,7 @@ export async function upServiceCommand(io: CliIO, opts: { port: number; wsPort: 
     io.error(serviceRefusal(held, opts.statePath));
     return 1;
   }
+  await adoptLoginPath(line => io.log(line));
   // The service serves what wsp init recorded, and with no provider key that is this computer alone: asking for a
   // key to keep the host up would take the local road away at the next login.
   const keys = await loadKeys(io, deps.keys, { anthropic: false, noSolari: "local" });
@@ -1166,6 +1167,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     json: false,
     cliOnly: "forks a live machine and bills while it runs, or with --local runs a thread on this computer; a person decides that at a terminal",
     run: async (io, opts, values) => {
+      await adoptLoginPath(line => io.log(line));
       // The local road touches no provider, so a missing key is not asked for: it is the whole of the doctor for a
       // person whose wsp init took the local road.
       if (values.local === true) {
@@ -1315,7 +1317,11 @@ export const COMMAND_LINES: readonly CommandLine[] = [
 export async function cli(argv: string[], io: CliIO = terminalIO(), run: RunningWsp = runningWsp(), env: Readonly<Record<string, string | undefined>> = process.env): Promise<number> {
   const verb = findVerb(argv);
   // The one verb that runs with no host serving, new --local, builds the runtime over the state file in this process.
-  if (verb !== undefined) return runVerb(verb, argv, io, statePathFrom, { alsoHere, cwd: process.cwd(), env, runtime: async statePath => makeRuntime(await loadKeys(io, undefined, { anthropic: false, noSolari: "local" }), statePath) });
+  const verbRuntime = async (statePath: string): Promise<Runtime> => {
+    await adoptLoginPath(line => io.log(line));
+    return makeRuntime(await loadKeys(io, undefined, { anthropic: false, noSolari: "local" }), statePath);
+  };
+  if (verb !== undefined) return runVerb(verb, argv, io, statePathFrom, { alsoHere, cwd: process.cwd(), env, runtime: verbRuntime });
   if (argv[0] === MCP_COMMAND) return mcp(io, argv.slice(1), statePathFrom, run, env);
   let values: SharedFlags;
   let positionals: string[];

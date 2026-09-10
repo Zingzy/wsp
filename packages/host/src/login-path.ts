@@ -6,6 +6,12 @@
 // the host's start settles it for the whole process. That PATH is the whole
 // trigger: any other one was meant by whoever set it, and replacing it would
 // make the start depend on the machine's rc files for no reason.
+//
+// Every road into the app awaits this before it builds a runtime, not merely
+// before it serves: the local wiring copies the environment for this computer's
+// agents when it is made, so a runtime built first carries launchd's PATH into
+// every turn whatever the process environment does afterwards. The read is once
+// per process, so a road that follows another pays nothing for saying so.
 import { execFile } from "node:child_process";
 import { loginPathLine } from "@wsp/protocol";
 

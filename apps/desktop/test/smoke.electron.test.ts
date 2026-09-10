@@ -2,7 +2,7 @@
 // Drives the packaged app (pnpm --filter @wsp/desktop build first). Gated on
 // WSP_DESKTOP_SMOKE=1 so the unit suite stays free of a 200 MB binary.
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -122,6 +122,19 @@ function deadPid(): number {
   return child.pid;
 }
 
+/** This launch's login shell: a script printing the fixture's own bin folder in front of the four folders launchd
+ * gives an app, which is what a person's shell prints on their Mac. A launch handed launchd's set reads it, so this
+ * is what decides which agents the app finds; a launch handed a fuller PATH never runs it. Without one the app
+ * would read the shell of the Mac running the suite and find its agents instead of the fixture's. */
+function loginShellIn(home: string): string {
+  const bin = join(home, "bin");
+  mkdirSync(bin);
+  const shell = join(home, "login-shell");
+  writeFileSync(shell, `#!/bin/sh\nprintf %s ${JSON.stringify(`${bin}:${LAUNCHD_PATH.join(":")}`)}\n`);
+  chmodSync(shell, 0o755);
+  return shell;
+}
+
 /** HOME is the temp dir too, so the app's ~/.wsp (and the pointer a host it
  * starts would write there) never touch this machine's. A value of undefined
  * removes that variable, the way a Finder launch has no WSP_HOME. */
@@ -135,7 +148,7 @@ async function launch(env: Record<string, string | undefined>, prepare: (home: s
   delete inherited["ANTHROPIC_API_KEY"];
   // The app reads WSP_DESKTOP_SMOKE to know it is driven: the bundle runs out of dist, and the move to Applications
   // it would otherwise offer has nobody to press a button.
-  const merged = { ...inherited, HOME: home, WSP_HOME: home, WSP_PORT: "0", WSP_WS_PORT: "0", WSP_DESKTOP_SMOKE: "1", ...env };
+  const merged = { ...inherited, HOME: home, WSP_HOME: home, WSP_PORT: "0", WSP_WS_PORT: "0", WSP_DESKTOP_SMOKE: "1", SHELL: loginShellIn(home), ...env };
   const clean: Record<string, string> = {};
   for (const [k, v] of Object.entries(merged)) if (v !== undefined) clean[k] = v;
   // Playwright emulates a light prefers-color-scheme in the renderer unless told not to; the page's system theme has to
