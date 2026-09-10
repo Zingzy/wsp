@@ -803,7 +803,7 @@ describe("serveRuntime workspaces.exec", () => {
 
 describe("serveRuntime init door (the host's init job, read and driven from the app)", () => {
   const JOB: InitJob = { id: "init_1", road: "manual", phase: "answering", keys: { solari: true }, step: 0, stoppable: true, screens: [], rows: [], progress: { done: 0, total: 0 }, log: [] };
-  const SETUP = { keys: { solari: true }, home: "/Users/me", agents: [{ id: "claude", name: "Claude Code", configured: true }], pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 }, job: null };
+  const SETUP = { keys: { solari: true }, home: "/Users/me", agents: [{ id: "claude", name: "Claude Code", configured: true, takesTools: true }], pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 }, job: null };
   function fakeDoor() {
     const calls: unknown[] = [];
     const listeners = new Set<(e: { type: "init.job"; job: typeof JOB }) => void>();

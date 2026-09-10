@@ -15,7 +15,9 @@ import {
   SIGN_IN_CODE_MAX,
   SOLARI_CONSOLE,
   SignInFinish,
+  initAgentNoRecipeLine,
   initAgentPrompt,
+  initAgentStep,
   initButtonLine,
   initCostLine,
   initJobBuilding,
@@ -26,16 +28,20 @@ import {
   initRowOver,
   initSetupLines,
   initTallyLine,
+  threadWorkingLine,
   INIT_SIGN_IN_WORDS,
   initDiskLine,
   initDiskOverLine,
   fmtCalls,
   type InitRow,
+  type InitScreen,
 } from "../src/index.js";
 
 const MIB = 1024 * 1024;
 
 const row = (over: Partial<InitRow> = {}): InitRow => ({ id: "stage/creating", kind: "stage", label: "Creating the machine", state: "done", ...over });
+
+const SCREEN: InitScreen = { id: "agents", title: "Agents", top: "Which agents go on the image", counter: "1/6", items: [], ticks: [], answers: {}, footer: [] };
 
 const JOB: InitJob = {
   id: "init_1",
@@ -92,7 +98,7 @@ describe("the init job view", () => {
   });
 
   it("the setup the modal opens on carries the provider key's presence alone, never a key, the agents here and the price", () => {
-    const setup = InitSetup.parse({ keys: { solari: false }, home: "/Users/me", agents: [{ id: "claude", name: "Claude Code", configured: true }], pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 }, job: null });
+    const setup = InitSetup.parse({ keys: { solari: false }, home: "/Users/me", agents: [{ id: "claude", name: "Claude Code", configured: true, takesTools: true }], pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 }, job: null });
     expect(setup.job).toBeNull();
     expect(Object.keys(setup.keys)).toEqual(["solari"]);
     expect(InitSetup.safeParse({ keys: { solari: "slr_live_x" }, home: "/Users/me", agents: [], pricing: null, job: null }).success).toBe(false);
@@ -161,17 +167,45 @@ describe("the words the clients print for the job", () => {
     expect(initCostLine({ cpu: 2, memMb: 4096 }, 0.11)).toBe("A 2 vCPU · 4 GB machine costs about $0.11/hr while it runs; it naps when idle.");
   });
 
-  it("the agent's first message names the two tools and where the recipe goes, and asks the agent to ask nothing", () => {
+  it("the agent's first message names the two tools and where the recipe goes, asks the agent to ask nothing, and says plainly to run no commands", () => {
     const prompt = initAgentPrompt("/Users/me/.wsp/recipe.json");
     expect(prompt).toContain("recipe_scan");
     expect(prompt).toContain("recipe");
     expect(prompt).toContain("/Users/me/.wsp/recipe.json");
     expect(prompt).toMatch(/ask (them|the person) nothing/i);
+    // The tools are named as the only road: a thread that reached for the command line instead asked for permission
+    // once per call and got nowhere.
+    expect(prompt).toMatch(/run no commands/i);
     expect(prompt).not.toContain("wsp init");
   });
 
+  it("the line when the thread ended with no recipe names the file waited on, and the turn's own reason where it had one", () => {
+    expect(initAgentNoRecipeLine("/Users/me/.wsp/recipe.json")).toBe("the thread ended without writing /Users/me/.wsp/recipe.json");
+    expect(initAgentNoRecipeLine("/Users/me/.wsp/recipe.json", "the harness died")).toBe("the thread ended without writing /Users/me/.wsp/recipe.json: the harness died");
+  });
+
+  it("one predicate says the job's step is the agent's: its road writing the recipe, and a job that ended before any screen", () => {
+    const agent = { ...JOB, road: "agent" as const, screens: [] };
+    expect(initAgentStep({ ...agent, phase: "agent" })).toBe(true);
+    expect(initAgentStep({ ...agent, phase: "failed" })).toBe(true);
+    expect(initAgentStep({ ...agent, phase: "cancelled" })).toBe(true);
+    // Past the step: the screens exist, so a failure there is the build's own.
+    expect(initAgentStep({ ...agent, phase: "answering" })).toBe(false);
+    expect(initAgentStep({ ...agent, phase: "failed", screens: [SCREEN] })).toBe(false);
+    expect(initAgentStep({ ...JOB, road: "manual", phase: "failed" })).toBe(false);
+  });
+
+  it("a thread's one line is the tool it is running, the prompt it is blocked on, else its own last line; anything else leaves the line alone", () => {
+    const scope = { workspaceId: "ws_1", sessionId: "s_1" };
+    expect(threadWorkingLine({ type: "session.delta", ...scope, kind: "text", text: "reading\nwriting the recipe" })).toBe("writing the recipe");
+    expect(threadWorkingLine({ type: "session.delta", ...scope, kind: "tool_use", toolName: "Bash", text: JSON.stringify({ command: "wsp recipe scan --json" }) })).toBe("$ wsp recipe scan --json");
+    expect(threadWorkingLine({ type: "session.permission", ...scope, askId: "a1", toolName: "Bash", input: "{}", detail: "wsp recipe scan --json", options: [] })).toBe("Permission for Bash: wsp recipe scan --json");
+    expect(threadWorkingLine({ type: "session.delta", ...scope, kind: "tool_result", text: "ok" })).toBeUndefined();
+    expect(threadWorkingLine({ type: "session.end", ...scope, exitCode: 0, sawResult: true })).toBeUndefined();
+  });
+
   it("wsp setup prints the keys as held or not, the agents with their tools, the price, and the job's rows with the page a sign-in waits on", () => {
-    const setup = { keys: { solari: true }, home: "/Users/me", agents: [{ id: "claude", name: "Claude Code", configured: true }, { id: "codex", name: "Codex", configured: false }], pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 }, job: null };
+    const setup = { keys: { solari: true }, home: "/Users/me", agents: [{ id: "claude", name: "Claude Code", configured: true, takesTools: true }, { id: "codex", name: "Codex", configured: false, takesTools: false }], pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 }, job: null };
     expect(initSetupLines(setup)).toEqual([
       "Solari key: saved",
       "Agents here: Claude Code (MCP added), Codex",

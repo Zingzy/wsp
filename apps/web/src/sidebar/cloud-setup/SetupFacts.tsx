@@ -9,7 +9,7 @@ import { CARD, META, NAME, ROW, ROW_LINE, RowState, Slot } from "./rows.js";
 import { SetupScreen } from "./SetupScreen.js";
 
 export function SetupFacts({ job, refusal }: { job: InitJob | null; refusal: string | null }) {
-  const words = job?.phase === "agent" ? CLOUD_SETUP_WORDS.agent : CLOUD_SETUP_WORDS.reading;
+  const words = CLOUD_SETUP_WORDS.reading;
   const rows = job?.rows ?? [];
   return (
     <SetupScreen k="reading" label={words.label} headline={words.headline} top={words.top} refusal={refusal}>

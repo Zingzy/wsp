@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Served by Vite to a real browser: the cloud setup sheet over a fake api at
-// each of its steps (?screen=choice|keys|reading|agents|tools|also|logins|ask|
-// building|signing|done|failed), in either theme (?theme=light), so a test
+// each of its steps (?screen=choice|keys|agent|agent-stopped|reading|agents|
+// tools|also|logins|ask|building|signing|done|failed), in either theme
+// (?theme=light), so a test
 // can lay out and photograph every state the ticket names. The screens' data
 // is what the host hands over for a small laptop: three agents, the tools with
 // the base locked on and the rest by calls, a manager's rows, three sign-ins.
 import { createRoot } from "react-dom/client";
-import { GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, initAgentNoRecipeLine, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api } from "../../src/protocol/client";
 import { useStore } from "../../src/protocol/store";
@@ -138,8 +139,11 @@ const FACTS: InitJob["rows"] = [
 const DISK = { fixed: 2.8 * GIB, total: 20 * GIB };
 const base: InitJob = { id: "init_1", road: "manual", phase: "answering", keys: { solari: true }, step: 0, stoppable: true, disk: DISK, screens: SCREENS, rows: [], progress: { done: 0, total: 0 }, log: [] };
 const screenAt = SCREENS.findIndex(s => s.id === at);
+const THREAD = { id: "th_1", workspaceId: "ws_local", session: "turn_1", harness: "claude" };
 const JOBS: Record<string, InitJob> = {
   reading: { ...base, phase: "reading", screens: [], rows: FACTS },
+  agent: { ...base, road: "agent", phase: "agent", screens: [], line: "read /Users/zingzy/.claude/projects", thread: THREAD },
+  "agent-stopped": { ...base, road: "agent", phase: "failed", screens: [], line: "Permission for Bash: wsp recipe scan --json", error: initAgentNoRecipeLine("/Users/zingzy/.wsp/recipe.json"), thread: THREAD },
   ask: { ...base, step: SCREENS.length },
   building: { ...base, phase: "building", screens: [], rows: STAGES, progress: { done: 5, total: 14 } },
   signing: {
@@ -165,8 +169,8 @@ const setup: InitSetup = {
   keys: { solari: at !== "keys" },
   home: "/Users/zingzy",
   agents: [
-    { id: "claude", name: "Claude Code", configured: true },
-    { id: "codex", name: "Codex", configured: false },
+    { id: "claude", name: "Claude Code", configured: true, takesTools: true },
+    { id: "codex", name: "Codex", configured: false, takesTools: false },
   ],
   pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 },
   job: JOBS[at] ?? (screenAt >= 0 ? { ...base, step: screenAt } : null),
