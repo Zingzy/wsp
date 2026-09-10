@@ -11,7 +11,7 @@ import type { Readable, Writable } from "node:stream";
 import { stripVTControlCharacters, styleText } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
 import { LOGIN_CHOICES, MCP_REMOTE_ID, RUNGS, type HistoryProgress, type Manifest, type ManifestEntry, type ProjectScan, type Rung } from "@wsp/collect";
-import { SnapshotFailedError, describeAge, type BackendPricing } from "@wsp/engine";
+import { SnapshotFailedError, checkProviderKey, describeAge, keyCheckLine, type BackendPricing } from "@wsp/engine";
 import type { GoldenStageEvent, GoldenStep, Recipe, RecipeCustomRow, RecipeHistory, ToolPin, WorkspaceView } from "@wsp/protocol";
 import { PrepareStoppedError, type GoldenBuilderView, type GoldenRecipe, type GoldenStage, type Runtime } from "@wsp/runtime";
 import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, log, outro } from "@clack/prompts";
@@ -19,7 +19,7 @@ import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { agentInstallsFor, brewfileFor, BUILDER_DISK_GB, estimateDisk, isMcpRow, PACK_BUDGET_BYTES, pinState, plural, recordedPins, shownOf, toolInstallsFor, TOOLS_DISK_FLOOR, type BrewTable, type ImportResult } from "@wsp/engine";
-import { ALREADY_APPLIED, BREW_ID_PREFIX, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, notHereLine, packageOf, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote, type AppPorts, type PortsAsked, GOLDEN_STAGE_WORDS } from "@wsp/protocol";
+import { ALREADY_APPLIED, BREW_ID_PREFIX, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, notHereLine, packageOf, savedKeyStoppedLine, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote, type AppPorts, type PortsAsked, GOLDEN_STAGE_WORDS } from "@wsp/protocol";
 import { importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
   RUNG_TITLE,
@@ -1201,6 +1201,21 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     log.step(`${question} Taken as yes (${takenAs}).`, out);
   }
   if (attach === undefined) await stopKeptBuilder(rt, io.output);
+
+  // The saved key read before the first stage, because the create is the first call that would carry it: a key the
+  // provider refuses used to stop the build nine stages on with the line about nothing being booted, leaving the
+  // provider's own word in the run log alone.
+  const key = await checkProviderKey(rt.backend);
+  const keyLine = keyCheckLine(key, true);
+  if (keyLine !== undefined) {
+    runLog.note(`failed: ${keyLine}`);
+    log.error(keyLine, out);
+    log.step(logLine(), out);
+    io.json?.({ event: "key-check", message: keyLine, refused: key.state === "refused" });
+    cancel(savedKeyStoppedLine(keyLine), out);
+    await closeRuntime();
+    return { code: 1 };
+  }
 
   const stream = new StageStream(io.output, io.isTTY, PREPARE_STEPS, runLog.note, io.stderr, io.json);
   const off = rt.events.on("golden.stage", e => {

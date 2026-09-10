@@ -974,6 +974,16 @@ export const CLOUD_SETUP_WORDS = {
     saved: "saved",
     unset: "not set",
     keycap: "Save",
+    /** Under the field when the provider answered and refused what was typed; its own status and word follow. */
+    refused: "Solari refused this key",
+    /** The build's line for a key already saved that the provider refuses, read before the first stage. */
+    refusedSaved: "Solari refused the saved key",
+    /** Under the field when nothing came back about the key at all; what this computer saw follows. */
+    unchecked: "Solari could not be reached to check the key",
+    /** What the Save keycap says after a check nothing answered, and what the failed build offers instead of a retry. */
+    retry: "Try again",
+    /** What the build offers when the saved key was refused: back to this step, not another build. */
+    changeKey: "Change the key",
   },
   screen: {
     keycap: "Continue",
@@ -1180,6 +1190,33 @@ export function initProgressState(job: Pick<InitJob, "phase" | "rows" | "progres
  * otherwise. */
 export function initButtonLine(job: Pick<InitJob, "phase" | "rows" | "progress">): string {
   return initProgressState(job).waitingOnYou ? WAITING_FOR_YOU : initProgressLine(job);
+}
+
+/** The provider's own answer about a key: the status it replied with and the word it used, so a person reads whose
+ * refusal they are looking at rather than ours. */
+export function providerSaidLine(status: number, said: string): string {
+  return said === "" ? String(status) : `${status} ${said}`;
+}
+
+/** Under the keys field when the provider answered and refused the key typed there. */
+export function keyRefusedLine(said: string): string {
+  return `${CLOUD_SETUP_WORDS.keys.refused}: ${said}`;
+}
+
+/** The same for a key already saved, which is what the build reads before its first stage. */
+export function savedKeyRefusedLine(said: string): string {
+  return `${CLOUD_SETUP_WORDS.keys.refusedSaved}: ${said}`;
+}
+
+/** Either place when nothing came back about the key at all: what this computer saw instead, with Try again beside it. */
+export function keyUncheckedLine(said: string): string {
+  return `${CLOUD_SETUP_WORDS.keys.unchecked}: ${said}`;
+}
+
+/** What a terminal run says when the saved key was refused before its first stage. It never falls back to the line
+ * about nothing being booted: that sentence left the provider's refusal in the run log alone. */
+export function savedKeyStoppedLine(line: string): string {
+  return `${line}. Save a key Solari takes and run wsp init again; nothing booted, and the recipe is kept.`;
 }
 
 /** What the machine the build boots costs, said once on the key screen from the backend's own rate. */

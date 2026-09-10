@@ -33,6 +33,11 @@ export interface StubBackend extends MachineBackend {
   /** Every template the provider holds by id, with the snapshot each was promoted from; the capability flag is off
    * until a test turns it on, so every road without templates stays as it was. */
   templates: Map<string, TemplateRow & { snapshotId: string }>;
+  /** What the key check throws when a test scripts one; without it the provider takes the key. */
+  keyRefusal?: unknown;
+  /** How often the key was checked, so a test proves the check happened before the first stage. */
+  keyChecks: number;
+  checkKey(): Promise<void>;
   /** Every promote asked, in order. */
   promoted: { snapshotId: string; name: string }[];
   promoteSnapshot(snapshotId: string, name: string): Promise<string>;
@@ -135,8 +140,16 @@ export function stubBackend(): StubBackend {
     snapshotBytes: 8_000_000_000,
     templates,
     promoted,
+    keyChecks: 0,
     execImpl: (_m, cmd) => guestAnswer(cmd),
+    async checkKey(): Promise<void> {
+      backend.keyChecks += 1;
+      if (backend.keyRefusal !== undefined) throw backend.keyRefusal;
+    },
     async create(spec: MachineSpec): Promise<Machine> {
+      // A key the provider will not take refuses every authenticated call, the create included: that is how the
+      // refusal used to surface, nine stages into the build.
+      if (backend.keyRefusal !== undefined) throw backend.keyRefusal;
       if (spec.template !== undefined && !BUILTIN_TEMPLATES.has(spec.template) && templates.get(spec.template)?.status !== "ready") {
         throw Object.assign(new Error(`TemplateNotReady ${spec.template}`), { kind: "missing", status: 404 });
       }

@@ -16,14 +16,16 @@ import { SignInCode } from "./SignInCode.js";
 import { RowMark } from "./SignInMark.js";
 import { SetupScreen, type ScreenAction } from "./SetupScreen.js";
 
-export function SetupBuild({ job, onCancel, onRetry, onCode, onOpenWorkspace, onAgain, refusal }: { job: InitJob; onCancel: () => void; onRetry: (tool: string) => void; onCode: (o: { tool: string; code: string }) => void; onOpenWorkspace: () => void; onAgain: () => void; refusal: string | null }) {
+export function SetupBuild({ job, onCancel, onRetry, onCode, onOpenWorkspace, onAgain, onChangeKey, refusal }: { job: InitJob; onCancel: () => void; onRetry: (tool: string) => void; onCode: (o: { tool: string; code: string }) => void; onOpenWorkspace: () => void; onAgain: () => void; onChangeKey: () => void; refusal: string | null }) {
   const words = CLOUD_SETUP_WORDS.build;
   const [asking, setAsking] = useState(false);
   const over = initJobOver(job.phase);
   const building = initJobBuilding(job.phase);
   const headline = job.phase === "done" ? words.done : over ? words.failed : words.headline;
   const { fraction } = initProgressState(job);
-  const primary: ScreenAction | undefined = job.phase === "done" && job.workspace !== undefined ? { word: words.keycap, onPress: onOpenWorkspace } : job.phase === "failed" || job.phase === "cancelled" ? { word: words.again, onPress: onAgain } : undefined;
+  // A saved key the provider refused offers the step that fixes it, not another build off the same key.
+  const primary: ScreenAction | undefined =
+    job.phase === "done" && job.workspace !== undefined ? { word: words.keycap, onPress: onOpenWorkspace } : job.keyRefused === true ? { word: CLOUD_SETUP_WORDS.keys.changeKey, onPress: onChangeKey } : job.phase === "failed" || job.phase === "cancelled" ? { word: words.again, onPress: onAgain } : undefined;
   const secondary: ScreenAction | undefined = building
     ? asking
       ? { word: words.cancelSure, onPress: onCancel, destructive: true }

@@ -8,6 +8,7 @@
 // shrinks and scrolls. The window itself never scrolls. No step pads itself.
 import { useEffect, useRef, type ReactNode } from "react";
 import { Button } from "../../components/ui/button.js";
+import { Spinner } from "../../components/ui/spinner.js";
 import { cn } from "../../lib/utils.js";
 
 export const MICRO_LABEL = "font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground";
@@ -25,6 +26,8 @@ export interface ScreenAction {
   destructive?: boolean;
   /** Why the action is disabled, as its tooltip. */
   title?: string;
+  /** The keycap while the host is answering it: the arrow gives way to the spinner and the press does not repeat. */
+  busy?: boolean;
 }
 
 export function SetupScreen({
@@ -98,9 +101,9 @@ export function SetupScreen({
         {primary !== undefined || secondary !== undefined ? (
           <div data-k="footer" className="flex flex-col items-center">
             {primary !== undefined ? (
-              <Button data-k="primary" ref={keycap} onClick={primary.onPress} disabled={primary.disabled === true} className="h-10 rounded-[10px] px-[22px] text-[15px] sm:h-10 sm:text-[15px]">
+              <Button data-k="primary" ref={keycap} onClick={primary.onPress} disabled={primary.disabled === true || primary.busy === true} data-busy={primary.busy === true} className="h-10 rounded-[10px] px-[22px] text-[15px] sm:h-10 sm:text-[15px]">
                 {primary.word}
-                <span aria-hidden>→</span>
+                {primary.busy === true ? <Spinner data-k="busy" className="size-4" /> : <span aria-hidden>→</span>}
               </Button>
             ) : null}
             {secondary !== undefined ? (

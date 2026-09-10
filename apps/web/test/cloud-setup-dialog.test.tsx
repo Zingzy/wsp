@@ -10,7 +10,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, initDiskLine, initDiskOverLine, initTallyLine, initButtonLine, initProgressLine, type EventUnion, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
-import type { Api } from "../src/protocol/client.js";
+import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { CloudSetupDialog } from "../src/sidebar/CloudSetupDialog.js";
 import { CloudSetupRow } from "../src/sidebar/CloudSetupRow.js";
@@ -78,9 +78,17 @@ const AGENT_JOB: InitJob = { ...JOB, road: "agent", phase: "agent", screens: [],
 const SETUP: InitSetup = { keys: { solari: false }, home: "/Users/me", agents: [{ id: "claude", name: "Claude Code", configured: true, takesTools: true }, { id: "codex", name: "Codex", configured: false, takesTools: false }], pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 }, job: null };
 const HELD: InitSetup = { ...SETUP, keys: { solari: true } };
 
-function fakeApi(over: { setup?: InitSetup; refuse?: string } = {}) {
+/** How the fake host answers a key: what it refuses with, and whether the answer waits for the test to let it go. */
+interface KeyAnswer {
+  refusal?: { message: string; kind: string };
+  hold?: boolean;
+}
+
+function fakeApi(over: { setup?: InitSetup; refuse?: string; key?: KeyAnswer } = {}) {
   const listeners = new Set<(e: EventUnion) => void>();
   let setup = over.setup ?? SETUP;
+  /** Lets a held key answer go, so a test reads the Save keycap while the provider is still being asked. */
+  let letKeyGo: () => void = () => {};
   /** The job as the host holds it: answers move its step and step moves it back, and every change is an event. */
   let job: InitJob | null = setup.job;
   const emit = (next: InitJob): void => {
@@ -124,6 +132,11 @@ function fakeApi(over: { setup?: InitSetup; refuse?: string } = {}) {
     }),
     initGet: vi.fn(async () => ({ ...setup, job })),
     initKeys: vi.fn(async (keys: { solari?: string; rows?: Record<string, string> }) => {
+      if (keys.solari !== undefined && over.key !== undefined) {
+        // The host checks the key with the provider before it saves it, so this answer is what that check said.
+        if (over.key.hold === true) await new Promise<void>(r => (letKeyGo = r));
+        if (over.key.refusal !== undefined) throw new RequestError(over.key.refusal.message, over.key.refusal.kind);
+      }
       if (keys.solari !== undefined) setup = { ...setup, keys: { solari: true } };
       if (keys.rows !== undefined && job !== null) {
         const saved = new Set(Object.keys(keys.rows));
@@ -165,7 +178,7 @@ function fakeApi(over: { setup?: InitSetup; refuse?: string } = {}) {
       return job ?? JOB;
     }),
   } satisfies Api;
-  return { api, emit, held: () => job };
+  return { api, emit, held: () => job, letKeyGo: () => letKeyGo() };
 }
 
 beforeEach(() => {
@@ -178,15 +191,15 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function open(over: { setup?: InitSetup; refuse?: string } = {}) {
-  const { api, emit, held } = fakeApi(over);
+async function open(over: { setup?: InitSetup; refuse?: string; key?: KeyAnswer } = {}) {
+  const { api, emit, held, letKeyGo } = fakeApi(over);
   useStore.setState({ initJob: over.setup?.job ?? null });
   useStore.getState().bind(api);
   const onClose = vi.fn();
   render(<CloudSetupDialog onClose={onClose} />);
   const dialog = await screen.findByRole("dialog");
   await waitFor(() => expect(api.initGet).toHaveBeenCalled());
-  return { api, emit, held, dialog, onClose };
+  return { api, emit, held, letKeyGo, dialog, onClose };
 }
 const k = (root: HTMLElement, key: string): HTMLElement => {
   const el = root.querySelector<HTMLElement>(`[data-k="${key}"]`);

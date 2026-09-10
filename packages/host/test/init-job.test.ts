@@ -10,8 +10,8 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SNAPSHOT_STORAGE, type BackendPricing } from "@wsp/engine";
-import { GOLDEN_STAGE_WORDS, INIT_SIGN_IN_WORDS, InitJob, Recipe, SIGN_IN_OPEN_STATE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, noMcpServersLine, type InitJobEvent } from "@wsp/protocol";
+import { SNAPSHOT_STORAGE, checkProviderKey, type BackendPricing } from "@wsp/engine";
+import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_SIGN_IN_WORDS, InitJob, KEY_REFUSED, KEY_UNCHECKED, Recipe, SIGN_IN_OPEN_STATE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, keyRefusedLine, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
 import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localWiring, type Keys } from "../src/cli.js";
@@ -100,6 +100,8 @@ function fake(over: { env?: Record<string, string>; configured?: boolean; read?:
       env = { ...env, ...set };
     },
     provider: k => void swapped.push(k),
+    // The provider module the typed key would name is this test's stub, so the check the keys step runs is its own.
+    checkKey: () => checkProviderKey(backend),
     pricing: () => PRICING,
     agents: async () =>
       over.agents ?? [
@@ -497,6 +499,75 @@ describe("the init job, manual road", () => {
     await f.jobs.start({ road: "manual" });
     await f.settled();
     await expect(f.jobs.build({})).rejects.toThrow(/Solari/);
+  });
+
+  it("Save puts the key to the provider first: a refused key is not written, nothing is wired, and the refusal carries the provider's own word", async () => {
+    const f = fake({ env: {} });
+    f.backend.keyRefusal = Object.assign(new Error("Unauthorized"), { kind: "auth", status: 401 });
+    await expect(f.jobs.keys({ solari: "slr_live_wrong" })).rejects.toThrow(keyRefusedLine("401 Unauthorized"));
+    expect(f.backend.keyChecks).toBe(1);
+    // Nothing was written and no provider module was swapped in, so the setup cannot move on with a refused key.
+    expect(f.saved).toEqual([]);
+    expect(f.swapped).toEqual([]);
+    expect((await f.jobs.get()).keys).toEqual({ solari: false });
+    // The refusal's kind says the key is the person's to change, not something to press again.
+    await expect(f.jobs.keys({ solari: "slr_live_wrong" })).rejects.toMatchObject({ kind: KEY_REFUSED });
+    // A key the provider takes goes through the one writer as before.
+    f.backend.keyRefusal = undefined;
+    expect((await f.jobs.keys({ solari: "slr_live_right" })).keys).toEqual({ solari: true });
+    expect(f.saved).toEqual([{ SOLARI_API_KEY: "slr_live_right" }]);
+    expect(f.backend.keyChecks).toBe(3);
+  });
+
+  it("a check nothing answered says so instead of blaming the key, and its kind marks it worth pressing again", async () => {
+    const f = fake({ env: {} });
+    f.backend.keyRefusal = Object.assign(new TypeError("fetch failed"), { cause: { code: "ENOTFOUND" } });
+    await expect(f.jobs.keys({ solari: "slr_live_maybe" })).rejects.toMatchObject({ message: keyUncheckedLine("fetch failed"), kind: KEY_UNCHECKED });
+    expect(f.saved).toEqual([]);
+    expect((await f.jobs.get()).keys).toEqual({ solari: false });
+  });
+
+  it("a saved key the provider refuses stops the build before its first stage, in the provider's words, with the keys step as the way on", async () => {
+    const f = fake();
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    f.backend.keyRefusal = Object.assign(new Error("Unauthorized"), { kind: "auth", status: 401 });
+    const building = await f.jobs.build({ firstWorkspace: "first" });
+    expect(building.phase).toBe("building");
+    await f.settled();
+    const stopped = f.jobs.view()!;
+    expect(stopped.phase).toBe("failed");
+    expect(stopped.error).toBe(savedKeyRefusedLine("401 Unauthorized"));
+    expect(stopped.keyRefused).toBe(true);
+    // Never the generic sentence, and never a machine: the refusal was read before anything could boot.
+    expect(stopped.log.join("\n")).not.toContain("Nothing was booted");
+    expect(f.backend.machines).toEqual([]);
+    expect(f.backend.keyChecks).toBe(1);
+  });
+
+  it("a build the provider could not be asked about fails on that, and offers no key step: the saved key may be fine", async () => {
+    const f = fake();
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    f.backend.keyRefusal = Object.assign(new TypeError("fetch failed"), { cause: { code: "ENOTFOUND" } });
+    await f.jobs.build({});
+    await f.settled();
+    const stopped = f.jobs.view()!;
+    expect(stopped.phase).toBe("failed");
+    expect(stopped.error).toBe(keyUncheckedLine("fetch failed"));
+    expect(stopped.keyRefused).toBeUndefined();
+    expect(f.backend.machines).toEqual([]);
+  });
+
+  it("a key the provider takes leaves the build as it was: one check, then the first stage", async () => {
+    const f = fake();
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.build({ firstWorkspace: "first" });
+    await f.settled();
+    expect(f.jobs.view()!.phase).toBe("done");
+    expect(f.backend.keyChecks).toBe(1);
+    expect(CLOUD_SETUP_WORDS.keys.refusedSaved).toBe("Solari refused the saved key");
   });
 });
 

@@ -12,9 +12,9 @@ import { basename } from "node:path";
 import { PassThrough, Writable } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
-import type { BackendPricing } from "@wsp/engine";
+import { keyCheckLine, type BackendPricing, type KeyCheck } from "@wsp/engine";
 import { RUNGS } from "@wsp/collect";
-import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initJobOver, initRowOver, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type LoginState, type McpServerSpec, type TurnResult } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, KEY_REFUSED, KEY_UNCHECKED, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initJobOver, initRowOver, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type LoginState, type McpServerSpec, type TurnResult } from "@wsp/protocol";
 import { harnessCatalog, smallestModel, type GoldenRecipe, type InitDoor, type Runtime, type SessionHandle } from "@wsp/runtime";
 import type { AgentHere } from "./agents-here.js";
 import { SOLARI_KEY, agentKeysIn, keysOf, type Keys } from "./env-keys.js";
@@ -42,6 +42,9 @@ export interface InitJobDeps {
   saveKeys(set: Record<string, string>): void;
   /** Wires the provider module the keys name into the runtime, so a host that started with none forks after the seal. */
   provider(keys: Keys): void;
+  /** Whether the provider takes these keys, asked before they are saved: the provider module the keys name makes one
+   * cheap authenticated call, and a refusal is the person's to fix on the step that typed the key. */
+  checkKey(keys: Keys): Promise<KeyCheck>;
   /** What the machine the build boots costs; the provider's own table, which needs no key to read. */
   pricing(): BackendPricing;
   agents(): Promise<AgentHere[]>;
@@ -102,6 +105,8 @@ interface State {
   building: boolean;
   log: string[];
   error?: string;
+  /** Set when the build's own read of the saved key came back refused: the way on is the keys step. */
+  keyRefused?: boolean;
   thread?: { id: string; workspaceId: string; session: string; harness: string };
   /** The one line the agent's thread is on, from its own events; the block on the agent step shows it. */
   line?: string;
@@ -205,6 +210,7 @@ export class InitJobs implements InitDoor {
       ...(s.thread !== undefined ? { thread: s.thread } : {}),
       ...(s.line !== undefined ? { line: s.line } : {}),
       ...(s.error !== undefined ? { error: s.error } : {}),
+      ...(s.keyRefused === true ? { keyRefused: true } : {}),
       ...(s.golden !== undefined ? { golden: s.golden } : {}),
       ...(s.workspace !== undefined ? { workspace: s.workspace } : {}),
     };
@@ -223,11 +229,19 @@ export class InitJobs implements InitDoor {
   }
 
   /** Saves the provider key, and an agent's API key by the sign-in row that took it, under the variable the agent's
-   * sign-in declares; a row that takes no key is refused, so nothing a client names lands in the file. */
+   * sign-in declares; a row that takes no key is refused, so nothing a client names lands in the file. The provider
+   * key is put to the provider before anything is written, so a key it refuses is never saved and the setup cannot
+   * move on with one; the refusal carries its kind, since a road that never answered is worth pressing again and a
+   * refused key is not. */
   async keys(k: { solari?: string; rows?: Record<string, string> }): Promise<InitSetup> {
     const set: Record<string, string> = {};
     const solari = k.solari?.trim();
-    if (solari !== undefined && solari !== "") set[SOLARI_KEY] = solari;
+    if (solari !== undefined && solari !== "") {
+      const check = await this.deps.checkKey({ solari });
+      const line = keyCheckLine(check);
+      if (line !== undefined) throw Object.assign(new Error(line), { kind: check.state === "refused" ? KEY_REFUSED : KEY_UNCHECKED });
+      set[SOLARI_KEY] = solari;
+    }
     for (const [row, value] of Object.entries(k.rows ?? {})) {
       const typed = value.trim();
       if (typed === "") continue;
@@ -737,6 +751,13 @@ export class InitJobs implements InitDoor {
         if (text("dest") !== undefined) had.detail = text("dest")!;
         break;
       }
+      case "key-check":
+        // The build's own read of the saved key, before its first stage: the provider's word is the failure, and a
+        // refusal names the step that fixes it rather than offering another build.
+        s.phase = "failed";
+        s.error = text("message") ?? CLOUD_SETUP_WORDS.keys.refusedSaved;
+        if (record["refused"] === true) s.keyRefused = true;
+        break;
       case "seal-failed":
         s.phase = "failed";
         s.error = text("message") ?? "the seal failed";

@@ -28,7 +28,7 @@ import {
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
 import { authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, fmtDuration, forksNoMachines, NOTHING_TO_SERVE_LINE, type PortsAsked, portsAsked, shellQuote, SOLARI_CONSOLE, THIS_COMPUTER, TURN_END_WORDS, usageRefusal, WS_PORT_OFFSET } from "@wsp/protocol";
-import { agentHome, agentHomes, LocalBackend, type MachineBackend, NoProviderBackend, SOLARI_PRICING, parseSshAddress, providerSlot, type ProviderSlot, SshBackend, sshIdentity, sshMachineName } from "@wsp/engine";
+import { agentHome, agentHomes, checkProviderKey, LocalBackend, type MachineBackend, NoProviderBackend, SOLARI_PRICING, parseSshAddress, providerSlot, type ProviderSlot, SshBackend, sshIdentity, sshMachineName } from "@wsp/engine";
 import { assetDir } from "./assets.js";
 import { claudeEnvs, deployDaemon, doctor, localDoctor } from "./doctor.js";
 import { agentsHere } from "./agents-here.js";
@@ -543,6 +543,7 @@ function hostInitDoor(rt: Runtime, statePath: string, run: RunningWsp, openUrl: 
     saved: () => savedEnv(wspHome()),
     saveKeys: set => writeEnvFile(join(wspHome(), ".env"), set),
     provider: keys => swapProvider(rt, keys),
+    checkKey: keys => checkProviderKey(providerBackend(keys)),
     pricing: () => SOLARI_PRICING,
     agents: () => agentsHere(nodeHost(), { versions: false }),
     installTools: agents => installEach(agents, mcpServerSpec(statePath, run), home),

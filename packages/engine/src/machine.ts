@@ -135,6 +135,10 @@ export interface MachineBackend {
   readonly capabilities: Capabilities;
   readonly pricing: BackendPricing;
   create(spec: MachineSpec): Promise<Machine>;
+  /** Optional: only backends the person holds a key for. One cheap authenticated read that boots nothing and touches
+   * no machine's idle clock, so a key the provider refuses is known before anything is saved or billed. Rejects with
+   * the provider's own WspError; `checkProviderKey` is what reads that answer. */
+  checkKey?(): Promise<void>;
   get(id: string): Promise<Machine>;
   /** size comes off the listing itself; a per-machine GET would reset that machine's idle timer. */
   list(labels?: Record<string, string>): Promise<{ id: string; state: MachineState; labels: Record<string, string>; size?: { cpu: number; memMb: number } }[]>;

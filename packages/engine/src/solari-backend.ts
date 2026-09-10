@@ -181,6 +181,12 @@ export class SolariBackend implements MachineBackend {
     return new SolariMachine(this, res.sandboxId, res.kind ?? spec.kind, res.streamUrl, spec.labels, seen, reply.headers.get("Idempotent-Replayed") === "true");
   }
 
+  /** The template table is the cheapest read the key opens: it is the account's own, every account has the
+   * provider's built-ins in it, and it boots no machine and resets no idle clock. */
+  async checkKey(): Promise<void> {
+    await this.listTemplates();
+  }
+
   async get(id: string): Promise<Machine> {
     const view = await this.request<SandboxView>("GET", `/sandboxes/${encodeURIComponent(id)}`);
     return new SolariMachine(this, view.sandboxId ?? id, view.kind ?? "sandbox", undefined, view.metadata, {

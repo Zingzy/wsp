@@ -8,9 +8,10 @@
 // and it reopens on the step it was shut at with the answers in place, until
 // Start over or the build.
 import { useCallback, useEffect, useState } from "react";
-import { CLOUD_SETUP_WORDS, initAgentStep, initDiskOverLine, initJobOver, wspToolsRowId, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, KEY_REFUSED, KEY_UNCHECKED, initAgentStep, initDiskOverLine, initJobOver, wspToolsRowId, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { Dialog, DialogSheet, DialogTitle } from "../components/ui/dialog.js";
 import { errorText } from "../lib/utils.js";
+import { RequestError } from "../protocol/client.js";
 import { useStore } from "../protocol/store.js";
 import { DiskRing } from "./cloud-setup/DiskRing.js";
 import { draftOf, SetupAnswers, tallyOf, type Draft } from "./cloud-setup/SetupAnswers.js";
@@ -19,7 +20,7 @@ import { SetupAsk } from "./cloud-setup/SetupAsk.js";
 import { SetupBuild } from "./cloud-setup/SetupBuild.js";
 import { SetupChoice, type RoadPick } from "./cloud-setup/SetupChoice.js";
 import { SetupFacts } from "./cloud-setup/SetupFacts.js";
-import { SetupKeys } from "./cloud-setup/SetupKeys.js";
+import { SetupKeys, type KeyCheckShown } from "./cloud-setup/SetupKeys.js";
 import { SetupScreen } from "./cloud-setup/SetupScreen.js";
 
 type Step = "choice" | "keys" | "job";
@@ -49,6 +50,8 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
   const [pick, setPick] = useState<RoadPick>({ road: "manual" });
   const [draft, setDraft] = useState<{ key: string; draft: Draft } | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
+  const [check, setCheck] = useState<KeyCheckShown | null>(null);
+  const [saving, setSaving] = useState(false);
   useEffect(() => {
     void api?.initGet?.().then(setSetup, e => setRefusal(errorText(e)));
   }, [api]);
@@ -80,12 +83,31 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
     if (!setup.keys.solari) setStep("keys");
     else start();
   };
+  // The host checks the key with the provider before it saves it, so Save spins for as long as that call takes and a
+  // key the provider would not take leaves the person on this step with what it said under the field.
   const onSaveKeys = (keys: { solari: string }): void => {
     if (api?.initKeys === undefined) return;
-    void attempt(async () => {
-      setSetup(await api.initKeys!(keys));
-      start();
-    });
+    setRefusal(null);
+    setCheck(null);
+    setSaving(true);
+    void (async () => {
+      try {
+        setSetup(await api.initKeys!(keys));
+        start();
+      } catch (e) {
+        const kind = e instanceof RequestError ? e.kind : undefined;
+        if (kind === KEY_REFUSED || kind === KEY_UNCHECKED) setCheck({ line: errorText(e), retry: kind === KEY_UNCHECKED });
+        else setRefusal(errorText(e));
+      } finally {
+        setSaving(false);
+      }
+    })();
+  };
+  /** The build read the saved key and the provider refused it: back to the step that takes one, with the field clear. */
+  const onChangeKey = (): void => {
+    setCheck(null);
+    setStep("keys");
+    void api?.initGet?.().then(setSetup, () => {});
   };
   const again = (): void => {
     setStep("choice");
@@ -97,7 +119,7 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
   if (step === "choice" || setup === null) {
     body = setup === null ? <SetupScreen k="loading" label={CLOUD_SETUP_WORDS.choice.label} headline={CLOUD_SETUP_WORDS.choice.headline} top={CLOUD_SETUP_WORDS.choice.top} refusal={refusal} /> : <SetupChoice agents={setup.agents} pick={pick} onPick={setPick} onContinue={onContinueChoice} refusal={refusal} />;
   } else if (step === "keys") {
-    body = <SetupKeys setup={setup} onSave={onSaveKeys} onBack={() => setStep("choice")} refusal={refusal} />;
+    body = <SetupKeys setup={setup} onSave={onSaveKeys} onBack={() => setStep("choice")} refusal={refusal} check={check} busy={saving} />;
   } else if (job !== null && initAgentStep(job)) {
     body = (
       <SetupAgent
@@ -189,6 +211,7 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
         onCancel={() => void attempt(() => api!.initCancel!())}
         onRetry={tool => void attempt(() => api!.initRetry!({ tool }))}
         onCode={o => void attempt(() => api!.initSignInCode!(o))}
+        onChangeKey={onChangeKey}
         onOpenWorkspace={() => {
           if (job.workspace !== undefined) select(job.workspace.id);
           onClose();
