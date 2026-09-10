@@ -8,7 +8,7 @@
 // machine is paused, the sentence names the road, and the rebuild stands beside
 // a wake that can be tried again.
 import { createRoot } from "react-dom/client";
-import { wakeGaveUpLine, WAKE_ASKS_AGAIN, WAKE_ASK_EVERY_MS, type EventUnion, type SnapshotLineage, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { RESUME_CAP_MS, wakeAsksIn, wakeGaveUpLine, WAKE_ASKS_FOR_MS, WAKE_ASK_EVERY_MS, type EventUnion, type SnapshotLineage, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { MachineSurface } from "../../src/components/machine/MachineSurface";
 import type { Api } from "../../src/protocol/client";
 import { useStore } from "../../src/protocol/store";
@@ -17,8 +17,10 @@ import "../../src/index.css";
 const params = new URLSearchParams(window.location.search);
 document.documentElement.classList.toggle("dark", params.get("theme") !== "light");
 
-/** The words the host's asking left on the record once it ran out, as the runtime writes them. */
-const GAVE_UP = wakeGaveUpLine(WAKE_ASKS_AGAIN + 1, WAKE_ASKS_AGAIN * WAKE_ASK_EVERY_MS);
+const ASKS = wakeAsksIn(WAKE_ASKS_FOR_MS, WAKE_ASK_EVERY_MS);
+/** The words the host's asking left on the record once it ran out, as the runtime writes them: the last of the asks
+ * ran its cap out a cap short of the half hour. */
+const GAVE_UP = wakeGaveUpLine(ASKS, WAKE_ASKS_FOR_MS - RESUME_CAP_MS);
 const gaveUp = params.has("gave-up");
 const workspace: WorkspaceView = {
   id: "ws_b1",
@@ -35,7 +37,7 @@ const status: WorkspaceStatus = {
   reach: { state: "napping" },
   size: { cpu: 2, memMb: 4096 },
   rateUsdPerHour: 0.11,
-  ...(gaveUp ? { reason: GAVE_UP } : { wakeAsk: { ask: 3, of: WAKE_ASKS_AGAIN } }),
+  ...(gaveUp ? { reason: GAVE_UP } : { wakeAsk: { ask: 3, of: ASKS } }),
 };
 const lineage: SnapshotLineage = { name: "default", head: 12, versions: [{ version: 12, snapshotId: "snap_golden-v12", baseTemplate: "base", setupSha: "sha12", createdAt: "2026-08-22T00:00:00.000Z", smoke: { cmd: "true", exitCode: 0 } }] };
 

@@ -2,7 +2,9 @@
 import type { Clock } from "../src/clock.js";
 
 /** A clock that moves only when the test says so; advance() runs the timers that fall due, earliest first.
- * holding() counts the pending timers that would keep a real process alive. */
+ * holding() counts the pending timers that would keep a real process alive, and dueFor() says whether one is
+ * waiting on a given moment, which is how a test waits for the runtime to have scheduled a timer before it moves
+ * the clock onto it: advance() leaves the clock at its target, so a timer scheduled late fires late. */
 export function fakeClock(start = Date.now()) {
   let now = start;
   let seq = 0;
@@ -27,5 +29,11 @@ export function fakeClock(start = Date.now()) {
     }
     now = target;
   };
-  return { clock, advance, pending: () => timers.size, holding: () => [...timers.values()].filter(t => !t.unref).length };
+  return {
+    clock,
+    advance,
+    pending: () => timers.size,
+    holding: () => [...timers.values()].filter(t => !t.unref).length,
+    dueFor: (at: number) => [...timers.values()].some(t => t.at === at),
+  };
 }
