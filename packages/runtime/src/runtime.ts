@@ -118,6 +118,7 @@ import type {
   HostFolderListing,
   InitJob,
   InitJobEvent,
+  InitNeedsYouEvent,
   InitRoad,
   InitScreenId,
   InitSetup,
@@ -453,7 +454,9 @@ export interface InitDoor {
   /** Types the code a sign-in's page handed back into the tool waiting for it on the machine; refused when none is. */
   signInCode(o: { tool: string; code: string }): Promise<InitJob>;
   cancel(): Promise<InitJob>;
-  on(fn: (e: InitJobEvent) => void): () => void;
+  /** Every change to the job, and beside it the arrival of a wait on the person, which a client that speaks once per
+   * need rides rather than diffing views. */
+  on(fn: (e: InitJobEvent | InitNeedsYouEvent) => void): () => void;
 }
 
 /** One agent's result with its catalog name, for the sentence the runtime says about it. */

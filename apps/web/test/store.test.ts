@@ -2,7 +2,7 @@
 // The store's session folding: rows come from the sessions.list op, the
 // session.* events decide when to refetch and what to patch in between.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_THEME, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_THEME, type InitJob, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api, type ProtocolEvent } from "../src/protocol/client.js";
 import { LAST_WORKSPACE_KEY } from "../src/protocol/lastWorkspace.js";
 import { useStore } from "../src/protocol/store.js";
@@ -64,7 +64,7 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
 const flush = () => new Promise(r => setTimeout(r, 0));
 
 beforeEach(() => {
-  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, creations: [], sessions: {}, ready: false, gaps: 0 });
+  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, creations: [], sessions: {}, ready: false, gaps: 0 });
 });
 
 // The address is a global the store reads: a #w/<id> left behind would pick the workspace for every test after it.
@@ -503,6 +503,55 @@ describe("store sessions", () => {
     useStore.setState({ toast: null });
     await useStore.getState().renameThread({ sessionId: "s1", workspaceId: "ws_a", harness: "claude", title: "the name" });
     expect(useStore.getState().toast).toBeNull();
+  });
+
+  it("job.needs-you is a toast in the app's own words with an Open that opens the setup, and dismissing it takes the action too", async () => {
+    const { api, emit } = fakeApi([view("ws_a")], []);
+    useStore.getState().bind(api);
+    await flush();
+    emit({ type: "job.needs-you", jobId: "init_1", needsYou: { what: "sign in to GitHub CLI login", since: 1_760_000_000_000 } });
+    expect(useStore.getState().toast).toBe("wsp needs you: sign in to GitHub CLI login");
+    const action = useStore.getState().toastAction!;
+    expect(action).toMatchObject({ for: "wsp needs you: sign in to GitHub CLI login", word: "Open" });
+    expect(useStore.getState().setupOpen).toBe(false);
+    action.run();
+    expect(useStore.getState().setupOpen).toBe(true);
+    useStore.getState().clearToast();
+    expect([useStore.getState().toast, useStore.getState().toastAction]).toEqual([null, null]);
+  });
+
+  it("the need's toast goes when the need does: the row moving on, another need, and the job ending each take it away, and a toast said elsewhere is left alone", async () => {
+    const { api, emit } = fakeApi([view("ws_a")], []);
+    useStore.getState().bind(api);
+    await flush();
+    const job = (over: Partial<InitJob> = {}): InitJob => ({ id: "init_1", road: "manual", phase: "signing-in", keys: { solari: true }, step: 0, stoppable: true, screens: [], rows: [], progress: { done: 1, total: 2 }, log: [], ...over });
+    const need = { what: "sign in to GitHub CLI login", since: 1_760_000_000_000 };
+    const line = "wsp needs you: sign in to GitHub CLI login";
+
+    // A view of the same standing need leaves the toast where it is.
+    emit({ type: "job.needs-you", jobId: "init_1", needsYou: need });
+    emit({ type: "init.job", job: job({ needsYou: need }) });
+    expect(useStore.getState().toast).toBe(line);
+
+    // The row moved on: the view carries no need, so the sentence goes with it and the action with the sentence.
+    emit({ type: "init.job", job: job() });
+    expect([useStore.getState().toast, useStore.getState().toastAction]).toEqual([null, null]);
+
+    // The next need takes the slot, and a view carrying only the older one does not resurrect it.
+    emit({ type: "job.needs-you", jobId: "init_1", needsYou: need });
+    emit({ type: "init.job", job: job({ needsYou: { what: "sign in to Claude Code login", since: 1_760_000_002_000 } }) });
+    expect(useStore.getState().toast).toBeNull();
+
+    // A job that ends while a need's toast stands takes it away too, the last view being one with no need on it.
+    emit({ type: "job.needs-you", jobId: "init_1", needsYou: need });
+    expect(useStore.getState().toast).toBe(line);
+    emit({ type: "init.job", job: job({ phase: "done" }) });
+    expect([useStore.getState().toast, useStore.getState().toastAction]).toEqual([null, null]);
+
+    // A toast from anywhere else has no action beside it, so a job view is not allowed to clear it.
+    useStore.setState({ toast: "runtime unreachable" });
+    emit({ type: "init.job", job: job({ needsYou: need }) });
+    expect(useStore.getState().toast).toBe("runtime unreachable");
   });
 
   it("workspace.deleted drops the workspace's rows", async () => {
