@@ -575,12 +575,22 @@ describe("the cloud setup sheet", () => {
     await waitFor(() => expect(document.querySelector('[data-k=option][data-value="key"]')).not.toBeNull());
     fireEvent.click(document.querySelector<HTMLElement>('[data-k=option][data-value="key"]')!);
     await waitFor(() => expect(claude.querySelector("[data-k=key-field]")).not.toBeNull());
+    // The pick closes the menu and hands focus back to the trigger, so the next row's picker opens on its own click.
+    await waitFor(() => expect(document.querySelector("[data-k=option]")).toBeNull());
+    expect(picker.getAttribute("aria-expanded")).not.toBe("true");
+    await waitFor(() => expect(document.activeElement).toBe(picker));
+    const ghPicker = dialog.querySelector<HTMLElement>('[data-row="logins/gh"] [data-k=answer]')!;
+    fireEvent.click(ghPicker);
+    await waitFor(() => expect(document.querySelector('[data-k=option][data-value="machine"]')).not.toBeNull());
+    fireEvent.click(document.querySelector<HTMLElement>('[data-k=option][data-value="machine"]')!);
+    await waitFor(() => expect(ghPicker.getAttribute("data-value")).toBe("machine"));
+    await waitFor(() => expect(document.querySelector("[data-k=option]")).toBeNull());
     expect(claude.querySelector("[data-k=key-field]")!.textContent).toContain("ANTHROPIC_API_KEY");
     expect(claude.querySelector("[data-k=key-state]")!.textContent).toBe(CLOUD_SETUP_WORDS.keys.unset);
     fireEvent.change(claude.querySelector("input")!, { target: { value: "sk-ant-x-typed" } });
     fireEvent.click(k(dialog, "primary"));
     await waitFor(() => expect(api.initKeys).toHaveBeenCalledWith({ rows: { "logins/claude": "sk-ant-x-typed" } }));
-    await waitFor(() => expect(api.initAnswer).toHaveBeenCalledWith({ screen: "logins", ticks: [], answers: { "logins/claude": "key", "logins/gh": "copy", "logins/kube": "skip" } }));
+    await waitFor(() => expect(api.initAnswer).toHaveBeenCalledWith({ screen: "logins", ticks: [], answers: { "logins/claude": "key", "logins/gh": "machine", "logins/kube": "skip" } }));
     expect(dialog.textContent).not.toContain("sk-ant-x-typed");
     // The screen after the sign-ins is the build's question, counted as the fifth: the wsp screen is not shown.
     await waitFor(() => expect(k(dialog, "ask")).toBeDefined());
