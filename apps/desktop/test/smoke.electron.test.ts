@@ -362,6 +362,10 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     await page.waitForSelector("#agents:not([hidden])");
     expect(await page.isHidden("#welcome")).toBe(true);
     expect(await page.textContent("#agents h1")).toBe("Let your agents drive wsp");
+    // No caps label over the title, and Enter put no ring on the keycap: a ring comes only where the keyboard puts the focus.
+    expect(await page.$$eval(".micro", els => els.length)).toBe(0);
+    expect(await page.$eval("#agents", el => el.firstElementChild?.tagName.toLowerCase())).toBe("h1");
+    expect(await page.$$eval(":focus-visible", els => els.length)).toBe(0);
     // Every catalog agent is a row: the two found first with the keycap, then, dimmed and with the state word in place
     // of a button, those whose command is not on this computer; each group in catalog order, no version anywhere.
     const here = (a: { id: string }): boolean => a.id === "claude" || a.id === "codex";
@@ -369,12 +373,14 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(rows).toEqual([...CATALOG_AGENTS.filter(here), ...CATALOG_AGENTS.filter(a => !here(a))].map(a => [a.id, a.name, here(a) ? "Add MCP" : "not installed", !here(a)]));
     expect(await page.$$eval("#rows li.absent button", els => els.length)).toBe(0);
     for (const meta of await page.$$eval("#rows li .meta", els => els.map(e => e.textContent))) expect(meta).not.toMatch(/^v\d/);
+    // A found row's slot is never blank: it says the count is being read until the count lands.
+    for (const meta of await page.$$eval("#rows li:not(.absent) .meta", els => els.map(e => e.textContent))) expect(meta).toMatch(/^(reading sessions|\d+ sessions?)$/);
     expect(await page.textContent("#all")).toContain("Add to all");
     // The marks are the web app's vendored svgs, masked in the current colour; an agent without one gets its initial.
     expect(await page.$eval("#rows li[data-agent=claude] .glyph", el => (el as HTMLElement).style.getPropertyValue("--mark"))).toContain("agents/claude.svg");
     expect(await page.$eval("#rows li[data-agent=hermes] .initial", el => el.textContent)).toBe("H");
     // The session counts land after the rows, read off the stores, which here are empty.
-    await page.waitForFunction(() => /sessions$/.test(document.querySelector("#rows li[data-agent=claude] .meta")?.textContent ?? ""), undefined, { timeout: 30_000 });
+    await page.waitForFunction(() => /^\d+ sessions?$/.test(document.querySelector("#rows li[data-agent=claude] .meta")?.textContent ?? ""), undefined, { timeout: 30_000 });
     expect(await page.textContent("#rows li[data-agent=claude] .meta")).toBe("0 sessions");
     expect(await page.textContent("#skip")).toBe("Skip");
     expect(await page.isEnabled("#all")).toBe(true);
@@ -395,6 +401,8 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     await page.keyboard.press("Escape");
     await page.waitForSelector("#recap:not([hidden])");
     expect(await page.textContent("#recap h1")).toBe("This computer is your first workspace");
+    expect(await page.$eval("#recap", el => el.firstElementChild?.tagName.toLowerCase())).toBe("h1");
+    expect(await page.$$eval(":focus-visible", els => els.length)).toBe(0);
     expect(await page.textContent("#happened")).toBe("Recorded as your workspace, with the wsp tools added to 1 agent.");
     expect(await page.isVisible("#later")).toBe(true);
     expect(await page.textContent("#open")).toContain("Open wsp");
