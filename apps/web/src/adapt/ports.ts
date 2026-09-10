@@ -6,6 +6,7 @@
 // fold the same way. processName is the daemon's /proc/<pid>/comm read, null
 // when it could not read one.
 import type { DaemonEvent, EventUnion } from "@wsp/protocol";
+import { loopbackUrl } from "../browser/url.js";
 import type { PreviewableServer } from "./view-model.js";
 
 export interface KnownPort {
@@ -120,7 +121,7 @@ export interface PreviewableServersInput {
 
 export function toPreviewableServers(input: PreviewableServersInput): PreviewableServer[] {
   return input.ports.map(p => {
-    const requestedUrl = `http://localhost:${p.port}`;
+    const requestedUrl = loopbackUrl(p.port);
     return {
       host: "localhost",
       port: p.port,

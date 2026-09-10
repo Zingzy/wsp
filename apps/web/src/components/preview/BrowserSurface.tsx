@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The right panel's browser surface: the copied chrome row over an iframe on
-// the route the runtime mints for one guest port. The servers list is the
-// workspace's port directory; recents live in local storage per workspace.
-// The bar shows the route without its token; copy and the frame keep it.
+// the route the runtime mints for one guest port, with the tab's path on it.
+// The servers list is the workspace's port directory; recents live in local
+// storage per workspace. The bar shows the loopback address; copy and the
+// frame keep the route and its token.
 import { Check, Copy, Laptop } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { stoppedSentence, toPreviewableServers } from "../../adapt/ports.js";
 import { useStoppedPort, useWorkspacePorts, useWorkspacePortsSeeded } from "../../browser/model.js";
 import { recordVisit, removeVisit, useRecents } from "../../browser/recents.js";
 import { useProbedRoute } from "../../browser/refusal.js";
-import { currentPort, useBrowserTab, useBrowserTabs, ZOOM_STEP } from "../../browser/tabs.js";
-import { elideToken, loopbackUrl, parsePortInput } from "../../browser/url.js";
+import { currentAddress, useBrowserTab, useBrowserTabs, ZOOM_STEP } from "../../browser/tabs.js";
+import { frameSrc, loopbackAddress, loopbackUrl, parseAddress, type Address } from "../../browser/url.js";
 import { useForwarded } from "../../protocol/store.js";
 import { useRightPanelStore, type RightPanelSurface } from "../../rightPanelStore.js";
 import { clockLabel } from "../machine/format.js";
@@ -38,10 +39,11 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
   const [hint, setHint] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const port = currentPort(tab);
+  const address = currentAddress(tab);
+  const port = address?.port ?? null;
   const { reach, refusal } = useProbedRoute(workspaceId, port, tab?.reloadNonce ?? 0);
-  const realUrl = reach.state === "ready" ? reach.reach.url : null;
-  const shownUrl = realUrl !== null ? elideToken(realUrl) : port !== null ? loopbackUrl(port) : "";
+  const realUrl = reach.state === "ready" && address !== null ? frameSrc(reach.reach.url, address.path) : null;
+  const shownUrl = address !== null ? loopbackAddress(address.port, address.path) : "";
   const listening = port === null || !portsSeeded || ports.some(p => p.port === port);
   const stopped = useStoppedPort(workspaceId, port);
   const sentence = listening ? "" : stoppedSentence(port, stopped, clockLabel);
@@ -61,20 +63,20 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
     if (tabId !== null && realUrl !== null && listening && !prev.listening && prev.port === port) tabs.reload(workspaceId, tabId);
   }, [port, listening, realUrl, tabId, workspaceId, tabs]);
 
-  const framePort = (next: number): void => {
+  const frameAddress = (next: Address): void => {
     setHint(null);
     if (tabId === null) openBrowser(workspaceId, tabs.createTab(workspaceId, next));
     else tabs.navigate(workspaceId, tabId, next);
-    setRecents(prev => recordVisit(prev, loopbackUrl(next), Date.now()));
+    setRecents(prev => recordVisit(prev, loopbackUrl(next.port, next.path), Date.now()));
   };
 
   const openUrl = (url: string): void => {
-    const next = parsePortInput(url);
+    const next = parseAddress(url);
     if (next === null) {
       setHint(UNFRAMEABLE);
       return;
     }
-    framePort(next);
+    frameAddress(next);
   };
 
   const copyUrl = (): void => {
@@ -102,7 +104,7 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
         onOpenInBrowser={realUrl !== null ? openOutside : undefined}
         trailingActions={
           <>
-            {forwarded && port !== null ? <OpenOnLaptopButton port={port} /> : null}
+            {forwarded && address !== null ? <OpenOnLaptopButton address={address} /> : null}
             {realUrl !== null ? <CopyUrlButton url={realUrl} /> : null}
             <PreviewMoreMenu
               tabId={tabId}
@@ -160,7 +162,7 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
               </Empty>
             ) : framed ? (
               <iframe
-                key={`${port}:${tab?.reloadNonce ?? 0}`}
+                key={`${loopbackUrl(port, address?.path)}:${tab?.reloadNonce ?? 0}`}
                 title={`:${port}`}
                 src={realUrl}
                 onLoad={() => setLoading(false)}
@@ -181,7 +183,8 @@ export function BrowserSurface({ workspaceId, surface }: { workspaceId: string; 
 }
 
 /** Shown only while the host forwards this port: localhost:<port> on this computer reaches the workspace. */
-function OpenOnLaptopButton({ port }: { port: number }) {
+function OpenOnLaptopButton({ address }: { address: Address }) {
+  const here = loopbackAddress(address.port, address.path);
   return (
     <Tooltip>
       <TooltipTrigger
@@ -191,13 +194,13 @@ function OpenOnLaptopButton({ port }: { port: number }) {
             size="icon-xs"
             type="button"
             aria-label="Open on laptop"
-            onClick={() => window.open(loopbackUrl(port), "_blank", "noopener,noreferrer")}
+            onClick={() => window.open(loopbackUrl(address.port, address.path), "_blank", "noopener,noreferrer")}
           />
         }
       >
         <Laptop />
       </TooltipTrigger>
-      <TooltipPopup>Open localhost:{port} on this computer</TooltipPopup>
+      <TooltipPopup>Open {here} on this computer</TooltipPopup>
     </Tooltip>
   );
 }

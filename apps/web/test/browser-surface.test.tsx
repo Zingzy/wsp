@@ -26,7 +26,7 @@ const workspace = (id: string, phase: WorkspaceView["phase"] = "running"): Works
 });
 
 const PUBLIC = (port: number, token = "e") => `https://m1-${port}.preview.example/?pt_token=${token}`;
-const SHOWN = (port: number) => `https://m1-${port}.preview.example/`;
+const SHOWN = (port: number, path = "") => `localhost:${port}${path}`;
 const mint: Api["portReach"] = async (_id, port) => ({ url: PUBLIC(port), expiresAt: Date.now() + 3_600_000 });
 
 function fakeApi(workspaces: WorkspaceView[], portReach: Api["portReach"] = mint, portProbe?: Api["portProbe"]) {
@@ -173,6 +173,31 @@ describe("framing a port", () => {
     fireEvent.keyDown(address(), { key: "Enter" });
     await screen.findByTitle(":4000");
     expect(screen.queryByTitle(":3000")).toBeNull();
+  });
+
+  it("a typed path rides on the port's route with the token beside its query; the bar, the tab and the recent carry it", async () => {
+    await setup();
+    act(() => address().focus());
+    fireEvent.change(address(), { target: { value: "localhost:3000/about?x=1" } });
+    fireEvent.keyDown(address(), { key: "Enter" });
+    const f = await screen.findByTitle(":3000");
+    expect(f.getAttribute("src")).toBe("https://m1-3000.preview.example/about?pt_token=e&x=1");
+    expect(address().value).toBe(SHOWN(3000, "/about?x=1"));
+    expect(address().value).not.toContain("pt_token");
+    expect(screen.getByRole("button", { name: "Close :3000/about?x=1" })).toBeDefined();
+
+    // A new path on the same port mounts a fresh frame rather than moving a mounted one, which would push a history entry.
+    act(() => address().focus());
+    fireEvent.change(address(), { target: { value: "3000/docs" } });
+    fireEvent.keyDown(address(), { key: "Enter" });
+    await waitFor(() => expect(screen.getByTitle(":3000").getAttribute("src")).toBe("https://m1-3000.preview.example/docs?pt_token=e"));
+    expect(screen.getByTitle(":3000")).not.toBe(f);
+    expect(address().value).toBe(SHOWN(3000, "/docs"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(screen.getByRole("button", { name: /^localhost:3000\/about\?x=1/ }));
+    await waitFor(() => expect(screen.getByTitle(":3000").getAttribute("src")).toBe("https://m1-3000.preview.example/about?pt_token=e&x=1"));
   });
 
   it("back returns to the servers list and forward re-frames the port", async () => {
@@ -430,5 +455,19 @@ describe("open on laptop", () => {
     emit({ type: "forward.close", workspaceId: WS, port: 5173 });
     emit({ type: "forward.open", forward: { workspaceId: OTHER, port: 5173, startedAt: "2026-09-04T10:00:00.000Z", name: "other", kind: "url" } });
     await waitFor(() => expect(screen.queryByRole("button", { name: "Open on laptop" })).toBeNull());
+  });
+
+  it("opens the tab's path on this computer, not the port's root", async () => {
+    const opened = vi.fn(() => null);
+    vi.stubGlobal("open", opened);
+    const { emit } = await setup();
+    act(() => address().focus());
+    fireEvent.change(address(), { target: { value: "localhost:5173/about?x=1" } });
+    fireEvent.keyDown(address(), { key: "Enter" });
+    await screen.findByTitle(":5173");
+    emit({ type: "forward.open", forward: { workspaceId: WS, port: 5173, startedAt: "2026-09-04T10:00:00.000Z", name: "api", kind: "url" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Open on laptop" }));
+    expect(opened).toHaveBeenCalledWith("http://localhost:5173/about?x=1", "_blank", "noopener,noreferrer");
+    emit({ type: "forward.close", workspaceId: WS, port: 5173 });
   });
 });
