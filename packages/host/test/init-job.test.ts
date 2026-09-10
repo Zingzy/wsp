@@ -11,7 +11,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SNAPSHOT_STORAGE, checkProviderKey, type BackendPricing } from "@wsp/engine";
-import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_SIGN_IN_WORDS, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, Recipe, SIGN_IN_OPEN_STATE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, keyRefusedLine, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_SIGN_IN_WORDS, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, Recipe, SIGN_IN_OPEN_STATE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, keyRefusedLine, keyUncheckedLine, noMcpServersLine, SAVED_KEY_STOPPED_LINE, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
 import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localWiring, type Keys } from "../src/cli.js";
@@ -593,8 +593,12 @@ describe("the init job, manual road", () => {
     expect(stopped.phase).toBe("failed");
     expect(stopped.error).toBe(savedKeyRefusedLine("401 Unauthorized"));
     expect(stopped.keyRefused).toBe(true);
-    // Never the generic sentence, and never a machine: the refusal was read before anything could boot.
-    expect(stopped.log.join("\n")).not.toContain("Nothing was booted");
+    // The run says the refusal and then the one way on; never the generic sentence, and never a machine, since the
+    // refusal was read before anything could boot.
+    const said = stopped.log.join("\n");
+    expect(said).toContain(savedKeyRefusedLine("401 Unauthorized"));
+    expect(said).toContain(SAVED_KEY_STOPPED_LINE);
+    expect(said).not.toContain("Nothing was booted");
     expect(f.backend.machines).toEqual([]);
     expect(f.backend.keyChecks).toBe(1);
   });

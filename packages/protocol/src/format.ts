@@ -1316,11 +1316,10 @@ export function keyUncheckedLine(said: string): string {
   return `${CLOUD_SETUP_WORDS.keys.unchecked}: ${said}`;
 }
 
-/** What a terminal run says when the saved key was refused before its first stage. It never falls back to the line
- * about nothing being booted: that sentence left the provider's refusal in the run log alone. */
-export function savedKeyStoppedLine(line: string): string {
-  return `${line}. Save a key Solari takes and run wsp init again; nothing booted, and the recipe is kept.`;
-}
+/** How a terminal run closes when the check stopped it before the first stage. The refusal itself is said above this
+ * line, so this one carries the way on alone and never the sentence about nothing being booted, which is what left
+ * the provider's own word in the run log. */
+export const SAVED_KEY_STOPPED_LINE = "Save a key Solari takes and run wsp init again; nothing booted, and the recipe is kept.";
 
 /** What the machine the build boots costs, said once under the key screen's title from the backend's own rate. */
 export function initCostLine(size: WorkspaceSize, rateUsdPerHour: number): string {

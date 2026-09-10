@@ -16,6 +16,8 @@ import { FIELD_LABEL, LONE_FIELD } from "./rows.js";
 import { SetupScreen } from "./SetupScreen.js";
 
 const CONSOLE_URL = `https://${SOLARI_CONSOLE}`;
+const FIELD_ID = "setup-key-solari";
+const CHECK_ID = `${FIELD_ID}-check`;
 
 /** What the provider said about the key last pressed: the line under the field, and whether pressing again is worth
  * anything, which is true of a check nothing answered and false of a key the provider refused. */
@@ -27,19 +29,27 @@ export interface KeyCheckShown {
 export function SetupKeys({ setup, onSave, onBack, refusal, check = null, busy = false }: { setup: InitSetup; onSave: (keys: { solari: string }) => void; onBack: () => void; refusal: string | null; check?: KeyCheckShown | null; busy?: boolean }) {
   const words = CLOUD_SETUP_WORDS.keys;
   const [solari, setSolari] = useState("");
-  const ready = solari.trim() !== "";
-  const save = (): void => onSave({ solari: solari.trim() });
+  // The key the last press sent, so what the provider said about it goes as soon as the field holds something else:
+  // a refusal standing over a freshly typed key would be describing a key that is no longer there.
+  const [sent, setSent] = useState<string | null>(null);
+  const typed = solari.trim();
+  const ready = typed !== "";
+  const save = (): void => {
+    setSent(typed);
+    onSave({ solari: typed });
+  };
+  const said = check !== null && sent === typed ? check : null;
   const top = setup.pricing !== null ? `${words.top}. ${initCostLine(setup.pricing.size, setup.pricing.rateUsdPerHour)}` : words.top;
   return (
-    <SetupScreen k="keys" headline={words.headline} top={top} refusal={refusal} primary={{ word: check?.retry === true ? words.retry : words.keycap, onPress: save, disabled: !ready, focus: false, busy, title: words.pasteFirst }} secondary={{ word: CLOUD_SETUP_WORDS.screen.back, onPress: onBack }}>
+    <SetupScreen k="keys" headline={words.headline} top={top} refusal={refusal} primary={{ word: said?.retry === true ? words.retry : words.keycap, onPress: save, disabled: !ready, focus: false, busy, title: words.pasteFirst }} secondary={{ word: CLOUD_SETUP_WORDS.screen.back, onPress: onBack }}>
       <div className="flex w-full flex-col gap-2">
-        <label htmlFor="setup-key-solari" className={FIELD_LABEL}>
+        <label htmlFor={FIELD_ID} className={FIELD_LABEL}>
           {words.solari}
         </label>
-        <Input id="setup-key-solari" type="password" size="compact" autoComplete="off" spellCheck={false} autoFocus value={solari} placeholder={setup.keys.solari ? "••••••••" : words.placeholder} aria-invalid={check !== null} aria-describedby={check !== null ? "setup-key-solari-check" : undefined} onChange={e => setSolari(e.target.value)} onKeyDown={e => (e.key === "Enter" && ready && !busy ? save() : undefined)} className={cn(LONE_FIELD, "min-w-0")} />
-        {check !== null ? (
-          <p id="setup-key-solari-check" data-k="key-check" className="break-words font-mono text-xs text-destructive-foreground">
-            {check.line}
+        <Input id={FIELD_ID} type="password" size="compact" autoComplete="off" spellCheck={false} autoFocus value={solari} placeholder={setup.keys.solari ? "••••••••" : words.placeholder} aria-invalid={said !== null} aria-describedby={said !== null ? CHECK_ID : undefined} onChange={e => setSolari(e.target.value)} onKeyDown={e => (e.key === "Enter" && ready && !busy ? save() : undefined)} className={cn(LONE_FIELD, "min-w-0")} />
+        {said !== null ? (
+          <p id={CHECK_ID} data-k="key-check" className="break-words font-mono text-xs text-destructive-foreground">
+            {said.line}
           </p>
         ) : null}
       </div>

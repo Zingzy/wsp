@@ -77,6 +77,15 @@ export function SetupBuild({ job, onCancel, onRetry, onCode, onOpenWorkspace, on
       </SetupScreen>
     );
   }
+  // A run that stopped before its first stage has no rows to count, so the count line and the card would be an empty
+  // frame with a bar at nothing: the sentence and the way on stand alone.
+  if (rows.length === 0) {
+    return (
+      <SetupScreen k="build" headline={headline} top={job.error ?? words.top} refusal={refusal} {...(primary !== undefined ? { primary } : {})} {...(secondary !== undefined ? { secondary } : {})} {...(building ? { note: asking ? words.cancelWhy : words.keeps } : {})}>
+        {keep}
+      </SetupScreen>
+    );
+  }
   return (
     <SetupScreen k="build" headline={headline} top={job.error ?? words.top} refusal={refusal} {...(primary !== undefined ? { primary } : {})} {...(secondary !== undefined ? { secondary } : {})} {...(building ? { note: asking ? words.cancelWhy : words.keeps } : {})}>
       <p data-k="count" className={cn(META, "mb-2 w-full text-right")}>

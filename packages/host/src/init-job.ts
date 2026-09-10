@@ -774,7 +774,7 @@ export class InitJobs implements InitDoor {
         if (text("dest") !== undefined) had.detail = text("dest")!;
         break;
       }
-      case "key-check":
+      case "key-check-failed":
         // The build's own read of the saved key, before its first stage: the provider's word is the failure, and a
         // refusal names the step that fixes it rather than offering another build.
         s.phase = "failed";

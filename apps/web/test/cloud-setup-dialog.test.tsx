@@ -335,6 +335,10 @@ describe("the cloud setup sheet", () => {
     expect(k(t.dialog, "primary").textContent).toContain(CLOUD_SETUP_WORDS.keys.keycap);
     expect(t.api.initStart).not.toHaveBeenCalled();
     expect(t.dialog.textContent).not.toContain("slr_live_wrong");
+    // Typing another key takes the refusal with it: it was about the key that was sent, not about this one.
+    fireEvent.change(field, { target: { value: "slr_live_another" } });
+    await waitFor(() => expect(t.dialog.querySelector("[data-k=key-check]")).toBeNull());
+    expect(t.dialog.querySelector("input")!.getAttribute("aria-invalid")).toBe("false");
   });
 
   it("a check nothing answered says so in the same place, and the keycap turns to Try again", async () => {

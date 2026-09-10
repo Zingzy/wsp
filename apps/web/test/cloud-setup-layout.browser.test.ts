@@ -9,13 +9,16 @@
 // rows of 48 px, the agent step's mono block with its spinner and the two ways
 // on once its turn stopped, the disk meter inline after the tally on the steps
 // that change the image's size, sizes coloured by weight, state words that read
-// at AA, nothing animating at rest and no badge. Photographed at each. Runs only
-// when asked for (WSP_RENDER=1) and skips without Playwright's Chromium.
+// at AA, nothing animating at rest and no badge; then two states of a step: a
+// key the provider refused, under the field in the danger tone, and a saved key
+// refused before the build's first stage with the way back to the keys step.
+// Photographed at each. Runs only when asked for (WSP_RENDER=1) and skips
+// without Playwright's Chromium.
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
-import { CLOUD_SETUP_WORDS } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, keyRefusedLine, savedKeyRefusedLine } from "@wsp/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { textContrast } from "./contrast";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
@@ -35,11 +38,13 @@ interface Box {
 
 /** Every step the sheet has, in the order a person meets them. */
 const STEPS = ["choice", "keys", "agent", "agent-stopped", "reading", "agents", "tools", "also", "logins", "ask", "building", "signing", "retry", "done", "failed"] as const;
-type StepName = (typeof STEPS)[number];
+/** States of a step rather than steps of the walk: each is photographed on its own, not walked with the rest. */
+const STATES = ["keys-refused", "failed-key"] as const;
+type StepName = (typeof STEPS)[number] | (typeof STATES)[number];
 /** The answer steps, which carry their count over the title. */
 const COUNTED: ReadonlySet<StepName> = new Set<StepName>(["agents", "tools", "also", "logins", "ask"]);
 /** The frame's data-k for each, where it differs from the step's own name. */
-const FRAME: Record<StepName, string> = { choice: "choice", keys: "keys", agent: "agent", "agent-stopped": "agent", reading: "reading", agents: "screen-agents", tools: "screen-tools", also: "screen-also", logins: "screen-logins", ask: "ask", building: "build", signing: "build", retry: "build", done: "build", failed: "build" };
+const FRAME: Record<StepName, string> = { choice: "choice", keys: "keys", "keys-refused": "keys", agent: "agent", "agent-stopped": "agent", reading: "reading", agents: "screen-agents", tools: "screen-tools", also: "screen-also", logins: "screen-logins", ask: "ask", building: "build", signing: "build", retry: "build", done: "build", failed: "build", "failed-key": "build" };
 /** The steps whose tally carries the disk meter: the ones that change the image's size. */
 const METERED = new Set<StepName>(["agents", "tools", "also"]);
 /** The first launch's numbers: what every step is measured against. */
@@ -422,6 +427,50 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     const stopped = join(SHOTS, `cloud-setup-agent-stopped-${theme}.png`);
     await page!.screenshot({ path: stopped });
     console.info(`cloud setup agent stopped ${theme}: ${stopped}`);
+  }, 120_000);
+
+  it.each(["dark", "light"] as const)("in the %s theme a key the provider refused reads under the field in the danger tone with the field itself in it, and a saved key refused at build time offers Change the key", async theme => {
+    await page!.setViewportSize({ ...VIEWPORTS[0] });
+    let frame = await goTo("keys-refused", theme);
+    await page!.waitForSelector(`${frame} [data-k=key-check]`);
+    // The provider's own word under the field, inside the column, not in the footer's slot.
+    const line = await box(`${frame} [data-k=key-check]`);
+    const field = await box(`${frame} #setup-key-solari`);
+    expect(line.y, "the refusal is under the field").toBeGreaterThan(field.y + field.height - 1);
+    expect(line.x, "and starts where the field does").toBeGreaterThanOrEqual(field.x - 1);
+    expect(await page!.locator(`${frame} [data-k=key-check]`).textContent()).toBe(keyRefusedLine("401 Unauthorized"));
+    expect(await page!.locator(`${frame} [data-k=refusal]`).count(), "not the footer's slot").toBe(0);
+    // The danger tone on both: the field's border and the line's own colour, the same token.
+    const [border = ""] = await style(`${frame} #setup-key-solari`, "border-top-color");
+    const [ink = ""] = await style(`${frame} [data-k=key-check]`, "color");
+    const [quiet = ""] = await style(`${frame} [data-k=sentence]`, "color");
+    expect(border, "the field carries the danger tone").not.toBe(quiet);
+    expect(ink, "and so does its line").not.toBe(quiet);
+    expect(await page!.locator(`${frame} #setup-key-solari`).getAttribute("aria-invalid")).toBe("true");
+    // The person is still on this step, with Save to press again, and nothing of the key is on the page.
+    expect(await page!.locator(`${frame} [data-k=primary]`).textContent()).toContain(CLOUD_SETUP_WORDS.keys.keycap);
+    expect(await page!.locator("[role=dialog]").textContent()).not.toContain("slr_live_fake_wrong_key");
+    expect(await page!.locator(`${frame} #setup-key-solari`).getAttribute("type")).toBe("password");
+    const refused = join(SHOTS, `cloud-setup-keys-refused-${theme}.png`);
+    await page!.screenshot({ path: refused });
+    console.info(`cloud setup keys refused ${theme}: ${refused}`);
+    // The saved key refused before the first stage: the provider's line as the step's sentence, no stage rows, and
+    // the keycap that goes back to the keys step rather than another build.
+    frame = await goTo("failed-key", theme);
+    expect(await page!.locator(`${frame} [data-k=title]`).textContent()).toBe(CLOUD_SETUP_WORDS.build.failed);
+    expect(await page!.locator(`${frame} [data-k=sentence]`).textContent()).toBe(savedKeyRefusedLine("401 Unauthorized"));
+    expect(await page!.locator("[role=dialog]").textContent(), "never the generic sentence").not.toContain("Nothing was booted");
+    expect(await page!.locator(`${frame} [data-k=primary]`).textContent()).toContain(CLOUD_SETUP_WORDS.keys.changeKey);
+    // No stage ran, so there is no count and no empty card with a bar at nothing.
+    expect(await page!.locator(`${frame} [data-k=count]`).count()).toBe(0);
+    expect(await page!.locator(`${frame} [data-k=card]`).count()).toBe(0);
+    const stopped = join(SHOTS, `cloud-setup-failed-key-${theme}.png`);
+    await page!.screenshot({ path: stopped });
+    console.info(`cloud setup failed key ${theme}: ${stopped}`);
+    // It goes back to the step that takes a key, with the field clear.
+    await page!.locator(`${frame} [data-k=primary]`).click();
+    await page!.waitForSelector('[role=dialog] [data-k="keys"]');
+    expect(await page!.locator('[role=dialog] [data-k="keys"] [data-k=key-check]').count()).toBe(0);
   }, 120_000);
 
   it.each(["dark", "light"] as const)("in the %s theme the button is alive while the job runs: the spinner in the glyph's place, the stage word and count, a 2 px line inside the bottom edge at the stages done over the total, paused and waiting for you at a sign-in, the line kept under reduced motion", async theme => {
