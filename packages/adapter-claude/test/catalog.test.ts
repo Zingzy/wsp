@@ -19,15 +19,15 @@ describe("catalogProbeCommand", () => {
   });
 
   it("exports the base env a session gets, PATH included, so a probe served by a bare-PATH exec still finds the binary", () => {
-    const cmd = catalogProbeCommand({ configDir: "/root/.claude-cfg", baseEnv: { PATH: "/root/.local/bin:/usr/bin", CLAUDECODE: "1" } });
+    const cmd = catalogProbeCommand({ baseEnv: { PATH: "/root/.local/bin:/usr/bin", CLAUDECODE: "1" } });
     expect(cmd).toContain("export ");
     expect(cmd).toContain("PATH='/root/.local/bin:/usr/bin'");
     expect(cmd).not.toContain("CLAUDECODE=1");
-    expect(catalogProbeCommand({ configDir: "/root/.claude-cfg" })).not.toContain("PATH=");
+    expect(catalogProbeCommand()).not.toContain("PATH=");
   });
 
   it("asks for the version, the help and one initialize handshake, and never a prompt", () => {
-    const cmd = catalogProbeCommand({ configDir: "/root/.claude-cfg" });
+    const cmd = catalogProbeCommand();
     expect(cmd).toContain("claude --version");
     expect(cmd).toContain("claude --help");
     expect(cmd).toContain("--bare");
@@ -47,7 +47,7 @@ describe("catalogProbeCommand", () => {
     execFileSync("mkdir", [bin]);
     writeFileSync(join(bin, "claude"), "#!/bin/sh\ncat >/dev/null; echo CALL; env\n");
     chmodSync(join(bin, "claude"), 0o755);
-    const out = execFileSync("bash", ["-c", catalogProbeCommand({ configDir: "/root/.claude-cfg" })], {
+    const out = execFileSync("bash", ["-c", catalogProbeCommand({ baseEnv: { CLAUDE_CONFIG_DIR: "/root/.claude-cfg" } })], {
       encoding: "utf8",
       env: { PATH: `${bin}:/usr/bin:/bin`, HOME: dir, CLAUDECODE: "1", CLAUDE_CODE_ENTRYPOINT: "cli", FORCE_CODE_TERMINAL: "1" },
     });
@@ -55,10 +55,6 @@ describe("catalogProbeCommand", () => {
     expect(out.match(/^CLAUDE_CONFIG_DIR=\/root\/\.claude-cfg$/gm)).toHaveLength(3);
     expect(out).not.toMatch(/^CLAUDECODE=|^CLAUDE_CODE_ENTRYPOINT=|^FORCE_CODE_TERMINAL=/m);
     expect(out.match(/^CLAUDE_CODE_AUTO_CONNECT_IDE=0$/gm)).toHaveLength(3);
-  });
-
-  it("refuses a relative config dir, as the session env does", () => {
-    expect(() => catalogProbeCommand({ configDir: ".claude-cfg" })).toThrow(/absolute/);
   });
 });
 

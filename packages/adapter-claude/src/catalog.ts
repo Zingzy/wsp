@@ -39,11 +39,12 @@ type ClaudeModel = HarnessCatalogModelProbe & { efforts: string[]; contextWindow
  * handshake answers in about a second and the user's SessionStart hooks do not run
  * on a probe. `cd ~` for the same reason as a session: guest exec carries no HOME.
  * The handshake still writes .claude.json into the config dir it sees, so the probe
- * runs under the session's CLAUDE_CONFIG_DIR, never HOME, and drops every inherited
- * CLAUDE_CODE_* mark the way the session env does (the exec shell is bash).
+ * runs under the same environment as a session, the login's config dir included, and
+ * drops every inherited CLAUDE_CODE_* mark the way the session env does (the exec
+ * shell is bash).
  */
-export function catalogProbeCommand(options: { configDir: string; baseEnv?: Readonly<Record<string, string | undefined>> }): string {
-  const env = buildEnv({ base: options.baseEnv, configDir: options.configDir });
+export function catalogProbeCommand(options: { baseEnv?: Readonly<Record<string, string | undefined>> } = {}): string {
+  const env = buildEnv({ base: options.baseEnv });
   const exports = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
   const clean = `unset \${!CLAUDE_CODE_@} CLAUDECODE FORCE_CODE_TERMINAL; export ${exports}`;
   const handshake = `printf '%s\\n' "${INIT_REQUEST.replaceAll('"', '\\"')}" | claude -p --bare --output-format stream-json --input-format stream-json --verbose`;

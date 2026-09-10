@@ -28,6 +28,7 @@ export {
   type KeySources,
   type StopProcess,
 } from "./cli.js";
+export { LAUNCHD_PATH, adoptLoginPath, needsLoginPath, takeLoginPath, type LoginShellDeps } from "./login-path.js";
 export { SECTION_BEGIN, SECTION_END, sectionText } from "./agents-md.js";
 export { runBin } from "./entry.js";
 export { shimPath } from "./shim.js";

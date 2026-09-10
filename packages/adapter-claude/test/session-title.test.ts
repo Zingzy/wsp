@@ -89,7 +89,7 @@ describe("the title Claude Code makes for a thread", () => {
     const seen = join(mkdtempSync(join(tmpdir(), "wsp-claude-seen-")), "seen");
     const bin = fakeClaude(`{ printf '%s\\n' "$*"; cat; } > ${seen}\nprintf '{"type":"result","is_error":false,"result":"Seed thread titles here"}\\n'`);
     const prompt = "Name it. It's a thread's own \"words\"; nothing else.";
-    const command = titleForCommand({ configDir: "/root/.claude-cfg", prompt, model: "claude-sonnet-5" });
+    const command = titleForCommand({ prompt, model: "claude-sonnet-5" });
     const { stdout } = await run("bash", ["-c", command], { env: { PATH: `${bin}:${process.env["PATH"] ?? ""}` } });
     expect(parseTitleFor(stdout)).toBe("Seed thread titles here");
     const [argv, ...rest] = readFileSync(seen, "utf8").split("\n");
@@ -97,8 +97,8 @@ describe("the title Claude Code makes for a thread", () => {
     expect(rest.join("\n")).toBe(prompt);
   });
 
-  it("runs under the session's own config dir and drops the marks that would make it a nested run", () => {
-    const command = titleForCommand({ configDir: "/root/it's here", prompt: "name it", baseEnv: { CLAUDE_CODE_ENTRYPOINT: "cli", PATH: "/bin" } });
+  it("runs under the login's own config dir when it names one and drops the marks that would make it a nested run", () => {
+    const command = titleForCommand({ prompt: "name it", baseEnv: { CLAUDE_CONFIG_DIR: "/root/it's here", CLAUDE_CODE_ENTRYPOINT: "cli", PATH: "/bin" } });
     expect(command).toContain(String.raw`CLAUDE_CONFIG_DIR='/root/it'\''s here'`);
     expect(command).toContain("unset ${!CLAUDE_CODE_@} CLAUDECODE FORCE_CODE_TERMINAL");
     expect(command).not.toContain("CLAUDE_CODE_ENTRYPOINT=");
@@ -108,13 +108,13 @@ describe("the title Claude Code makes for a thread", () => {
   it("asks with the person's customizations off and their sign-in still read, never in the mode that reads a key alone", () => {
     // --bare's auth is ANTHROPIC_API_KEY or nothing, so this question is the one call on a workspace that must not
     // take it: a person who signed in and exported no key would have every thread of theirs named by an error.
-    const command = titleForCommand({ configDir: "/root/.claude-cfg", prompt: "name it" });
+    const command = titleForCommand({ prompt: "name it" });
     expect(command).toContain("claude -p --safe-mode ");
     expect(command).not.toContain("--bare");
   });
 
   it("leaves the model to the CLI when the catalog named none", () => {
-    expect(titleForCommand({ configDir: "/root/.claude-cfg", prompt: "name it" })).not.toContain("--model");
+    expect(titleForCommand({ prompt: "name it" })).not.toContain("--model");
   });
 
   it("reads no title out of an answer that is not one: an error, an explanation, a refusal, or nothing at all", () => {
