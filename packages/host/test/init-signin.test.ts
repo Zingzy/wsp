@@ -10,6 +10,7 @@ import type { ManifestEntry } from "@wsp/collect";
 import { describe, expect, it } from "vitest";
 import { flowHooks, keyAsks, signInStage, stageLogins, type SignInFlow, type SignInStageOptions } from "../src/init-signin.js";
 import { fakePtyLink, type FakePty, type FakePtyLink } from "./fake-pty-link.js";
+import { loginOf } from "./signin-questions.js";
 
 const CLAUDE: ManifestEntry = { rung: "logins", id: "logins/claude", label: "Claude Code login", group: "Agent logins", paths: [], bytes: 0, default: "bring", choice: "copy" };
 const GH: ManifestEntry = { rung: "logins", id: "logins/gh", label: "GitHub CLI login", group: "CLI logins", paths: [], bytes: 0, default: "bring", choice: "copy" };
@@ -94,13 +95,15 @@ describe("the sign-in stage", () => {
     };
     const st = stage(link, { logins: [{ ...CLAUDE, choice: "machine" }, { ...GH, choice: "machine" }] });
     const rows = await st.run;
-    expect(link.ptys.map(p => p.writes[0])).toEqual(["exec claude auth login || exit\r", "exec gh auth login || exit\r"]);
+    expect(link.ptys.map(p => p.writes[0])).toEqual(["exec claude auth login || exit\r", `exec ${loginOf("gh")} || exit\r`]);
     expect(rows).toEqual([
       { id: "logins/claude", label: "Claude Code login", state: "signed-in", command: "claude auth login", exit: 0, note: "claude auth login exited 0" },
-      { id: "logins/gh", label: "GitHub CLI login", state: "signed-in", command: "gh auth login", exit: 0, note: "gh auth login exited 0" },
+      { id: "logins/gh", label: "GitHub CLI login", state: "signed-in", command: loginOf("gh"), exit: 0, note: `${loginOf("gh")} exited 0` },
     ]);
     const text = st.text();
-    expect(text).toMatch(/Claude Code login: signed in \(claude auth login exited 0\)\n[\s\S]*GitHub CLI login\s+gh auth login\n/);
+    const first = text.indexOf("Claude Code login: signed in (claude auth login exited 0)\n");
+    expect(first).toBeGreaterThan(-1);
+    expect(text.slice(first)).toContain(`GitHub CLI login  ${loginOf("gh")}\n`);
     expect(text).not.toMatch(/r retry|s skip|checking:/);
   });
 

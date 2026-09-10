@@ -18,7 +18,7 @@ import { agentName, isLoginChoice, isTickable } from "./init-recipe.js";
 import type { SelectItem } from "./init-select.js";
 import { agentRows, recipeTable, type TableRow } from "./init-table.js";
 import { manifestFor, type Reading } from "./init.js";
-import { signInFor } from "./signin-table.js";
+import { asksThePerson, signInFor } from "./signin-table.js";
 
 /** What the screens have settled so far: the recipe with its ticks, each sign-in row's answer, and the wsp tools rows
  * ticked once that screen was answered (undefined before, since an empty set is an answer of its own). */
@@ -106,8 +106,11 @@ function loginItems(items: readonly SelectItem[], manifest: Manifest, saved: Rea
     const base = item(i);
     if (e === undefined) return base;
     const where = e.paths.length > 0 ? e.paths.map(shortSource).join(", ") : undefined;
+    // A row the catalog locked out keeps its own reason (its picker is fixed on skip either way); otherwise the word
+    // says what stops this one, a sign-in only the person can work through or a tool the image will not carry.
     const fixed = (i.choices ?? []).length === 1;
-    const state = fixed ? (isTickable(e) ? CLOUD_SETUP_WORDS.screen.notOnImage : (e.reason ?? CLOUD_SETUP_WORDS.screen.leftAlone)) : undefined;
+    const asksYou = asksThePerson(signInFor(agentName(e))) ? CLOUD_SETUP_WORDS.screen.asksYou : undefined;
+    const state = isTickable(e) ? (asksYou ?? (fixed ? CLOUD_SETUP_WORDS.screen.notOnImage : undefined)) : (e.reason ?? CLOUD_SETUP_WORDS.screen.leftAlone);
     const key = keyNameFor(manifest, i.id);
     const why = isMcpRow(e) ? mcpAgents(e, manifest).map(catalogName).join(", ") : where;
     return {
@@ -116,7 +119,8 @@ function loginItems(items: readonly SelectItem[], manifest: Manifest, saved: Rea
       ...(why !== undefined && why !== "" ? { why } : {}),
       ...(state !== undefined ? { state } : {}),
       ...(key !== undefined ? { key: { name: key, saved: (saved[key] ?? "") !== "" } } : {}),
-      detail: [...(e.paths.length > 0 ? [e.paths.join(", ")] : []), ...base.detail.filter(line => !e.paths.includes(line) && line !== e.paths.join(", "))],
+      // The state word carries the same line here, so the detail does not say it a second time.
+      detail: [...(e.paths.length > 0 ? [e.paths.join(", ")] : []), ...base.detail.filter(line => !e.paths.includes(line) && line !== e.paths.join(", ") && line !== state)],
     };
   });
 }

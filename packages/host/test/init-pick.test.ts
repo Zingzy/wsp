@@ -154,13 +154,15 @@ describe("the sign-ins screen", () => {
     // Copy where there is something here to copy, the sign-in where the catalog has a flow, the key where the tool reads one.
     expect(words(s, "logins/claude")).toEqual(["copy", "machine", "key", "skip"]);
     expect(words(s, "logins/codex")).toEqual(["copy", "machine", "key", "skip"]);
-    expect(words(s, "logins/hermes")).toEqual(["copy", "machine", "skip"]);
+    // hermes stops on a menu only the person can work through, so the machine is no road for it: copy or skip.
+    expect(words(s, "logins/hermes")).toEqual(["copy", "skip"]);
+    expect(s.items.find(i => i.id === "logins/hermes")!.detail).toContain("asks questions only you can answer");
     expect(words(s, "logins/kube")).toEqual(["copy", "skip"]);
     // A row the catalog locked out is here with its reason and skip as its only answer.
     expect(words(s, "logins/op")).toEqual(["skip"]);
     expect(s.items.find(i => i.id === "logins/op")).toMatchObject({ why: "nothing to copy here", detail: ["needs the 1Password desktop app; the machine uses a service account token", "this one is left alone"] });
     expect([...s.initial].sort()).toEqual([
-      ["logins/claude", "machine"], ["logins/codex", "machine"], ["logins/gh", "machine"], ["logins/hermes", "machine"], ["logins/hermes-keys", "copy"], ["logins/kube", "copy"], ["logins/op", "skip"],
+      ["logins/claude", "machine"], ["logins/codex", "machine"], ["logins/gh", "machine"], ["logins/hermes", "copy"], ["logins/hermes-keys", "copy"], ["logins/kube", "copy"], ["logins/op", "skip"],
     ]);
     // No row on this screen is about this Mac's own config, and no sentence explains one choice against another.
     expect(s.items.some(i => i.id.startsWith("wsp-tools/"))).toBe(false);
@@ -207,7 +209,7 @@ describe("the sign-ins screen", () => {
   it("a group header counts how its rows answered, in the choice order", () => {
     const s = signInItems(applyRecipe(withCatalogAgents(laptop), recipe), new Map());
     const agents = s.items.filter(i => i.group === AGENT_LOGINS);
-    expect(signInGroupLine(agents, { ticks: new Set(), answers: new Map(s.initial) })).toBe("1 copy  3 sign in  0 API key  0 skip");
+    expect(signInGroupLine(agents, { ticks: new Set(), answers: new Map(s.initial) })).toBe("2 copy  2 sign in  0 API key  0 skip");
   });
 
   it("the disk estimate counts what the build takes before anyone answers", () => {
