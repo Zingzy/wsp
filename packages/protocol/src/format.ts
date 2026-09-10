@@ -90,10 +90,11 @@ export function diskTone(used: number, total: number): "muted" | "warning" | "da
   return share >= 0.7 ? "warning" : "muted";
 }
 
-/** The disk ring's tooltip: what the image holds against the machine's disk. */
-export const initDiskLine = (used: number, total: number): string => `about ${fmtBytes(used)} of ${fmtBytes(total)} on the image`;
+/** The disk meter's tooltip: what the image holds against the machine's disk, and by how much it is over once it is;
+ * the overshoot is said here and in Continue's refusal, nowhere else. */
+export const initDiskLine = (used: number, total: number): string => `about ${fmtBytes(used)} of ${fmtBytes(total)} on the image${used > total ? `, ${initDiskOverLine(used - total)}` : ""}`;
 
-/** The ring's tooltip and the primary's refusal once the ticks pass the disk. */
+/** The primary's refusal once the ticks pass the disk, and the tail of the meter's tooltip. */
 export const initDiskOverLine = (over: number): string => `over by ${fmtBytes(over)}`;
 
 /** Memory in GB as the size table names it: whole when whole, else one decimal; a size spec, not a byte count. */
@@ -1094,6 +1095,8 @@ export const CLOUD_SETUP_WORDS = {
     cancelWhy: "The machine is thrown away and nothing is saved",
     cancelKeep: "Keep building",
     done: "Cloud machines are ready",
+    /** The sentence under that title: the running one would say the machine is still being saved. */
+    doneTop: "The image is sealed; every thread forks it",
     failed: "The build stopped",
     /** The headline of a build the person stopped, so the screen never reads as the machine's doing. */
     stopped: "You stopped the build",
@@ -1290,6 +1293,10 @@ export const initRowUnrun = (state: string): boolean => ROW_UNRUN.has(state);
 /** The end states that are not an end well: what the count leaves out of its done, so a build that failed, was
  * stopped, or never reached a stage never reads complete. */
 const ROW_UNDONE: ReadonlySet<string> = new Set([INIT_ROW_STATES.failed, ...ROW_UNRUN]);
+
+/** Whether a row's state is a failure to show as one: the stage that failed, and the sign-in stage whose one sign-in
+ * ran out, which reads not signed in and must never wear a tick. */
+export const initRowFailed = (state: string): boolean => state === INIT_ROW_STATES.failed || state === INIT_SIGN_IN_WORDS["not-signed-in"];
 
 /** Whether a row's state word is one it ends on: what the progress count and a section's count read. */
 export const initRowOver = (state: string): boolean => ROW_OVER.has(state);

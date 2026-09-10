@@ -40,6 +40,7 @@ export function SetupScreen({
   children,
   primary,
   secondary,
+  aside,
   note,
   refusal = null,
 }: {
@@ -52,10 +53,13 @@ export function SetupScreen({
   children?: ReactNode;
   primary?: ScreenAction;
   secondary?: ScreenAction;
+  /** A second quiet link beside the secondary, 12 px from it, for a question with two answers. */
+  aside?: ScreenAction;
   /** One muted line above the footer, the column wide, where a step has something the footer alone does not say. */
   note?: string;
-  /** The host's word for what it refused, above the footer as the note is, so a press that did nothing says why
-   * where the eye already is rather than under the link below the keycap. */
+  /** The host's word for what it refused, above the footer, so a press that did nothing says why where the eye
+   * already is rather than under the link below the keycap. Without a note it sits inside the gap the footer keeps
+   * from the content, so its arrival moves nothing above it. */
   refusal?: string | null;
 }) {
   // The keycap takes focus without scrolling to it: a long step opens on its title, not on its button.
@@ -88,23 +92,23 @@ export function SetupScreen({
       </Tooltip>
     );
   const secondaryHeld = secondary !== undefined && secondary.disabled === true;
-  const secondaryLink =
-    secondary !== undefined ? (
-      <Button
-        data-k="secondary"
-        variant="link"
-        onClick={secondary.onPress}
-        disabled={secondaryHeld}
-        className={cn(
-          "h-auto p-0 text-[15px] disabled:opacity-50 sm:text-[15px]",
-          primary !== undefined ? "mt-3" : "",
-          // A destructive link is quiet at rest and shows its tone only when the pointer or focus is on it.
-          secondary.destructive === true ? "text-muted-foreground transition-colors duration-150 hover:text-destructive-foreground focus-visible:text-destructive-foreground" : "text-muted-foreground hover:text-foreground",
-        )}
-      >
-        {secondary.word}
-      </Button>
-    ) : null;
+  const quietLink = (k: string, action: ScreenAction, held: boolean): ReactNode => (
+    <Button
+      data-k={k}
+      variant="link"
+      onClick={action.onPress}
+      disabled={held}
+      className={cn(
+        "h-auto p-0 text-[15px] disabled:opacity-50 sm:text-[15px]",
+        // A destructive link is quiet at rest and shows its tone only when the pointer or focus is on it.
+        action.destructive === true ? "text-muted-foreground transition-colors duration-150 hover:text-destructive-foreground focus-visible:text-destructive-foreground" : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {action.word}
+    </Button>
+  );
+  const secondaryLink = secondary !== undefined ? quietLink("secondary", secondary, secondaryHeld) : null;
+  const asideLink = aside !== undefined ? quietLink("aside", aside, aside.disabled === true) : null;
   return (
     <div data-k={k} className="mx-auto flex h-full w-[560px] max-w-full flex-col items-center">
       {/* The margins are two flex items sharing the room the bands leave, so a short step stands centred; each stops at its least and the middle scrolls from there. */}
@@ -130,21 +134,26 @@ export function SetupScreen({
           {children}
         </div>
       </div>
-      <div data-k="foot" className="flex w-full shrink-0 flex-col items-center pt-14">
+      <div data-k="foot" className="relative flex w-full shrink-0 flex-col items-center pt-14">
         {note !== undefined ? (
           <p data-k="note" className="mb-4 w-full text-center text-[13px] leading-[1.5] text-muted-foreground">
             {note}
           </p>
         ) : null}
         {refusal !== null ? (
-          <p data-k="refusal" className="mb-4 max-w-[440px] break-words text-center font-mono text-xs text-destructive-foreground">
+          <p data-k="refusal" className={cn("max-w-[440px] break-words text-center font-mono text-xs text-destructive-foreground", note === undefined ? "absolute top-[18px] left-1/2 w-max -translate-x-1/2" : "mb-4")}>
             {refusal}
           </p>
         ) : null}
         {primary !== undefined || secondary !== undefined ? (
           <div data-k="footer" className="flex flex-col items-center">
             {withReason("primary-reason", keycapButton, held ? primary.title : undefined)}
-            {withReason("secondary-reason", secondaryLink, secondaryHeld ? secondary.title : undefined)}
+            {secondaryLink !== null || asideLink !== null ? (
+              <div data-k="links" className={cn("flex items-center gap-3", primary !== undefined && "mt-3")}>
+                {withReason("secondary-reason", secondaryLink, secondaryHeld ? secondary.title : undefined)}
+                {asideLink}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>

@@ -15,7 +15,7 @@
 // link stops the job after asking once.
 import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, SIGN_IN_STAGE_ID, initBuildRows, initElapsedLine, initJobBuilding, initJobOver, initRowOver, initRowTimed, initRowUnrun, initSignInLine, initStageCount, initStageCountLine, type InitJob, type InitRow } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, SIGN_IN_STAGE_ID, initBuildRows, initElapsedLine, initJobBuilding, initJobOver, initRowFailed, initRowOver, initRowTimed, initRowUnrun, initSignInLine, initStageCount, initStageCountLine, type InitJob, type InitRow } from "@wsp/protocol";
 import { Button } from "../../components/ui/button.js";
 import { cn } from "../../lib/utils.js";
 import { ansiSpans, toolPrefix } from "./ansi.js";
@@ -63,16 +63,12 @@ export function SetupBuild({ job, onCancel, onRetry, onCode, onOpenWorkspace, on
       ? { word: words.cancelSure, onPress: onCancel, destructive: true }
       : { word: words.cancel, onPress: () => setAsking(true), destructive: true, disabled: !job.stoppable, ...(job.stoppable ? {} : { title: words.cannotStop }) }
     : undefined;
-  const keep = asking && building ? (
-    <div className="mt-3 flex justify-center">
-      <Button data-k="keep" variant="link" className="h-auto p-0 text-[13px] text-muted-foreground hover:text-foreground sm:text-[13px]" onClick={() => setAsking(false)}>
-        {words.cancelKeep}
-      </Button>
-    </div>
-  ) : null;
+  // The question is one block in the footer: the sentence above, Stop the build and Keep building side by side under it.
+  const aside: ScreenAction | undefined = asking && building ? { word: words.cancelKeep, onPress: () => setAsking(false) } : undefined;
+  const footer = { ...(secondary !== undefined ? { secondary } : {}), ...(aside !== undefined ? { aside } : {}) };
   if (slide) {
     return (
-      <SetupScreen k="build" headline={words.slideHeadline} top={words.slideTop} refusal={refusal} {...(secondary !== undefined ? { secondary } : {})} note={asking ? words.cancelWhy : words.keeps}>
+      <SetupScreen k="build" headline={words.slideHeadline} top={words.slideTop} refusal={refusal} {...footer} note={asking ? words.cancelWhy : words.keeps}>
         <p data-k="stages-folded" className={cn(META, "mb-2 w-full text-right")}>
           {words.headline} · {initStageCountLine(count)}
         </p>
@@ -81,12 +77,11 @@ export function SetupBuild({ job, onCancel, onRetry, onCode, onOpenWorkspace, on
             <SignInSlideRow key={s.id} row={s} marked={marked(signIns)} focus={s.id === slideFocusId} onRetry={s.state === INIT_SIGN_IN_WORDS["not-signed-in"] ? () => onRetry(s.tool ?? s.id) : undefined} onCode={s.finish === "code" ? code => onCode({ tool: s.tool ?? s.id, code }) : undefined} />
           ))}
         </Card>
-        {keep}
       </SetupScreen>
     );
   }
   return (
-    <SetupScreen k="build" headline={headline} top={job.error ?? words.top} refusal={refusal} {...(primary !== undefined ? { primary } : {})} {...(secondary !== undefined ? { secondary } : {})} {...(building ? { note: asking ? words.cancelWhy : words.keeps } : {})}>
+    <SetupScreen k="build" headline={headline} top={job.error ?? (job.phase === "done" ? words.doneTop : words.top)} refusal={refusal} {...(primary !== undefined ? { primary } : {})} {...footer} {...(building ? { note: asking ? words.cancelWhy : words.keeps } : {})}>
       <p data-k="count" className={cn(META, "mb-2 w-full text-right")}>
         {initStageCountLine(count)}
       </p>
@@ -109,7 +104,6 @@ export function SetupBuild({ job, onCancel, onRetry, onCode, onOpenWorkspace, on
           />
         ))}
       </Card>
-      {keep}
     </SetupScreen>
   );
 }
@@ -216,7 +210,7 @@ function BuildRow({ row, focus, signIns, onRetry, onCode }: { row: InitRow; focu
   }, [focus]);
   return (
     <li ref={item} data-k="row" data-row={row.id} data-state={row.state} data-open={open} className={ROW_LINE}>
-      <div className={cn(ROW, canOpen && "cursor-pointer hover:bg-accent/30")} title={row.detail} onClick={canOpen ? () => setOpened(o => !(o === true)) : undefined} role={canOpen ? "button" : undefined} aria-expanded={canOpen ? open : undefined}>
+      <div className={cn(ROW, canOpen && "cursor-pointer hover:bg-accent/30")} title={row.detail} onClick={canOpen ? () => setOpened(!open) : undefined} role={canOpen ? "button" : undefined} aria-expanded={canOpen ? open : undefined}>
         <span data-k="glyph" aria-hidden className="flex size-[18px] shrink-0 items-center justify-center text-foreground">
           <StageGlyph state={row.state} />
         </span>
@@ -311,25 +305,25 @@ function TerminalLine({ line, danger }: { line: string; danger: boolean }) {
 
 /** A stage's, a workspace's or a machine's glyph: a hollow ring while it waits, nothing while it runs (the slot's
  * spinner says so), a filled dot while a machine is still being removed, a check once it ended well, a cross when
- * it failed. A row that ended without running keeps the ring it waited with: it is over, but a check beside it
- * would read as work that happened. */
+ * it failed, the sign-in stage with a run-out included. A row that ended without running keeps the ring it waited
+ * with: it is over, but a check beside it would read as work that happened. */
 function StageGlyph({ state }: { state: string }) {
-  if (initRowUnrun(state)) return <span className="size-2 rounded-full border border-muted-foreground/60" />;
-  if (state === INIT_ROW_STATES.retrying) return <span className="size-2 rounded-full bg-foreground" />;
-  if (state === INIT_ROW_STATES.failed) {
+  if (initRowUnrun(state)) return <span data-glyph="ring" className="size-2 rounded-full border border-muted-foreground/60" />;
+  if (state === INIT_ROW_STATES.retrying) return <span data-glyph="dot" className="size-2 rounded-full bg-foreground" />;
+  if (initRowFailed(state)) {
     return (
-      <svg viewBox="0 0 16 16" className="size-3.5 fill-none stroke-destructive-foreground" strokeWidth={1.75} strokeLinecap="round">
+      <svg data-glyph="failed" viewBox="0 0 16 16" className="size-3.5 fill-none stroke-destructive-foreground" strokeWidth={1.75} strokeLinecap="round">
         <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
       </svg>
     );
   }
   if (initRowOver(state)) {
     return (
-      <svg viewBox="0 0 16 16" className="size-3.5 fill-none stroke-current" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+      <svg data-glyph="done" viewBox="0 0 16 16" className="size-3.5 fill-none stroke-current" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
         <path d="M3.5 8.5 6.5 11.5 12.5 5" />
       </svg>
     );
   }
-  if (onIt(state) || state === INIT_ROW_STATES.open) return <span className="size-2 rounded-full bg-foreground" />;
-  return <span className="size-2 rounded-full border border-muted-foreground/60" />;
+  if (onIt(state) || state === INIT_ROW_STATES.open) return <span data-glyph="dot" className="size-2 rounded-full bg-foreground" />;
+  return <span data-glyph="ring" className="size-2 rounded-full border border-muted-foreground/60" />;
 }

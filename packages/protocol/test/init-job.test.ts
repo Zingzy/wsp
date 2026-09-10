@@ -31,6 +31,7 @@ import {
   initProgressLine,
   initProgressState,
   initRowOver,
+  initRowFailed,
   titleWithNeed,
   initSetupLines,
   initTallyLine,
@@ -383,6 +384,11 @@ describe("the words the clients print for the job", () => {
     expect(initTallyLine(3, "more", 1.2 * 1024 * MIB)).toBe("3 more on the image · 1.2 GB");
     expect(initTallyLine(1, "more", MIB)).toBe("1 more on the image · 1 MB");
     expect(initDiskLine(1.1 * 1024 * MIB, 20 * 1024 * MIB)).toBe("about 1.1 GB of 20 GB on the image");
+    // Past the disk the tooltip carries the overshoot too: said there and in Continue's refusal, nowhere else.
+    expect(initDiskLine(21 * 1024 * MIB, 20 * 1024 * MIB)).toBe("about 21 GB of 20 GB on the image, over by 1 GB");
+    // The sign-in stage with a run-out is a failure to draw as one, beside the stage that failed; nothing else is.
+    expect([initRowFailed(INIT_ROW_STATES.failed), initRowFailed(INIT_SIGN_IN_WORDS["not-signed-in"]), initRowFailed(INIT_ROW_STATES.done), initRowFailed(INIT_ROW_STATES.stopped)]).toEqual([true, true, false, false]);
+    expect(CLOUD_SETUP_WORDS.build.doneTop).toBe("The image is sealed; every thread forks it");
     const rows: InitRow[] = [
       { id: "agent/claude", kind: "agent", label: "Claude Code", state: "MCP added" },
       { id: "stage/creating", kind: "stage", label: "Creating the machine", state: "done" },

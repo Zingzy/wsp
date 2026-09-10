@@ -538,7 +538,10 @@ describe("the cloud setup sheet", () => {
     fireEvent.click(within(t.dialog.querySelector<HTMLElement>('[data-row="big"]')!).getByRole("checkbox"));
     await waitFor(() => expect(k(t.dialog, "disk").getAttribute("data-tone")).toBe("danger"));
     const used = DISK.fixed + 208 * MIB + 72 * MIB + 18 * GIB;
-    expect(k(t.dialog, "disk-over").textContent).toBe(initDiskOverLine(used - DISK.total));
+    // The overshoot is said in the meter's tooltip and in the refusal, and nowhere as a third line beside the tally.
+    expect(k(t.dialog, "disk").getAttribute("aria-label")).toBe(initDiskLine(used, DISK.total));
+    expect(k(t.dialog, "disk").getAttribute("aria-label")).toContain(initDiskOverLine(used - DISK.total));
+    expect(t.dialog.querySelector("[data-k=disk-over]")).toBeNull();
     fireEvent.click(k(t.dialog, "primary"));
     await waitFor(() => expect(k(t.dialog, "refusal").textContent).toBe(initDiskOverLine(used - DISK.total)));
     expect(t.api.initAnswer).not.toHaveBeenCalled();
@@ -887,9 +890,9 @@ describe("the cloud setup sheet", () => {
     await waitFor(() => expect(k(dialog, "screen-tools")).toBeDefined());
     // Swift takes the image 3 GB past a disk with 1 GB to spare, and the ring says so.
     fireEvent.click(within(dialog.querySelector<HTMLElement>('[data-row="swift"]')!).getByRole("checkbox"));
-    await waitFor(() => expect(dialog.querySelector("[data-k=disk-over]")).not.toBeNull());
-    const over = dialog.querySelector("[data-k=disk-over]")!.textContent;
-    expect(over).toBe(initDiskOverLine(19 * GIB + 208 * MIB + 60 * MIB + 12 * MIB + 3 * GIB - 20 * GIB));
+    const over = initDiskOverLine(19 * GIB + 208 * MIB + 60 * MIB + 12 * MIB + 3 * GIB - 20 * GIB);
+    await waitFor(() => expect(dialog.querySelector("[data-k=disk]")!.getAttribute("aria-label")).toContain(over));
+    expect(dialog.querySelector("[data-k=disk-over]")).toBeNull();
     expect(dialog.querySelector("[data-k=disk]")!.getAttribute("data-tone")).toBe("danger");
     fireEvent.click(k(dialog, "primary"));
     // The refusal is the ring's own words: one rule, said in one place, read in two.
@@ -981,12 +984,23 @@ describe("the cloud setup sheet", () => {
     expect(dialog.querySelector("[data-k=primary]")).toBeNull();
     expect(k(dialog, "note").textContent).toBe(CLOUD_SETUP_WORDS.build.keeps);
     expect(k(dialog, "secondary").textContent).toBe(CLOUD_SETUP_WORDS.build.cancel);
+    const contentBefore = k(dialog, "content").innerHTML;
     fireEvent.click(k(dialog, "secondary"));
     expect(api.initCancel).not.toHaveBeenCalled();
     expect(k(dialog, "secondary").textContent).toBe(CLOUD_SETUP_WORDS.build.cancelSure);
     expect(k(dialog, "note").textContent).toBe(CLOUD_SETUP_WORDS.build.cancelWhy);
-    fireEvent.click(k(dialog, "keep"));
+    // The question is one block in the footer: the two answers side by side under the sentence, nothing under the card.
+    const links = k(dialog, "links");
+    expect(links.children).toHaveLength(2);
+    expect(links.querySelector("[data-k=secondary]")).not.toBeNull();
+    expect(links.querySelector("[data-k=aside]")).not.toBeNull();
+    expect(k(dialog, "aside").textContent).toBe(CLOUD_SETUP_WORDS.build.cancelKeep);
+    expect(k(dialog, "footer").contains(k(dialog, "aside"))).toBe(true);
+    expect(k(dialog, "content").innerHTML).toBe(contentBefore);
+    expect(dialog.querySelector("[data-k=keep]")).toBeNull();
+    fireEvent.click(k(dialog, "aside"));
     expect(k(dialog, "secondary").textContent).toBe(CLOUD_SETUP_WORDS.build.cancel);
+    expect(dialog.querySelector("[data-k=aside]")).toBeNull();
     fireEvent.keyDown(dialog, { key: "Escape" });
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(api.initCancel).not.toHaveBeenCalled();
@@ -1026,6 +1040,8 @@ describe("the cloud setup sheet", () => {
     // Done: the headline turns and the one keycap opens the workspace.
     emit({ ...building, phase: "done", golden: { version: 1 }, workspace: { id: "ws_first", name: "first" }, rows: building.rows.map(r => ({ ...r, state: r.kind === "workspace" ? "forked" : r.kind === "sign-in" ? INIT_SIGN_IN_WORDS["signed-in"] : "done" })), progress: { done: 9, total: 9 } });
     await waitFor(() => expect(dialog.textContent).toContain(CLOUD_SETUP_WORDS.build.done));
+    // The sentence says what stands, not what was running.
+    expect(k(dialog, "sentence").textContent).toBe(CLOUD_SETUP_WORDS.build.doneTop);
     expect(k(dialog, "primary").textContent).toBe(`${CLOUD_SETUP_WORDS.build.keycap}→`);
     expect(dialog.querySelector("[data-k=secondary]")).toBeNull();
     fireEvent.click(k(dialog, "primary"));
@@ -1090,7 +1106,19 @@ describe("the cloud setup sheet", () => {
     await waitFor(() => expect(k(dialog, "build")).toBeDefined());
     const gh = dialog.querySelector<HTMLElement>('[data-row="sign-in/gh"]')!;
     expect(gh.querySelector("[data-k=state]")!.textContent).toBe("not signed in");
-    fireEvent.click(gh.querySelector<HTMLElement>("[data-k=retry]")!);
+    // The stage the run-out folds into wears the failed glyph beside not signed in, open or folded, never a tick.
+    const stage = dialog.querySelector<HTMLElement>(`[data-row="${SIGN_IN_STAGE_ID}"]`)!;
+    expect(stage.querySelector("[data-k=state]")!.textContent).toBe("not signed in");
+    expect(stage.querySelector("[data-glyph]")!.getAttribute("data-glyph")).toBe("failed");
+    expect(stage.dataset["open"]).toBe("true");
+    const stageRow = stage.querySelector<HTMLElement>(':scope > div[role="button"]')!;
+    fireEvent.click(stageRow);
+    expect(stage.dataset["open"]).toBe("false");
+    expect(stage.querySelector("[data-glyph]")!.getAttribute("data-glyph")).toBe("failed");
+    fireEvent.click(stageRow);
+    expect(stage.dataset["open"]).toBe("true");
+    // The sub-rows are drawn again on the reopen, so the keycap is looked up again.
+    fireEvent.click(dialog.querySelector<HTMLElement>('[data-row="sign-in/gh"] [data-k=retry]')!);
     await waitFor(() => expect(api.initRetry).toHaveBeenCalledWith({ tool: "gh" }));
     const cancel = k(dialog, "secondary") as HTMLButtonElement;
     expect(cancel.disabled).toBe(true);

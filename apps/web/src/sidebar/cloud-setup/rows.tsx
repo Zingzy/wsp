@@ -11,7 +11,7 @@
 // weighs.
 import { ChevronDownIcon } from "lucide-react";
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { INIT_ROW_STATES, diskTone, initDiskLine, initDiskOverLine, type SizeTone } from "@wsp/protocol";
+import { INIT_ROW_STATES, diskTone, initDiskLine, type SizeTone } from "@wsp/protocol";
 import { Button } from "../../components/ui/button.js";
 import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../../components/ui/menu.js";
 import { ScrollArea } from "../../components/ui/scroll-area.js";
@@ -95,11 +95,11 @@ export function Card({ label, children, className, style, top, cap = true }: { l
 }
 
 /** The disk meter inline after the tally: a 64 px hairline track and the estimate's share of the machine's disk as
- * its fill, in the tone the share earns; the numbers in its tooltip, the overshoot as words after it. */
+ * its fill, in the tone the share earns; the numbers in its tooltip, the overshoot with them once there is one. The
+ * overshoot is said there and in Continue's refusal, never as a third line beside the tally. */
 export function Meter({ used, total }: { used: number; total: number }) {
   const share = total > 0 ? Math.min(1, used / total) : 0;
   const tone = diskTone(used, total);
-  const over = Math.max(0, used - total);
   return (
     <>
       <Tooltip>
@@ -112,11 +112,6 @@ export function Meter({ used, total }: { used: number; total: number }) {
           {initDiskLine(used, total)}
         </TooltipPopup>
       </Tooltip>
-      {over > 0 ? (
-        <span data-k="disk-over" className={cn("font-mono text-xs tabular-nums", TONE_TEXT.danger)}>
-          {initDiskOverLine(over)}
-        </span>
-      ) : null}
     </>
   );
 }

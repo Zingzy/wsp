@@ -20,7 +20,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
-import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, MACHINE_ROW_LABEL, NETWORK_LOST_LINE, SIGN_IN_STAGE_ID, initSignInLine, initStageCountLine, keyRefusedLine } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MACHINE_ROW_LABEL, NETWORK_LOST_LINE, SIGN_IN_STAGE_ID, initSignInLine, initStageCountLine, keyRefusedLine } from "@wsp/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { textContrast, textHue } from "./contrast";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
@@ -297,16 +297,24 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     expect(await page!.locator(`${frame} [data-row="stage/creating"] [data-k=lines]`).textContent()).toContain("at its machine cap");
     await shoot("slot", theme);
 
-    // Past the disk: Continue refuses, and the line sits above the footer in the ring's own tone, not under the link.
+    // Past the disk: the overshoot is in the meter's tooltip and nowhere beside the tally; Continue refuses with it above the footer in the meter's tone, and the card does not move when the line arrives.
     frame = await goTo("over", theme);
     expect(await page!.locator("[role=dialog] [data-k=disk]").getAttribute("data-tone")).toBe("danger");
+    expect(await page!.locator("[role=dialog] [data-k=disk-over]").count(), "no third line beside the tally").toBe(0);
+    expect(await page!.locator("[role=dialog] [data-k=disk]").getAttribute("aria-label")).toMatch(/, over by [\d.]+ (MB|GB)$/);
+    const cardBefore = await box(`${frame} [data-k=card]`);
+    const keycapBefore = await box(`${frame} [data-k=primary]`);
     await page!.click(`${frame} [data-k=primary]`);
     await page!.waitForSelector(`${frame} [data-k=refusal]`);
+    const cardAfter = await box(`${frame} [data-k=card]`);
+    expect([cardAfter.y, cardAfter.height], "the card stands where it stood").toEqual([cardBefore.y, cardBefore.height]);
+    expect((await box(`${frame} [data-k=primary]`)).y, "and so does the keycap").toBe(keycapBefore.y);
     const over = await box(`${frame} [data-k=refusal]`);
     const footer = await box(`${frame} [data-k=footer]`);
     expect(over.y + over.height, "the refusal is above the keycap and its link").toBeLessThanOrEqual(footer.y + 1);
-    const [tone, ringTone] = await page!.evaluate(() => [getComputedStyle(document.querySelector("[data-k=refusal]")!).color, getComputedStyle(document.querySelector("[data-k=disk-over]")!).color]);
-    expect(tone, "the refusal wears the ring's tone").toBe(ringTone);
+    expect(over.y, "and below the card").toBeGreaterThanOrEqual(cardAfter.y + cardAfter.height);
+    const [tone, fillTone] = await page!.evaluate(() => [getComputedStyle(document.querySelector("[data-k=refusal]")!).color, getComputedStyle(document.querySelector("[data-k=disk-fill]")!).backgroundColor]);
+    expect(tone, "the refusal wears the meter's tone").toBe(fillTone);
     expect((await textContrast(page!, "[role=dialog] [data-k=refusal]"))[0], "the refusal reads at AA").toBeGreaterThanOrEqual(4.5);
     await shoot("over", theme);
   }, 240_000);
@@ -449,6 +457,22 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     await page!.waitForTimeout(250);
     expect((await style("[role=dialog] [data-k=secondary]", "color"))[0]).not.toBe(restInk);
     await page!.mouse.move(0, 0);
+    // The cancel question is one block in the footer: the sentence above, Stop the build and Keep building side by side 12 px apart under it, and nothing under the card.
+    const contentBefore = await box("[role=dialog] [data-k=content]");
+    await page!.click("[role=dialog] [data-k=secondary]");
+    await page!.waitForSelector("[role=dialog] [data-k=aside]");
+    expect(await page!.locator("[role=dialog] [data-k=note]").textContent()).toBe(CLOUD_SETUP_WORDS.build.cancelWhy);
+    const stop = await box("[role=dialog] [data-k=secondary]");
+    const keepLink = await box("[role=dialog] [data-k=aside]");
+    expect(near(stop.y + stop.height / 2, keepLink.y + keepLink.height / 2), "the two answers on one line").toBe(true);
+    expect(near(keepLink.x - (stop.x + stop.width), 12), `12 px apart, ${keepLink.x - (stop.x + stop.width)}`).toBe(true);
+    const noteBox = await box("[role=dialog] [data-k=note]");
+    expect(noteBox.y + noteBox.height, "the sentence above the answers").toBeLessThanOrEqual(stop.y + 1);
+    const contentAfter = await box("[role=dialog] [data-k=content]");
+    expect([contentAfter.y, contentAfter.height], "nothing under the card").toEqual([contentBefore.y, contentBefore.height]);
+    await page!.click("[role=dialog] [data-k=aside]");
+    await page!.waitForSelector("[role=dialog] [data-k=aside]", { state: "detached" });
+    await page!.mouse.move(0, 0);
     expect(await page!.locator("[role=dialog] [data-row^='sign-in/'] [data-row-mark]").count()).toBe(4);
     const slideShot = join(SHOTS, `cloud-setup-signin-slide-${theme}.png`);
     await page!.screenshot({ path: slideShot });
@@ -456,6 +480,9 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     await goTo("retry", theme);
     expect(await page!.locator("[role=dialog] [data-k=title]").textContent()).toBe(CLOUD_SETUP_WORDS.build.headline);
     expect(await page!.locator("[role=dialog] [data-row='stage/sign-ins'][data-open=true]").count()).toBe(1);
+    // The stage with a run-out wears the failed glyph beside not signed in, never a tick.
+    expect(await page!.locator("[role=dialog] [data-row='stage/sign-ins'] [data-glyph]").getAttribute("data-glyph")).toBe("failed");
+    expect(await page!.locator("[role=dialog] [data-row='stage/sign-ins'] > div [data-k=state]").textContent()).toBe(INIT_SIGN_IN_WORDS["not-signed-in"]);
     const stageRow = await box("[role=dialog] [data-row='stage/sign-ins'] > div");
     const subRow = await box("[role=dialog] [data-row='sign-in/gh'] > div [data-row-mark]");
     expect(near(subRow.x - (stageRow.x + SPEC.rowLeft), 24), `sub-rows indented ${subRow.x - (stageRow.x + SPEC.rowLeft)}`).toBe(true);
@@ -485,6 +512,9 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     expect(await scroller.evaluate(el => el.clientHeight % 20 === 0 && Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) < 1), "whole lines, no sliver").toBe(true);
     expect(await page!.locator("[role=dialog] [data-k=lines] span[class*='--terminal-ansi-2']").count(), "the machine's green, from the pane's own palette").toBeGreaterThan(0);
     expect(await page!.locator("[role=dialog] [data-k=lines] span[class*='opacity-60']").count(), "the tool prefix dimmed").toBeGreaterThan(0);
+    // The done screen says what stands, not what was running.
+    await goTo("done", theme);
+    expect(await page!.locator("[role=dialog] [data-k=sentence]").textContent()).toBe(CLOUD_SETUP_WORDS.build.doneTop);
     // A stage with one line gets a block one line tall, never an empty band, and the snapshot counts its own seconds beside the spinner with no snapshot name in sight.
     await goTo("retry", theme);
     const one = await box("[role=dialog] [data-row='stage/snapshotting'] [data-k=lines]");
