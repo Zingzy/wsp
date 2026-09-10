@@ -1051,6 +1051,35 @@ describe("new workspace dialog", () => {
     expect(useStore.getState().workspaces.filter(w => w.id === "ws_beta")).toHaveLength(1);
   });
 
+  it("while the image is still building the Create keycap is held, so Enter forks nothing and no row is written", async () => {
+    const api = fakeApi([API], [status(API)]);
+    api.getGolden = async () => undefined;
+    api.createFromGoldenHead = vi.fn(async (name: string) => view("ws_new", name));
+    await mount(api, "api");
+    await waitFor(() => expect(useStore.getState().hasGolden).toBe(false));
+    act(() =>
+      useStore.getState().applyEvent({
+        type: "init.job",
+        job: { id: "init_1", road: "manual", phase: "building", keys: { solari: true }, step: 0, stoppable: true, screens: [], rows: [{ id: "stage/creating", kind: "stage", label: "Creating the machine", state: "done" }, { id: "stage/ready", kind: "stage", label: "Waiting for the machine", state: "running" }], progress: { done: 1, total: 2 }, log: [] },
+      }),
+    );
+    const { dialog, input } = await openDialog();
+    const create = within(dialog).getByRole("button", { name: "Create" });
+    await waitFor(() => expect(create.hasAttribute("disabled")).toBe(true));
+    fireEvent.change(input, { target: { value: "beta" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(create);
+    expect(api.createFromGoldenHead).not.toHaveBeenCalled();
+    expect(useStore.getState().creations).toEqual([]);
+    expect(useStore.getState().toast).toBeNull();
+    expect(screen.queryByText(/wspx|golden build/)).toBeNull();
+    // The seal frees the keycap under the open dialog: the person presses Create where they already are.
+    act(() => useStore.getState().applyEvent({ type: "init.job", job: { id: "init_1", road: "manual", phase: "done", keys: { solari: true }, step: 0, stoppable: false, screens: [], rows: [], progress: { done: 2, total: 2 }, log: [] } }));
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Create" }).hasAttribute("disabled")).toBe(false));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(api.createFromGoldenHead).toHaveBeenCalledWith("beta", undefined));
+  });
+
   it("a refusal keeps the row, names the refusal on it, and reopens no dialog", async () => {
     const api = fakeApi([API], [status(API)]);
     api.createFromGoldenHead = vi.fn(async () => { throw new RequestError("Sandbox limit reached", "concurrency"); });

@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The new-workspace dialog in a real Chromium, both themes: the size rows
 // share one height with each other, read in the muted mono voice the start
-// details use, carry no border or fill of their own, and the rates read at AA.
-// Photographed open in each theme. Runs only when asked for (WSP_RENDER=1)
-// and skips without Playwright's Chromium.
+// details use, carry no border or fill of their own, and the rates read at AA;
+// and with nothing to fork yet, the Create keycap is held with the reason as
+// its tooltip. Photographed in each state and theme. Runs only when asked for
+// (WSP_RENDER=1) and skips without Playwright's Chromium.
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { CLOUD_SETUP_WORDS } from "@wsp/protocol";
 import { textContrast } from "./contrast";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
 import { startVite, type ViteChild } from "./vite-child";
@@ -63,5 +65,23 @@ describe.skipIf(renderSkipped !== undefined)("the new-workspace dialog laid out 
     console.info(`${theme}: size rows read at ${ratios.map(r => r.toFixed(2)).join(", ")} to 1`);
     for (const ratio of ratios) expect(ratio).toBeGreaterThanOrEqual(4.5);
     await page!.locator("[role=dialog]").screenshot({ path: join(SHOTS, `new-workspace-open-${theme}.png`) });
+  });
+
+  it.each(["dark", "light"] as const)("in the %s theme a build still running holds the Create keycap and puts its reason in the tooltip", async theme => {
+    const line = `${CLOUD_SETUP_WORDS.create.building} · 5 of 13`;
+    await page!.goto(`${base}?theme=${theme}&refusal=${encodeURIComponent(line)}`);
+    const create = page!.locator("[role=dialog] button", { hasText: "Create" });
+    await create.waitFor();
+    expect(await create.isDisabled()).toBe(true);
+    // The reason hangs on the wrapper, since a disabled button takes no hover of its own.
+    await page!.locator("[data-k=create-reason]").hover();
+    const popup = page!.locator("[data-slot=tooltip-popup]");
+    await popup.waitFor();
+    expect(await popup.textContent()).toBe(line);
+    const ratios = await textContrast(page!, "[data-slot=tooltip-popup]");
+    console.info(`${theme}: the held keycap's reason reads at ${ratios.map(r => r.toFixed(2)).join(", ")} to 1`);
+    for (const ratio of ratios) expect(ratio).toBeGreaterThanOrEqual(4.5);
+    // The whole window, since the tooltip is a popup beside the card and a shot of the card alone would cut it.
+    await page!.screenshot({ path: join(SHOTS, `new-workspace-building-${theme}.png`) });
   });
 });

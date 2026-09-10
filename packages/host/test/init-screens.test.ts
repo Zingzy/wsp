@@ -51,13 +51,15 @@ describe("the screens as data", () => {
     expect(also.tally).toBe("more");
   });
 
-  it("the tools screen is two groups, the base checked and locked under one divider and the rest by calls, each usage row one number, no footer lines", () => {
+  it("the tools screen is two groups, the base checked and locked under one divider in the catalog's order with no calls however used, and the rest by calls, each usage row one number, no footer lines", () => {
     const used = (id: string, calls: number, sessions = 3): Recipe["rows"][number] => ({ id, kind: "tool", on: true, source: { kind: "used", sessions, calls } });
-    const recipe: Recipe = { ...RECIPE, rows: [...RECIPE.rows.filter(r => r.id !== "gh" && r.id !== "yq"), used("gh", 412), used("yq", 29_623)] };
-    const tools = screensOf(reading(), fresh(recipe), at())[1]!;
     const floor = CATALOG_TOOLS.filter(e => e.floor).map(e => e.id);
+    // A base tool the agents ran here more than anything: it stays where the catalog puts it and carries no number.
+    const heavyBase = floor[0]!;
+    const recipe: Recipe = { ...RECIPE, rows: [...RECIPE.rows.filter(r => r.id !== "gh" && r.id !== "yq" && r.id !== heavyBase), used("gh", 412), used("yq", 29_623), used(heavyBase, 99_999)] };
+    const tools = screensOf(reading(), fresh(recipe), at())[1]!;
     const base = tools.items.filter(i => i.group === ALWAYS_GROUP);
-    expect(base.map(i => i.id).sort()).toEqual([...floor].sort());
+    expect(base.map(i => i.id)).toEqual(floor);
     expect(base.every(i => i.lock === "on" && i.why === undefined)).toBe(true);
     expect(tools.items.filter(i => i.group !== ALWAYS_GROUP).every(i => i.group === USAGE_GROUP)).toBe(true);
     // Most calls first within the usage group, whatever the tick; a row never used carries no number.

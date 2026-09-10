@@ -240,8 +240,7 @@ describe("daemon WS server", () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-daemon-env-"));
     const tokenPath = join(dir, "token");
     writeFileSync(tokenPath, "fromfile\n");
-    const previous = process.env["WSP_DAEMON_TOKEN"];
-    process.env["WSP_DAEMON_TOKEN"] = "fromenv";
+    vi.stubEnv("WSP_DAEMON_TOKEN", "fromenv");
     const d = await startDaemon({ port: 0, tokenPath });
     try {
       const env = await Client.connect(d.port, "fromenv");
@@ -250,8 +249,7 @@ describe("daemon WS server", () => {
       expect((await file.request("ping")).ok).toBe(true);
       file.close();
     } finally {
-      if (previous === undefined) delete process.env["WSP_DAEMON_TOKEN"];
-      else process.env["WSP_DAEMON_TOKEN"] = previous;
+      vi.unstubAllEnvs();
       await d.close();
       rmSync(dir, { recursive: true, force: true });
     }

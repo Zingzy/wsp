@@ -722,6 +722,9 @@ export interface RuntimeOptions {
   /** How long a daemon gets to announce itself when an update reads the version either side of its deploy; the
    * hello lands on connect, so a daemon that is there answers in one round trip (tests shrink it). */
   daemonHelloTimeoutMs?: number;
+  /** The environment labs is read from; this process's when unset, which the entry points mean and a test does not:
+   * a test says the environment it means here rather than inheriting the shell that started it. */
+  env?: Readonly<Record<string, string | undefined>>;
 }
 
 export interface WakeOptions {
@@ -4622,8 +4625,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     await store.delete(BUILDERS, id);
   };
 
-  const stageOf = (name: string) => (stage: GoldenStage, detail?: string, step?: GoldenStep) =>
-    bus.emit({ type: "golden.stage", name, stage, ...(detail !== undefined ? { detail } : {}), ...(step !== undefined ? { step } : {}) });
+  const stageOf = (name: string) => (stage: GoldenStage, detail?: string, step?: GoldenStep, left?: readonly string[]) =>
+    bus.emit({ type: "golden.stage", name, stage, ...(detail !== undefined ? { detail } : {}), ...(step !== undefined ? { step } : {}), ...(left !== undefined && left.length > 0 ? { left: [...left] } : {}) });
 
   /** The recipe a golden road builds from: the one the call names, else the one the runtime was wired with. A host
    * serving the app names it per call, since the init job's recipe is answered while the runtime already serves. */
@@ -5063,7 +5066,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await ready();
       await refreshBuilders();
       const entry = builders.get(builderId);
-      if (!entry) throw new Error(`no such builder: ${builderId}`);
+      // A machine of this setup no builder record claims: a seal's smoke fork whose rollback could not reach the
+      // provider. Only this state file's own builder or smoke fork is taken, by the labels the create stamped, so
+      // neither another host's machine nor a workspace of this one is ever killed here; a provider that cannot be
+      // read keeps its own reason, which is what a caller retrying reads.
+      if (!entry) {
+        const machine = await backend.get(builderId).catch((e: unknown) => {
+          if (isMissing(e)) return undefined;
+          throw e;
+        });
+        const labels = machine?.labels;
+        const mine = labels?.[OWNER_LABEL] === owner && (labels[BUILDER_LABEL] === "1" || labels[SMOKE_LABEL] === "1");
+        if (!mine || machine === undefined) throw new Error(`no such builder: ${builderId}`);
+        await killUntilGone(backend, machine, opts.killConfirm);
+        return;
+      }
       // A record its dead holder left mid-setup is stopped here as the sweep would stop it; only seal and reach need finished stages.
       if (entry.life === "foreign" || entry.life === "held") refuseUntouchable(entry);
       await killUntilGone(backend, entry.builder.machine, opts.killConfirm);
@@ -5460,7 +5477,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   // before the other's write and the later write would drop the earlier field.
   let preferenceWrites: Promise<unknown> = Promise.resolve();
   // Read once, here, and stamped on every read: a state file that holds an older labs cannot outvote the environment.
-  const labs = labsFromEnv(process.env);
+  const labs = labsFromEnv(opts.env ?? process.env);
   const preferences: Runtime["preferences"] = {
     get: async () => ({ ...preferencesFrom(await store.get(PREFERENCES, PREFERENCES_ID)), labs }),
     set: patch => {

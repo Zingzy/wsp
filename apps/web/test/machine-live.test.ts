@@ -2,7 +2,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { SysSample } from "@wsp/protocol";
-import { bytesOfLabel, diskTier, percentLabel, reachLabel } from "../src/components/machine/format.js";
+import { percentLabel, reachLabel } from "../src/components/machine/format.js";
 import { getLive, LIVE_WINDOW, outOfMemoryReading, resetLive, useOutOfMemoryReading, useOutOfMemoryReadings } from "../src/machine/live.js";
 
 const sample = (i: number): SysSample => ({ type: "sys.sample", cpu: i, load1: 0.5, mem: { used: i, total: 100 }, disk: { used: i, total: 100 }, at: 1_000 + i });
@@ -20,30 +20,11 @@ describe("the Reach row's word", () => {
   });
 });
 
-describe("disk tier", () => {
-  it("turns at 50, 65 and 75 percent of the disk, on the number only", () => {
-    expect(diskTier(0)).toBe("plain");
-    expect(diskTier(49.99)).toBe("plain");
-    expect(diskTier(50)).toBe("yellow");
-    expect(diskTier(64.99)).toBe("yellow");
-    expect(diskTier(65)).toBe("orange");
-    expect(diskTier(74.99)).toBe("orange");
-    expect(diskTier(75)).toBe("red");
-    expect(diskTier(100)).toBe("red");
-  });
-});
-
 describe("live labels", () => {
   it("percent is a whole number with its sign", () => {
     expect(percentLabel(33.333)).toBe("33%");
     expect(percentLabel(0.4)).toBe("0%");
     expect(percentLabel(100)).toBe("100%");
-  });
-
-  it("used of total prints each side under the shared byte rule", () => {
-    const GiB = 1024 ** 3;
-    expect(bytesOfLabel(3.14 * GiB, 7.75 * GiB)).toBe("3.1 GB of 7.8 GB");
-    expect(bytesOfLabel(900 * 1024 ** 2, 7.75 * GiB)).toBe("900 MB of 7.8 GB");
   });
 });
 

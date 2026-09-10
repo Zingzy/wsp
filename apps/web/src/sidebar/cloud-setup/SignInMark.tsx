@@ -9,6 +9,9 @@ import { harnessClient } from "../../adapt/harnesses.js";
 import { signInMark } from "../../adapt/signins.js";
 import { cn } from "../../lib/utils.js";
 
+/** Whether a row's tool has a mark to lead with, so a card can reserve the column for every row once one does. */
+export const hasRowMark = (id: string): boolean => (harnessClient(id)?.mark ?? signInMark(id)) !== undefined;
+
 export function RowMark({ id, className }: { id: string; className?: string }) {
   const mark = harnessClient(id)?.mark ?? signInMark(id);
   if (mark === undefined) return null;

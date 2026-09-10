@@ -18,6 +18,7 @@ import {
   SIGN_IN_CODE_MAX,
   SOLARI_CONSOLE,
   SignInFinish,
+  cloudCreateRefusal,
   initAgentNoRecipeLine,
   initAgentPrompt,
   initAgentStep,
@@ -31,6 +32,7 @@ import {
   initProgressLine,
   initProgressState,
   initRowOver,
+  initRowFailed,
   titleWithNeed,
   initSetupLines,
   initTallyLine,
@@ -41,7 +43,9 @@ import {
   initStageCount,
   initStageCountLine,
   initSweeping,
-  initMachineRowLabel,
+  MACHINE_GONE_LINE,
+  MACHINE_ROW_LABEL,
+  machineLeftLine,
   MACHINE_SWEEP_LINE,
   initStageWhile,
   initStoppedLine,
@@ -50,8 +54,20 @@ import {
   sizeTone,
   diskTone,
   initDiskOverLine,
+  initImageBytes,
+  initSizeTone,
+  fmtBytesOfTotal,
+  initTallyOf,
+  initTicksOf,
   fmtCalls,
-  type InitRow,
+  GOLDEN_STAGE_TIMED,
+  SAVING_IMAGE_LINE,
+  InitRow,
+  initElapsedLine,
+  initRowTimed,
+  initSignInLine,
+  snapshotStageLine,
+  templateStatusLine,
   type InitScreen,
 } from "../src/index.js";
 
@@ -302,7 +318,12 @@ describe("the words the clients print for the job", () => {
     // Once the provider took it the line goes back to the job the person is looking at.
     expect(initProgressLine({ ...building, rows: [...building.rows, left(INIT_ROW_STATES.gone)] })).toBe("building · 1/2");
     // A machine row's name is words, never a bare provider id in a column of sentences.
-    expect(initMachineRowLabel("b_dlb9oeig")).toBe("Builder b_dlb9oeig");
+    // No provider id in a row's name or a sentence: the builder is the builder, and a stopped build's machine is the machine.
+    expect(MACHINE_ROW_LABEL).toBe("The builder");
+    expect(MACHINE_GONE_LINE).toBe("The machine is gone; nothing is billing.");
+    expect(`${MACHINE_ROW_LABEL} ${MACHINE_GONE_LINE} ${MACHINE_SWEEP_LINE}`).not.toMatch(/b_[a-z0-9]{6,}/);
+    // A rollback the provider refused is a line on the stage's block with the provider's own words, never the headline.
+    expect(machineLeftLine("getaddrinfo ENOTFOUND api.getsolari.com")).toBe("the machine could not be removed and bills on: getaddrinfo ENOTFOUND api.getsolari.com");
   });
 
   it("a stopped build's sentence is this computer's own word for what happened, and a reason said twice is said once", () => {
@@ -364,6 +385,11 @@ describe("the words the clients print for the job", () => {
     expect(initTallyLine(3, "more", 1.2 * 1024 * MIB)).toBe("3 more on the image · 1.2 GB");
     expect(initTallyLine(1, "more", MIB)).toBe("1 more on the image · 1 MB");
     expect(initDiskLine(1.1 * 1024 * MIB, 20 * 1024 * MIB)).toBe("about 1.1 GB of 20 GB on the image");
+    // Past the disk the tooltip carries the overshoot too: said there and in Continue's refusal, nowhere else.
+    expect(initDiskLine(21 * 1024 * MIB, 20 * 1024 * MIB)).toBe("about 21 GB of 20 GB on the image, over by 1 GB");
+    // The sign-in stage with a run-out is a failure to draw as one, beside the stage that failed; nothing else is.
+    expect([initRowFailed(INIT_ROW_STATES.failed), initRowFailed(INIT_SIGN_IN_WORDS["not-signed-in"]), initRowFailed(INIT_ROW_STATES.done), initRowFailed(INIT_ROW_STATES.stopped)]).toEqual([true, true, false, false]);
+    expect(CLOUD_SETUP_WORDS.build.doneTop).toBe("The image is sealed; every thread forks it");
     const rows: InitRow[] = [
       { id: "agent/claude", kind: "agent", label: "Claude Code", state: "MCP added" },
       { id: "stage/creating", kind: "stage", label: "Creating the machine", state: "done" },
@@ -394,9 +420,86 @@ describe("the words the clients print for the job", () => {
     expect(fmtCalls(1)).toBe("1 call");
   });
 
+  it("every step's tally reads the step's count and the running image estimate against the disk, one function computes that estimate from the job's drafts over its answers, and only the tools and what-else screens weigh their sizes", () => {
+    const GIB = 1024 * MIB;
+    const agents: InitScreen = { id: "agents", title: "Agents", top: "Which agents go on the image", counter: "1/6", items: [{ id: "claude", label: "Claude Code", size: 208 * MIB, detail: [] }, { id: "codex", label: "Codex", size: 455 * MIB, detail: [] }, { id: "hermes", label: "Hermes Agent", size: 484 * MIB, detail: [] }], ticks: ["claude", "codex"], answers: {}, footer: [], tally: "agents" };
+    const tools: InitScreen = { id: "tools", title: "Tools", top: "Tools from your usage", counter: "2/6", items: [{ id: "node", label: "Node", size: 300 * MIB, lock: "on", detail: [] }, { id: "rust", label: "Rust", size: 4 * GIB, detail: [] }, { id: "swift", label: "Swift", size: 3 * GIB, detail: [] }, { id: "bun", label: "bun", size: null, detail: [] }], ticks: ["rust", "bun"], answers: {}, footer: [], tally: "tools" };
+    const logins: InitScreen = { id: "logins", title: "Sign-ins", top: "How sign-ins reach the machine", counter: "4/6", items: [{ id: "logins/gh", label: "GitHub CLI login", detail: [], choices: [{ value: "copy", label: "copy" }] }], ticks: [], answers: {}, footer: [] };
+    const job = { disk: { fixed: 0, total: 20 * GIB }, screens: [agents, tools, logins] };
+    // A locked row is on, a row with a picker is not counted, and a row nothing measured adds nothing.
+    expect(initTallyOf(tools, new Set(["rust", "bun"]))).toEqual({ count: 3, bytes: 300 * MIB + 4 * GIB });
+    expect(initTallyOf(logins, new Set())).toEqual({ count: 0, bytes: 0 });
+    // Agents ticked to 663 MB and tools to 4.3 GB: the tools step counts its own rows and reads the whole image.
+    expect(initImageBytes(job)).toBe(663 * MIB + 300 * MIB + 4 * GIB);
+    expect(initTallyLine(3, "tools", initImageBytes(job), job.disk.total)).toBe("3 tools on the image · 4.9 GB of 20 GB");
+    // What the disk holds before any tick is under every estimate; a draft kept on a step stands over what the host
+    // last answered; the draft a client holds and the host has not echoed stands over both.
+    expect(initImageBytes({ ...job, disk: { fixed: 2 * GIB, total: 20 * GIB } })).toBe(2 * GIB + 663 * MIB + 300 * MIB + 4 * GIB);
+    expect(initImageBytes({ ...job, drafts: [{ at: "tools", ticks: ["rust", "swift"], answers: {} }] })).toBe(663 * MIB + 300 * MIB + 7 * GIB);
+    expect(initImageBytes({ ...job, drafts: [{ at: "tools", ticks: ["rust", "swift"], answers: {} }] }, { at: "tools", ticks: new Set<string>() })).toBe(663 * MIB + 300 * MIB);
+    expect(initImageBytes(job, { at: "agents", ticks: ["claude"] })).toBe(208 * MIB + 300 * MIB + 4 * GIB);
+    expect(initImageBytes({ screens: [] })).toBe(0);
+    // The one rule for a screen's ticks as they stand, which the screen's draft and the estimate both read.
+    expect([...initTicksOf(tools)]).toEqual(["rust", "bun"]);
+    expect([...initTicksOf(tools, { ticks: ["swift"] })]).toEqual(["swift"]);
+    // The estimate reads in the tone its share of the disk earns, never its weight: 4.9 GB is the danger weight and a quarter of the disk.
+    expect(fmtBytesOfTotal(4.9 * GIB, 20 * GIB)).toBe("4.9 GB of 20 GB");
+    expect(fmtBytesOfTotal(4.9 * GIB)).toBe("4.9 GB");
+    expect(initTallyLine(0, "more", 4.9 * GIB)).toBe("0 more on the image · 4.9 GB");
+    expect(diskTone(initImageBytes(job), job.disk.total)).toBe("muted");
+    expect(sizeTone(initImageBytes(job))).toBe("danger");
+    // The agents screen's sizes are muted whatever they weigh; the tools and what-else screens' wear the weight table; nothing measured is muted anywhere.
+    expect([initSizeTone(agents, 455 * MIB), initSizeTone(agents, 4 * GIB), initSizeTone(tools, 455 * MIB), initSizeTone(tools, 4 * GIB), initSizeTone({ id: "also" }, 150 * MIB), initSizeTone(tools, null)]).toEqual(["muted", "muted", "warning", "danger", "yellow", "muted"]);
+  });
+
+  it("a sign-in's sentence names what the machine waits on and never a command, the seal's stages say what a person can use with no snapshot name, and a running stage's clock rides the row in whole seconds", () => {
+    expect(initSignInLine({ state: INIT_ROW_STATES.open, code: "8F4A-C21B" })).toBe("waiting for the code");
+    expect(initSignInLine({ state: INIT_ROW_STATES.open, finish: "code" })).toBe("waiting for the code");
+    expect(initSignInLine({ state: INIT_ROW_STATES.open })).toBe("the page is open on this computer");
+    expect(initSignInLine({ state: INIT_SIGN_IN_WORDS.copied })).toBeUndefined();
+    expect(initSignInLine({ state: INIT_ROW_STATES.done })).toBeUndefined();
+    expect(initSignInLine({ state: INIT_SIGN_IN_WORDS["not-signed-in"] })).toBeUndefined();
+    expect(snapshotStageLine(13 * 1024 * MIB)).toBe("snapshotting about 13 GB, usually under a minute");
+    expect(snapshotStageLine(undefined)).toBe("snapshotting, usually under a minute");
+    expect(SAVING_IMAGE_LINE).toBe("saving the image");
+    expect(templateStatusLine("ready")).toBe("the image is saved");
+    expect(templateStatusLine("building")).toBe("saving the image, the provider says building; asking again");
+    // The two stages the provider says nothing during count their own seconds; the wire carries the clock's start.
+    expect([...GOLDEN_STAGE_TIMED]).toEqual(["snapshotting", "promoting"]);
+    expect([initRowTimed({ id: "stage/snapshotting" }), initRowTimed({ id: "stage/promoting" }), initRowTimed({ id: "stage/creating" }), initRowTimed({ id: "sign-in/gh" })]).toEqual([true, true, false, false]);
+    expect([initElapsedLine(0), initElapsedLine(999), initElapsedLine(41_400), initElapsedLine(72_000)]).toEqual(["0s", "0s", "41s", "1m 12s"]);
+    expect(InitRow.parse({ id: "stage/snapshotting", kind: "stage", label: "Taking the snapshot", state: "running", since: 1_760_000_000_000 }).since).toBe(1_760_000_000_000);
+  });
+
   it("the row's words never ask the person to run a command", () => {
     const text = JSON.stringify(CLOUD_SETUP_WORDS);
     expect(text).not.toMatch(/wsp init|terminal/i);
     expect(CLOUD_SETUP_WORDS.row).toBe("Set up cloud machines");
+  });
+
+  it("holds a new cloud workspace back while there is no image to fork, in the app's own words", () => {
+    const stages: InitRow[] = [
+      row({ id: "stage/creating", state: "done" }),
+      row({ id: "stage/tools", state: "done" }),
+      row({ id: "stage/snapshotting", state: "running" }),
+    ];
+    const building = { ...JOB, phase: "building" as const, rows: stages };
+    expect(cloudCreateRefusal({ hasGolden: false, job: building })).toEqual({ line: "the image is still building · 2 of 3", word: "Open the build" });
+    // The count is the build's own, so the sign-ins fold into one stage here as they do on the build screen.
+    const withSignIns = { ...building, rows: [...stages, row({ id: "sign-in/gh", kind: "sign-in" as const, label: "GitHub CLI login", state: "waiting" }), row({ id: "sign-in/claude", kind: "sign-in" as const, label: "Claude Code", state: "waiting" })] };
+    expect(cloudCreateRefusal({ hasGolden: false, job: withSignIns })?.line).toBe("the image is still building · 2 of 4");
+    // Every stretch of the build says it, since the image is sealed at the end of all of them.
+    for (const phase of ["signing-in", "sealing", "finishing"] as const) {
+      expect(cloudCreateRefusal({ hasGolden: false, job: { ...building, phase } })?.line).toMatch(/^the image is still building/);
+    }
+    // No build to point at: the answers, a job that stopped, and no job at all all send the person to the setup.
+    const setup = { line: "set up cloud machines first", word: CLOUD_SETUP_WORDS.row };
+    expect(cloudCreateRefusal({ hasGolden: false, job: null })).toEqual(setup);
+    expect(cloudCreateRefusal({ hasGolden: false, job: { ...building, phase: "answering" } })).toEqual(setup);
+    expect(cloudCreateRefusal({ hasGolden: false, job: { ...building, phase: "failed" } })).toEqual(setup);
+    // A sealed image has a head to fork, so a later build over it holds nothing back; nor does a state not read yet.
+    expect(cloudCreateRefusal({ hasGolden: true, job: building })).toBeNull();
+    expect(cloudCreateRefusal({ hasGolden: null, job: building })).toBeNull();
+    expect(JSON.stringify(CLOUD_SETUP_WORDS.create)).not.toMatch(/wspx|golden build|terminal/i);
   });
 });

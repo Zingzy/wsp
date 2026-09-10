@@ -4805,7 +4805,7 @@ describe("runtime golden update and the post-seal grace", () => {
       "installing-mcp:none configured",
       expect.stringMatching(/^installing-mcp:machine context: \d+(\.\d+)? KB written; no agent on the machine$/),
       "ready:",
-      "snapshotting:wsp-h1-default-v2",
+      "snapshotting:snapshotting about 2.9 GB, usually under a minute",
       "smoke-forking:codex --version",
       "smoke-forking:1 agent answers: Codex",
       "sealed:v2; builder kept for one more change",

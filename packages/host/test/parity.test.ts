@@ -28,7 +28,7 @@ interface Tool {
 }
 
 async function listTools(): Promise<Tool[]> {
-  const server = mcpServer("/nonexistent/state.json");
+  const server = mcpServer("/nonexistent/state.json", { env: {} });
   const [toClient, toServer] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "parity", version: "0" });
   await server.connect(toServer);

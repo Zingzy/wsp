@@ -295,7 +295,7 @@ describe("the agent contract on the command line and the tool door", () => {
   });
 
   it("the tool door answers a failure as a tool error whose structured content is the same object with the same class", async () => {
-    const server = mcpServer(statePath);
+    const server = mcpServer(statePath, { env: {} });
     const [toClient, toServer] = InMemoryTransport.createLinkedPair();
     const client = new Client({ name: "contract", version: "0" });
     await server.connect(toServer);
@@ -310,7 +310,7 @@ describe("the agent contract on the command line and the tool door", () => {
       const relative = await call("exec", { workspace: "alpha", argv: ["true"], cwd: "packages" });
       expect(relative).toEqual({ text: '--cwd is a path on the machine, absolute: got "packages"', structured: { error: '--cwd is a path on the machine, absolute: got "packages"', class: "usage", exit: 3 }, isError: true });
       writeFileSync(hostTokenPath(statePath), "not-the-token\n");
-      const fresh = mcpServer(statePath);
+      const fresh = mcpServer(statePath, { env: {} });
       const [c2, s2] = InMemoryTransport.createLinkedPair();
       const client2 = new Client({ name: "contract-2", version: "0" });
       await fresh.connect(s2);

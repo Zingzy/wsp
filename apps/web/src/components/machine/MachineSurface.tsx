@@ -14,7 +14,7 @@ import { CLIENT_CANNOT_REBUILD } from "../../actions/format.js";
 import { actionById, resolveActions, rowLabelOf } from "../../actions/registry.js";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { workspaceActions, workspaceTarget } from "../../actions/workspaceActions.js";
-import { FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, LINEAGE_MARKS, NOT_ON_THIS_KIND, behindGoldenLine, biggerSizeLine, fmtBytes, fmtRate, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageKeptLine, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, sizeWord, vaultStaleLine, workspaceKind, workspaceProjects, workspaceState, workspaceStateOf, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, LINEAGE_MARKS, NOT_ON_THIS_KIND, behindGoldenLine, biggerSizeLine, diskTone, fmtBytes, fmtBytesOfTotal, fmtRate, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageKeptLine, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, sizeWord, vaultStaleLine, workspaceKind, workspaceProjects, workspaceState, workspaceStateOf, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SizeTone, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { isDesktopShell } from "../../lib/desktopShell.js";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, useOutOfMemoryReading, useWorkspaceLive } from "../../machine/live.js";
@@ -34,8 +34,6 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty.js
 import { ForgetWorkspaceDialog } from "../ForgetWorkspaceDialog.js";
 import { ScrollArea } from "../ui/scroll-area.js";
 import {
-  bytesOfLabel,
-  diskTier,
   divergentMachineState,
   durationLabel,
   idleLabel,
@@ -43,8 +41,8 @@ import {
   percentLabel,
   phaseLabel,
   reachLabel,
-  type DiskTier,
 } from "./format.js";
+import { TONE_TEXT } from "../../lib/tone.js";
 import { workspaceKindGlyph } from "../../workspaceKindGlyph.js";
 import { SnapshotStorageLine } from "./SnapshotStorageLine.js";
 import { UsageChart, UsageRangeToggle } from "./UsageChart.js";
@@ -425,20 +423,13 @@ function Live({ workspace, kind }: { workspace: WorkspaceView; kind: WorkspaceKi
   return (
     <Section label="Live" aside={kindWord === null && last !== undefined && stale === null ? `load ${last.load1.toFixed(2)}` : undefined}>
       <div className="mt-1 divide-y divide-border/40">
-        <LiveRow {...row} label="cpu" k="cpu" y={s => s.cpu} text={s => percentLabel(s.cpu)} />
-        <LiveRow {...row} label="memory" k="mem" y={s => share(s.mem)} text={s => bytesOfLabel(s.mem.used, s.mem.total)} />
-        <LiveRow {...row} label="disk" k="disk" y={s => share(s.disk)} text={s => bytesOfLabel(s.disk.used, s.disk.total)} tier={s => diskTier(share(s.disk))} />
+        <LiveRow {...row} label="cpu" k="cpu" y={s => s.cpu} text={s => percentLabel(s.cpu)} tone={s => diskTone(s.cpu, 100)} />
+        <LiveRow {...row} label="memory" k="mem" y={s => share(s.mem)} text={s => fmtBytesOfTotal(s.mem.used, s.mem.total)} tone={s => diskTone(s.mem.used, s.mem.total)} />
+        <LiveRow {...row} label="disk" k="disk" y={s => share(s.disk)} text={s => fmtBytesOfTotal(s.disk.used, s.disk.total)} tone={s => diskTone(s.disk.used, s.disk.total)} />
       </div>
     </Section>
   );
 }
-
-const TIER_CLASS: Record<DiskTier, string | undefined> = {
-  plain: undefined,
-  yellow: "text-warning-foreground",
-  orange: "text-caution-foreground",
-  red: "text-destructive-foreground",
-};
 
 /** The drawing box of one sparkline, stretched to the row; every value is a percent, so the scale is fixed. */
 const SPARK_W = 100;
@@ -460,7 +451,8 @@ interface LiveRowProps {
   samples: SysSample[];
   y: (s: SysSample) => number;
   text: (s: SysSample) => string;
-  tier?: (s: SysSample) => DiskTier;
+  /** The tone the sample's share earns, from the protocol's one percent table. */
+  tone: (s: SysSample) => SizeTone;
   stale: Stale;
   /** The daemon's refusal of the stream; the slot reads unavailable and carries it as the title. */
   unavailable: string | null;
@@ -471,12 +463,12 @@ interface LiveRowProps {
 
 /** One fixed-height row: label, sparkline, value. The value slot has a fixed width so a word in place of a number
  * moves nothing; a single sample draws as a dot through the round cap. Hovering reads that sample into the slot. */
-function LiveRow({ label, k, samples, y, text, tier, stale, unavailable, kindWord }: LiveRowProps) {
+function LiveRow({ label, k, samples, y, text, tone, stale, unavailable, kindWord }: LiveRowProps) {
   const [hover, setHover] = useState<number | null>(null);
   const points = sparkPoints(samples, y);
   const shown = hover !== null ? samples[hover] : samples[samples.length - 1];
   const word = kindWord ?? stale ?? (unavailable !== null ? "unavailable" : shown === undefined ? "pending" : null);
-  const tone = word === null && shown !== undefined && tier ? TIER_CLASS[tier(shown)] : undefined;
+  const ink = word === null && shown !== undefined ? TONE_TEXT[tone(shown)] : undefined;
 
   const track = (e: ReactMouseEvent<SVGSVGElement>): void => {
     const box = e.currentTarget.getBoundingClientRect();
@@ -513,7 +505,7 @@ function LiveRow({ label, k, samples, y, text, tier, stale, unavailable, kindWor
         )}
       </svg>
       <span
-        className={cn("truncate text-right font-mono tabular-nums", word !== null ? "text-muted-foreground/60" : (tone ?? "text-foreground"))}
+        className={cn("truncate text-right font-mono tabular-nums", word !== null ? "text-muted-foreground/60" : ink)}
         data-k={k}
         {...(word === "unavailable" && unavailable !== null ? { title: unavailable } : {})}
       >

@@ -14,7 +14,7 @@ import { stripVTControlCharacters } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
 import { keyCheckLine, type BackendPricing, type KeyCheck } from "@wsp/engine";
 import { RUNGS } from "@wsp/collect";
-import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, KEY_REFUSED, KEY_UNCHECKED, NEVER_REACHED, NO_FIRST_WORKSPACE, STOP_LEFT_MACHINE_LINE, shellQuote, SIGN_IN_NEVER_REACHED, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobOver, initMachineRowLabel, initNeedWhat, initRowOver, initStageCount, initStoppedAt, initStoppedLine, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type LoginState, type McpServerSpec, type TurnResult } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, KEY_REFUSED, KEY_UNCHECKED, NEVER_REACHED, NO_FIRST_WORKSPACE, STOP_LEFT_MACHINE_LINE, shellQuote, SIGN_IN_NEVER_REACHED, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobOver, MACHINE_ROW_LABEL, initNeedWhat, initRowOver, initStageCount, initStoppedAt, initStoppedLine, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type LoginState, type McpServerSpec, type TurnResult } from "@wsp/protocol";
 import { harnessCatalog, smallestModel, type GoldenRecipe, type InitDoor, type Runtime, type SessionHandle } from "@wsp/runtime";
 import type { AgentHere } from "./agents-here.js";
 import { SOLARI_KEY, agentKeysIn, keysOf, type Keys } from "./env-keys.js";
@@ -761,8 +761,14 @@ export class InitJobs implements InitDoor {
         if (stage === undefined) return;
         const step = record["step"] as GoldenStep | undefined;
         s.frames.push({ type: "golden.stage", name: GOLDEN_NAME, stage, ...(text("detail") !== undefined ? { detail: text("detail")! } : {}), ...(step !== undefined ? { step: { label: step.label, command: step.command } } : {}), at });
+        // The failure's sentence stands from the frame that failed, so the view drawn on it already closes the stage's
+        // block with what the head says; the raw detail stays in the frame and reaches no screen.
+        if (stage === "failed") this.fail(s, text("detail") ?? "no detail given");
         // The provider having no room is not the stage working: the next frame off it, cap or not, says so again.
         s.slotWait = record["waiting"] === true ? stage : undefined;
+        // A machine the stage made and could not remove bills on, whether the person stopped the build or it failed
+        // on its own: every road that leaves one comes through here, so the sweep starts from all of them.
+        for (const id of Array.isArray(record["left"]) ? (record["left"] as unknown[]) : []) if (typeof id === "string") this.sweep(id);
         // The phase turns to signing in on the first sign-in row, not when the machine answers: the checks and the
         // secrets between the two are the build's, and a status that says signing in with no row to sign in is a lie.
         if (stage === "sealed") s.phase = "finishing";
@@ -886,13 +892,15 @@ export class InitJobs implements InitDoor {
       const halted = s.phase === "failed" || s.phase === "cancelled";
       const running = halted ? ended : s.slotWait === w.stage ? STATE.slot : STATE.running;
       const state = step === undefined ? STATE.waiting : step.state === "current" ? running : step.state === "done" ? STATE.done : ended;
-      // A failed stage ends with the reason, so a row read on its own says why and a build that stopped before any
-      // stage ran still has one line saying what stopped it. The terminal's block draws the failure itself.
-      const failure = step?.state === "failed" && view.failure !== undefined ? view.failure.split("\n").filter(l => l !== "") : [];
+      // A failed stage ends with the reason in this computer's own words, the sentence the head shows, so a row read
+      // on its own says why and a build that stopped before any stage ran still has one line saying what stopped it;
+      // the raw error stays in the frame. The terminal's block draws the failure itself.
+      const failure = step?.state === "failed" && s.error !== undefined ? [s.error] : [];
       const tail = step === undefined ? [] : [...step.tail, ...failure.filter(l => l !== step.tail.at(-1))];
       const detail = step?.running?.command ?? tail.at(-1);
       const lines = [...tail.slice(-STAGE_LINES), ...(step?.running !== undefined ? [step.running.command] : [])];
-      return { id: `stage/${w.stage}`, kind: "stage", label: w.start, state, ...(detail !== undefined ? { detail } : {}), ...(step?.ms !== undefined ? { ms: step.ms } : {}), ...(lines.length > 0 ? { lines } : {}) };
+      const since = !halted && step?.state === "current" ? step.since : undefined;
+      return { id: `stage/${w.stage}`, kind: "stage", label: w.start, state, ...(detail !== undefined ? { detail } : {}), ...(step?.ms !== undefined ? { ms: step.ms } : {}), ...(since !== undefined ? { since } : {}), ...(lines.length > 0 ? { lines } : {}) };
     });
     // The sign-ins sit after the machine answers. A build that ended before that stage has no row for it, and the
     // sign-ins belong after every stage it did reach rather than ahead of all of them.
@@ -906,7 +914,7 @@ export class InitJobs implements InitDoor {
    * whatever job is current and the sidebar's keycap says so until the provider takes it. */
   private sweep(builderId: string): void {
     if (this.sweeps.has(builderId)) return;
-    const row: InitRow = { id: `machine/${builderId}`, kind: "machine", label: initMachineRowLabel(builderId), state: STATE.retrying };
+    const row: InitRow = { id: `machine/${builderId}`, kind: "machine", label: MACHINE_ROW_LABEL, state: STATE.retrying };
     this.sweeps.set(builderId, row);
     const retry = this.deps.retry ?? SWEEP_RETRY;
     const work = async (): Promise<void> => {

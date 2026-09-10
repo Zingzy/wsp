@@ -10,6 +10,7 @@ import { shellQuote, type RecipeDigest } from "@wsp/protocol";
 import { NotFirstLifeError } from "../src/lifecycle.js";
 import { AGENT_INSTALLERS, HOMEBREW, NODE_PATH_LINE, type ToolInstall } from "../src/golden-import.js";
 import { INLINE_EXEC_MS } from "../src/exec-detached.js";
+import { USED_KB_CMD } from "../src/golden-tools.js";
 import { goldenName } from "../src/snapshot-names.js";
 import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec, TemplateRow } from "../src/machine.js";
 
@@ -19,6 +20,8 @@ function recordingBackend(
   execResults: Record<string, ExecResult> = {},
   opts: {
     ignoreKill?: (id: string, nth: number) => boolean;
+    /** The provider's refusal of a kill, by machine and attempt; the machine stays as it was. */
+    refuseKill?: (id: string, nth: number) => Error | undefined;
     built?: (spec: MachineSpec) => MachineShape;
     exec?: (cmd: string) => ExecResult;
     stream?: boolean;
@@ -80,6 +83,8 @@ function recordingBackend(
           timeline.push(`kill ${id}`);
           const nth = (killCount.get(id) ?? 0) + 1;
           killCount.set(id, nth);
+          const refusal = opts.refuseKill?.(id, nth);
+          if (refusal !== undefined) throw refusal;
           if (!opts.ignoreKill?.(id, nth)) gone.add(id);
         },
         state: async () => {
@@ -309,7 +314,7 @@ describe("interactive golden: prepare then seal", () => {
     expect(manifest.head).toBe(1);
     expect(sansBase(stages)).toEqual([
       "creating:desktop from default", "deploying-daemon", "installing-harness", "ready",
-      "snapshotting:wsp-h1-default-v1", "smoke-forking:claude --version", "smoke-forking:1 agent answers: Claude Code", "sealed:v1",
+      "snapshotting:snapshotting, usually under a minute", "smoke-forking:claude --version", "smoke-forking:1 agent answers: Claude Code", "sealed:v1",
     ]);
   });
 
@@ -411,7 +416,7 @@ describe("interactive golden: prepare then seal", () => {
     expect(timeline).toEqual(["create m1", "snapshot m1", "snapshot m1", "snapshot m1"]);
     expect(killed).toEqual([]);
     expect(sansBase(stages).slice(-4)).toEqual([
-      "snapshotting:wsp-h1-default-v1",
+      "snapshotting:snapshotting, usually under a minute",
       "snapshotting:attempt 1 of 3 answered 502 Failed to snapshot sandbox (request req_1); the builder reads running, next attempt in 1ms",
       "snapshotting:attempt 2 of 3 answered 502 Failed to snapshot sandbox (request req_2); the builder reads running, next attempt in 1ms",
       "failed:the snapshot failed 3 times: the provider answered 502 Failed to snapshot sandbox (request req_3) while the builder read running",
@@ -486,7 +491,7 @@ describe("golden templates", () => {
     expect(created[1]!.fromSnapshot).toBeUndefined();
     expect(version).toMatchObject({ version: 1, snapshotId: "snap_wsp-h1-work-v1", templateId: "tpl_snap_wsp-h1-work-v1" });
     expect(sansBase(stages).slice(4)).toEqual([
-      "snapshotting:wsp-h1-work-v1", "promoting:wsp-h1-work-v1", "promoting:tpl_snap_wsp-h1-work-v1 is ready", "smoke-forking:claude --version", "smoke-forking:1 agent answers: Claude Code", "sealed:v1",
+      "snapshotting:snapshotting, usually under a minute", "promoting:saving the image", "promoting:the image is saved", "smoke-forking:claude --version", "smoke-forking:1 agent answers: Claude Code", "sealed:v1",
     ]);
   });
 
@@ -507,8 +512,32 @@ describe("golden templates", () => {
     const { version } = await sealGolden(builder, { backend, hostId: "h1", smoke: "true", onStage, templateWait: FAST_WAIT });
     expect(version.templateId).toBe("tpl_snap_wsp-h1-default-v1");
     expect(stages.filter(s => s.startsWith("promoting"))).toEqual([
-      "promoting:wsp-h1-default-v1", "promoting:tpl_snap_wsp-h1-default-v1 is building; asking again", "promoting:tpl_snap_wsp-h1-default-v1 is building; asking again", "promoting:tpl_snap_wsp-h1-default-v1 is ready",
+      "promoting:saving the image", "promoting:saving the image, the provider says building; asking again", "promoting:saving the image, the provider says building; asking again", "promoting:the image is saved",
     ]);
+  });
+
+  it("a rollback the provider refuses is its own line on the stage that failed, with the machine named in left; the failure's line stays the failure's own", async () => {
+    const refusal = Object.assign(new Error("getaddrinfo ENOTFOUND api.getsolari.com"), { code: "ENOTFOUND" });
+    const { backend } = recordingBackend({ "claude --version": { exitCode: 1, stdout: "", stderr: "the fork did not boot" } }, { templates: true, refuseKill: id => (id === "m2" ? refusal : undefined) });
+    const frames: { stage: string; detail: string | undefined; left: readonly string[] | undefined }[] = [];
+    const builder = await prepareBuilder({ backend, setup: "true" });
+    await expect(sealGolden(builder, { backend, hostId: "h1", smoke: "claude --version", onStage: (stage, detail, _step, left) => frames.push({ stage, detail, left }), templateWait: FAST_WAIT })).rejects.toThrow(/the fork did not boot/);
+    const failed = frames.at(-1)!;
+    expect(failed.stage).toBe("failed");
+    expect(failed.detail).toMatch(/^golden smoke failed .*the fork did not boot$/);
+    expect(failed.detail).not.toContain("ENOTFOUND");
+    expect(failed.left).toEqual(["m2"]);
+    expect(frames.at(-2)).toEqual({ stage: "smoke-forking", detail: "the machine could not be removed and bills on: getaddrinfo ENOTFOUND api.getsolari.com", left: undefined });
+  });
+
+  it("the seal's lines say what a person can use: the snapshot's size read off the builder's disk and that the image is being saved, never the snapshot's or the template's name", async () => {
+    const { backend } = recordingBackend({ [USED_KB_CMD]: { exitCode: 0, stdout: "13631488\n", stderr: "" } }, { templates: true });
+    const { stages, onStage } = stageRecorder();
+    const builder = await prepareBuilder({ backend, setup: "true" });
+    await sealGolden(builder, { backend, hostId: "h1", smoke: "true", onStage, templateWait: FAST_WAIT });
+    expect(stages.filter(s => s.startsWith("snapshotting"))).toEqual(["snapshotting:snapshotting about 13 GB, usually under a minute"]);
+    expect(stages.filter(s => s.startsWith("promoting"))).toEqual(["promoting:saving the image", "promoting:the image is saved"]);
+    expect(stages.some(s => s.includes("wsp-h1") || s.includes("tpl_"))).toBe(false);
   });
 
   it("a template the provider fails ends the seal with its reason before any smoke fork, and the template goes before the snapshot", async () => {

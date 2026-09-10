@@ -40,3 +40,23 @@ export const textContrast = (page: Page, selector: string): Promise<number[]> =>
       return Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100;
     }),
   );
+
+/** The oklch hue of each element's text colour, in degrees to a tenth: what tells two tones apart to the eye once
+ * they share a lightness. */
+export const textHue = (page: Page, selector: string): Promise<number[]> =>
+  page.locator(selector).evaluateAll(els =>
+    els.map(el => {
+      const ctx = document.createElement("canvas").getContext("2d")!;
+      ctx.fillStyle = getComputedStyle(el).color;
+      ctx.fillRect(0, 0, 1, 1);
+      const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+      const lin = (v: number): number => (v / 255 <= 0.04045 ? v / 255 / 12.92 : ((v / 255 + 0.055) / 1.055) ** 2.4);
+      const [R, G, B] = [lin(r!), lin(g!), lin(b!)];
+      const l = Math.cbrt(0.4122214708 * R + 0.5363325363 * G + 0.0514459929 * B);
+      const m = Math.cbrt(0.2119034982 * R + 0.6806995451 * G + 0.1073969566 * B);
+      const s = Math.cbrt(0.0883024619 * R + 0.2817188376 * G + 0.6299787005 * B);
+      const a = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
+      const bq = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
+      return Math.round((((Math.atan2(bq, a) * 180) / Math.PI + 360) % 360) * 10) / 10;
+    }),
+  );

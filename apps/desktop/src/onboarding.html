@@ -72,13 +72,6 @@
       @media (prefers-reduced-motion: reduce) {
         .tilde .body, .tilde .lit, #welcome h1, #welcome .sub, #welcome .primary { animation: none; }
       }
-      .micro {
-        margin: 0 0 14px;
-        font: 11px/1 var(--font-mono);
-        letter-spacing: 0.14em;
-        text-transform: uppercase;
-        color: var(--muted-foreground);
-      }
       h1 { margin: 0 0 12px; font: 600 34px/1.15 var(--font-sans); letter-spacing: -0.02em; }
       .sub { margin: 0 0 32px; max-width: 440px; font-size: 15px; line-height: 1.5; color: var(--muted-foreground); }
       .said { margin: 0 0 32px; max-width: 440px; display: grid; gap: 12px; font-size: 15px; line-height: 1.5; color: var(--muted-foreground); }
@@ -205,7 +198,6 @@
         <button id="start" type="button" class="primary">Get started<span class="arrow" aria-hidden="true">→</span></button>
       </section>
       <section id="agents" data-screen="agents" hidden>
-        <p class="micro">Your agents</p>
         <h1>Let your agents drive wsp</h1>
         <p class="sub">Each agent found here gets the wsp tools and skill, so it can start threads on this computer.</p>
         <ul class="card" id="rows"></ul>
@@ -213,7 +205,6 @@
         <button id="skip" type="button" class="link">Skip</button>
       </section>
       <section id="recap" data-screen="recap" hidden>
-        <p class="micro">This computer</p>
         <h1>This computer is your first workspace</h1>
         <div class="said">
           <p id="happened"></p>
@@ -225,8 +216,9 @@
     <footer><span id="status"></span></footer>
     <script>
       const $ = id => document.getElementById(id);
-      /** The row words: the action, its done state, and the row whose command is not here, with nothing to add to. */
-      const WORDS = { add: "Add MCP", added: "MCP added", absent: "not installed" };
+      /** The row words: the action, its done state, the row whose command is not here, with nothing to add to, and the
+       * meta slot of a row whose sessions are still being counted. */
+      const WORDS = { add: "Add MCP", added: "MCP added", absent: "not installed", reading: "reading sessions" };
       const text = e => String(e && e.message ? e.message : e).replace(/^.*Error: /, "");
 
       // The app's stylesheet has two sides told apart by the dark class; this page follows the computer's, with
@@ -246,11 +238,11 @@
       const rows = new Map();
       let screen = "welcome";
 
+      // Nothing is focused for the person: Enter is answered by the document below, and a ring shows only where the
+      // keyboard put the focus.
       function show(next) {
         for (const id of ["welcome", "agents", "recap"]) $(id).hidden = id !== next;
         screen = next;
-        const focus = { welcome: "start", agents: "all", recap: "open" }[next];
-        $(focus).focus();
       }
 
       function stateOf(slot, word, err) {
@@ -351,6 +343,7 @@
           const meta = document.createElement("span");
           meta.className = "meta";
           meta.dataset.k = "meta";
+          if (a.found) meta.textContent = WORDS.reading;
           const slot = document.createElement("span");
           slot.className = "slot";
           li.append(glyphFor(a), name, meta, slot);
@@ -363,7 +356,8 @@
         settle();
       }
 
-      /** The session counts arrive after the rows: the stores take a while to read, and the meta slot waits for them. */
+      /** The session counts arrive after the rows: the stores take a while to read, and the meta slot says so until
+       * they land; a read that failed leaves the slot empty rather than reading forever. */
       async function history(agents) {
         const found = agents.filter(a => a.found).map(a => a.id);
         if (found.length === 0) return;
@@ -371,6 +365,7 @@
         try {
           counts = await window.wsp.history(found);
         } catch {
+          for (const id of found) rows.get(id).meta.textContent = "";
           return;
         }
         for (const c of counts) {

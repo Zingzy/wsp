@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Served by Vite to a real browser: the cloud setup sheet over a fake api at
-// each of its steps (?screen=choice|keys|keys-refused|agent|agent-stopped|
+// each of its steps (?screen=choice|keys|keys-refused|keys-saved|agent|agent-stopped|
 // reading|agents|tools|also|logins|ask|building|signing|retry|done|failed|
 // failed-key|stopped|you-stopped|slot|over|sweeping), in either theme
 // (?theme=light), so a test
@@ -8,7 +8,7 @@
 // is what the host hands over for a small laptop: three agents, the tools with
 // the base locked on and the rest by calls, a manager's rows, three sign-ins.
 import { createRoot } from "react-dom/client";
-import { GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, KEY_REFUSED, MCP_ADDED_WORD, NETWORK_LOST_LINE, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initAgentNoRecipeLine, initBuildRows, initMachineRowLabel, initStageCount, keyRefusedLine, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, KEY_REFUSED, MCP_ADDED_WORD, NETWORK_LOST_LINE, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initAgentNoRecipeLine, initBuildRows, MACHINE_GONE_LINE, MACHINE_ROW_LABEL, initStageCount, initStoppedAt, keyRefusedLine, snapshotStageLine, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import { RequestError, type Api } from "../../src/protocol/client";
 import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS } from "./keyRefusedJob";
@@ -56,11 +56,13 @@ const SCREENS: InitScreen[] = [
       { id: "git", label: "git", size: 12 * MIB, group: "always on the image", detail: [], lock: "on" },
       { id: "gh", label: "GitHub CLI", size: 40 * MIB, why: "29,623 calls", group: "from your usage", detail: [] },
       { id: "yq", label: "yq", size: 10 * MIB, why: "412 calls", group: "from your usage", detail: [] },
+      { id: "python", label: "Python 3.13", size: 199 * MIB, why: "1,204 calls", group: "from your usage", detail: [] },
+      { id: "go", label: "Go 1.24", size: 517 * MIB, why: "88 calls", group: "from your usage", detail: [] },
       { id: "ripgrep", label: "ripgrep", size: 6 * MIB, group: "from your usage", detail: [] },
       { id: "swift", label: "Swift 6.3", size: 3.3 * GIB, group: "from your usage", detail: [] },
       { id: "bun", label: "bun", size: null, group: "from your usage", detail: [] },
     ],
-    ticks: ["node", "git", "gh", "yq"],
+    ticks: ["node", "git", "gh", "yq", "python"],
     answers: {},
     footer: [],
     tally: "tools",
@@ -126,16 +128,16 @@ const done = (rows: InitJob["rows"]): InitJob["rows"] => rows.map(r => (r.kind =
 /** The stages after the one a stopped build was on: still listed, still waiting, whatever they carry above. */
 const notYet = (rows: InitJob["rows"]): InitJob["rows"] => rows.map(r => (r.kind === "stage" ? { id: r.id, kind: r.kind, label: r.label, state: INIT_ROW_STATES.waiting } : r));
 /** A machine a stop could not reach the provider to kill, as the host's sweep rides it on the current job. */
-const machine = (state: string, detail?: string, id = "b_dlb9oeig"): InitJob["rows"][number] => ({ id: `machine/${id}`, kind: "machine", label: initMachineRowLabel(id), state, ...(detail !== undefined ? { detail } : {}) });
-/** The provider client's own words when nothing on this computer can reach it: what the host appends to the failed
- * stage's block, under a sentence that reads as a person would say it. */
-const RAW_FETCH_FAILURE = "fetch failed; fetch failed";
+const machine = (state: string, detail?: string, id = "b_dlb9oeig"): InitJob["rows"][number] => ({ id: `machine/${id}`, kind: "machine", label: MACHINE_ROW_LABEL, state, ...(detail !== undefined ? { detail } : {}) });
+// Every kind of row the slide draws: a page waiting with its code, a copy (whose note names the command the machine
+// ran, which no screen shows), a sign-in done, one that ran out with Retry and no mark of its own, and the row whose
+// page hands a code back, with the field for it on its action line.
 const signIns: InitJob["rows"] = [
-  { id: "sign-in/claude", kind: "sign-in", tool: "claude", label: "Sign in to Claude Code", state: INIT_ROW_STATES.keySet },
-  { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "Sign in to GitHub CLI", state: SIGN_IN_OPEN_STATE, page: "https://github.com/login/device", code: "8F4A-C21B", detail: "gh auth login is waiting on the machine for the code" },
-  { id: "sign-in/codex", kind: "sign-in", tool: "codex", label: "Sign in to Codex", state: INIT_SIGN_IN_WORDS.copied },
-  // The row whose page hands a code back: the field for it sits under the row.
-  { id: "sign-in/gcloud", kind: "sign-in", tool: "gcloud", label: "Sign in to Google Cloud", state: SIGN_IN_OPEN_STATE, page: "https://accounts.google.com/o/oauth2/auth", finish: "code", detail: "the page hands you a code to paste here" },
+  { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "Sign in to GitHub CLI", state: SIGN_IN_OPEN_STATE, page: "https://github.com/login/device", code: "8F4A-C21B" },
+  { id: "sign-in/codex", kind: "sign-in", tool: "codex", label: "Sign in to Codex", state: INIT_SIGN_IN_WORDS.copied, detail: "codex login --api-key exited 0" },
+  { id: "sign-in/gemini", kind: "sign-in", tool: "gemini", label: "Sign in to Gemini CLI", state: INIT_SIGN_IN_WORDS["signed-in"] },
+  { id: "sign-in/wrangler", kind: "sign-in", tool: "wrangler", label: "Sign in to Cloudflare Wrangler", state: INIT_SIGN_IN_WORDS["not-signed-in"], detail: "wrangler login exited 1; no sign-in within 16m" },
+  { id: "sign-in/gcloud", kind: "sign-in", tool: "gcloud", label: "Sign in to Google Cloud", state: SIGN_IN_OPEN_STATE, page: "https://accounts.google.com/o/oauth2/auth", finish: "code" },
 ];
 
 const FACTS: InitJob["rows"] = [
@@ -172,7 +174,7 @@ const JOBS: Record<string, InitJob> = {
     phase: "sealing",
     stoppable: false,
     screens: [],
-    rows: [...done(STAGES.slice(0, 9)), ...signIns.map(r => (r.id === "sign-in/gh" ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, state: INIT_SIGN_IN_WORDS["not-signed-in"], detail: "no sign-in within 16m" } : r.state === SIGN_IN_OPEN_STATE ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, state: INIT_SIGN_IN_WORDS["signed-in"] } : r)), stage("snapshotting", INIT_ROW_STATES.running, { lines: ["snapshot wsp-h1-default-v1 requested", "waiting on the provider"] }), ...STAGES.slice(10)]
+    rows: [...done(STAGES.slice(0, 9)), ...signIns.map(r => (r.id === "sign-in/gh" ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, state: INIT_SIGN_IN_WORDS["not-signed-in"], detail: "no sign-in within 16m" } : r.state === SIGN_IN_OPEN_STATE ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, state: INIT_SIGN_IN_WORDS["signed-in"] } : r)), stage("snapshotting", INIT_ROW_STATES.running, { lines: [snapshotStageLine(13 * GIB)], since: Date.now() - 41_000 }), ...STAGES.slice(10)]
   },
   done: {
     ...base,
@@ -187,13 +189,13 @@ const JOBS: Record<string, InitJob> = {
   // refusal on it and every row after it never reached, so the one way on is the step that takes a key.
   "failed-key": { ...base, phase: "failed", screens: [], rows: KEY_REFUSED_ROWS, error: KEY_REFUSED_LINE, keyRefused: true },
   // A build the network stopped: the list keeps its order and every row, the failed stage's block ends on the
-  // error's own line, and the stages after it still read waiting.
+  // sentence the head shows, and the stages after it still read waiting.
   stopped: {
     ...base,
     phase: "failed",
     stoppable: false,
     screens: [],
-    rows: [...done(STAGES.slice(1, 3)), stage("applying-setup", INIT_ROW_STATES.failed, { lines: ["applying your setup", RAW_FETCH_FAILURE] }), ...notYet(STAGES.slice(4, 13)), { id: "workspace/e2e", kind: "workspace", label: "e2e", state: INIT_ROW_STATES.notMade }],
+    rows: [...done(STAGES.slice(1, 3)), stage("applying-setup", INIT_ROW_STATES.failed, { lines: ["applying your setup", NETWORK_LOST_LINE] }), ...notYet(STAGES.slice(4, 13)), { id: "workspace/e2e", kind: "workspace", label: "e2e", state: INIT_ROW_STATES.notMade }],
     error: NETWORK_LOST_LINE,
   },
   // A build the person stopped: the run's own line for where it was and what became of the machine.
@@ -203,7 +205,7 @@ const JOBS: Record<string, InitJob> = {
     stoppable: false,
     screens: [],
     rows: [...done(STAGES.slice(1, 2)), stage("deploying-daemon", INIT_ROW_STATES.stopped, { lines: ["deploy wsp-daemon"] }), ...notYet(STAGES.slice(3, 13)), { id: "workspace/e2e-cancel", kind: "workspace", label: "e2e-cancel", state: INIT_ROW_STATES.notMade }],
-    error: "Stopped while installing the base tools. Builder b_dlb9oeig is gone; nothing is billing.",
+    error: `${initStoppedAt("while installing the base tools")} ${MACHINE_GONE_LINE}`,
   },
   // The stop the provider would not take: the machine's own row rides on, and it rides on the next job too.
   sweeping: {
@@ -231,6 +233,7 @@ const JOBS: Record<string, InitJob> = {
 const withProgress = (job: InitJob): InitJob => ({ ...job, progress: initStageCount(initBuildRows(job.rows).rows) });
 
 const setup: InitSetup = {
+  // The saved-key state is the key step reached with a key in the home, one Continue past the choice like the others.
   keys: { solari: at !== "keys" && at !== "keys-refused" },
   home: "/Users/zingzy",
   agents: [
@@ -304,7 +307,7 @@ if (at === "reading") {
 if (at === "ask") window.wsp = { ...window.wsp, pickFolder: async () => "/Users/zingzy/code/app", droppedPath: file => `/Users/zingzy/${file.name}` };
 
 // The key screen is one press past the choice, as it is for a person: the fixture presses Continue once the choice is drawn.
-if (at === "keys" || at === "keys-refused") {
+if (at === "keys" || at === "keys-refused" || at === "keys-saved") {
   const press = setInterval(() => {
     const key = document.querySelector<HTMLButtonElement>("[data-k=choice] [data-k=primary]");
     if (key !== null) {

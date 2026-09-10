@@ -10,8 +10,9 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
-import { SNAPSHOT_STORAGE, checkProviderKey, type BackendPricing } from "@wsp/engine";
-import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, initMachineRowLabel, initProgressLine, initStageCount, keyRefusedLine, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
+import { SMOKE_LABEL, SNAPSHOT_STORAGE, checkProviderKey, type BackendPricing } from "@wsp/engine";
+import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initStageCount, keyRefusedLine, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
+import { runLogPath } from "../src/init-log.js";
 import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localWiring, type Keys } from "../src/cli.js";
@@ -23,7 +24,7 @@ import type { FakePtyLink } from "./fake-pty-link.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
 import { CLAUDE_URL, DEVICE_URL, scriptedLink } from "./init-link.js";
 import type { HostHooks } from "../src/init-signin.js";
-import { stubBackend, type StubBackend } from "./stub-backend.js";
+import { stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
 import { holdingAgent, scriptedAgent } from "./verbs-fixture.js";
 
 const SOLARI = "slr_live_fake_solari_key";
@@ -44,6 +45,29 @@ const KEY_REFUSED_ROWS = [
   ["workspace/first", INIT_ROW_STATES.notMade, NEVER_REACHED],
 ];
 const WSP_SERVER = { command: "/usr/local/bin/node", args: ["/opt/wsp/bin.js", "mcp", "--state", "/tmp/state.json"] };
+
+/** The network gone for the next `times` kills of the machines `pick` names, then back: what an outage looked like
+ * from the host on 2026-09-10, where every DELETE answered ENOTFOUND and the machine went on billing. */
+function downFor(backend: StubBackend, times: number, pick: (m: StubMachine) => boolean = () => true): { first(): StubMachine } {
+  const made = backend.create.bind(backend);
+  const hit: StubMachine[] = [];
+  let left = times;
+  backend.create = async spec => {
+    const m = (await made(spec)) as StubMachine;
+    if (!pick(m)) return m;
+    hit.push(m);
+    const real = m.kill.bind(m);
+    m.kill = async () => {
+      if (left > 0) {
+        left -= 1;
+        throw Object.assign(new Error("getaddrinfo ENOTFOUND api.getsolari.com"), { code: "ENOTFOUND" });
+      }
+      await real();
+    };
+    return m;
+  };
+  return { first: () => hit[0]! };
+}
 
 const dirs: string[] = [];
 const runtimes: Runtime[] = [];
@@ -641,7 +665,7 @@ describe("the init job, manual road", () => {
     await expect(f.jobs.signInCode({ tool: "claude", code: PASTED })).rejects.toThrow(/no init job is running/);
   });
 
-  it("a build the network stopped says what happened in this computer's own words, keeps every stage row in its order, and closes the failed stage's block with the error's own line", async () => {
+  it("a build the network stopped says what happened in this computer's own words, keeps every stage row in its order, and closes the failed stage's block with that sentence, never the raw error", async () => {
     const f = fake({ deployDaemon: async () => Promise.reject(new Error("fetch failed; fetch failed")) });
     await f.jobs.start({ road: "manual" });
     await f.settled();
@@ -661,10 +685,11 @@ describe("the init job, manual road", () => {
     expect(ids.at(-1)).toBe("workspace/e2e");
     // The bar reads the stages done over all of them, so two of twelve never reads as nearly there.
     expect(initStageCount(view.rows.filter(r => r.kind === "stage"))).toEqual({ done: 1, total: 12 });
-    // The stage that failed carries the error's own line at the end of its block; the ones after it wait.
+    // The stage that failed ends its block on the sentence the head shows, and the raw error reaches no row; the ones after it wait.
     const failed = view.rows.find(r => r.state === INIT_ROW_STATES.failed)!;
     expect(failed.label).toBe(GOLDEN_STAGE_WORDS["deploying-daemon"]);
-    expect(failed.lines!.at(-1)).toContain("fetch failed");
+    expect(failed.lines!.at(-1)).toBe(NETWORK_LOST_LINE);
+    expect(JSON.stringify(view.rows)).not.toContain("fetch failed");
     expect(view.rows.find(r => r.id === "stage/snapshotting")!.state).toBe(INIT_ROW_STATES.waiting);
   });
 
@@ -679,10 +704,10 @@ describe("the init job, manual road", () => {
       }
       return made(spec);
     };
-    const waits: { state: string; lines: string[] }[] = [];
+    const waits: { state: string; lines: string[]; since: number | undefined }[] = [];
     f.onJob(job => {
       const row = job.rows.find(r => r.id === "stage/creating");
-      if (row !== undefined && row.state === INIT_ROW_STATES.slot) waits.push({ state: row.state, lines: row.lines ?? [] });
+      if (row !== undefined && row.state === INIT_ROW_STATES.slot) waits.push({ state: row.state, lines: row.lines ?? [], since: row.since });
     });
     await f.jobs.start({ road: "manual" });
     await f.settled();
@@ -692,8 +717,11 @@ describe("the init job, manual road", () => {
     expect(refusals).toBe(1);
     expect(waits.length).toBeGreaterThan(0);
     expect(waits.at(-1)!.lines.some(l => l.includes("at its machine cap"))).toBe(true);
+    // The stage's clock rides the row while it runs, and leaves it once it is over.
+    expect(typeof waits.at(-1)!.since).toBe("number");
     // The wait is over once the slot came free: the row is the running stage again, then done.
     expect(f.jobs.view()!.rows.find(r => r.id === "stage/creating")!.state).toBe(INIT_ROW_STATES.done);
+    expect(f.jobs.view()!.rows.find(r => r.id === "stage/creating")!.since).toBeUndefined();
   });
 
   it("a build the person stopped says it was them, with the stage it stopped at, and the first workspace reads not made", async () => {
@@ -777,7 +805,7 @@ describe("the init job, manual road", () => {
     const said = f.events.map(e => e.job.rows.find(r => r.kind === "machine")).filter(r => r !== undefined).map(r => r.state);
     expect(said).toContain(INIT_ROW_STATES.retrying);
     // The row is words, not a bare provider id in a column of sentences.
-    expect(f.jobs.view()!.rows.find(r => r.kind === "machine")!.label).toBe(initMachineRowLabel(builder.id));
+    expect(f.jobs.view()!.rows.find(r => r.kind === "machine")!.label).toBe(MACHINE_ROW_LABEL);
     // The kill landed once the network was back, so the row says the machine is gone and nothing bills on.
     expect(f.jobs.view()!.rows.find(r => r.kind === "machine")).toMatchObject({ state: INIT_ROW_STATES.gone });
     expect(f.backend.machines.filter(m => !m.killed)).toHaveLength(0);
@@ -840,6 +868,58 @@ describe("the init job, manual road", () => {
     await f.jobs.cancel();
     const third = await f.jobs.start({ road: "manual" });
     expect(third.rows.find(r => r.kind === "machine")).toBeUndefined();
+  });
+
+  it("a build the network stopped leaves the builder retrying, not a stage that says the machine is gone", async () => {
+    // The outage of 2026-09-10: the daemon deploy failed, and the build's own kill of the builder could not reach
+    // the provider either. Live it was never retried and the machine billed until the reap loop caught it.
+    const f = fake({ deployDaemon: async () => Promise.reject(new Error("fetch failed; fetch failed")) });
+    const outage = downFor(f.backend, 2);
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
+    await f.jobs.build({ firstWorkspace: "e2e" });
+    await f.settled();
+    const view = f.jobs.view()!;
+    expect(view.phase).toBe("failed");
+    // The stop was not the person's, so the sweep has to come off the failure itself.
+    const said = f.events.map(e => e.job.rows.find(r => r.kind === "machine")).filter(r => r !== undefined).map(r => r.state);
+    expect(said).toContain(INIT_ROW_STATES.retrying);
+    expect(view.rows.find(r => r.kind === "machine")).toMatchObject({ id: `machine/${outage.first().id}`, state: INIT_ROW_STATES.gone });
+    expect(f.backend.machines.filter(m => !m.killed)).toHaveLength(0);
+  });
+
+  it("a seal whose rollback the provider refused leaves the smoke fork retrying, and the kill lands when the network returns", async () => {
+    // The second outage of the same day: the fork failed its check after the golden was promoted, and the
+    // rollback's delete of the fork got ENOTFOUND three times with nothing after it.
+    const f = fake();
+    // Only the fork answers the smoke badly, so the seal fails exactly where it did live.
+    const guest = f.backend.execImpl;
+    f.backend.execImpl = (m, cmd) => (m.spec.labels?.[SMOKE_LABEL] === "1" ? { exitCode: 1, stdout: "", stderr: "the fork did not boot" } : guest(m, cmd));
+    const outage = downFor(f.backend, 2, m => m.spec.labels?.[SMOKE_LABEL] === "1");
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
+    await f.jobs.build({ firstWorkspace: "e2e" });
+    await f.settled();
+    const view = f.jobs.view()!;
+    expect(view.phase).toBe("failed");
+    const smoke = view.rows.find(r => r.id === "stage/smoke-forking")!;
+    expect(smoke.state).toBe(INIT_ROW_STATES.failed);
+    // The headline is the smoke's own sentence; the rollback's refusal is a line on the stage's block, in the provider's words, and never in the headline.
+    expect(view.error).toMatch(/^golden smoke failed .*the fork did not boot$/);
+    expect(view.error).not.toContain("ENOTFOUND");
+    expect(smoke.lines!.at(-1)).toBe(view.error);
+    expect(smoke.lines!.some(l => l.includes("could not be removed") && l.includes("getaddrinfo ENOTFOUND api.getsolari.com"))).toBe(true);
+    // And in the host's run log, where every stage frame lands, in the provider's own words.
+    const runLog = readFileSync(runLogPath(f.statePath), "utf8");
+    expect(runLog).toContain("the machine could not be removed and bills on: getaddrinfo ENOTFOUND api.getsolari.com");
+    const fork = outage.first();
+    // No builder record claims a smoke fork, so the sweep reaches it as a machine of this setup and not as a builder.
+    const said = f.events.map(e => e.job.rows.find(r => r.kind === "machine")).filter(r => r !== undefined).map(r => r.state);
+    expect(said).toContain(INIT_ROW_STATES.retrying);
+    expect(view.rows.find(r => r.kind === "machine")).toMatchObject({ id: `machine/${fork.id}`, state: INIT_ROW_STATES.gone });
+    expect(f.backend.machines.filter(m => !m.killed)).toHaveLength(0);
   });
 
   it("one count for one build: the host's progress is the sheet's own bar, over the same rows", async () => {

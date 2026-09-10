@@ -9,12 +9,12 @@
 // answers and what was ticked or typed since in place, until Start over or the
 // build.
 import { useCallback, useEffect, useState } from "react";
-import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, INIT_BUILD_STEP, KEY_REFUSED, KEY_UNCHECKED, initAgentStep, initDiskOverLine, initJobOver, wspToolsRowId, type InitDraft, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, INIT_BUILD_STEP, KEY_REFUSED, KEY_UNCHECKED, initAgentStep, initDiskOverLine, initImageBytes, initJobOver, wspToolsRowId, type InitDraft, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { Dialog, DialogSheet, DialogTitle } from "../components/ui/dialog.js";
 import { errorText } from "../lib/utils.js";
 import { RequestError } from "../protocol/client.js";
 import { useStore } from "../protocol/store.js";
-import { draftOf, SetupAnswers, tallyOf, type Draft } from "./cloud-setup/SetupAnswers.js";
+import { draftOf, SetupAnswers, type Draft } from "./cloud-setup/SetupAnswers.js";
 import { SetupAgent } from "./cloud-setup/SetupAgent.js";
 import { SetupAsk } from "./cloud-setup/SetupAsk.js";
 import { SetupBuild } from "./cloud-setup/SetupBuild.js";
@@ -41,13 +41,6 @@ const shownOf = (job: InitJob): InitScreen[] => job.screens.filter(s => s.id !==
 /** What the host kept of a step the person left mid-answer, if anything. */
 const keptAt = (job: InitJob, at: string): InitDraft | undefined => job.drafts?.find(d => d.at === at);
 
-/** What the image's disk holds with these ticks: the fixed part the host measured plus every ticked row's size across
- * the screens, the current screen read from the draft. */
-export function diskUsed(job: InitJob, current: { screen: string; ticks: ReadonlySet<string> } | undefined): number {
-  const fixed = job.disk?.fixed ?? 0;
-  return job.screens.reduce((sum, s) => sum + tallyOf(s, current !== undefined && current.screen === s.id ? current.ticks : new Set(s.ticks)).bytes, fixed);
-}
-
 export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
   const api = useStore(s => s.api);
   const job = useStore(s => s.initJob);
@@ -58,6 +51,8 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
   const [draft, setDraft] = useState<{ key: string; draft: Draft } | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [check, setCheck] = useState<KeyCheckShown | null>(null);
+  // Whether the key step opens on an empty field though a key is saved: after a build the saved key failed, yes.
+  const [keyChange, setKeyChange] = useState(false);
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     void api?.initGet?.().then(setSetup, e => setRefusal(errorText(e)));
@@ -94,21 +89,27 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
       setStep("job");
     });
   };
+  // The key step is on every run, so a person always sees that a key is set and can change it.
   const onContinueChoice = (): void => {
     if (setup === null) return;
-    if (!setup.keys.solari) setStep("keys");
-    else start();
+    setKeyChange(false);
+    setStep("keys");
   };
   // The host checks the key with the provider before it saves it, so Save spins for as long as that call takes and a
-  // key the provider would not take leaves the person on this step with what it said under the field.
-  const onSaveKeys = (keys: { solari: string }): void => {
+  // key the provider would not take leaves the person on this step with what it said under the field. A saved key the
+  // person left as it was is not sent again: Continue starts the job on it.
+  const onSaveKeys = (keys: { solari?: string }): void => {
+    if (keys.solari === undefined) {
+      start();
+      return;
+    }
     if (api?.initKeys === undefined) return;
     setRefusal(null);
     setCheck(null);
     setSaving(true);
     void (async () => {
       try {
-        setSetup(await api.initKeys!(keys));
+        setSetup(await api.initKeys!({ solari: keys.solari }));
         start();
       } catch (e) {
         const kind = e instanceof RequestError ? e.kind : undefined;
@@ -122,6 +123,7 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
   /** The build read the saved key and the provider refused it: back to the step that takes one, with the field clear. */
   const onChangeKey = (): void => {
     setCheck(null);
+    setKeyChange(true);
     setStep("keys");
     void api?.initGet?.().then(setSetup, () => {});
   };
@@ -135,7 +137,7 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
   if (step === "choice" || setup === null) {
     body = setup === null ? <SetupScreen k="loading" headline={CLOUD_SETUP_WORDS.choice.headline} top={CLOUD_SETUP_WORDS.choice.top} refusal={refusal} /> : <SetupChoice agents={setup.agents} pick={pick} onPick={setPick} onContinue={onContinueChoice} refusal={refusal} />;
   } else if (step === "keys") {
-    body = <SetupKeys setup={setup} onSave={onSaveKeys} onBack={() => setStep("choice")} refusal={refusal} check={check} busy={saving} />;
+    body = <SetupKeys setup={setup} onSave={onSaveKeys} onBack={() => setStep("choice")} refusal={refusal} check={check} busy={saving} change={keyChange} />;
   } else if (job !== null && initAgentStep(job)) {
     body = (
       <SetupAgent
@@ -197,9 +199,8 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
     } else {
       const key = screen.id;
       const current = draft !== null && draft.key === key ? draft.draft : draftOf(screen, keptAt(job, key));
-      const used = diskUsed(job, { screen: screen.id, ticks: current.ticks });
-      const disk = job.disk !== undefined ? { used, total: job.disk.total } : undefined;
-      const over = disk !== undefined ? Math.max(0, disk.used - disk.total) : 0;
+      const image = { used: initImageBytes(job, { at: screen.id, ticks: current.ticks }), ...(job.disk !== undefined ? { total: job.disk.total } : {}) };
+      const over = image.total !== undefined ? Math.max(0, image.used - image.total) : 0;
       body = (
         <SetupAnswers
           key={`${job.id}:${key}`}
@@ -212,7 +213,7 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
             if (next.ticks !== current.ticks || next.answers !== current.answers) keep(key, next);
           }}
           refusal={refusal}
-          {...(disk !== undefined ? { disk } : {})}
+          image={image}
           primary={{
             word: CLOUD_SETUP_WORDS.screen.keycap,
             onPress: () => {

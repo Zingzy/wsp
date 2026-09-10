@@ -58,7 +58,7 @@ describe("golden templates", () => {
     expect(backend.promoted).toEqual([{ snapshotId: "snap_wsp-h1-default-v1", name: "wsp-h1-default-v1" }]);
     expect(backend.machines[1]!.spec).toMatchObject({ template: "tpl_wsp-h1-default-v1" });
     expect(backend.machines[1]!.spec.fromSnapshot).toBeUndefined();
-    expect(frames.filter(f => f.startsWith("promoting"))).toEqual(["promoting:wsp-h1-default-v1", "promoting:tpl_wsp-h1-default-v1 is ready"]);
+    expect(frames.filter(f => f.startsWith("promoting"))).toEqual(["promoting:saving the image", "promoting:the image is saved"]);
     expect((await rt.golden.get())!.versions[0]!.templateId).toBe("tpl_wsp-h1-default-v1");
   });
 
