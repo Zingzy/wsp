@@ -112,6 +112,12 @@ export type InitRow = z.infer<typeof InitRow>;
 export const InitKeys = z.object({ solari: z.boolean() });
 export type InitKeys = z.infer<typeof InitKeys>;
 
+/** What the job waits on the person for while it waits: the sentence every surface says, and when the wait began.
+ * The host writes it and nothing else derives it, so the sidebar's row, the toast, the window title and a system
+ * notification say one thing. */
+export const InitNeedsYou = z.object({ what: z.string(), since: z.number().int().nonnegative() });
+export type InitNeedsYou = z.infer<typeof InitNeedsYou>;
+
 export const InitJob = z.object({
   id: z.string(),
   road: InitRoad,
@@ -130,6 +136,8 @@ export const InitJob = z.object({
   rows: z.array(InitRow),
   /** Rows over, rows in all: what the collapsed sidebar row counts. */
   progress: z.object({ done: z.number().int().nonnegative(), total: z.number().int().nonnegative() }),
+  /** What the job waits on the person for, absent while it waits on the machine instead. */
+  needsYou: InitNeedsYou.optional(),
   /** The tail of what the run said, the lines a terminal would have shown. */
   log: z.array(z.string()),
   /** The agent's thread, on the agent road. */
@@ -148,3 +156,8 @@ export type InitAgent = z.infer<typeof InitAgent>;
 /** Every change to the job, as one whole view: a client draws the newest and needs no history. */
 export const InitJobEvent = z.object({ type: z.literal("init.job"), job: InitJob });
 export type InitJobEvent = z.infer<typeof InitJobEvent>;
+
+/** A wait on the person arriving, once per need: the signal a surface that speaks once (a toast, a system
+ * notification) rides. The wait standing and the wait ending both ride the job's own view. */
+export const InitNeedsYouEvent = z.object({ type: z.literal("job.needs-you"), jobId: z.string(), needsYou: InitNeedsYou });
+export type InitNeedsYouEvent = z.infer<typeof InitNeedsYouEvent>;

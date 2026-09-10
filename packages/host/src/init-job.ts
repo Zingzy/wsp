@@ -14,7 +14,7 @@ import { stripVTControlCharacters } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
 import type { BackendPricing } from "@wsp/engine";
 import { RUNGS } from "@wsp/collect";
-import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, SignInFinish, THIS_COMPUTER, initAgentPrompt, initJobOver, initRowOver, isLocalWorkspace, plural, type GoldenStep, type InitJob, type InitJobEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type LoginState } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, SignInFinish, THIS_COMPUTER, initAgentPrompt, initJobOver, initNeedWhat, initRowOver, isLocalWorkspace, plural, type GoldenStep, type InitJob, type InitJobEvent, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type LoginState } from "@wsp/protocol";
 import { harnessCatalog, smallestModel, type GoldenRecipe, type InitDoor, type Runtime, type SessionHandle } from "@wsp/runtime";
 import type { AgentHere } from "./agents-here.js";
 import { SOLARI_KEY, agentKeysIn, keysOf, type Keys } from "./env-keys.js";
@@ -103,6 +103,9 @@ interface State {
   cancelled: boolean;
   /** Which keys the host held when the job started or a key was last saved; the view reads this, not the files. */
   keys: InitJob["keys"];
+  /** What the job waits on the person for, kept here so its clock starts once and the surfaces that speak once per
+   * need see one need for as long as it stands. */
+  needsYou?: InitJob["needsYou"];
   /** What the run's sign-in stage runs with, once it has started: a retry runs the same way, through the same relay. */
   signIns?: SignInContext;
 }
@@ -149,7 +152,7 @@ function buildingOn(rt: Runtime, recipe: GoldenRecipe, offs: (() => void)[]): Ru
 
 export class InitJobs implements InitDoor {
   private state: State | undefined;
-  private readonly listeners = new Set<(e: InitJobEvent) => void>();
+  private readonly listeners = new Set<(e: InitJobEvent | InitNeedsYouEvent) => void>();
   private running: Promise<void> = Promise.resolve();
   private count = 0;
   /** Set while a start is opening its thread, before the job stands: a second start meanwhile is refused too. */
@@ -159,7 +162,7 @@ export class InitJobs implements InitDoor {
 
   constructor(private readonly deps: InitJobDeps) {}
 
-  on(fn: (e: InitJobEvent) => void): () => void {
+  on(fn: (e: InitJobEvent | InitNeedsYouEvent) => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
   }
@@ -189,6 +192,7 @@ export class InitJobs implements InitDoor {
       screens: s.screens,
       rows,
       progress: { done: rows.filter(r => initRowOver(r.state)).length, total: rows.length },
+      ...(s.needsYou !== undefined ? { needsYou: s.needsYou } : {}),
       log: s.log.slice(-LOG_TAIL),
       ...(s.thread !== undefined ? { thread: s.thread } : {}),
       ...(s.error !== undefined ? { error: s.error } : {}),
@@ -428,9 +432,28 @@ export class InitJobs implements InitDoor {
   }
 
   private emit(): void {
+    const s = this.state;
+    if (s === undefined) return;
+    const arrived = this.settleNeed(s);
     const job = this.view();
     if (job === null) return;
     for (const fn of this.listeners) fn({ type: "init.job", job });
+    if (arrived) for (const fn of this.listeners) fn({ type: "job.needs-you", jobId: job.id, needsYou: s.needsYou! });
+  }
+
+  /** What the job waits on the person for, settled against the rows before every view: the clock is taken when a
+   * need arrives and left alone while the same need stands, and a need gone is a need cleared. True where this
+   * settle is the arrival, which is what the one event per need rides. The rows here are the state's own, not the
+   * view's: only their sign-ins carry a wait, and the view reorders nothing that matters to it. */
+  private settleNeed(s: State): boolean {
+    const what = initJobOver(s.phase) ? undefined : initNeedWhat({ rows: s.rows });
+    if (what === undefined) {
+      delete s.needsYou;
+      return false;
+    }
+    if (s.needsYou?.what === what) return false;
+    s.needsYou = { what, since: this.deps.now?.() ?? Date.now() };
+    return true;
   }
 
   /** Background work on the job: a failure lands on the view as the job failing, never as an unhandled rejection. */

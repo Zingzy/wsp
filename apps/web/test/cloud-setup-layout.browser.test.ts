@@ -315,7 +315,18 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     expect(paused, "the spinner pauses while the person is waited on").toBe("paused");
     const half = await box("[data-cloud-setup-progress]");
     expect(Math.abs(half.width - (button.width - 2) / 2), "two of four stages over").toBeLessThan(1);
+    // The whole keycap turns to the warning tone while the person is waited on: the words, its border and the line.
+    expect(await row.getAttribute("data-waiting-on-you")).toBe("");
+    const [warnWords] = await style("[data-cloud-setup-row] [data-cloud-setup-words]", "color");
+    const [warnBorder] = await style("[data-cloud-setup-row]", "border-top-color");
+    const [warnLine] = await style("[data-cloud-setup-progress]", "background-color");
+    expect(warnWords, "not the muted zinc a build waiting on the machine is in").not.toBe(wordsColour);
+    expect(warnLine, "and the line follows the words").not.toBe(lineColour);
+    expect(warnBorder, "the border carries it too").not.toBe(warnWords);
+    const [warnRead] = await textContrast(page!, "[data-cloud-setup-row] [data-cloud-setup-words]");
+    expect(warnRead, "the warning words read against the sidebar").toBeGreaterThanOrEqual(4.5);
     await page!.locator("[data-slot=sidebar-footer]").first().screenshot({ path: join(SHOTS, `cloud-setup-row-waiting-foot-${theme}.png`) });
+    console.info(`cloud setup row waiting ${theme}: ${join(SHOTS, `cloud-setup-row-waiting-foot-${theme}.png`)} words ${String(warnWords)} border ${String(warnBorder)} line ${String(warnLine)}`);
 
     await page!.emulateMedia({ reducedMotion: "reduce" });
     await page!.goto(`${base}/test/shell/index.html?theme=${theme}&init=building`);

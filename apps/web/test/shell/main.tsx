@@ -445,6 +445,7 @@ if (params.get("init") === "waiting") {
         { id: "stage/ready", kind: "stage", label: GOLDEN_STAGE_WORDS.ready, state: "waiting" },
       ],
       progress: { done: 2, total: 4 },
+      needsYou: { what: "sign in to GitHub CLI login", since: Date.now() },
       log: [],
     },
   });

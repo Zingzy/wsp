@@ -14,6 +14,7 @@ import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { CloudSetupDialog } from "../src/sidebar/CloudSetupDialog.js";
 import { CloudSetupRow } from "../src/sidebar/CloudSetupRow.js";
+import { resetAskedToNotify } from "../src/shell/needsYou.js";
 
 const MIB = 1024 * 1024;
 const GIB = 1024 * MIB;
@@ -167,7 +168,7 @@ function fakeApi(over: { setup?: InitSetup; refuse?: string } = {}) {
 }
 
 beforeEach(() => {
-  useStore.setState({ api: null, capabilities: null, hasGolden: false, initJob: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false });
+  useStore.setState({ api: null, capabilities: null, hasGolden: false, initJob: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, sessions: {}, ready: false });
   // Base UI's checkbox and radio re-dispatch a click as a PointerEvent, which jsdom does not have.
   vi.stubGlobal("PointerEvent", class extends MouseEvent {});
 });
@@ -696,7 +697,7 @@ describe("the cloud setup sheet", () => {
     act(() => useStore.getState().applyEvent({ type: "init.job", job: { ...job, rows: stages.map((r, i) => (i < 2 ? { ...r, state: "done" } : r)), progress: { done: 2, total: 4 } } }));
     expect(line!.style.width).toBe("50%");
     expect(row.querySelector("[data-cloud-setup-words]")?.textContent).toBe("building · 2/4");
-    const waiting: InitJob = { ...job, phase: "signing-in", progress: { done: 2, total: 4 }, rows: [...stages, { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "GitHub CLI login", state: SIGN_IN_OPEN_STATE, page: "https://github.com/login/device", code: "8F4A-C21B" }] };
+    const waiting: InitJob = { ...job, phase: "signing-in", progress: { done: 2, total: 4 }, rows: [...stages, { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "GitHub CLI login", state: SIGN_IN_OPEN_STATE, page: "https://github.com/login/device", code: "8F4A-C21B" }], needsYou: { what: "sign in to GitHub CLI login", since: 1_760_000_000_000 } };
     act(() => useStore.getState().applyEvent({ type: "init.job", job: waiting }));
     expect(row.querySelector("[data-cloud-setup-words]")?.textContent).toBe(initButtonLine(waiting));
     expect(row.querySelector("[data-cloud-setup-words]")?.textContent).toBe("waiting for you");
@@ -705,5 +706,55 @@ describe("the cloud setup sheet", () => {
     fireEvent.click(row);
     const dialog = await screen.findByRole("dialog");
     await waitFor(() => expect(k(dialog, "build")).toBeDefined());
+  });
+
+  it("the press that opens the setup is where the browser is asked for leave to notify, since a request off an event is one it quietens", async () => {
+    resetAskedToNotify();
+    const asks: string[] = [];
+    class FakeNotification {
+      static permission = "default";
+      static requestPermission = () => {
+        asks.push("asked");
+        return Promise.resolve("granted");
+      };
+    }
+    vi.stubGlobal("Notification", FakeNotification);
+    const { api } = fakeApi({ setup: HELD });
+    useStore.getState().bind(api);
+    render(<CloudSetupRow />);
+    const row = await screen.findByRole("button", { name: CLOUD_SETUP_WORDS.row });
+    expect(asks, "nothing on mount: a prompt out of nowhere is one nobody grants").toEqual([]);
+    fireEvent.click(row);
+    expect(asks).toEqual(["asked"]);
+    expect(useStore.getState().setupOpen).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
+  it("a build that needs the person turns the whole keycap to the warning tone, and it goes back to muted zinc when the need does", async () => {
+    const { api } = fakeApi({ setup: HELD });
+    useStore.getState().bind(api);
+    render(<CloudSetupRow />);
+    const row = await screen.findByRole("button", { name: CLOUD_SETUP_WORDS.row });
+    const signIn: InitJob["rows"][number] = { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "GitHub CLI login", state: SIGN_IN_OPEN_STATE, page: "https://github.com/login/device" };
+    const job: InitJob = { ...JOB, phase: "signing-in", screens: [], rows: [{ id: "stage/ready", kind: "stage", label: GOLDEN_STAGE_WORDS.ready, state: "done" }, signIn], progress: { done: 1, total: 2 } };
+    act(() => useStore.getState().applyEvent({ type: "init.job", job }));
+    // Waiting on the machine: the row is the sidebar's own muted zinc, and no warning token is anywhere on it.
+    expect(row.className).toContain("text-sidebar-muted-foreground");
+    expect(row.className).not.toMatch(/warning/);
+    expect(row.hasAttribute("data-waiting-on-you")).toBe(false);
+    expect(row.querySelector<HTMLElement>("[data-cloud-setup-progress]")!.className).toContain("bg-sidebar-muted-foreground");
+    const needed: InitJob = { ...job, needsYou: { what: "sign in to GitHub CLI login", since: 1_760_000_000_000 } };
+    act(() => useStore.getState().applyEvent({ type: "init.job", job: needed }));
+    expect(row.hasAttribute("data-waiting-on-you")).toBe(true);
+    expect(row.className).toContain("text-warning-foreground");
+    expect(row.className).toContain("border-warning/50");
+    expect(row.className).not.toContain("text-sidebar-muted-foreground");
+    // The tone is the tokens' warning and nothing literal, and the fill stays quiet: it is a wait, not a confirm.
+    expect(row.className).not.toMatch(/amber|orange|#|rgb\(/);
+    expect(row.querySelector<HTMLElement>("[data-cloud-setup-progress]")!.className).toContain("bg-warning");
+    act(() => useStore.getState().applyEvent({ type: "init.job", job }));
+    expect(row.hasAttribute("data-waiting-on-you")).toBe(false);
+    expect(row.className).toContain("text-sidebar-muted-foreground");
+    expect(row.className).not.toMatch(/warning/);
   });
 });
