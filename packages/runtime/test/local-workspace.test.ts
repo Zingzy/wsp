@@ -10,7 +10,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { LocalBackend } from "@wsp/engine";
 import { alreadyRecorded, inFolder, NO_SUCH_TURN, NOTIFY_ME, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, rootsPathIn, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type EventUnion, type PortForward, type ProjectImportEvent, type TurnResult } from "@wsp/protocol";
 import type { MachineExecOptions } from "../src/machine-exec.js";
-import { createRuntime, type HarnessAdapterFactory, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
+import { createRuntime, type HarnessAdapterContext, type HarnessAdapterFactory, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { serveRuntime, type ForwardsSource } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -161,6 +161,20 @@ describe("local workspace", () => {
     const rt = runtime();
     await rt.workspaces.createLocal("mac");
     await expect(rt.workspaces.createLocal("mac2")).rejects.toThrow(alreadyRecorded(THIS_COMPUTER, "mac"));
+  });
+
+  it("a turn on this computer runs under the person's own login and no sandbox flag: this computer is not a machine", async () => {
+    const seen: HarnessAdapterContext[] = [];
+    const seeing: HarnessAdapterFactory = ctx => {
+      seen.push(ctx);
+      return echoAdapter(ctx);
+    };
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: seeing }, local: localWiring });
+    const ws = await rt.workspaces.createLocal("mac");
+    await (await rt.sessions.start(ws.id, { prompt: "say pong" })).finished;
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every(c => c.env["IS_SANDBOX"] === undefined)).toBe(true);
+    expect(seen.every(c => c.env["PATH"] === localWiring.env["PATH"])).toBe(true);
   });
 
   it("a thread starts on the local workspace and its reply lands, run through the local exec stream", async () => {

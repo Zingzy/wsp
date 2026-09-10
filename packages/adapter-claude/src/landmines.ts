@@ -23,9 +23,8 @@ const HEADLESS_OVERRIDES = {
 } as const;
 
 export interface ClaudeEnvOptions {
+  /** The machine's login environment: a guest's carries its config dir and IS_SANDBOX, a person's own carries theirs. */
   base?: Readonly<Record<string, string | undefined>>;
-  /** Absolute path for CLAUDE_CONFIG_DIR ("/root/.claude-cfg" in guests). */
-  configDir: string;
   apiKey?: string;
 }
 
@@ -42,21 +41,17 @@ export function stripLandmineEnv(
 }
 
 /**
- * Config isolation goes through CLAUDE_CONFIG_DIR, never through HOME:
- * overriding HOME relocates the macOS keychain lookup and the CLI reports
- * "Not logged in" (t3code ClaudeHome.ts). IS_SANDBOX=1 is what lets
- * --dangerously-skip-permissions run as root in guests (solari-poc P1).
+ * Sets neither CLAUDE_CONFIG_DIR nor IS_SANDBOX: both ride in `base` where they are true. The CLI keys its Keychain
+ * item by whether the variable is set, not by its path (the service name gains a hash of the path once it is set),
+ * so a Mac that exports it even as ~/.claude reports a claude.ai login as "Not logged in" (measured on 2.1.257 and
+ * 2.1.259, 2026-09-10). A machine's login carries IS_SANDBOX=1, what lets --dangerously-skip-permissions run as root
+ * there (solari-poc P1), and a guest's carries its config dir, never a changed HOME, which relocates the Keychain
+ * lookup (t3code ClaudeHome.ts).
  */
-export function buildEnv(options: ClaudeEnvOptions): Record<string, string> {
-  const configDir = options.configDir.trim();
-  if (!configDir.startsWith("/")) {
-    throw new Error(`configDir must be an absolute path, got "${options.configDir}"`);
-  }
+export function buildEnv(options: ClaudeEnvOptions = {}): Record<string, string> {
   return {
     ...stripLandmineEnv(options.base ?? {}),
     ...HEADLESS_OVERRIDES,
-    CLAUDE_CONFIG_DIR: configDir,
-    IS_SANDBOX: "1",
     ...(options.apiKey === undefined ? {} : { ANTHROPIC_API_KEY: options.apiKey }),
   };
 }

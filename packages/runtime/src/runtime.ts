@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join, posix } from "node:path";
-import { DEFAULT_AGENT, GUEST_HOME } from "@wsp/catalog";
+import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, guestEnv } from "@wsp/catalog";
 import {
   BUILDER_IDLE_MS,
   DAEMON_PORT,
@@ -198,13 +198,19 @@ export interface HarnessAdapterContext {
    * a cloud fork, the person's own store on the local computer. */
   home: (agentId: string) => string;
   /** The machine's login environment, exported under the harness's own on every launch: the golden's PATH, so a
-   * launch served by a process with a bare one still finds the binary. */
+   * launch served by a process with a bare one still finds the binary, and on a guest the variable that points this
+   * harness at its store there. On the person's own computer it is their shell's, so a store variable is set only
+   * where their shell sets it, and their login is the turn's login. */
   env: Readonly<Record<string, string>>;
 }
 
-/** The machine's login environment: who the guest runs as and the PATH the golden's login shells get. Every fork
- * carries it in its envs at create and every adapter exports it under the harness's own. */
-export const GUEST_LOGIN_ENV: Readonly<Record<string, string>> = { ...GUEST_USER_ENV, PATH: TOOLS_PATH };
+/** What every machine wsp runs agents on tells them, cloud fork and ssh machine alike, and this computer never does:
+ * IS_SANDBOX=1 is what lets Claude Code take --dangerously-skip-permissions as root there (solari-poc P1). */
+export const MACHINE_SANDBOX_ENV: Readonly<Record<string, string>> = { IS_SANDBOX: "1" };
+
+/** The guest's login environment: who it runs as, the PATH the golden's login shells get, and the sandbox flag every
+ * machine carries. Every fork carries it in its envs at create and every adapter exports it under the harness's own. */
+export const GUEST_LOGIN_ENV: Readonly<Record<string, string>> = { ...GUEST_USER_ENV, PATH: TOOLS_PATH, ...MACHINE_SANDBOX_ENV };
 
 export interface HarnessStartOptions {
   prompt: string;
@@ -1458,8 +1464,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     /** The machine's own home, published on the view so a client shortens a folder under it to ~; undefined where
      * the kind has not read one. */
     homeDir: (record: WorkspaceRecord) => string | undefined;
-    /** The login environment a turn runs under there, read the same way. */
-    env: (entry: LiveWorkspace) => Readonly<Record<string, string>>;
+    /** The login environment a turn of one harness runs under there, read the same way. */
+    env: (entry: LiveWorkspace, agentId: string) => Readonly<Record<string, string>>;
     /** How a folder on this computer gets onto a machine of this kind: packed and landed on a fork, its path recorded
      * with nothing copied on this computer, refused where no road exists yet. Answers what landed, the project the
      * record gains and the done line; the caller keeps the record and the roots file, which every road shares. */
@@ -1509,6 +1515,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (home === undefined) throw new Error(`the catalog has no home for ${id}`);
     return home;
   };
+  /** The guest's login plus the variable pointing one harness at its store there, the store cloudHome names: a guest
+   * exec carries no environment of its own, so the adapter exports this on every launch. */
+  const cloudEnv = (id: string): Readonly<Record<string, string>> => {
+    const agent = CATALOG_AGENTS.find(a => a.id === id);
+    return agent === undefined ? GUEST_LOGIN_ENV : { ...GUEST_LOGIN_ENV, ...guestEnv(agent) };
+  };
   const cloudRoad = async (entry: LiveWorkspace): Promise<DaemonReachView> => {
     const reach = await entry.ws.daemonReach();
     const token = await daemonTokenOf(entry.machine);
@@ -1544,7 +1556,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       folder: undefined,
       home: (_entry, id) => cloudHome(id),
       homeDir: () => GUEST_HOME,
-      env: () => GUEST_LOGIN_ENV,
+      env: (_entry, id) => cloudEnv(id),
       relayed: () => true,
       hasDaemon: entry => Boolean(entry.machine.previewUrl),
       daemonRoad: cloudRoad,
@@ -1585,7 +1597,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // answered with. The catalog's rule for both is agentHomes, the same call the local kind makes.
             home: (entry, id) => sshHome(entry, id),
             homeDir: record => loginOf(record)["HOME"],
-            env: entry => loginOf(entry.record),
+            // The machine's own login, plus the flag every machine wsp runs agents on carries, whoever owns it.
+            env: entry => ({ ...loginOf(entry.record), ...MACHINE_SANDBOX_ENV }),
             // A machine wsp reaches is a machine, so a request relayed from one drives it as it drives a fork. The
             // one exception is a dial that names the computer wsp runs on: that is this computer under another
             // kind's name, and the local kind's refusal is the whole reason the rule exists.
@@ -3665,7 +3678,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const kind = moduleOf(entry.record.kind);
     return {
       harness,
-      adapter: factory({ machine: entry.machine, workspaceId: entry.record.id, execStream: execFactoryFor(entry), home: id => kind.home(entry, id), env: { ...kind.env(entry), ...turnEnv } }),
+      adapter: factory({ machine: entry.machine, workspaceId: entry.record.id, execStream: execFactoryFor(entry), home: id => kind.home(entry, id), env: { ...kind.env(entry, harness), ...turnEnv } }),
     };
   };
 

@@ -15,6 +15,8 @@ function fixtureLines(): string[] {
 
 /** What the guest calls the run every scripted stream stands for. */
 const RUN_HANDLE = "/tmp/wsp-run/ab12";
+/** A guest's login environment as the runtime hands it: the store variable and the sandbox flag are the machine's own. */
+const GUEST_ENV = { HOME: "/root", CLAUDE_CONFIG_DIR: "/root/.claude-cfg", IS_SANDBOX: "1" };
 
 interface ScriptedExec {
   factory: ExecStreamFactory;
@@ -188,7 +190,7 @@ describe("ClaudeAdapter over the recorded fixture", () => {
   });
 
   it("probes the catalog through the exec it is handed, under the session's config dir, and reads the answer", async () => {
-    const adapter = createClaudeAdapter({ exec: scriptedExec([]).factory, configDir: "/root/.claude-cfg" });
+    const adapter = createClaudeAdapter({ exec: scriptedExec([]).factory, configDir: "/root/.claude-cfg", baseEnv: GUEST_ENV });
     const ran: string[] = [];
     const probe = await adapter.probeCatalog(async command => {
       ran.push(command);
@@ -291,7 +293,7 @@ describe("ClaudeAdapter over the recorded fixture", () => {
     const adapter = createClaudeAdapter({
       exec: exec.factory,
       configDir: "/root/.claude-cfg",
-      baseEnv: { CLAUDECODE: "1", CLAUDE_CODE_ENTRYPOINT: "cli", PATH: "/usr/bin", HOME: "/Users/z" },
+      baseEnv: { ...GUEST_ENV, CLAUDECODE: "1", CLAUDE_CODE_ENTRYPOINT: "cli", PATH: "/usr/bin", HOME: "/Users/z" },
     });
     const { onEvent } = collect();
 
@@ -312,7 +314,41 @@ describe("ClaudeAdapter over the recorded fixture", () => {
     expect(call.env.CLAUDECODE).toBeUndefined();
     expect(call.env.CLAUDE_CODE_ENTRYPOINT).toBeUndefined();
     expect(call.env.CLAUDE_CONFIG_DIR).toBe("/root/.claude-cfg");
+    expect(call.env.IS_SANDBOX).toBe("1");
     expect(call.env.HOME).toBe("/Users/z");
+  });
+
+  it("on a person's own computer exports no config dir and no sandbox flag, and reads the store under their home", async () => {
+    // Their shell sets neither, so a launch sets neither: Claude keys its Keychain login by whether the variable is
+    // set, and the flag is a machine's fact. The transcript and the session store are still read under ~/.claude.
+    const exec = scriptedExec(fixtureLines());
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/Users/z/.claude", baseEnv: { PATH: "/usr/bin", HOME: "/Users/z" } });
+    const { onEvent } = collect();
+    await adapter.start({ prompt: "say ok", onEvent }).finished;
+    const call = exec.calls[0];
+    if (!call) throw new Error("exec never called");
+    expect(call.env.CLAUDE_CONFIG_DIR).toBeUndefined();
+    expect(call.env.IS_SANDBOX).toBeUndefined();
+    expect(adapter.env.CLAUDE_CONFIG_DIR).toBeUndefined();
+    const ran: string[] = [];
+    await adapter.sessionTitle(FIXTURE_SESSION_ID, async command => (ran.push(command), ""));
+    await adapter.probeCatalog(async command => (ran.push(command), ""));
+    expect(ran[0]).toContain("'/Users/z/.claude/projects'");
+    expect(ran[1]).not.toContain("CLAUDE_CONFIG_DIR");
+    expect(ran[1]).not.toContain("IS_SANDBOX");
+  });
+
+  it("refuses a relative config dir, since every transcript and title read is built on it", () => {
+    expect(() => createClaudeAdapter({ exec: scriptedExec([]).factory, configDir: ".claude-cfg" })).toThrow(/absolute/);
+  });
+
+  it("on a person's own computer whose shell names a store, exports theirs unchanged", async () => {
+    const exec = scriptedExec(fixtureLines());
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/Users/z/elsewhere", baseEnv: { PATH: "/usr/bin", HOME: "/Users/z", CLAUDE_CONFIG_DIR: "/Users/z/elsewhere" } });
+    const { onEvent } = collect();
+    await adapter.start({ prompt: "say ok", onEvent }).finished;
+    expect(exec.calls[0]?.env.CLAUDE_CONFIG_DIR).toBe("/Users/z/elsewhere");
+    expect(exec.calls[0]?.env.IS_SANDBOX).toBeUndefined();
   });
 
   it("starts claude in the guest home unless a cwd is named", async () => {

@@ -136,6 +136,10 @@ describe("ssh workspace", () => {
     // The machine's own login is still under it: the token is laid over what the ssh read answered with, not instead.
     expect(launched[0]!.env["HOME"]).toBe("/home/dev");
     expect(launched[0]!.env["PATH"]).toBe("/home/dev/.local/bin:/usr/bin");
+    // A machine wsp runs agents on is the sandbox, whoever owns it: IS_SANDBOX=1 rides every road to it, as it does
+    // to a cloud fork, so a root login there still takes --dangerously-skip-permissions.
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every(c => c.env["IS_SANDBOX"] === "1")).toBe(true);
     // Two turns on one machine get two tokens, so neither can be read as the other's thread.
     await (await rt.sessions.start(box.id, { prompt: "coordinate again" })).finished;
     const tokens = seen.map(c => c.env[TURN_TOKEN_ENV]).filter(t => t !== undefined);

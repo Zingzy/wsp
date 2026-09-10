@@ -66,12 +66,12 @@ export function parseSessionTitle(stdout: string): string | null {
  * it skips: its auth is strictly ANTHROPIC_API_KEY, with OAuth and the keychain never read (measured on 2.1.263:
  * with no key in the environment, a --bare question against a signed-in store answers "Failed to authenticate"
  * where a --safe-mode question against that same store answers the title), so on a computer whose person signed in
- * rather than exported a key every title question came back an error while their own turns ran. The same config dir
- * and the same stripped environment as a session, so the question reads the sign-in a turn there reads and never
- * runs as a nested Claude Code.
+ * rather than exported a key every title question came back an error while their own turns ran. The same
+ * environment as a session, the login's config dir included, so the question reads the sign-in a turn there reads
+ * and never runs as a nested Claude Code.
  */
-export function titleForCommand(options: { configDir: string; prompt: string; model?: string; baseEnv?: Readonly<Record<string, string | undefined>> }): string {
-  const env = buildEnv({ base: options.baseEnv, configDir: options.configDir });
+export function titleForCommand(options: { prompt: string; model?: string; baseEnv?: Readonly<Record<string, string | undefined>> }): string {
+  const env = buildEnv({ base: options.baseEnv });
   const exports = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
   const clean = `unset \${!CLAUDE_CODE_@} CLAUDECODE FORCE_CODE_TERMINAL; export ${exports}`;
   const claude = ["claude -p", "--safe-mode", "--output-format json", "--allowed-tools ''", ...(options.model === undefined ? [] : [`--model ${shellQuote(options.model)}`])].join(" ");
