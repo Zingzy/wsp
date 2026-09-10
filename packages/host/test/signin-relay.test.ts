@@ -6,8 +6,10 @@
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it } from "vitest";
-import { OFFER_MS, UrlScanner, hyperlink, relayPty, runQuiet, shellLine, stripOsc8, urlsIn, watchPty, type RelayTerminal } from "../src/signin-relay.js";
+import type { Question } from "@wsp/catalog";
+import { OFFER_MS, QuestionScanner, UrlScanner, hyperlink, relayPty, runQuiet, shellLine, stripOsc8, urlsIn, watchPty, type Asked, type RelayTerminal } from "../src/signin-relay.js";
 import { fakePtyLink, type FakePty } from "./fake-pty-link.js";
+import { ASKED } from "./signin-questions.js";
 
 interface Term extends RelayTerminal {
   input: PassThrough & RelayTerminal["input"];
@@ -303,6 +305,57 @@ describe("relayPty", () => {
     expect(pty.writes).toEqual(["exit\r"]);
     link.exit(pty, 0);
     await run;
+  });
+});
+
+describe("the questions a row declares", () => {
+  const ENTER = { asks: /Press \[?Enter\]? to (?:open|continue)/, answer: "\r" };
+  const THEIRS = { asks: /SSO session name \(Recommended\)/, person: true } as const;
+  const answers = (asked: readonly Asked[]): (string | undefined)[] => asked.map(a => ("answer" in a.question ? a.question.answer : undefined));
+
+  it("reports each question once, past the colours the tool paints it in, and stops reading once every one is seen", () => {
+    const scanner = new QuestionScanner([ENTER, { asks: /Authenticate Git with your GitHub credentials\?/, answer: "y\r" }]);
+    // The colours gh puts around "Press Enter" sit inside the line, so the shape only matches with them taken out.
+    expect(scanner.feed("\x1b[0;33m!\x1b[0m First copy your one-time code: \x1b[0;1;39m72F3-072B\x1b[0m\r\n")).toEqual([]);
+    expect(answers(scanner.feed("\x1b[0;1;39mPress Enter\x1b[0m to open https://github.com/login/device in your browser... "))).toEqual(["\r"]);
+    // The same line again is a redraw, not a second question.
+    expect(scanner.feed(ASKED.ghWeb)).toEqual([]);
+    expect(answers(scanner.feed(ASKED.ghCredentials))).toEqual(["y\r"]);
+    expect(scanner.feed(ASKED.ghCredentials)).toEqual([]);
+  });
+
+  it("sees a question the pty split across two chunks, and an escape sequence split with it", () => {
+    const split = new QuestionScanner([ENTER]);
+    expect(split.feed("Press Ent")).toEqual([]);
+    expect(answers(split.feed("er to open https://github.com/login/device in your browser... "))).toEqual(["\r"]);
+    // The escapes come out of the joined text, so a sequence cut in half by a read boundary hides nothing.
+    const escaped = new QuestionScanner([ENTER]);
+    expect(escaped.feed("\x1b[0;1;39mPress Enter\x1b[")).toEqual([]);
+    expect(answers(escaped.feed("0m to open https://github.com/login/device in your browser... "))).toEqual(["\r"]);
+    const quiet = new QuestionScanner([]);
+    expect(quiet.feed(ASKED.ghWeb)).toEqual([]);
+  });
+
+  it("carries the tool's own words for a question, which is all a row can say about one nobody here can answer", () => {
+    expect(new QuestionScanner([THEIRS]).feed(ASKED.awsSso)).toEqual([{ question: THEIRS, matched: "SSO session name (Recommended)" }]);
+  });
+
+  it("types an answer on the tool's own pty as the line arrives, reports every question, and types nothing for one that is the person's", async () => {
+    const run = async (questions: readonly Question[]) => {
+      const link = fakePtyLink();
+      const seen: string[] = [];
+      link.script = (pty: FakePty, line: string) => {
+        if (!line.startsWith("exec ")) return;
+        link.data(pty, `! First copy your one-time code: 72F3-072B\r\n`);
+        link.data(pty, `Press Enter to open https://github.com/login/device in your browser... `);
+        link.data(pty, `SSO session name (Recommended): `);
+      };
+      await watchPty({ link, command: "gh auth login --web", timeoutMs: 100, questions, onQuestion: a => seen.push(a.matched) });
+      return { writes: link.ptys[0]!.writes, seen };
+    };
+    expect(await run([ENTER])).toEqual({ writes: ["exec gh auth login --web || exit\r", "\r"], seen: ["Press Enter to open"] });
+    expect(await run([THEIRS])).toEqual({ writes: ["exec gh auth login --web || exit\r"], seen: ["SSO session name (Recommended)"] });
+    expect(await run([])).toEqual({ writes: ["exec gh auth login --web || exit\r"], seen: [] });
   });
 });
 

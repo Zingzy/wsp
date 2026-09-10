@@ -1019,6 +1019,8 @@ export const CLOUD_SETUP_WORDS = {
     notOnImage: "not on the image",
     /** A sign-in row the catalog locked out. */
     leftAlone: "left alone",
+    /** A sign-in row whose tool stops on a question nobody but the person can answer, so the machine is no road for it. */
+    asksYou: "asks questions only you can answer",
     /** The disk ring's name for the tooltip's reader. */
     disk: "Disk on the image",
   },

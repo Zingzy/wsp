@@ -38,6 +38,7 @@ import { saveSmallRecipe } from "../src/recipe-file.js";
 import { fakeHost } from "./recipe-fixture.js";
 import type { ScanRow } from "../src/scan.js";
 import { guestAnswer, mcpEditPlan, type StubBackend, stubBackend, type StubMachine } from "./stub-backend.js";
+import { loginOf } from "./signin-questions.js";
 
 const SOLARI = "slr_live_fake_solari_key";
 const KEY = { up: "\x1b[A", down: "\x1b[B", right: "\x1b[C", left: "\x1b[D", space: " ", enter: "\r", esc: "\x1b", ctrlC: "\x03" };
@@ -1002,8 +1003,10 @@ describe("wsp init, the summary-first screens", () => {
     await f.until("Sign-ins  4/6");
     const four = f.text().slice(f.text().lastIndexOf("◆  Sign-ins"));
     // Every row carries the word it will act on, the agents first, then the CLIs, then the servers with auth.
-    expect(four).toMatch(/▾ Agents\s+1 copy\s+4 sign in\s+0 API key\s+0 skip\n/);
+    expect(four).toMatch(/▾ Agents\s+2 copy\s+3 sign in\s+0 API key\s+0 skip\n/);
     expect(four).toMatch(/Claude Code login\s+[^\n]*sign in on the machine\n/);
+    // Hermes signs in through a menu only the person can work through, so its row opens on the copy instead.
+    expect(four).toMatch(/Hermes Agent login\s+[^\n]*copy from this Mac\n/);
     expect(four).toMatch(/Hermes Agent API keys\s+[^\n]*copy from this Mac\n/);
     expect(four).toMatch(/▾ Developer CLIs\s+0 copy\s+1 sign in\s+1 skip\n┃\s+GitHub CLI login\s+[^\n]*sign in on the machine\n┃\s+kubectl config\s+kubectl is not coming\s+skip\n/);
     expect(four).toMatch(/▾ MCP servers from your agents' configs\s+0 copy\s+1 skip\n┃\s+github\s+in Claude Code's config\s+skip\n/);
@@ -1032,7 +1035,8 @@ describe("wsp init, the summary-first screens", () => {
     // The four agents and both MCP servers, the one with a token by the copy it was given on the screen.
     // Gemini's row is the catalog's, added after what the collector found, so it installs last.
     expect(summary).toMatch(/Agents\s+6 of 8/);
-    expect(summary).toMatch(/Sign-ins\s+1 copy, 5 sign in\s+24 KB\n/);
+    expect(summary).toMatch(/Sign-ins\s+2 copy, 4 sign in\s+25 KB\n/);
+    expect(summary).toMatch(/Hermes Agent login\s+copy\n/);
     expect(summary).toMatch(/Hermes Agent API keys\s+copy\n/);
     expect(summary).toMatch(/kubectl config\s+skip\n/);
     expect(summary).toMatch(/github\s+copy\n/);
@@ -1045,10 +1049,11 @@ describe("wsp init, the summary-first screens", () => {
     expect(result.code).toBe(0);
     const out = f.text();
     expect(out).not.toMatch(/—|\p{Emoji_Presentation}/u);
-    // The four agents installed, Gemini from the catalog's road though nothing of it is on this Mac; the five sign-ins ran here.
+    // The four agents installed, Gemini from the catalog's road though nothing of it is on this Mac; the four sign-ins
+    // that run without a question ran here, and Hermes, whose menu is the person's, copied instead.
     expect(out).toMatch(/Agents\n│\s+4 installed: Claude Code, Codex, Hermes Agent, Gemini CLI\n/);
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual(["exec gh auth login || exit\r", "exec claude auth login || exit\r", "exec codex login || exit\r", "exec hermes auth || exit\r", "exec gemini || exit\r"]);
-    expect(out).toMatch(/Gemini CLI login: signed in \(gemini exited 0\)/);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([`exec ${loginOf("gh")} || exit\r`, "exec claude auth login || exit\r", "exec codex login || exit\r", `exec ${loginOf("gemini")} || exit\r`]);
+    expect(out).toContain(`Gemini CLI login: signed in (${loginOf("gemini")} exited 0)`);
     expect(f.reads).toEqual([]);
     const log = f.backends[0]!.machines[0]!.execLog;
     expect(log.some(c => c.includes("@google/gemini-cli@"))).toBe(true);
@@ -1061,9 +1066,9 @@ describe("wsp init, the summary-first screens", () => {
     expect(saved.get("tools/brew/yq")).toMatchObject({ bring: false });
     expect(saved.get("tools/brew/gh")).toMatchObject({ bring: true });
     expect(saved.get("tools/npm/tsx")).toMatchObject({ bring: false });
-    // The keys row was left on copy, so it travels; the login beside it still signs in on the machine.
+    // The keys row was left on copy, so it travels; the login beside it copies too, since its menu is the person's.
     expect(saved.get("logins/hermes-keys")).toMatchObject({ bring: true, choice: "copy" });
-    expect(saved.get("logins/hermes")).toMatchObject({ bring: false, choice: "machine" });
+    expect(saved.get("logins/hermes")).toMatchObject({ bring: true, choice: "copy" });
     expect(saved.get("logins/gemini")).toMatchObject({ bring: false, choice: "machine" });
     expect(saved.get("logins/kube")).toMatchObject({ bring: false, choice: "skip" });
     expect(saved.get("agents/mcp/claude/github")).toMatchObject({ bring: true, choice: "copy" });
@@ -1079,7 +1084,7 @@ describe("wsp init, the summary-first screens", () => {
     expect(rows.get("gemini")).toMatchObject({ on: true, signIn: "machine" });
     expect(rows.get("codex")).toMatchObject({ on: true, signIn: "machine" });
     expect(rows.get("claude")).toMatchObject({ on: true, signIn: "machine" });
-    expect(rows.get("hermes")).toMatchObject({ on: true, signIn: "machine" });
+    expect(rows.get("hermes")).toMatchObject({ on: true, signIn: "copy" });
     expect(rows.get("yq")).toMatchObject({ on: false });
     expect(rows.get("gh")).toMatchObject({ on: true, signIn: "machine" });
     expect(rows.get("wrangler")).toMatchObject({ on: true });
@@ -1204,7 +1209,7 @@ describe("wsp init, the summary-first screens", () => {
     expect(out).not.toMatch(/github\s+copy/);
     // The copied keys are on the machine; their status is the catalog's to check from the app, not this terminal's.
     expect(out).toContain("Hermes Agent API keys: copied");
-    expect(out).toContain("Sign-ins on the machine skipped: GitHub CLI login, Claude Code login, Codex login, Hermes Agent login. --yes asks nothing; sign in from the app's terminal.");
+    expect(out).toContain("Sign-ins on the machine skipped: GitHub CLI login, Claude Code login, Codex login. --yes asks nothing; sign in from the app's terminal.");
     expect(f.reads).toEqual([]);
     const saved = new Map(loadManifest(join(dirs[0]!, "golden-recipe.json")).entries.map(e => [e.id, e]));
     expect(saved.get("agents/codex")).toMatchObject({ bring: true });
@@ -1660,7 +1665,7 @@ describe("wsp init, flags and no terminal", () => {
     expect(out).toMatch(/GitHub CLI login\s+sign in/);
     expect(out).toContain(`GitHub CLI login: open ${DEVICE_URL} on this computer`);
     expect(out).toContain(`open '${DEVICE_URL}'`);
-    expect(result.logins?.find(l => l.id === "logins/gh")).toMatchObject({ state: "signed-in", note: "gh auth login exited 0" });
+    expect(result.logins?.find(l => l.id === "logins/gh")).toMatchObject({ state: "signed-in", note: `${loginOf("gh")} exited 0` });
     expect(loadManifest(join(dirs[0]!, "golden-recipe.json")).entries.find(e => e.id === "logins/gh")?.choice).toBe("machine");
     expect(out).not.toContain("from your Keychain");
     // Nothing is printed as an object without --json.
@@ -1720,7 +1725,7 @@ describe("wsp init, flags and no terminal", () => {
       // its outcome.
       { event: "sign-in", tool: "gh", label: "GitHub CLI login" },
       { event: "sign-in", tool: "gh", label: "GitHub CLI login", browserUrl: DEVICE_URL, finish: "none", nextCommand: `open '${DEVICE_URL}'`, waitSeconds: 960 },
-      { event: "sign-in-result", tool: "gh", label: "GitHub CLI login", state: "signed-in", note: "gh auth login exited 0" },
+      { event: "sign-in-result", tool: "gh", label: "GitHub CLI login", state: "signed-in", note: `${loginOf("gh")} exited 0` },
       { event: "sign-in", tool: "claude", label: "Claude Code login" },
       // claude's row is declared callback, and the page it printed here redirects to the hosted paste-code page, not
       // to a port on the machine, so the row takes a code.

@@ -139,6 +139,23 @@ describe("the screens as data", () => {
     expect(logins.items.find(i => i.id === "logins/claude")!.state).toBeUndefined();
   });
 
+  it("a sign-in whose tool stops on a question only the person can answer says so as its state word, and its picker never offers the machine", () => {
+    const withHermes: Recipe = { ...RECIPE, rows: [...RECIPE.rows, { id: "hermes", kind: "agent", on: true, source: { kind: "installed", paths: ["~/.hermes/config.yaml"], bin: true } }] };
+    const manifest = { entries: [...FIXTURE.entries, { rung: "agents" as const, id: "agents/hermes", label: "Hermes Agent", paths: ["~/.hermes"], bytes: 900, default: "bring" as const }, { rung: "logins" as const, id: "logins/hermes", label: "Hermes Agent login", group: "Agent logins", paths: ["~/.hermes/config.yaml"], bytes: 900, default: "skip" as const }] };
+    const logins = screensOf(reading({ manifest }), fresh(withHermes), at())[3]!;
+    const hermes = logins.items.find(i => i.id === "logins/hermes")!;
+    expect(hermes.state).toBe(CLOUD_SETUP_WORDS.screen.asksYou);
+    expect(hermes.choices!.map(c => c.value)).toEqual(["copy", "skip"]);
+    expect(logins.answers["logins/hermes"]).toBe("copy");
+    // The state word says it once: the row's detail does not carry it a second time.
+    expect(hermes.detail).not.toContain(CLOUD_SETUP_WORDS.screen.asksYou);
+    // With nothing of it here to copy the picker is fixed on skip, and the word still says which fact stopped the row.
+    const bare = { entries: [...FIXTURE.entries, { rung: "agents" as const, id: "agents/hermes", label: "Hermes Agent", paths: ["~/.hermes"], bytes: 900, default: "bring" as const }, { rung: "logins" as const, id: "logins/hermes", label: "Hermes Agent login", group: "Agent logins", paths: [], bytes: 0, default: "skip" as const }] };
+    const alone = screensOf(reading({ manifest: bare }), fresh(withHermes), at())[3]!.items.find(i => i.id === "logins/hermes")!;
+    expect(alone.choices!.map(c => c.value)).toEqual(["skip"]);
+    expect(alone.state).toBe(CLOUD_SETUP_WORDS.screen.asksYou);
+  });
+
   it("the wsp screen lists the agents here whose config the catalog can write, ticked once answered, and the Also screen says when nothing was found", () => {
     const screens = screensOf(reading(), fresh(), at());
     const wsp = screens[4]!;
