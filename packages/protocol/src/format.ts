@@ -1733,10 +1733,17 @@ export function moveTimedOutLine(move: "pause" | "wake", elapsedMs: number, read
  * The engine's request takes RESUME_CAP_MS as the cap on its own call and the runtime stops waiting on the same
  * number; nothing else holds a wake's clock. */
 export const RESUME_CAP_MS = 30_000;
-/** How often the host asks again after a resume the provider did not take, and how many such asks it makes: thirty
- * minutes of asking, so a provider that comes back inside its own outage wakes the machine with nobody watching. */
+/** How often the host asks again after a resume the provider did not take, and how long it keeps asking: thirty
+ * minutes of asking, so a provider that comes back inside its own outage wakes the machine with nobody watching.
+ * Both are wall time from the first ask, not time added up after each call: a resume that sits on its 30 s cap
+ * spends half of its own minute, and counting the cadence after the cap instead made thirty asks span 45 minutes
+ * (seen live 2026-09-10, 25 asks in 38 minutes). */
 export const WAKE_ASK_EVERY_MS = 60_000;
-export const WAKE_ASKS_AGAIN = 30;
+export const WAKE_ASKS_FOR_MS = 30 * 60_000;
+
+/** How many asks a window of asking holds at a cadence, which is the count the row counts against and the last ask
+ * a wake makes. An ask starting exactly as the window runs out is not made, so a window of one cadence holds one. */
+export const wakeAsksIn = (forMs: number, everyMs: number): number => Math.ceil(forMs / everyMs);
 
 /** The row's line the moment a resume runs its cap out with nothing back. Not a refusal and not a failed resume: the
  * provider's mutating calls hang at the HTTP level while the operation goes through (probed 2026-09-10, a pause that
@@ -1747,7 +1754,7 @@ export const RESUME_UNANSWERED = "the provider has not answered the resume reque
 /** The line for an ask the host is making on its own: which ask this is, of the ones it will make. Two readings of
  * the one fact, since two surfaces show it: the long one is the Machine tab's, which has a line to spend on prose,
  * and the short one is the sidebar row's, whose meta slot holds a couple of words beside the spend and the nap
- * countdown and cuts from the right. The count is passed rather than read off WAKE_ASKS_AGAIN so a runtime given a
+ * countdown and cuts from the right. The count is passed rather than worked out here so a runtime given a
  * shorter cadence says the number it will keep to. */
 export function wakeAskingAgainLine(ask: number, of: number, style: "long" | "short" = "long"): string {
   return style === "short" ? `asking ${ask}/${of}` : `waking, asking again (${ask} of ${of})`;

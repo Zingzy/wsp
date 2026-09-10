@@ -176,7 +176,7 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
-import { mcpServersBlocked, actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, machineCapRefusal, machineWord, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noSshImportLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_ASK_EVERY_MS, WAKE_ASKS_AGAIN, WAKE_STOPPED, wakeAskingAgainLine, wakeGaveUpLine, workspaceProjects, workspaceState } from "@wsp/protocol";
+import { mcpServersBlocked, actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, machineCapRefusal, machineWord, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noSshImportLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_ASK_EVERY_MS, WAKE_ASKS_FOR_MS, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
@@ -758,9 +758,10 @@ export interface WakeOptions {
   deadlineMs?: number;
   /** How long after a wake gave up the provider is read once more for a resume that landed late (tests shrink it). */
   lateReadMs?: number;
-  /** How long the host waits before asking the provider again, and how many such asks it makes (tests shrink both). */
+  /** How long after an ask began the host asks the provider again, and how long from the first ask it keeps asking
+   * (tests shrink both). Both are wall time, so a call that sits on its cap spends the cadence it is in. */
   askEveryMs?: number;
-  asksAgain?: number;
+  asksForMs?: number;
   /** A nap-time vault archive over this is not stored (a warning names the size). */
   vaultCapBytes?: number;
 }
@@ -1721,7 +1722,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const goneConfirmMs = opts.goneConfirmMs ?? GONE_CONFIRM_MS;
   const lateReadMs = opts.wake?.lateReadMs ?? WAKE_LATE_READ_MS;
   const wakeAskEveryMs = opts.wake?.askEveryMs ?? WAKE_ASK_EVERY_MS;
-  const wakeAsksAgain = opts.wake?.asksAgain ?? WAKE_ASKS_AGAIN;
+  const wakeAsksForMs = opts.wake?.asksForMs ?? WAKE_ASKS_FOR_MS;
+  const wakeAsks = wakeAsksIn(wakeAsksForMs, wakeAskEveryMs);
   const clock = opts.clock ?? realClock;
   const permissionWaitMs = opts.permissionWaitMs ?? PERMISSION_WAIT_MS;
   /** Each provider move the guest has to cooperate with: the state it leaves the machine in, and the state a
@@ -3313,11 +3315,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               await emitStatus(entry, reachOf(entry), result.reason);
               return view(entry.record);
             } catch (e) {
-              if (!stopped() && e instanceof ResumeUnansweredError && ask <= wakeAsksAgain) {
-                entry.wakeAsk = { ask, of: wakeAsksAgain };
+              if (!stopped() && e instanceof ResumeUnansweredError && ask < wakeAsks) {
+                entry.wakeAsk = { ask, of: wakeAsks };
                 delete entry.wakeSaid;
                 await emitStatus(entry, "napping");
-                if ((await orStopped(sleeps(wakeAskEveryMs))) !== "stopped") {
+                // The cadence is wall time from the wake's start, so the half hour of asking is half an hour: a
+                // resume that sat on its cap for half the minute leaves half a minute to wait, and one that ran
+                // longer than the cadence is asked again at once.
+                if ((await orStopped(sleeps(Math.max(0, began + ask * wakeAskEveryMs - clock.now())))) !== "stopped") {
                   // The retry reads the machine before it asks: a call that hung at the provider can land in the
                   // minute since, and a resume is worth sending only while the machine still reads paused.
                   landed = tookTheResume(await readsState(entry.machine));

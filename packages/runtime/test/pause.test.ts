@@ -612,7 +612,7 @@ describe("a provider move that never answers", () => {
 
   // Asking again is the host's own road and has its own file; a runtime given no asks ends the wake on the first one.
   it("a wake the provider never takes ends with its silence on the row and the wake control open, and the next wake works", async () => {
-    const { backend, store, fc, rt, events } = rig({ wake: { deadlineMs: 20, asksAgain: 0 } });
+    const { backend, store, fc, rt, events } = rig({ wake: { deadlineMs: 20, asksForMs: 0 } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
     await rt.workspaces.nap(ws.id);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -714,7 +714,7 @@ describe("a provider move that never answers", () => {
   });
 
   it("a resume that lands after the wake gave up is found by one later read: the record follows to running instead of billing under a paused row", async () => {
-    const { backend, store, fc, rt, events } = rig({ wake: { deadlineMs: 20, lateReadMs: 50, asksAgain: 0 } });
+    const { backend, store, fc, rt, events } = rig({ wake: { deadlineMs: 20, lateReadMs: 50, asksForMs: 0 } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
     await rt.workspaces.nap(ws.id);
     const hung = hang(backend, "resume");

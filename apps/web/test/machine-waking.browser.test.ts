@@ -12,9 +12,12 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { wakeAskingAgainLine, wakeGaveUpLine, WAKE_ASKS_AGAIN, WAKE_ASK_EVERY_MS } from "@wsp/protocol";
+import { RESUME_CAP_MS, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, WAKE_ASKS_FOR_MS, WAKE_ASK_EVERY_MS } from "@wsp/protocol";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
 import { startVite, type ViteChild } from "./vite-child";
+
+/** The asks the shipped half hour holds, which is what the fixture's row counts against. */
+const ASKS = wakeAsksIn(WAKE_ASKS_FOR_MS, WAKE_ASK_EVERY_MS);
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SHOTS = join(WEB_DIR, "artifacts", "render");
@@ -43,8 +46,8 @@ describe.skipIf(renderSkipped !== undefined)("the machine tab of a wake the prov
     expect(await page!.locator("[data-k=state]").textContent()).toBe("Waking");
     // The tab has a line to spend, so it reads the ask at its full length; the sidebar row reads the same two
     // numbers as "asking 3/30" beside the spend.
-    expect(await page!.locator("[data-k=wake-ask]").textContent()).toBe(wakeAskingAgainLine(3, WAKE_ASKS_AGAIN));
-    expect(wakeAskingAgainLine(3, WAKE_ASKS_AGAIN, "short")).toBe("asking 3/30");
+    expect(await page!.locator("[data-k=wake-ask]").textContent()).toBe(wakeAskingAgainLine(3, ASKS));
+    expect(wakeAskingAgainLine(3, ASKS, "short")).toBe("asking 3/30");
     // The sentence is a muted line, not a badge and not an alarm: nothing about it is coloured.
     const reason = await page!.locator("[data-k=wake-ask]").evaluate(el => {
       const s = getComputedStyle(el);
@@ -66,7 +69,7 @@ describe.skipIf(renderSkipped !== undefined)("the machine tab of a wake the prov
     await page!.goto(`${base}?gave-up&theme=${theme}`);
     await page!.waitForSelector("[data-k=reason]");
     expect(await page!.locator("[data-k=state]").textContent()).toBe("Paused");
-    const words = wakeGaveUpLine(WAKE_ASKS_AGAIN + 1, WAKE_ASKS_AGAIN * WAKE_ASK_EVERY_MS);
+    const words = wakeGaveUpLine(ASKS, WAKE_ASKS_FOR_MS - RESUME_CAP_MS);
     expect(await page!.locator("[data-k=reason]").textContent()).toBe(words);
     // Both roads stand: the rebuild the sentence names, and the wake, since the fault is the provider's and may pass.
     const rebuild = page!.locator("button", { hasText: "Rebuild" });
