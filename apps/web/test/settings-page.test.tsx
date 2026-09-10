@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The settings page: its two sections and their rows, each control reading the
-// host's record and writing a patch to it, the theme, the sidebar body and the
-// terminal text size as segmented controls, the sidebar width as a mono number
-// field with a stepper and a reset offered only off the default, the resolved
-// size in mono beside the text size pick, no sentence under any pick, and the
-// page in the shell's centre with its name in the breadcrumb until a workspace
-// is picked.
+// The settings page: its three sections and their rows, each control reading
+// the host's record and writing a patch to it, the theme, the sidebar body and
+// the terminal text size as segmented controls, the sidebar width as a mono
+// number field with a stepper and a reset offered only off the default, the
+// resolved size in mono beside the text size pick, the release each half is on
+// the about row, no sentence under any pick, and the page in the shell's centre
+// with its name in the breadcrumb until a workspace is picked.
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, applyPreferencesPatch, type Preferences, type PreferencesPatch, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, applyPreferencesPatch, type BootPayload, type Preferences, type PreferencesPatch, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { Shell } from "../src/App.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -61,6 +61,12 @@ const group = (name: string): HTMLElement => screen.getByRole("radiogroup", { na
 const checked = (name: string): string[] => within(group(name)).getAllByRole("radio").map(r => r.getAttribute("aria-checked") ?? "");
 const segments = (name: string): string[] => within(group(name)).getAllByRole("radio").map(r => r.textContent ?? "");
 const widthField = (): HTMLInputElement => document.querySelector<HTMLInputElement>("[data-k=sidebar-width]")!;
+/** The boot object a host wrote into this page, as the page reads it. */
+const served = (boot: BootPayload | undefined): void => {
+  const holder = window as unknown as { __WSP__?: BootPayload };
+  if (boot === undefined) delete holder.__WSP__;
+  else holder.__WSP__ = boot;
+};
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -72,17 +78,20 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   document.body.innerHTML = "";
+  delete window.wsp;
+  served(undefined);
 });
 
 describe("the settings page", () => {
-  it("has Appearance and Terminal, one hairline row per pick with its label left and its control right, segments for the picks, and the record's values checked", async () => {
+  it("has Appearance, Terminal and About, one hairline row per pick with its label left and its control right, segments for the picks, and the record's values checked", async () => {
     const { api } = fakeApi({ ...DEFAULT_PREFERENCES, labs: true, theme: "light", sidebarMode: "spaces", sidebarWidth: 312, terminalSize: "file", terminalZoom: {} });
     useStore.getState().bind(api);
     await flush();
     render(<SettingsPage />);
-    expect(screen.getAllByRole("region").map(s => s.getAttribute("aria-labelledby"))).toEqual(["settings-appearance", "settings-terminal"]);
+    expect(screen.getAllByRole("region").map(s => s.getAttribute("aria-labelledby"))).toEqual(["settings-appearance", "settings-terminal", "settings-about"]);
     expect(screen.getByText("Appearance").tagName).toBe("H2");
     expect(screen.getByText("Terminal").tagName).toBe("H2");
+    expect(screen.getByText("About").tagName).toBe("H2");
     expect(segments("Theme")).toEqual(["System", "Light", "Dark"]);
     expect(checked("Theme")).toEqual(["false", "true", "false"]);
     expect(segments("Sidebar")).toEqual(["List", "Spaces"]);
@@ -91,10 +100,10 @@ describe("the settings page", () => {
     expect(checked("Text size")).toEqual(["false", "true"]);
     expect(widthField().value).toBe("312");
     expect(widthField().className).toContain("font-mono");
-    // Four rows, each one hairline under it, the label at the left and nothing else in the label's slot: no
+    // Five rows, each one hairline under it, the label at the left and nothing else in the label's slot: no
     // sentence under any pick, no radio, no chip.
     const rows = Array.from(document.querySelectorAll<HTMLElement>("[data-settings-row]"));
-    expect(rows.map(row => row.firstElementChild?.textContent)).toEqual(["Theme", "Sidebar", "Sidebar width", "Text size"]);
+    expect(rows.map(row => row.firstElementChild?.textContent)).toEqual(["Theme", "Sidebar", "Sidebar width", "Text size", "Version"]);
     for (const row of rows) {
       expect(row.className).toContain("border-b");
       expect(row.querySelector("[data-slot=badge], .truncate + span span")).toBeNull();
@@ -159,6 +168,28 @@ describe("the settings page", () => {
     expect(sets.filter(patch => "sidebarWidth" in patch).map(patch => patch.sidebarWidth)).not.toContain(1000);
     expect(sets.filter(patch => "sidebarWidth" in patch).map(patch => patch.sidebarWidth)).not.toContain(10);
     expect(sets).toEqual([{ theme: "light" }, { sidebarMode: "spaces" }, { terminalSize: "file" }, { sidebarWidth: SIDEBAR_DEFAULT_WIDTH + 8 }, { sidebarWidth: 300 }, { sidebarWidth: 480 }, { sidebarWidth: 220 }, { sidebarWidth: null }]);
+  });
+
+  it("shows both halves on the about row in a desktop shell, and the host's alone in a browser tab that has no other half", async () => {
+    const { api } = fakeApi({ ...DEFAULT_PREFERENCES, labs: true });
+    useStore.getState().bind(api);
+    await flush();
+    const fact = (): string => document.querySelector<HTMLElement>("[data-k=version]")!.textContent!;
+    served({ wsPort: 1, token: "t", version: "0.1.5" });
+    window.wsp = { version: "0.1.3" };
+    render(<SettingsPage />);
+    expect(fact()).toBe("app 0.1.3 · host 0.1.5");
+    expect(document.querySelector<HTMLElement>("[data-k=version]")!.className).toContain("font-mono");
+    document.body.innerHTML = "";
+    delete window.wsp;
+    render(<SettingsPage />);
+    expect(fact()).toBe("host 0.1.5");
+    document.body.innerHTML = "";
+    // A shell from before the bridge carried a version: the page has a half it cannot name, and says so rather than
+    // reading as a browser tab.
+    window.wsp = {};
+    render(<SettingsPage />);
+    expect(fact()).toBe("app unknown · host 0.1.5");
   });
 
   it("in the shell's centre, the page takes the thread's place and the breadcrumb its name until a workspace is picked", async () => {

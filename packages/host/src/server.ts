@@ -13,6 +13,7 @@ import { projectBundler } from "./project-bundle.js";
 import { projectLander } from "./project-export.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 import { describeStorage } from "./storage.js";
+import { VERSION } from "./version.js";
 
 // The enriched status now lives in @wsp/runtime (every client reads one
 // implementation); re-exported so host consumers keep their imports.
@@ -265,7 +266,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   // Rendered per request: wsp init saves the recipe while a host may already be serving.
   const page = (): string => {
     const terminalFont = terminalFontOf(opts.recipePath);
-    return loadPage(webDir, { wsPort: rtServer.port, token: authToken, ...(terminalFont !== undefined ? { terminalFont } : {}), ...(opts.statePath !== undefined ? { statePath: opts.statePath } : {}) });
+    return loadPage(webDir, { wsPort: rtServer.port, token: authToken, version: VERSION, ...(terminalFont !== undefined ? { terminalFont } : {}), ...(opts.statePath !== undefined ? { statePath: opts.statePath } : {}) });
   };
   try {
     page();

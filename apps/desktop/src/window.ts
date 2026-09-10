@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { DESKTOP_MAC_CLASS } from "@wsp/protocol";
 import type { BrowserWindowConstructorOptions } from "electron";
-import { htmlClassArg } from "./html-class.js";
+import { shellArg } from "./shell-args.js";
 
 /** How one platform frames the app window: the BrowserWindow options beyond the size and title every
  * platform shares, and the class the page carries so the web lays itself out for that frame. */
@@ -28,7 +28,7 @@ const MAC: WindowFrame = {
 
 const FRAMES: Partial<Record<NodeJS.Platform, WindowFrame>> = { darwin: MAC };
 
-export function windowOptions(platform: NodeJS.Platform, preload?: string): BrowserWindowConstructorOptions {
+export function windowOptions(platform: NodeJS.Platform, version: string, preload?: string): BrowserWindowConstructorOptions {
   const frame = FRAMES[platform] ?? STOCK;
   return {
     width: 1280,
@@ -40,7 +40,7 @@ export function windowOptions(platform: NodeJS.Platform, preload?: string): Brow
       contextIsolation: true,
       sandbox: true,
       ...(preload !== undefined ? { preload } : {}),
-      ...(frame.htmlClass !== undefined ? { additionalArguments: [htmlClassArg(frame.htmlClass)] } : {}),
+      additionalArguments: [shellArg("version", version), ...(frame.htmlClass !== undefined ? [shellArg("html-class", frame.htmlClass)] : [])],
     },
   };
 }

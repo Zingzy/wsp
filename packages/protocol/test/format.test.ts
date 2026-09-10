@@ -134,6 +134,7 @@ import {
   secretsNote,
   secretSignalsLine,
   SESSIONS_NOTE,
+  shellVersionNotice,
   type GoldenMissingTool,
 } from "../src/index.js";
 import * as format from "../src/format.js";
@@ -1304,5 +1305,47 @@ describe("the words a relayed permission prompt shows", () => {
     // The slot is one line that truncates from the right, and the longest label this can carry is the one that
     // names the machine; the render test measures the paint, this holds the budget the measurement was against.
     expect(line.length).toBeLessThan(54);
+  });
+});
+
+describe("a desktop shell and the host that served it its page", () => {
+  it("says nothing while the two are one release", () => {
+    expect(shellVersionNotice("0.1.5", "0.1.5")).toBeUndefined();
+  });
+
+  it("names both numbers and points at the new app when the shell is the older half", () => {
+    expect(shellVersionNotice("0.1.3", "0.1.5")).toEqual({ line: "this app is 0.1.3, the host is 0.1.5: get the new app", update: true });
+  });
+
+  it("names both numbers and asks for the app's own host when the host is the older half, with nothing to download", () => {
+    expect(shellVersionNotice("0.1.5", "0.1.3")).toEqual({ line: "this app is 0.1.5, the host is 0.1.3: run the app's own host", update: false });
+  });
+
+  it("reads a shell whose bridge carries no version as older than the host, since every shell that has one says so", () => {
+    expect(shellVersionNotice(undefined, "0.1.5")).toEqual({ line: "this app is older than the host, which is 0.1.5: get the new app", update: true });
+  });
+
+  it("reads the numbers as numbers, so 0.1.10 is after 0.1.9 rather than before it", () => {
+    expect(shellVersionNotice("0.1.10", "0.1.9")?.update).toBe(false);
+    expect(shellVersionNotice("0.1.9", "0.1.10")?.update).toBe(true);
+  });
+
+  it("puts a prerelease before the release it leads to, and a shorter number before a longer one that grows", () => {
+    expect(shellVersionNotice("1.0.0-rc.1", "1.0.0")?.update).toBe(true);
+    expect(shellVersionNotice("1.0.0", "1.0.0-rc.1")?.update).toBe(false);
+    expect(shellVersionNotice("0.2", "0.2.1")?.update).toBe(true);
+    expect(shellVersionNotice("0.2", "0.2.0")).toBeUndefined();
+  });
+
+  it("tells two prereleases of one release apart, whichever way their tails are spelled, so neither reads as silence", () => {
+    expect(shellVersionNotice("0.1.6-alpha", "0.1.6-beta")).toEqual({ line: "this app is 0.1.6-alpha, the host is 0.1.6-beta: get the new app", update: true });
+    expect(shellVersionNotice("0.1.6-beta", "0.1.6-alpha")?.update).toBe(false);
+    expect(shellVersionNotice("0.1.6-rc1", "0.1.6-rc2")?.update).toBe(true);
+    expect(shellVersionNotice("0.1.6-rc2", "0.1.6-rc1")?.update).toBe(false);
+    expect(shellVersionNotice("0.1.6-rc1", "0.1.6")?.update).toBe(true);
+    // A numbered tail counts as a number, so a tenth candidate is above a second and not below it.
+    expect(shellVersionNotice("0.1.6-rc.2", "0.1.6-rc.10")?.update).toBe(true);
+    // Build metadata carries no precedence, so two builds of one release say nothing.
+    expect(shellVersionNotice("0.1.6+a1b2c3d", "0.1.6+9f8e7d6")).toBeUndefined();
   });
 });

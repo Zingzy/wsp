@@ -2,7 +2,7 @@
 import type { AgentHere, AgentSessions, InstallReport } from "@wsp/host";
 import type { ContextMenuItem, DesktopBridge, InitNeedsYou, LocalFontFace, ShellChord, ThemePreference } from "@wsp/protocol";
 import { contextBridge, ipcRenderer, webUtils } from "electron";
-import { htmlClassFrom } from "./html-class.js";
+import { shellArgFrom } from "./shell-args.js";
 
 /** What the first launch's page can ask the shell, answered only while that page is up. */
 export interface OnboardingBridge {
@@ -17,6 +17,7 @@ export interface OnboardingBridge {
 }
 
 const bridge: DesktopBridge & OnboardingBridge = {
+  version: shellArgFrom(process.argv, "version"),
   agents: () => ipcRenderer.invoke("onboarding:agents"),
   history: (ids: string[]): Promise<AgentSessions[]> => ipcRenderer.invoke("onboarding:history", ids),
   install: (ids: string[]): Promise<InstallReport> => ipcRenderer.invoke("onboarding:install", ids),
@@ -44,7 +45,7 @@ const bridge: DesktopBridge & OnboardingBridge = {
 
 contextBridge.exposeInMainWorld("wsp", bridge);
 
-const htmlClass = htmlClassFrom(process.argv);
+const htmlClass = shellArgFrom(process.argv, "html-class");
 if (htmlClass !== undefined) {
   // The preload runs before the parser has made the html element, so the class waits for it.
   new MutationObserver((_, observer) => {

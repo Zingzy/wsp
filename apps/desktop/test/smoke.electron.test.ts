@@ -3,18 +3,19 @@
 // WSP_DESKTOP_SMOKE=1 so the unit suite stays free of a 200 MB binary.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { serve, shimPath, startHost, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
-import { CLOUD_SETUP_WORDS, fmtSize, kindWords } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, GET_THE_APP_WORD, fmtSize, kindWords } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
 import { WORKSPACE_WORDS } from "../../web/src/actions/format.js";
 import { LOCKUP_OPTICAL_CENTRE } from "../../web/src/brand/optical.js";
-import { THEME_WORDS } from "../../web/src/settings/format.js";
+import { SETTINGS_WORDS, THEME_WORDS, versionFact } from "../../web/src/settings/format.js";
 import { workspaceRowId } from "../../web/src/sidebar/rowGrammar.js";
 import { VERSION } from "../../../packages/host/src/version.js";
 import { executableIn, treeHere } from "./packaged.js";
@@ -100,10 +101,14 @@ function fakeWebDir(): string {
   return webDir;
 }
 
-function testRuntime(seedGolden = false): Runtime {
+/** The environment a fixture host's runtime is given, said here rather than inherited from the shell that started
+ * the run. The settings page is one of the surfaces behind labs, so a case that opens it turns labs on. */
+const LABS_ON = { WSP_LABS: "1" };
+
+function testRuntime(seedGolden = false, env: Record<string, string> = {}): Runtime {
   const store = memoryStore();
   if (seedGolden) void store.put("goldens", "default", GOLDEN);
-  return createRuntime({ backend: stubBackend(), store, adapters: {} });
+  return createRuntime({ backend: stubBackend(), store, adapters: {}, env });
 }
 
 function fixtureHost(): Promise<HostHandle> {
@@ -137,6 +142,46 @@ async function launch(env: Record<string, string | undefined>, prepare: (home: s
   // read the Mac's own appearance, the one the window's glass is drawn from, or the two sides split in the shot.
   const app = await electron.launch({ executablePath: builtApp(), cwd, env: clean, colorScheme: null });
   return { app, home };
+}
+
+/** A host of another release, as an app attached to one it did not start meets it. The real host serves the page and
+ * runs the runtime; this stands in front of it on its own port and rewrites the one version in the boot object, so
+ * the window is a real window on a real host that happens to have been built apart from it. Faking the app's half
+ * instead would need a lever in the shipped shell, since a packaged bundle's own version cannot be moved. */
+async function hostOfVersion(upstream: HostHandle, version: string): Promise<{ port: number; server: Server }> {
+  const server = createServer((req, res) => {
+    void (async () => {
+      const body = req.method === "GET" || req.method === "HEAD" ? undefined : Buffer.concat(await collect(req));
+      const from = await fetch(`http://127.0.0.1:${upstream.port}${req.url ?? "/"}`, {
+        method: req.method ?? "GET",
+        ...(body !== undefined ? { body } : {}),
+      });
+      const type = from.headers.get("content-type") ?? "application/octet-stream";
+      const bytes = type.startsWith("text/html")
+        ? Buffer.from((await from.text()).replace(`"version":"${VERSION}"`, `"version":"${version}"`))
+        : Buffer.from(await from.arrayBuffer());
+      res.writeHead(from.status, { "content-type": type, "content-length": bytes.length });
+      res.end(bytes);
+    })().catch(() => res.writeHead(502).end());
+  });
+  return { port: await listenOn(server), server };
+}
+
+function collect(req: NodeJS.ReadableStream): Promise<Buffer[]> {
+  return new Promise(resolve => {
+    const chunks: Buffer[] = [];
+    req.on("data", (c: Buffer) => chunks.push(c));
+    req.on("end", () => resolve(chunks));
+  });
+}
+
+function listenOn(server: Server): Promise<number> {
+  return new Promise(resolve => {
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      resolve(typeof addr === "object" && addr !== null ? addr.port : 0);
+    });
+  });
 }
 
 async function bootOf(page: Page): Promise<{ wsPort: number; token: string }> {
@@ -228,12 +273,15 @@ async function refused(url: string): Promise<boolean> {
 describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
   let launched: Launched | undefined;
   let existing: HostHandle | undefined;
+  let standIn: Server | undefined;
   afterEach(async () => {
     await launched?.app.close().catch(() => {});
     if (launched) rmSync(launched.home, { recursive: true, force: true });
     launched = undefined;
     await existing?.close();
     existing = undefined;
+    if (standIn !== undefined) await new Promise<void>(resolve => standIn!.close(() => resolve()));
+    standIn = undefined;
     vi.unstubAllEnvs();
   });
 
@@ -529,6 +577,46 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(readdirSync(join(launched.home, ".wsp"))).toEqual(["bin"]);
     await launched.app.close();
     expect(await refused(`http://127.0.0.1:${existing.port}/`)).toBe(false);
+  });
+
+  it("attached to a host of a later release, says so in the sidebar's own sentence with the releases page behind its button", async () => {
+    existing = await startHost({ runtime: testRuntime(true, LABS_ON), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
+    const stand = await hostOfVersion(existing, "9.9.9");
+    standIn = stand.server;
+    launched = await launch({ WSP_HOME: undefined, WSP_PORT: String(stand.port) });
+    const win = await windowAt(launched.app, APP_URL);
+    const line = win.locator("[role=status]");
+    await line.waitFor();
+    expect(await line.textContent()).toContain(`this app is ${VERSION}, the host is 9.9.9: get the new app`);
+    expect(await win.locator("[data-toast-action]").textContent()).toBe(GET_THE_APP_WORD);
+    // The settings page names both halves as well, so the line is never the only place the numbers are. It is a labs
+    // surface, and the record that says labs is on is its own reply over the socket, which can land after the
+    // workspace list: the palette's Settings row is that record on screen, so the road through it waits on the fact
+    // rather than on a chord that is silently dropped when it arrives first.
+    await win.keyboard.press("Meta+k");
+    await win.locator("[data-command-palette]").getByText(SETTINGS_WORDS.title, { exact: true }).click();
+    await win.waitForSelector("[data-settings-page]");
+    expect(await win.locator("[data-k=version]").textContent()).toBe(versionFact(VERSION, "9.9.9", true));
+  });
+
+  it("attached to a host of an earlier release, asks for the app's own host and offers nothing to download", async () => {
+    existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
+    const stand = await hostOfVersion(existing, "0.0.1");
+    standIn = stand.server;
+    launched = await launch({ WSP_HOME: undefined, WSP_PORT: String(stand.port) });
+    const win = await windowAt(launched.app, APP_URL);
+    const line = win.locator("[role=status]");
+    await line.waitFor();
+    expect(await line.textContent()).toContain(`this app is ${VERSION}, the host is 0.0.1: run the app's own host`);
+    expect(await win.locator("[data-toast-action]").count()).toBe(0);
+  });
+
+  it("attached to a host of its own release, says nothing at all", async () => {
+    existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
+    launched = await launch({ WSP_HOME: undefined, WSP_PORT: String(existing.port) });
+    const win = await windowAt(launched.app, APP_URL);
+    await win.waitForSelector("[data-slot=sidebar-container]");
+    expect(await win.locator("[role=status]").count()).toBe(0);
   });
 
   it("follows ~/.wsp/current-home to a host serving a custom home, with no WSP_HOME and no port hint", async () => {

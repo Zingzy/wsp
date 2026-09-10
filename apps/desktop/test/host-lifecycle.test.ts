@@ -9,7 +9,7 @@ import { localWorkFolder, makeRuntime, startHost, type CliIO, type HostHandle } 
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
-import { locateHost, openHost, probeHost, type HostSession } from "../src/host-lifecycle.js";
+import { locateHost, openHost, probeHost, statePathIn, type HostSession } from "../src/host-lifecycle.js";
 import { checkSetup } from "../src/setup.js";
 
 const PAGE = `<!doctype html>
@@ -283,7 +283,7 @@ describe("locateHost", () => {
 
   it("attaches to a wsp host on the port with an empty ~/.wsp and no keys anywhere", async () => {
     existing = await fixture();
-    const found = await locateHost({ port: existing.port, cwd });
+    const found = await locateHost({ port: existing.port, packaged: false, cwd });
     expect(found.home).toBe(join(user, ".wsp"));
     expect(found.session?.owned).toBe(false);
     expect(found.session?.url).toBe(`http://127.0.0.1:${existing.port}`);
@@ -293,7 +293,7 @@ describe("locateHost", () => {
   it("follows current-home to a custom home whose host is live, on a port it was not asked about", async () => {
     existing = await fixture();
     const custom = homeServedBy(existing);
-    const found = await locateHost({ port: await freePort(), pointer: custom, cwd });
+    const found = await locateHost({ port: await freePort(), packaged: false, pointer: custom, cwd });
     expect(found.home).toBe(custom);
     expect(found.session?.url).toBe(`http://127.0.0.1:${existing.port}`);
     expect(found.stalePointer).toBeUndefined();
@@ -302,27 +302,64 @@ describe("locateHost", () => {
   it("reports a pointer whose host is gone and falls back to ~/.wsp without a session", async () => {
     existing = await fixture();
     const custom = homeServedBy(existing, JSON.stringify({ pid: deadPid(), port: existing.port, wsPort: existing.wsPort, startedAt: "2026-09-01T00:00:00.000Z" }));
-    const found = await locateHost({ port: await freePort(), pointer: custom, cwd });
+    const found = await locateHost({ port: await freePort(), packaged: false, pointer: custom, cwd });
     expect(found).toEqual({ home: join(user, ".wsp"), stalePointer: custom });
   });
 
   it("names ~/.wsp with nothing to attach to when there is no host and no pointer", async () => {
-    expect(await locateHost({ port: await freePort(), cwd })).toEqual({ home: join(user, ".wsp") });
+    expect(await locateHost({ port: await freePort(), packaged: false, cwd })).toEqual({ home: join(user, ".wsp") });
   });
 
   it("uses WSP_HOME when set and leaves the pointer unread", async () => {
     existing = await fixture();
     const custom = homeServedBy(existing);
     const env = join(user, "env-home");
-    const found = await locateHost({ port: await freePort(), env, pointer: custom, cwd });
+    const found = await locateHost({ port: await freePort(), packaged: false, env, pointer: custom, cwd });
     expect(found).toEqual({ home: env });
   });
 
   it("attaches through the lock next to the state file of the home it resolved", async () => {
     existing = await fixture();
     const env = homeServedBy(existing);
-    const found = await locateHost({ port: await freePort(), env, cwd });
+    const found = await locateHost({ port: await freePort(), packaged: false, env, cwd });
     expect(found.home).toBe(env);
     expect(found.session?.url).toBe(`http://127.0.0.1:${existing.port}`);
+  });
+});
+
+describe("statePathIn", () => {
+  let home: string;
+  let cwd: string;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "wsp-desktop-home-"));
+    cwd = mkdtempSync(join(tmpdir(), "wsp-desktop-cwd-"));
+    writeFileSync(join(cwd, ".env"), "SOLARI_API_KEY=slr_live_fake\n");
+  });
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it("shares the checkout's state with wspx when a development run is launched from a folder holding a .env", () => {
+    expect(statePathIn(home, { packaged: false, cwd })).toBe(join(cwd, ".wsp", "state.json"));
+  });
+
+  it("keeps a packaged app's state in the home, whatever the folder it was launched from holds", () => {
+    expect(statePathIn(home, { packaged: true, cwd })).toBe(join(home, "state.json"));
+  });
+
+  it("lets WSP_HOME win over the launch folder's .env, packaged or not, which is what the locate doc says", () => {
+    for (const packaged of [true, false]) expect(statePathIn(home, { packaged, cwd, env: home })).toBe(join(home, "state.json"));
+  });
+
+  it("reads an empty WSP_HOME as none set, so a development run still shares the checkout's state", () => {
+    expect(statePathIn(home, { packaged: false, cwd, env: "" })).toBe(join(cwd, ".wsp", "state.json"));
+  });
+
+  it("takes the home when the launch folder holds no .env, packaged or not", () => {
+    const bare = mkdtempSync(join(tmpdir(), "wsp-desktop-bare-"));
+    for (const packaged of [true, false]) expect(statePathIn(home, { packaged, cwd: bare })).toBe(join(home, "state.json"));
+    rmSync(bare, { recursive: true, force: true });
   });
 });

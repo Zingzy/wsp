@@ -9,7 +9,7 @@ import type { Runtime } from "@wsp/runtime";
 import { BrowserWindow, Menu, Notification, app, dialog, ipcMain, nativeTheme, shell, type IpcMainInvokeEvent } from "electron";
 import { chooseFrom, parseContextMenuItems } from "./context-menu.js";
 import { fontDirs, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
-import { locateHost, openHost, statePathIn, type HostSession, type Located } from "./host-lifecycle.js";
+import { locateHost, openHost, statePathIn, type HostSession, type Launch, type Located } from "./host-lifecycle.js";
 import { offerMove, type MoveGate } from "./move.js";
 import { sayNeedsYou, type Notifier } from "./needs-you.js";
 import { fromAppPage, fromOnboardingPage } from "./origin.js";
@@ -36,7 +36,12 @@ function envPort(name: string, fallback: number): number {
   return raw === undefined || raw === "" ? fallback : Number(raw);
 }
 
-const newWindow = (preload?: string): BrowserWindow => new BrowserWindow(windowOptions(process.platform, preload));
+const newWindow = (preload?: string): BrowserWindow => new BrowserWindow(windowOptions(process.platform, app.getVersion(), preload));
+
+function launch(): Launch {
+  const env = process.env["WSP_HOME"];
+  return { packaged: app.isPackaged, cwd: process.cwd(), ...(env !== undefined ? { env } : {}) };
+}
 
 let session: HostSession | undefined;
 
@@ -116,20 +121,14 @@ ipcMain.on("needs-you:say", (event, need: unknown) => {
 });
 
 function locate(): Promise<Located> {
-  const env = process.env["WSP_HOME"];
   const pointer = currentHome();
-  return locateHost({
-    port: envPort("WSP_PORT", DEFAULT_PORT),
-    ...(env !== undefined ? { env } : {}),
-    ...(pointer !== undefined ? { pointer } : {}),
-    cwd: process.cwd(),
-  });
+  return locateHost({ port: envPort("WSP_PORT", DEFAULT_PORT), ...launch(), ...(pointer !== undefined ? { pointer } : {}) });
 }
 
 /** A serving host is attached to with no gate; otherwise a host is started over the runtime the first launch just
  * recorded this computer on, or, with none, over the located home once the gate says it holds something to show. */
 async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
-  const statePath = statePathIn(located.home, process.cwd());
+  const statePath = statePathIn(located.home, launch());
   if (located.session === undefined) {
     let runtime = recorded;
     if (runtime === undefined) {
@@ -194,7 +193,7 @@ function agentIds(raw: unknown): string[] {
  * only the onboarding page is answered here, and only while it is up. The host starts before the page's window
  * closes so the window count never hits zero. */
 async function showOnboarding(located: Located): Promise<void> {
-  const statePath = statePathIn(located.home, process.cwd());
+  const statePath = statePathIn(located.home, launch());
   const shim = shimPath(wspHome());
   const page = newWindow(PRELOAD);
   const gate = (event: IpcMainInvokeEvent, channel: string): void => {
