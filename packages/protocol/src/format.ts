@@ -1128,6 +1128,14 @@ export const CLOUD_SETUP_WORDS = {
     /** The one action on the toast and the one thing a system notification's click does. */
     open: "Open",
   },
+  create: {
+    /** Why a new cloud workspace is held back while the image is still being built; the stage count follows it. */
+    building: "the image is still building",
+    /** The same where no image is sealed and no build runs, which is a computer the setup has not run on. */
+    none: "set up cloud machines first",
+    /** The word beside the building sentence, which opens the build the count is of. */
+    open: "Open the build",
+  },
 } as const;
 
 /** The state of a sign-in as a word, the one spelling the terminal's rows and the modal's rows print. */
@@ -1459,6 +1467,24 @@ export function initStageCount(rows: readonly InitRow[]): { done: number; total:
 
 /** The count as words: `3 of 12`. */
 export const initStageCountLine = (count: { done: number; total: number }): string => `${count.done} of ${count.total}`;
+
+/** What a road to a new cloud workspace is held back with: the sentence every surface says and the word on the
+ * action that opens the setup where the job stands. */
+export interface CloudCreateRefusal {
+  readonly line: string;
+  readonly word: string;
+}
+
+/** Why a new cloud workspace cannot be asked for yet, or null when it can. A workspace is forked from the sealed
+ * image, so a computer with none has nothing to fork: while the build runs the person is told where it stands, and
+ * with no build at all they are sent to the setup. A sealed image holds nothing back, whatever a later build does,
+ * since its head is there to fork. */
+export function cloudCreateRefusal(state: { hasGolden: boolean | null; job: Pick<InitJob, "phase" | "rows"> | null }): CloudCreateRefusal | null {
+  if (state.hasGolden !== false) return null;
+  const words = CLOUD_SETUP_WORDS.create;
+  if (state.job === null || !initJobBuilding(state.job.phase)) return { line: words.none, word: CLOUD_SETUP_WORDS.row };
+  return { line: `${words.building} · ${initStageCountLine(initStageCount(initBuildRows(state.job.rows).rows))}`, word: words.open };
+}
 
 /** The sidebar button's words for a running job: `waiting for you` while the person is waited on, the progress line
  * otherwise. */

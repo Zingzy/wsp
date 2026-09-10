@@ -766,6 +766,9 @@ export class InitJobs implements InitDoor {
         if (stage === "failed") this.fail(s, text("detail") ?? "no detail given");
         // The provider having no room is not the stage working: the next frame off it, cap or not, says so again.
         s.slotWait = record["waiting"] === true ? stage : undefined;
+        // A machine the stage made and could not remove bills on, whether the person stopped the build or it failed
+        // on its own: every road that leaves one comes through here, so the sweep starts from all of them.
+        for (const id of Array.isArray(record["left"]) ? (record["left"] as unknown[]) : []) if (typeof id === "string") this.sweep(id);
         // The phase turns to signing in on the first sign-in row, not when the machine answers: the checks and the
         // secrets between the two are the build's, and a status that says signing in with no row to sign in is a lie.
         if (stage === "sealed") s.phase = "finishing";

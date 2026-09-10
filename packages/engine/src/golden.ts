@@ -28,7 +28,8 @@ import { importInto } from "./vault.js";
 
 export { goldenHead, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenStage, type GoldenVersion };
 
-export type StageListener = (stage: GoldenStage, detail?: string, step?: GoldenStep) => void;
+/** `left` names the machines the stage made and could not remove; only a failure that tried to clean up carries it. */
+export type StageListener = (stage: GoldenStage, detail?: string, step?: GoldenStep, left?: readonly string[]) => void;
 
 /** How long to wait for the provider to report a killed machine gone before
  * killing again; two rounds, then the caller fails. Tests shrink both. */
@@ -734,9 +735,9 @@ function staged(onStage: StageListener | undefined): { stage: StageListener; cur
   let current: GoldenStage | undefined;
   const told = onStage ?? (() => {});
   return {
-    stage: (name, detail, step) => {
+    stage: (name, detail, step, left) => {
       if (name !== "failed") current = name;
-      told(name, detail, step);
+      told(name, detail, step, left);
     },
     current: () => current,
   };
@@ -790,13 +791,15 @@ export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Build
       ...(opts.import !== undefined ? { import: applied.ledger } : {}),
     };
   } catch (e) {
-    // Nothing records this machine yet, so one that survives here is said on the stage's own block for reap to sweep;
-    // the failure's line stays the failure's own.
+    // Nothing records this machine yet, so one that survives here is said on the stage's own block and named to
+    // whoever can kill it again; the failure's line stays the failure's own.
+    const left: string[] = [];
     await killUntilGone(opts.backend, machine).catch((k: unknown) => {
       const at = current();
       if (at !== undefined) stage(at, machineLeftLine(messageOf(k)));
+      left.push(machine.id);
     });
-    stage("failed", messageOf(e));
+    stage("failed", messageOf(e), undefined, left);
     throw e;
   }
 }
@@ -914,20 +917,22 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
     return { manifest: { head: versionNum, versions: [...prior, version] }, version, builderKept: builderAlive };
   } catch (e) {
     const detail = messageOf(e);
-    // A rollback the provider would not take leaves a machine billing: the refusal goes on the stage's own block, and
-    // the failure's line stays the failure's own.
-    const leaked = (k: unknown) => {
+    // A rollback the provider would not take leaves a machine billing: the refusal goes on the stage's own block and
+    // the machine is named to whoever can kill it again; the failure's line stays the failure's own.
+    const left: string[] = [];
+    const leaked = (machine: Machine) => (k: unknown) => {
       const at = current();
       if (at !== undefined) stage(at, machineLeftLine(messageOf(k)));
+      left.push(machine.id);
     };
     // A refused snapshot changed nothing on the builder: it is left as the person set it up, for the next attach.
-    if (builderAlive && !(e instanceof MachineAliveError) && !(e instanceof SnapshotFailedError)) await kill(builder.machine).catch(leaked);
-    if (fork) await kill(fork).catch(leaked);
+    if (builderAlive && !(e instanceof MachineAliveError) && !(e instanceof SnapshotFailedError)) await kill(builder.machine).catch(leaked(builder.machine));
+    if (fork) await kill(fork).catch(leaked(fork));
     // A template that read ready and then lost its smoke goes first: the provider refuses to delete a snapshot while
     // a template stands on it.
     if (templateId !== undefined) await templates?.delete(templateId).catch(() => {});
     if (snapshotId !== undefined) await opts.backend.deleteSnapshot(snapshotId).catch(() => {});
-    stage("failed", detail);
+    stage("failed", detail, undefined, left);
     throw e;
   }
 }
@@ -1108,11 +1113,13 @@ export async function upgradeBuilder(opts: UpgradeBuilderOptions): Promise<Build
       retired: opts.delta.retiredOnImage,
     };
   } catch (e) {
+    const left: string[] = [];
     await killUntilGone(opts.backend, machine).catch((k: unknown) => {
       const at = current();
       if (at !== undefined) stage(at, machineLeftLine(messageOf(k)));
+      left.push(machine.id);
     });
-    stage("failed", messageOf(e));
+    stage("failed", messageOf(e), undefined, left);
     throw e;
   }
 }

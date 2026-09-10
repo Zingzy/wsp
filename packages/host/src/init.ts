@@ -248,10 +248,12 @@ export interface StageFrame {
   /** Set on a frame the run itself pushed because the provider has no room for the stage yet: the stage is not
    * working, it is queueing behind the account's machine cap. */
   waiting?: true;
+  /** The machines the stage made and could not remove; they bill until something kills them again. */
+  left?: string[];
 }
 
 /** A golden.stage event off the runtime as the stream takes it. */
-export const toFrame = (e: GoldenStageEvent): StageFrame => ({ type: "golden.stage", name: e.name, stage: e.stage, ...(e.detail !== undefined ? { detail: e.detail } : {}), ...(e.step !== undefined ? { step: e.step } : {}) });
+export const toFrame = (e: GoldenStageEvent): StageFrame => ({ type: "golden.stage", name: e.name, stage: e.stage, ...(e.detail !== undefined ? { detail: e.detail } : {}), ...(e.step !== undefined ? { step: e.step } : {}), ...(e.left !== undefined ? { left: e.left } : {}) });
 
 /** The words the terminal shows for each prepare stage while it runs and once
  * it is over. The stage names are the protocol's; the harness stage installs
@@ -567,7 +569,7 @@ export class StageStream {
 function stageRecord(frame: StageFrame, view: StageView): Record<string, unknown> {
   const since = view.steps.find(s => s.stage === frame.stage)?.running?.since;
   const elapsedSeconds = frame.step === undefined ? undefined : Math.round(((frame.at ?? 0) - (since ?? frame.at ?? 0)) / 1000);
-  return { event: "stage", stage: frame.stage, ...(frame.detail !== undefined ? { detail: frame.detail } : {}), ...(frame.step !== undefined ? { step: { ...frame.step, elapsedSeconds } } : {}), ...(frame.waiting === true ? { waiting: true } : {}) };
+  return { event: "stage", stage: frame.stage, ...(frame.detail !== undefined ? { detail: frame.detail } : {}), ...(frame.step !== undefined ? { step: { ...frame.step, elapsedSeconds } } : {}), ...(frame.waiting === true ? { waiting: true } : {}), ...(frame.left !== undefined ? { left: frame.left } : {}) };
 }
 
 interface Spinner {

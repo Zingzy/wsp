@@ -2,7 +2,7 @@
 // The store's session folding: rows come from the sessions.list op, the
 // session.* events decide when to refetch and what to patch in between.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_THEME, type InitJob, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, DEFAULT_THEME, type GoldenManifest, type InitJob, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api, type ProtocolEvent } from "../src/protocol/client.js";
 import { LAST_WORKSPACE_KEY } from "../src/protocol/lastWorkspace.js";
 import { useStore } from "../src/protocol/store.js";
@@ -15,6 +15,11 @@ const view = (id: string): WorkspaceView => ({
   golden: "snap_g",
   createdAt: "2026-09-01T00:00:00Z",
 });
+
+const GOLDEN: GoldenManifest = {
+  head: 1,
+  versions: [{ version: 1, snapshotId: "snap_g", baseTemplate: "default", setupSha: "s", createdAt: "c", smoke: { cmd: "true", exitCode: 0 } }],
+};
 
 const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, kept: false, sizes: [] };
 
@@ -49,7 +54,8 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
       listCalls.push(id);
       return id === undefined ? sessions : sessions.filter(s => s.workspaceId === id);
     },
-    getGolden: async () => undefined,
+    // Sealed, since these are the forks of its head: a computer with no image forks nothing at all.
+    getGolden: async () => GOLDEN,
     subscribe: fn => {
       listeners.add(fn);
       return () => listeners.delete(fn);
@@ -347,6 +353,42 @@ describe("store creations", () => {
     emit({ type: "workspace.created", workspace: view("ws_far") });
     expect(useStore.getState().creations).toEqual([]);
     expect(useStore.getState().selectedId).toBe("ws_a");
+  });
+
+  it("with no image sealed the fork is refused before a row exists: the toast says where the build stands and opens it, and nothing is asked of the runtime", async () => {
+    const { api } = fakeApi([view("ws_a")], []);
+    const asked: string[] = [];
+    api.getGolden = async () => undefined;
+    api.createFromGoldenHead = async name => {
+      asked.push(name);
+      return view("ws_new");
+    };
+    useStore.getState().bind(api);
+    await flush();
+    useStore.setState({
+      initJob: { id: "init_1", road: "manual", phase: "building", keys: { solari: true }, step: 0, stoppable: true, screens: [], rows: [{ id: "stage/creating", kind: "stage", label: "Creating the machine", state: "done" }, { id: "stage/ready", kind: "stage", label: "Waiting for the machine", state: "running" }], progress: { done: 1, total: 2 }, log: [] },
+    });
+    expect(await useStore.getState().createWorkspace("beta")).toBeNull();
+    expect(asked).toEqual([]);
+    // No row: the sidebar never gains a workspace that only failed, so there is nothing to retry or dismiss.
+    expect(useStore.getState().creations).toEqual([]);
+    expect(useStore.getState().selectedId).toBe("ws_a");
+    expect(useStore.getState().toast).toBe("the image is still building · 1 of 2");
+    const action = useStore.getState().toastAction!;
+    expect(action.for).toBe(useStore.getState().toast);
+    expect(action.word).toBe(CLOUD_SETUP_WORDS.create.open);
+    action.run();
+    expect(useStore.getState().setupOpen).toBe(true);
+    // With no build to point at, the same road says the setup instead and its word opens that.
+    useStore.setState({ initJob: null, setupOpen: false });
+    expect(await useStore.getState().createWorkspace("gamma")).toBeNull();
+    expect(useStore.getState().toast).toBe(CLOUD_SETUP_WORDS.create.none);
+    expect(useStore.getState().toastAction!.word).toBe(CLOUD_SETUP_WORDS.row);
+    // A named snapshot carries its own image, so that fork is never held back by the golden's absence.
+    api.createWorkspace = async () => view("ws_new");
+    expect(await useStore.getState().createWorkspace("proj-fork", "snap_project")).toBe("ws_new");
+    // The sentence the person reads is never the one that names a command to run.
+    expect(JSON.stringify([useStore.getState().toast, CLOUD_SETUP_WORDS.create])).not.toMatch(/wspx|golden build/);
   });
 });
 

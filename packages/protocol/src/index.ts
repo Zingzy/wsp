@@ -1671,6 +1671,9 @@ export const GoldenStageEvent = z.object({
   stage: GoldenStage,
   detail: z.string().optional(),
   step: GoldenStep.optional(),
+  /** The machines this stage made and could not remove, because the provider could not be reached: they bill until
+   * something takes them, so a client that can retry the kill retries it rather than reading the stage as over. */
+  left: z.array(z.string()).optional(),
 });
 export type GoldenStageEvent = z.infer<typeof GoldenStageEvent>;
 /** The detail a golden.stage frame carries for a step the builder already holds; a reader closes the step at once and charges it no time. */
