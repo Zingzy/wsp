@@ -7,10 +7,11 @@
 // when its rows do not fit: never taller than half the window or eight rows, a
 // 24 px fade at the edge more rows lie past, the app's thin overlay bar. State
 // is a muted word or the app's small spinner, never a chip; nothing moves at
-// rest. Sizes are coloured by weight from the protocol's one table.
+// rest. Sizes wear the tone the protocol gives them, by weight where the step
+// weighs.
 import { ChevronDownIcon } from "lucide-react";
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { INIT_ROW_STATES, diskTone, initDiskLine, initDiskOverLine, sizeTone, type SizeTone } from "@wsp/protocol";
+import { INIT_ROW_STATES, diskTone, initDiskLine, initDiskOverLine, type SizeTone } from "@wsp/protocol";
 import { Button } from "../../components/ui/button.js";
 import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../../components/ui/menu.js";
 import { ScrollArea } from "../../components/ui/scroll-area.js";
@@ -53,9 +54,8 @@ function roomFor(card: HTMLElement): number | undefined {
 export const TONE_TEXT: Record<SizeTone, string> = { danger: "text-destructive-foreground", warning: "text-warning-foreground", yellow: "text-yellow-foreground", muted: "text-muted-foreground" };
 export const TONE_FILL: Record<SizeTone, string> = { danger: "bg-destructive-foreground", warning: "bg-warning-foreground", yellow: "bg-yellow-foreground", muted: "bg-muted-foreground" };
 
-/** A size cell: tabular mono in the tone its weight earns. */
-export function SizeCell({ bytes, children, className }: { bytes: number | null; children: ReactNode; className?: string }) {
-  const tone = bytes === null ? "muted" : sizeTone(bytes);
+/** A size cell: tabular mono in the tone the protocol gave it. */
+export function SizeCell({ tone, children, className }: { tone: SizeTone; children: ReactNode; className?: string }) {
   return (
     <span data-k="size" data-tone={tone} className={cn("font-mono text-xs tabular-nums", TONE_TEXT[tone], className)}>
       {children}

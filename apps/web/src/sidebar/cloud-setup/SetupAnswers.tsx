@@ -2,12 +2,13 @@
 // One of the screens of wsp init the person answers, drawn from the data the
 // host hands over: the rows the terminal's list draws, grouped where the
 // terminal groups them, a checkbox or the app's picker on each, a mark where
-// the row has a real one, the source and the size in mono coloured by weight,
-// and under the card, centred, the tally counting the ticks as they change
-// with the disk meter inline after it on the steps that change the image's
-// size. The ticks, answers and typed keys live in the dialog's one draft until
-// Continue sends them.
-import { CLOUD_SETUP_WORDS, UNKNOWN_SIZE, fmtBytes, initTallyCount, sizeTone, type InitDraft, type InitScreen, type InitScreenItem } from "@wsp/protocol";
+// the row has a real one, the source and the size in mono coloured by weight
+// where the protocol says the screen weighs, and under the card, centred, the
+// tally: the step's count and the whole image so far against the disk,
+// coloured by its share, with the disk meter inline after it on the steps that
+// change the image's size. The ticks, answers and typed keys live in the
+// dialog's one draft until Continue sends them.
+import { CLOUD_SETUP_WORDS, UNKNOWN_SIZE, diskTone, fmtBytes, initSizeTone, initTallyCount, initTallyEstimate, initTallyOf, initTicksOf, type InitDraft, type InitScreen, type InitScreenItem } from "@wsp/protocol";
 import { Checkbox } from "../../components/ui/checkbox.js";
 import { Input } from "../../components/ui/input.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip.js";
@@ -25,29 +26,17 @@ export interface Draft {
   keys: Readonly<Record<string, string>>;
 }
 
-/** The draft a screen opens on: what the person left on it and the host kept, else what the host says stands. */
-export const draftOf = (screen: InitScreen, kept?: InitDraft): Draft => (kept === undefined ? { ticks: new Set(screen.ticks), answers: { ...screen.answers }, keys: {} } : { ticks: new Set(kept.ticks), answers: { ...screen.answers, ...kept.answers }, keys: {} });
+/** The draft a screen opens on: what the person left on it and the host kept, else what the host says stands; the
+ * ticks by the protocol's one rule, the same one the estimate counts by. */
+export const draftOf = (screen: InitScreen, kept?: InitDraft): Draft => ({ ticks: initTicksOf(screen, kept), answers: { ...screen.answers, ...kept?.answers }, keys: {} });
 
 /** A row's answer as it stands in the draft. */
 export const answerOf = (draft: Draft, item: InitScreenItem): string | undefined => draft.answers[item.id];
 
-/** The bytes the ticked rows of a screen come to, and how many are ticked; a locked row is on. */
-export function tallyOf(screen: InitScreen, ticks: ReadonlySet<string>): { count: number; bytes: number } {
-  let count = 0;
-  let bytes = 0;
-  for (const item of screen.items) {
-    if (item.choices !== undefined) continue;
-    if (!(item.lock === "on" || ticks.has(item.id))) continue;
-    count += 1;
-    if (typeof item.size === "number") bytes += item.size;
-  }
-  return { count, bytes };
-}
-
 /** The API key the row's choice is: the one answer that opens a field under the row. */
 const KEY_CHOICE = "key";
 
-export function SetupAnswers({ screen, counter, draft, onDraft, primary, secondary, refusal, disk }: { screen: InitScreen; counter: string; draft: Draft; onDraft: (next: Draft) => void; primary: ScreenAction; secondary: ScreenAction; refusal: string | null; disk?: { used: number; total: number } }) {
+export function SetupAnswers({ screen, counter, draft, onDraft, primary, secondary, refusal, image }: { screen: InitScreen; counter: string; draft: Draft; onDraft: (next: Draft) => void; primary: ScreenAction; secondary: ScreenAction; refusal: string | null; /** The image so far, the protocol's one estimate, against the machine's disk where the provider reports one. */ image: { used: number; total?: number } }) {
   const groups = [...new Set(screen.items.map(i => i.group ?? ""))];
   const grouped = groups.some(g => g !== "");
   const tick = (id: string, on: boolean): void => {
@@ -58,7 +47,8 @@ export function SetupAnswers({ screen, counter, draft, onDraft, primary, seconda
   };
   const answer = (id: string, value: string): void => onDraft({ ...draft, answers: { ...draft.answers, [id]: value } });
   const typeKey = (id: string, value: string): void => onDraft({ ...draft, keys: { ...draft.keys, [id]: value } });
-  const tally = screen.tally !== undefined ? tallyOf(screen, draft.ticks) : undefined;
+  const tally = screen.tally !== undefined ? initTallyOf(screen, draft.ticks) : undefined;
+  const imageTone = image.total === undefined ? "muted" : diskTone(image.used, image.total);
   const rows = (items: readonly InitScreenItem[]) =>
     items.map(item => {
       const fixed = item.choices !== undefined && item.choices.length === 1;
@@ -86,7 +76,7 @@ export function SetupAnswers({ screen, counter, draft, onDraft, primary, seconda
             ) : (
               <span className="flex-1" />
             )}
-            {item.size !== undefined ? <SizeCell bytes={item.size}>{item.size === null ? UNKNOWN_SIZE : fmtBytes(item.size)}</SizeCell> : null}
+            {item.size !== undefined ? <SizeCell tone={initSizeTone(screen, item.size)}>{item.size === null ? UNKNOWN_SIZE : fmtBytes(item.size)}</SizeCell> : null}
             {item.choices !== undefined ? (
               <Slot>
                 {item.state !== undefined ? (
@@ -135,9 +125,12 @@ export function SetupAnswers({ screen, counter, draft, onDraft, primary, seconda
       {tally !== undefined && screen.tally !== undefined ? (
         <p data-k="tally" className={cn(META, "mt-3 flex items-center justify-center gap-2")}>
           <span>
-            {initTallyCount(tally.count, screen.tally)} · <span data-k="tally-size" className={TONE_TEXT[sizeTone(tally.bytes)]}>{fmtBytes(tally.bytes)}</span>
+            {initTallyCount(tally.count, screen.tally)} ·{" "}
+            <span data-k="tally-size" data-tone={imageTone} className={TONE_TEXT[imageTone]}>
+              {initTallyEstimate(image.used, image.total)}
+            </span>
           </span>
-          {disk !== undefined ? <Meter used={disk.used} total={disk.total} /> : null}
+          {image.total !== undefined ? <Meter used={image.used} total={image.total} /> : null}
         </p>
       ) : null}
       {screen.footer.length > 0 ? (

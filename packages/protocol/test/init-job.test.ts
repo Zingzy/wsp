@@ -50,6 +50,11 @@ import {
   sizeTone,
   diskTone,
   initDiskOverLine,
+  initImageBytes,
+  initSizeTone,
+  initTallyEstimate,
+  initTallyOf,
+  initTicksOf,
   fmtCalls,
   type InitRow,
   type InitScreen,
@@ -392,6 +397,38 @@ describe("the words the clients print for the job", () => {
     expect(initDiskOverLine(300 * MIB)).toBe("over by 300 MB");
     expect(fmtCalls(29_623)).toBe("29,623 calls");
     expect(fmtCalls(1)).toBe("1 call");
+  });
+
+  it("every step's tally reads the step's count and the running image estimate against the disk, one function computes that estimate from the job's drafts over its answers, and only the tools and what-else screens weigh their sizes", () => {
+    const GIB = 1024 * MIB;
+    const agents: InitScreen = { id: "agents", title: "Agents", top: "Which agents go on the image", counter: "1/6", items: [{ id: "claude", label: "Claude Code", size: 208 * MIB, detail: [] }, { id: "codex", label: "Codex", size: 455 * MIB, detail: [] }, { id: "hermes", label: "Hermes Agent", size: 484 * MIB, detail: [] }], ticks: ["claude", "codex"], answers: {}, footer: [], tally: "agents" };
+    const tools: InitScreen = { id: "tools", title: "Tools", top: "Tools from your usage", counter: "2/6", items: [{ id: "node", label: "Node", size: 300 * MIB, lock: "on", detail: [] }, { id: "rust", label: "Rust", size: 4 * GIB, detail: [] }, { id: "swift", label: "Swift", size: 3 * GIB, detail: [] }, { id: "bun", label: "bun", size: null, detail: [] }], ticks: ["rust", "bun"], answers: {}, footer: [], tally: "tools" };
+    const logins: InitScreen = { id: "logins", title: "Sign-ins", top: "How sign-ins reach the machine", counter: "4/6", items: [{ id: "logins/gh", label: "GitHub CLI login", detail: [], choices: [{ value: "copy", label: "copy" }] }], ticks: [], answers: {}, footer: [] };
+    const job = { disk: { fixed: 0, total: 20 * GIB }, screens: [agents, tools, logins] };
+    // A locked row is on, a row with a picker is not counted, and a row nothing measured adds nothing.
+    expect(initTallyOf(tools, new Set(["rust", "bun"]))).toEqual({ count: 3, bytes: 300 * MIB + 4 * GIB });
+    expect(initTallyOf(logins, new Set())).toEqual({ count: 0, bytes: 0 });
+    // Agents ticked to 663 MB and tools to 4.3 GB: the tools step counts its own rows and reads the whole image.
+    expect(initImageBytes(job)).toBe(663 * MIB + 300 * MIB + 4 * GIB);
+    expect(initTallyLine(3, "tools", initImageBytes(job), job.disk.total)).toBe("3 tools on the image · 4.9 GB of 20 GB");
+    // What the disk holds before any tick is under every estimate; a draft kept on a step stands over what the host
+    // last answered; the draft a client holds and the host has not echoed stands over both.
+    expect(initImageBytes({ ...job, disk: { fixed: 2 * GIB, total: 20 * GIB } })).toBe(2 * GIB + 663 * MIB + 300 * MIB + 4 * GIB);
+    expect(initImageBytes({ ...job, drafts: [{ at: "tools", ticks: ["rust", "swift"], answers: {} }] })).toBe(663 * MIB + 300 * MIB + 7 * GIB);
+    expect(initImageBytes({ ...job, drafts: [{ at: "tools", ticks: ["rust", "swift"], answers: {} }] }, { at: "tools", ticks: new Set<string>() })).toBe(663 * MIB + 300 * MIB);
+    expect(initImageBytes(job, { at: "agents", ticks: ["claude"] })).toBe(208 * MIB + 300 * MIB + 4 * GIB);
+    expect(initImageBytes({ screens: [] })).toBe(0);
+    // The one rule for a screen's ticks as they stand, which the screen's draft and the estimate both read.
+    expect([...initTicksOf(tools)]).toEqual(["rust", "bun"]);
+    expect([...initTicksOf(tools, { ticks: ["swift"] })]).toEqual(["swift"]);
+    // The estimate reads in the tone its share of the disk earns, never its weight: 4.9 GB is the danger weight and a quarter of the disk.
+    expect(initTallyEstimate(4.9 * GIB, 20 * GIB)).toBe("4.9 GB of 20 GB");
+    expect(initTallyEstimate(4.9 * GIB)).toBe("4.9 GB");
+    expect(initTallyLine(0, "more", 4.9 * GIB)).toBe("0 more on the image · 4.9 GB");
+    expect(diskTone(initImageBytes(job), job.disk.total)).toBe("muted");
+    expect(sizeTone(initImageBytes(job))).toBe("danger");
+    // The agents screen's sizes are muted whatever they weigh; the tools and what-else screens' wear the weight table; nothing measured is muted anywhere.
+    expect([initSizeTone(agents, 455 * MIB), initSizeTone(agents, 4 * GIB), initSizeTone(tools, 455 * MIB), initSizeTone(tools, 4 * GIB), initSizeTone({ id: "also" }, 150 * MIB), initSizeTone(tools, null)]).toEqual(["muted", "muted", "warning", "danger", "yellow", "muted"]);
   });
 
   it("the row's words never ask the person to run a command", () => {

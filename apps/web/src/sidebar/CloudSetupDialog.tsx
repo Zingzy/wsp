@@ -9,12 +9,12 @@
 // answers and what was ticked or typed since in place, until Start over or the
 // build.
 import { useCallback, useEffect, useState } from "react";
-import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, INIT_BUILD_STEP, KEY_REFUSED, KEY_UNCHECKED, initAgentStep, initDiskOverLine, initJobOver, wspToolsRowId, type InitDraft, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, INIT_BUILD_STEP, KEY_REFUSED, KEY_UNCHECKED, initAgentStep, initDiskOverLine, initImageBytes, initJobOver, wspToolsRowId, type InitDraft, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { Dialog, DialogSheet, DialogTitle } from "../components/ui/dialog.js";
 import { errorText } from "../lib/utils.js";
 import { RequestError } from "../protocol/client.js";
 import { useStore } from "../protocol/store.js";
-import { draftOf, SetupAnswers, tallyOf, type Draft } from "./cloud-setup/SetupAnswers.js";
+import { draftOf, SetupAnswers, type Draft } from "./cloud-setup/SetupAnswers.js";
 import { SetupAgent } from "./cloud-setup/SetupAgent.js";
 import { SetupAsk } from "./cloud-setup/SetupAsk.js";
 import { SetupBuild } from "./cloud-setup/SetupBuild.js";
@@ -40,13 +40,6 @@ const shownOf = (job: InitJob): InitScreen[] => job.screens.filter(s => s.id !==
 
 /** What the host kept of a step the person left mid-answer, if anything. */
 const keptAt = (job: InitJob, at: string): InitDraft | undefined => job.drafts?.find(d => d.at === at);
-
-/** What the image's disk holds with these ticks: the fixed part the host measured plus every ticked row's size across
- * the screens, the current screen read from the draft. */
-export function diskUsed(job: InitJob, current: { screen: string; ticks: ReadonlySet<string> } | undefined): number {
-  const fixed = job.disk?.fixed ?? 0;
-  return job.screens.reduce((sum, s) => sum + tallyOf(s, current !== undefined && current.screen === s.id ? current.ticks : new Set(s.ticks)).bytes, fixed);
-}
 
 export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
   const api = useStore(s => s.api);
@@ -197,9 +190,8 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
     } else {
       const key = screen.id;
       const current = draft !== null && draft.key === key ? draft.draft : draftOf(screen, keptAt(job, key));
-      const used = diskUsed(job, { screen: screen.id, ticks: current.ticks });
-      const disk = job.disk !== undefined ? { used, total: job.disk.total } : undefined;
-      const over = disk !== undefined ? Math.max(0, disk.used - disk.total) : 0;
+      const image = { used: initImageBytes(job, { at: screen.id, ticks: current.ticks }), ...(job.disk !== undefined ? { total: job.disk.total } : {}) };
+      const over = image.total !== undefined ? Math.max(0, image.used - image.total) : 0;
       body = (
         <SetupAnswers
           key={`${job.id}:${key}`}
@@ -212,7 +204,7 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
             if (next.ticks !== current.ticks || next.answers !== current.answers) keep(key, next);
           }}
           refusal={refusal}
-          {...(disk !== undefined ? { disk } : {})}
+          image={image}
           primary={{
             word: CLOUD_SETUP_WORDS.screen.keycap,
             onPress: () => {

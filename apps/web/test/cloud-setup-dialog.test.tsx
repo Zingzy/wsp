@@ -408,7 +408,7 @@ describe("the cloud setup sheet", () => {
     expect(rows[0]!.querySelector("[data-k=size]")!.textContent).toBe("208 MB");
     expect(rows[0]!.querySelector("[data-k=why]")!.textContent).toBe("used here, 12 sessions");
     expect(rows[0]!.querySelector("[data-row-mark=claude]")).not.toBeNull();
-    expect(k(dialog, "tally").textContent).toBe(initTallyLine(1, "agents", 208 * MIB));
+    expect(k(dialog, "tally").textContent).toBe(initTallyLine(1, "agents", DISK.fixed + 208 * MIB + 72 * MIB, DISK.total));
     const ring = k(dialog, "disk");
     expect(ring.getAttribute("data-used")).toBe(String(DISK.fixed + 208 * MIB + 72 * MIB));
     expect(ring.getAttribute("data-total")).toBe(String(DISK.total));
@@ -416,7 +416,7 @@ describe("the cloud setup sheet", () => {
     // The third row ticked: the checkbox, the tally and the meter move together, before anything is sent.
     fireEvent.click(within(rows[2]!).getByRole("checkbox"));
     await waitFor(() => expect(within(rows[2]!).getByRole("checkbox").getAttribute("aria-checked")).toBe("true"));
-    expect(k(dialog, "tally").textContent).toBe(initTallyLine(2, "agents", 692 * MIB));
+    expect(k(dialog, "tally").textContent).toBe(initTallyLine(2, "agents", DISK.fixed + 692 * MIB + 72 * MIB, DISK.total));
     expect(k(dialog, "disk").getAttribute("data-used")).toBe(String(DISK.fixed + 692 * MIB + 72 * MIB));
     expect(t.api.initAnswer).not.toHaveBeenCalled();
     fireEvent.click(within(rows[1]!).getByRole("checkbox"));
@@ -433,13 +433,61 @@ describe("the cloud setup sheet", () => {
     expect(node.querySelector("[data-k=state]")).toBeNull();
     expect(dialog.querySelector('[data-row="gh"] [data-k=why]')!.textContent).toBe("29,623 calls");
     expect(dialog.querySelector('[data-row="swift"] [data-k=why]')).toBeNull();
-    expect(k(dialog, "tally").textContent).toBe(initTallyLine(2, "tools", 72 * MIB));
+    expect(k(dialog, "tally").textContent).toBe(initTallyLine(2, "tools", DISK.fixed + 1147 * MIB + 72 * MIB, DISK.total));
     expect(dialog.querySelectorAll('[data-k="screen-tools"] [data-k=footer-lines]')).toHaveLength(0);
     // Ticking the 3 GB row moves the tally and the meter on this step too.
     fireEvent.click(within(dialog.querySelector<HTMLElement>('[data-row="swift"]')!).getByRole("checkbox"));
-    await waitFor(() => expect(k(dialog, "tally").textContent).toBe(initTallyLine(3, "tools", 72 * MIB + 3 * GIB)));
+    await waitFor(() => expect(k(dialog, "tally").textContent).toBe(initTallyLine(3, "tools", DISK.fixed + 1147 * MIB + 72 * MIB + 3 * GIB, DISK.total)));
     expect(k(dialog, "disk").getAttribute("data-used")).toBe(String(DISK.fixed + 1147 * MIB + 72 * MIB + 3 * GIB));
     expect(k(dialog, "disk").getAttribute("data-tone")).toBe("muted");
+  });
+
+  it("every step's tally reads the running image estimate against the disk in the tone its share earns, the agents step's sizes carry no weight tone, and a tick on one step moves the next step's tally", async () => {
+    const agents: InitScreen = { ...AGENTS, ticks: ["claude", "codex"] };
+    const tools: InitScreen = { ...TOOLS, items: [{ id: "node", label: "node", size: 300 * MIB, group: "always on the image", detail: [], lock: "on" }, { id: "rust", label: "Rust 1.89", size: 4 * GIB, group: "from your usage", detail: [] }, { id: "swift", label: "Swift 6.3", size: 3 * GIB, group: "from your usage", detail: [] }], ticks: ["rust"] };
+    const also: InitScreen = { ...ALSO, items: [{ id: "brew/ffmpeg", label: "ffmpeg", size: 200 * MIB, group: "Homebrew", detail: [] }], tally: "more" };
+    const t = await open({ setup: { ...HELD, job: { ...JOB, step: 1, disk: { fixed: 0, total: 20 * GIB }, screens: [agents, tools, also, LOGINS, WSP] } } });
+    await waitFor(() => expect(k(t.dialog, "screen-tools")).toBeDefined());
+    // Agents ticked to 663 MB and tools to 4.3 GB: the tools step counts its own rows and reads the whole image so far, a quarter of the disk, so muted, though 4.9 GB is the danger weight.
+    const soFar = 663 * MIB + 300 * MIB + 4 * GIB;
+    expect(k(t.dialog, "tally").textContent).toBe(initTallyLine(2, "tools", soFar, 20 * GIB));
+    expect(k(t.dialog, "tally").textContent).toContain("4.9 GB of 20 GB");
+    expect(k(t.dialog, "tally-size").getAttribute("data-tone")).toBe("muted");
+    expect(k(t.dialog, "tally-size").className).toContain("text-muted-foreground");
+    expect(k(t.dialog, "disk").getAttribute("data-used")).toBe(String(soFar));
+    // The tools step's cells wear their weight; the agents step's wear none, whatever they weigh.
+    expect(t.dialog.querySelector('[data-row="rust"] [data-k=size]')!.getAttribute("data-tone")).toBe("danger");
+    expect(t.dialog.querySelector('[data-row="node"] [data-k=size]')!.getAttribute("data-tone")).toBe("warning");
+    fireEvent.click(k(t.dialog, "secondary"));
+    await waitFor(() => expect(k(t.dialog, "screen-agents")).toBeDefined());
+    const sizes = [...t.dialog.querySelectorAll<HTMLElement>('[data-k="screen-agents"] [data-k=size]')];
+    expect(sizes.map(s => s.textContent)).toEqual(["208 MB", "455 MB", "484 MB"]);
+    expect(sizes.map(s => s.getAttribute("data-tone"))).toEqual(["muted", "muted", "muted"]);
+    for (const s of sizes) expect(s.className).not.toMatch(/yellow|warning|destructive/);
+    // The agents step reads the same estimate, its own count before it.
+    expect(k(t.dialog, "tally").textContent).toBe(initTallyLine(2, "agents", soFar, 20 * GIB));
+    // On to tools, the 3 GB row ticked, Continue: the what-else step's tally has moved by the same 3 GB.
+    fireEvent.click(k(t.dialog, "primary"));
+    await waitFor(() => expect(k(t.dialog, "screen-tools")).toBeDefined());
+    fireEvent.click(within(t.dialog.querySelector<HTMLElement>('[data-row="swift"]')!).getByRole("checkbox"));
+    await waitFor(() => expect(k(t.dialog, "tally").textContent).toBe(initTallyLine(3, "tools", soFar + 3 * GIB, 20 * GIB)));
+    fireEvent.click(k(t.dialog, "primary"));
+    await waitFor(() => expect(k(t.dialog, "screen-also")).toBeDefined());
+    expect(k(t.dialog, "tally").textContent).toBe(initTallyLine(0, "more", soFar + 3 * GIB, 20 * GIB));
+    expect(k(t.dialog, "tally").textContent).toContain("7.9 GB of 20 GB");
+    expect(k(t.dialog, "disk").getAttribute("data-used")).toBe(String(soFar + 3 * GIB));
+  });
+
+  it("the tally's estimate wears the meter's own table: the warning tone from 70 percent of the disk, the danger tone from 90", async () => {
+    const t = await open({ setup: { ...HELD, job: { ...JOB, step: 1, disk: { fixed: 15 * GIB, total: 20 * GIB } } } });
+    await waitFor(() => expect(k(t.dialog, "screen-tools")).toBeDefined());
+    // 15 GB fixed, 208 MB of agents and 72 MB of tools: 76 percent; the 3 GB row takes it to 91.
+    expect(k(t.dialog, "tally-size").getAttribute("data-tone")).toBe("warning");
+    expect(k(t.dialog, "tally-size").className).toContain("text-warning-foreground");
+    expect(k(t.dialog, "disk").getAttribute("data-tone")).toBe("warning");
+    fireEvent.click(within(t.dialog.querySelector<HTMLElement>('[data-row="swift"]')!).getByRole("checkbox"));
+    await waitFor(() => expect(k(t.dialog, "tally-size").getAttribute("data-tone")).toBe("danger"));
+    expect(k(t.dialog, "tally-size").className).toContain("text-destructive-foreground");
   });
 
   it("over the disk the meter is full in the danger tone and Continue refuses with the over line; under 70 percent it is muted", async () => {
@@ -628,7 +676,7 @@ describe("the cloud setup sheet", () => {
     const rows = [...again.dialog.querySelectorAll<HTMLElement>('[data-k="screen-tools"] [data-k=row]')];
     expect(rows.map(r => r.dataset["row"])).toEqual(["node", "gh", "swift"]);
     expect(rows.map(r => within(r).getByRole("checkbox").getAttribute("aria-checked"))).toEqual(["true", "false", "false"]);
-    expect(k(again.dialog, "tally").textContent).toContain(initTallyLine(1, "tools", 60 * MIB));
+    expect(k(again.dialog, "tally").textContent).toContain(initTallyLine(1, "tools", DISK.fixed + 208 * MIB + 60 * MIB, DISK.total));
   });
 
   it("a key typed under a sign-in row is never drafted: it goes to the key store on Continue and nowhere else", async () => {

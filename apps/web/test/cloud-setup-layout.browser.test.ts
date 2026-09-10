@@ -8,8 +8,10 @@
 // where it has one), the sentence and the card at the first launch's numbers,
 // rows of 48 px, the agent step's mono block with its spinner and the two ways
 // on once its turn stopped, the disk meter inline after the tally on the steps
-// that change the image's size, sizes coloured by weight, state words that read
-// at AA, nothing animating at rest and no badge; then two states of a step: a
+// that change the image's size and its estimate coloured by its share, sizes
+// coloured by weight on the steps that weigh in three hues an eye tells apart,
+// state words that read at AA, nothing animating at rest and no badge; then two
+// states of a step: a
 // key the provider refused, under the field in the danger tone, and a saved key
 // refused before the build's first stage with the way back to the keys step.
 // Photographed at each. Runs only when asked for (WSP_RENDER=1) and skips
@@ -20,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
 import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, NETWORK_LOST_LINE, SIGN_IN_STAGE_ID, initStageCountLine, keyRefusedLine } from "@wsp/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { textContrast } from "./contrast";
+import { textContrast, textHue } from "./contrast";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
 import { startVite, type ViteChild } from "./vite-child";
 import { KEY_REFUSED_LINE } from "./cloud-setup/keyRefusedJob";
@@ -230,7 +232,15 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
       }
       // No initials in a ring: a mark is an svg or nothing, and every size cell wears the tone its weight earns.
       expect(await page!.locator(`${frame} [data-row-mark]:not(svg)`).count(), `${step}: no drawn initials`).toBe(0);
-      for (const [bytes, tone] of await page!.locator(`${frame} [data-k=size]`).evaluateAll(els => els.map(el => [el.textContent, el.getAttribute("data-tone")]))) expect(["danger", "warning", "yellow", "muted"], `${step}: ${bytes} in ${tone}`).toContain(tone);
+      const cellTones = await page!.locator(`${frame} [data-k=size]`).evaluateAll(els => els.map(el => el.getAttribute("data-tone")));
+      for (const tone of cellTones) expect(["danger", "warning", "yellow", "muted"], `${step}: a size in ${tone}`).toContain(tone);
+      // The agents step's sizes wear no weight tone; the tools step's wear every tier; the tally's estimate wears the share table, the meter's own.
+      if (step === "agents") expect(new Set(cellTones), "agents: muted sizes").toEqual(new Set(["muted"]));
+      if (step === "tools") expect(new Set(cellTones), "tools: weighed sizes").toEqual(new Set(["muted", "yellow", "warning", "danger"]));
+      if (METERED.has(step)) {
+        expect(await page!.locator(`${frame} [data-k=tally-size]`).textContent(), `${step}: the estimate against the disk`).toMatch(/^[\d.]+ (MB|GB) of 20 GB$/);
+        expect(await page!.locator(`${frame} [data-k=tally-size]`).getAttribute("data-tone"), `${step}: the estimate in the meter's tone`).toBe(await page!.locator("[role=dialog] [data-k=disk]").getAttribute("data-tone"));
+      }
       const close = await box("[role=dialog] [aria-label=Close]");
       expect(near(close.y, SPEC.close) && near(VIEWPORTS[0].width - (close.x + close.width), SPEC.close), `${step}: close at ${close.x},${close.y}`).toBe(true);
       expect(await page!.locator("[role=dialog] [class*=animate-]:not([role=status]), [role=dialog] [data-badge]").count(), `${step}: nothing animates at rest, no badge`).toBe(0);
@@ -373,6 +383,17 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     expect(await inView("[role=dialog] [data-row='sign-in/gh'] > div:first-child"), "the first waiting sign-in").toBe(true);
     await page!.setViewportSize({ ...VIEWPORTS[0] });
   }, 60_000);
+
+  it.each(["dark", "light"] as const)("in the %s theme the three weight tones are told apart by hue alone: the yellow at least 20 degrees of oklch hue cooler than the orange, the orange at least 20 cooler than the red, each cell reading at AA", async theme => {
+    await page!.setViewportSize({ ...VIEWPORTS[0] });
+    const frame = await goTo("tools", theme);
+    const hue = async (tone: string): Promise<number> => (await textHue(page!, `${frame} [data-k=size][data-tone=${tone}]`))[0]!;
+    const [yellow, orange, red] = [await hue("yellow"), await hue("warning"), await hue("danger")];
+    console.info(`${theme} weight hues: yellow ${yellow}, orange ${orange}, red ${red}`);
+    expect(yellow - orange, `${theme}: yellow ${yellow} against orange ${orange}`).toBeGreaterThanOrEqual(20);
+    expect(orange - red, `${theme}: orange ${orange} against red ${red}`).toBeGreaterThanOrEqual(20);
+    for (const ratio of await textContrast(page!, `${frame} [data-k=size]`)) expect(ratio, `${theme}: a size reads`).toBeGreaterThanOrEqual(4.5);
+  });
 
   it.each(["dark", "light"] as const)("in the %s theme the meter's tooltip reads the numbers, its fill grows with a tick, the sign-in rows carry a mark each, the open one its page and code, and the one whose page hands a code back a mono field under it", async theme => {
     await page!.setViewportSize({ ...VIEWPORTS[0] });
