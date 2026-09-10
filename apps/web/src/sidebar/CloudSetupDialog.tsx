@@ -8,12 +8,12 @@
 // and it reopens on the step it was shut at with the answers in place, until
 // Start over or the build.
 import { useCallback, useEffect, useState } from "react";
-import { CLOUD_SETUP_WORDS, initDiskOverLine, initJobOver, wspToolsRowId, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, initAgentStep, initDiskOverLine, initJobOver, wspToolsRowId, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { Dialog, DialogSheet, DialogTitle } from "../components/ui/dialog.js";
 import { errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
-import { DiskRing } from "./cloud-setup/DiskRing.js";
 import { draftOf, SetupAnswers, tallyOf, type Draft } from "./cloud-setup/SetupAnswers.js";
+import { SetupAgent } from "./cloud-setup/SetupAgent.js";
 import { SetupAsk } from "./cloud-setup/SetupAsk.js";
 import { SetupBuild } from "./cloud-setup/SetupBuild.js";
 import { SetupChoice, type RoadPick } from "./cloud-setup/SetupChoice.js";
@@ -94,10 +94,28 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
   let body;
   let disk: { used: number; total: number } | undefined;
   if (step === "choice" || setup === null) {
-    body = setup === null ? <SetupScreen k="loading" label={CLOUD_SETUP_WORDS.choice.label} headline={CLOUD_SETUP_WORDS.choice.headline} top={CLOUD_SETUP_WORDS.choice.top} refusal={refusal} /> : <SetupChoice agents={setup.agents} pick={pick} onPick={setPick} onContinue={onContinueChoice} refusal={refusal} />;
+    body = setup === null ? <SetupScreen k="loading" headline={CLOUD_SETUP_WORDS.choice.headline} top={CLOUD_SETUP_WORDS.choice.top} refusal={refusal} /> : <SetupChoice agents={setup.agents} pick={pick} onPick={setPick} onContinue={onContinueChoice} refusal={refusal} />;
   } else if (step === "keys") {
     body = <SetupKeys setup={setup} onSave={onSaveKeys} onBack={() => setStep("choice")} refusal={refusal} />;
-  } else if (job === null || job.phase === "agent" || job.phase === "reading") {
+  } else if (job !== null && initAgentStep(job)) {
+    body = (
+      <SetupAgent
+        job={job}
+        refusal={refusal}
+        onOpenThread={() => {
+          if (job.thread === undefined) return;
+          select(job.thread.workspaceId, job.thread.id);
+          onClose();
+        }}
+        onRetry={() => {
+          const harness = job.thread?.harness;
+          if (api?.initStart === undefined || harness === undefined) return;
+          void attempt(() => api.initStart!({ road: "agent", harness }));
+        }}
+        onAgain={again}
+      />
+    );
+  } else if (job === null || job.phase === "reading") {
     body = <SetupFacts job={job} refusal={refusal} />;
   } else if (job.phase === "answering") {
     const shown = shownOf(job);
@@ -143,6 +161,7 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
           draft={current}
           onDraft={next => setDraft({ key, draft: next })}
           refusal={refusal}
+          {...(disk !== undefined ? { disk } : {})}
           primary={{
             word: CLOUD_SETUP_WORDS.screen.keycap,
             onPress: () => {
@@ -185,7 +204,7 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
         if (!open) onClose();
       }}
     >
-      <DialogSheet data-cloud-setup-dialog initialFocus={false} aside={disk !== undefined ? <DiskRing used={disk.used} total={disk.total} /> : undefined}>
+      <DialogSheet data-cloud-setup-dialog initialFocus={false}>
         <DialogTitle className="sr-only">{CLOUD_SETUP_WORDS.title}</DialogTitle>
         {body}
       </DialogSheet>

@@ -101,7 +101,7 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
 
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
+  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
 });
 
 async function mount(api: FakeApi, firstName: string) {
@@ -676,6 +676,32 @@ describe("rows from the fixture wire", () => {
     await waitFor(() => expect(screen.getByText(/No workspaces yet/)).toBeDefined());
     const toast = await screen.findByRole("status", { name: /runtime unreachable/ });
     fireEvent.click(toast);
+    expect(useStore.getState().toast).toBeNull();
+    // A toast with no action of its own carries no button, so nothing to press appears beside a plain sentence.
+    expect(toast.querySelector("[data-toast-action]")).toBeNull();
+  });
+
+  it("a build that needs the person says so in the toast once, with an Open that opens the setup sheet; a later toast takes the slot and its action goes with it", async () => {
+    const api = fakeApi([], []);
+    useStore.getState().bind(api);
+    render(<SidebarProvider defaultOpen><WorkspaceSidebar /></SidebarProvider>);
+    await waitFor(() => expect(screen.getByText(/No workspaces yet/)).toBeDefined());
+    act(() => useStore.getState().applyEvent({ type: "job.needs-you", jobId: "init_1", needsYou: { what: "sign in to GitHub CLI login", since: 1_760_000_000_000 } }));
+    const toast = await screen.findByRole("status", { name: "wsp needs you: sign in to GitHub CLI login" });
+    expect(toast.textContent).toContain("wsp needs you: sign in to GitHub CLI login");
+    expect(useStore.getState().setupOpen).toBe(false);
+    expect(toast.querySelector<HTMLElement>("[data-toast-action]")!.textContent).toBe("Open");
+
+    // A toast said from anywhere else takes the slot, and the Open the need's sentence had does not come with it.
+    act(() => useStore.setState({ toast: "runtime unreachable" }));
+    const plain = await screen.findByRole("status", { name: "runtime unreachable" });
+    expect(plain.querySelector("[data-toast-action]")).toBeNull();
+
+    // The need again, and its Open opens the sheet and clears the sentence it belonged to.
+    act(() => useStore.getState().applyEvent({ type: "job.needs-you", jobId: "init_1", needsYou: { what: "sign in to Claude Code login", since: 1_760_000_001_000 } }));
+    const again = await screen.findByRole("status", { name: "wsp needs you: sign in to Claude Code login" });
+    fireEvent.click(again.querySelector<HTMLElement>("[data-toast-action]")!);
+    expect(useStore.getState().setupOpen).toBe(true);
     expect(useStore.getState().toast).toBeNull();
   });
 });

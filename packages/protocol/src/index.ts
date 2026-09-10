@@ -10,7 +10,7 @@
 import { z } from "zod";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
 import { openingTitle, titleLine } from "./format.js";
-import { InitJob, InitJobEvent, InitAgent, InitKeys, InitRoad, InitScreenId, SIGN_IN_CODE_MAX } from "./init-job.js";
+import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, SIGN_IN_CODE_MAX } from "./init-job.js";
 import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
 import { WorkspaceGlyph, WorkspaceLook, WorkspaceTheme } from "./workspace-look.js";
@@ -514,6 +514,11 @@ export const HarnessCatalog = z.object({
    * the adapter on a machine knows. Read it through readsImages, which reads a table row as no answer rather than as
    * a no: the composer offers the picker and the runtime answers with the agent's name if it turns out to read none. */
   images: z.boolean(),
+  /** Whether wsp can hand this harness's launch an MCP server. Unlike the three above this is decided by the
+   * adapter in this host and by no binary on a machine, so the table's own row is the answer and a caller may read
+   * it before any workspace exists; a runtime test pins every row to its adapter's declaration. Read it through
+   * takesMcpServers: absent is a no, since a catalog from before the field was declared knew of no such road. */
+  mcpServers: z.boolean().optional(),
   /** Set on the harness a start without one runs, so a client can pick its list without the catalog package. */
   isDefault: z.boolean().optional(),
   /** Why the binary described nothing, in its own adapter's words, when it ran and refused for a reason it can name
@@ -535,6 +540,29 @@ export const HarnessCatalog = z.object({
   bypassMode: z.string().optional(),
 });
 export type HarnessCatalog = z.infer<typeof HarnessCatalog>;
+
+/** An MCP server as every agent's config names it and as a launch may carry it: the program and its arguments, run
+ * over stdio. The catalog's config writers, the adapters that hand a server to a turn and the install that writes
+ * one into a config file all read this shape, and none of them may import another, so it lives here. */
+export interface McpServerSpec {
+  command: string;
+  args: readonly string[];
+}
+
+/** What a start that names MCP servers for a harness whose adapter renders none for its CLI is refused with. The
+ * servers cannot be dropped quietly: a thread launched without them looks like an agent that ignored the tools it
+ * was told to call, which is the whole fault the cloud setup's own thread had. */
+export function noMcpServersLine(harness: string): string {
+  return `${harness} takes no MCP server with a launch, so its thread would run without them; open the thread on an agent that takes them`;
+}
+
+/** Why these servers cannot go to this agent's thread, or null when they can. Every road that hands a launch a
+ * server asks this before a machine is asked for anything: the caller that picks the agent, and the runtime again
+ * before the turn. `takes` is the adapter's own declaration. */
+export function mcpServersBlocked(servers: Readonly<Record<string, McpServerSpec>> | undefined, takes: true | undefined, harness: string): string | null {
+  if (servers === undefined || Object.keys(servers).length === 0) return null;
+  return takes === true ? null : noMcpServersLine(harness);
+}
 
 /** The catalog a kept machine's composer shows and its starts are checked against: the same lists, with the default
  * mark moved from what a throwaway machine runs to keptMode, and the row's own bypassMode named after the machine it
@@ -567,6 +595,13 @@ export function keepsRename(catalog: HarnessCatalog | null | undefined): boolean
  * refuses in the agent's name if the adapter turns out to read none. */
 export function readsImages(catalog: HarnessCatalog | null | undefined): boolean {
   return catalog === null || catalog === undefined || catalog.source === "table" || catalog.images;
+}
+
+/** Whether wsp can hand this harness's launch an MCP server. Unlike the three above, a table row is the answer and
+ * not a stand-in: this is decided by the adapter in this host and by no binary, so a caller may read it before any
+ * machine exists. Absent is a no, which is a catalog from before the field was declared. */
+export function takesMcpServers(catalog: Pick<HarnessCatalog, "mcpServers"> | null | undefined): boolean {
+  return catalog?.mcpServers === true;
 }
 
 /** The option a list marks as its default, if one is: what an unpicked picker shows and an unnamed start runs. */
@@ -874,6 +909,10 @@ export type SessionEvent = z.infer<typeof SessionEvent>;
 /** Every type a session event carries, read off the union itself: a client telling a session event from the rest of
  * the bus asks this rather than keeping a list of its own, which one added event leaves quietly short. */
 export const SESSION_EVENT_TYPES: ReadonlySet<SessionEvent["type"]> = new Set(SessionEvent.options.map(o => o.shape.type.value));
+
+/** Whether one event off the bus is a session's, narrowed: the one test every reader that folds a thread's events
+ * out of the whole channel makes, so none of them keeps a list or a cast of its own. */
+export const isSessionEvent = (e: { type: string }): e is SessionEvent => SESSION_EVENT_TYPES.has(e.type as SessionEvent["type"]);
 
 // --- workspace / port / inbox events ----------------------------------------
 
@@ -1321,6 +1360,12 @@ export interface DesktopBridge {
   onShellChord(handler: (chord: ShellChord) => void): () => void;
   /** The theme the page draws, so the window's frame, glass and traffic-light bar follow it. */
   setTheme(theme: ThemePreference): void;
+  /** A build waits on the person: the shell shows a system notification while its window has no focus, and nothing
+   * while it has, since the page already says it. The page decides nothing about focus; the shell owns that. */
+  needsYou(need: InitNeedsYou): void;
+  /** A click on that notification, after the shell has raised its window: the page opens the build screen. Returns
+   * the unsubscribe. */
+  onNeedsYouOpen(handler: () => void): () => void;
 }
 
 // --- golden image (manifest, interactive builder, build stages) ---------------
@@ -1685,6 +1730,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   ProjectExportEvent.extend(sequenced),
   PreferencesChangedEvent.extend(sequenced),
   InitJobEvent.extend(sequenced),
+  InitNeedsYouEvent.extend(sequenced),
 ]);
 export type EventUnion = z.infer<typeof EventUnion>;
 

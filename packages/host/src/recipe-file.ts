@@ -3,7 +3,7 @@
 // live on this computer, and how the recipe is read and written. Nothing here
 // reaches past the catalog, the protocol and the collector, so the MCP server
 // can write a recipe without the runtime or the engine coming with it.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { catalogEntry, loginIdOf } from "@wsp/catalog";
 import { type HistoryCache, fileHistoryCache } from "@wsp/collect";
@@ -33,6 +33,19 @@ export function loadRecipe(path: string): Recipe {
   const r = Recipe.safeParse(data);
   if (r.success) return r.data;
   throw new Error(`${path}: invalid recipe: ${r.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+}
+
+/** What the file at `path` is right now, for telling a recipe that arrived from one that was already there: its size
+ * and the nanosecond of its last write, or nothing when no file is there. A recipe beside the state is not proof
+ * that a caller's own write landed, since the first launch writes one and so does wsp recipe; a caller that waits
+ * for a write takes this first and waits for it to change. */
+export function recipeStamp(path: string): string | undefined {
+  try {
+    const s = statSync(path, { bigint: true });
+    return `${s.size}:${s.mtimeNs}`;
+  } catch {
+    return undefined;
+  }
 }
 
 export function saveSmallRecipe(path: string, recipe: Recipe): void {

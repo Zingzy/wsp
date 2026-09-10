@@ -8,34 +8,51 @@ import {
   EventUnion,
   InitJob,
   InitJobEvent,
+  InitNeedsYouEvent,
   InitSetup,
   LOGIN_STATE_WORDS,
+  NEEDS_YOU,
   RuntimeRequest,
   INIT_ROW_STATES,
   SIGN_IN_CODE_MAX,
   SOLARI_CONSOLE,
   SignInFinish,
+  initAgentNoRecipeLine,
   initAgentPrompt,
+  initAgentStep,
   initButtonLine,
   initCostLine,
   initJobBuilding,
   initJobOver,
+  initNeedWhat,
+  initNeedsYouLine,
   initPhaseWord,
   initProgressLine,
   initProgressState,
   initRowOver,
+  titleWithNeed,
   initSetupLines,
   initTallyLine,
+  threadWorkingLine,
   INIT_SIGN_IN_WORDS,
   initDiskLine,
+  initBuildRows,
+  initStageCount,
+  initStageCountLine,
+  SIGN_IN_STAGE_ID,
+  sizeTone,
+  diskTone,
   initDiskOverLine,
   fmtCalls,
   type InitRow,
+  type InitScreen,
 } from "../src/index.js";
 
 const MIB = 1024 * 1024;
 
 const row = (over: Partial<InitRow> = {}): InitRow => ({ id: "stage/creating", kind: "stage", label: "Creating the machine", state: "done", ...over });
+
+const SCREEN: InitScreen = { id: "agents", title: "Agents", top: "Which agents go on the image", counter: "1/6", items: [], ticks: [], answers: {}, footer: [] };
 
 const JOB: InitJob = {
   id: "init_1",
@@ -48,6 +65,14 @@ const JOB: InitJob = {
   rows: [row(), row({ id: "stage/deploying-daemon", label: "Installing the base tools", state: "running" }), row({ id: "stage/ready", label: "Waiting for the machine", state: "waiting" })],
   progress: { done: 1, total: 3 },
   log: ["Recipe saved to /tmp/recipe.json"],
+};
+
+/** The same job with a sign-in's page open on the machine and the need the host wrote for it. */
+const WAITING: InitJob = {
+  ...JOB,
+  phase: "signing-in",
+  rows: [...JOB.rows, row({ id: "sign-in/gh", kind: "sign-in", label: "GitHub CLI login", state: INIT_ROW_STATES.open, page: "https://github.com/login/device", code: "8F4A-C21B" })],
+  needsYou: { what: "sign in to GitHub CLI login", since: 1_760_000_000_000 },
 };
 
 describe("the init job view", () => {
@@ -92,7 +117,7 @@ describe("the init job view", () => {
   });
 
   it("the setup the modal opens on carries the provider key's presence alone, never a key, the agents here and the price", () => {
-    const setup = InitSetup.parse({ keys: { solari: false }, home: "/Users/me", agents: [{ id: "claude", name: "Claude Code", configured: true }], pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 }, job: null });
+    const setup = InitSetup.parse({ keys: { solari: false }, home: "/Users/me", agents: [{ id: "claude", name: "Claude Code", configured: true, takesTools: true }], pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 }, job: null });
     expect(setup.job).toBeNull();
     expect(Object.keys(setup.keys)).toEqual(["solari"]);
     expect(InitSetup.safeParse({ keys: { solari: "slr_live_x" }, home: "/Users/me", agents: [], pricing: null, job: null }).success).toBe(false);
@@ -145,37 +170,100 @@ describe("the words the clients print for the job", () => {
     expect(initProgressLine({ ...JOB, phase: "failed", rows: [] })).toBe("failed");
   });
 
-  it("the sidebar button's facts: the rows over as a fraction of the total, whether the person is waited on, and its words", () => {
+  it("the sidebar button's facts: the rows over as a fraction of the total, the host's own needsYou for whether the person is waited on, and its words", () => {
     expect(initProgressState(JOB)).toEqual({ fraction: 1 / 3, waitingOnYou: false });
     expect(initButtonLine(JOB)).toBe("building · 1/3");
-    const waiting = { ...JOB, phase: "signing-in" as const, progress: { done: 2, total: 4 }, rows: [...JOB.rows, row({ id: "sign-in/gh", kind: "sign-in", label: "GitHub CLI login", state: INIT_ROW_STATES.open, page: "https://github.com/login/device", code: "8F4A-C21B" })] };
+    const waiting = { ...WAITING, progress: { done: 2, total: 4 } };
     expect(initProgressState(waiting)).toEqual({ fraction: 0.5, waitingOnYou: true });
     expect(initButtonLine(waiting)).toBe("waiting for you");
-    const answering = { ...JOB, phase: "answering" as const, rows: [], progress: { done: 0, total: 0 } };
-    expect(initProgressState(answering)).toEqual({ fraction: 0, waitingOnYou: true });
-    expect(initButtonLine(answering)).toBe("waiting for you");
     expect(initButtonLine({ ...JOB, phase: "sealing", progress: { done: 3, total: 3 } })).toBe("sealing · 3/3");
+    // The rows alone no longer say it: a job whose host wrote no need waits on the machine, whatever its rows hold.
+    expect(initProgressState({ ...waiting, needsYou: undefined })).toEqual({ fraction: 0.5, waitingOnYou: false });
+    // The screens are not a need, so nothing is waited on there; the phase word still carries them on the button.
+    const answering = { ...JOB, phase: "answering" as const, rows: [], progress: { done: 0, total: 0 } };
+    expect(initProgressState(answering)).toEqual({ fraction: 0, waitingOnYou: false });
+    expect(initButtonLine(answering)).toBe(initPhaseWord("answering"));
+  });
+
+  it("only a wait the person is not looking at is a need: a sign-in's open page, never the screens they just opened", () => {
+    expect(initNeedWhat(JOB)).toBeUndefined();
+    expect(initNeedWhat(WAITING)).toBe("sign in to GitHub CLI login");
+    // The screens wait on the person, but they are the thing the person is looking at, so they are no one's need.
+    // The phase is not even an argument here, which is what keeps any of them from becoming one by accident.
+    for (const phase of ["agent", "reading", "answering"] as const) {
+      const job: InitJob = { ...JOB, phase, rows: [] };
+      expect(initNeedWhat(job), phase).toBeUndefined();
+    }
+    // A sign-in that moved on waits on nobody, whatever it once said.
+    expect(initNeedWhat({ ...WAITING, rows: WAITING.rows.map(r => (r.kind === "sign-in" ? { ...r, state: INIT_SIGN_IN_WORDS["signed-in"] } : r)) })).toBeUndefined();
+    // The sidebar's line and the need are one spelling, so the toast never says it a second way.
+    expect(initProgressLine(WAITING)).toBe(initNeedWhat(WAITING));
+  });
+
+  it("the toast and the system notification say the app's name and the need, and a title carries the mark once however often it is set", () => {
+    expect(NEEDS_YOU).toBe("wsp needs you");
+    expect(initNeedsYouLine("sign in to GitHub CLI login")).toBe("wsp needs you: sign in to GitHub CLI login");
+    expect(titleWithNeed("wsp", true)).toBe("• wsp");
+    expect(titleWithNeed("wsp", false)).toBe("wsp");
+    expect(titleWithNeed(titleWithNeed("wsp", true), true)).toBe("• wsp");
+    expect(titleWithNeed(titleWithNeed("wsp", true), false)).toBe("wsp");
+  });
+
+  it("the need's arrival is its own event on the same channel, one per need, and the wire refuses a need without its clock", () => {
+    const event = InitNeedsYouEvent.parse({ type: "job.needs-you", jobId: "init_1", needsYou: { what: "sign in to GitHub CLI login", since: 1_760_000_000_000 } });
+    expect(EventUnion.parse({ ...event, seq: 4 })).toEqual({ ...event, seq: 4 });
+    expect(InitNeedsYouEvent.safeParse({ type: "job.needs-you", jobId: "init_1", needsYou: { what: "sign in" } }).success).toBe(false);
+    expect(InitJob.parse(WAITING).needsYou).toEqual(WAITING.needsYou);
+    expect(InitJob.safeParse({ ...JOB, needsYou: { what: "sign in", since: -1 } }).success).toBe(false);
   });
 
   it("the cost line names the size and the rate once, from the backend's own number", () => {
-    expect(initCostLine({ cpu: 2, memMb: 4096 }, 0.11)).toBe("A 2 vCPU · 4 GB machine costs about $0.11/hr while it runs; it naps when idle.");
+    expect(initCostLine({ cpu: 2, memMb: 4096 }, 0.11)).toBe("A 2 vCPU · 4 GB machine costs about $0.11 an hour while it runs and naps when idle");
   });
 
-  it("the agent's first message names the two tools and where the recipe goes, and asks the agent to ask nothing", () => {
+  it("the agent's first message names the two tools and where the recipe goes, asks the agent to ask nothing, and says plainly to run no commands", () => {
     const prompt = initAgentPrompt("/Users/me/.wsp/recipe.json");
     expect(prompt).toContain("recipe_scan");
     expect(prompt).toContain("recipe");
     expect(prompt).toContain("/Users/me/.wsp/recipe.json");
     expect(prompt).toMatch(/ask (them|the person) nothing/i);
+    // The tools are named as the only road: a thread that reached for the command line instead asked for permission
+    // once per call and got nowhere.
+    expect(prompt).toMatch(/run no commands/i);
     expect(prompt).not.toContain("wsp init");
   });
 
+  it("the line when the thread ended with no recipe names the file waited on, and the turn's own reason where it had one", () => {
+    expect(initAgentNoRecipeLine("/Users/me/.wsp/recipe.json")).toBe("the thread ended without writing /Users/me/.wsp/recipe.json");
+    expect(initAgentNoRecipeLine("/Users/me/.wsp/recipe.json", "the harness died")).toBe("the thread ended without writing /Users/me/.wsp/recipe.json: the harness died");
+  });
+
+  it("one predicate says the job's step is the agent's: its road writing the recipe, and a job that ended before any screen", () => {
+    const agent = { ...JOB, road: "agent" as const, screens: [] };
+    expect(initAgentStep({ ...agent, phase: "agent" })).toBe(true);
+    expect(initAgentStep({ ...agent, phase: "failed" })).toBe(true);
+    expect(initAgentStep({ ...agent, phase: "cancelled" })).toBe(true);
+    // Past the step: the screens exist, so a failure there is the build's own.
+    expect(initAgentStep({ ...agent, phase: "answering" })).toBe(false);
+    expect(initAgentStep({ ...agent, phase: "failed", screens: [SCREEN] })).toBe(false);
+    expect(initAgentStep({ ...JOB, road: "manual", phase: "failed" })).toBe(false);
+  });
+
+  it("a thread's one line is the tool it is running, the prompt it is blocked on, else its own last line; anything else leaves the line alone", () => {
+    const scope = { workspaceId: "ws_1", sessionId: "s_1" };
+    expect(threadWorkingLine({ type: "session.delta", ...scope, kind: "text", text: "reading\nwriting the recipe" })).toBe("writing the recipe");
+    expect(threadWorkingLine({ type: "session.delta", ...scope, kind: "tool_use", toolName: "Bash", text: JSON.stringify({ command: "wsp recipe scan --json" }) })).toBe("$ wsp recipe scan --json");
+    expect(threadWorkingLine({ type: "session.permission", ...scope, askId: "a1", toolName: "Bash", input: "{}", detail: "wsp recipe scan --json", options: [] })).toBe("Permission for Bash: wsp recipe scan --json");
+    expect(threadWorkingLine({ type: "session.delta", ...scope, kind: "tool_result", text: "ok" })).toBeUndefined();
+    expect(threadWorkingLine({ type: "session.end", ...scope, exitCode: 0, sawResult: true })).toBeUndefined();
+  });
+
   it("wsp setup prints the keys as held or not, the agents with their tools, the price, and the job's rows with the page a sign-in waits on", () => {
-    const setup = { keys: { solari: true }, home: "/Users/me", agents: [{ id: "claude", name: "Claude Code", configured: true }, { id: "codex", name: "Codex", configured: false }], pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 }, job: null };
+    const setup = { keys: { solari: true }, home: "/Users/me", agents: [{ id: "claude", name: "Claude Code", configured: true, takesTools: true }, { id: "codex", name: "Codex", configured: false, takesTools: false }], pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 }, job: null };
     expect(initSetupLines(setup)).toEqual([
       "Solari key: saved",
       "Agents here: Claude Code (MCP added), Codex",
-      "A 2 vCPU · 4 GB machine costs about $0.11/hr while it runs; it naps when idle.",
+      "A 2 vCPU · 4 GB machine costs about $0.11 an hour while it runs and naps when idle",
       "No setup is running; the app's sidebar row starts one.",
     ]);
     const waiting = { ...JOB, phase: "signing-in" as const, rows: [row(), row({ id: "sign-in/gh", kind: "sign-in", label: "GitHub CLI login", state: INIT_ROW_STATES.open, page: "https://github.com/login/device", code: "8F4A-C21B" })] };
@@ -221,6 +309,7 @@ describe("the words the clients print for the job", () => {
   });
 
   it("every step has a sentence under its title, and no title or sentence ends in a period", () => {
+    expect(CLOUD_SETUP_WORDS.build.slideTop).not.toMatch(/[.;]$/);
     for (const step of [CLOUD_SETUP_WORDS.choice, CLOUD_SETUP_WORDS.keys, CLOUD_SETUP_WORDS.reading, CLOUD_SETUP_WORDS.agent, CLOUD_SETUP_WORDS.build, CLOUD_SETUP_WORDS.ask]) {
       expect(step.top.length, step.top).toBeGreaterThan(20);
       expect(step.top, step.top).not.toMatch(/\.$/);
@@ -232,7 +321,30 @@ describe("the words the clients print for the job", () => {
     expect(initTallyLine(3, "agents", 1.1 * 1024 * MIB)).toBe("3 agents on the image · 1.1 GB");
     expect(initTallyLine(1, "tools", 60 * MIB)).toBe("1 tool on the image · 60 MB");
     expect(initTallyLine(0, "agents", 0)).toBe("0 agents on the image · 0 B");
+    expect(initTallyLine(3, "more", 1.2 * 1024 * MIB)).toBe("3 more on the image · 1.2 GB");
+    expect(initTallyLine(1, "more", MIB)).toBe("1 more on the image · 1 MB");
     expect(initDiskLine(1.1 * 1024 * MIB, 20 * 1024 * MIB)).toBe("about 1.1 GB of 20 GB on the image");
+    const rows: InitRow[] = [
+      { id: "agent/claude", kind: "agent", label: "Claude Code", state: "MCP added" },
+      { id: "stage/creating", kind: "stage", label: "Creating the machine", state: "done" },
+      { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "Sign in to GitHub CLI", state: "waiting for you" },
+      { id: "sign-in/claude", kind: "sign-in", tool: "claude", label: "Sign in to Claude Code", state: "key set" },
+      { id: "stage/snapshotting", kind: "stage", label: "Taking the snapshot", state: "waiting" },
+      { id: "workspace/first", kind: "workspace", label: "first", state: "waiting" },
+    ];
+    const folded = initBuildRows(rows);
+    expect(folded.rows.map(r => r.id)).toEqual(["stage/creating", SIGN_IN_STAGE_ID, "stage/snapshotting", "workspace/first"]);
+    expect(folded.rows[1]).toMatchObject({ kind: "stage", label: "Signing in on the machine", state: "waiting for you" });
+    expect(folded.signIns.map(r => r.id)).toEqual(["sign-in/gh", "sign-in/claude"]);
+    const settled = initBuildRows(rows.map(r => (r.id === "sign-in/gh" ? { ...r, state: "not signed in" } : r)));
+    expect(settled.rows[1]!.state, "a sign-in that ran out keeps the stage from reading done").toBe("not signed in");
+    expect(initBuildRows(rows.map(r => (r.id === "sign-in/gh" ? { ...r, state: "done" } : r))).rows[1]!.state).toBe("done");
+    expect(initBuildRows(rows.map(r => (r.kind === "sign-in" ? { ...r, state: "waiting" } : r))).rows[1]!.state).toBe("waiting");
+    expect(initStageCount(folded.rows)).toEqual({ done: 1, total: 4 });
+    expect(initStageCount([row({ state: "done" }), row({ id: "stage/ready", state: "failed" })]), "a failed row is not done").toEqual({ done: 1, total: 2 });
+    expect(initStageCountLine({ done: 3, total: 12 })).toBe("3 of 12");
+    expect([sizeTone(1024 * MIB), sizeTone(300 * MIB), sizeTone(100 * MIB), sizeTone(99 * MIB), sizeTone(0)]).toEqual(["danger", "warning", "yellow", "muted", "muted"]);
+    expect([diskTone(13, 20), diskTone(14, 20), diskTone(18, 20), diskTone(21, 20), diskTone(1, 0)]).toEqual(["muted", "warning", "danger", "danger", "danger"]);
     expect(initDiskOverLine(300 * MIB)).toBe("over by 300 MB");
     expect(fmtCalls(29_623)).toBe("29,623 calls");
     expect(fmtCalls(1)).toBe("1 call");

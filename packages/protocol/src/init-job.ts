@@ -112,6 +112,12 @@ export type InitRow = z.infer<typeof InitRow>;
 export const InitKeys = z.object({ solari: z.boolean() });
 export type InitKeys = z.infer<typeof InitKeys>;
 
+/** What the job waits on the person for while it waits: the sentence every surface says, and when the wait began.
+ * The host writes it and nothing else derives it, so the sidebar's row, the toast, the window title and a system
+ * notification say one thing. */
+export const InitNeedsYou = z.object({ what: z.string(), since: z.number().int().nonnegative() });
+export type InitNeedsYou = z.infer<typeof InitNeedsYou>;
+
 export const InitJob = z.object({
   id: z.string(),
   road: InitRoad,
@@ -130,21 +136,35 @@ export const InitJob = z.object({
   rows: z.array(InitRow),
   /** Rows over, rows in all: what the collapsed sidebar row counts. */
   progress: z.object({ done: z.number().int().nonnegative(), total: z.number().int().nonnegative() }),
+  /** What the job waits on the person for, absent while it waits on the machine instead. */
+  needsYou: InitNeedsYou.optional(),
   /** The tail of what the run said, the lines a terminal would have shown. */
   log: z.array(z.string()),
-  /** The agent's thread, on the agent road. */
-  thread: z.object({ id: z.string(), workspaceId: z.string() }).optional(),
+  /** The agent's thread, on the agent road: the thread a client focuses, the workspace it runs on (this computer),
+   * the runtime's id for its running turn, which is what answers a prompt that turn raised, and the agent writing
+   * the recipe, which is what a retry starts again. */
+  thread: z.object({ id: z.string(), workspaceId: z.string(), session: z.string(), harness: z.string() }).optional(),
+  /** The one line the agent's thread is on, for the block the agent step shows: the tool it is running, the prompt
+   * it is blocked on, else its own latest line. Absent before the thread's first line. */
+  line: z.string().optional(),
   error: z.string().optional(),
   golden: z.object({ version: z.number().int() }).optional(),
   workspace: z.object({ id: z.string(), name: z.string() }).optional(),
 });
 export type InitJob = z.infer<typeof InitJob>;
 
-/** An agent on this computer the agent road can start: the catalog's id and name, and whether its config already
- * names the wsp tools. */
-export const InitAgent = z.object({ id: z.string(), name: z.string(), configured: z.boolean() });
+/** An agent on this computer the agent road can start: the catalog's id and name, whether its config already names
+ * the wsp tools, and whether wsp can hand its thread those tools at launch, which is what the road needs. An agent
+ * whose adapter renders no MCP server for its CLI cannot be picked: its thread would run without the two tools the
+ * brief tells it to call, so the picker shows it and does not offer it. */
+export const InitAgent = z.object({ id: z.string(), name: z.string(), configured: z.boolean(), takesTools: z.boolean() });
 export type InitAgent = z.infer<typeof InitAgent>;
 
 /** Every change to the job, as one whole view: a client draws the newest and needs no history. */
 export const InitJobEvent = z.object({ type: z.literal("init.job"), job: InitJob });
 export type InitJobEvent = z.infer<typeof InitJobEvent>;
+
+/** A wait on the person arriving, once per need: the signal a surface that speaks once (a toast, a system
+ * notification) rides. The wait standing and the wait ending both ride the job's own view. */
+export const InitNeedsYouEvent = z.object({ type: z.literal("job.needs-you"), jobId: z.string(), needsYou: InitNeedsYou });
+export type InitNeedsYouEvent = z.infer<typeof InitNeedsYouEvent>;

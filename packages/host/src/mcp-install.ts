@@ -5,8 +5,8 @@
 // config module says where it goes and in what format.
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join, sep } from "node:path";
-import { CATALOG_AGENTS, MCP_AGENTS, MCP_AGENT_IDS, type AgentEntry, type McpAgent, type McpServerSpec, type Placed } from "@wsp/catalog";
-import { mcpServerCommandLine, nextInsideAgentLine } from "@wsp/protocol";
+import { CATALOG_AGENTS, MCP_AGENTS, MCP_AGENT_IDS, type AgentEntry, type McpAgent, type Placed } from "@wsp/catalog";
+import { mcpServerCommandLine, nextInsideAgentLine, type McpServerSpec } from "@wsp/protocol";
 import { placeSections, removeSections } from "./agents-md.js";
 import { SKILL_NAME, WSP_SKILL } from "./skill.js";
 import { VERSION } from "./version.js";

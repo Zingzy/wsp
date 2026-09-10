@@ -14,7 +14,7 @@ import { stripVTControlCharacters } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
 import type { BackendPricing } from "@wsp/engine";
 import { RUNGS } from "@wsp/collect";
-import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, SignInFinish, THIS_COMPUTER, initAgentPrompt, initJobOver, initRowOver, isLocalWorkspace, plural, type GoldenStep, type InitJob, type InitJobEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type LoginState } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initJobOver, initNeedWhat, initRowOver, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type LoginState, type McpServerSpec, type TurnResult } from "@wsp/protocol";
 import { harnessCatalog, smallestModel, type GoldenRecipe, type InitDoor, type Runtime, type SessionHandle } from "@wsp/runtime";
 import type { AgentHere } from "./agents-here.js";
 import { SOLARI_KEY, agentKeysIn, keysOf, type Keys } from "./env-keys.js";
@@ -25,8 +25,8 @@ import { SignInCodes } from "./init-signin.js";
 import { handoffStage } from "./init-handoff.js";
 import { historyWord } from "./recipe-command.js";
 import { GOLDEN_NAME, PREPARE_STEPS, SEAL_STEPS, readThisComputer, reduceStages, runInit, type InitIO, type InitOptions, type Reading, type SignInContext, type StageFrame, type StageWords } from "./init.js";
-import type { InstallReport } from "./mcp-install.js";
-import { saveSmallRecipe, smallRecipePath } from "./recipe-file.js";
+import { MCP_SERVER_NAME, type InstallReport } from "./mcp-install.js";
+import { loadRecipe, recipeStamp, saveSmallRecipe, smallRecipePath } from "./recipe-file.js";
 import type { WorkspaceRoads } from "./server.js";
 
 export interface InitJobDeps {
@@ -47,6 +47,9 @@ export interface InitJobDeps {
   agents(): Promise<AgentHere[]>;
   /** Writes the wsp tools into these agents' configs on this computer, the road wsp mcp install takes. */
   installTools(agents: ReadonlySet<string>): InstallReport;
+  /** The wsp MCP server pointed at this host, the same spec wsp mcp install writes: what the agent road's thread is
+   * launched with, so its recipe tools are there whatever the person's own config says. */
+  mcpServer(): McpServerSpec;
   /** This computer's readers, the ones a terminal run takes. */
   read: Pick<InitOptions, "collect" | "recipe" | "scanProject" | "brew" | "scan">;
   /** The build's pieces a terminal run also takes, and the roads to a workspace on the serving host. */
@@ -64,6 +67,11 @@ export interface InitJobDeps {
 const LOG_TAIL = 60;
 /** How many of a stage's lines ride under its row. */
 const STAGE_LINES = 12;
+/** How often the agent road looks for the recipe its thread is writing, between the thread's own events. */
+const RECIPE_POLL_MS = 250;
+/** Whether the agent road can run on this agent at all: its thread is handed the wsp server on the launch, so an
+ * agent whose adapter renders none would write no recipe. The harness table is the one place that says which do. */
+const takesTools = (harness: string): boolean => takesMcpServers(harnessCatalog(harness));
 /** What a sign-in row says when the run ended without reaching it. */
 export const SIGN_IN_NEVER_REACHED = "the build never reached this sign-in";
 /** The stage rows in the order the build runs them: the prepare's, then the seal's. */
@@ -94,7 +102,11 @@ interface State {
   building: boolean;
   log: string[];
   error?: string;
-  thread?: { id: string; workspaceId: string };
+  thread?: { id: string; workspaceId: string; session: string; harness: string };
+  /** The one line the agent's thread is on, from its own events; the block on the agent step shows it. */
+  line?: string;
+  /** What the agent road listens to on the runtime while its thread runs, dropped when the thread is done with. */
+  watching: (() => void)[];
   golden?: { version: number };
   workspace?: { id: string; name: string };
   /** Where a terminal's Ctrl-C would arrive for the run; cancel emits it. */
@@ -103,6 +115,9 @@ interface State {
   cancelled: boolean;
   /** Which keys the host held when the job started or a key was last saved; the view reads this, not the files. */
   keys: InitJob["keys"];
+  /** What the job waits on the person for, kept here so its clock starts once and the surfaces that speak once per
+   * need see one need for as long as it stands. */
+  needsYou?: InitJob["needsYou"];
   /** What the run's sign-in stage runs with, once it has started: a retry runs the same way, through the same relay. */
   signIns?: SignInContext;
 }
@@ -149,7 +164,7 @@ function buildingOn(rt: Runtime, recipe: GoldenRecipe, offs: (() => void)[]): Ru
 
 export class InitJobs implements InitDoor {
   private state: State | undefined;
-  private readonly listeners = new Set<(e: InitJobEvent) => void>();
+  private readonly listeners = new Set<(e: InitJobEvent | InitNeedsYouEvent) => void>();
   private running: Promise<void> = Promise.resolve();
   private count = 0;
   /** Set while a start is opening its thread, before the job stands: a second start meanwhile is refused too. */
@@ -159,7 +174,7 @@ export class InitJobs implements InitDoor {
 
   constructor(private readonly deps: InitJobDeps) {}
 
-  on(fn: (e: InitJobEvent) => void): () => void {
+  on(fn: (e: InitJobEvent | InitNeedsYouEvent) => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
   }
@@ -189,8 +204,10 @@ export class InitJobs implements InitDoor {
       screens: s.screens,
       rows,
       progress: { done: rows.filter(r => initRowOver(r.state)).length, total: rows.length },
+      ...(s.needsYou !== undefined ? { needsYou: s.needsYou } : {}),
       log: s.log.slice(-LOG_TAIL),
       ...(s.thread !== undefined ? { thread: s.thread } : {}),
+      ...(s.line !== undefined ? { line: s.line } : {}),
       ...(s.error !== undefined ? { error: s.error } : {}),
       ...(s.golden !== undefined ? { golden: s.golden } : {}),
       ...(s.workspace !== undefined ? { workspace: s.workspace } : {}),
@@ -199,7 +216,7 @@ export class InitJobs implements InitDoor {
 
   async get(): Promise<InitSetup> {
     const pricing = this.deps.pricing();
-    const agents = (await this.deps.agents()).filter(a => a.found).map(a => ({ id: a.id, name: a.name, configured: a.configured }));
+    const agents = (await this.deps.agents()).filter(a => a.found).map(a => ({ id: a.id, name: a.name, configured: a.configured, takesTools: takesTools(a.id) }));
     return {
       keys: this.held(),
       home: this.deps.home,
@@ -238,8 +255,11 @@ export class InitJobs implements InitDoor {
   async start(o: { road: InitRoad; harness?: string }): Promise<InitJob> {
     if (this.starting || (this.state !== undefined && !initJobOver(this.state.phase))) throw new Error("an init job is already running; cancel it or let it finish first");
     this.count += 1;
-    const state: State = { id: `init_${this.count}`, road: o.road, phase: o.road === "agent" ? "agent" : "reading", screens: [], step: 0, facts: [], rows: [], frames: [], building: false, log: [], signals: new EventEmitter(), cancelled: false, keys: this.held() };
+    const state: State = { id: `init_${this.count}`, road: o.road, phase: o.road === "agent" ? "agent" : "reading", screens: [], step: 0, facts: [], rows: [], frames: [], building: false, log: [], signals: new EventEmitter(), cancelled: false, keys: this.held(), watching: [] };
     if (o.road === "agent") {
+      const path = smallRecipePath(this.deps.statePath);
+      // Read before the thread is launched: whatever recipe is beside the state now is not this thread's.
+      const before = recipeStamp(path);
       // The thread is started here, so a harness the runtime cannot run refuses the start rather than failing a job.
       this.starting = true;
       try {
@@ -250,10 +270,13 @@ export class InitJobs implements InitDoor {
       this.state = state;
       this.emit();
       this.run(state, async () => {
-        const result = await state.handle!.finished;
+        try {
+          await this.recipeArrived(state, path, before);
+        } finally {
+          this.unwatch(state);
+        }
         if (state.cancelled) return;
-        if (result.status !== "completed") throw new Error(`the agent's thread ended without writing the recipe: ${result.error ?? result.status}`);
-        await this.read(state, smallRecipePath(this.deps.statePath));
+        await this.read(state, path);
       });
       return this.view()!;
     }
@@ -428,9 +451,28 @@ export class InitJobs implements InitDoor {
   }
 
   private emit(): void {
+    const s = this.state;
+    if (s === undefined) return;
+    const arrived = this.settleNeed(s);
     const job = this.view();
     if (job === null) return;
     for (const fn of this.listeners) fn({ type: "init.job", job });
+    if (arrived) for (const fn of this.listeners) fn({ type: "job.needs-you", jobId: job.id, needsYou: s.needsYou! });
+  }
+
+  /** What the job waits on the person for, settled against the rows before every view: the clock is taken when a
+   * need arrives and left alone while the same need stands, and a need gone is a need cleared. True where this
+   * settle is the arrival, which is what the one event per need rides. The rows here are the state's own, not the
+   * view's: only their sign-ins carry a wait, and the view reorders nothing that matters to it. */
+  private settleNeed(s: State): boolean {
+    const what = initJobOver(s.phase) ? undefined : initNeedWhat({ rows: s.rows });
+    if (what === undefined) {
+      delete s.needsYou;
+      return false;
+    }
+    if (s.needsYou?.what === what) return false;
+    s.needsYou = { what, since: this.deps.now?.() ?? Date.now() };
+    return true;
   }
 
   /** Background work on the job: a failure lands on the view as the job failing, never as an unhandled rejection. */
@@ -447,24 +489,82 @@ export class InitJobs implements InitDoor {
       .finally(() => this.emit());
   }
 
-  /** Opens the agent's thread on this computer with the cheapest model its harness offers, the wsp tools added to
-   * its config first when they were not, so the recipe tools are there for it to call. */
+  /** Opens the agent's thread on this computer with the cheapest model its harness offers. The server rides the
+   * launch because the config the harness reads here is the person's own, and the access is the harness's bypass
+   * mode because the person is at the setup screen, not at the thread. */
   private async openAgent(s: State, harness: string | undefined): Promise<void> {
     if (harness === undefined) throw new Error("the agent road needs a harness: which agent on this computer writes the recipe");
     const local = (await this.deps.rt.workspaces.list()).find(isLocalWorkspace);
     if (local === undefined) throw new Error(`the agent road runs a thread on ${THIS_COMPUTER}, which is not a workspace yet`);
     const agent = (await this.deps.agents()).find(a => a.id === harness);
     if (agent === undefined || !agent.found) throw new Error(`${catalogEntry(harness)?.name ?? harness} is not on this computer`);
+    const name = catalogEntry(harness)?.name ?? harness;
+    if (!takesTools(harness)) throw new Error(noMcpServersLine(name));
     if (!agent.configured) this.tools(s, this.deps.installTools(new Set([harness])));
-    const model = smallestModel(harnessCatalog(harness));
+    const table = harnessCatalog(harness);
+    const model = smallestModel(table);
     const handle = await this.deps.rt.sessions.start(local.id, {
       prompt: initAgentPrompt(smallRecipePath(this.deps.statePath)),
       harness,
       ...(model !== undefined ? { model } : {}),
+      ...(table?.bypassMode !== undefined ? { permissionMode: table.bypassMode } : {}),
+      mcpServers: { [MCP_SERVER_NAME]: this.deps.mcpServer() },
       title: CLOUD_SETUP_WORDS.agent.title,
     });
     s.handle = handle;
-    s.thread = { id: handle.id, workspaceId: local.id };
+    const threadId = handle.view().threadId ?? handle.id;
+    s.thread = { id: threadId, workspaceId: local.id, session: handle.id, harness };
+    this.watch(s, threadId);
+  }
+
+  /** The thread's own events folded to the one line the agent step shows. Nothing else of the thread is kept: the
+   * chat is where its transcript lives, and the step's link goes there. */
+  private watch(s: State, threadId: string): void {
+    s.watching.push(
+      this.deps.rt.events.on("*", e => {
+        if (!isSessionEvent(e) || e.threadId !== threadId) return;
+        const line = threadWorkingLine(e);
+        if (line === undefined || line === s.line) return;
+        s.line = line;
+        this.emit();
+      }),
+    );
+  }
+
+  private unwatch(s: State): void {
+    for (const off of s.watching.splice(0)) off();
+  }
+
+  /** Waits for the recipe the thread was asked to write to land at the path the brief named. The file's own arrival
+   * is what moves the setup on, so a recipe that was already beside the state is never read as this thread's, and a
+   * turn that ends without writing one fails the job with a line rather than showing the screens off a stale file.
+   * The turn ending is the other wake-up, so the poll only bounds how long a written file waits to be noticed. */
+  private async recipeArrived(s: State, path: string, before: string | undefined): Promise<void> {
+    let ended: TurnResult | undefined;
+    const finished = s.handle!.finished.then(
+      r => {
+        ended = r;
+      },
+      (e: unknown) => {
+        ended = { status: "failed", error: e instanceof Error ? e.message : String(e) };
+      },
+    );
+    // Why a read and not the stamp alone: the recipe tool writes the file from its own process, so a poll can land
+    // inside that write. A file that does not parse yet has not arrived; if the turn ends on one, its reason is why.
+    let unreadable: string | undefined;
+    for (;;) {
+      if (recipeStamp(path) !== before) {
+        try {
+          loadRecipe(path);
+          return;
+        } catch (e) {
+          unreadable = e instanceof Error ? e.message : String(e);
+        }
+      }
+      if (s.cancelled) return;
+      if (ended !== undefined) throw new Error(initAgentNoRecipeLine(path, unreadable ?? ended.error ?? (ended.status === "completed" ? undefined : ended.status)));
+      await Promise.race([finished, new Promise(r => setTimeout(r, RECIPE_POLL_MS))]);
+    }
   }
 
   /** Reads this computer for the screens, from the recipe file when the agent wrote one. Each reader is wrapped so

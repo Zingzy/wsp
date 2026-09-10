@@ -60,4 +60,18 @@ describe("the preload's bridge", () => {
     stop();
     expect(off).toHaveBeenLastCalledWith("shell:chord", listen);
   });
+
+  it("hands over a build that needs the person and takes the click back, unsubscribing with the same listener", async () => {
+    const wsp = await bridge();
+    wsp.needsYou({ what: "sign in to GitHub CLI login", since: 1_760_000_000_000 });
+    expect(send).toHaveBeenLastCalledWith("needs-you:say", { what: "sign in to GitHub CLI login", since: 1_760_000_000_000 });
+    let opened = 0;
+    const stop = wsp.onNeedsYouOpen(() => (opened += 1));
+    expect(on).toHaveBeenLastCalledWith("needs-you:open", expect.any(Function));
+    const listen = on.mock.calls.at(-1)![1] as (event: unknown) => void;
+    listen(null);
+    expect(opened).toBe(1);
+    stop();
+    expect(off).toHaveBeenLastCalledWith("needs-you:open", listen);
+  });
 });

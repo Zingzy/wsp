@@ -3,7 +3,7 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { GoldenMissingTool, GoldenStage, HarnessCatalog, InitJob, InitPhase, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
+import type { GoldenMissingTool, GoldenStage, HarnessCatalog, InitJob, InitPhase, InitRow, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, SessionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
 import { shellLine } from "./shell-quote.js";
 import type { ThreadMessage } from "./thread-read.js";
@@ -28,7 +28,30 @@ export const UNKNOWN_SIZE = "size unknown";
 export const fmtCalls = (n: number): string => `${n.toLocaleString("en-US")} ${n === 1 ? "call" : "calls"}`;
 
 /** The line under a screen's card: what the ticked rows come to. */
-export const initTallyLine = (count: number, noun: string, bytes: number): string => `${plural(count, noun.replace(/s$/, ""))} on the image · ${fmtBytes(bytes)}`;
+export const initTallyLine = (count: number, noun: string, bytes: number): string => `${initTallyCount(count, noun)} · ${fmtBytes(bytes)}`;
+/** The tally's first half, the count of rows on the image, so a view can colour the size after it on its own. The noun
+ * is the screen's plural ("agents", "tools"), or a word that does not count ("more") kept as it is. */
+export const initTallyCount = (count: number, noun: string): string => `${noun.endsWith("s") ? plural(count, noun.replace(/s$/, "")) : `${count} ${noun}`} on the image`;
+
+/** The tone a size is read in, by weight, the one table every size cell, tally total and meter reads: a gigabyte and
+ * over is the danger tone, 300 MB and over the warning tone, 100 MB and over the yellow tone, anything under muted. */
+export type SizeTone = "danger" | "warning" | "yellow" | "muted";
+const SIZE_TONES: readonly (readonly [number, SizeTone])[] = [
+  [1024 * MIB, "danger"],
+  [300 * MIB, "warning"],
+  [100 * MIB, "yellow"],
+];
+export function sizeTone(bytes: number): SizeTone {
+  return SIZE_TONES.find(([from]) => bytes >= from)?.[1] ?? "muted";
+}
+
+/** The tone of the disk meter by the share the estimate takes of the disk: muted under 70 percent, the warning tone
+ * from 70, the danger tone from 90 and when over. */
+export function diskTone(used: number, total: number): "muted" | "warning" | "danger" {
+  const share = total > 0 ? used / total : 1;
+  if (share >= 0.9) return "danger";
+  return share >= 0.7 ? "warning" : "muted";
+}
 
 /** The disk ring's tooltip: what the image holds against the machine's disk. */
 export const initDiskLine = (used: number, total: number): string => `about ${fmtBytes(used)} of ${fmtBytes(total)} on the image`;
@@ -953,20 +976,26 @@ export const CLOUD_SETUP_WORDS = {
   row: "Set up cloud machines",
   title: "Cloud machines",
   choice: {
-    label: "CLOUD MACHINES",
     headline: "Set up cloud machines",
     top: "Your setup goes on one machine image, built once and forked for every thread",
     manual: "Choose what goes on the image",
     agent: "Let an agent choose from your usage",
     agentWith: "with",
+    /** An agent here whose thread wsp cannot hand the recipe tools at launch: shown, never offered. */
+    noTools: "no wsp tools yet",
+    /** What the agent row says with no agent on this computer at all. */
+    none: "no agent here",
     keycap: "Continue",
   },
   keys: {
-    label: "PROVIDER KEY",
     headline: "Your Solari key",
-    top: "Solari runs the machines; the key is saved in wsp's home on this computer and never leaves it",
-    solari: "Solari API key",
+    top: "Solari runs the machines",
+    solari: "API key",
+    /** The empty field's ghost: the start every Solari key has, and no more. */
+    placeholder: "slr_live_...",
     where: "Get one at Solari",
+    /** Why Save is disabled, as its tooltip. */
+    pasteFirst: "paste the key first",
     saved: "saved",
     unset: "not set",
     keycap: "Save",
@@ -984,7 +1013,6 @@ export const CLOUD_SETUP_WORDS = {
     disk: "Disk on the image",
   },
   ask: {
-    label: "BUILD",
     headline: "Your first cloud workspace",
     top: "Forked from the image as soon as the build finishes",
     name: "Name",
@@ -993,21 +1021,21 @@ export const CLOUD_SETUP_WORDS = {
     choose: "Choose",
   },
   build: {
-    label: "BUILD",
     headline: "Building your image",
     top: "The machine boots, installs what you ticked and is saved as the image every thread forks",
-    image: "IMAGE",
-    signIns: "SIGN-INS",
-    computer: "THIS COMPUTER",
-    workspace: "WORKSPACE",
+    /** The one stage row the sign-ins fold into, its sub-rows one per sign-in. */
+    signingIn: "Signing in on the machine",
+    /** The slide the build becomes while that stage runs: room to act on each sign-in. */
+    slideHeadline: "Sign in on the machine",
+    slideTop: "Each one opens a page on this computer, and the machine keeps the sign-in",
     open: "Open sign-in",
     retry: "Retry",
     codeAsk: "Paste the code from the page",
     codeSubmit: "Submit",
-    keeps: "The build keeps running; the sidebar shows its progress",
+    keeps: "You can close this. The build keeps going and wsp tells you when it needs you",
     cancel: "Cancel the build",
     /** Why the cancel link is disabled while the seal runs: the host's refusal and the app's tooltip, one sentence. */
-    cannotStop: "The image is being saved; the snapshot and the save cannot be stopped",
+    cannotStop: "The image is being saved. The snapshot and the save cannot be stopped.",
     cancelSure: "Stop the build",
     cancelWhy: "The machine is thrown away and nothing is saved",
     cancelKeep: "Keep building",
@@ -1017,15 +1045,29 @@ export const CLOUD_SETUP_WORDS = {
     again: "Start over",
   },
   agent: {
-    label: "AGENT",
     headline: "Reading what your agents used",
     top: "Your agent reads this computer and writes the recipe the next screens start from",
     title: "Set up cloud machines",
+    /** The link to the thread doing the work, which the sidebar focuses. */
+    open: "Open the thread",
+    /** The headline once the turn ended without the recipe, and the two ways on from there. */
+    failed: "Your agent stopped",
+    /** The sentence under it when nothing named a reason, which is a job stopped from another client. */
+    stopped: "The thread ended before the recipe was written",
+    retry: "Retry",
+    again: "Start over",
+    /** What the block under the title says before the thread's first line. */
+    waiting: "waiting for the thread's first line",
   },
   reading: {
-    label: "THIS COMPUTER",
     headline: "Reading this computer",
     top: "What is installed here and what your agents used decides what the image starts with",
+    /** The one row the card shows until the first fact lands, so the work reads as started. */
+    first: "This computer",
+  },
+  needsYou: {
+    /** The one action on the toast and the one thing a system notification's click does. */
+    open: "Open",
   },
 } as const;
 
@@ -1139,32 +1181,113 @@ export const initJobOver = (phase: InitPhase): boolean => phase === "done" || ph
 /** Whether the job is on the build: from the machine booting to the first workspace, the stretch the count is over. */
 export const initJobBuilding = (phase: InitPhase): boolean => phase === "building" || phase === "signing-in" || phase === "sealing" || phase === "finishing";
 
+/** Whether the job's step is the agent's own: the agent road while its thread writes the recipe, and a job that
+ * ended there, which is the step that carries Retry. A job that ended with screens ended past this step, on the
+ * build. One rule, so the app's sheet and the terminal pick the same step for one job. */
+export const initAgentStep = (job: Pick<InitJob, "road" | "phase" | "screens">): boolean =>
+  job.road === "agent" && (job.phase === "agent" || (initJobOver(job.phase) && job.screens.length === 0));
+
+/** The sentence a sign-in whose page is open makes: one spelling for the sidebar's line, the toast and a system
+ * notification. */
+const signInTo = (label: string): string => `sign in to ${label}`;
+
+/** The sign-in row whose page waits for the person, if one does. */
+const openSignIn = (rows: InitJob["rows"]): InitJob["rows"][number] | undefined => rows.find(r => r.kind === "sign-in" && r.state === SIGN_IN_OPEN_STATE);
+
+/** What the job waits on the person for, or nothing: a sign-in whose page is open on the machine and nothing else
+ * today. Only a wait the person is not already looking at counts, so the screens they just opened are not one; the
+ * phase word says where those stand. The host writes the job's needsYou from this and every surface reads that
+ * field, so nothing derives the wait twice. */
+export function initNeedWhat(job: Pick<InitJob, "rows">): string | undefined {
+  const open = openSignIn(job.rows);
+  return open === undefined ? undefined : signInTo(open.label);
+}
+
+/** What the app says when it needs the person: the toast's opening and a system notification's title. */
+export const NEEDS_YOU = "wsp needs you";
+
+/** The one line the toast and a system notification say for a need. */
+export const initNeedsYouLine = (what: string): string => `${NEEDS_YOU}: ${what}`;
+
+/** What a window or tab title leads with while a need stands, so a person reading only the title sees it. */
+export const NEEDS_YOU_MARK = "• ";
+
+/** The title with the mark on it while a need stands and without it otherwise, from a title that may already carry
+ * one: the same title goes through this on every change, so the mark can never double or stick. */
+export function titleWithNeed(title: string, needed: boolean): string {
+  const plain = title.startsWith(NEEDS_YOU_MARK) ? title.slice(NEEDS_YOU_MARK.length) : title;
+  return needed ? `${NEEDS_YOU_MARK}${plain}` : plain;
+}
+
 /** The one line the collapsed sidebar row shows for a running job: the sign-in waited on while one is open, the phase
  * with the count of rows over while it builds, the phase word alone otherwise. */
 export function initProgressLine(job: Pick<InitJob, "phase" | "rows" | "progress">): string {
-  const open = job.rows.find(r => r.kind === "sign-in" && r.state === SIGN_IN_OPEN_STATE);
-  if (open !== undefined) return `sign in to ${open.label}`;
+  const open = openSignIn(job.rows);
+  if (open !== undefined) return signInTo(open.label);
   const word = initPhaseWord(job.phase);
   return initJobBuilding(job.phase) && job.progress.total > 0 ? `${word} · ${job.progress.done}/${job.progress.total}` : word;
 }
 
 /** The facts the sidebar's button and the build screen's bar draw: the rows over as a fraction of the total (0 before
- * the build has rows), and whether the job waits on the person (the answers, or a sign-in's open page) rather than on
- * the machine. */
-export function initProgressState(job: Pick<InitJob, "phase" | "rows" | "progress">): { fraction: number; waitingOnYou: boolean } {
-  const open = job.rows.some(r => r.kind === "sign-in" && r.state === SIGN_IN_OPEN_STATE);
-  return { fraction: job.progress.total > 0 ? job.progress.done / job.progress.total : 0, waitingOnYou: open || job.phase === "answering" };
+ * the build has rows), and whether the job waits on the person rather than on the machine, which is the host's own
+ * needsYou field and nothing derived beside it. */
+export function initProgressState(job: Pick<InitJob, "progress" | "needsYou">): { fraction: number; waitingOnYou: boolean } {
+  return { fraction: job.progress.total > 0 ? job.progress.done / job.progress.total : 0, waitingOnYou: job.needsYou !== undefined };
 }
+
+/** The id of the stage row the build's sign-ins fold into. */
+export const SIGN_IN_STAGE_ID = "stage/sign-ins";
+
+/** The build's list as the app draws it: stages only, in the job's order, the sign-ins folded into one stage row where
+ * the first of them sits, whose state is the sign-ins' own (waiting for you while a page waits on the person, running
+ * while one runs, not signed in once every one is over and one ran out, done once every one is over well, waiting
+ * before any starts); the agent rows are not build stages and leave. The sign-ins come back beside it, for the stage's sub-rows. */
+export function initBuildRows(rows: readonly InitRow[]): { rows: InitRow[]; signIns: InitRow[] } {
+  const signIns = rows.filter(r => r.kind === "sign-in");
+  const out: InitRow[] = [];
+  let folded = false;
+  for (const row of rows) {
+    if (row.kind === "agent") continue;
+    if (row.kind !== "sign-in") {
+      out.push(row);
+      continue;
+    }
+    if (folded) continue;
+    folded = true;
+    const state = signIns.some(r => r.state === SIGN_IN_OPEN_STATE)
+      ? SIGN_IN_OPEN_STATE
+      : signIns.some(r => r.state === INIT_ROW_STATES.running)
+        ? INIT_ROW_STATES.running
+        : signIns.every(r => initRowOver(r.state))
+          ? signIns.some(r => r.state === INIT_SIGN_IN_WORDS["not-signed-in"])
+            ? INIT_SIGN_IN_WORDS["not-signed-in"]
+            : INIT_ROW_STATES.done
+          : signIns.every(r => r.state === INIT_ROW_STATES.waiting)
+            ? INIT_ROW_STATES.waiting
+            : INIT_ROW_STATES.running;
+    out.push({ id: SIGN_IN_STAGE_ID, kind: "stage", label: CLOUD_SETUP_WORDS.build.signingIn, state });
+  }
+  return { rows: out, signIns };
+}
+
+/** How many of the build's rows ended well, of all of them: what the line along the card's top edge and the count
+ * beside the title read. A failed row is over but not done, so a failed build never reads complete. */
+export function initStageCount(rows: readonly InitRow[]): { done: number; total: number } {
+  return { done: rows.filter(r => initRowOver(r.state) && r.state !== INIT_ROW_STATES.failed).length, total: rows.length };
+}
+
+/** The count as words: `3 of 12`. */
+export const initStageCountLine = (count: { done: number; total: number }): string => `${count.done} of ${count.total}`;
 
 /** The sidebar button's words for a running job: `waiting for you` while the person is waited on, the progress line
  * otherwise. */
-export function initButtonLine(job: Pick<InitJob, "phase" | "rows" | "progress">): string {
+export function initButtonLine(job: Pick<InitJob, "phase" | "rows" | "progress" | "needsYou">): string {
   return initProgressState(job).waitingOnYou ? WAITING_FOR_YOU : initProgressLine(job);
 }
 
-/** What the machine the build boots costs, said once on the key screen from the backend's own rate. */
+/** What the machine the build boots costs, said once under the key screen's title from the backend's own rate. */
 export function initCostLine(size: WorkspaceSize, rateUsdPerHour: number): string {
-  return `A ${fmtSize(size)} machine costs about ${fmtRate(rateUsdPerHour)} while it runs; it naps when idle.`;
+  return `A ${fmtSize(size)} machine costs about $${rateUsdPerHour.toFixed(2)} an hour while it runs and naps when idle`;
 }
 
 /** The cloud setup as wsp setup prints it: which keys are held, the agents here with their tools, the price, and the
@@ -1187,15 +1310,25 @@ export function initSetupLines(setup: InitSetup): string[] {
 
 /** The first message of the thread the agent road opens on this computer: read this computer with recipe_scan, write
  * the recipe with recipe to the path the job reads it from, and ask the person nothing, since they review every row
- * on the screens that follow. */
+ * on the screens that follow. The two tools are named as the only road on purpose: a thread that reached for the
+ * command line instead spent its turn on one permission prompt per `sed` over its own tool results (seen 2026-09-10),
+ * and the launch carries the wsp server so both tools are there to call. */
 export function initAgentPrompt(recipePath: string): string {
   return [
     "Write the recipe for this person's wsp machine image from what their agents actually used on this computer.",
+    "Use the wsp tools recipe_scan and recipe, and nothing else: run no commands and read no files.",
     "Call recipe_scan first and read every row's recommended value and its reason.",
     `Then call recipe once, with tick set to used, set for every row whose reason says it is worth changing, signin for every sign-in row at its recommended choice, and out set to ${recipePath}.`,
-    "Ask them nothing and run nothing else: they review every row in the app once the file is written.",
+    "Ask them nothing: they review every row in the app once the file is written.",
     "Reply with one line saying the recipe is written.",
   ].join(" ");
+}
+
+/** What the agent step says when the thread's turn ended and no recipe arrived at the path the brief named: the
+ * turn's own reason where it had one, and what the file was waited on for. A recipe that was already beside the
+ * state is not this thread's, so this is the line even when a file is sitting there. */
+export function initAgentNoRecipeLine(recipePath: string, reason?: string): string {
+  return `the thread ended without writing ${recipePath}${reason === undefined || reason === "" ? "" : `: ${reason}`}`;
 }
 
 /** What a local workspace's machine is, in every sentence and every row that names it: the refusals below, the
@@ -1255,6 +1388,20 @@ export function noSshImportLine(name: string): string {
  * next socket, and a socket this host minted no relay ticket for is one of the person's own, so a machine that
  * could mint one would hand itself the origin the relay stamps on it. */
 export const RELAY_TICKET_REFUSAL = "a request relayed from a machine cannot mint a ticket into this host";
+
+/** What a thread is doing, as the one line a client with no transcript shows: the tool call it is running, the
+ * prompt it is blocked on, else its own latest line of prose. Nothing for an event that says nothing about the
+ * work, so a caller keeps the line it had. */
+export function threadWorkingLine(e: SessionEvent): string | undefined {
+  switch (e.type) {
+    case "session.delta":
+      return e.kind === "text" || e.kind === "thinking" ? lastLine(e.text) : e.kind === "tool_use" ? toolActivityLine(e.toolName, e.text) : undefined;
+    case "session.permission":
+      return permissionAskLine(e.toolName, e.detail);
+    default:
+      return undefined;
+  }
+}
 
 /** The prompt row's lead, the same on every surface that shows a relayed permission prompt: the tool the harness
  * wants to run, and what it wants to run it on where the harness named one. No question mark: the options under it
