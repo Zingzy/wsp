@@ -344,6 +344,9 @@ export interface VerbDeps {
    * agent starts in its own folder. What a thread opened with no workspace named is placed by. Absent where the
    * caller has none. */
   cwd?: string;
+  /** The environment the caller runs in, which is where the token of the turn a verb is running inside comes from.
+   * Both doors hand in this process's; a test hands in the one it means, never the shell that started it. */
+  env: Readonly<Record<string, string | undefined>>;
   /** The socket to the host: a verb's own dial, closed when it returns; a tool server's one dial across calls. */
   client(): Promise<HostClient>;
   /** The runtime over the state file in this process, for the one verb that runs with no host serving (new --local
@@ -997,12 +1000,12 @@ function openedLine(target: Awaited<ReturnType<typeof threadTarget>>, workspace:
  * the runtime's one rule, the same one the app's composer reads. notify names who every turn's end on it is told,
  * each a thread or NOTIFY_ME. The one place both doors, the command line and the MCP server, put the token of the
  * turn they are running inside on a start: it is what the host reads NOTIFY_ME against, and there is none when the
- * caller is not a turn. */
-export function openingOf(workspace: WorkspaceView, prompt: string, opts: Picks & { harness?: string; cwd?: string; project?: string; notify?: readonly string[]; title?: string; images?: readonly string[] } = {}): Record<string, unknown> {
+ * caller is not a turn; the environment it is read off is the caller's, handed in, never this process's. */
+export function openingOf(env: VerbDeps["env"], workspace: WorkspaceView, prompt: string, opts: Picks & { harness?: string; cwd?: string; project?: string; notify?: readonly string[]; title?: string; images?: readonly string[] } = {}): Record<string, unknown> {
   const cwd = absoluteFolder(opts.cwd);
   const project = projectNamed(workspace, opts.project);
   const attachments = imagesFrom(opts.images ?? []);
-  const turnToken = turnTokenOf(process.env);
+  const turnToken = turnTokenOf(env);
   return {
     workspaceId: workspace.id,
     prompt,
@@ -1922,7 +1925,7 @@ export const VERBS: readonly Verb[] = [
       if (task !== undefined) await checkedStart(client, task, harness, picks, source.id);
       const created = await create(client, ctx.out, source.golden, flag(ctx.flags, "name") ?? `${source.name}-fork`, flag(ctx.flags, "size"));
       if (task === undefined) return 0;
-      ctx.out.emit({ turn: turnView(await followVerb(ctx, client, openingOf(created.workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify }), true)) });
+      ctx.out.emit({ turn: turnView(await followVerb(ctx, client, openingOf(ctx.env, created.workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify }), true)) });
       return 0;
     },
     tool: tool({
@@ -1939,7 +1942,7 @@ export const VERBS: readonly Verb[] = [
         if (task === undefined) return asJson(created);
         let failure: string;
         try {
-          const turn = await follow(client, openingOf(created.workspace, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell ?? []) }), "agent", QUIET_TURN);
+          const turn = await follow(client, openingOf(deps.env, created.workspace, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell ?? []) }), "agent", QUIET_TURN);
           const ended = turnFailure(turn);
           if (ended === undefined) return asJson({ ...created, turn: turnView(turn) });
           failure = ended;
@@ -2124,7 +2127,7 @@ export const VERBS: readonly Verb[] = [
       const cwd = flag(ctx.flags, "cwd");
       const opened = openedLine(target, found, project, cwd);
       const workspace = await awake(client, found, "send", line => ctx.io.error(line));
-      const opening = openingOf(workspace, task, { harness, ...picks, project, cwd, notify: await notifyOf(client, flagList(ctx.flags, "notify")), title: flag(ctx.flags, "title"), images: flagList(ctx.flags, "image") });
+      const opening = openingOf(ctx.env, workspace, task, { harness, ...picks, project, cwd, notify: await notifyOf(client, flagList(ctx.flags, "notify")), title: flag(ctx.flags, "title"), images: flagList(ctx.flags, "image") });
       if (ctx.flags["detach"] === true) await detachVerb(ctx, client, opening, {}, opened);
       else ctx.out.emit(turnView(await followVerb(ctx, client, opening, true, {}, opened)));
       return 0;
@@ -2141,7 +2144,7 @@ export const VERBS: readonly Verb[] = [
         const project = projectNamed(found, named ?? target.project);
         const opened = openedLine(target, found, project, folder);
         const awoken = await awake(client, found, "send", QUIET_LINE);
-        const opening = openingOf(awoken, task, { harness, ...input, project, cwd: folder, notify: await notifyOf(client, tell ?? []), title, images });
+        const opening = openingOf(deps.env, awoken, task, { harness, ...input, project, cwd: folder, notify: await notifyOf(client, tell ?? []), title, images });
         if (detach === true) return detachedOut(await startDetached(client, opening, "agent"), opened);
         const out = turnOut(await follow(client, opening, "agent", QUIET_TURN));
         return asText(opened === undefined ? turnText(out) : `${opened(out.threadId)}\n${turnText(out)}`, out);
@@ -2574,7 +2577,7 @@ export function jsonAsked(argv: ReadonlyArray<string>): boolean {
   return argv.slice(0, cut === -1 ? argv.length : cut).includes("--json");
 }
 
-export async function runVerb(verb: CliVerb, argv: ReadonlyArray<string>, io: CliIO, statePathOf: (flag?: string) => string, deps: Pick<VerbDeps, "alsoHere" | "cwd" | "runtime"> = {}): Promise<number> {
+export async function runVerb(verb: CliVerb, argv: ReadonlyArray<string>, io: CliIO, statePathOf: (flag?: string) => string, deps: Pick<VerbDeps, "alsoHere" | "cwd" | "runtime" | "env">): Promise<number> {
   let flags: Flags;
   let args: string[];
   try {
@@ -2597,6 +2600,7 @@ export async function runVerb(verb: CliVerb, argv: ReadonlyArray<string>, io: Cl
     io,
     out: formatter(io, flags["json"] === true),
     statePath,
+    env: deps.env,
     ...(deps.alsoHere !== undefined ? { alsoHere: deps.alsoHere } : {}),
     ...(deps.cwd !== undefined ? { cwd: deps.cwd } : {}),
     ...(deps.runtime !== undefined ? { runtime: deps.runtime } : {}),

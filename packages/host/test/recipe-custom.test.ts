@@ -98,7 +98,7 @@ describe("the recipe verb's flags", () => {
   /** The recipe verb down the command line's own door, with what this computer's managers have handed in: `cli`
    * reaches the same `runVerb` and hands it the real scan, which a unit test must not run. */
   const onCli = (argv: readonly string[], out: string[], errors: string[], dir: string, here: readonly ScanRow[] = []): Promise<number> =>
-    withHome(dir, () => runVerb(verb, ["recipe", ...argv], io(out, errors), () => join(dir, "state.json"), { alsoHere: async () => here }));
+    withHome(dir, () => runVerb(verb, ["recipe", ...argv], io(out, errors), () => join(dir, "state.json"), { alsoHere: async () => here, env: {} }));
 
   it("names both flags in the help, and in the recipe verb's own usage", async () => {
     const lines: string[] = [];

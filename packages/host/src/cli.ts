@@ -1221,7 +1221,7 @@ function commandUsage(word: string): string | undefined {
  * once per `--agent` given, and answers with the lines or, with `--json`, the report as one line. Its flags are
  * parsed here rather than in the table every command shares, so a command that has no JSON to print refuses
  * `--json` instead of taking it and printing prose. */
-async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => string, run: RunningWsp): Promise<number> {
+async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => string, run: RunningWsp, env: Readonly<Record<string, string | undefined>>): Promise<number> {
   const usage = mcpUsage();
   let values: { agent?: string[]; json?: boolean; remove?: boolean; state?: string; help?: boolean };
   let words: string[];
@@ -1237,7 +1237,7 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
   const statePath = statePathOf(values.state);
   if (words.length === 0) {
     // The agent starts the server in its own folder, which is the folder a thread opened with no workspace is placed by.
-    await serveMcp(statePath, { alsoHere, cwd: process.cwd() });
+    await serveMcp(statePath, { alsoHere, cwd: process.cwd(), env });
     return 0;
   }
   const json = values.json === true;
@@ -1306,12 +1306,13 @@ export const COMMAND_LINES: readonly CommandLine[] = [
 ];
 
 /** `run` is how this process was started, which the MCP install writes into an agent's config as the way to start it
- * again; the desktop's bundled command hands in its shim, the npm command the default reading. */
-export async function cli(argv: string[], io: CliIO = terminalIO(), run: RunningWsp = runningWsp()): Promise<number> {
+ * again; the desktop's bundled command hands in its shim, the npm command the default reading. `env` is the
+ * environment the verbs run with, this process's for a real command line and its own for a test. */
+export async function cli(argv: string[], io: CliIO = terminalIO(), run: RunningWsp = runningWsp(), env: Readonly<Record<string, string | undefined>> = process.env): Promise<number> {
   const verb = findVerb(argv);
   // The one verb that runs with no host serving, new --local, builds the runtime over the state file in this process.
-  if (verb !== undefined) return runVerb(verb, argv, io, statePathFrom, { alsoHere, cwd: process.cwd(), runtime: async statePath => makeRuntime(await loadKeys(io, undefined, { anthropic: false, noSolari: "local" }), statePath) });
-  if (argv[0] === MCP_COMMAND) return mcp(io, argv.slice(1), statePathFrom, run);
+  if (verb !== undefined) return runVerb(verb, argv, io, statePathFrom, { alsoHere, cwd: process.cwd(), env, runtime: async statePath => makeRuntime(await loadKeys(io, undefined, { anthropic: false, noSolari: "local" }), statePath) });
+  if (argv[0] === MCP_COMMAND) return mcp(io, argv.slice(1), statePathFrom, run, env);
   let values: SharedFlags;
   let positionals: string[];
   try {
