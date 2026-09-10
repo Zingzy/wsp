@@ -3725,6 +3725,26 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_wsp-h1-default-v1", true], ["snap_wsp-h1-default-v1", false], [undefined, false], ["snap_wsp-h1-default-v2", true]]);
   });
 
+  it("--first-workspace on a rebuild forks it whatever the list holds, and the workspaces already there stay on the version they came from", async () => {
+    const { store, shared, first, next } = await sealed();
+    const alpha = await createRuntime({ backend: shared, store, adapters: {}, hostId: "box:h1" }).workspaces.create({ golden: "snap_wsp-h1-default-v1", name: "alpha" });
+    const f = next({ recipe: async () => ticking("codex") });
+    f.opts.firstWorkspace = "proj";
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const out = f.text();
+    expect(out).toContain("Golden v2 sealed.");
+    // The step was answered, so the count of workspaces has nothing to say and the stay line stands down.
+    expect(out).not.toContain("stays on the golden version it was forked from");
+    expect(out).toMatch(/Workspace proj \(ws_[0-9a-f]+\) forked from golden v2\./);
+    expect(f.trail).toContain("fork proj");
+    const workspaces = await f.runtimes.at(-1)!.workspaces.list();
+    expect(workspaces.map(w => w.name).sort()).toEqual(["alpha", "proj"]);
+    // The one that was already there is untouched: the fork above it is a new machine on the new version.
+    expect(workspaces.find(w => w.name === "alpha")!.golden).toBe(alpha.golden);
+    expect(workspaces.find(w => w.name === "proj")!.golden).toBe("snap_wsp-h1-default-v2");
+    expect(first.text()).not.toContain("Workspace proj");
+  });
+
   it("interactive: the offer is a choice with the update first when the change is small; enter takes it", async () => {
     const { shared, first, next } = await sealed();
     writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");

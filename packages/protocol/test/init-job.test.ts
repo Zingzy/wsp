@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   CLOUD_SETUP_WORDS,
   EventUnion,
+  FIRST_WORKSPACE,
   InitJob,
   InitJobEvent,
   InitNeedsYouEvent,
@@ -276,7 +277,7 @@ describe("the words the clients print for the job", () => {
   });
 
   it("a row's state words have one table, and one predicate says which of them end the row", () => {
-    expect(INIT_ROW_STATES).toEqual({ waiting: "waiting", running: "running", done: "done", failed: "failed", forking: "forking", forked: "forked", importing: "importing", imported: "imported", open: "waiting for you", keySet: "key set", mcpAdded: "MCP added" });
+    expect(INIT_ROW_STATES).toEqual({ waiting: "waiting", running: "running", done: "done", failed: "failed", forking: "forking", forked: "forked", importing: "importing", imported: "imported", open: "waiting for you", keySet: "key set", skipped: "skipped", mcpAdded: "MCP added" });
     for (const word of ["done", "failed", "forked", "imported", "MCP added", "key set", "signed in", "not signed in", "copied", "copied from this Mac", "not verified", "skipped"]) expect(initRowOver(word), word).toBe(true);
     for (const word of ["waiting", "running", "forking", "importing", "waiting for you"]) expect(initRowOver(word), word).toBe(false);
     // The app's row words for a sign-in's outcome: done once the machine has the credential, the copy named as such.
@@ -300,6 +301,11 @@ describe("the words the clients print for the job", () => {
     const takesCode = row({ id: "sign-in/gcloud", kind: "sign-in", tool: "gcloud", label: "Google Cloud login", state: INIT_ROW_STATES.open, page: "https://accounts.google.com/o/oauth2/auth", finish: "code" });
     expect(InitJob.parse({ ...JOB, rows: [takesCode] }).rows[0]).toEqual(takesCode);
     expect(InitJob.safeParse({ ...JOB, rows: [row({ finish: "paste" as InitRow["finish"] })] }).success).toBe(false);
+  });
+
+  it("the first workspace's default name and the reason its keycap is held live here, so the terminal and the app read one spelling each", () => {
+    expect(FIRST_WORKSPACE).toBe("first");
+    expect(CLOUD_SETUP_WORDS.ask.needsName).toBe("give the workspace a name");
   });
 
   it("the provider's console is spelled once, and the key screen's link names the company, not the host", () => {

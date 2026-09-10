@@ -447,6 +447,31 @@ describe("the cloud setup sheet", () => {
     await waitFor(() => expect(k(dialog, "screen-logins")).toBeDefined());
   });
 
+  it("the build's question with the name cleared: the keycap is held and says why, so a folder can never be sent with nothing to fork", async () => {
+    const t = await open({ setup: HELD });
+    await waitFor(() => expect(k(t.dialog, "choice")).toBeDefined());
+    fireEvent.click(k(t.dialog, "primary"));
+    await waitFor(() => expect(t.api.initStart).toHaveBeenCalled());
+    t.emit({ ...JOB, step: 4 });
+    const { dialog, api } = t;
+    await waitFor(() => expect(k(dialog, "ask")).toBeDefined());
+    fireEvent.change(within(dialog).getByLabelText(/Project folder/), { target: { value: "/Users/me/code/app" } });
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "  " } });
+    await waitFor(() => expect(k(dialog, "primary").hasAttribute("disabled")).toBe(true));
+    expect(k(dialog, "primary-reason")).toBeDefined();
+    fireEvent.click(k(dialog, "primary"));
+    expect(api.initBuild).not.toHaveBeenCalled();
+    // Enter in either field is the same keycap, so neither road sends a folder with no name.
+    fireEvent.keyDown(within(dialog).getByLabelText(/Project folder/), { key: "Enter" });
+    expect(api.initBuild).not.toHaveBeenCalled();
+    // A name typed back frees it, and the build goes with both.
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "proj" } });
+    await waitFor(() => expect(k(dialog, "primary").hasAttribute("disabled")).toBe(false));
+    expect(dialog.querySelector("[data-k=primary-reason]")).toBeNull();
+    fireEvent.click(k(dialog, "primary"));
+    await waitFor(() => expect(api.initBuild).toHaveBeenCalledWith({ firstWorkspace: "proj", importFolder: "/Users/me/code/app" }));
+  });
+
   it("the step lives on the host: the sheet opens on the step the job stands at, Back moves the host's step, and the first step's secondary is Start over, which ends the job", async () => {
     const at2: InitJob = { ...JOB, step: 2, screens: JOB.screens.map(s => (s.id === "agents" ? { ...s, ticks: ["claude", "codex"] } : s)) };
     const { api, dialog, emit } = await open({ setup: { ...HELD, job: at2 } });
