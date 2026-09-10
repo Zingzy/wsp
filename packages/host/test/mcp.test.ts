@@ -66,10 +66,14 @@ describe("the MCP server over the host", () => {
   let codex: ReturnType<typeof scriptedAgent>;
   let client: Client | undefined;
   let server: ReturnType<typeof mcpServer> | undefined;
+  /** The environment the tool server runs with: this file's, never the shell that started the run, so a builder with
+   * WSP_TURN exported does not have every start refused. The case that means a turn writes that turn's token into it. */
+  let env: Record<string, string | undefined>;
   /** The host socket the server last dialled, so a test can wait for the host's close to reach it. */
   let socket: HostClient | undefined;
 
   beforeEach(async () => {
+    env = {};
     dir = mkdtempSync(join(tmpdir(), "wsp-mcp-"));
     const webDir = join(dir, "web");
     mkdirSync(join(webDir, "assets"), { recursive: true });
@@ -104,7 +108,7 @@ describe("the MCP server over the host", () => {
   async function connect(over: Partial<Parameters<typeof mcpServer>[1]> = {}): Promise<Client> {
     const [toClient, toServer] = InMemoryTransport.createLinkedPair();
     const dial = dialer(statePath);
-    server = mcpServer(statePath, { dial: Object.assign(async () => (socket = await dial()), { close: dial.close }), ...over });
+    server = mcpServer(statePath, { dial: Object.assign(async () => (socket = await dial()), { close: dial.close }), env, ...over });
     await server.connect(toServer);
     client = new Client({ name: "test-agent", version: "0.0.0" });
     await client.connect(toClient);
@@ -822,7 +826,7 @@ describe("the MCP server over the host", () => {
     expect(missing).toEqual(failedWith("no thread nope"));
   });
 
-  it("thread_new with notify me, called by an agent inside a turn, names that turn's thread: the server reads the token off its own environment", async () => {
+  it("thread_new with notify me, called by an agent inside a turn, names that turn's thread: the server reads the token off the environment it runs with", async () => {
     const held = heldAgent(true);
     await restartHost({ claude: held.adapter });
     await call("new", { name: "alpha" });
@@ -830,7 +834,7 @@ describe("the MCP server over the host", () => {
     await vi.waitFor(() => expect(held.starts).toHaveLength(1));
     const [parentRow] = await rt.sessions.list();
     // The MCP server this agent runs is a child of that turn's process, so it holds the turn's own variable.
-    vi.stubEnv(TURN_TOKEN_ENV, held.envs[0]![TURN_TOKEN_ENV]!);
+    env[TURN_TOKEN_ENV] = held.envs[0]![TURN_TOKEN_ENV]!;
     const kid = call("thread_new", { workspace: "alpha", task: "build it", notify: ["me"] });
     await vi.waitFor(() => expect(held.starts).toHaveLength(2));
     const kidRow = (await rt.sessions.list()).find(r => r.threadId !== parentRow!.threadId)!;
@@ -842,7 +846,7 @@ describe("the MCP server over the host", () => {
     held.release(0, "read it");
     await parent;
     // A token no turn carries is refused on this door in the contract's own shape.
-    vi.stubEnv(TURN_TOKEN_ENV, "f".repeat(32));
+    env[TURN_TOKEN_ENV] = "f".repeat(32);
     expect(await call("thread_new", { workspace: "alpha", task: "x", notify: ["me"] })).toEqual(failedWith(NO_SUCH_TURN));
   });
 
@@ -1036,7 +1040,7 @@ describe("the MCP server over the host", () => {
     client = undefined;
     const toServer = new PassThrough();
     const fromServer = new PassThrough();
-    const served = serveMcp(statePath, {}, { input: toServer, output: fromServer });
+    const served = serveMcp(statePath, { env }, { input: toServer, output: fromServer });
     const stdio = new Client({ name: "test-agent", version: "0.0.0" });
     await stdio.connect(streamTransport(toServer, fromServer));
     const result = await stdio.callTool({ name: "workspaces", arguments: {} });

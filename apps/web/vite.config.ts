@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
+import { TEST_ENV } from "../../vitest.env.js";
 
 const pkg = (path: string) => fileURLToPath(new URL(`../../packages/${path}`, import.meta.url));
 
@@ -23,6 +24,7 @@ export default defineConfig(({ command }) => ({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./test/setup.ts"],
+    env: TEST_ENV,
     // A budget, not a retry: the slowest case here runs half a second idle, and a gate at load average 135
     // stretched cases of 0.05 to 0.2 s to 5 to 8 s. 20 s is 40 times the slowest idle case, 2.5 times that stretch.
     testTimeout: 20_000,

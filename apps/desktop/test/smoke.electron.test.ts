@@ -362,6 +362,10 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     await page.waitForSelector("#agents:not([hidden])");
     expect(await page.isHidden("#welcome")).toBe(true);
     expect(await page.textContent("#agents h1")).toBe("Let your agents drive wsp");
+    // The session counts land after the rows and are what the list is ordered by, so every reading of the list waits
+    // for them first: read before they land, the order is the one the counts are about to change.
+    await page.waitForFunction(() => /^\d+ sessions?$/.test(document.querySelector("#rows li[data-agent=claude] .meta")?.textContent ?? ""), undefined, { timeout: 30_000 });
+    expect(await page.textContent("#rows li[data-agent=claude] .meta")).toBe("0 sessions");
     // No caps label over the title, and Enter put no ring on the keycap: a ring comes only where the keyboard puts the focus.
     expect(await page.$$eval(".micro", els => els.length)).toBe(0);
     expect(await page.$eval("#agents", el => el.firstElementChild?.tagName.toLowerCase())).toBe("h1");
@@ -379,9 +383,6 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     // The marks are the web app's vendored svgs, masked in the current colour; an agent without one gets its initial.
     expect(await page.$eval("#rows li[data-agent=claude] .glyph", el => (el as HTMLElement).style.getPropertyValue("--mark"))).toContain("agents/claude.svg");
     expect(await page.$eval("#rows li[data-agent=hermes] .initial", el => el.textContent)).toBe("H");
-    // The session counts land after the rows, read off the stores, which here are empty.
-    await page.waitForFunction(() => /^\d+ sessions?$/.test(document.querySelector("#rows li[data-agent=claude] .meta")?.textContent ?? ""), undefined, { timeout: 30_000 });
-    expect(await page.textContent("#rows li[data-agent=claude] .meta")).toBe("0 sessions");
     expect(await page.textContent("#skip")).toBe("Skip");
     expect(await page.isEnabled("#all")).toBe(true);
     // Every row one height, whatever its slot holds.
@@ -419,6 +420,9 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(boot.token).toMatch(TOKEN);
     await closed;
     await vi.waitFor(() => expect(appWindows(app)).toHaveLength(1), { timeout: 10_000, interval: 50 });
+    // The window opening and the record reaching the state file are two events, and the file is read once. The row is
+    // the second of them said on screen: the app draws it from what the host read back, so the file holds it by then.
+    await win.waitForSelector("[data-row-id^='ws:']");
     const state = JSON.parse(readFileSync(join(home, "state.json"), "utf8")) as { workspaces?: Record<string, { kind?: string }> };
     expect(Object.values(state.workspaces ?? {}).filter(w => w.kind === "local")).toHaveLength(1);
     expect(existsSync(join(home, ".env"))).toBe(false);
