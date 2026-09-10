@@ -4,17 +4,18 @@
 // the person to run a command. First the choice, manual or an agent; the
 // provider key screen when the host holds none; the read of this computer as
 // rows; then the screens as data, the build's question, and the build as rows.
-// The job and the step live on the host: shutting the sheet changes nothing,
-// and it reopens on the step it was shut at with the answers in place, until
-// Start over or the build.
+// The job, the step and the step's unsent draft live on the host: shutting the
+// sheet changes nothing, and it reopens on the step it was shut at with the
+// answers and what was ticked or typed since in place, until Start over or the
+// build.
 import { useCallback, useEffect, useState } from "react";
-import { CLOUD_SETUP_WORDS, initAgentStep, initDiskOverLine, initJobOver, wspToolsRowId, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, INIT_BUILD_STEP, initAgentStep, initDiskOverLine, initJobOver, wspToolsRowId, type InitDraft, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { Dialog, DialogSheet, DialogTitle } from "../components/ui/dialog.js";
 import { errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
 import { draftOf, SetupAnswers, tallyOf, type Draft } from "./cloud-setup/SetupAnswers.js";
 import { SetupAgent } from "./cloud-setup/SetupAgent.js";
-import { SetupAsk } from "./cloud-setup/SetupAsk.js";
+import { FIRST_WORKSPACE, SetupAsk } from "./cloud-setup/SetupAsk.js";
 import { SetupBuild } from "./cloud-setup/SetupBuild.js";
 import { SetupChoice, type RoadPick } from "./cloud-setup/SetupChoice.js";
 import { SetupFacts } from "./cloud-setup/SetupFacts.js";
@@ -29,8 +30,15 @@ const stepFor = (job: InitJob | null): Step => (job === null || initJobOver(job.
 /** The screen the first launch already answered on this computer, left out of the app's setup. */
 const FIRST_LAUNCH_SCREEN = "wsp";
 
+/** The build question's two typed answers, as the draft names them. */
+const ASK_NAME = "name";
+const ASK_FOLDER = "folder";
+
 /** The screens the app walks: the host's, less the one the first launch answered. */
 const shownOf = (job: InitJob): InitScreen[] => job.screens.filter(s => s.id !== FIRST_LAUNCH_SCREEN);
+
+/** What the host kept of a step the person left mid-answer, if anything. */
+const keptAt = (job: InitJob, at: string): InitDraft | undefined => job.drafts?.find(d => d.at === at);
 
 /** What the image's disk holds with these ticks: the fixed part the host measured plus every ticked row's size across
  * the screens, the current screen read from the draft. */
@@ -54,8 +62,17 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
   // A job that starts while the sheet is open is drawn from where the host says it stands.
   const jobId = job?.id;
   useEffect(() => {
+    setDraft(null);
     if (jobId !== undefined) setStep("job");
   }, [jobId]);
+  // What a step has and has not sent goes to the host as it changes, so the sheet holds nothing a close would lose.
+  // A refused keep is left alone: it costs the person nothing and the step's own Continue is what must be heard.
+  const keep = useCallback(
+    (at: string, next: Draft): void => {
+      void api?.initDraft?.({ at, ticks: [...next.ticks], answers: next.answers }).catch(() => {});
+    },
+    [api],
+  );
   const attempt = useCallback(async (work: () => Promise<unknown>): Promise<boolean> => {
     setRefusal(null);
     try {
@@ -88,11 +105,11 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
   };
   const again = (): void => {
     setStep("choice");
+    setDraft(null);
     void api?.initGet?.().then(setSetup, () => {});
   };
 
   let body;
-  let disk: { used: number; total: number } | undefined;
   if (step === "choice" || setup === null) {
     body = setup === null ? <SetupScreen k="loading" headline={CLOUD_SETUP_WORDS.choice.headline} top={CLOUD_SETUP_WORDS.choice.top} refusal={refusal} /> : <SetupChoice agents={setup.agents} pick={pick} onPick={setPick} onContinue={onContinueChoice} refusal={refusal} />;
   } else if (step === "keys") {
@@ -132,12 +149,18 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
     if (screen === undefined) {
       // The first launch's answer for the MCP rows rides with the build: the agents here it configured.
       const firstLaunch = job.screens.find(s => s.id === FIRST_LAUNCH_SCREEN);
-      disk = job.disk !== undefined ? { used: diskUsed(job, undefined), total: job.disk.total } : undefined;
+      const kept = keptAt(job, INIT_BUILD_STEP);
+      const typed = draft !== null && draft.key === INIT_BUILD_STEP ? draft.draft.answers : { [ASK_NAME]: kept?.answers[ASK_NAME] ?? FIRST_WORKSPACE, [ASK_FOLDER]: kept?.answers[ASK_FOLDER] ?? "" };
+      const asked = (o: { name: string; folder: string }): Draft => ({ ticks: new Set<string>(), answers: { [ASK_NAME]: o.name, [ASK_FOLDER]: o.folder }, keys: {} });
       body = (
         <SetupAsk
           setup={setup}
           counter={`${total}/${total}`}
           refusal={refusal}
+          name={typed[ASK_NAME] ?? FIRST_WORKSPACE}
+          folder={typed[ASK_FOLDER] ?? ""}
+          onType={o => setDraft({ key: INIT_BUILD_STEP, draft: asked(o) })}
+          onKeep={o => keep(INIT_BUILD_STEP, asked(o))}
           onBuild={o =>
             void attempt(async () => {
               if (firstLaunch !== undefined) await api!.initAnswer!({ screen: firstLaunch.id, ticks: setup.agents.filter(a => a.configured).map(a => wspToolsRowId(a.id)).filter(id => firstLaunch.items.some(i => i.id === id)) });
@@ -148,18 +171,22 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
         />
       );
     } else {
-      const key = `${job.id}:${screen.id}`;
-      const current = draft !== null && draft.key === key ? draft.draft : draftOf(screen);
+      const key = screen.id;
+      const current = draft !== null && draft.key === key ? draft.draft : draftOf(screen, keptAt(job, key));
       const used = diskUsed(job, { screen: screen.id, ticks: current.ticks });
-      disk = job.disk !== undefined ? { used, total: job.disk.total } : undefined;
+      const disk = job.disk !== undefined ? { used, total: job.disk.total } : undefined;
       const over = disk !== undefined ? Math.max(0, disk.used - disk.total) : 0;
       body = (
         <SetupAnswers
-          key={key}
+          key={`${job.id}:${key}`}
           screen={screen}
           counter={`${index + 1}/${total}`}
           draft={current}
-          onDraft={next => setDraft({ key, draft: next })}
+          onDraft={next => {
+            setDraft({ key, draft: next });
+            // A typed key is not drafted, so a keystroke in one pushes no view to every client watching the job.
+            if (next.ticks !== current.ticks || next.answers !== current.answers) keep(key, next);
+          }}
           refusal={refusal}
           {...(disk !== undefined ? { disk } : {})}
           primary={{
@@ -173,6 +200,7 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
                 const typed = Object.fromEntries(Object.entries(current.keys).filter(([, v]) => v.trim() !== ""));
                 if (Object.keys(typed).length > 0) await api!.initKeys!({ rows: typed });
                 await api!.initAnswer!({ screen: screen.id, ticks: [...current.ticks], answers: current.answers });
+                setDraft(null);
               });
             },
           }}
@@ -181,7 +209,6 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
       );
     }
   } else {
-    disk = job.disk !== undefined ? { used: diskUsed(job, undefined), total: job.disk.total } : undefined;
     body = (
       <SetupBuild
         job={job}
@@ -201,7 +228,9 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
     <Dialog
       open
       onOpenChange={open => {
-        if (!open) onClose();
+        if (open) return;
+        if (draft !== null) keep(draft.key, draft.draft);
+        onClose();
       }}
     >
       <DialogSheet data-cloud-setup-dialog initialFocus={false}>

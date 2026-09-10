@@ -14,7 +14,7 @@ import { stripVTControlCharacters } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
 import type { BackendPricing } from "@wsp/engine";
 import { RUNGS } from "@wsp/collect";
-import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initJobOver, initNeedWhat, initRowOver, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type LoginState, type McpServerSpec, type TurnResult } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initJobOver, initNeedWhat, initRowOver, initStoppedLine, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type LoginState, type McpServerSpec, type TurnResult } from "@wsp/protocol";
 import { harnessCatalog, smallestModel, type GoldenRecipe, type InitDoor, type Runtime, type SessionHandle } from "@wsp/runtime";
 import type { AgentHere } from "./agents-here.js";
 import { SOLARI_KEY, agentKeysIn, keysOf, type Keys } from "./env-keys.js";
@@ -74,6 +74,10 @@ const RECIPE_POLL_MS = 250;
 const takesTools = (harness: string): boolean => takesMcpServers(harnessCatalog(harness));
 /** What a sign-in row says when the run ended without reaching it. */
 export const SIGN_IN_NEVER_REACHED = "the build never reached this sign-in";
+/** How often, and how many times, a stop that could not reach the provider tries the kill again. Twenty minutes of
+ * trying outlasts the network outages this has been seen with; past that the row says the machine is still there.
+ * A caller that sets its own retry (only a test does) is taken at its word, so a run of this takes milliseconds. */
+const SWEEP_RETRY = { attempts: 40, waitMs: 30_000 };
 /** The stage rows in the order the build runs them: the prepare's, then the seal's. */
 const STAGE_WORDS: readonly StageWords[] = [...PREPARE_STEPS, ...SEAL_STEPS];
 const SEAL_STAGES = new Set<string>(SEAL_STEPS.map(w => w.stage));
@@ -90,6 +94,8 @@ interface State {
   screens: InitScreen[];
   /** The screen the person is on; one past the last is the build's own question. */
   step: number;
+  /** What each step has ticked, picked or typed and not sent yet, by the step's own name. */
+  drafts: Map<string, { ticks: string[]; answers: Record<string, string> }>;
   /** What the image's disk holds before any tick and the disk the build asks for, once this computer is read. */
   disk?: { fixed: number; total: number };
   /** What the read of this computer found so far, one row per fact, drawn while it reads. */
@@ -120,6 +126,8 @@ interface State {
   needsYou?: InitJob["needsYou"];
   /** What the run's sign-in stage runs with, once it has started: a retry runs the same way, through the same relay. */
   signIns?: SignInContext;
+  /** The stage the provider has no room for yet, while the account sits at its machine cap. */
+  slotWait?: string;
 }
 
 /** A writable that keeps the lines written to it, stripped of colour, for the view's log. */
@@ -179,9 +187,14 @@ export class InitJobs implements InitDoor {
     return () => this.listeners.delete(fn);
   }
 
-  /** Resolves once the work the last call started is over; what a test waits on. */
-  settled(): Promise<void> {
-    return this.running;
+  /** Resolves once the work the last call started is over, and anything that work queued behind it; what a test
+   * waits on. A stop's sweep of a machine the provider would not take is queued from inside the run itself, so one
+   * await of the run's own promise would come back before it. */
+  async settled(): Promise<void> {
+    for (let waited = this.running; ; waited = this.running) {
+      await waited.catch(() => {});
+      if (waited === this.running) return;
+    }
   }
 
   /** Whether the host holds the provider key; read off the home's file once per ask, never on a view. */
@@ -205,6 +218,7 @@ export class InitJobs implements InitDoor {
       rows,
       progress: { done: rows.filter(r => initRowOver(r.state)).length, total: rows.length },
       ...(s.needsYou !== undefined ? { needsYou: s.needsYou } : {}),
+      ...(s.drafts.size > 0 ? { drafts: [...s.drafts].map(([at, d]) => ({ at, ticks: [...d.ticks], answers: { ...d.answers } })) } : {}),
       log: s.log.slice(-LOG_TAIL),
       ...(s.thread !== undefined ? { thread: s.thread } : {}),
       ...(s.line !== undefined ? { line: s.line } : {}),
@@ -255,7 +269,7 @@ export class InitJobs implements InitDoor {
   async start(o: { road: InitRoad; harness?: string }): Promise<InitJob> {
     if (this.starting || (this.state !== undefined && !initJobOver(this.state.phase))) throw new Error("an init job is already running; cancel it or let it finish first");
     this.count += 1;
-    const state: State = { id: `init_${this.count}`, road: o.road, phase: o.road === "agent" ? "agent" : "reading", screens: [], step: 0, facts: [], rows: [], frames: [], building: false, log: [], signals: new EventEmitter(), cancelled: false, keys: this.held(), watching: [] };
+    const state: State = { id: `init_${this.count}`, road: o.road, phase: o.road === "agent" ? "agent" : "reading", screens: [], step: 0, drafts: new Map(), facts: [], rows: [], frames: [], building: false, log: [], signals: new EventEmitter(), cancelled: false, keys: this.held(), watching: [] };
     if (o.road === "agent") {
       const path = smallRecipePath(this.deps.statePath);
       // Read before the thread is launched: whatever recipe is beside the state now is not this thread's.
@@ -292,6 +306,20 @@ export class InitJobs implements InitDoor {
     s.screens = screensOf(s.reading!, s.answers, this.deps);
     s.disk = diskOf(s.reading!, s.answers.recipe, this.deps.statePath);
     s.step = Math.min(s.screens.findIndex(x => x.id === o.screen) + 1, s.screens.length);
+    // The screen's answer is what its draft was for: what stands is on the recipe now, and a stale draft would
+    // come back over it on the next reopen.
+    s.drafts.delete(o.screen);
+    this.emit();
+    return this.view()!;
+  }
+
+  /** What a step has ticked, picked or typed and not sent yet, kept beside the step it belongs to so shutting the
+   * sheet loses none of it. Nothing here moves the recipe: the step's own Continue does that. */
+  async draft(o: { at: string; ticks?: string[]; answers?: Record<string, string> }): Promise<InitJob> {
+    const s = this.answering();
+    if (o.at !== INIT_BUILD_STEP && !s.screens.some(x => x.id === o.at)) throw new Error(`the init job has no step ${o.at} to draft on`);
+    // An empty draft is an answer of its own: a step whose every tick was taken off comes back with none on.
+    s.drafts.set(o.at, { ticks: [...(o.ticks ?? [])], answers: { ...(o.answers ?? {}) } });
     this.emit();
     return this.view()!;
   }
@@ -399,15 +427,18 @@ export class InitJobs implements InitDoor {
         if (s.cancelled) s.phase = "cancelled";
         else if (!initJobOver(s.phase)) {
           s.phase = result.code === 0 ? "done" : "failed";
-          if (result.code !== 0) s.error ??= reduceStages(s.frames, STAGE_WORDS).failure ?? s.log.at(-1) ?? "the run stopped before the seal";
+          if (result.code !== 0) this.fail(s, reduceStages(s.frames, STAGE_WORDS).failure ?? s.log.at(-1) ?? "the run stopped before the seal");
         }
       } finally {
         for (const off of offs) off();
+        delete s.slotWait;
         for (const row of s.rows) {
           if (row.kind === "sign-in" && (row.state === STATE.waiting || row.state === STATE.running)) {
             row.state = INIT_SIGN_IN_WORDS.skipped;
             row.detail = SIGN_IN_NEVER_REACHED;
           }
+          // A first workspace or its project the build never reached was not made; waiting would read as still coming.
+          if ((row.kind === "workspace" || row.kind === "project") && row.state === STATE.waiting) row.state = STATE.notMade;
         }
       }
     });
@@ -475,6 +506,13 @@ export class InitJobs implements InitDoor {
     return true;
   }
 
+  /** Why the job is not running, in the words a person reads: every reason goes through here, so the raw error a
+   * client shows is this computer's own sentence when there is one and is never said twice. The first reason in
+   * stands: a run that failed and then stopped reports what failed it. */
+  private fail(s: State, message: string): void {
+    s.error ??= initStoppedLine(message);
+  }
+
   /** Background work on the job: a failure lands on the view as the job failing, never as an unhandled rejection. */
   private run(s: State, work: () => Promise<void>): void {
     this.running = work()
@@ -484,7 +522,7 @@ export class InitJobs implements InitDoor {
           return;
         }
         s.phase = "failed";
-        s.error = e instanceof Error ? e.message : String(e);
+        this.fail(s, e instanceof Error ? e.message : String(e));
       })
       .finally(() => this.emit());
   }
@@ -696,6 +734,8 @@ export class InitJobs implements InitDoor {
         if (stage === undefined) return;
         const step = record["step"] as GoldenStep | undefined;
         s.frames.push({ type: "golden.stage", name: GOLDEN_NAME, stage, ...(text("detail") !== undefined ? { detail: text("detail")! } : {}), ...(step !== undefined ? { step: { label: step.label, command: step.command } } : {}), at });
+        // The provider having no room is not the stage working: the next frame off it, cap or not, says so again.
+        s.slotWait = record["waiting"] === true ? stage : undefined;
         // The phase turns to signing in on the first sign-in row, not when the machine answers: the checks and the
         // secrets between the two are the build's, and a status that says signing in with no row to sign in is a lie.
         if (stage === "sealed") s.phase = "finishing";
@@ -762,8 +802,16 @@ export class InitJobs implements InitDoor {
       }
       case "seal-failed":
         s.phase = "failed";
-        s.error = text("message") ?? "the seal failed";
+        this.fail(s, text("message") ?? "the seal failed");
         break;
+      case "stopped": {
+        // The run's own word for a stop the person asked for: it names the stage it was at and what became of the
+        // machine, which is the one thing the screen must not invent a second version of.
+        this.fail(s, text("line") ?? "the build was stopped");
+        const left = text("left");
+        if (left !== undefined) this.sweep(s, left);
+        break;
+      }
       case "done": {
         const version = record["version"];
         if (typeof version === "number") s.golden = { version };
@@ -778,10 +826,11 @@ export class InitJobs implements InitDoor {
     this.emit();
   }
 
-  /** The rows as the view shows them: the agents given the tools, the stages in the build's order (every one from
-   * the first frame while the build runs, so the count means something; a stage the provider never ran leaves once
-   * the build is over) with the sign-ins where they happen, after the machine answers and before the snapshot, then
-   * the first workspace and its project. A stage's label is its plain name; its state says where it is. */
+  /** The rows as the view shows them: the agents given the tools, every stage in the build's order with the
+   * sign-ins where they happen, after the machine answers and before the snapshot, then the first workspace and
+   * its project. A stopped build keeps the list it had, order and all: the stages it never reached stay in it as
+   * waiting, so nothing moves under the person reading why it stopped. A stage's label is its plain name; its
+   * state says where it is, and the failure's own line closes the failed stage's block. */
   private rowsOf(s: State): InitRow[] {
     // Copies: a view on the events channel is a snapshot, and the rows here move on after it.
     const agents = s.rows.filter(r => r.kind === "agent").map(r => ({ ...r }));
@@ -789,15 +838,48 @@ export class InitJobs implements InitDoor {
     const rest = s.rows.filter(r => r.kind !== "agent" && r.kind !== "sign-in").map(r => ({ ...r }));
     if (!s.building) return [...agents, ...signIns, ...rest];
     const view = reduceStages(s.frames, STAGE_WORDS);
-    const over = initJobOver(s.phase);
-    const stages = STAGE_WORDS.filter(w => !over || view.steps.some(x => x.stage === w.stage)).map((w): InitRow => {
+    // A build that reached its end had the stages it ran and no others; one that stopped was going to run the rest,
+    // so they stay in the list as waiting rather than vanishing under the person reading why it stopped.
+    const stages = STAGE_WORDS.filter(w => s.phase !== "done" || view.steps.some(x => x.stage === w.stage)).map((w): InitRow => {
       const step = view.steps.find(x => x.stage === w.stage);
-      const state = step === undefined ? STATE.waiting : step.state === "current" ? STATE.running : step.state === "done" ? STATE.done : STATE.failed;
+      const state = step === undefined ? STATE.waiting : step.state === "current" ? (s.slotWait === w.stage ? STATE.slot : STATE.running) : step.state === "done" ? STATE.done : STATE.failed;
       const detail = step?.running?.command ?? step?.tail.at(-1);
-      const lines = step === undefined ? [] : [...step.tail.slice(-STAGE_LINES), ...(step.running !== undefined ? [step.running.command] : [])];
+      const failure = step?.state === "failed" && view.failure !== undefined ? [view.failure] : [];
+      const lines = step === undefined ? [] : [...step.tail.slice(-STAGE_LINES), ...(step.running !== undefined ? [step.running.command] : []), ...failure];
       return { id: `stage/${w.stage}`, kind: "stage", label: w.start, state, ...(detail !== undefined ? { detail } : {}), ...(step?.ms !== undefined ? { ms: step.ms } : {}), ...(lines.length > 0 ? { lines } : {}) };
     });
     const answered = stages.findIndex(r => r.id === "stage/ready") + 1;
     return [...agents, ...stages.slice(0, answered), ...signIns, ...stages.slice(answered), ...rest];
+  }
+
+  /** A builder the stop could not reach the provider to kill, killed again until the provider takes it: the row
+   * says the machine is still running for as long as that is true, so nothing bills in silence. */
+  private sweep(s: State, builderId: string): void {
+    const id = `machine/${builderId}`;
+    if (s.rows.some(r => r.id === id)) return;
+    const row: InitRow = { id, kind: "machine", label: builderId, state: STATE.retrying };
+    s.rows.push(row);
+    const retry = this.deps.retry ?? SWEEP_RETRY;
+    // Start over replaces the job while a sweep may still be trying; the row it moves is that job's, so the view
+    // it would push is a later job's and nobody is waiting on it.
+    const said = (): void => (this.state === s ? this.emit() : undefined);
+    const work = async (): Promise<void> => {
+      for (let attempt = 0; attempt < retry.attempts; attempt++) {
+        await new Promise(r => setTimeout(r, retry.waitMs));
+        try {
+          await this.deps.rt.golden.kill(builderId);
+          row.state = STATE.gone;
+          delete row.detail;
+          said();
+          return;
+        } catch (e) {
+          row.detail = e instanceof Error ? e.message : String(e);
+          said();
+        }
+      }
+      row.state = STATE.failed;
+      said();
+    };
+    this.running = this.running.then(work, work);
   }
 }

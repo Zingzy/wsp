@@ -15,7 +15,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
-import { CLOUD_SETUP_WORDS } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, NETWORK_LOST_LINE } from "@wsp/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { textContrast } from "./contrast";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
@@ -35,11 +35,14 @@ interface Box {
 
 /** Every step the sheet has, in the order a person meets them. */
 const STEPS = ["choice", "keys", "agent", "agent-stopped", "reading", "agents", "tools", "also", "logins", "ask", "building", "signing", "retry", "done", "failed"] as const;
-type StepName = (typeof STEPS)[number];
+/** The error states of the end-to-end run, checked and photographed on their own: the layout loop above walks the
+ * steps a person meets in order, and these are the roads off it. */
+const SIDE_ROADS = ["stopped", "you-stopped", "slot", "over"] as const;
+type StepName = (typeof STEPS)[number] | (typeof SIDE_ROADS)[number];
 /** The answer steps, which carry their count over the title. */
 const COUNTED: ReadonlySet<StepName> = new Set<StepName>(["agents", "tools", "also", "logins", "ask"]);
 /** The frame's data-k for each, where it differs from the step's own name. */
-const FRAME: Record<StepName, string> = { choice: "choice", keys: "keys", agent: "agent", "agent-stopped": "agent", reading: "reading", agents: "screen-agents", tools: "screen-tools", also: "screen-also", logins: "screen-logins", ask: "ask", building: "build", signing: "build", retry: "build", done: "build", failed: "build" };
+const FRAME: Record<StepName, string> = { choice: "choice", keys: "keys", agent: "agent", "agent-stopped": "agent", reading: "reading", agents: "screen-agents", tools: "screen-tools", also: "screen-also", logins: "screen-logins", ask: "ask", building: "build", signing: "build", retry: "build", done: "build", failed: "build", stopped: "build", "you-stopped": "build", slot: "build", over: "screen-also" };
 /** The steps whose tally carries the disk meter: the ones that change the image's size. */
 const METERED = new Set<StepName>(["agents", "tools", "also"]);
 /** The first launch's numbers: what every step is measured against. */
@@ -100,6 +103,12 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     const bar = await boxes(`${frame} [data-slot=scroll-area-scrollbar][data-orientation=vertical]`);
     if (bar.length > 0) expect(near(bar[0]!.width, 6), `${step}: the thin bar, ${bar[0]!.width}`).toBe(true);
     return scrolls;
+  };
+
+  const shoot = async (step: StepName, theme: "dark" | "light"): Promise<void> => {
+    const path = join(SHOTS, `cloud-setup-${step}-${theme}.png`);
+    await page!.screenshot({ path });
+    console.info(`cloud setup ${step} ${theme}: ${path}`);
   };
 
   const goTo = async (step: StepName, theme: "dark" | "light"): Promise<string> => {
@@ -228,10 +237,47 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
       expect(await page!.locator("[role=dialog]").evaluate(el => el.scrollHeight <= el.clientHeight), `${step}: the sheet does not scroll`).toBe(true);
       // A card opens at its top, except the build's, which brings the stage that opened on its own into view.
       if (scrolls && FRAME[step] !== "build") expect(await page!.locator(`${frame} [data-slot=scroll-area-viewport]`).evaluate(el => el.scrollTop), `${step}: the card opens at its top`).toBe(0);
-      const path = join(SHOTS, `cloud-setup-${step}-${theme}.png`);
-      await page!.screenshot({ path });
-      console.info(`cloud setup ${step} ${theme}: ${path}`);
+      await shoot(step, theme);
     }
+  }, 240_000);
+
+  it.each(["dark", "light"] as const)("in the %s theme the error states read as themselves: the sentence a stopped build gives, the cap wait on its own row, the whole list kept in order, and the refusal past the disk above the footer in the ring's tone", async theme => {
+    await page!.setViewportSize({ ...VIEWPORTS[0] });
+    // The network stopped it: the sentence is this computer's word, not the raw error, and every stage is still listed.
+    let frame = await goTo("stopped", theme);
+    expect(await page!.locator(`${frame} [data-k=sentence]`).textContent()).toBe(NETWORK_LOST_LINE);
+    expect(await page!.locator(`${frame} [data-k=title]`).textContent()).toBe(CLOUD_SETUP_WORDS.build.failed);
+    const listed = await page!.locator(`${frame} [data-k=row]`).evaluateAll(els => els.map(el => el.getAttribute("data-row")));
+    expect(listed, "the list keeps its order and its rows").toEqual(["stage/creating", "stage/deploying-daemon", "stage/applying-setup", "stage/uploading-files", "stage/installing-harness", "stage/installing-tools", "stage/installing-mcp", "stage/ready", "stage/snapshotting", "stage/promoting", "stage/smoke-forking", "stage/sealed", "workspace/e2e"]);
+    expect(await page!.locator(`${frame} [data-row="stage/applying-setup"] [data-k=lines]`).textContent()).toContain(NETWORK_LOST_LINE);
+    expect(await page!.locator(`${frame} [data-k=count]`).textContent()).toBe("2 of 12");
+    await shoot("stopped", theme);
+
+    // The person stopped it: the screen says so, with the stage, and the workspace was not made.
+    frame = await goTo("you-stopped", theme);
+    expect(await page!.locator(`${frame} [data-k=title]`).textContent()).toBe(CLOUD_SETUP_WORDS.build.stopped);
+    expect(await page!.locator(`${frame} [data-k=sentence]`).textContent()).toContain("Stopped while installing the base tools");
+    expect(await page!.locator(`${frame} [data-row="workspace/e2e-cancel"] [data-k=state]`).textContent()).toBe(INIT_ROW_STATES.notMade);
+    await shoot("you-stopped", theme);
+
+    // The account is at its machine cap: the row says what it waits on, and its block carries the runtime's line.
+    frame = await goTo("slot", theme);
+    expect(await page!.locator(`${frame} [data-row="stage/creating"] [data-k=state]`).textContent()).toBe(INIT_ROW_STATES.slot);
+    expect(await page!.locator(`${frame} [data-row="stage/creating"] [data-k=lines]`).textContent()).toContain("at its machine cap");
+    await shoot("slot", theme);
+
+    // Past the disk: Continue refuses, and the line sits above the footer in the ring's own tone, not under the link.
+    frame = await goTo("over", theme);
+    expect(await page!.locator("[role=dialog] [data-k=disk]").getAttribute("data-tone")).toBe("danger");
+    await page!.click(`${frame} [data-k=primary]`);
+    await page!.waitForSelector(`${frame} [data-k=refusal]`);
+    const over = await box(`${frame} [data-k=refusal]`);
+    const footer = await box(`${frame} [data-k=footer]`);
+    expect(over.y + over.height, "the refusal is above the keycap and its link").toBeLessThanOrEqual(footer.y + 1);
+    const [tone, ringTone] = await page!.evaluate(() => [getComputedStyle(document.querySelector("[data-k=refusal]")!).color, getComputedStyle(document.querySelector("[data-k=disk-over]")!).color]);
+    expect(tone, "the refusal wears the ring's tone").toBe(ringTone);
+    expect((await textContrast(page!, "[role=dialog] [data-k=refusal]"))[0], "the refusal reads at AA").toBeGreaterThanOrEqual(4.5);
+    await shoot("over", theme);
   }, 240_000);
 
   it.each(["dark", "light"] as const)("in the %s theme at 980 by 700 the column keeps its width, a step that fits stays centred and one that does not pins its footer and its card scrolls", async theme => {

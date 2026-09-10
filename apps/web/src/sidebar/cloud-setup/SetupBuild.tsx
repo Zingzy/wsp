@@ -32,12 +32,16 @@ export const STAGE_BLOCK_HEIGHT = STAGE_BLOCK_LINES * LINE_HEIGHT + 16;
 export const STAGE_BLOCK_HEIGHT_SHORT = STAGE_BLOCK_LINES_SHORT * LINE_HEIGHT + 16;
 const STAGE_BLOCK = "h-[176px] [@media(max-height:699px)]:h-[136px]";
 
+/** A stage the machine is on: working, or queueing behind the account's machine cap, which is the same row open on
+ * the same block, saying so. */
+const onIt = (state: string): boolean => state === INIT_ROW_STATES.running || state === INIT_ROW_STATES.slot;
+
 export function SetupBuild({ job, onCancel, onRetry, onCode, onOpenWorkspace, onAgain, refusal }: { job: InitJob; onCancel: () => void; onRetry: (tool: string) => void; onCode: (o: { tool: string; code: string }) => void; onOpenWorkspace: () => void; onAgain: () => void; refusal: string | null }) {
   const words = CLOUD_SETUP_WORDS.build;
   const [asking, setAsking] = useState(false);
   const over = initJobOver(job.phase);
   const building = initJobBuilding(job.phase);
-  const headline = job.phase === "done" ? words.done : over ? words.failed : words.headline;
+  const headline = job.phase === "done" ? words.done : job.phase === "cancelled" ? words.stopped : over ? words.failed : words.headline;
   const { rows, signIns } = initBuildRows(job.rows);
   const count = initStageCount(rows);
   const fraction = count.total > 0 ? count.done / count.total : 0;
@@ -45,7 +49,7 @@ export function SetupBuild({ job, onCancel, onRetry, onCode, onOpenWorkspace, on
   const slide = building && signInStage !== undefined && (signInStage.state === INIT_ROW_STATES.open || signInStage.state === INIT_ROW_STATES.running);
   // The one row the card keeps in view, as the screen appears and whenever it changes: a sign-in to retry first, else the stage that runs or failed; on the slide, the first sign-in waiting on the person.
   const attention = building && signIns.some(s => s.state === INIT_SIGN_IN_WORDS["not-signed-in"]);
-  const focusId = attention && signInStage !== undefined ? signInStage.id : rows.find(r => r.state === INIT_ROW_STATES.running || r.state === INIT_ROW_STATES.failed)?.id;
+  const focusId = attention && signInStage !== undefined ? signInStage.id : rows.find(r => onIt(r.state) || r.state === INIT_ROW_STATES.failed)?.id;
   const slideFocusId = (signIns.find(s => s.state === INIT_ROW_STATES.open) ?? signIns.find(s => s.state === INIT_SIGN_IN_WORDS["not-signed-in"]))?.id;
   const primary: ScreenAction | undefined = job.phase === "done" && job.workspace !== undefined ? { word: words.keycap, onPress: onOpenWorkspace } : job.phase === "failed" || job.phase === "cancelled" ? { word: words.again, onPress: onAgain } : undefined;
   const secondary: ScreenAction | undefined = building
@@ -164,7 +168,7 @@ function SignInSlideRow({ row, focus, onRetry, onCode }: { row: InitRow; focus: 
 function BuildRow({ row, focus, signIns, onRetry, onCode }: { row: InitRow; focus: boolean; signIns?: InitRow[]; onRetry?: (tool: string) => void; onCode: (tool: string, code: string) => void }) {
   const [opened, setOpened] = useState<boolean | undefined>(undefined);
   const item = useRef<HTMLLIElement>(null);
-  const running = row.state === INIT_ROW_STATES.running;
+  const running = onIt(row.state);
   const waitedOn = row.state === INIT_ROW_STATES.open;
   const failed = row.state === INIT_ROW_STATES.failed;
   const lines = row.lines ?? [];
@@ -272,9 +276,10 @@ function TerminalLine({ line, danger }: { line: string; danger: boolean }) {
   );
 }
 
-/** A stage's or a workspace row's glyph: a hollow ring while it waits, nothing while it runs (the slot's spinner says
- * so), a check once it ended well, a cross when it failed. */
+/** A stage's or a workspace row's glyph: a hollow ring while it waits and where it was never made, nothing while it
+ * runs (the slot's spinner says so), a check once it ended well, a cross when it failed. */
 function StageGlyph({ state }: { state: string }) {
+  if (state === INIT_ROW_STATES.notMade) return <span className="size-2 rounded-full border border-muted-foreground/60" />;
   if (state === INIT_ROW_STATES.failed) {
     return (
       <svg viewBox="0 0 16 16" className="size-3.5 fill-none stroke-destructive-foreground" strokeWidth={1.75} strokeLinecap="round">
@@ -289,6 +294,6 @@ function StageGlyph({ state }: { state: string }) {
       </svg>
     );
   }
-  if (state === INIT_ROW_STATES.running || state === INIT_ROW_STATES.open) return <span className="size-2 rounded-full bg-foreground" />;
+  if (onIt(state) || state === INIT_ROW_STATES.open) return <span className="size-2 rounded-full bg-foreground" />;
   return <span className="size-2 rounded-full border border-muted-foreground/60" />;
 }

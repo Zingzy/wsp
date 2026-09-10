@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Served by Vite to a real browser: the cloud setup sheet over a fake api at
 // each of its steps (?screen=choice|keys|agent|agent-stopped|reading|agents|
-// tools|also|logins|ask|building|signing|retry|done|failed), in either theme
+// tools|also|logins|ask|building|signing|retry|done|failed|stopped|slot|over),
+// in either theme
 // (?theme=light), so a test
 // can lay out and photograph every state the ticket names. The screens' data
 // is what the host hands over for a small laptop: three agents, the tools with
 // the base locked on and the rest by calls, a manager's rows, three sign-ins.
 import { createRoot } from "react-dom/client";
-import { GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, initAgentNoRecipeLine, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MCP_ADDED_WORD, NETWORK_LOST_LINE, SIGN_IN_OPEN_STATE, initAgentNoRecipeLine, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api } from "../../src/protocol/client";
 import { useStore } from "../../src/protocol/store";
@@ -121,6 +122,8 @@ const STAGES: InitJob["rows"] = [
   { id: "workspace/first", kind: "workspace", label: "first", state: "waiting" },
 ];
 const done = (rows: InitJob["rows"]): InitJob["rows"] => rows.map(r => (r.kind === "stage" ? { ...r, state: "done", detail: undefined } : r));
+/** The stages after the one a stopped build was on: still listed, still waiting, whatever they carry above. */
+const notYet = (rows: InitJob["rows"]): InitJob["rows"] => rows.map(r => (r.kind === "stage" ? { id: r.id, kind: r.kind, label: r.label, state: INIT_ROW_STATES.waiting } : r));
 const signIns: InitJob["rows"] = [
   { id: "sign-in/claude", kind: "sign-in", tool: "claude", label: "Sign in to Claude Code", state: INIT_ROW_STATES.keySet },
   { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "Sign in to GitHub CLI", state: SIGN_IN_OPEN_STATE, page: "https://github.com/login/device", code: "8F4A-C21B", detail: "gh auth login is waiting on the machine for the code" },
@@ -177,6 +180,38 @@ const JOBS: Record<string, InitJob> = {
     workspace: { id: "ws_first", name: "first" },
   },
   failed: { ...base, phase: "failed", screens: [], rows: [...done(STAGES.slice(0, 5)), stage("installing-harness", "failed", { lines: ["npm i -g @anthropic-ai/claude-code", "npm ERR! ENOSPC: no space left on device"] })], progress: { done: 5, total: 6 }, error: "npm i -g @anthropic-ai/claude-code exited 1: ENOSPC: no space left on device" },
+  // A build the network stopped: the list keeps its order and every row, the failed stage's block ends on the
+  // error's own line, and the stages after it still read waiting.
+  stopped: {
+    ...base,
+    phase: "failed",
+    stoppable: false,
+    screens: [],
+    rows: [...done(STAGES.slice(1, 3)), stage("applying-setup", INIT_ROW_STATES.failed, { lines: ["applying your setup", NETWORK_LOST_LINE] }), ...notYet(STAGES.slice(4, 13)), { id: "workspace/e2e", kind: "workspace", label: "e2e", state: INIT_ROW_STATES.notMade }],
+    progress: { done: 2, total: 13 },
+    error: NETWORK_LOST_LINE,
+  },
+  // A build the person stopped: the run's own line for where it was and what became of the machine.
+  "you-stopped": {
+    ...base,
+    phase: "cancelled",
+    stoppable: false,
+    screens: [],
+    rows: [...done(STAGES.slice(1, 2)), stage("deploying-daemon", INIT_ROW_STATES.failed, { lines: ["deploy wsp-daemon", "stopped"] }), ...notYet(STAGES.slice(3, 13)), { id: "workspace/e2e-cancel", kind: "workspace", label: "e2e-cancel", state: INIT_ROW_STATES.notMade }],
+    progress: { done: 1, total: 13 },
+    error: "Stopped while installing the base tools. Builder b_dlb9oeig is gone; nothing is billing.",
+  },
+  // Everything ticked past the image's disk: the ring is full in the danger tone and Continue refuses, which is
+  // what the test presses to photograph the refusal line.
+  over: { ...base, step: 2, disk: { fixed: 19.4 * GIB, total: 20 * GIB }, screens: SCREENS.map(x => (x.id === "also" ? { ...x, ticks: x.items.map(i => i.id) } : x)) },
+  // The account is at its machine cap: the row says what it waits on and its block carries the runtime's own line.
+  slot: {
+    ...base,
+    phase: "building",
+    screens: [],
+    rows: [stage("creating", INIT_ROW_STATES.slot, { lines: ["sandbox from base", "Solari account at its machine cap; waiting 30s for a slot (5/20). Nothing is killed.", "sandbox from base", "Solari account at its machine cap; waiting 30s for a slot (5/20). Nothing is killed."] }), ...notYet(STAGES.slice(2, 13)), { id: "workspace/first", kind: "workspace", label: "first", state: INIT_ROW_STATES.waiting }],
+    progress: { done: 0, total: 13 },
+  },
 };
 
 const setup: InitSetup = {

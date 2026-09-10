@@ -365,6 +365,8 @@ export interface Api {
   initAnswer?(o: { screen: InitScreenId; ticks?: string[]; answers?: Record<string, string> }): Promise<InitJob>;
   /** Moves the job to a screen the person went back to, so a setup shut there reopens there. */
   initStep?(o: { at: number }): Promise<InitJob>;
+  /** Keeps what a step has ticked, picked or typed and not sent, so a sheet shut mid-step reopens on it. */
+  initDraft?(o: { at: string; ticks?: string[]; answers?: Record<string, string> }): Promise<InitJob>;
   /** Runs a sign-in that ran out or failed again on the machine while the build goes on. */
   initRetry?(o: { tool: string }): Promise<InitJob>;
   /** Writes the recipe as answered and starts the build, which rides on after the reply. */
@@ -522,6 +524,7 @@ export function makeApi(c: ProtocolClient): Api {
     initStart: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.start", { ...o })).job),
     initAnswer: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.answer", { ...o })).job),
     initStep: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.step", { ...o })).job),
+    initDraft: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.draft", { ...o })).job),
     initRetry: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.retry", { ...o })).job),
     initBuild: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.build", { ...o })).job),
     initSignInCode: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.signInCode", { ...o })).job),

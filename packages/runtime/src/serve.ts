@@ -447,6 +447,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "init.step":
               send({ id: msg.id, ok: true, job: await init().step({ at: msg.at }) });
               return;
+            case "init.draft":
+              send({ id: msg.id, ok: true, job: await init().draft({ at: msg.at, ...(msg.ticks !== undefined ? { ticks: msg.ticks } : {}), ...(msg.answers !== undefined ? { answers: msg.answers } : {}) }) });
+              return;
             case "init.retry":
               send({ id: msg.id, ok: true, job: await init().retry({ tool: msg.tool }) });
               return;

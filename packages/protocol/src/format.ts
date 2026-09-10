@@ -1041,6 +1041,8 @@ export const CLOUD_SETUP_WORDS = {
     cancelKeep: "Keep building",
     done: "Cloud machines are ready",
     failed: "The build stopped",
+    /** The headline of a build the person stopped, so the screen never reads as the machine's doing. */
+    stopped: "You stopped the build",
     keycap: "Open workspace",
     again: "Start over",
   },
@@ -1126,6 +1128,14 @@ export const INIT_ROW_STATES = {
   imported: "imported",
   /** A sign-in whose page waits for the person. */
   open: "waiting for you",
+  /** A stage running only in the sense that the provider has no room yet: the account is at its machine cap. */
+  slot: "waiting for a machine slot",
+  /** A first workspace or its project the build ended before reaching. */
+  notMade: "not made",
+  /** A machine a stop could not reach the provider to kill, being killed again until it is. */
+  retrying: "machine still running, retrying",
+  /** That machine once the provider took the kill: nothing is billing. */
+  gone: "gone",
   /** A sign-in answered with an API key the home held, so the machine has it and nothing is asked. */
   keySet: "key set",
   /** An agent on this computer whose config carries the wsp tools. */
@@ -1170,10 +1180,29 @@ export const SIGN_IN_OPEN_STATE = INIT_ROW_STATES.open;
 /** The state word of an agent on this computer whose config carries the wsp tools. */
 export const MCP_ADDED_WORD = INIT_ROW_STATES.mcpAdded;
 
-const ROW_OVER: ReadonlySet<string> = new Set([INIT_ROW_STATES.done, INIT_ROW_STATES.failed, INIT_ROW_STATES.forked, INIT_ROW_STATES.imported, INIT_ROW_STATES.keySet, INIT_ROW_STATES.mcpAdded, ...Object.values(INIT_SIGN_IN_WORDS), ...Object.values(LOGIN_STATE_WORDS)]);
+const ROW_OVER: ReadonlySet<string> = new Set([INIT_ROW_STATES.done, INIT_ROW_STATES.failed, INIT_ROW_STATES.forked, INIT_ROW_STATES.imported, INIT_ROW_STATES.keySet, INIT_ROW_STATES.mcpAdded, INIT_ROW_STATES.notMade, INIT_ROW_STATES.gone, ...Object.values(INIT_SIGN_IN_WORDS), ...Object.values(LOGIN_STATE_WORDS)]);
 
 /** Whether a row's state word is one it ends on: what the progress count and a section's count read. */
 export const initRowOver = (state: string): boolean => ROW_OVER.has(state);
+
+/** Where a stopped build was, from the stage that was running: one spelling for the terminal's stop line and the
+ * app's sentence, since the stage names read as sentence openings ("Creating the machine"). */
+export const initStageWhile = (stage: string): string => `while ${stage.charAt(0).toLowerCase()}${stage.slice(1)}`;
+
+/** What a build says stopped it when nothing on this computer could reach anything. */
+export const NETWORK_LOST_LINE = "This computer lost its network";
+
+/** The failures a provider client raises when the network is gone rather than when the provider refused. */
+const OFFLINE_FAILURE = /^fetch failed$|\b(ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ENETDOWN|ENETUNREACH|EHOSTUNREACH)\b/;
+
+/** The sentence a stopped build shows for what happened: this computer's own word when every part of the error is
+ * the network going away, else the error's parts said once. A run that failed the same way twice reports it twice;
+ * the person reads one reason, not a list. */
+export function initStoppedLine(error: string): string {
+  const parts = [...new Set(error.split(";").map(p => p.trim()).filter(p => p !== ""))];
+  if (parts.length === 0) return error;
+  return parts.every(p => OFFLINE_FAILURE.test(p)) ? NETWORK_LOST_LINE : parts.join("; ");
+}
 
 /** Whether the job's phase is one it ends on. */
 export const initJobOver = (phase: InitPhase): boolean => phase === "done" || phase === "failed" || phase === "cancelled";
@@ -1270,10 +1299,12 @@ export function initBuildRows(rows: readonly InitRow[]): { rows: InitRow[]; sign
   return { rows: out, signIns };
 }
 
-/** How many of the build's rows ended well, of all of them: what the line along the card's top edge and the count
- * beside the title read. A failed row is over but not done, so a failed build never reads complete. */
+/** How many of the build's stages ended well, of all of them: what the line along the card's top edge and the count
+ * beside the title read. Stages alone, so the bar measures the build and not the agents given the tools, the first
+ * workspace or its project. A failed stage is over but not done, so a failed build never reads complete. */
 export function initStageCount(rows: readonly InitRow[]): { done: number; total: number } {
-  return { done: rows.filter(r => initRowOver(r.state) && r.state !== INIT_ROW_STATES.failed).length, total: rows.length };
+  const stages = rows.filter(r => r.kind === "stage");
+  return { done: stages.filter(r => initRowOver(r.state) && r.state !== INIT_ROW_STATES.failed).length, total: stages.length };
 }
 
 /** The count as words: `3 of 12`. */
