@@ -5,7 +5,7 @@
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { bundleEnv, bundleNames, downloadUrl, REPO, STABLE_NAMES } from "../scripts/bundles.mjs";
+import { bundleEnv, bundleNames, downloadUrl, RELEASES, REPO, STABLE_NAMES } from "../scripts/bundles.mjs";
 
 const script = fileURLToPath(new URL("../scripts/bundle-env.mjs", import.meta.url));
 
@@ -31,6 +31,10 @@ describe("where a download is reached", () => {
     expect(downloadUrl(STABLE_NAMES.mac)).toBe(`${REPO}/releases/latest/download/wsp-mac.dmg`);
     expect(downloadUrl(STABLE_NAMES.appImage)).toBe(`${REPO}/releases/latest/download/wsp-linux.AppImage`);
     expect(REPO).toBe("https://github.com/Zingzy/wsp");
+  });
+
+  it("has one page for anything with no single asset to point at, which the site's footer and the app's version line both read", () => {
+    expect(RELEASES).toBe("https://github.com/Zingzy/wsp/releases");
   });
 });
 

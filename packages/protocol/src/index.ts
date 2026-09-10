@@ -1304,6 +1304,9 @@ export interface LocalFontFace {
 export interface BootPayload {
   wsPort: number;
   token: string;
+  /** The release this host is, which is the release this page is: a desktop shell attached to a host it did not
+   * start reads it to tell whether the two halves were built apart. */
+  version: string;
   /** The family the person's terminal draws with, when the saved recipe ticks its row; the terminal pane defaults to it. */
   terminalFont?: string;
   /** The state file this host serves; the page keeps what it remembers (the workspace open last) under it. */
@@ -1341,6 +1344,9 @@ export interface ShellChord {
 
 /** What the desktop shell's preload puts on window.wsp; a browser tab has none of it. */
 export interface DesktopBridge {
+  /** The release this shell is, so a page served by a host of another one can say which half is behind. Absent on
+   * a shell from before the bridge carried it, which is older than any page that reads this. */
+  readonly version?: string;
   /** The installed faces for a family and its Nerd Font variants, from this computer's font directories. */
   localFonts(family: string): Promise<LocalFontFace[]>;
   /** The system folder picker; the absolute path chosen, or nothing when it was dismissed. */
@@ -2550,6 +2556,7 @@ export { actionRefusal, computerOffline, goneRefusal, type ImageMoveInput, image
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";
+export { compareVersions } from "./semver.mjs";
 export { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS, IMAGE_TYPES, IMAGE_TYPE_WORDS, ImageAttachment, ImageRecord, imageBytes, imageLine, imagePathIn, imageRecord, imageTypeOf, imagesBlocked, imagesRefusal, noImagesLine, notAFileLine, notAnImageLine, threadImagesDir, turnImagesDir } from "./attachments.js";
 export * from "./oom.js";
 export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";

@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cli, serve, type CliIO } from "../src/cli.js";
 import { claudeEnvs } from "../src/doctor.js";
 import { REAP_INTERVAL_MS, startHost, type HostHandle } from "../src/server.js";
+import { VERSION } from "../src/version.js";
 import { SEALED_GOLDEN as GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 
@@ -250,7 +251,7 @@ describe("host serves the app", () => {
     vi.unstubAllEnvs();
   });
 
-  it("the page's one inline script is the boot object: runtime port and token, nothing else", async () => {
+  it("the page's one inline script is the boot object: runtime port, token and the release this host is, nothing else", async () => {
     const { rt } = testRuntime();
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir() });
     expect(handle.wsPort).toBeGreaterThan(0);
@@ -261,7 +262,7 @@ describe("host serves the app", () => {
     const html = await page.text();
     expect(html).toContain('<script type="module" crossorigin src="/assets/app.js">');
     expect(inlineScripts(html)).toEqual([
-      `window.__WSP__ = {"wsPort":${handle.wsPort},"token":"${handle.authToken}"};`,
+      `window.__WSP__ = {"wsPort":${handle.wsPort},"token":"${handle.authToken}","version":"${VERSION}"};`,
     ]);
     expect(html).not.toContain("window.__WSP__ ||");
   });
@@ -270,7 +271,7 @@ describe("host serves the app", () => {
     const { rt } = testRuntime();
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), statePath: "/Users/dev/.wsp/state.json" });
     const html = await (await fetch(`http://127.0.0.1:${handle.port}/`)).text();
-    expect(inlineScripts(html)).toEqual([`window.__WSP__ = {"wsPort":${handle.wsPort},"token":"${handle.authToken}","statePath":"/Users/dev/.wsp/state.json"};`]);
+    expect(inlineScripts(html)).toEqual([`window.__WSP__ = {"wsPort":${handle.wsPort},"token":"${handle.authToken}","version":"${VERSION}","statePath":"/Users/dev/.wsp/state.json"};`]);
   });
 
   it("the handle's createWorkspace forks the golden's head the way the app's own create does, and refuses without a golden", async () => {
@@ -299,7 +300,7 @@ describe("host serves the app", () => {
     writeFileSync(recipePath, JSON.stringify({ entries: [{ rung: "shell", id: "shell/zshrc", label: "~/.zshrc", paths: ["~/.zshrc"], bytes: 10, default: "bring", bring: true }, font(true)] }));
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), recipePath });
     const boot = async () => inlineScripts(await (await fetch(`http://127.0.0.1:${handle!.port}/`)).text())[0];
-    expect(await boot()).toBe(`window.__WSP__ = {"wsPort":${handle.wsPort},"token":"${handle.authToken}","terminalFont":"Hack"};`);
+    expect(await boot()).toBe(`window.__WSP__ = {"wsPort":${handle.wsPort},"token":"${handle.authToken}","version":"${VERSION}","terminalFont":"Hack"};`);
     writeFileSync(recipePath, JSON.stringify({ entries: [font(false)] }));
     expect(await boot()).not.toContain("terminalFont");
     writeFileSync(recipePath, "not json");

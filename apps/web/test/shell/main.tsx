@@ -47,7 +47,8 @@
 // the workspace ?ws names, so its PROJECTS section can be measured with two
 // projects (ws_a under ?projects=1) and with none;
 // ?init=building puts the init job mid-build so the cloud row's progress line
-// can be measured.
+// can be measured; ?version=behind holds a shell older than the host that
+// served the page, so the one line the app says about it can be measured.
 import { createRoot } from "react-dom/client";
 import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DESKTOP_MAC_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, keptAccess, THEME_PRESETS, THIS_COMPUTER, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
@@ -59,6 +60,7 @@ import { useRightPanelStore } from "../../src/rightPanelStore";
 import { SettingsPage } from "../../src/settings/SettingsPage";
 import { useThemeEffect } from "../../src/settings/theme";
 import { AppShell } from "../../src/shell/AppShell";
+import { useShellVersionEffect } from "../../src/shell/shellVersion";
 import { openPanelTerminal } from "../../src/shell/shellCommands";
 import { WorkspaceThread } from "../../src/shell/WorkspaceThread";
 import { useComposerImagesStore } from "../../src/components/chat/composerImages";
@@ -388,6 +390,12 @@ function fakeWire(): TerminalWire {
   };
 }
 
+// ?version=behind puts a shell older than the host that served this page on the window, so the one line the app
+// says about it can be measured where it lands; the whole road runs, bridge and boot object both.
+if (params.get("version") === "behind") {
+  window.wsp = { ...window.wsp, version: "0.1.3" };
+  (window as unknown as { __WSP__?: { wsPort: number; token: string; version: string } }).__WSP__ = { wsPort: 0, token: "", version: "0.1.5" };
+}
 const toast = params.get("toast");
 const shown = params.get("ws");
 useStore.setState({ conn: "live", ...(toast !== null ? { toast } : {}), ...(shown !== null ? { selectedId: shown } : {}) });
@@ -400,6 +408,11 @@ const settings = params.get("settings") === "1";
 if (settings) useStore.setState({ settingsOpen: true });
 function ThemeRule() {
   useThemeEffect();
+  return null;
+}
+/** The app's own reading of the two halves, so ?version=behind runs the road the app runs and not a set toast. */
+function VersionRule() {
+  useShellVersionEffect();
   return null;
 }
 useStore.getState().bind(api);
@@ -498,6 +511,7 @@ if (params.get("oom") === "1") {
 createRoot(document.getElementById("root")!).render(
   <TooltipProvider>
     {settings ? <ThemeRule /> : null}
+    {params.get("version") === "behind" ? <VersionRule /> : null}
     <AppShell>{settings ? <SettingsPage /> : shown === null ? <div /> : <WorkspaceThread workspaceId={shown} />}</AppShell>
   </TooltipProvider>,
 );

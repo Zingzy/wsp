@@ -4,7 +4,8 @@
 // per pick with its label at the left and its control at the right edge. The
 // control's own label is the explanation: no sentence under any pick. Every
 // pick goes to the host's preferences record and paints at once, so a browser
-// tab on the same host follows.
+// tab on the same host follows. About is the one section that takes no pick:
+// it names the release each half of the app is on.
 import { SidebarMode, TerminalSizeSource, ThemePreference, fmtPx, type TerminalConfig } from "@wsp/protocol";
 import { useEffect, useState, type ReactNode } from "react";
 import { SIDEBAR_MODE_WORDS } from "../actions/format.js";
@@ -12,11 +13,13 @@ import { Button } from "../components/ui/button.js";
 import { NumberField, NumberFieldDecrement, NumberFieldGroup, NumberFieldIncrement, NumberFieldInput } from "../components/ui/number-field.js";
 import { ScrollArea } from "../components/ui/scroll-area.js";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
+import { cn } from "../lib/utils.js";
 import { usePreferences, useStore } from "../protocol/store.js";
 import { SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "../shell/sidebarWidth.js";
 import { appTerminalFontSize } from "../terminal/ghostty/surface.js";
 import { appScheme } from "../terminal/ghosttyConfig.js";
-import { SETTINGS_WORDS, TERMINAL_SIZE_FACT, TERMINAL_SIZE_WORDS, THEME_WORDS } from "./format.js";
+import { shellVersions } from "../shell/shellVersion.js";
+import { SETTINGS_WORDS, TERMINAL_SIZE_FACT, TERMINAL_SIZE_WORDS, THEME_WORDS, versionFact } from "./format.js";
 
 const ZONE_LABEL = "font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground";
 const FACT = "font-mono text-[11px] tabular-nums text-muted-foreground";
@@ -30,6 +33,7 @@ export function SettingsPage() {
   const setPreferences = useStore(s => s.setPreferences);
   const readHostConfig = useStore(s => s.api?.hostTerminalConfig);
   const [file, setFile] = useState<TerminalConfig | null>(null);
+  const versions = shellVersions();
   // The file's size is a fact the host already reads for the pane; the page shows it beside the pick that would use it.
   useEffect(() => {
     if (readHostConfig === undefined) return;
@@ -90,6 +94,14 @@ export function SettingsPage() {
               {TERMINAL_SIZE_FACT[preferences.terminalSize](appTerminalFontSize(), file?.fontSize)}
             </span>
             <SegmentedControl aria-labelledby="settings-text-size" value={preferences.terminalSize} segments={SIZES} onChange={terminalSize => void setPreferences({ terminalSize })} />
+          </Row>
+        </Section>
+        <Section id="settings-about" title={SETTINGS_WORDS.about}>
+          <Row id="settings-version" label={SETTINGS_WORDS.version}>
+            {/* A row with no control still stands as tall as one, so the rhythm down the column never breaks. */}
+            <span className={cn(FACT, "flex h-7 items-center")} data-k="version">
+              {versionFact(versions.app, versions.host, versions.inShell)}
+            </span>
           </Row>
         </Section>
       </div>

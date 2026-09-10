@@ -8,6 +8,7 @@ import { SettingsPage } from "./settings/SettingsPage.js";
 import { useThemeEffect } from "./settings/theme.js";
 import { AppShell } from "./shell/AppShell.js";
 import { useNeedsYouEffect } from "./shell/needsYou.js";
+import { useShellVersionEffect } from "./shell/shellVersion.js";
 import { WorkspaceCreation } from "./shell/WorkspaceCreation.js";
 import { WorkspaceThread } from "./shell/WorkspaceThread.js";
 import { wireTerminals } from "./terminal/wiring.js";
@@ -38,6 +39,7 @@ export function App({ wsUrl, token }: { wsUrl: string; token: string }) {
   useEffect(() => wireTerminals(useStore), []);
   useThemeEffect();
   useNeedsYouEffect();
+  useShellVersionEffect();
   return <Shell />;
 }
 
