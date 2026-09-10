@@ -31,6 +31,12 @@ import {
   threadWorkingLine,
   INIT_SIGN_IN_WORDS,
   initDiskLine,
+  initBuildRows,
+  initStageCount,
+  initStageCountLine,
+  SIGN_IN_STAGE_ID,
+  sizeTone,
+  diskTone,
   initDiskOverLine,
   fmtCalls,
   type InitRow,
@@ -164,7 +170,7 @@ describe("the words the clients print for the job", () => {
   });
 
   it("the cost line names the size and the rate once, from the backend's own number", () => {
-    expect(initCostLine({ cpu: 2, memMb: 4096 }, 0.11)).toBe("A 2 vCPU · 4 GB machine costs about $0.11/hr while it runs; it naps when idle.");
+    expect(initCostLine({ cpu: 2, memMb: 4096 }, 0.11)).toBe("A 2 vCPU · 4 GB machine costs about $0.11 an hour while it runs and naps when idle");
   });
 
   it("the agent's first message names the two tools and where the recipe goes, asks the agent to ask nothing, and says plainly to run no commands", () => {
@@ -209,7 +215,7 @@ describe("the words the clients print for the job", () => {
     expect(initSetupLines(setup)).toEqual([
       "Solari key: saved",
       "Agents here: Claude Code (MCP added), Codex",
-      "A 2 vCPU · 4 GB machine costs about $0.11/hr while it runs; it naps when idle.",
+      "A 2 vCPU · 4 GB machine costs about $0.11 an hour while it runs and naps when idle",
       "No setup is running; the app's sidebar row starts one.",
     ]);
     const waiting = { ...JOB, phase: "signing-in" as const, rows: [row(), row({ id: "sign-in/gh", kind: "sign-in", label: "GitHub CLI login", state: INIT_ROW_STATES.open, page: "https://github.com/login/device", code: "8F4A-C21B" })] };
@@ -255,6 +261,7 @@ describe("the words the clients print for the job", () => {
   });
 
   it("every step has a sentence under its title, and no title or sentence ends in a period", () => {
+    expect(CLOUD_SETUP_WORDS.build.slideTop).not.toMatch(/[.;]$/);
     for (const step of [CLOUD_SETUP_WORDS.choice, CLOUD_SETUP_WORDS.keys, CLOUD_SETUP_WORDS.reading, CLOUD_SETUP_WORDS.agent, CLOUD_SETUP_WORDS.build, CLOUD_SETUP_WORDS.ask]) {
       expect(step.top.length, step.top).toBeGreaterThan(20);
       expect(step.top, step.top).not.toMatch(/\.$/);
@@ -266,7 +273,30 @@ describe("the words the clients print for the job", () => {
     expect(initTallyLine(3, "agents", 1.1 * 1024 * MIB)).toBe("3 agents on the image · 1.1 GB");
     expect(initTallyLine(1, "tools", 60 * MIB)).toBe("1 tool on the image · 60 MB");
     expect(initTallyLine(0, "agents", 0)).toBe("0 agents on the image · 0 B");
+    expect(initTallyLine(3, "more", 1.2 * 1024 * MIB)).toBe("3 more on the image · 1.2 GB");
+    expect(initTallyLine(1, "more", MIB)).toBe("1 more on the image · 1 MB");
     expect(initDiskLine(1.1 * 1024 * MIB, 20 * 1024 * MIB)).toBe("about 1.1 GB of 20 GB on the image");
+    const rows: InitRow[] = [
+      { id: "agent/claude", kind: "agent", label: "Claude Code", state: "MCP added" },
+      { id: "stage/creating", kind: "stage", label: "Creating the machine", state: "done" },
+      { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "Sign in to GitHub CLI", state: "waiting for you" },
+      { id: "sign-in/claude", kind: "sign-in", tool: "claude", label: "Sign in to Claude Code", state: "key set" },
+      { id: "stage/snapshotting", kind: "stage", label: "Taking the snapshot", state: "waiting" },
+      { id: "workspace/first", kind: "workspace", label: "first", state: "waiting" },
+    ];
+    const folded = initBuildRows(rows);
+    expect(folded.rows.map(r => r.id)).toEqual(["stage/creating", SIGN_IN_STAGE_ID, "stage/snapshotting", "workspace/first"]);
+    expect(folded.rows[1]).toMatchObject({ kind: "stage", label: "Signing in on the machine", state: "waiting for you" });
+    expect(folded.signIns.map(r => r.id)).toEqual(["sign-in/gh", "sign-in/claude"]);
+    const settled = initBuildRows(rows.map(r => (r.id === "sign-in/gh" ? { ...r, state: "not signed in" } : r)));
+    expect(settled.rows[1]!.state, "a sign-in that ran out keeps the stage from reading done").toBe("not signed in");
+    expect(initBuildRows(rows.map(r => (r.id === "sign-in/gh" ? { ...r, state: "done" } : r))).rows[1]!.state).toBe("done");
+    expect(initBuildRows(rows.map(r => (r.kind === "sign-in" ? { ...r, state: "waiting" } : r))).rows[1]!.state).toBe("waiting");
+    expect(initStageCount(folded.rows)).toEqual({ done: 1, total: 4 });
+    expect(initStageCount([row({ state: "done" }), row({ id: "stage/ready", state: "failed" })]), "a failed row is not done").toEqual({ done: 1, total: 2 });
+    expect(initStageCountLine({ done: 3, total: 12 })).toBe("3 of 12");
+    expect([sizeTone(1024 * MIB), sizeTone(300 * MIB), sizeTone(100 * MIB), sizeTone(99 * MIB), sizeTone(0)]).toEqual(["danger", "warning", "yellow", "muted", "muted"]);
+    expect([diskTone(13, 20), diskTone(14, 20), diskTone(18, 20), diskTone(21, 20), diskTone(1, 0)]).toEqual(["muted", "warning", "danger", "danger", "danger"]);
     expect(initDiskOverLine(300 * MIB)).toBe("over by 300 MB");
     expect(fmtCalls(29_623)).toBe("29,623 calls");
     expect(fmtCalls(1)).toBe("1 call");

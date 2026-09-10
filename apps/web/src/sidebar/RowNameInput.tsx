@@ -51,7 +51,7 @@ export function RowNameInput({
       aria-label={label}
       defaultValue={name}
       spellCheck={false}
-      className="min-w-0 flex-1 rounded-sm bg-transparent p-0 text-inherit outline-hidden ring-1 ring-ring/50 ring-offset-1 ring-offset-transparent"
+      className="min-w-0 flex-1 rounded-sm border border-input bg-transparent px-1 text-inherit outline-hidden transition-[border-color] duration-150 focus:border-ring"
       onKeyDown={onKeyDown}
       onBlur={() => {
         if (!saving) onCancel();

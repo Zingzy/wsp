@@ -2,19 +2,22 @@
 // A waiting step that shows its work: while this computer is read, the card
 // fills row by row with what the read found, the app's spinner beside the row
 // being read and a mono word in the slot once it is done. The rows are the
-// job's own, so nothing here fakes progress.
-import { CLOUD_SETUP_WORDS, type InitJob } from "@wsp/protocol";
+// job's own, so nothing here fakes progress; until the first lands the card
+// holds one row for this computer with the spinner, so the work reads as
+// started.
+import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, type InitJob } from "@wsp/protocol";
 import { cn } from "../../lib/utils.js";
-import { CARD, META, NAME, ROW, ROW_LINE, RowState, Slot } from "./rows.js";
+import { Card, META, NAME, ROW, ROW_LINE, RowState, Slot } from "./rows.js";
 import { SetupScreen } from "./SetupScreen.js";
 
 export function SetupFacts({ job, refusal }: { job: InitJob | null; refusal: string | null }) {
   const words = CLOUD_SETUP_WORDS.reading;
-  const rows = job?.rows ?? [];
+  const landed = job?.rows ?? [];
+  const rows: InitJob["rows"] = landed.length > 0 ? landed : [{ id: "fact/first", kind: "fact", label: CLOUD_SETUP_WORDS.reading.first, state: INIT_ROW_STATES.running }];
   return (
-    <SetupScreen k="reading" label={words.label} headline={words.headline} top={words.top} refusal={refusal}>
-      {rows.length > 0 ? (
-        <ul className={CARD} aria-label={words.headline}>
+    <SetupScreen k="reading" headline={words.headline} top={words.top} refusal={refusal}>
+      {(
+        <Card label={words.headline}>
           {rows.map(row => (
             <li key={row.id} data-k="row" data-row={row.id} data-state={row.state} className={cn(ROW, ROW_LINE)}>
               <span className={NAME}>{row.label}</span>
@@ -24,8 +27,8 @@ export function SetupFacts({ job, refusal }: { job: InitJob | null; refusal: str
               </Slot>
             </li>
           ))}
-        </ul>
-      ) : null}
+        </Card>
+      )}
     </SetupScreen>
   );
 }
