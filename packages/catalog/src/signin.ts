@@ -32,6 +32,26 @@ export type LoginSource = "keychain" | "rc-key" | "file" | "helper";
  * (device), a key pasted or exported (key), or nothing to run on a headless machine (none). */
 export type SignInKind = "oauth" | "device" | "key" | "none";
 
+/** A question the tool puts to its terminal that a run with nobody there would stop on, measured by running the
+ * login command in a pty with nothing typed into it. One of three settles it: `flag` is the flag in the login
+ * command that means it is never asked, `answer` is the line the relay types when the question appears, and
+ * `person` is a choice nothing but they can make (which provider, whose organisation), which keeps the row one they
+ * work through at the machine's terminal. A page that hands a code back is no question of this kind; `finish`
+ * declares that road. */
+export interface Question {
+  /** What the tool prints when it asks, matched against its output with the terminal's escapes taken out. */
+  asks: RegExp;
+  /** The flag in the login command that answers it before it is ever printed. */
+  flag?: string;
+  /** What the relay types on the tool's own pty when it sees the line, the way the person at it would. */
+  answer?: string;
+  /** The answer is the person's own, so the row waits for them at the machine's terminal. */
+  person?: true;
+}
+
+/** A question the row answers itself. */
+export type TypedAnswer = Question & { answer: string };
+
 /** Key files beside a login that no sign-in on the machine produces: they travel only by copy, as a row of their
  * own under the login's id plus "-keys", and the login's own status proves them once landed. */
 export interface KeyFiles {
@@ -49,6 +69,9 @@ export type SignIn =
       sources: readonly LoginSource[];
       /** The device-code, paste-code or no-browser variant, offered on a retry. */
       fallback?: string;
+      /** Every question this tool is known to put to a terminal, each with what settles it. Absent: running the
+       * login command in a pty with nothing typed into it printed a page and waited on the browser. */
+      questions?: readonly Question[];
       /** How this login finishes where nobody is at the machine's terminal: `callback` is the road the app takes for
        * every tool that has one, `code` a page that hands a code back for the person to submit, `none` a flow the
        * page or the tool's own prompts finish. Declared per tool here and nowhere else; the hand-off reads it. */
@@ -73,6 +96,11 @@ export type LoginSignIn = Extract<SignIn, { login: string }>;
 /** A sign-in the wizard runs as a command on the machine. */
 export function hasLogin(s: SignIn | { kind: "shell" }): s is LoginSignIn {
   return s.kind !== "none" && s.kind !== "shell";
+}
+
+/** The questions this login answers itself, for the relay to watch the tool's output for. */
+export function typedAnswers(s: SignIn | { kind: "shell" }): readonly TypedAnswer[] {
+  return hasLogin(s) ? (s.questions ?? []).filter((q): q is TypedAnswer => q.answer !== undefined) : [];
 }
 
 /** Whether a login starts as a sign-in on the machine: a browser or device flow the relay finishes there. A key has no
@@ -185,12 +213,22 @@ export function claudeSource(output: string, secrets: ReadonlyMap<string, string
 /** The sign-in rows of the entries that have one, by the tool's name; a row's words are the wizard's. */
 export const SIGN_IN_ROWS = {
   // Device flow by default; the shim opens the device page and the person types the code there. The status lists
-  // every account of the host, so one is signed in only when none of them failed.
+  // every account of the host, so one is signed in only when none of them failed. Bare, gh 2.100.0 stops on its
+  // first question and prints no page at all, so the four flags answer its four pickers ahead of time.
   gh: {
     kind: "device",
     sources: ["file", "keychain"],
     finish: "none",
-    login: "gh auth login",
+    login: "gh auth login --hostname github.com --git-protocol https --web --skip-ssh-key",
+    questions: [
+      { asks: /Where do you use GitHub\?/, flag: "--hostname" },
+      { asks: /What is your preferred protocol for Git operations on this host\?/, flag: "--git-protocol" },
+      { asks: /How would you like to authenticate GitHub CLI\?/, flag: "--web" },
+      { asks: /(?:Generate a new SSH key to add to|Upload your SSH public key to) your GitHub account\?/, flag: "--skip-ssh-key" },
+      { asks: /Press \[?Enter\]? to (?:open|continue)/, answer: "\r" },
+      // gh sets the git credential helper after the token lands, so this one comes only once the person is through.
+      { asks: /Authenticate Git with your GitHub credentials\?/, answer: "\r" },
+    ],
     // Two groups of four, as gh prints it: "! First copy your one-time code: XXXX-XXXX".
     code: /\b[A-Z0-9]{4}-[A-Z0-9]{4}\b/,
     status: { command: "gh auth status", signedIn: o => /Logged in to/.test(o) && !/Failed to log in/.test(o) },
@@ -206,16 +244,22 @@ export const SIGN_IN_ROWS = {
     status: { command: "gcloud auth list --filter=status:ACTIVE --format=value(account)", signedIn: ok(/@/) },
   },
   // A fresh machine has no sso-session profile, so the login is the one that writes it first; it names
-  // the profile {role}-{account} by default, so the check tries every configured profile.
+  // the profile {role}-{account} by default, so the check tries every configured profile. It is a configuration
+  // wizard before it is a sign-in: the start URL and the region it asks for are the person's organisation's.
   aws: {
     kind: "oauth",
     sources: ["file"],
     finish: "callback",
     login: "aws configure sso",
     fallback: "aws configure sso --use-device-code",
+    questions: [
+      { asks: /SSO session name \(Recommended\)/, person: true },
+      { asks: /SSO start URL/, person: true },
+      { asks: /SSO region/, person: true },
+    ],
     status: { command: AWS_STATUS, signedIn: ok(/"Arn"/) },
     toolTimeoutMs: 10 * MIN,
-    note: "the check tries every configured profile",
+    note: "the check tries every configured profile; the start URL and region it asks for are yours to type",
   },
   // --browser=false still binds the callback port, so there is no flag around the callback.
   wrangler: {
@@ -232,9 +276,30 @@ export const SIGN_IN_ROWS = {
   vercel: { kind: "oauth", sources: ["file"], finish: "none", login: "vercel login", status: { command: "vercel whoami", signedIn: (o, c) => c === 0 && !/No existing credentials/.test(o) }, toolTimeoutMs: 15 * MIN },
   netlify: { kind: "oauth", sources: [], finish: "none", login: "netlify login", status: { command: "netlify status", signedIn: (o, c) => c === 0 && !/Not logged in/i.test(o) }, toolTimeoutMs: 5 * MIN },
   fly: { kind: "oauth", sources: [], finish: "none", login: "fly auth login", status: { command: "fly auth whoami", signedIn: ok(/@/) }, toolTimeoutMs: 15 * MIN },
-  supabase: { kind: "oauth", sources: [], finish: "none", login: "supabase login", fallback: "supabase login --no-browser", status: { command: "supabase projects list", signedIn: ok() } },
+  // supabase waits for an Enter before it opens anything and has no flag for it (--yes leaves it standing); the
+  // relay presses it. --no-browser prints the link at once instead and asks for a code back, which is the retry.
+  supabase: {
+    kind: "oauth",
+    sources: [],
+    finish: "none",
+    login: "supabase login",
+    fallback: "supabase login --no-browser",
+    questions: [{ asks: /Press Enter to open browser and login automatically/, answer: "\r" }],
+    status: { command: "supabase projects list", signedIn: ok() },
+  },
   railway: { kind: "oauth", sources: [], finish: "callback", login: "railway login", status: { command: "railway whoami", signedIn: ok(/Logged in as/) }, toolTimeoutMs: 5 * MIN },
-  doppler: { kind: "oauth", sources: [], finish: "none", login: "doppler login", status: { command: "doppler me", signedIn: ok() }, toolTimeoutMs: 5 * MIN },
+  // Without --yes doppler asks before it prints anything; with it the page and the code its page asks for come at once.
+  doppler: {
+    kind: "oauth",
+    sources: [],
+    finish: "none",
+    login: "doppler login --yes",
+    questions: [{ asks: /Open the authorization page in your browser\?/, flag: "--yes" }],
+    // Lowercase words joined by underscores, as doppler prints it under "Your auth code is:".
+    code: /\b[a-z]+(?:_[a-z]+){2,}\b/,
+    status: { command: "doppler me", signedIn: ok() },
+    toolTimeoutMs: 5 * MIN,
+  },
   // The shim gets the localhost-callback URL and the terminal the hosted paste-code one; either finishes the login.
   claude: {
     kind: "oauth",
@@ -245,13 +310,28 @@ export const SIGN_IN_ROWS = {
     status: { command: "claude auth status", typed: CLAUDE_STATUS, signedIn: claudeSignedIn, detail: claudeSource, why: claudeWhy },
   },
   codex: { kind: "oauth", sources: ["file"], finish: "callback", keyEnv: "OPENAI_API_KEY", login: "codex login", fallback: "codex login --device-auth", status: { command: "codex login status", signedIn: ok(/Logged in using/) } },
-  gemini: { kind: "oauth", sources: ["file"], finish: "callback", keyEnv: "GEMINI_API_KEY", login: "gemini", status: { command: GEMINI_STATUS, signedIn: ok(), detail: geminiSource }, toolTimeoutMs: 5 * MIN },
+  // Gemini CLI 0.59.0 asks about the folder before anything else, and then which sign-in to take, with Google's
+  // preselected: --skip-trust answers the first and the relay's Enter takes the second.
+  gemini: {
+    kind: "oauth",
+    sources: ["file"],
+    finish: "callback",
+    keyEnv: "GEMINI_API_KEY",
+    login: "gemini --skip-trust",
+    questions: [
+      { asks: /Do you trust the files in this folder\?/, flag: "--skip-trust" },
+      { asks: /How would you like to authenticate for this project\?/, answer: "\r" },
+    ],
+    status: { command: GEMINI_STATUS, signedIn: ok(), detail: geminiSource },
+    toolTimeoutMs: 5 * MIN,
+  },
   // Both counts print on exit 0; a provider key exported on the machine is listed under Environment and counts as a login.
   opencode: {
     kind: "key",
     sources: ["file"],
     finish: "none",
     login: "opencode auth login",
+    questions: [{ asks: /Select provider/, person: true }],
     status: { command: "opencode auth list", signedIn: ok(/[1-9]\d* (credentials|environment variable)/), detail: secretNamed },
     note: "OpenCode dropped its Anthropic sign-in in 1.3.0; it takes an API key there",
     toolTimeoutMs: 5 * MIN,
@@ -266,13 +346,22 @@ export const SIGN_IN_ROWS = {
     status: { command: "kubectl config current-context", typed: "kubectl config current-context 2>/dev/null", signedIn: ok(/\S/), detail: o => `context ${o.trim()}` },
   },
   // pi lists a model only for a provider it holds credentials for, and prints a /login hint on exit 0 when it holds none.
-  pi: { kind: "oauth", sources: ["file"], finish: "none", login: "pi", status: { command: "pi --list-models", signedIn: ok(/^provider\s+model\b/m) }, note: "type /login inside pi and pick a provider, then /exit; a key on the machine counts" },
+  pi: {
+    kind: "oauth",
+    sources: ["file"],
+    finish: "none",
+    login: "pi",
+    questions: [{ asks: /Trust project folder\?/, person: true }],
+    status: { command: "pi --list-models", signedIn: ok(/^provider\s+model\b/m) },
+    note: "type /login inside pi and pick a provider, then /exit; a key on the machine counts",
+  },
   // The pool lists keys from ~/.hermes/.env and the environment beside stored logins; with none it prints nothing on exit 0.
   hermes: {
     kind: "device",
     sources: ["file"],
     finish: "none",
     login: "hermes auth",
+    questions: [{ asks: /What would you like to do\?/, person: true }],
     status: { command: "hermes auth list", signedIn: ok(/\(\d+ credentials\):/), detail: secretNamed },
     note: "pick Add a credential in the menu; keys in ~/.hermes/.env count",
     keys: { paths: ["~/.hermes/.env"], note: "the keys in ~/.hermes/.env travel only by copy; no sign-in produces them" },

@@ -38,6 +38,7 @@ import { saveSmallRecipe } from "../src/recipe-file.js";
 import { fakeHost } from "./recipe-fixture.js";
 import type { ScanRow } from "../src/scan.js";
 import { guestAnswer, mcpEditPlan, type StubBackend, stubBackend, type StubMachine } from "./stub-backend.js";
+import { loginOf } from "./signin-questions.js";
 
 const SOLARI = "slr_live_fake_solari_key";
 const KEY = { up: "\x1b[A", down: "\x1b[B", right: "\x1b[C", left: "\x1b[D", space: " ", enter: "\r", esc: "\x1b", ctrlC: "\x03" };
@@ -1047,8 +1048,8 @@ describe("wsp init, the summary-first screens", () => {
     expect(out).not.toMatch(/—|\p{Emoji_Presentation}/u);
     // The four agents installed, Gemini from the catalog's road though nothing of it is on this Mac; the five sign-ins ran here.
     expect(out).toMatch(/Agents\n│\s+4 installed: Claude Code, Codex, Hermes Agent, Gemini CLI\n/);
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual(["exec gh auth login || exit\r", "exec claude auth login || exit\r", "exec codex login || exit\r", "exec hermes auth || exit\r", "exec gemini || exit\r"]);
-    expect(out).toMatch(/Gemini CLI login: signed in \(gemini exited 0\)/);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([`exec ${loginOf("gh")} || exit\r`, "exec claude auth login || exit\r", "exec codex login || exit\r", "exec hermes auth || exit\r", `exec ${loginOf("gemini")} || exit\r`]);
+    expect(out).toContain(`Gemini CLI login: signed in (${loginOf("gemini")} exited 0)`);
     expect(f.reads).toEqual([]);
     const log = f.backends[0]!.machines[0]!.execLog;
     expect(log.some(c => c.includes("@google/gemini-cli@"))).toBe(true);
@@ -1660,7 +1661,7 @@ describe("wsp init, flags and no terminal", () => {
     expect(out).toMatch(/GitHub CLI login\s+sign in/);
     expect(out).toContain(`GitHub CLI login: open ${DEVICE_URL} on this computer`);
     expect(out).toContain(`open '${DEVICE_URL}'`);
-    expect(result.logins?.find(l => l.id === "logins/gh")).toMatchObject({ state: "signed-in", note: "gh auth login exited 0" });
+    expect(result.logins?.find(l => l.id === "logins/gh")).toMatchObject({ state: "signed-in", note: `${loginOf("gh")} exited 0` });
     expect(loadManifest(join(dirs[0]!, "golden-recipe.json")).entries.find(e => e.id === "logins/gh")?.choice).toBe("machine");
     expect(out).not.toContain("from your Keychain");
     // Nothing is printed as an object without --json.
@@ -1720,7 +1721,7 @@ describe("wsp init, flags and no terminal", () => {
       // its outcome.
       { event: "sign-in", tool: "gh", label: "GitHub CLI login" },
       { event: "sign-in", tool: "gh", label: "GitHub CLI login", browserUrl: DEVICE_URL, finish: "none", nextCommand: `open '${DEVICE_URL}'`, waitSeconds: 960 },
-      { event: "sign-in-result", tool: "gh", label: "GitHub CLI login", state: "signed-in", note: "gh auth login exited 0" },
+      { event: "sign-in-result", tool: "gh", label: "GitHub CLI login", state: "signed-in", note: `${loginOf("gh")} exited 0` },
       { event: "sign-in", tool: "claude", label: "Claude Code login" },
       // claude's row is declared callback, and the page it printed here redirects to the hosted paste-code page, not
       // to a port on the machine, so the row takes a code.

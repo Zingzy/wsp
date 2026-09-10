@@ -11,6 +11,7 @@ import { CALLBACK_DISPLAY, cadence, codeIn, handoffStage, rowFinish, signInEnv, 
 import { SignInCodes, flowHooks, type SignInFlow } from "../src/init-signin.js";
 import { signInFor } from "../src/signin-table.js";
 import { fakePtyLink, type FakePty, type FakePtyLink } from "./fake-pty-link.js";
+import { ASKED, loginOf } from "./signin-questions.js";
 
 const GH: ManifestEntry = { rung: "logins", id: "logins/gh", label: "GitHub CLI login", group: "CLI logins", paths: [], bytes: 0, default: "bring", choice: "machine" };
 const CLAUDE: ManifestEntry = { rung: "logins", id: "logins/claude", label: "Claude Code login", group: "Agent logins", paths: [], bytes: 0, default: "bring", choice: "copy" };
@@ -32,6 +33,7 @@ const PASTED = "4/0AfakeCodeFromThePage";
 const PAGE = "https://github.com/login/oauth/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A42485%2Fcallback";
 const BANNER = "https://cli.github.com/upgrade";
 const BUILDER = { id: "m_builder", name: "default" };
+const GH_LOGIN = loginOf("gh");
 const GH_CODE = (() => {
   const s = signInFor("gh");
   return s.kind === "device" ? s.code : undefined;
@@ -119,7 +121,7 @@ describe("the sign-in hand-off", () => {
     const link = ghLink({ after: 1, hold: true });
     const st = stage(link);
     const [r] = await st.run;
-    expect(r).toMatchObject({ id: "logins/gh", state: "signed-in", command: "gh auth login", note: "gh auth status says signed in" });
+    expect(r).toMatchObject({ id: "logins/gh", state: "signed-in", command: GH_LOGIN, note: "gh auth status says signed in" });
     expect(st.json).toEqual([
       // The row stands as the command starts, before the tool has printed its page and before any road is known.
       { event: "sign-in", tool: "gh", label: "GitHub CLI login" },
@@ -129,11 +131,11 @@ describe("the sign-in hand-off", () => {
     const text = st.text();
     expect(text).toContain(`GitHub CLI login: open ${DEVICE} on this computer, then enter the code ${CODE}`);
     expect(text).toContain(`open '${DEVICE}'`);
-    expect(text).toContain("gh auth login is running on the machine; this run waits up to 2.0s for you");
+    expect(text).toContain(`${GH_LOGIN} is running on the machine; this run waits up to 2.0s for you`);
     expect(text).toContain("GitHub CLI login: signed in");
     // Two checks: the first said no, the second said yes, and the login's own pty was killed once it had.
     expect(link.ptys.filter(p => p.writes[0]?.includes("WSP_STATUS"))).toHaveLength(2);
-    expect(link.ptys[0]!.writes[0]).toBe("exec gh auth login || exit\r");
+    expect(link.ptys[0]!.writes[0]).toBe(`exec ${GH_LOGIN} || exit\r`);
     expect(link.ptys.every(p => p.killed)).toBe(true);
   });
 
@@ -175,13 +177,34 @@ describe("the sign-in hand-off", () => {
 
   it("a command that ends 0 by itself is signed in without another check; one that ends badly is judged by the tool's status", async () => {
     const clean = stage(ghLink({ after: 99 }));
-    expect((await clean.run)[0]).toMatchObject({ state: "signed-in", exit: 0, note: "gh auth login exited 0" });
+    expect((await clean.run)[0]).toMatchObject({ state: "signed-in", exit: 0, note: `${GH_LOGIN} exited 0` });
 
     const refused = stage(ghLink({ after: 99, exitCode: 1 }));
-    expect((await refused.run)[0]).toMatchObject({ state: "not-signed-in", exit: 1, note: "gh auth login exited 1; gh auth status says not signed in" });
+    expect((await refused.run)[0]).toMatchObject({ state: "not-signed-in", exit: 1, note: `${GH_LOGIN} exited 1; gh auth status says not signed in` });
 
     const late = stage(ghLink({ after: 0, exitCode: 1 }));
     expect((await late.run)[0]).toMatchObject({ state: "signed-in", exit: 1, note: "gh auth status says signed in" });
+  });
+
+  it("answers the question the row says its tool waits on, on that tool's own pty, so the flow reaches the browser with nobody at the machine", async () => {
+    const link = fakePtyLink();
+    let login: FakePty | undefined;
+    link.script = (pty, line) => {
+      if (line.includes("WSP_STATUS")) {
+        link.data(pty, `You are not logged into any GitHub hosts\r\nWSP_STATUS 1\r\n`);
+        link.exit(pty, 0);
+        return;
+      }
+      if (!line.startsWith("exec ")) return;
+      login = pty;
+      link.data(pty, ASKED.ghWeb.replace(/\n/g, "\r\n"));
+    };
+    const st = stage(link, { deadlineMs: 120, pollMs: 20 });
+    await st.run;
+    // The command line, then the Enter gh waits on before it opens anything; nothing else is ever typed at it.
+    expect(login!.writes).toEqual([`exec ${GH_LOGIN} || exit\r`, "\r"]);
+    // The code and the page gh printed beside that question still reach the person.
+    expect(st.json[1]).toMatchObject({ browserUrl: DEVICE, code: "72F3-072B" });
   });
 
   it("a tool the shell cannot find is skipped with that reason and no status is asked", async () => {

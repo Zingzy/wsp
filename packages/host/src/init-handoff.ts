@@ -20,7 +20,7 @@ import { agentName } from "./init-recipe.js";
 import { SIGN_IN_CAP_MS, copiedOutcomes, signInCapMs, stateLine, toolOf, type BuilderLink, type LoginOutcome, type SignInCodes, type SignInFlow } from "./init-signin.js";
 import { openerCommand } from "./relay.js";
 import { runQuiet, stripOsc8, urlsIn, watchPty, type WatchOutcome } from "./signin-relay.js";
-import { hasLogin, signInFor } from "./signin-table.js";
+import { hasLogin, signInFor, typedAnswers } from "./signin-table.js";
 
 export interface HandoffOptions {
   /** The logins the stage owns, the same rows the terminal stage takes: a choice of copy is recorded as copied,
@@ -225,6 +225,7 @@ export async function handoffStage(o: HandoffOptions): Promise<LoginOutcome[]> {
       command,
       timeoutMs: capMs,
       stop,
+      answers: typedAnswers(s),
       ...(env !== undefined ? { env } : {}),
       onData: chunk => {
         if (seen.length < TEXT_CAP) seen += chunk;

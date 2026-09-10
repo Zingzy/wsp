@@ -23,8 +23,9 @@ export function scriptedLink(state: { signedIn: boolean; hold: boolean; missing:
       link.exit(pty, 127);
       return;
     }
-    // A held login that is typed into: the code from its page, which the tool takes before it ends.
-    if (state.hold && !line.startsWith("exec ")) {
+    // A held login that is typed into: the code from its page, which the tool takes before it ends. A bare Enter is
+    // the relay answering a question the row declares, and no tool ends on that.
+    if (state.hold && line !== "" && !line.startsWith("exec ")) {
       link.exit(pty, 0);
       return;
     }

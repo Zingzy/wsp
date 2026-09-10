@@ -5,8 +5,9 @@
 import { describe, expect, it } from "vitest";
 import { CLAUDE_CONFIG_DIR } from "@wsp/catalog";
 import { SignInFinish } from "@wsp/protocol";
-import { AWS_STATUS, CLAUDE_KEY_PATH, CLAUDE_STATUS, CLOUDFLARED_STATUS, GEMINI_STATUS, SIGN_INS, claudeSource, claudeWhy, geminiSource, hasLogin, secretNamed, signInFor, signInWords, signsInByDefault, type SignIn } from "../src/signin-table.js";
+import { AWS_STATUS, CLAUDE_KEY_PATH, CLAUDE_STATUS, CLOUDFLARED_STATUS, GEMINI_STATUS, SIGN_INS, claudeSource, claudeWhy, geminiSource, hasLogin, secretNamed, signInFor, signInWords, signsInByDefault, typedAnswers, type SignIn } from "../src/signin-table.js";
 import { collectorLogins } from "./collector-logins.js";
+import { ASKED, REACHED } from "./signin-questions.js";
 
 /** The catalog's status check on a row, whichever kind it is. */
 const statusOf = (s: SignIn) => (s.kind === "shell" ? undefined : s.status);
@@ -32,7 +33,6 @@ describe("sign-in table", () => {
   });
 
   it("carries the corrected flags: device code or paste code where the callback flow cannot land, none where the tool has only one flow", () => {
-    expect(command("gh").login).toBe("gh auth login");
     expect(command("gh").fallback).toBeUndefined();
     // gcloud, gemini and railway already take their paste or device flow under the daemon pty (DISPLAY unset), so no second variant.
     for (const name of ["gcloud", "gemini", "railway"]) expect(command(name).fallback, name).toBeUndefined();
@@ -56,6 +56,68 @@ describe("sign-in table", () => {
     expect(command("pi").note).toMatch(/\/login/);
     expect(command("hermes").login).toBe("hermes auth");
     expect(command("hermes").fallback).toBeUndefined();
+  });
+
+  it("settles every question each tool is known to ask: a flag in the login command, a line the relay types, or the person's own choice", () => {
+    for (const [name, s] of Object.entries(SIGN_INS)) {
+      if (!hasLogin(s)) {
+        expect(s.kind, name).toBe("none");
+        continue;
+      }
+      for (const q of s.questions ?? []) {
+        const settled = [q.flag, q.answer, q.person].filter(x => x !== undefined);
+        expect(settled, `${name}: ${q.asks.source}`).toHaveLength(1);
+        // A global shape carries lastIndex from one chunk to the next, so a question printed twice would be missed.
+        expect(q.asks.global, `${name}: ${q.asks.source}`).toBe(false);
+        if (q.flag !== undefined) expect(s.login.split(" "), `${name}: ${q.asks.source}`).toContain(q.flag);
+      }
+    }
+  });
+
+  it("runs gh without questions: the four flags answer its pickers and the relay presses the Enter it waits on", () => {
+    expect(command("gh").login).toBe("gh auth login --hostname github.com --git-protocol https --web --skip-ssh-key");
+    const asked = (line: string): string | undefined => command("gh").questions?.find(q => q.asks.test(line))?.flag ?? command("gh").questions?.find(q => q.asks.test(line))?.answer;
+    expect(asked(ASKED.ghBare)).toBe("--hostname");
+    expect(asked(ASKED.ghProtocol)).toBe("--git-protocol");
+    expect(asked(ASKED.ghHow)).toBe("--web");
+    expect(asked(ASKED.ghSshKey)).toBe("--skip-ssh-key");
+    expect(asked(ASKED.ghWeb)).toBe("\r");
+    expect(asked(ASKED.ghCredentials)).toBe("\r");
+    // The line the flags leave standing is the only one the relay answers before the person is through.
+    expect(typedAnswers(signInFor("gh")).filter(a => a.asks.test(ASKED.ghWeb))).toHaveLength(1);
+  });
+
+  it("runs supabase, doppler and gemini without questions, by a flag or by the relay's own Enter", () => {
+    expect(typedAnswers(signInFor("supabase")).map(a => [a.asks.test(ASKED.supabase), a.answer])).toEqual([[true, "\r"]]);
+    expect(command("doppler").login).toBe("doppler login --yes");
+    expect(command("doppler").questions?.map(q => [q.asks.test(ASKED.dopplerBare), q.flag])).toEqual([[true, "--yes"]]);
+    expect(command("doppler").code?.exec(ASKED.dopplerYes)?.[0]).toBe("arugula_backpack_termite_sea_lannister");
+    expect(command("gemini").login).toBe("gemini --skip-trust");
+    expect(command("gemini").questions?.map(q => [q.asks.test(ASKED.geminiTrust), q.flag])).toEqual([[true, "--skip-trust"], [false, undefined]]);
+    expect(typedAnswers(signInFor("gemini")).map(a => [a.asks.test(ASKED.geminiAuth), a.answer])).toEqual([[true, "\r"]]);
+  });
+
+  it("leaves the rows whose next answer is the person's own to the machine's terminal, and declares no question for the rows that reach their page on their own", () => {
+    const theirs = Object.entries(SIGN_INS).filter(([, s]) => hasLogin(s) && (s.questions ?? []).some(q => q.person === true)).map(([k]) => k);
+    expect(theirs.sort()).toEqual(["aws", "hermes", "opencode", "pi"]);
+    expect(command("aws").questions?.[0]?.asks.test(ASKED.awsSso)).toBe(true);
+    expect(command("opencode").questions?.[0]?.asks.test(ASKED.opencode)).toBe(true);
+    expect(command("pi").questions?.[0]?.asks.test(ASKED.pi)).toBe(true);
+    expect(command("hermes").questions?.[0]?.asks.test(ASKED.hermes)).toBe(true);
+    // Each of these printed a page and then waited on the browser, so there is nothing for the relay to answer.
+    for (const name of ["gcloud", "wrangler", "vercel", "netlify", "fly", "railway", "claude", "codex", "cloudflared"]) {
+      expect(command(name).questions, name).toBeUndefined();
+      expect(typedAnswers(signInFor(name)), name).toEqual([]);
+    }
+    expect(typedAnswers({ kind: "shell" })).toEqual([]);
+    expect(typedAnswers(signInFor("kube"))).toEqual([]);
+    // No shape is loose enough to read one of those pages as a question, which would type into a tool that is waiting
+    // on the browser instead.
+    for (const [tool, printed] of Object.entries(REACHED)) {
+      for (const [name, s] of Object.entries(SIGN_INS)) {
+        if (hasLogin(s)) for (const q of s.questions ?? []) expect(q.asks.test(printed), `${name}: ${q.asks.source} on ${tool}`).toBe(false);
+      }
+    }
   });
 
   it("names the tool's own wait where it has one and leaves it out where the tool never gives up", () => {
@@ -237,7 +299,7 @@ describe("sign-in table", () => {
   });
 
   it("words a row for a checklist: the command, what to do instead, or a plain ask", () => {
-    expect(signInWords(signInFor("gh"))).toBe("gh auth login");
+    expect(signInWords(signInFor("gh"))).toBe(command("gh").login);
     expect(signInWords(signInFor("kube"))).toBe("kubectl has no sign-in; copy the kubeconfig instead");
     expect(signInWords(signInFor("unknown"))).toBe("sign in as the tool asks");
   });

@@ -6,8 +6,9 @@
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it } from "vitest";
-import { OFFER_MS, UrlScanner, hyperlink, relayPty, runQuiet, shellLine, stripOsc8, urlsIn, watchPty, type RelayTerminal } from "../src/signin-relay.js";
+import { OFFER_MS, QuestionScanner, UrlScanner, hyperlink, relayPty, runQuiet, shellLine, stripOsc8, urlsIn, watchPty, type RelayTerminal } from "../src/signin-relay.js";
 import { fakePtyLink, type FakePty } from "./fake-pty-link.js";
+import { ASKED } from "./signin-questions.js";
 
 interface Term extends RelayTerminal {
   input: PassThrough & RelayTerminal["input"];
@@ -303,6 +304,45 @@ describe("relayPty", () => {
     expect(pty.writes).toEqual(["exit\r"]);
     link.exit(pty, 0);
     await run;
+  });
+});
+
+describe("the questions a row answers itself", () => {
+  const ENTER = { asks: /Press \[?Enter\]? to (?:open|continue)/, answer: "\r" };
+
+  it("gives each answer once, past the colours the tool paints its question in, and stops reading once every one is given", () => {
+    const scanner = new QuestionScanner([ENTER, { asks: /Authenticate Git with your GitHub credentials\?/, answer: "y\r" }]);
+    // The colours gh puts around "Press Enter" sit inside the line, so the shape only matches with them taken out.
+    expect(scanner.feed("\x1b[0;33m!\x1b[0m First copy your one-time code: \x1b[0;1;39m72F3-072B\x1b[0m\r\n")).toEqual([]);
+    expect(scanner.feed("\x1b[0;1;39mPress Enter\x1b[0m to open https://github.com/login/device in your browser... ")).toEqual(["\r"]);
+    // The same line again is a redraw, not a second question.
+    expect(scanner.feed(ASKED.ghWeb)).toEqual([]);
+    expect(scanner.feed(ASKED.ghCredentials)).toEqual(["y\r"]);
+    expect(scanner.feed(ASKED.ghCredentials)).toEqual([]);
+  });
+
+  it("sees a question split across two chunks, and answers nothing for a row that declares none", () => {
+    const split = new QuestionScanner([ENTER]);
+    expect(split.feed("Press Ent")).toEqual([]);
+    expect(split.feed("er to open https://github.com/login/device in your browser... ")).toEqual(["\r"]);
+    const quiet = new QuestionScanner([]);
+    expect(quiet.feed(ASKED.ghWeb)).toEqual([]);
+  });
+
+  it("types the answer on the tool's own pty as the line arrives, and nothing when the row declares none", async () => {
+    const run = async (answers: { asks: RegExp; answer: string }[]) => {
+      const link = fakePtyLink();
+      link.script = (pty: FakePty, line: string) => {
+        if (!line.startsWith("exec ")) return;
+        link.data(pty, `! First copy your one-time code: 72F3-072B\r\n`);
+        link.data(pty, `Press Enter to open https://github.com/login/device in your browser... `);
+      };
+      const watching = watchPty({ link, command: "gh auth login --web", timeoutMs: 100, answers });
+      await watching;
+      return link.ptys[0]!.writes;
+    };
+    expect(await run([ENTER])).toEqual(["exec gh auth login --web || exit\r", "\r"]);
+    expect(await run([])).toEqual(["exec gh auth login --web || exit\r"]);
   });
 });
 

@@ -9,6 +9,7 @@ import { runScan, type RecipeIo } from "../src/recipe-command.js";
 import { FLOOR_LINE, USED_GROUP, type TableRow } from "../src/init-table.js";
 import { ALSO_HERE_TITLE, COMMANDS_TITLE, NOT_SCANNED, RecipeScan, SIGN_INS_TITLE, alsoHereLines, scanPrintout, signInAdvice, tickAdvice } from "../src/recipe-answer.js";
 import { claudeLine, fakeHost, HOME } from "./recipe-fixture.js";
+import { loginOf } from "./signin-questions.js";
 
 const PROJ = `${HOME}/proj`;
 const MB = 1024 * 1024;
@@ -41,7 +42,7 @@ describe("wsp recipe scan", () => {
     expect(scan.tools.find(r => r.id === "java")).toMatchObject({ on: false, why: "installed here, never used" });
     expect(scan.commands.map(c => c.name)).toEqual(["pulumi"]);
     expect(scan.signIns.map(r => r.id)).toEqual(["claude", "gh", "wrangler"]);
-    expect(scan.signIns.find(r => r.id === "gh")).toMatchObject({ signIn: "gh auth login" });
+    expect(scan.signIns.find(r => r.id === "gh")).toMatchObject({ signIn: loginOf("gh") });
     rmSync(dir, { recursive: true, force: true });
   });
 

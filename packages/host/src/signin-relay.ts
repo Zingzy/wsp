@@ -7,6 +7,7 @@
 // forwarded port, which o opens instead; codes and tokens are never looked at.
 import type { Readable, Writable } from "node:stream";
 import { stripVTControlCharacters, styleText } from "node:util";
+import type { TypedAnswer } from "@wsp/catalog";
 
 export interface PtyLink {
   op(op: string, extra?: Record<string, unknown>): Promise<Record<string, unknown>>;
@@ -97,6 +98,27 @@ export class UrlScanner {
   private fresh(urls: string[]): string[] {
     const out = urls.filter(u => !this.seen.has(u));
     for (const u of out) this.seen.add(u);
+    return out;
+  }
+}
+
+/** Feeds chunks and gives back what to type for each question the row answers itself, once each: the shape is
+ * matched against the text with the terminal's escapes taken out, keeping a tail so a question split across two
+ * chunks is still seen. */
+export class QuestionScanner {
+  private tail = "";
+  private readonly given = new Set<TypedAnswer>();
+  constructor(private readonly answers: readonly TypedAnswer[]) {}
+  feed(chunk: string): string[] {
+    if (this.given.size === this.answers.length) return [];
+    const text = this.tail + stripVTControlCharacters(stripOsc8(chunk));
+    this.tail = text.slice(-TAIL_CHARS);
+    const out: string[] = [];
+    for (const a of this.answers) {
+      if (this.given.has(a) || !a.asks.test(text)) continue;
+      this.given.add(a);
+      out.push(a.answer);
+    }
     return out;
   }
 }
@@ -244,6 +266,9 @@ export interface WatchOptions {
   onUrl?(url: string): void;
   /** Rides the pty's environment on the machine, where the daemon's own defaults would otherwise decide. */
   env?: Record<string, string>;
+  /** The questions the row answers itself: each one's line is typed on the tool's own pty as it appears, once, the
+   * way the person at that terminal would press it. */
+  answers?: readonly TypedAnswer[];
   /** Handed the pty's own input once it is attached, and nothing once it is gone: what a code from a page is typed
    * with, from wherever the person pasted it. A refused write rejects, so the caller can say so. */
   onTyping?(write: ((data: string) => Promise<void>) | undefined): void;
@@ -278,11 +303,13 @@ export async function watchPty(o: WatchOptions): Promise<WatchOutcome> {
   const report = (urls: string[]): void => {
     for (const url of urls) o.onUrl?.(url);
   };
+  const questions = new QuestionScanner(o.answers ?? []);
   const detach = o.link.onEvent(e => {
     if (e["ptyId"] !== ptyId) return;
     if (e["type"] === "pty.data") {
       const data = String(e["data"]);
       o.onData?.(data);
+      for (const answer of questions.feed(data)) void o.link.op("pty.write", { ptyId, data: answer }).catch(() => {});
       report(scanner.feed(data));
       if (flush) clearTimeout(flush);
       flush = setTimeout(() => report(scanner.flush()), o.flushMs ?? FLUSH_MS);
