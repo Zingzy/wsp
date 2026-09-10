@@ -1143,7 +1143,7 @@ describe("gone machine", () => {
 });
 
 const GiB = 1024 ** 3;
-const sysSample = (i: number, over: Partial<Pick<SysSample, "cpu" | "disk">> = {}): SysSample => ({
+const sysSample = (i: number, over: Partial<Pick<SysSample, "cpu" | "mem" | "disk">> = {}): SysSample => ({
   type: "sys.sample",
   cpu: 33.3,
   load1: 0.42,
@@ -1250,25 +1250,26 @@ describe("live", () => {
     expect(fact("disk")).toBe("20 GB of 100 GB");
   });
 
-  it("the disk number takes the tier colour at 50, 65 and 75 percent; cpu and memory stay neutral", async () => {
+  it("the live numbers read the percent table the setup's tallies use, cpu and memory the same as disk: muted under 70 percent of the total, the warning tone from 70, the danger tone from 90, each side in whole units", async () => {
     await mount([view("ws_a", "api")]);
     const tone = (k: string): string => valueSlot(k).className;
-    const disk = (pct: number): SysSample => sysSample(0, { cpu: 95, disk: { used: pct * GiB, total: 100 * GiB } });
-    feed("ws_a", [disk(49.9)]);
-    await waitFor(() => expect(fact("disk")).toBe("49.9 GB of 100 GB"));
-    expect(tone("disk")).not.toMatch(/warning|caution|destructive/);
-    feed("ws_a", [disk(50)]);
-    await waitFor(() => expect(fact("disk")).toBe("50 GB of 100 GB"));
+    const at = (over: Partial<Pick<SysSample, "cpu" | "mem" | "disk">>): SysSample => sysSample(0, over);
+    feed("ws_a", [at({ cpu: 33, mem: { used: 25 * GiB, total: 100 * GiB }, disk: { used: 53 * GiB, total: 100 * GiB } })]);
+    await waitFor(() => expect(fact("disk")).toBe("53 GB of 100 GB"));
+    for (const k of ["cpu", "mem", "disk"]) expect(tone(k), `${k} muted`).toMatch(/text-muted-foreground/);
+    feed("ws_a", [at({ cpu: 70, mem: { used: 73 * GiB, total: 100 * GiB }, disk: { used: 69.9 * GiB, total: 100 * GiB } })]);
+    await waitFor(() => expect(fact("mem")).toBe("73 GB of 100 GB"));
+    expect(fact("disk")).toBe("69.9 GB of 100 GB");
+    expect(tone("cpu")).toMatch(/text-warning-foreground/);
+    expect(tone("mem")).toMatch(/text-warning-foreground/);
+    expect(tone("disk")).toMatch(/text-muted-foreground/);
+    feed("ws_a", [at({ cpu: 95, mem: { used: 90 * GiB, total: 100 * GiB }, disk: { used: 89.9 * GiB, total: 100 * GiB } })]);
+    await waitFor(() => expect(fact("cpu")).toBe("95%"));
+    expect(tone("cpu")).toMatch(/text-destructive-foreground/);
+    expect(tone("mem")).toMatch(/text-destructive-foreground/);
     expect(tone("disk")).toMatch(/text-warning-foreground/);
-    feed("ws_a", [disk(65)]);
-    await waitFor(() => expect(fact("disk")).toBe("65 GB of 100 GB"));
-    expect(tone("disk")).toMatch(/text-caution-foreground/);
-    feed("ws_a", [disk(75)]);
-    await waitFor(() => expect(fact("disk")).toBe("75 GB of 100 GB"));
-    expect(tone("disk")).toMatch(/text-destructive-foreground/);
-    expect(fact("cpu")).toBe("95%");
-    expect(tone("cpu")).not.toMatch(/warning|caution|destructive/);
-    expect(tone("mem")).not.toMatch(/warning|caution|destructive/);
+    // The tones come from the one table: no tier of the surface's own, so no caution tone anywhere on the rows.
+    for (const k of ["cpu", "mem", "disk"]) expect(tone(k)).not.toMatch(/caution/);
   });
 
   it("every row is the same fixed height in every state", async () => {

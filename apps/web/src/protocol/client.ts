@@ -6,6 +6,7 @@
 // token; the store re-runs its standing fetches when the status comes back
 // to live.
 import {
+  CLOUD_SETUP_WORDS,
   HarnessCatalog,
   PortForward,
   SessionAccessOutcome,
@@ -467,7 +468,8 @@ export function makeApi(c: ProtocolClient): Api {
     createFromGoldenHead: async (name, size) => {
       const { manifest } = await c.request<{ manifest?: GoldenManifest }>("golden.get", { name: "default" });
       const head = goldenHead(manifest);
-      if (!head) throw new Error("no golden image yet; build one first (wspx golden build)");
+      // A golden gone between the store's read and this ask: the app's own sentence, never a command to run.
+      if (!head) throw new Error(CLOUD_SETUP_WORDS.create.none);
       return create(head.snapshotId, name, size);
     },
     watchStatuses: async () => (await c.request<{ statuses: WorkspaceStatus[] }>("status.subscribe")).statuses,

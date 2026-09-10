@@ -988,9 +988,9 @@ describe("LINEAGE_MARKS", () => {
 });
 
 describe("template words", () => {
-  it("says what the provider reads the template as and whether the seal asks again; ready is final", () => {
-    expect(templateStatusLine("tpl_a", "building")).toBe("tpl_a is building; asking again");
-    expect(templateStatusLine("tpl_a", "ready")).toBe("tpl_a is ready");
+  it("says the image is being saved and whether the seal asks again, never the template's id; ready is final", () => {
+    expect(templateStatusLine("building")).toBe("saving the image, the provider says building; asking again");
+    expect(templateStatusLine("ready")).toBe("the image is saved");
   });
 
   it("names a failed template with the provider's reason, or that none was given, and a wait that ran out with the last status and the time", () => {

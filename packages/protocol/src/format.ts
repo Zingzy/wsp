@@ -3,7 +3,7 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { GoldenMissingTool, GoldenStage, HarnessCatalog, InitJob, InitPhase, InitRow, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, SessionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
+import type { GoldenMissingTool, GoldenStage, HarnessCatalog, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, SessionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
 import { shellLine } from "./shell-quote.js";
 import type { ThreadMessage } from "./thread-read.js";
@@ -27,14 +27,44 @@ export const UNKNOWN_SIZE = "size unknown";
 /** How often the agents ran a tool here, the one number a usage row shows. */
 export const fmtCalls = (n: number): string => `${n.toLocaleString("en-US")} ${n === 1 ? "call" : "calls"}`;
 
-/** The line under a screen's card: what the ticked rows come to. */
-export const initTallyLine = (count: number, noun: string, bytes: number): string => `${initTallyCount(count, noun)} · ${fmtBytes(bytes)}`;
-/** The tally's first half, the count of rows on the image, so a view can colour the size after it on its own. The noun
- * is the screen's plural ("agents", "tools"), or a word that does not count ("more") kept as it is. */
+/** The line under a screen's card: the step's own count, then the whole image so far against the machine's disk. */
+export const initTallyLine = (count: number, noun: string, used: number, total?: number): string => `${initTallyCount(count, noun)} · ${fmtBytesOfTotal(used, total)}`;
+/** The tally's first half, the count of rows on the image, so a view can colour the estimate after it on its own. The
+ * noun is the screen's plural ("agents", "tools"), or a word that does not count ("more") kept as it is. */
 export const initTallyCount = (count: number, noun: string): string => `${noun.endsWith("s") ? plural(count, noun.replace(/s$/, "")) : `${count} ${noun}`} on the image`;
+/** Two byte counts against each other, each under the byte rule ("4.9 GB of 20 GB"): the tally's running estimate
+ * against the disk and the machine tab's memory and disk rows, each read in the tone the share earns; the first count
+ * alone where there is no total. */
+export const fmtBytesOfTotal = (used: number, total?: number): string => (total === undefined ? fmtBytes(used) : `${fmtBytes(used)} of ${fmtBytes(total)}`);
 
-/** The tone a size is read in, by weight, the one table every size cell, tally total and meter reads: a gigabyte and
- * over is the danger tone, 300 MB and over the warning tone, 100 MB and over the yellow tone, anything under muted. */
+/** How many rows of a screen are on the image with these ticks and the bytes they come to: a locked row is on, a row
+ * that takes an answer is not counted, and a row nothing measured adds nothing. */
+export function initTallyOf(screen: Pick<InitScreen, "items">, ticks: ReadonlySet<string>): { count: number; bytes: number } {
+  let count = 0;
+  let bytes = 0;
+  for (const item of screen.items) {
+    if (item.choices !== undefined) continue;
+    if (!(item.lock === "on" || ticks.has(item.id))) continue;
+    count += 1;
+    if (typeof item.size === "number") bytes += item.size;
+  }
+  return { count, bytes };
+}
+
+/** The ticks of a screen as they stand: the draft kept on its step where the person left one, else what the host last
+ * answered. The one rule for what a screen opens on and for what the estimate counts. */
+export const initTicksOf = (screen: Pick<InitScreen, "ticks">, kept?: Pick<InitDraft, "ticks">): ReadonlySet<string> => new Set(kept?.ticks ?? screen.ticks);
+
+/** The running estimate of the image in bytes: what the disk holds before any tick plus every screen's ticked rows as
+ * they stand, drafts over answers. The one number every step's tally, the meter and Continue's refusal read. A client
+ * passes the draft it holds and the host has not echoed yet, so a tick moves the number before the round trip. */
+export function initImageBytes(job: Pick<InitJob, "disk" | "screens" | "drafts">, current?: { at: string; ticks: Iterable<string> }): number {
+  const fixed = job.disk?.fixed ?? 0;
+  return job.screens.reduce((sum, s) => sum + initTallyOf(s, current !== undefined && current.at === s.id ? new Set(current.ticks) : initTicksOf(s, job.drafts?.find(d => d.at === s.id))).bytes, fixed);
+}
+
+/** The tone a size is read in, by weight, the one table every size cell reads: a gigabyte and over is the danger
+ * tone, 300 MB and over the warning tone, 100 MB and over the yellow tone, anything under muted. */
 export type SizeTone = "danger" | "warning" | "yellow" | "muted";
 const SIZE_TONES: readonly (readonly [number, SizeTone])[] = [
   [1024 * MIB, "danger"],
@@ -45,18 +75,26 @@ export function sizeTone(bytes: number): SizeTone {
   return SIZE_TONES.find(([from]) => bytes >= from)?.[1] ?? "muted";
 }
 
-/** The tone of the disk meter by the share the estimate takes of the disk: muted under 70 percent, the warning tone
- * from 70, the danger tone from 90 and when over. */
+/** The screens where a person is choosing weight, whose size cells wear the weight tone. The agents screen's sizes
+ * are muted: the agents are what the person came for, not a place to be warned off. */
+const WEIGHED_SCREENS: ReadonlySet<InitScreenId> = new Set<InitScreenId>(["tools", "also"]);
+/** The tone a row's size cell wears on a screen: the weight table where the screen weighs, muted elsewhere and where
+ * nothing measured the row. */
+export const initSizeTone = (screen: Pick<InitScreen, "id">, bytes: number | null): SizeTone => (bytes === null || !WEIGHED_SCREENS.has(screen.id) ? "muted" : sizeTone(bytes));
+
+/** The tone of the disk meter and the tally's estimate by the share the estimate takes of the disk: muted under 70
+ * percent, the warning tone from 70, the danger tone from 90 and when over. */
 export function diskTone(used: number, total: number): "muted" | "warning" | "danger" {
   const share = total > 0 ? used / total : 1;
   if (share >= 0.9) return "danger";
   return share >= 0.7 ? "warning" : "muted";
 }
 
-/** The disk ring's tooltip: what the image holds against the machine's disk. */
-export const initDiskLine = (used: number, total: number): string => `about ${fmtBytes(used)} of ${fmtBytes(total)} on the image`;
+/** The disk meter's tooltip: what the image holds against the machine's disk, and by how much it is over once it is;
+ * the overshoot is said here and in Continue's refusal, nowhere else. */
+export const initDiskLine = (used: number, total: number): string => `about ${fmtBytes(used)} of ${fmtBytes(total)} on the image${used > total ? `, ${initDiskOverLine(used - total)}` : ""}`;
 
-/** The ring's tooltip and the primary's refusal once the ticks pass the disk. */
+/** The primary's refusal once the ticks pass the disk, and the tail of the meter's tooltip. */
 export const initDiskOverLine = (over: number): string => `over by ${fmtBytes(over)}`;
 
 /** Memory in GB as the size table names it: whole when whole, else one decimal; a size spec, not a byte count. */
@@ -1009,6 +1047,8 @@ export const CLOUD_SETUP_WORDS = {
     retry: "Try again",
     /** What the build offers when the saved key was refused: back to this step, not another build. */
     changeKey: "Change the key",
+    /** The quiet link under a saved key's dots that empties the field for a new one. */
+    change: "Change",
   },
   screen: {
     keycap: "Continue",
@@ -1055,6 +1095,8 @@ export const CLOUD_SETUP_WORDS = {
     cancelWhy: "The machine is thrown away and nothing is saved",
     cancelKeep: "Keep building",
     done: "Cloud machines are ready",
+    /** The sentence under that title: the running one would say the machine is still being saved. */
+    doneTop: "The image is sealed; every thread forks it",
     failed: "The build stopped",
     /** The headline of a build the person stopped, so the screen never reads as the machine's doing. */
     stopped: "You stopped the build",
@@ -1085,6 +1127,14 @@ export const CLOUD_SETUP_WORDS = {
   needsYou: {
     /** The one action on the toast and the one thing a system notification's click does. */
     open: "Open",
+  },
+  create: {
+    /** Why a new cloud workspace is held back while the image is still being built; the stage count follows it. */
+    building: "the image is still building",
+    /** The same where no image is sealed and no build runs, which is a computer the setup has not run on. */
+    none: "set up cloud machines first",
+    /** The word beside the building sentence, which opens the build the count is of. */
+    open: "Open the build",
   },
 } as const;
 
@@ -1187,6 +1237,35 @@ export const GOLDEN_STAGE_WORDS: Record<Exclude<GoldenStage, "failed">, string> 
   sealed: "Finishing",
 };
 
+/** The stages the provider gives no progress for: the snapshot and the save go to their end with nothing to say in
+ * between, so the row counts its own seconds while one runs. */
+export const GOLDEN_STAGE_TIMED: ReadonlySet<GoldenStage> = new Set<GoldenStage>(["snapshotting", "promoting"]);
+
+/** A stage's row id, the one spelling the host writes and a client reads. */
+export const initStageRowId = (stage: GoldenStage): string => `stage/${stage}`;
+
+/** Whether a row is one of the stages that count their own seconds. */
+export const initRowTimed = (row: Pick<InitRow, "id">): boolean => [...GOLDEN_STAGE_TIMED].some(stage => row.id === initStageRowId(stage));
+
+/** A row's clock while it runs: whole seconds under a minute, then minutes and seconds. */
+export const initElapsedLine = (ms: number): string => (ms < 60_000 ? `${Math.max(0, Math.floor(ms / 1_000))}s` : fmtDuration(ms));
+
+/** The snapshot stage's one line: what is being snapshotted in words a person can use, never the snapshot's name,
+ * and the size when the builder's disk could be read. */
+export const snapshotStageLine = (bytes: number | undefined): string => `snapshotting${bytes === undefined ? "" : ` about ${fmtBytes(bytes)}`}, usually under a minute`;
+
+/** The save stage's one line. */
+export const SAVING_IMAGE_LINE = "saving the image";
+
+/** The one sentence on a sign-in the person is waited on for, beside the way to act: what the machine waits on, never
+ * the command it ran, and short enough to share the action line with the code and the keycap uncut. A page that shows
+ * a code or hands one back has the machine waiting for that code; any other page is open on this computer. A row
+ * nobody is waited on for has no sentence. */
+export function initSignInLine(row: Pick<InitRow, "state" | "code" | "finish">): string | undefined {
+  if (row.state !== INIT_ROW_STATES.open) return undefined;
+  return row.code !== undefined || row.finish === "code" ? "waiting for the code" : "the page is open on this computer";
+}
+
 /** The id of the wsp tools screen's row for an agent, the one the app answers for it from the first launch's own answer. */
 export const wspToolsRowId = (agent: string): string => `wsp-tools/${agent}`;
 
@@ -1223,6 +1302,10 @@ export const initRowUnrun = (state: string): boolean => ROW_UNRUN.has(state);
  * stopped, or never reached a stage never reads complete. */
 const ROW_UNDONE: ReadonlySet<string> = new Set([INIT_ROW_STATES.failed, ...ROW_UNRUN]);
 
+/** Whether a row's state is a failure to show as one: the stage that failed, and the sign-in stage whose one sign-in
+ * ran out, which reads not signed in and must never wear a tick. */
+export const initRowFailed = (state: string): boolean => state === INIT_ROW_STATES.failed || state === INIT_SIGN_IN_WORDS["not-signed-in"];
+
 /** Whether a row's state word is one it ends on: what the progress count and a section's count read. */
 export const initRowOver = (state: string): boolean => ROW_OVER.has(state);
 
@@ -1238,8 +1321,15 @@ export const initStoppedAt = (where: string): string => `Stopped ${where}.`;
  * how to finish it themselves, the app does not, because the host is already trying again and its row says so. */
 export const STOP_LEFT_MACHINE_LINE = "The machine did not stop yet; wsp keeps trying.";
 
-/** A machine row's name: the builder's provider id in words, so a column of sentences never holds a bare id. */
-export const initMachineRowLabel = (builderId: string): string => `Builder ${builderId}`;
+/** A machine row's name: the builder, never its provider id, which is the host's to hold and no sentence's to say. */
+export const MACHINE_ROW_LABEL = "The builder";
+
+/** What a stopped build says of its machine once the provider took the kill: the same words in the terminal and the app. */
+export const MACHINE_GONE_LINE = "The machine is gone; nothing is billing.";
+
+/** A stage's line for a machine its rollback could not remove, with the provider's own refusal: it goes in the stage's
+ * block, never in the headline, which stays the failure's own sentence; the machine's row carries the retries. */
+export const machineLeftLine = (reason: string): string => `the machine could not be removed and bills on: ${reason}`;
 
 /** What the sidebar's keycap says while a machine an earlier build left is still being removed: the one line that
  * keeps a machine from billing unseen once the setup has moved on to another job. */
@@ -1377,6 +1467,24 @@ export function initStageCount(rows: readonly InitRow[]): { done: number; total:
 
 /** The count as words: `3 of 12`. */
 export const initStageCountLine = (count: { done: number; total: number }): string => `${count.done} of ${count.total}`;
+
+/** What a road to a new cloud workspace is held back with: the sentence every surface says and the word on the
+ * action that opens the setup where the job stands. */
+export interface CloudCreateRefusal {
+  readonly line: string;
+  readonly word: string;
+}
+
+/** Why a new cloud workspace cannot be asked for yet, or null when it can. A workspace is forked from the sealed
+ * image, so a computer with none has nothing to fork: while the build runs the person is told where it stands, and
+ * with no build at all they are sent to the setup. A sealed image holds nothing back, whatever a later build does,
+ * since its head is there to fork. */
+export function cloudCreateRefusal(state: { hasGolden: boolean | null; job: Pick<InitJob, "phase" | "rows"> | null }): CloudCreateRefusal | null {
+  if (state.hasGolden !== false) return null;
+  const words = CLOUD_SETUP_WORDS.create;
+  if (state.job === null || !initJobBuilding(state.job.phase)) return { line: words.none, word: CLOUD_SETUP_WORDS.row };
+  return { line: `${words.building} · ${initStageCountLine(initStageCount(initBuildRows(state.job.rows).rows))}`, word: words.open };
+}
 
 /** The sidebar button's words for a running job: `waiting for you` while the person is waited on, the progress line
  * otherwise. */
@@ -1745,10 +1853,10 @@ export function snapshotFailedLine(attempts: number, answer: ProviderAnswer, bui
   return `${head} while the builder read ${builderState}`;
 }
 
-/** The promoting stage's line for one read of the template: what the provider says it is, and whether the seal asks
- * again. Ready is the last line the stage writes. */
-export function templateStatusLine(templateId: string, status: string): string {
-  return status === "ready" ? `${templateId} is ready` : `${templateId} is ${status}; asking again`;
+/** The promoting stage's line for one read of the saved image: what the provider says of it and whether the seal asks
+ * again. Ready is the last line the stage writes; the template's id is the provider's and reaches no screen. */
+export function templateStatusLine(status: string): string {
+  return status === "ready" ? "the image is saved" : `${SAVING_IMAGE_LINE}, the provider says ${status}; asking again`;
 }
 
 /** The seal's failure line when the provider marks the template failed: forks would have nothing to boot from. */

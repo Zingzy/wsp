@@ -102,6 +102,8 @@ export const InitRow = z.object({
   finish: SignInFinish.optional(),
   /** How long the row ran, once it is over. */
   ms: z.number().optional(),
+  /** When a running stage's clock started, epoch ms, so a row counts its own seconds while the provider says nothing. */
+  since: z.number().optional(),
   /** A stage's latest lines, what the machine said while it ran, for the block under its row. */
   lines: z.array(z.string()).optional(),
 });

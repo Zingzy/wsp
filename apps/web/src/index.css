@@ -985,10 +985,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --success: var(--color-emerald-500);
   --success-foreground: var(--color-emerald-700);
   --warning: var(--color-amber-500);
-  --warning-foreground: var(--color-amber-700);
+  /* The three weight tiers are told apart by hue alone, so the orange sits about 30 degrees of oklch hue from the
+     yellow above it and from the red below it in both themes, and each reads at AA on the card. */
+  --warning-foreground: oklch(0.56 0.14 56);
   --warning-surface: color-mix(in srgb, var(--warning) 8%, transparent);
   --caution-foreground: var(--color-orange-700);
-  --yellow-foreground: var(--color-yellow-700);
+  --yellow-foreground: oklch(0.555 0.11 85);
   --update: var(--primary);
   --update-foreground: var(--primary);
   --update-surface: color-mix(in srgb, var(--update) 12%, transparent);
@@ -1075,7 +1077,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
     --input: --alpha(var(--color-white) / 8%);
     --info-foreground: var(--color-blue-400);
     --success-foreground: var(--color-emerald-400);
-    --warning-foreground: var(--color-amber-400);
+    --warning-foreground: var(--color-orange-400);
     --warning-surface: color-mix(in srgb, var(--warning) 16%, transparent);
     --caution-foreground: var(--color-orange-400);
     --yellow-foreground: var(--color-yellow-400);

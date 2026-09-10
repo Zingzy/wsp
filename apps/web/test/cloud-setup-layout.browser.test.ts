@@ -8,8 +8,10 @@
 // where it has one), the sentence and the card at the first launch's numbers,
 // rows of 48 px, the agent step's mono block with its spinner and the two ways
 // on once its turn stopped, the disk meter inline after the tally on the steps
-// that change the image's size, sizes coloured by weight, state words that read
-// at AA, nothing animating at rest and no badge; then two states of a step: a
+// that change the image's size and its estimate coloured by its share, sizes
+// coloured by weight on the steps that weigh in three hues an eye tells apart,
+// state words that read at AA, nothing animating at rest and no badge; then two
+// states of a step: a
 // key the provider refused, under the field in the danger tone, and a saved key
 // refused before the build's first stage with the way back to the keys step.
 // Photographed at each. Runs only when asked for (WSP_RENDER=1) and skips
@@ -18,9 +20,9 @@ import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
-import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, NETWORK_LOST_LINE, SIGN_IN_STAGE_ID, initStageCountLine, keyRefusedLine } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MACHINE_ROW_LABEL, NETWORK_LOST_LINE, SIGN_IN_STAGE_ID, initSignInLine, initStageCountLine, keyRefusedLine } from "@wsp/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { textContrast } from "./contrast";
+import { textContrast, textHue } from "./contrast";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
 import { startVite, type ViteChild } from "./vite-child";
 import { KEY_REFUSED_LINE } from "./cloud-setup/keyRefusedJob";
@@ -41,12 +43,12 @@ interface Box {
 const STEPS = ["choice", "keys", "agent", "agent-stopped", "reading", "agents", "tools", "also", "logins", "ask", "building", "signing", "retry", "done", "failed"] as const;
 /** States of a step rather than steps of the walk, and the error states of the end-to-end run: each is
  * photographed on its own, not walked with the rest. */
-const STATES = ["keys-refused", "failed-key", "stopped", "you-stopped", "slot", "over", "sweeping"] as const;
+const STATES = ["keys-refused", "keys-saved", "failed-key", "stopped", "you-stopped", "slot", "over", "sweeping"] as const;
 type StepName = (typeof STEPS)[number] | (typeof STATES)[number];
 /** The answer steps, which carry their count over the title. */
 const COUNTED: ReadonlySet<StepName> = new Set<StepName>(["agents", "tools", "also", "logins", "ask"]);
 /** The frame's data-k for each, where it differs from the step's own name. */
-const FRAME: Record<StepName, string> = { choice: "choice", keys: "keys", "keys-refused": "keys", agent: "agent", "agent-stopped": "agent", reading: "reading", agents: "screen-agents", tools: "screen-tools", also: "screen-also", logins: "screen-logins", ask: "ask", building: "build", signing: "build", retry: "build", done: "build", failed: "build", "failed-key": "build", stopped: "build", "you-stopped": "build", slot: "build", over: "screen-also", sweeping: "build" };
+const FRAME: Record<StepName, string> = { choice: "choice", keys: "keys", "keys-refused": "keys", "keys-saved": "keys", agent: "agent", "agent-stopped": "agent", reading: "reading", agents: "screen-agents", tools: "screen-tools", also: "screen-also", logins: "screen-logins", ask: "ask", building: "build", signing: "build", retry: "build", done: "build", failed: "build", "failed-key": "build", stopped: "build", "you-stopped": "build", slot: "build", over: "screen-also", sweeping: "build" };
 /** The steps whose tally carries the disk meter: the ones that change the image's size. */
 const METERED = new Set<StepName>(["agents", "tools", "also"]);
 /** The first launch's numbers: what every step is measured against. */
@@ -230,7 +232,15 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
       }
       // No initials in a ring: a mark is an svg or nothing, and every size cell wears the tone its weight earns.
       expect(await page!.locator(`${frame} [data-row-mark]:not(svg)`).count(), `${step}: no drawn initials`).toBe(0);
-      for (const [bytes, tone] of await page!.locator(`${frame} [data-k=size]`).evaluateAll(els => els.map(el => [el.textContent, el.getAttribute("data-tone")]))) expect(["danger", "warning", "yellow", "muted"], `${step}: ${bytes} in ${tone}`).toContain(tone);
+      const cellTones = await page!.locator(`${frame} [data-k=size]`).evaluateAll(els => els.map(el => el.getAttribute("data-tone")));
+      for (const tone of cellTones) expect(["danger", "warning", "yellow", "muted"], `${step}: a size in ${tone}`).toContain(tone);
+      // The agents step's sizes wear no weight tone; the tools step's wear every tier; the tally's estimate wears the share table, the meter's own.
+      if (step === "agents") expect(new Set(cellTones), "agents: muted sizes").toEqual(new Set(["muted"]));
+      if (step === "tools") expect(new Set(cellTones), "tools: weighed sizes").toEqual(new Set(["muted", "yellow", "warning", "danger"]));
+      if (METERED.has(step)) {
+        expect(await page!.locator(`${frame} [data-k=tally-size]`).textContent(), `${step}: the estimate against the disk`).toMatch(/^[\d.]+ (MB|GB) of 20 GB$/);
+        expect(await page!.locator(`${frame} [data-k=tally-size]`).getAttribute("data-tone"), `${step}: the estimate in the meter's tone`).toBe(await page!.locator("[role=dialog] [data-k=disk]").getAttribute("data-tone"));
+      }
       const close = await box("[role=dialog] [aria-label=Close]");
       expect(near(close.y, SPEC.close) && near(VIEWPORTS[0].width - (close.x + close.width), SPEC.close), `${step}: close at ${close.x},${close.y}`).toBe(true);
       expect(await page!.locator("[role=dialog] [class*=animate-]:not([role=status]), [role=dialog] [data-badge]").count(), `${step}: nothing animates at rest, no badge`).toBe(0);
@@ -254,8 +264,8 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     const listed = await page!.locator(`${frame} [data-k=row]`).evaluateAll(els => els.map(el => el.getAttribute("data-row")));
     expect(listed, "the list keeps its order and its rows").toEqual(["stage/creating", "stage/deploying-daemon", "stage/applying-setup", "stage/uploading-files", "stage/installing-harness", "stage/installing-tools", "stage/installing-mcp", "stage/ready", "stage/snapshotting", "stage/promoting", "stage/smoke-forking", "stage/sealed", "workspace/e2e"]);
     // The sentence is this computer's word; the block under the failed stage keeps the provider client's own.
-    expect(await page!.locator(`${frame} [data-row="stage/applying-setup"] [data-k=lines]`).textContent()).toContain("fetch failed; fetch failed");
-    expect(await page!.locator(`${frame} [data-row="stage/applying-setup"] [data-k=lines]`).textContent()).not.toContain(NETWORK_LOST_LINE);
+    expect(await page!.locator(`${frame} [data-row="stage/applying-setup"] [data-k=lines]`).textContent()).toMatch(new RegExp(`${NETWORK_LOST_LINE}$`));
+    expect(await page!.locator(`${frame} [data-row="stage/applying-setup"] [data-k=lines]`).textContent()).not.toContain("fetch failed");
     expect(await page!.locator(`${frame} [data-k=count]`).textContent()).toBe("2 of 12");
     await shoot("stopped", theme);
 
@@ -274,7 +284,8 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     const machine = `${frame} [data-row="machine/b_dlb9oeig"]`;
     expect(await page!.locator(machine).count()).toBe(1);
     expect(await page!.locator(`${machine} [data-k=state]`).textContent()).toBe(INIT_ROW_STATES.retrying);
-    expect(await page!.locator(machine).textContent()).toContain("Builder b_dlb9oeig");
+    expect(await page!.locator(machine).textContent()).toContain(MACHINE_ROW_LABEL);
+    expect(await page!.locator("[role=dialog]").textContent(), "no provider id on the screen").not.toMatch(/b_dlb9oeig|b_dlbauaeb/);
     expect(near((await box(`${machine} > div:first-child`)).height, SPEC.row), "the machine row is a row").toBe(true);
     expect(await page!.locator(`${frame} [data-row="machine/b_dlbauaeb"] [data-k=state]`).textContent()).toBe(INIT_ROW_STATES.gone);
     for (const ratio of await textContrast(page!, `${machine} [data-k=state]`)) expect(ratio, "the machine's word reads").toBeGreaterThanOrEqual(4.5);
@@ -286,16 +297,24 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     expect(await page!.locator(`${frame} [data-row="stage/creating"] [data-k=lines]`).textContent()).toContain("at its machine cap");
     await shoot("slot", theme);
 
-    // Past the disk: Continue refuses, and the line sits above the footer in the ring's own tone, not under the link.
+    // Past the disk: the overshoot is in the meter's tooltip and nowhere beside the tally; Continue refuses with it above the footer in the meter's tone, and the card does not move when the line arrives.
     frame = await goTo("over", theme);
     expect(await page!.locator("[role=dialog] [data-k=disk]").getAttribute("data-tone")).toBe("danger");
+    expect(await page!.locator("[role=dialog] [data-k=disk-over]").count(), "no third line beside the tally").toBe(0);
+    expect(await page!.locator("[role=dialog] [data-k=disk]").getAttribute("aria-label")).toMatch(/, over by [\d.]+ (MB|GB)$/);
+    const cardBefore = await box(`${frame} [data-k=card]`);
+    const keycapBefore = await box(`${frame} [data-k=primary]`);
     await page!.click(`${frame} [data-k=primary]`);
     await page!.waitForSelector(`${frame} [data-k=refusal]`);
+    const cardAfter = await box(`${frame} [data-k=card]`);
+    expect([cardAfter.y, cardAfter.height], "the card stands where it stood").toEqual([cardBefore.y, cardBefore.height]);
+    expect((await box(`${frame} [data-k=primary]`)).y, "and so does the keycap").toBe(keycapBefore.y);
     const over = await box(`${frame} [data-k=refusal]`);
     const footer = await box(`${frame} [data-k=footer]`);
     expect(over.y + over.height, "the refusal is above the keycap and its link").toBeLessThanOrEqual(footer.y + 1);
-    const [tone, ringTone] = await page!.evaluate(() => [getComputedStyle(document.querySelector("[data-k=refusal]")!).color, getComputedStyle(document.querySelector("[data-k=disk-over]")!).color]);
-    expect(tone, "the refusal wears the ring's tone").toBe(ringTone);
+    expect(over.y, "and below the card").toBeGreaterThanOrEqual(cardAfter.y + cardAfter.height);
+    const [tone, fillTone] = await page!.evaluate(() => [getComputedStyle(document.querySelector("[data-k=refusal]")!).color, getComputedStyle(document.querySelector("[data-k=disk-fill]")!).backgroundColor]);
+    expect(tone, "the refusal wears the meter's tone").toBe(fillTone);
     expect((await textContrast(page!, "[role=dialog] [data-k=refusal]"))[0], "the refusal reads at AA").toBeGreaterThanOrEqual(4.5);
     await shoot("over", theme);
   }, 240_000);
@@ -374,6 +393,17 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     await page!.setViewportSize({ ...VIEWPORTS[0] });
   }, 60_000);
 
+  it.each(["dark", "light"] as const)("in the %s theme the three weight tones are told apart by hue alone: the yellow at least 20 degrees of oklch hue cooler than the orange, the orange at least 20 cooler than the red, each cell reading at AA", async theme => {
+    await page!.setViewportSize({ ...VIEWPORTS[0] });
+    const frame = await goTo("tools", theme);
+    const hue = async (tone: string): Promise<number> => (await textHue(page!, `${frame} [data-k=size][data-tone=${tone}]`))[0]!;
+    const [yellow, orange, red] = [await hue("yellow"), await hue("warning"), await hue("danger")];
+    console.info(`${theme} weight hues: yellow ${yellow}, orange ${orange}, red ${red}`);
+    expect(yellow - orange, `${theme}: yellow ${yellow} against orange ${orange}`).toBeGreaterThanOrEqual(20);
+    expect(orange - red, `${theme}: orange ${orange} against red ${red}`).toBeGreaterThanOrEqual(20);
+    for (const ratio of await textContrast(page!, `${frame} [data-k=size]`)) expect(ratio, `${theme}: a size reads`).toBeGreaterThanOrEqual(4.5);
+  });
+
   it.each(["dark", "light"] as const)("in the %s theme the meter's tooltip reads the numbers, its fill grows with a tick, the sign-in rows carry a mark each, the open one its page and code, and the one whose page hands a code back a mono field under it", async theme => {
     await page!.setViewportSize({ ...VIEWPORTS[0] });
     const frame = await goTo("agents", theme);
@@ -392,10 +422,32 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     expect(await page!.locator("[role=dialog] [data-k=title]").textContent()).toBe(CLOUD_SETUP_WORDS.build.slideHeadline);
     expect(await page!.locator("[role=dialog] [data-k=stages-folded]").textContent()).toMatch(/^Building your image · \d+ of \d+$/);
     expect(await page!.locator("[role=dialog] [data-row^='agent/']").count(), "no MCP rows").toBe(0);
-    expect(await page!.locator("[role=dialog] [data-k=signin]").count()).toBe(4);
-    for (const h of await boxes("[role=dialog] [data-k=signin] > div:first-child")) expect(h.height, `a slide row ${h.height}`).toBeGreaterThanOrEqual(60);
+    expect(await page!.locator("[role=dialog] [data-k=signin]").count()).toBe(5);
+    // One 48 px line per row; only a row with something to do grows by one 40 px action line, so a row is 48 or 88 px and never between. The state word sits on the name's line, and every name starts at one x, the row without a mark of its own included.
+    const slideRows = await page!.locator("[role=dialog] [data-k=signin]").evaluateAll(els =>
+      els.map(el => {
+        const box = el.getBoundingClientRect();
+        const line = el.firstElementChild!.getBoundingClientRect();
+        return { row: el.getAttribute("data-row"), acts: el.getAttribute("data-acts"), height: box.height, line: line.height, lineY: line.y, act: el.querySelector("[data-k=act]")?.getBoundingClientRect().height ?? 0, name: el.querySelector("span[class*='text-[15px]']")!.getBoundingClientRect().x, stateY: el.querySelector("[data-k=state]")!.getBoundingClientRect().y };
+      }),
+    );
+    for (const r of slideRows) {
+      expect(near(r.line, SPEC.row), `${r.row}: line ${r.line}`).toBe(true);
+      expect(near(r.height, r.acts === "true" ? 88 : 48, 1.5), `${r.row}: row ${r.height}`).toBe(true);
+      if (r.acts === "true") expect(near(r.act, 40), `${r.row}: action line ${r.act}`).toBe(true);
+      expect(r.stateY >= r.lineY - 1 && r.stateY < r.lineY + SPEC.row, `${r.row}: the state word on the name's line`).toBe(true);
+    }
+    expect(slideRows.filter(r => r.acts === "true").map(r => r.row)).toEqual(["sign-in/gh", "sign-in/wrangler", "sign-in/gcloud"]);
+    expect(new Set(slideRows.map(r => Math.round(r.name))).size, "names start at one x").toBe(1);
     expect((await style("[role=dialog] [data-k=signin] [data-k=code]", "font-size"))[0]).toBe("20px");
-    expect(await page!.locator("[role=dialog] [data-k=handoff]").count()).toBeGreaterThan(0);
+    const codeBox = await box("[role=dialog] [data-k=signin] [data-k=code]");
+    expect(near(codeBox.height, 28), `the code on one line, ${codeBox.height}`).toBe(true);
+    expect(await page!.locator("[role=dialog] [data-k=handoff]").count(), "no hand-off lines").toBe(0);
+    // Nothing on the slide is cut: every element that holds words shows them whole, the sentence beside the code and the keycap included.
+    const cut = await page!.locator("[role=dialog] [data-k=signin] *").evaluateAll(els => els.filter(el => el.children.length === 0 && (el.textContent ?? "").trim() !== "" && el.scrollWidth > el.clientWidth + 1).map(el => el.textContent));
+    expect(cut, "no text on the slide is cut").toEqual([]);
+    expect(await page!.locator("[role=dialog] [data-k=card]").textContent()).not.toMatch(/exited|codex login|wrangler login/);
+    expect(await page!.locator('[role=dialog] [data-row="sign-in/gh"] [data-k=why]').textContent()).toBe(initSignInLine({ state: INIT_ROW_STATES.open, code: "8F4A-C21B" }));
     // The slide's card takes no row cap: every sign-in row whole, the code field included, no scrolling while the window holds them.
     expect(await page!.locator("[role=dialog] [data-slot=scroll-area-viewport]").evaluate(el => el.scrollHeight > el.clientHeight + 1), "the slide's card scrolls").toBe(false);
     // The cancel link is quiet at rest: the muted ink, the danger tone on hover.
@@ -405,6 +457,22 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     await page!.waitForTimeout(250);
     expect((await style("[role=dialog] [data-k=secondary]", "color"))[0]).not.toBe(restInk);
     await page!.mouse.move(0, 0);
+    // The cancel question is one block in the footer: the sentence above, Stop the build and Keep building side by side 12 px apart under it, and nothing under the card.
+    const contentBefore = await box("[role=dialog] [data-k=content]");
+    await page!.click("[role=dialog] [data-k=secondary]");
+    await page!.waitForSelector("[role=dialog] [data-k=aside]");
+    expect(await page!.locator("[role=dialog] [data-k=note]").textContent()).toBe(CLOUD_SETUP_WORDS.build.cancelWhy);
+    const stop = await box("[role=dialog] [data-k=secondary]");
+    const keepLink = await box("[role=dialog] [data-k=aside]");
+    expect(near(stop.y + stop.height / 2, keepLink.y + keepLink.height / 2), "the two answers on one line").toBe(true);
+    expect(near(keepLink.x - (stop.x + stop.width), 12), `12 px apart, ${keepLink.x - (stop.x + stop.width)}`).toBe(true);
+    const noteBox = await box("[role=dialog] [data-k=note]");
+    expect(noteBox.y + noteBox.height, "the sentence above the answers").toBeLessThanOrEqual(stop.y + 1);
+    const contentAfter = await box("[role=dialog] [data-k=content]");
+    expect([contentAfter.y, contentAfter.height], "nothing under the card").toEqual([contentBefore.y, contentBefore.height]);
+    await page!.click("[role=dialog] [data-k=aside]");
+    await page!.waitForSelector("[role=dialog] [data-k=aside]", { state: "detached" });
+    await page!.mouse.move(0, 0);
     expect(await page!.locator("[role=dialog] [data-row^='sign-in/'] [data-row-mark]").count()).toBe(4);
     const slideShot = join(SHOTS, `cloud-setup-signin-slide-${theme}.png`);
     await page!.screenshot({ path: slideShot });
@@ -412,6 +480,9 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     await goTo("retry", theme);
     expect(await page!.locator("[role=dialog] [data-k=title]").textContent()).toBe(CLOUD_SETUP_WORDS.build.headline);
     expect(await page!.locator("[role=dialog] [data-row='stage/sign-ins'][data-open=true]").count()).toBe(1);
+    // The stage with a run-out wears the failed glyph beside not signed in, never a tick.
+    expect(await page!.locator("[role=dialog] [data-row='stage/sign-ins'] [data-glyph]").getAttribute("data-glyph")).toBe("failed");
+    expect(await page!.locator("[role=dialog] [data-row='stage/sign-ins'] > div [data-k=state]").textContent()).toBe(INIT_SIGN_IN_WORDS["not-signed-in"]);
     const stageRow = await box("[role=dialog] [data-row='stage/sign-ins'] > div");
     const subRow = await box("[role=dialog] [data-row='sign-in/gh'] > div [data-row-mark]");
     expect(near(subRow.x - (stageRow.x + SPEC.rowLeft), 24), `sub-rows indented ${subRow.x - (stageRow.x + SPEC.rowLeft)}`).toBe(true);
@@ -441,6 +512,16 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     expect(await scroller.evaluate(el => el.clientHeight % 20 === 0 && Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) < 1), "whole lines, no sliver").toBe(true);
     expect(await page!.locator("[role=dialog] [data-k=lines] span[class*='--terminal-ansi-2']").count(), "the machine's green, from the pane's own palette").toBeGreaterThan(0);
     expect(await page!.locator("[role=dialog] [data-k=lines] span[class*='opacity-60']").count(), "the tool prefix dimmed").toBeGreaterThan(0);
+    // The done screen says what stands, not what was running.
+    await goTo("done", theme);
+    expect(await page!.locator("[role=dialog] [data-k=sentence]").textContent()).toBe(CLOUD_SETUP_WORDS.build.doneTop);
+    // A stage with one line gets a block one line tall, never an empty band, and the snapshot counts its own seconds beside the spinner with no snapshot name in sight.
+    await goTo("retry", theme);
+    const one = await box("[role=dialog] [data-row='stage/snapshotting'] [data-k=lines]");
+    expect(near(one.height, 36), `one line, block ${one.height}`).toBe(true);
+    expect(await page!.locator("[role=dialog] [data-row='stage/snapshotting'] [data-k=lines]").textContent()).toMatch(/^snapshotting about 13 GB, usually under a minute$/);
+    expect(await page!.locator("[role=dialog] [data-row='stage/snapshotting'] [data-k=elapsed]").textContent()).toMatch(/^4\d s?$|^4\ds$/);
+    expect((await style("[role=dialog] [data-k=elapsed]", "font-family"))[0]!.toLowerCase()).toMatch(/mono|menlo|consolas/);
     await goTo("signing", theme);
     expect(await page!.locator('[role=dialog] [data-row="sign-in/gh"] [data-k=open]').getAttribute("href")).toBe("https://github.com/login/device");
     expect(await page!.locator('[role=dialog] [data-row="sign-in/gh"] [data-k=code]').textContent()).toBe("8F4A-C21B");
@@ -490,9 +571,30 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     console.info(`cloud setup agent stopped ${theme}: ${stopped}`);
   }, 120_000);
 
-  it.each(["dark", "light"] as const)("in the %s theme a key the provider refused reads under the field in the danger tone with the field itself in it, and a saved key refused at build time offers Change the key", async theme => {
+  it.each(["dark", "light"] as const)("in the %s theme a key the provider refused reads under the field in the danger tone with the field itself in it, a saved key shows as dots with saved and a Change link that empties the field, and a saved key refused at build time offers Change the key", async theme => {
     await page!.setViewportSize({ ...VIEWPORTS[0] });
-    let frame = await goTo("keys-refused", theme);
+    // With a key in the home the step still shows: the field reads the key as dots and cannot be typed in, saved sits at its right end, Continue is live, and Change is the one quiet link.
+    let frame = await goTo("keys-saved", theme);
+    const savedField = page!.locator(`${frame} #setup-key-solari`);
+    expect(await savedField.inputValue()).toMatch(/^•+$/);
+    expect(await savedField.getAttribute("readonly")).not.toBeNull();
+    expect(await page!.locator(`${frame} [data-k=solari-state]`).textContent()).toBe(CLOUD_SETUP_WORDS.keys.saved);
+    const savedWord = await box(`${frame} [data-k=solari-state]`);
+    const savedBox = await box(`${frame} #setup-key-solari`);
+    expect(savedWord.x + savedWord.width <= savedBox.x + savedBox.width && savedWord.y >= savedBox.y, "saved inside the field's right end").toBe(true);
+    expect(await page!.locator(`${frame} [data-k=primary]`).textContent()).toContain(CLOUD_SETUP_WORDS.screen.keycap);
+    expect(await page!.locator(`${frame} [data-k=primary]`).isEnabled()).toBe(true);
+    expect(await page!.locator(`${frame} [data-k=where]`).count(), "no link to get a key while one is saved").toBe(0);
+    for (const ratio of await textContrast(page!, `${frame} [data-k=solari-state], ${frame} [data-k=change]`)) expect(ratio, "the word and the link read").toBeGreaterThanOrEqual(4.5);
+    await shoot("keys-saved", theme);
+    await page!.click(`${frame} [data-k=change]`);
+    expect(await savedField.inputValue()).toBe("");
+    expect(await savedField.getAttribute("readonly")).toBeNull();
+    expect(await page!.locator(`${frame} [data-k=solari-state]`).count()).toBe(0);
+    expect(await page!.locator(`${frame} [data-k=primary]`).textContent()).toContain(CLOUD_SETUP_WORDS.keys.keycap);
+    expect(await page!.locator(`${frame} [data-k=primary]`).isDisabled()).toBe(true);
+    expect(await page!.locator(`${frame} [data-k=where]`).count()).toBe(1);
+    frame = await goTo("keys-refused", theme);
     await page!.waitForSelector(`${frame} [data-k=key-check]`);
     // The provider's own word under the field, inside the column, not in the footer's slot.
     const line = await box(`${frame} [data-k=key-check]`);

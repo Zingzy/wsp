@@ -5,7 +5,9 @@
 // and the entrance plays from CSS alone, so the page is frozen at 0 ms,
 // mid-entrance and at rest in both appearances and photographed; the agents
 // screen orders by use, dims what is not installed and names the action as
-// adding the MCP; the recap is one line and the button; no footer line. Like
+// adding the MCP, its session slots never blank; the recap is one line and the
+// button; no caps label over either title, no footer line, and no focus ring
+// at rest on any screen however it was reached. Like
 // the web's render tests it runs only when asked for (WSP_RENDER=1) and skips
 // without Playwright's Chromium.
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -49,13 +51,19 @@ function stagePage(): string {
   return dir;
 }
 
-/** The shell's bridge, answered in the page: the fixture's agents, their counts, an install that lands every id. */
-const BRIDGE = `window.wsp = {
+/** The shell's bridge, answered in the page: the fixture's agents, their counts, an install that lands every id. With
+ * `held`, the counts wait until the test lets them land, as a slow store's would. */
+const bridge = (held = false): string => `window.wsp = {
   agents: async () => ${JSON.stringify(AGENTS)},
-  history: async ids => ids.map(id => ({ id, sessions: (${JSON.stringify(SESSIONS)})[id] ?? 0 })),
+  history: ids => new Promise(land => {
+    const counts = ids.map(id => ({ id, sessions: (${JSON.stringify(SESSIONS)})[id] ?? 0 }));
+    if (${held}) window.landCounts = () => land(counts);
+    else land(counts);
+  }),
   install: async ids => ({ installed: ids.map(id => ({ id })), failures: [] }),
   finish: async () => {},
 };`;
+const BRIDGE = bridge();
 
 if (renderSkipped !== undefined) console.info(`onboarding render test skipped: ${renderSkipped}`);
 
@@ -84,9 +92,9 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's page laid out i
   });
 
   /** A fresh page in one appearance, its animations held at their start so a frame is a fact and not a race. */
-  async function open(theme: "dark" | "light", reducedMotion: "reduce" | "no-preference" = "no-preference"): Promise<Page> {
+  async function open(theme: "dark" | "light", reducedMotion: "reduce" | "no-preference" = "no-preference", init = BRIDGE): Promise<Page> {
     page = await browser!.newPage({ viewport: WINDOW, colorScheme: theme, reducedMotion });
-    await page.addInitScript(BRIDGE);
+    await page.addInitScript(init);
     cdp = await page.context().newCDPSession(page);
     await cdp.send("Animation.enable");
     await cdp.send("Animation.setPlaybackRate", { playbackRate: 0 });
@@ -157,7 +165,9 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's page laid out i
   const opacity = (selector: string): Promise<number> => page!.$eval(selector, el => Number(getComputedStyle(el).opacity));
   const floodOpacity = (selector: string): Promise<number> => page!.$eval(selector, el => Number(getComputedStyle(el).floodOpacity));
   const dashOffset = (selector: string): Promise<number> => page!.$eval(selector, el => parseFloat(getComputedStyle(el).strokeDashoffset));
-  const focusRing = (): Promise<{ visible: boolean; outline: string }> => page!.$eval("#start", el => ({ visible: el.matches(":focus-visible"), outline: getComputedStyle(el).outlineStyle }));
+  const focusRing = (selector = "#start"): Promise<{ visible: boolean; outline: string }> => page!.$eval(selector, el => ({ visible: el.matches(":focus-visible"), outline: getComputedStyle(el).outlineStyle }));
+  /** The muted ink, read off the welcome's sentence, which every screen's quiet words share. */
+  const mutedInk = (): Promise<string> => page!.$eval("#welcome .sub", el => getComputedStyle(el).color);
 
   it.each(["dark", "light"] as const)("in the %s appearance the tilde is the hero: about 200 px across, centred, a flat stroke with a thin light along its top edge and a thin shade along its bottom, over a page that changed nowhere else", async theme => {
     await open(theme);
@@ -280,7 +290,7 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's page laid out i
     await settle();
     await page!.click("#start");
     await page!.waitForSelector("#agents:not([hidden])");
-    await page!.waitForFunction(() => document.querySelectorAll("#rows li .meta").length > 0 && [...document.querySelectorAll("#rows li[data-agent=claude] .meta")].every(m => /sessions$/.test(m.textContent ?? "")));
+    await page!.waitForFunction(() => document.querySelectorAll("#rows li .meta").length > 0 && [...document.querySelectorAll("#rows li[data-agent=claude] .meta")].every(m => /^\d+ sessions?$/.test(m.textContent ?? "")));
     const rows = await page!.$$eval("#rows li", rows =>
       rows.map(r => ({
         id: r.getAttribute("data-agent"),
@@ -291,8 +301,11 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's page laid out i
         height: r.getBoundingClientRect().height,
       })),
     );
-    const muted = await page!.$eval("#agents .micro", el => getComputedStyle(el).color);
+    const muted = await mutedInk();
     const ink = await page!.$eval("#agents h1", el => getComputedStyle(el).color);
+    // No caps label over the title, on this screen or any other: the cloud setup dropped its own, and this is the same design a minute earlier.
+    expect(await page!.$$eval(".micro, #agents > p:first-child", els => els.length), "no label row").toBe(0);
+    expect(await page!.$eval("#agents", el => el.firstElementChild?.tagName.toLowerCase())).toBe("h1");
     expect(rows.map(r => r.id)).toEqual(["codex", "claude", "opencode", "gemini", "hermes"]);
     expect(rows.map(r => r.meta)).toEqual(["12 sessions", "3 sessions", "0 sessions", "", ""]);
     expect(rows.map(r => r.button)).toEqual(["Add MCP", "Add MCP", "Add MCP", null, null]);
@@ -317,7 +330,48 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's page laid out i
     expect(await page!.$("#next")).toBeNull();
     expect(await page!.$("#recap kbd")).toBeNull();
     expect(await page!.textContent("#open")).toContain("Open wsp");
+    expect(await page!.$eval("#recap", el => el.firstElementChild?.tagName.toLowerCase()), "no label row over the recap").toBe("h1");
     await page!.screenshot({ path: join(SHOTS, `onboarding-recap-${theme}.png`) });
+  });
+
+  it.each(["dark", "light"] as const)("in the %s appearance a screen reached by Enter shows no focus ring at rest on Add to all or Open wsp: Enter still advances, and a ring comes only where the keyboard puts the focus", async theme => {
+    await open(theme);
+    await settle();
+    await page!.keyboard.press("Enter");
+    await page!.waitForSelector("#agents:not([hidden])");
+    expect(await focusRing("#all")).toEqual({ visible: false, outline: "none" });
+    expect(await page!.$$eval(":focus-visible", els => els.length), "nothing on the agents screen wears a ring").toBe(0);
+    await page!.screenshot({ path: join(SHOTS, `onboarding-agents-by-enter-${theme}.png`) });
+    await page!.keyboard.press("Enter");
+    await page!.waitForSelector("#recap:not([hidden])");
+    expect(await focusRing("#open")).toEqual({ visible: false, outline: "none" });
+    expect(await page!.$$eval(":focus-visible", els => els.length), "nothing on the recap wears a ring").toBe(0);
+    await page!.screenshot({ path: join(SHOTS, `onboarding-recap-by-enter-${theme}.png`) });
+    // Tab is the keyboard's own focus, and the ring follows it.
+    await page!.keyboard.press("Tab");
+    expect(await page!.$$eval(":focus-visible", els => els.map(el => el.id))).toEqual(["open"]);
+    expect((await focusRing("#open")).outline).toBe("solid");
+  });
+
+  it.each(["dark", "light"] as const)("in the %s appearance a row whose sessions are still being counted says so in muted mono, never a blank slot, and reads its count once it lands", async theme => {
+    await open(theme, "no-preference", bridge(true));
+    await settle();
+    await page!.click("#start");
+    await page!.waitForSelector("#agents:not([hidden])");
+    const before = await page!.$$eval("#rows li", rows => rows.map(r => [r.getAttribute("data-agent"), r.querySelector(".meta")?.textContent]));
+    expect(before).toEqual([
+      ["claude", "reading sessions"],
+      ["codex", "reading sessions"],
+      ["opencode", "reading sessions"],
+      ["gemini", ""],
+      ["hermes", ""],
+    ]);
+    expect(await page!.$eval("#rows li[data-agent=claude] .meta", el => getComputedStyle(el).color)).toBe(await mutedInk());
+    expect(await page!.$eval("#rows li[data-agent=claude] .meta", el => /mono/i.test(getComputedStyle(el).fontFamily))).toBe(true);
+    await page!.screenshot({ path: join(SHOTS, `onboarding-agents-reading-${theme}.png`) });
+    await page!.evaluate(() => (window as unknown as { landCounts: () => void }).landCounts());
+    await page!.waitForFunction(() => document.querySelector("#rows li[data-agent=codex] .meta")?.textContent === "12 sessions");
+    expect(await page!.$$eval("#rows li", rows => rows.map(r => r.querySelector(".meta")?.textContent))).toEqual(["12 sessions", "3 sessions", "0 sessions", "", ""]);
   });
 
   it("a skipped agents screen leaves the recap one line, and one muted sentence about later", async () => {
@@ -330,9 +384,8 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's page laid out i
     expect(await page!.textContent("#happened")).toBe("Recorded as your workspace.");
     expect(await page!.isVisible("#later")).toBe(true);
     expect(await page!.textContent("#later")).toBe("The wsp tools can be added to your agents later, from the app's settings.");
-    const muted = await page!.$eval("#recap .micro", el => getComputedStyle(el).color);
-    expect(await page!.$eval("#later", el => getComputedStyle(el).color)).toBe(muted);
-    expect(await page!.$$eval("#recap > *:not([hidden])", els => els.map(e => e.tagName.toLowerCase()))).toEqual(["p", "h1", "div", "button"]);
+    expect(await page!.$eval("#later", el => getComputedStyle(el).color)).toBe(await mutedInk());
+    expect(await page!.$$eval("#recap > *:not([hidden])", els => els.map(e => e.tagName.toLowerCase()))).toEqual(["h1", "div", "button"]);
     await page!.screenshot({ path: join(SHOTS, "onboarding-recap-skipped-dark.png") });
   });
 });

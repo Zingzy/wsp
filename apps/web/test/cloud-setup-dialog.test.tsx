@@ -9,7 +9,7 @@
 // happen. Esc hides it with the job running on.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLOUD_SETUP_WORDS, KEY_REFUSED, KEY_UNCHECKED, SIGN_IN_STAGE_ID, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MACHINE_SWEEP_LINE, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initBuildRows, initDiskLine, initDiskOverLine, initMachineRowLabel, initStageCount, initStageCountLine, initTallyLine, initButtonLine, initProgressLine, keyRefusedLine, keyUncheckedLine, type EventUnion, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, KEY_REFUSED, KEY_UNCHECKED, SIGN_IN_STAGE_ID, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MACHINE_SWEEP_LINE, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initBuildRows, initDiskLine, initDiskOverLine, MACHINE_GONE_LINE, MACHINE_ROW_LABEL, initStageCount, initStoppedAt, initStageCountLine, initTallyLine, initButtonLine, initProgressLine, initSignInLine, keyRefusedLine, keyUncheckedLine, snapshotStageLine, type EventUnion, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS, keyStoppedRows } from "./cloud-setup/keyRefusedJob.js";
 import { useStore } from "../src/protocol/store.js";
@@ -215,10 +215,16 @@ const k = (root: HTMLElement, key: string): HTMLElement => {
   if (el === null) throw new Error(`no [data-k=${key}] in the dialog`);
   return el;
 };
-/** Walks a fresh job to the screen named, as the person would, answering each screen with what it opened on. */
-async function walkTo(t: Awaited<ReturnType<typeof open>>, screenId: string): Promise<void> {
+/** Continue on the choice, then Continue on the key step, which every run passes through and a held key does not stop. */
+async function pressPastKeys(t: Awaited<ReturnType<typeof open>>): Promise<void> {
+  fireEvent.click(k(t.dialog, "primary"));
+  await waitFor(() => expect(k(t.dialog, "keys")).toBeDefined());
   fireEvent.click(k(t.dialog, "primary"));
   await waitFor(() => expect(t.api.initStart).toHaveBeenCalled());
+}
+/** Walks a fresh job to the screen named, as the person would, answering each screen with what it opened on. */
+async function walkTo(t: Awaited<ReturnType<typeof open>>, screenId: string): Promise<void> {
+  await pressPastKeys(t);
   t.emit(JOB);
   await waitFor(() => expect(k(t.dialog, "screen-agents")).toBeDefined());
   for (const id of ["agents", "tools", "also", "logins"]) {
@@ -365,19 +371,50 @@ describe("the cloud setup sheet", () => {
     await waitFor(() => expect(t.api.initKeys).toHaveBeenCalledTimes(2));
   });
 
-  it("with a key held, Continue starts the job on the road picked; the agent road names its harness; a refused start leaves the choice up with the refusal", async () => {
+  it("with a key held the key step still shows: the key as dots with saved, Continue starts the job on the road picked without sending a key, Change empties the field for a new one, and a refused start leaves the step up with the refusal", async () => {
     const { api, dialog } = await open({ setup: HELD });
     await waitFor(() => expect(k(dialog, "choice")).toBeDefined());
     fireEvent.click(k(dialog, "road-agent"));
     await waitFor(() => expect(k(dialog, "road-agent").getAttribute("aria-checked")).toBe("true"));
     fireEvent.click(k(dialog, "primary"));
+    await waitFor(() => expect(k(dialog, "keys")).toBeDefined());
+    // The saved key reads as dots, never the key, in a field that cannot be typed in; saved stands at its right; the link to get a key is gone.
+    const field = dialog.querySelector<HTMLInputElement>("#setup-key-solari")!;
+    expect(field.value).toMatch(/^•+$/);
+    expect(field.readOnly).toBe(true);
+    expect(k(dialog, "solari-state").textContent).toBe(CLOUD_SETUP_WORDS.keys.saved);
+    expect(dialog.querySelector("[data-k=where]")).toBeNull();
+    expect(k(dialog, "primary").textContent).toContain(CLOUD_SETUP_WORDS.screen.keycap);
+    expect((k(dialog, "primary") as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(k(dialog, "primary"));
     await waitFor(() => expect(api.initStart).toHaveBeenCalledWith({ road: "agent", harness: "claude" }));
     expect(api.initKeys).not.toHaveBeenCalled();
+    // Change empties the field for a new key: Save is held until one is typed, and the typed one goes to the host once.
+    const again = await open({ setup: HELD });
+    await waitFor(() => expect(k(again.dialog, "choice")).toBeDefined());
+    fireEvent.click(k(again.dialog, "primary"));
+    await waitFor(() => expect(k(again.dialog, "keys")).toBeDefined());
+    fireEvent.click(k(again.dialog, "change"));
+    const emptied = again.dialog.querySelector<HTMLInputElement>("#setup-key-solari")!;
+    expect(emptied.value).toBe("");
+    expect(emptied.readOnly).toBe(false);
+    expect(again.dialog.querySelector("[data-k=solari-state]")).toBeNull();
+    expect(again.dialog.querySelector("[data-k=change]")).toBeNull();
+    expect(k(again.dialog, "where")).toBeDefined();
+    expect(k(again.dialog, "primary").textContent).toContain(CLOUD_SETUP_WORDS.keys.keycap);
+    expect((k(again.dialog, "primary") as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(emptied, { target: { value: "slr_live_new_key" } });
+    fireEvent.click(k(again.dialog, "primary"));
+    await waitFor(() => expect(again.api.initKeys).toHaveBeenCalledWith({ solari: "slr_live_new_key" }));
+    await waitFor(() => expect(again.api.initStart).toHaveBeenCalledWith({ road: "manual" }));
+    expect(again.dialog.textContent).not.toContain("slr_live_new_key");
     const refused = await open({ setup: HELD, refuse: "start" });
     await waitFor(() => expect(k(refused.dialog, "choice")).toBeDefined());
     fireEvent.click(k(refused.dialog, "primary"));
+    await waitFor(() => expect(k(refused.dialog, "keys")).toBeDefined());
+    fireEvent.click(k(refused.dialog, "primary"));
     await waitFor(() => expect(k(refused.dialog, "refusal").textContent).toMatch(/already running/));
-    expect(k(refused.dialog, "choice")).toBeDefined();
+    expect(k(refused.dialog, "keys")).toBeDefined();
   });
 
   it("while this computer is read the step shows the work as rows: the spinner on the row being read, a mono word once done, no bare sentence", async () => {
@@ -408,7 +445,7 @@ describe("the cloud setup sheet", () => {
     expect(rows[0]!.querySelector("[data-k=size]")!.textContent).toBe("208 MB");
     expect(rows[0]!.querySelector("[data-k=why]")!.textContent).toBe("used here, 12 sessions");
     expect(rows[0]!.querySelector("[data-row-mark=claude]")).not.toBeNull();
-    expect(k(dialog, "tally").textContent).toBe(initTallyLine(1, "agents", 208 * MIB));
+    expect(k(dialog, "tally").textContent).toBe(initTallyLine(1, "agents", DISK.fixed + 208 * MIB + 72 * MIB, DISK.total));
     const ring = k(dialog, "disk");
     expect(ring.getAttribute("data-used")).toBe(String(DISK.fixed + 208 * MIB + 72 * MIB));
     expect(ring.getAttribute("data-total")).toBe(String(DISK.total));
@@ -416,7 +453,7 @@ describe("the cloud setup sheet", () => {
     // The third row ticked: the checkbox, the tally and the meter move together, before anything is sent.
     fireEvent.click(within(rows[2]!).getByRole("checkbox"));
     await waitFor(() => expect(within(rows[2]!).getByRole("checkbox").getAttribute("aria-checked")).toBe("true"));
-    expect(k(dialog, "tally").textContent).toBe(initTallyLine(2, "agents", 692 * MIB));
+    expect(k(dialog, "tally").textContent).toBe(initTallyLine(2, "agents", DISK.fixed + 692 * MIB + 72 * MIB, DISK.total));
     expect(k(dialog, "disk").getAttribute("data-used")).toBe(String(DISK.fixed + 692 * MIB + 72 * MIB));
     expect(t.api.initAnswer).not.toHaveBeenCalled();
     fireEvent.click(within(rows[1]!).getByRole("checkbox"));
@@ -433,28 +470,78 @@ describe("the cloud setup sheet", () => {
     expect(node.querySelector("[data-k=state]")).toBeNull();
     expect(dialog.querySelector('[data-row="gh"] [data-k=why]')!.textContent).toBe("29,623 calls");
     expect(dialog.querySelector('[data-row="swift"] [data-k=why]')).toBeNull();
-    expect(k(dialog, "tally").textContent).toBe(initTallyLine(2, "tools", 72 * MIB));
+    expect(k(dialog, "tally").textContent).toBe(initTallyLine(2, "tools", DISK.fixed + 1147 * MIB + 72 * MIB, DISK.total));
     expect(dialog.querySelectorAll('[data-k="screen-tools"] [data-k=footer-lines]')).toHaveLength(0);
     // Ticking the 3 GB row moves the tally and the meter on this step too.
     fireEvent.click(within(dialog.querySelector<HTMLElement>('[data-row="swift"]')!).getByRole("checkbox"));
-    await waitFor(() => expect(k(dialog, "tally").textContent).toBe(initTallyLine(3, "tools", 72 * MIB + 3 * GIB)));
+    await waitFor(() => expect(k(dialog, "tally").textContent).toBe(initTallyLine(3, "tools", DISK.fixed + 1147 * MIB + 72 * MIB + 3 * GIB, DISK.total)));
     expect(k(dialog, "disk").getAttribute("data-used")).toBe(String(DISK.fixed + 1147 * MIB + 72 * MIB + 3 * GIB));
     expect(k(dialog, "disk").getAttribute("data-tone")).toBe("muted");
+  });
+
+  it("every step's tally reads the running image estimate against the disk in the tone its share earns, the agents step's sizes carry no weight tone, and a tick on one step moves the next step's tally", async () => {
+    const agents: InitScreen = { ...AGENTS, ticks: ["claude", "codex"] };
+    const tools: InitScreen = { ...TOOLS, items: [{ id: "node", label: "node", size: 300 * MIB, group: "always on the image", detail: [], lock: "on" }, { id: "rust", label: "Rust 1.89", size: 4 * GIB, group: "from your usage", detail: [] }, { id: "swift", label: "Swift 6.3", size: 3 * GIB, group: "from your usage", detail: [] }], ticks: ["rust"] };
+    const also: InitScreen = { ...ALSO, items: [{ id: "brew/ffmpeg", label: "ffmpeg", size: 200 * MIB, group: "Homebrew", detail: [] }], tally: "more" };
+    const t = await open({ setup: { ...HELD, job: { ...JOB, step: 1, disk: { fixed: 0, total: 20 * GIB }, screens: [agents, tools, also, LOGINS, WSP] } } });
+    await waitFor(() => expect(k(t.dialog, "screen-tools")).toBeDefined());
+    // Agents ticked to 663 MB and tools to 4.3 GB: the tools step counts its own rows and reads the whole image so far, a quarter of the disk, so muted, though 4.9 GB is the danger weight.
+    const soFar = 663 * MIB + 300 * MIB + 4 * GIB;
+    expect(k(t.dialog, "tally").textContent).toBe(initTallyLine(2, "tools", soFar, 20 * GIB));
+    expect(k(t.dialog, "tally").textContent).toContain("4.9 GB of 20 GB");
+    expect(k(t.dialog, "tally-size").getAttribute("data-tone")).toBe("muted");
+    expect(k(t.dialog, "tally-size").className).toContain("text-muted-foreground");
+    expect(k(t.dialog, "disk").getAttribute("data-used")).toBe(String(soFar));
+    // The tools step's cells wear their weight; the agents step's wear none, whatever they weigh.
+    expect(t.dialog.querySelector('[data-row="rust"] [data-k=size]')!.getAttribute("data-tone")).toBe("danger");
+    expect(t.dialog.querySelector('[data-row="node"] [data-k=size]')!.getAttribute("data-tone")).toBe("warning");
+    fireEvent.click(k(t.dialog, "secondary"));
+    await waitFor(() => expect(k(t.dialog, "screen-agents")).toBeDefined());
+    const sizes = [...t.dialog.querySelectorAll<HTMLElement>('[data-k="screen-agents"] [data-k=size]')];
+    expect(sizes.map(s => s.textContent)).toEqual(["208 MB", "455 MB", "484 MB"]);
+    expect(sizes.map(s => s.getAttribute("data-tone"))).toEqual(["muted", "muted", "muted"]);
+    for (const s of sizes) expect(s.className).not.toMatch(/yellow|warning|destructive/);
+    // The agents step reads the same estimate, its own count before it.
+    expect(k(t.dialog, "tally").textContent).toBe(initTallyLine(2, "agents", soFar, 20 * GIB));
+    // On to tools, the 3 GB row ticked, Continue: the what-else step's tally has moved by the same 3 GB.
+    fireEvent.click(k(t.dialog, "primary"));
+    await waitFor(() => expect(k(t.dialog, "screen-tools")).toBeDefined());
+    fireEvent.click(within(t.dialog.querySelector<HTMLElement>('[data-row="swift"]')!).getByRole("checkbox"));
+    await waitFor(() => expect(k(t.dialog, "tally").textContent).toBe(initTallyLine(3, "tools", soFar + 3 * GIB, 20 * GIB)));
+    fireEvent.click(k(t.dialog, "primary"));
+    await waitFor(() => expect(k(t.dialog, "screen-also")).toBeDefined());
+    expect(k(t.dialog, "tally").textContent).toBe(initTallyLine(0, "more", soFar + 3 * GIB, 20 * GIB));
+    expect(k(t.dialog, "tally").textContent).toContain("7.9 GB of 20 GB");
+    expect(k(t.dialog, "disk").getAttribute("data-used")).toBe(String(soFar + 3 * GIB));
+  });
+
+  it("the tally's estimate wears the meter's own table: the warning tone from 70 percent of the disk, the danger tone from 90", async () => {
+    const t = await open({ setup: { ...HELD, job: { ...JOB, step: 1, disk: { fixed: 15 * GIB, total: 20 * GIB } } } });
+    await waitFor(() => expect(k(t.dialog, "screen-tools")).toBeDefined());
+    // 15 GB fixed, 208 MB of agents and 72 MB of tools: 76 percent; the 3 GB row takes it to 91.
+    expect(k(t.dialog, "tally-size").getAttribute("data-tone")).toBe("warning");
+    expect(k(t.dialog, "tally-size").className).toContain("text-warning-foreground");
+    expect(k(t.dialog, "disk").getAttribute("data-tone")).toBe("warning");
+    fireEvent.click(within(t.dialog.querySelector<HTMLElement>('[data-row="swift"]')!).getByRole("checkbox"));
+    await waitFor(() => expect(k(t.dialog, "tally-size").getAttribute("data-tone")).toBe("danger"));
+    expect(k(t.dialog, "tally-size").className).toContain("text-destructive-foreground");
   });
 
   it("over the disk the meter is full in the danger tone and Continue refuses with the over line; under 70 percent it is muted", async () => {
     const heavy: InitScreen = { ...TOOLS, items: [...TOOLS.items, { id: "big", label: "big", size: 18 * GIB, group: "from your usage", detail: [] }] };
     const t = await open({ setup: HELD });
     await waitFor(() => expect(k(t.dialog, "choice")).toBeDefined());
-    fireEvent.click(k(t.dialog, "primary"));
-    await waitFor(() => expect(t.api.initStart).toHaveBeenCalled());
+    await pressPastKeys(t);
     t.emit({ ...JOB, step: 1, screens: [AGENTS, heavy, ALSO, LOGINS, WSP] });
     await waitFor(() => expect(k(t.dialog, "screen-tools")).toBeDefined());
     expect(k(t.dialog, "disk").getAttribute("data-tone")).toBe("muted");
     fireEvent.click(within(t.dialog.querySelector<HTMLElement>('[data-row="big"]')!).getByRole("checkbox"));
     await waitFor(() => expect(k(t.dialog, "disk").getAttribute("data-tone")).toBe("danger"));
     const used = DISK.fixed + 208 * MIB + 72 * MIB + 18 * GIB;
-    expect(k(t.dialog, "disk-over").textContent).toBe(initDiskOverLine(used - DISK.total));
+    // The overshoot is said in the meter's tooltip and in the refusal, and nowhere as a third line beside the tally.
+    expect(k(t.dialog, "disk").getAttribute("aria-label")).toBe(initDiskLine(used, DISK.total));
+    expect(k(t.dialog, "disk").getAttribute("aria-label")).toContain(initDiskOverLine(used - DISK.total));
+    expect(t.dialog.querySelector("[data-k=disk-over]")).toBeNull();
     fireEvent.click(k(t.dialog, "primary"));
     await waitFor(() => expect(k(t.dialog, "refusal").textContent).toBe(initDiskOverLine(used - DISK.total)));
     expect(t.api.initAnswer).not.toHaveBeenCalled();
@@ -491,12 +578,22 @@ describe("the cloud setup sheet", () => {
     await waitFor(() => expect(document.querySelector('[data-k=option][data-value="key"]')).not.toBeNull());
     fireEvent.click(document.querySelector<HTMLElement>('[data-k=option][data-value="key"]')!);
     await waitFor(() => expect(claude.querySelector("[data-k=key-field]")).not.toBeNull());
+    // The pick closes the menu and hands focus back to the trigger, so the next row's picker opens on its own click.
+    await waitFor(() => expect(document.querySelector("[data-k=option]")).toBeNull());
+    expect(picker.getAttribute("aria-expanded")).not.toBe("true");
+    await waitFor(() => expect(document.activeElement).toBe(picker));
+    const ghPicker = dialog.querySelector<HTMLElement>('[data-row="logins/gh"] [data-k=answer]')!;
+    fireEvent.click(ghPicker);
+    await waitFor(() => expect(document.querySelector('[data-k=option][data-value="machine"]')).not.toBeNull());
+    fireEvent.click(document.querySelector<HTMLElement>('[data-k=option][data-value="machine"]')!);
+    await waitFor(() => expect(ghPicker.getAttribute("data-value")).toBe("machine"));
+    await waitFor(() => expect(document.querySelector("[data-k=option]")).toBeNull());
     expect(claude.querySelector("[data-k=key-field]")!.textContent).toContain("ANTHROPIC_API_KEY");
     expect(claude.querySelector("[data-k=key-state]")!.textContent).toBe(CLOUD_SETUP_WORDS.keys.unset);
     fireEvent.change(claude.querySelector("input")!, { target: { value: "sk-ant-x-typed" } });
     fireEvent.click(k(dialog, "primary"));
     await waitFor(() => expect(api.initKeys).toHaveBeenCalledWith({ rows: { "logins/claude": "sk-ant-x-typed" } }));
-    await waitFor(() => expect(api.initAnswer).toHaveBeenCalledWith({ screen: "logins", ticks: [], answers: { "logins/claude": "key", "logins/gh": "copy", "logins/kube": "skip" } }));
+    await waitFor(() => expect(api.initAnswer).toHaveBeenCalledWith({ screen: "logins", ticks: [], answers: { "logins/claude": "key", "logins/gh": "machine", "logins/kube": "skip" } }));
     expect(dialog.textContent).not.toContain("sk-ant-x-typed");
     // The screen after the sign-ins is the build's question, counted as the fifth: the wsp screen is not shown.
     await waitFor(() => expect(k(dialog, "ask")).toBeDefined());
@@ -507,8 +604,7 @@ describe("the cloud setup sheet", () => {
   it("the build's question: the title, the sentence from the recipe's numbers, both fields in the input grammar, the first launch's MCP answer handed to the job with the build", async () => {
     const t = await open({ setup: HELD });
     await waitFor(() => expect(k(t.dialog, "choice")).toBeDefined());
-    fireEvent.click(k(t.dialog, "primary"));
-    await waitFor(() => expect(t.api.initStart).toHaveBeenCalled());
+    await pressPastKeys(t);
     t.emit({ ...JOB, step: 4 });
     const { dialog, api } = t;
     await waitFor(() => expect(k(dialog, "ask")).toBeDefined());
@@ -534,8 +630,7 @@ describe("the cloud setup sheet", () => {
   it("the build's question with the name cleared: the keycap is held and says why, so a folder can never be sent with nothing to fork", async () => {
     const t = await open({ setup: HELD });
     await waitFor(() => expect(k(t.dialog, "choice")).toBeDefined());
-    fireEvent.click(k(t.dialog, "primary"));
-    await waitFor(() => expect(t.api.initStart).toHaveBeenCalled());
+    await pressPastKeys(t);
     t.emit({ ...JOB, step: 4 });
     const { dialog, api } = t;
     await waitFor(() => expect(k(dialog, "ask")).toBeDefined());
@@ -628,7 +723,7 @@ describe("the cloud setup sheet", () => {
     const rows = [...again.dialog.querySelectorAll<HTMLElement>('[data-k="screen-tools"] [data-k=row]')];
     expect(rows.map(r => r.dataset["row"])).toEqual(["node", "gh", "swift"]);
     expect(rows.map(r => within(r).getByRole("checkbox").getAttribute("aria-checked"))).toEqual(["true", "false", "false"]);
-    expect(k(again.dialog, "tally").textContent).toContain(initTallyLine(1, "tools", 60 * MIB));
+    expect(k(again.dialog, "tally").textContent).toContain(initTallyLine(1, "tools", DISK.fixed + 208 * MIB + 60 * MIB, DISK.total));
   });
 
   it("a key typed under a sign-in row is never drafted: it goes to the key store on Continue and nowhere else", async () => {
@@ -680,7 +775,7 @@ describe("the cloud setup sheet", () => {
       ...JOB,
       phase: "cancelled",
       stoppable: false,
-      error: "Stopped while creating the machine. Builder b_1 is gone; nothing is billing.",
+      error: `${initStoppedAt("while creating the machine")} ${MACHINE_GONE_LINE}`,
       rows: [
         { id: "stage/creating", kind: "stage", label: GOLDEN_STAGE_WORDS.creating, state: INIT_ROW_STATES.failed, lines: ["sandbox from base"] },
         { id: "stage/snapshotting", kind: "stage", label: GOLDEN_STAGE_WORDS.snapshotting, state: INIT_ROW_STATES.waiting },
@@ -707,7 +802,7 @@ describe("the cloud setup sheet", () => {
       error: `Stopped while creating the machine. ${STOP_LEFT_MACHINE_LINE}`,
       rows: [
         { id: "stage/creating", kind: "stage", label: GOLDEN_STAGE_WORDS.creating, state: INIT_ROW_STATES.stopped, lines: ["sandbox from base"] },
-        { id: "machine/b_dlb9oeig", kind: "machine", label: initMachineRowLabel("b_dlb9oeig"), state: INIT_ROW_STATES.retrying, detail: "getaddrinfo ENOTFOUND api.getsolari.com" },
+        { id: "machine/b_dlb9oeig", kind: "machine", label: MACHINE_ROW_LABEL, state: INIT_ROW_STATES.retrying, detail: "getaddrinfo ENOTFOUND api.getsolari.com" },
       ],
       progress: { done: 0, total: 1 },
       log: [],
@@ -716,7 +811,8 @@ describe("the cloud setup sheet", () => {
     await waitFor(() => expect(k(dialog, "build")).toBeDefined());
     const row = dialog.querySelector<HTMLElement>('[data-row="machine/b_dlb9oeig"]')!;
     expect(row).not.toBeNull();
-    expect(row.textContent).toContain("Builder b_dlb9oeig");
+    expect(row.textContent).toContain(MACHINE_ROW_LABEL);
+    expect(row.textContent).not.toContain("b_dlb9oeig");
     expect(row.querySelector("[data-k=state]")!.textContent).toBe(INIT_ROW_STATES.retrying);
     // A live row, so a filled glyph and no chevron: there is nothing to open and nothing to press.
     expect(row.querySelector("svg")).toBeNull();
@@ -753,7 +849,7 @@ describe("the cloud setup sheet", () => {
     expect(k(dialog, "count").textContent).toBe(initStageCountLine(building.progress));
     expect(initProgressLine(building)).toBe(`building · ${building.progress.done}/${building.progress.total}`);
     // A machine still being removed takes the keycap's line, since that one bills while nobody looks.
-    expect(initProgressLine({ ...building, rows: [...building.rows, { id: "machine/b_1", kind: "machine", label: "Builder b_1", state: INIT_ROW_STATES.retrying }] })).toBe(MACHINE_SWEEP_LINE);
+    expect(initProgressLine({ ...building, rows: [...building.rows, { id: "machine/b_1", kind: "machine", label: MACHINE_ROW_LABEL, state: INIT_ROW_STATES.retrying }] })).toBe(MACHINE_SWEEP_LINE);
   });
 
   it("a stage waiting on the account's machine cap reads so on its row with the cap line in its block", async () => {
@@ -794,9 +890,9 @@ describe("the cloud setup sheet", () => {
     await waitFor(() => expect(k(dialog, "screen-tools")).toBeDefined());
     // Swift takes the image 3 GB past a disk with 1 GB to spare, and the ring says so.
     fireEvent.click(within(dialog.querySelector<HTMLElement>('[data-row="swift"]')!).getByRole("checkbox"));
-    await waitFor(() => expect(dialog.querySelector("[data-k=disk-over]")).not.toBeNull());
-    const over = dialog.querySelector("[data-k=disk-over]")!.textContent;
-    expect(over).toBe(initDiskOverLine(19 * GIB + 208 * MIB + 60 * MIB + 12 * MIB + 3 * GIB - 20 * GIB));
+    const over = initDiskOverLine(19 * GIB + 208 * MIB + 60 * MIB + 12 * MIB + 3 * GIB - 20 * GIB);
+    await waitFor(() => expect(dialog.querySelector("[data-k=disk]")!.getAttribute("aria-label")).toContain(over));
+    expect(dialog.querySelector("[data-k=disk-over]")).toBeNull();
     expect(dialog.querySelector("[data-k=disk]")!.getAttribute("data-tone")).toBe("danger");
     fireEvent.click(k(dialog, "primary"));
     // The refusal is the ring's own words: one rule, said in one place, read in two.
@@ -829,8 +925,10 @@ describe("the cloud setup sheet", () => {
         { id: "stage/ready", kind: "stage", label: GOLDEN_STAGE_WORDS.ready, state: "done" },
         { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "Sign in to GitHub CLI", state: SIGN_IN_OPEN_STATE, page: "https://github.com/login/device", code: "8F4A-C21B" },
         { id: "sign-in/claude", kind: "sign-in", tool: "claude", label: "Sign in to Claude Code", state: INIT_ROW_STATES.keySet },
-        { id: "sign-in/codex", kind: "sign-in", tool: "codex", label: "Sign in to Codex", state: INIT_SIGN_IN_WORDS.copied },
-        { id: "stage/snapshotting", kind: "stage", label: GOLDEN_STAGE_WORDS.snapshotting, state: INIT_ROW_STATES.running, lines: ["snapshot wsp-h1-default-v1 requested", "waiting on the provider"] },
+        // The host's note names the command the machine ran; no screen shows it.
+        { id: "sign-in/codex", kind: "sign-in", tool: "codex", label: "Sign in to Codex", state: INIT_SIGN_IN_WORDS.copied, detail: "codex login --api-key exited 0" },
+        { id: "sign-in/wrangler", kind: "sign-in", tool: "wrangler", label: "Sign in to Cloudflare Wrangler", state: INIT_SIGN_IN_WORDS["not-signed-in"], detail: "wrangler login exited 1; no sign-in within 16m" },
+        { id: "stage/snapshotting", kind: "stage", label: GOLDEN_STAGE_WORDS.snapshotting, state: INIT_ROW_STATES.running, lines: [snapshotStageLine(13 * GIB)], since: Date.now() - 41_000 },
         { id: "stage/sealed", kind: "stage", label: GOLDEN_STAGE_WORDS.sealed, state: "waiting" },
         { id: "workspace/first", kind: "workspace", label: "first", state: "waiting" },
       ],
@@ -844,7 +942,7 @@ describe("the cloud setup sheet", () => {
     expect(k(dialog, "sentence").textContent).toBe(CLOUD_SETUP_WORDS.build.slideTop);
     expect(k(dialog, "stages-folded").textContent).toBe(`${CLOUD_SETUP_WORDS.build.headline} · 2 of 5`);
     expect(dialog.querySelector("[data-k=count]")).toBeNull();
-    expect([...dialog.querySelectorAll<HTMLElement>("[data-k=signin]")].map(r => r.dataset["row"])).toEqual(["sign-in/gh", "sign-in/claude", "sign-in/codex"]);
+    expect([...dialog.querySelectorAll<HTMLElement>("[data-k=signin]")].map(r => r.dataset["row"])).toEqual(["sign-in/gh", "sign-in/claude", "sign-in/codex", "sign-in/wrangler"]);
     expect(dialog.querySelector('[data-row="agent/claude"]'), "the MCP rows are not build stages").toBeNull();
     expect(dialog.querySelector('[data-row="stage/snapshotting"]'), "the stage list is folded away").toBeNull();
     // The slide's rows carry the mark, the code in the large mono, and the keycap that opens the page.
@@ -859,23 +957,55 @@ describe("the cloud setup sheet", () => {
     expect(gh.querySelector("[data-k=code]")!.textContent).toBe("8F4A-C21B");
     expect(dialog.querySelector('[data-row="sign-in/claude"] [data-k=state]')!.textContent).toBe("key set");
     expect(dialog.querySelector('[data-row="sign-in/codex"] [data-k=state]')!.textContent).toBe("copied from this Mac");
+    // One line per row unless there is something to do: the waiting row and the one to retry carry the action line, the code
+    // and the keycap on it with the protocol's sentence; the key-set and copied rows are the name's line alone. The state
+    // word stays on the name's line, and no command the machine ran reaches any row, on the line or as a title.
+    const slideRows = [...dialog.querySelectorAll<HTMLElement>("[data-k=signin]")];
+    expect(slideRows.map(r => [r.dataset["row"], r.dataset["acts"], r.children.length])).toEqual([
+      ["sign-in/gh", "true", 2],
+      ["sign-in/claude", "false", 1],
+      ["sign-in/codex", "false", 1],
+      ["sign-in/wrangler", "true", 2],
+    ]);
+    for (const r of slideRows) expect(r.firstElementChild!.querySelector("[data-k=state]"), `${r.dataset["row"]}: the state word on the name's line`).not.toBeNull();
+    expect(gh.querySelector("[data-k=act] [data-k=code]")).not.toBeNull();
+    expect(gh.querySelector("[data-k=act] [data-k=open]")).not.toBeNull();
+    expect(gh.querySelector("[data-k=act] [data-k=why]")!.textContent).toBe(initSignInLine({ state: SIGN_IN_OPEN_STATE, code: "8F4A-C21B" }));
+    expect(dialog.querySelector('[data-row="sign-in/wrangler"] [data-k=act] [data-k=retry]')).not.toBeNull();
+    expect(dialog.querySelector("[data-k=handoff]")).toBeNull();
+    expect(dialog.textContent).not.toMatch(/exited|codex login|wrangler login/);
+    expect(dialog.querySelectorAll("[data-k=signin] [title]:not([data-k=state])")).toHaveLength(0);
+    // Every row reserves the mark's column once one row has a mark, the one without a mark of its own included.
+    expect(slideRows.map(r => r.querySelector("[data-k=mark-column]") !== null)).toEqual([true, true, true, true]);
+    expect(dialog.querySelector('[data-row="sign-in/wrangler"] [data-row-mark]')).toBeNull();
     // No chip, no badge: state is a word or the spinner.
     expect(dialog.querySelector("[data-badge], .animate-status-pulse")).toBeNull();
     // One footer action: the cancel link asks once; the note says the build keeps running and wsp tells them when needed.
     expect(dialog.querySelector("[data-k=primary]")).toBeNull();
     expect(k(dialog, "note").textContent).toBe(CLOUD_SETUP_WORDS.build.keeps);
     expect(k(dialog, "secondary").textContent).toBe(CLOUD_SETUP_WORDS.build.cancel);
+    const contentBefore = k(dialog, "content").innerHTML;
     fireEvent.click(k(dialog, "secondary"));
     expect(api.initCancel).not.toHaveBeenCalled();
     expect(k(dialog, "secondary").textContent).toBe(CLOUD_SETUP_WORDS.build.cancelSure);
     expect(k(dialog, "note").textContent).toBe(CLOUD_SETUP_WORDS.build.cancelWhy);
-    fireEvent.click(k(dialog, "keep"));
+    // The question is one block in the footer: the two answers side by side under the sentence, nothing under the card.
+    const links = k(dialog, "links");
+    expect(links.children).toHaveLength(2);
+    expect(links.querySelector("[data-k=secondary]")).not.toBeNull();
+    expect(links.querySelector("[data-k=aside]")).not.toBeNull();
+    expect(k(dialog, "aside").textContent).toBe(CLOUD_SETUP_WORDS.build.cancelKeep);
+    expect(k(dialog, "footer").contains(k(dialog, "aside"))).toBe(true);
+    expect(k(dialog, "content").innerHTML).toBe(contentBefore);
+    expect(dialog.querySelector("[data-k=keep]")).toBeNull();
+    fireEvent.click(k(dialog, "aside"));
     expect(k(dialog, "secondary").textContent).toBe(CLOUD_SETUP_WORDS.build.cancel);
+    expect(dialog.querySelector("[data-k=aside]")).toBeNull();
     fireEvent.keyDown(dialog, { key: "Escape" });
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(api.initCancel).not.toHaveBeenCalled();
     // The result lands as a state word and the page link goes.
-    emit({ ...building, rows: building.rows.map(r => (r.id === "sign-in/gh" ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, state: INIT_SIGN_IN_WORDS["signed-in"] } : r)), progress: { done: 6, total: 9 } });
+    emit({ ...building, rows: building.rows.map(r => (r.id === "sign-in/gh" || r.id === "sign-in/wrangler" ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, state: INIT_SIGN_IN_WORDS["signed-in"] } : r)), progress: { done: 6, total: 9 } });
     // With the last sign-in settled the list is back: stages in order, the sign-ins one stage reading done and folded, the count and the line along the card's top edge.
     await waitFor(() => expect(k(dialog, "title").textContent).toBe(CLOUD_SETUP_WORDS.build.headline));
     expect(within(dialog).getByRole("progressbar").getAttribute("aria-valuenow")).toBe("60");
@@ -886,14 +1016,21 @@ describe("the cloud setup sheet", () => {
     expect(signIns.dataset["state"]).toBe("done");
     expect(signIns.dataset["open"]).toBe("false");
     fireEvent.click(within(signIns).getByRole("button"));
-    expect([...signIns.querySelectorAll<HTMLElement>("[data-k=sign-ins] [data-k=row]")].map(r => r.dataset["row"])).toEqual(["sign-in/gh", "sign-in/claude", "sign-in/codex"]);
+    expect([...signIns.querySelectorAll<HTMLElement>("[data-k=sign-ins] [data-k=row]")].map(r => r.dataset["row"])).toEqual(["sign-in/gh", "sign-in/claude", "sign-in/codex", "sign-in/wrangler"]);
     expect(dialog.querySelector('[data-row="sign-in/gh"] [data-k=state]')!.textContent).toBe("done");
     expect(dialog.querySelector('[data-row="sign-in/gh"] [data-k=open]')).toBeNull();
-    // The running stage is open on its own with the machine's lines; the done one is folded and opens on a click.
+    // The sub-rows reserve the mark's column too, and carry no title with the machine's command.
+    expect([...signIns.querySelectorAll<HTMLElement>("[data-k=sign-ins] [data-k=row]")].map(r => r.querySelector("[data-k=mark-column]") !== null)).toEqual([true, true, true, true]);
+    expect(signIns.querySelectorAll("[data-k=sign-ins] [title]:not([data-k=state])")).toHaveLength(0);
+    // The running stage is open on its own with the machine's lines, the block as tall as its one line and the seconds it has run beside the spinner; the done one is folded and opens on a click.
     const snap = dialog.querySelector<HTMLElement>('[data-row="stage/snapshotting"]')!;
     expect(snap.dataset["open"]).toBe("true");
-    expect(snap.querySelector("[data-k=lines]")!.textContent).toContain("waiting on the provider");
+    expect(snap.querySelector("[data-k=lines]")!.textContent).toBe(snapshotStageLine(13 * GIB));
+    expect(snap.querySelector<HTMLElement>("[data-k=lines]")!.dataset["lines"]).toBe("1");
+    expect(snap.querySelector<HTMLElement>("[data-k=lines]")!.style.getPropertyValue("--stage-lines")).toBe("1");
+    expect(snap.querySelector("[data-k=elapsed]")!.textContent).toMatch(/^4[0-9]s$/);
     expect(snap.querySelector("[data-k=state][role=status]")).not.toBeNull();
+    expect(dialog.querySelector('[data-row="stage/creating"] [data-k=elapsed]'), "a done stage has no clock").toBeNull();
     const creating = dialog.querySelector<HTMLElement>('[data-row="stage/creating"]')!;
     expect(creating.dataset["open"]).toBe("false");
     fireEvent.click(within(creating).getByRole("button"));
@@ -903,6 +1040,8 @@ describe("the cloud setup sheet", () => {
     // Done: the headline turns and the one keycap opens the workspace.
     emit({ ...building, phase: "done", golden: { version: 1 }, workspace: { id: "ws_first", name: "first" }, rows: building.rows.map(r => ({ ...r, state: r.kind === "workspace" ? "forked" : r.kind === "sign-in" ? INIT_SIGN_IN_WORDS["signed-in"] : "done" })), progress: { done: 9, total: 9 } });
     await waitFor(() => expect(dialog.textContent).toContain(CLOUD_SETUP_WORDS.build.done));
+    // The sentence says what stands, not what was running.
+    expect(k(dialog, "sentence").textContent).toBe(CLOUD_SETUP_WORDS.build.doneTop);
     expect(k(dialog, "primary").textContent).toBe(`${CLOUD_SETUP_WORDS.build.keycap}→`);
     expect(dialog.querySelector("[data-k=secondary]")).toBeNull();
     fireEvent.click(k(dialog, "primary"));
@@ -967,7 +1106,19 @@ describe("the cloud setup sheet", () => {
     await waitFor(() => expect(k(dialog, "build")).toBeDefined());
     const gh = dialog.querySelector<HTMLElement>('[data-row="sign-in/gh"]')!;
     expect(gh.querySelector("[data-k=state]")!.textContent).toBe("not signed in");
-    fireEvent.click(gh.querySelector<HTMLElement>("[data-k=retry]")!);
+    // The stage the run-out folds into wears the failed glyph beside not signed in, open or folded, never a tick.
+    const stage = dialog.querySelector<HTMLElement>(`[data-row="${SIGN_IN_STAGE_ID}"]`)!;
+    expect(stage.querySelector("[data-k=state]")!.textContent).toBe("not signed in");
+    expect(stage.querySelector("[data-glyph]")!.getAttribute("data-glyph")).toBe("failed");
+    expect(stage.dataset["open"]).toBe("true");
+    const stageRow = stage.querySelector<HTMLElement>(':scope > div[role="button"]')!;
+    fireEvent.click(stageRow);
+    expect(stage.dataset["open"]).toBe("false");
+    expect(stage.querySelector("[data-glyph]")!.getAttribute("data-glyph")).toBe("failed");
+    fireEvent.click(stageRow);
+    expect(stage.dataset["open"]).toBe("true");
+    // The sub-rows are drawn again on the reopen, so the keycap is looked up again.
+    fireEvent.click(dialog.querySelector<HTMLElement>('[data-row="sign-in/gh"] [data-k=retry]')!);
     await waitFor(() => expect(api.initRetry).toHaveBeenCalledWith({ tool: "gh" }));
     const cancel = k(dialog, "secondary") as HTMLButtonElement;
     expect(cancel.disabled).toBe(true);
@@ -1052,6 +1203,12 @@ describe("the cloud setup sheet", () => {
     await waitFor(() => expect(k(t.dialog, "keys")).toBeDefined());
     expect(t.dialog.querySelector("[data-k=key-check]")).toBeNull();
     expect(t.api.initStart).not.toHaveBeenCalled();
+    // The refused key is not the one to keep: the step opens on an empty field for a new one, not on the saved dots.
+    const field = t.dialog.querySelector<HTMLInputElement>("#setup-key-solari")!;
+    expect(field.value).toBe("");
+    expect(field.readOnly).toBe(false);
+    expect(t.dialog.querySelector("[data-k=solari-state]")).toBeNull();
+    expect((k(t.dialog, "primary") as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("a build that could not ask the provider about the key offers Start over: the saved key may be fine", async () => {

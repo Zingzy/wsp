@@ -67,8 +67,9 @@ const callsOf = (recipe: Recipe, id: string): number | undefined => {
   return source?.kind === "used" ? source.calls : undefined;
 };
 
-/** The tools screen's rows as the app draws them: the base under one divider, everything else under the person's
- * usage, each usage row carrying its calls alone, most first; the tick says what the rule decided. */
+/** The tools screen's rows as the app draws them: the base under one divider in the catalog's order with name and
+ * size alone, everything else under the person's usage, each usage row carrying its calls, most first; the tick says
+ * what the rule decided. */
 function toolItems(tools: readonly TableRow[], recipe: Recipe, manifest: Manifest): InitScreenItem[] {
   const detail = new Map(tableItems(tools, recipe, manifest, PLAIN, true).map(i => [i.id, i.detail]));
   const rows = tools.map(row => ({ row, calls: callsOf(recipe, row.id) }));
@@ -77,12 +78,14 @@ function toolItems(tools: readonly TableRow[], recipe: Recipe, manifest: Manifes
     id: row.id,
     label: row.name,
     size: sizeOf(row),
-    ...(calls !== undefined ? { why: fmtCalls(calls) } : {}),
+    ...(calls !== undefined && !row.base ? { why: fmtCalls(calls) } : {}),
     group,
     detail: (detail.get(row.id) ?? []).filter(line => line !== ""),
     ...(row.base ? { lock: "on" as const } : {}),
   });
-  return [...rows.filter(r => r.row.base).map(r => shaped(r, ALWAYS_GROUP)), ...rows.filter(r => !r.row.base).sort(byCalls).map(r => shaped(r, USAGE_GROUP))];
+  const catalogOrder = new Map(CATALOG_TOOLS.map((e, i) => [e.id, i]));
+  const byCatalog = (a: { row: TableRow }, b: { row: TableRow }): number => (catalogOrder.get(a.row.id) ?? Infinity) - (catalogOrder.get(b.row.id) ?? Infinity);
+  return [...rows.filter(r => r.row.base).sort(byCatalog).map(r => shaped(r, ALWAYS_GROUP)), ...rows.filter(r => !r.row.base).sort(byCalls).map(r => shaped(r, USAGE_GROUP))];
 }
 
 /** The variable a sign-in row's agent reads an API key from, declared once on the agent's sign-in; nothing for a row

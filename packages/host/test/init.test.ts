@@ -2672,7 +2672,7 @@ describe("wsp init, a signal during prepare", () => {
     expect(f.backends[0]!.machines.map(m => [m.id, m.killed])).toEqual([["m1", true]]);
     expect(await store.list("builders")).toEqual([]);
     const out = f.text();
-    expect(out).toContain("Stopped while installing tools. Builder m1 is gone; nothing is billing.");
+    expect(out).toContain("Stopped while installing tools. The machine is gone; nothing is billing.");
     expect(out).not.toContain("Installing tools failed");
     expect(out).not.toContain("Run wsp init again");
     expect(f.signals.listenerCount("SIGINT") + f.signals.listenerCount("SIGTERM")).toBe(0);
@@ -2753,7 +2753,7 @@ describe("wsp init, a signal during prepare", () => {
     expect(result.code).toBe(130);
     expect(f.backends[0]!.machines.map(m => [m.id, m.killed])).toEqual([["m1", true]]);
     expect(await store.list("builders")).toEqual([]);
-    expect(f.text()).toContain("Stopped while creating the machine. Builder m1 is gone; nothing is billing.");
+    expect(f.text()).toContain("Stopped while creating the machine. The machine is gone; nothing is billing.");
     expect(f.exits).toEqual([130]);
   });
 
@@ -2785,7 +2785,7 @@ describe("wsp init, a signal during prepare", () => {
     });
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(130);
-    expect(f.text()).toContain(`Stopped while installing tools. Builder m1 did not stop (provider said no); ${SWEEP}`);
+    expect(f.text()).toContain(`Stopped while installing tools. The machine did not stop (provider said no); ${SWEEP}`);
     expect(f.text()).not.toContain("nothing is billing");
     expect(await store.get("builders", "m1")).toMatchObject({ building: true });
     expect(f.exits).toEqual([130]);
@@ -2803,7 +2803,7 @@ describe("wsp init, a signal during prepare", () => {
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(130);
     expect(f.exits).toEqual([130, 130]);
-    expect(f.text().match(/Stopped while installing tools\. Builder m1 is gone; nothing is billing\./g)).toHaveLength(2);
+    expect(f.text().match(/Stopped while installing tools\. The machine is gone; nothing is billing\./g)).toHaveLength(2);
     expect(f.text()).not.toContain("cut short");
   });
 
@@ -2854,7 +2854,8 @@ describe("wsp init, a signal during prepare", () => {
     expect(puts.every(p => p.building === true)).toBe(true);
     expect(await store.list("builders")).toEqual([]);
     expect(f.backends[0]!.machines[0]!.killed).toBe(true);
-    expect(f.text()).toContain("Builder m1 is gone; nothing is billing.");
+    expect(f.text()).toContain("The machine is gone; nothing is billing.");
+    expect(f.text()).not.toMatch(/Builder m1 is gone/);
   });
 
   it("a signal while attaching to an earlier first-life builder leaves it running: the hold is released, the record stays reusable, and the line says what bills", async () => {
