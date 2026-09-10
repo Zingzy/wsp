@@ -9,7 +9,7 @@
 // happen. Esc hides it with the job running on.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLOUD_SETUP_WORDS, KEY_REFUSED, KEY_UNCHECKED, SIGN_IN_STAGE_ID, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MACHINE_SWEEP_LINE, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initBuildRows, initDiskLine, initDiskOverLine, initMachineRowLabel, initStageCount, initStageCountLine, initTallyLine, initButtonLine, initProgressLine, keyRefusedLine, keyUncheckedLine, type EventUnion, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, KEY_REFUSED, KEY_UNCHECKED, SIGN_IN_STAGE_ID, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MACHINE_SWEEP_LINE, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initBuildRows, initDiskLine, initDiskOverLine, initMachineRowLabel, initStageCount, initStageCountLine, initTallyLine, initButtonLine, initProgressLine, initSignInLine, keyRefusedLine, keyUncheckedLine, snapshotStageLine, type EventUnion, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS, keyStoppedRows } from "./cloud-setup/keyRefusedJob.js";
 import { useStore } from "../src/protocol/store.js";
@@ -877,8 +877,10 @@ describe("the cloud setup sheet", () => {
         { id: "stage/ready", kind: "stage", label: GOLDEN_STAGE_WORDS.ready, state: "done" },
         { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "Sign in to GitHub CLI", state: SIGN_IN_OPEN_STATE, page: "https://github.com/login/device", code: "8F4A-C21B" },
         { id: "sign-in/claude", kind: "sign-in", tool: "claude", label: "Sign in to Claude Code", state: INIT_ROW_STATES.keySet },
-        { id: "sign-in/codex", kind: "sign-in", tool: "codex", label: "Sign in to Codex", state: INIT_SIGN_IN_WORDS.copied },
-        { id: "stage/snapshotting", kind: "stage", label: GOLDEN_STAGE_WORDS.snapshotting, state: INIT_ROW_STATES.running, lines: ["snapshot wsp-h1-default-v1 requested", "waiting on the provider"] },
+        // The host's note names the command the machine ran; no screen shows it.
+        { id: "sign-in/codex", kind: "sign-in", tool: "codex", label: "Sign in to Codex", state: INIT_SIGN_IN_WORDS.copied, detail: "codex login --api-key exited 0" },
+        { id: "sign-in/wrangler", kind: "sign-in", tool: "wrangler", label: "Sign in to Cloudflare Wrangler", state: INIT_SIGN_IN_WORDS["not-signed-in"], detail: "wrangler login exited 1; no sign-in within 16m" },
+        { id: "stage/snapshotting", kind: "stage", label: GOLDEN_STAGE_WORDS.snapshotting, state: INIT_ROW_STATES.running, lines: [snapshotStageLine(13 * GIB)], since: Date.now() - 41_000 },
         { id: "stage/sealed", kind: "stage", label: GOLDEN_STAGE_WORDS.sealed, state: "waiting" },
         { id: "workspace/first", kind: "workspace", label: "first", state: "waiting" },
       ],
@@ -892,7 +894,7 @@ describe("the cloud setup sheet", () => {
     expect(k(dialog, "sentence").textContent).toBe(CLOUD_SETUP_WORDS.build.slideTop);
     expect(k(dialog, "stages-folded").textContent).toBe(`${CLOUD_SETUP_WORDS.build.headline} · 2 of 5`);
     expect(dialog.querySelector("[data-k=count]")).toBeNull();
-    expect([...dialog.querySelectorAll<HTMLElement>("[data-k=signin]")].map(r => r.dataset["row"])).toEqual(["sign-in/gh", "sign-in/claude", "sign-in/codex"]);
+    expect([...dialog.querySelectorAll<HTMLElement>("[data-k=signin]")].map(r => r.dataset["row"])).toEqual(["sign-in/gh", "sign-in/claude", "sign-in/codex", "sign-in/wrangler"]);
     expect(dialog.querySelector('[data-row="agent/claude"]'), "the MCP rows are not build stages").toBeNull();
     expect(dialog.querySelector('[data-row="stage/snapshotting"]'), "the stage list is folded away").toBeNull();
     // The slide's rows carry the mark, the code in the large mono, and the keycap that opens the page.
@@ -907,6 +909,27 @@ describe("the cloud setup sheet", () => {
     expect(gh.querySelector("[data-k=code]")!.textContent).toBe("8F4A-C21B");
     expect(dialog.querySelector('[data-row="sign-in/claude"] [data-k=state]')!.textContent).toBe("key set");
     expect(dialog.querySelector('[data-row="sign-in/codex"] [data-k=state]')!.textContent).toBe("copied from this Mac");
+    // One line per row unless there is something to do: the waiting row and the one to retry carry the action line, the code
+    // and the keycap on it with the protocol's sentence; the key-set and copied rows are the name's line alone. The state
+    // word stays on the name's line, and no command the machine ran reaches any row, on the line or as a title.
+    const slideRows = [...dialog.querySelectorAll<HTMLElement>("[data-k=signin]")];
+    expect(slideRows.map(r => [r.dataset["row"], r.dataset["acts"], r.children.length])).toEqual([
+      ["sign-in/gh", "true", 2],
+      ["sign-in/claude", "false", 1],
+      ["sign-in/codex", "false", 1],
+      ["sign-in/wrangler", "true", 2],
+    ]);
+    for (const r of slideRows) expect(r.firstElementChild!.querySelector("[data-k=state]"), `${r.dataset["row"]}: the state word on the name's line`).not.toBeNull();
+    expect(gh.querySelector("[data-k=act] [data-k=code]")).not.toBeNull();
+    expect(gh.querySelector("[data-k=act] [data-k=open]")).not.toBeNull();
+    expect(gh.querySelector("[data-k=act] [data-k=why]")!.textContent).toBe(initSignInLine({ state: SIGN_IN_OPEN_STATE, code: "8F4A-C21B" }));
+    expect(dialog.querySelector('[data-row="sign-in/wrangler"] [data-k=act] [data-k=retry]')).not.toBeNull();
+    expect(dialog.querySelector("[data-k=handoff]")).toBeNull();
+    expect(dialog.textContent).not.toMatch(/exited|codex login|wrangler login/);
+    expect(dialog.querySelectorAll("[data-k=signin] [title]:not([data-k=state])")).toHaveLength(0);
+    // Every row reserves the mark's column once one row has a mark, the one without a mark of its own included.
+    expect(slideRows.map(r => r.querySelector("[data-k=mark-column]") !== null)).toEqual([true, true, true, true]);
+    expect(dialog.querySelector('[data-row="sign-in/wrangler"] [data-row-mark]')).toBeNull();
     // No chip, no badge: state is a word or the spinner.
     expect(dialog.querySelector("[data-badge], .animate-status-pulse")).toBeNull();
     // One footer action: the cancel link asks once; the note says the build keeps running and wsp tells them when needed.
@@ -923,7 +946,7 @@ describe("the cloud setup sheet", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(api.initCancel).not.toHaveBeenCalled();
     // The result lands as a state word and the page link goes.
-    emit({ ...building, rows: building.rows.map(r => (r.id === "sign-in/gh" ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, state: INIT_SIGN_IN_WORDS["signed-in"] } : r)), progress: { done: 6, total: 9 } });
+    emit({ ...building, rows: building.rows.map(r => (r.id === "sign-in/gh" || r.id === "sign-in/wrangler" ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, state: INIT_SIGN_IN_WORDS["signed-in"] } : r)), progress: { done: 6, total: 9 } });
     // With the last sign-in settled the list is back: stages in order, the sign-ins one stage reading done and folded, the count and the line along the card's top edge.
     await waitFor(() => expect(k(dialog, "title").textContent).toBe(CLOUD_SETUP_WORDS.build.headline));
     expect(within(dialog).getByRole("progressbar").getAttribute("aria-valuenow")).toBe("60");
@@ -934,14 +957,21 @@ describe("the cloud setup sheet", () => {
     expect(signIns.dataset["state"]).toBe("done");
     expect(signIns.dataset["open"]).toBe("false");
     fireEvent.click(within(signIns).getByRole("button"));
-    expect([...signIns.querySelectorAll<HTMLElement>("[data-k=sign-ins] [data-k=row]")].map(r => r.dataset["row"])).toEqual(["sign-in/gh", "sign-in/claude", "sign-in/codex"]);
+    expect([...signIns.querySelectorAll<HTMLElement>("[data-k=sign-ins] [data-k=row]")].map(r => r.dataset["row"])).toEqual(["sign-in/gh", "sign-in/claude", "sign-in/codex", "sign-in/wrangler"]);
     expect(dialog.querySelector('[data-row="sign-in/gh"] [data-k=state]')!.textContent).toBe("done");
     expect(dialog.querySelector('[data-row="sign-in/gh"] [data-k=open]')).toBeNull();
-    // The running stage is open on its own with the machine's lines; the done one is folded and opens on a click.
+    // The sub-rows reserve the mark's column too, and carry no title with the machine's command.
+    expect([...signIns.querySelectorAll<HTMLElement>("[data-k=sign-ins] [data-k=row]")].map(r => r.querySelector("[data-k=mark-column]") !== null)).toEqual([true, true, true, true]);
+    expect(signIns.querySelectorAll("[data-k=sign-ins] [title]:not([data-k=state])")).toHaveLength(0);
+    // The running stage is open on its own with the machine's lines, the block as tall as its one line and the seconds it has run beside the spinner; the done one is folded and opens on a click.
     const snap = dialog.querySelector<HTMLElement>('[data-row="stage/snapshotting"]')!;
     expect(snap.dataset["open"]).toBe("true");
-    expect(snap.querySelector("[data-k=lines]")!.textContent).toContain("waiting on the provider");
+    expect(snap.querySelector("[data-k=lines]")!.textContent).toBe(snapshotStageLine(13 * GIB));
+    expect(snap.querySelector<HTMLElement>("[data-k=lines]")!.dataset["lines"]).toBe("1");
+    expect(snap.querySelector<HTMLElement>("[data-k=lines]")!.style.getPropertyValue("--stage-lines")).toBe("1");
+    expect(snap.querySelector("[data-k=elapsed]")!.textContent).toMatch(/^4[0-9]s$/);
     expect(snap.querySelector("[data-k=state][role=status]")).not.toBeNull();
+    expect(dialog.querySelector('[data-row="stage/creating"] [data-k=elapsed]'), "a done stage has no clock").toBeNull();
     const creating = dialog.querySelector<HTMLElement>('[data-row="stage/creating"]')!;
     expect(creating.dataset["open"]).toBe("false");
     fireEvent.click(within(creating).getByRole("button"));

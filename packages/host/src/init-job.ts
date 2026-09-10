@@ -892,7 +892,8 @@ export class InitJobs implements InitDoor {
       const tail = step === undefined ? [] : [...step.tail, ...failure.filter(l => l !== step.tail.at(-1))];
       const detail = step?.running?.command ?? tail.at(-1);
       const lines = [...tail.slice(-STAGE_LINES), ...(step?.running !== undefined ? [step.running.command] : [])];
-      return { id: `stage/${w.stage}`, kind: "stage", label: w.start, state, ...(detail !== undefined ? { detail } : {}), ...(step?.ms !== undefined ? { ms: step.ms } : {}), ...(lines.length > 0 ? { lines } : {}) };
+      const since = !halted && step?.state === "current" ? step.since : undefined;
+      return { id: `stage/${w.stage}`, kind: "stage", label: w.start, state, ...(detail !== undefined ? { detail } : {}), ...(step?.ms !== undefined ? { ms: step.ms } : {}), ...(since !== undefined ? { since } : {}), ...(lines.length > 0 ? { lines } : {}) };
     });
     // The sign-ins sit after the machine answers. A build that ended before that stage has no row for it, and the
     // sign-ins belong after every stage it did reach rather than ahead of all of them.

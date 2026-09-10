@@ -679,10 +679,10 @@ describe("the init job, manual road", () => {
       }
       return made(spec);
     };
-    const waits: { state: string; lines: string[] }[] = [];
+    const waits: { state: string; lines: string[]; since: number | undefined }[] = [];
     f.onJob(job => {
       const row = job.rows.find(r => r.id === "stage/creating");
-      if (row !== undefined && row.state === INIT_ROW_STATES.slot) waits.push({ state: row.state, lines: row.lines ?? [] });
+      if (row !== undefined && row.state === INIT_ROW_STATES.slot) waits.push({ state: row.state, lines: row.lines ?? [], since: row.since });
     });
     await f.jobs.start({ road: "manual" });
     await f.settled();
@@ -692,8 +692,11 @@ describe("the init job, manual road", () => {
     expect(refusals).toBe(1);
     expect(waits.length).toBeGreaterThan(0);
     expect(waits.at(-1)!.lines.some(l => l.includes("at its machine cap"))).toBe(true);
+    // The stage's clock rides the row while it runs, and leaves it once it is over.
+    expect(typeof waits.at(-1)!.since).toBe("number");
     // The wait is over once the slot came free: the row is the running stage again, then done.
     expect(f.jobs.view()!.rows.find(r => r.id === "stage/creating")!.state).toBe(INIT_ROW_STATES.done);
+    expect(f.jobs.view()!.rows.find(r => r.id === "stage/creating")!.since).toBeUndefined();
   });
 
   it("a build the person stopped says it was them, with the stage it stopped at, and the first workspace reads not made", async () => {

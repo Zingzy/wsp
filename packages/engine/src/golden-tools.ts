@@ -40,7 +40,11 @@ export interface ToolsOutcome {
 
 type Stage = (stage: GoldenStage, detail?: string, step?: GoldenStep) => void;
 
-export const FREE_KB_CMD = "df -Pk /root | awk 'NR==2{print $4}'";
+/** df on the root disk in kilobytes, one column at a time: used is what a snapshot comes to, free is what an install
+ * has left; the one place the df line is spelled. */
+export const dfRootKbCmd = (column: "used" | "free"): string => `df -Pk /root | awk 'NR==2{print $${column === "used" ? 3 : 4}}'`;
+export const FREE_KB_CMD = dfRootKbCmd("free");
+export const USED_KB_CMD = dfRootKbCmd("used");
 export { MIB };
 /** One unpack peak filled the disk from 1.6 GB free (measured 2026-09-05), so the loop stops above that. */
 export const TOOLS_DISK_FLOOR = 2048 * MIB;
@@ -96,12 +100,24 @@ export function roadOf(stdout: string): ToolRoad | undefined {
 
 export type FreeDisk = { kind: "free"; bytes: number } | { kind: "unknown"; reason: string };
 
-/** What df says is free under /root; a df that fails or prints nothing is reported, never assumed. */
-export async function freeBytes(machine: Machine): Promise<FreeDisk> {
-  const res = await machine.exec(FREE_KB_CMD, { timeoutMs: INLINE_EXEC_MS });
+/** One df column read off the machine, in bytes; a df that fails or prints no number is reported, never assumed. */
+async function dfRootBytes(machine: Machine, column: "used" | "free"): Promise<{ bytes: number } | { reason: string }> {
+  const res = await machine.exec(dfRootKbCmd(column), { timeoutMs: INLINE_EXEC_MS });
   const kb = Number(res.stdout.trim());
-  if (res.exitCode === 0 && Number.isFinite(kb) && kb > 0) return { kind: "free", bytes: kb * 1024 };
-  return { kind: "unknown", reason: `df failed: ${reasonOf(res, INLINE_EXEC_MS / 1000)}` };
+  return res.exitCode === 0 && Number.isFinite(kb) && kb > 0 ? { bytes: kb * 1024 } : { reason: `df failed: ${reasonOf(res, INLINE_EXEC_MS / 1000)}` };
+}
+
+/** What df says is free under /root. */
+export async function freeBytes(machine: Machine): Promise<FreeDisk> {
+  const read = await dfRootBytes(machine, "free");
+  return "bytes" in read ? { kind: "free", bytes: read.bytes } : { kind: "unknown", reason: read.reason };
+}
+
+/** What df says is used under /root, which is what a snapshot of the disk comes to; unknown when df could not be
+ * read, and the line that wanted it says less. */
+export async function usedBytes(machine: Machine): Promise<number | undefined> {
+  const read = await dfRootBytes(machine, "used").catch(() => undefined);
+  return read !== undefined && "bytes" in read ? read.bytes : undefined;
 }
 
 /** The df reading that closes a stage's last line, so the run's log says what each stage left on the disk. */

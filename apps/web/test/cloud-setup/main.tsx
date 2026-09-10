@@ -8,7 +8,7 @@
 // is what the host hands over for a small laptop: three agents, the tools with
 // the base locked on and the rest by calls, a manager's rows, three sign-ins.
 import { createRoot } from "react-dom/client";
-import { GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, KEY_REFUSED, MCP_ADDED_WORD, NETWORK_LOST_LINE, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initAgentNoRecipeLine, initBuildRows, initMachineRowLabel, initStageCount, keyRefusedLine, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, KEY_REFUSED, MCP_ADDED_WORD, NETWORK_LOST_LINE, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initAgentNoRecipeLine, initBuildRows, initMachineRowLabel, initStageCount, keyRefusedLine, snapshotStageLine, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import { RequestError, type Api } from "../../src/protocol/client";
 import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS } from "./keyRefusedJob";
@@ -132,12 +132,15 @@ const machine = (state: string, detail?: string, id = "b_dlb9oeig"): InitJob["ro
 /** The provider client's own words when nothing on this computer can reach it: what the host appends to the failed
  * stage's block, under a sentence that reads as a person would say it. */
 const RAW_FETCH_FAILURE = "fetch failed; fetch failed";
+// Every kind of row the slide draws: a page waiting with its code, a copy (whose note names the command the machine
+// ran, which no screen shows), a sign-in done, one that ran out with Retry and no mark of its own, and the row whose
+// page hands a code back, with the field for it on its action line.
 const signIns: InitJob["rows"] = [
-  { id: "sign-in/claude", kind: "sign-in", tool: "claude", label: "Sign in to Claude Code", state: INIT_ROW_STATES.keySet },
-  { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "Sign in to GitHub CLI", state: SIGN_IN_OPEN_STATE, page: "https://github.com/login/device", code: "8F4A-C21B", detail: "gh auth login is waiting on the machine for the code" },
-  { id: "sign-in/codex", kind: "sign-in", tool: "codex", label: "Sign in to Codex", state: INIT_SIGN_IN_WORDS.copied },
-  // The row whose page hands a code back: the field for it sits under the row.
-  { id: "sign-in/gcloud", kind: "sign-in", tool: "gcloud", label: "Sign in to Google Cloud", state: SIGN_IN_OPEN_STATE, page: "https://accounts.google.com/o/oauth2/auth", finish: "code", detail: "the page hands you a code to paste here" },
+  { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "Sign in to GitHub CLI", state: SIGN_IN_OPEN_STATE, page: "https://github.com/login/device", code: "8F4A-C21B" },
+  { id: "sign-in/codex", kind: "sign-in", tool: "codex", label: "Sign in to Codex", state: INIT_SIGN_IN_WORDS.copied, detail: "codex login --api-key exited 0" },
+  { id: "sign-in/gemini", kind: "sign-in", tool: "gemini", label: "Sign in to Gemini CLI", state: INIT_SIGN_IN_WORDS["signed-in"] },
+  { id: "sign-in/wrangler", kind: "sign-in", tool: "wrangler", label: "Sign in to Cloudflare Wrangler", state: INIT_SIGN_IN_WORDS["not-signed-in"], detail: "wrangler login exited 1; no sign-in within 16m" },
+  { id: "sign-in/gcloud", kind: "sign-in", tool: "gcloud", label: "Sign in to Google Cloud", state: SIGN_IN_OPEN_STATE, page: "https://accounts.google.com/o/oauth2/auth", finish: "code" },
 ];
 
 const FACTS: InitJob["rows"] = [
@@ -174,7 +177,7 @@ const JOBS: Record<string, InitJob> = {
     phase: "sealing",
     stoppable: false,
     screens: [],
-    rows: [...done(STAGES.slice(0, 9)), ...signIns.map(r => (r.id === "sign-in/gh" ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, state: INIT_SIGN_IN_WORDS["not-signed-in"], detail: "no sign-in within 16m" } : r.state === SIGN_IN_OPEN_STATE ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, state: INIT_SIGN_IN_WORDS["signed-in"] } : r)), stage("snapshotting", INIT_ROW_STATES.running, { lines: ["snapshot wsp-h1-default-v1 requested", "waiting on the provider"] }), ...STAGES.slice(10)]
+    rows: [...done(STAGES.slice(0, 9)), ...signIns.map(r => (r.id === "sign-in/gh" ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, state: INIT_SIGN_IN_WORDS["not-signed-in"], detail: "no sign-in within 16m" } : r.state === SIGN_IN_OPEN_STATE ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, state: INIT_SIGN_IN_WORDS["signed-in"] } : r)), stage("snapshotting", INIT_ROW_STATES.running, { lines: [snapshotStageLine(13 * GIB)], since: Date.now() - 41_000 }), ...STAGES.slice(10)]
   },
   done: {
     ...base,

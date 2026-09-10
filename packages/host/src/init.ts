@@ -226,6 +226,8 @@ export interface StageStep {
   tail: string[];
   /** How long the stage ran, known once a later frame ends it. */
   ms?: number;
+  /** When the stage's clock started: its first frame's time, while it runs. */
+  since?: number;
   /** The step the latest frame belongs to; a frame naming none ends it. */
   running?: RunningStep;
 }
@@ -335,6 +337,7 @@ export function reduceStages(frames: readonly StageFrame[], words: readonly Stag
     if (step !== current) {
       current = step;
       since = f.at;
+      if (f.at !== undefined) step.since = f.at;
     }
     step.state = "current";
   }

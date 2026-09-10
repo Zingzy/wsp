@@ -1223,6 +1223,35 @@ export const GOLDEN_STAGE_WORDS: Record<Exclude<GoldenStage, "failed">, string> 
   sealed: "Finishing",
 };
 
+/** The stages the provider gives no progress for: the snapshot and the save go to their end with nothing to say in
+ * between, so the row counts its own seconds while one runs. */
+export const GOLDEN_STAGE_TIMED: ReadonlySet<GoldenStage> = new Set<GoldenStage>(["snapshotting", "promoting"]);
+
+/** A stage's row id, the one spelling the host writes and a client reads. */
+export const initStageRowId = (stage: GoldenStage): string => `stage/${stage}`;
+
+/** Whether a row is one of the stages that count their own seconds. */
+export const initRowTimed = (row: Pick<InitRow, "id">): boolean => [...GOLDEN_STAGE_TIMED].some(stage => row.id === initStageRowId(stage));
+
+/** A row's clock while it runs: whole seconds under a minute, then minutes and seconds. */
+export const initElapsedLine = (ms: number): string => (ms < 60_000 ? `${Math.max(0, Math.floor(ms / 1_000))}s` : fmtDuration(ms));
+
+/** The snapshot stage's one line: what is being snapshotted in words a person can use, never the snapshot's name,
+ * and the size when the builder's disk could be read. */
+export const snapshotStageLine = (bytes: number | undefined): string => `snapshotting${bytes === undefined ? "" : ` about ${fmtBytes(bytes)}`}, usually under a minute`;
+
+/** The save stage's one line. */
+export const SAVING_IMAGE_LINE = "saving the image";
+
+/** The one sentence on a sign-in the person is waited on for, beside the way to act: what the machine waits on, never
+ * the command it ran, and short enough to share the action line with the code and the keycap uncut. A page that shows
+ * a code or hands one back has the machine waiting for that code; any other page is open on this computer. A row
+ * nobody is waited on for has no sentence. */
+export function initSignInLine(row: Pick<InitRow, "state" | "code" | "finish">): string | undefined {
+  if (row.state !== INIT_ROW_STATES.open) return undefined;
+  return row.code !== undefined || row.finish === "code" ? "waiting for the code" : "the page is open on this computer";
+}
+
 /** The id of the wsp tools screen's row for an agent, the one the app answers for it from the first launch's own answer. */
 export const wspToolsRowId = (agent: string): string => `wsp-tools/${agent}`;
 
@@ -1781,10 +1810,10 @@ export function snapshotFailedLine(attempts: number, answer: ProviderAnswer, bui
   return `${head} while the builder read ${builderState}`;
 }
 
-/** The promoting stage's line for one read of the template: what the provider says it is, and whether the seal asks
- * again. Ready is the last line the stage writes. */
-export function templateStatusLine(templateId: string, status: string): string {
-  return status === "ready" ? `${templateId} is ready` : `${templateId} is ${status}; asking again`;
+/** The promoting stage's line for one read of the saved image: what the provider says of it and whether the seal asks
+ * again. Ready is the last line the stage writes; the template's id is the provider's and reaches no screen. */
+export function templateStatusLine(status: string): string {
+  return status === "ready" ? "the image is saved" : `${SAVING_IMAGE_LINE}, the provider says ${status}; asking again`;
 }
 
 /** The seal's failure line when the provider marks the template failed: forks would have nothing to boot from. */

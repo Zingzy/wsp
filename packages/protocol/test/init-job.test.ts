@@ -56,7 +56,14 @@ import {
   initTallyOf,
   initTicksOf,
   fmtCalls,
-  type InitRow,
+  GOLDEN_STAGE_TIMED,
+  SAVING_IMAGE_LINE,
+  InitRow,
+  initElapsedLine,
+  initRowTimed,
+  initSignInLine,
+  snapshotStageLine,
+  templateStatusLine,
   type InitScreen,
 } from "../src/index.js";
 
@@ -429,6 +436,25 @@ describe("the words the clients print for the job", () => {
     expect(sizeTone(initImageBytes(job))).toBe("danger");
     // The agents screen's sizes are muted whatever they weigh; the tools and what-else screens' wear the weight table; nothing measured is muted anywhere.
     expect([initSizeTone(agents, 455 * MIB), initSizeTone(agents, 4 * GIB), initSizeTone(tools, 455 * MIB), initSizeTone(tools, 4 * GIB), initSizeTone({ id: "also" }, 150 * MIB), initSizeTone(tools, null)]).toEqual(["muted", "muted", "warning", "danger", "yellow", "muted"]);
+  });
+
+  it("a sign-in's sentence names what the machine waits on and never a command, the seal's stages say what a person can use with no snapshot name, and a running stage's clock rides the row in whole seconds", () => {
+    expect(initSignInLine({ state: INIT_ROW_STATES.open, code: "8F4A-C21B" })).toBe("waiting for the code");
+    expect(initSignInLine({ state: INIT_ROW_STATES.open, finish: "code" })).toBe("waiting for the code");
+    expect(initSignInLine({ state: INIT_ROW_STATES.open })).toBe("the page is open on this computer");
+    expect(initSignInLine({ state: INIT_SIGN_IN_WORDS.copied })).toBeUndefined();
+    expect(initSignInLine({ state: INIT_ROW_STATES.done })).toBeUndefined();
+    expect(initSignInLine({ state: INIT_SIGN_IN_WORDS["not-signed-in"] })).toBeUndefined();
+    expect(snapshotStageLine(13 * 1024 * MIB)).toBe("snapshotting about 13 GB, usually under a minute");
+    expect(snapshotStageLine(undefined)).toBe("snapshotting, usually under a minute");
+    expect(SAVING_IMAGE_LINE).toBe("saving the image");
+    expect(templateStatusLine("ready")).toBe("the image is saved");
+    expect(templateStatusLine("building")).toBe("saving the image, the provider says building; asking again");
+    // The two stages the provider says nothing during count their own seconds; the wire carries the clock's start.
+    expect([...GOLDEN_STAGE_TIMED]).toEqual(["snapshotting", "promoting"]);
+    expect([initRowTimed({ id: "stage/snapshotting" }), initRowTimed({ id: "stage/promoting" }), initRowTimed({ id: "stage/creating" }), initRowTimed({ id: "sign-in/gh" })]).toEqual([true, true, false, false]);
+    expect([initElapsedLine(0), initElapsedLine(999), initElapsedLine(41_400), initElapsedLine(72_000)]).toEqual(["0s", "0s", "41s", "1m 12s"]);
+    expect(InitRow.parse({ id: "stage/snapshotting", kind: "stage", label: "Taking the snapshot", state: "running", since: 1_760_000_000_000 }).since).toBe(1_760_000_000_000);
   });
 
   it("the row's words never ask the person to run a command", () => {

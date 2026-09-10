@@ -8,12 +8,12 @@
 
 import { createHash } from "node:crypto";
 import { ROAD_STEPS } from "@wsp/catalog";
-import { ALREADY_APPLIED, MCP_ID_PREFIX, SNAPSHOT_GONE_REASON, fmtBytes, goldenHead, goldenImage, snapshotAttemptLine, snapshotFailedLine, templateFailedLine, templateStatusLine, templateWaitedLine, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenStep, type GoldenVersion, type BuilderReading, type ProviderAnswer, type RecipeDigest } from "@wsp/protocol";
+import { ALREADY_APPLIED, MCP_ID_PREFIX, SAVING_IMAGE_LINE, SNAPSHOT_GONE_REASON, fmtBytes, goldenHead, goldenImage, snapshotAttemptLine, snapshotFailedLine, snapshotStageLine, templateFailedLine, templateStatusLine, templateWaitedLine, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenStep, type GoldenVersion, type BuilderReading, type ProviderAnswer, type RecipeDigest } from "@wsp/protocol";
 import { nameOf, rungOf } from "./golden-diff.js";
 import { AGENT_INSTALLERS, NODE_PATH_LINE, type AgentInstall, type LoginShell, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { PRELUDE } from "./dotfiles-presets.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
-import { MIB, closing, freeBytes, freeNote, guardDeadlineMs, guarded, installTools, plural, reasonOf, sweepCaches, withRecordedPins, type ToolResult } from "./golden-tools.js";
+import { MIB, closing, freeBytes, freeNote, guardDeadlineMs, guarded, installTools, plural, reasonOf, sweepCaches, usedBytes, withRecordedPins, type ToolResult } from "./golden-tools.js";
 import { installBase } from "./golden-base.js";
 import { BUILDER_DISK_GB } from "./tool-sizes.js";
 import { assertFirstLife } from "./lifecycle.js";
@@ -152,7 +152,7 @@ export async function awaitTemplate(templates: Templates, templateId: string, wa
   const start = Date.now();
   for (;;) {
     const row = await templates.get(templateId);
-    wait.onStatus?.(templateStatusLine(templateId, row.status));
+    wait.onStatus?.(templateStatusLine(row.status));
     if (row.status === "ready") return;
     if (row.status === "failed") throw new Error(templateFailedLine(templateId, row.error));
     if (Date.now() - start >= readyMs) throw new Error(templateWaitedLine(templateId, row.status, readyMs));
@@ -835,7 +835,7 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
     }
   };
   try {
-    stage("snapshotting", name);
+    stage("snapshotting", snapshotStageLine(await usedBytes(builder.machine)));
     snapshotId = await takeSnapshot();
     if (opts.keepBuilder !== true) {
       await kill(builder.machine);
@@ -843,7 +843,7 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
     }
     // The template is what forks boot from, so the smoke proves it and not the snapshot behind it.
     if (templates !== undefined) {
-      stage("promoting", name);
+      stage("promoting", SAVING_IMAGE_LINE);
       templateId = (await promoteVersion(templates, snapshotId, name, { ...opts.templateWait, onStatus: line => stage("promoting", line) })).templateId;
     }
 

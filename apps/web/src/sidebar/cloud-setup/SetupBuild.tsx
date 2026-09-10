@@ -1,36 +1,40 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The build as stages, in the order the job runs them: a 2 px line along the
 // card's top edge filled by the stages done, the count beside the title, each
-// stage with the machine's latest lines under the one running in a block of
-// eight lines (a done stage folds and opens on a click), the sign-ins one
-// stage whose sub-rows are the sign-ins with the keycap that opens each page
-// and, where a page hands a code back, the field that takes it, then the first
-// workspace and its project. While the sign-in stage runs the screen is a
-// slide with room to act: its own title, the stage list folded to one line,
-// one large row per sign-in with the code in 20 px mono, the keycap, the
-// hand-off's lines under the name; the list comes back when the last sign-in
-// settles. Closing the screen hides it and the build goes on; the one link
-// stops the job after asking once.
+// stage with the machine's latest lines under the one running in a block as
+// tall as its lines up to eight (a done stage folds and opens on a click), the
+// stages the provider says nothing during counting their own seconds in the
+// slot, the sign-ins one stage whose sub-rows are the sign-ins with the keycap
+// that opens each page and, where a page hands a code back, the field that
+// takes it, then the first workspace and its project. While the sign-in stage
+// runs the screen is a slide with room to act: its own title, the stage list
+// folded to one line, one 48 px row per sign-in, and under a row the person
+// has something to do on, one 40 px action line with the code in 20 px mono,
+// the keycap and the protocol's sentence; the list comes back when the last
+// sign-in settles. Closing the screen hides it and the build goes on; the one
+// link stops the job after asking once.
 import { ChevronDownIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, SIGN_IN_STAGE_ID, initBuildRows, initJobBuilding, initJobOver, initRowOver, initRowUnrun, initStageCount, initStageCountLine, type InitJob, type InitRow } from "@wsp/protocol";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, SIGN_IN_STAGE_ID, initBuildRows, initElapsedLine, initJobBuilding, initJobOver, initRowOver, initRowTimed, initRowUnrun, initSignInLine, initStageCount, initStageCountLine, type InitJob, type InitRow } from "@wsp/protocol";
 import { Button } from "../../components/ui/button.js";
 import { cn } from "../../lib/utils.js";
 import { ansiSpans, toolPrefix } from "./ansi.js";
 import { Card, META, NAME, ROW, ROW_LINE, RowState, Slot } from "./rows.js";
 import { SignInCode } from "./SignInCode.js";
-import { RowMark } from "./SignInMark.js";
+import { RowMark, hasRowMark } from "./SignInMark.js";
 import { SetupScreen, type ScreenAction } from "./SetupScreen.js";
 
-/** How many lines the open stage's block shows at once, whatever the stage said: eight, six under a 700 px window. */
+/** The most lines the open stage's block shows at once: eight, six under a 700 px window; fewer lines make a shorter
+ * block, never an empty band. */
 export const STAGE_BLOCK_LINES = 8;
 export const STAGE_BLOCK_LINES_SHORT = 6;
 const LINE_HEIGHT = 20;
-/** The block: 20 px lines with 8 px above and below, 176 px tall, 136 on a short window. The classes are spelled out
- * so the stylesheet carries them. */
-export const STAGE_BLOCK_HEIGHT = STAGE_BLOCK_LINES * LINE_HEIGHT + 16;
-export const STAGE_BLOCK_HEIGHT_SHORT = STAGE_BLOCK_LINES_SHORT * LINE_HEIGHT + 16;
-const STAGE_BLOCK = "h-[176px] [@media(max-height:699px)]:h-[136px]";
+/** The block's height for its lines: 20 px each with 8 px above and below, so eight lines are 176 px. */
+export const stageBlockHeight = (lines: number, most = STAGE_BLOCK_LINES): number => Math.max(1, Math.min(lines, most)) * LINE_HEIGHT + 16;
+/** The height rides two variables the block sets from its lines, so the short window's cap is the stylesheet's. */
+const STAGE_BLOCK = "h-[calc(var(--stage-lines)*20px+16px)] [@media(max-height:699px)]:h-[calc(var(--stage-lines-short)*20px+16px)]";
+/** The action line under a sign-in the person has something to do on, and the inset that puts it under the name. */
+const ACT_LINE = "flex h-10 items-center gap-3 pb-2 pl-[46px] pr-[10px]";
 
 /** A stage the machine is on: working, or queueing behind the account's machine cap, which is the same row open on
  * the same block, saying so. */
@@ -74,7 +78,7 @@ export function SetupBuild({ job, onCancel, onRetry, onCode, onOpenWorkspace, on
         </p>
         <Card label={words.slideHeadline} cap={false}>
           {signIns.map(s => (
-            <SignInSlideRow key={s.id} row={s} focus={s.id === slideFocusId} onRetry={s.state === INIT_SIGN_IN_WORDS["not-signed-in"] ? () => onRetry(s.tool ?? s.id) : undefined} onCode={s.finish === "code" ? code => onCode({ tool: s.tool ?? s.id, code }) : undefined} />
+            <SignInSlideRow key={s.id} row={s} marked={marked(signIns)} focus={s.id === slideFocusId} onRetry={s.state === INIT_SIGN_IN_WORDS["not-signed-in"] ? () => onRetry(s.tool ?? s.id) : undefined} onCode={s.finish === "code" ? code => onCode({ tool: s.tool ?? s.id, code }) : undefined} />
           ))}
         </Card>
         {keep}
@@ -110,58 +114,83 @@ export function SetupBuild({ job, onCancel, onRetry, onCode, onOpenWorkspace, on
   );
 }
 
-/** One sign-in on the slide, with room to act: the company's mark, the name with the state word at its right, under
- * it the line to act on (the one-time code in 20 px mono when the page asks for one, the keycap that opens the page,
- * Retry after a failure), then the hand-off's lines; the code field under the row for a tool whose page hands a code
- * back. */
-function SignInSlideRow({ row, focus, onRetry, onCode }: { row: InitRow; focus: boolean; onRetry?: () => void; onCode?: (code: string) => void }) {
+/** Whether any sign-in in a card leads with a mark, in which case every row in it reserves the column so the names
+ * start at one x; a tool without a mark leaves its slot empty. */
+const marked = (signIns: readonly InitRow[]): boolean => signIns.some(s => s.tool !== undefined && hasRowMark(s.tool));
+
+/** The mark's column on a sign-in row: the tool's mark where it has one, the same 18 px of nothing where it does not. */
+function MarkColumn({ tool }: { tool: string | undefined }) {
+  return (
+    <span aria-hidden data-k="mark-column" className="flex size-[18px] shrink-0 items-center justify-center">
+      {tool !== undefined ? <RowMark id={tool} /> : null}
+    </span>
+  );
+}
+
+/** One sign-in on the slide: a 48 px line with the mark's column, the name and the state word at its right, and only
+ * where the person has something to do, one 40 px action line under it, left under the name: the one-time code in
+ * 20 px mono, the keycap that opens the page or retries, the field for a page that hands a code back, and the
+ * protocol's sentence for what the machine waits on. Nothing else changes a row's height, and nothing the machine
+ * ran reaches the row. */
+function SignInSlideRow({ row, marked, focus, onRetry, onCode }: { row: InitRow; marked: boolean; focus: boolean; onRetry?: () => void; onCode?: (code: string) => void }) {
   const item = useRef<HTMLLIElement>(null);
   useEffect(() => {
     if (focus) item.current?.scrollIntoView({ block: "start" });
   }, [focus]);
   const waiting = row.state === INIT_ROW_STATES.open;
-  const lines = row.lines ?? (row.detail !== undefined ? [row.detail] : []);
-  const acts = (waiting && (row.code !== undefined || row.page !== undefined)) || onRetry !== undefined;
+  const acts = (waiting && (row.code !== undefined || row.page !== undefined || onCode !== undefined)) || onRetry !== undefined;
+  const line = initSignInLine(row);
   return (
-    <li ref={item} data-k="signin" data-row={row.id} data-state={row.state} className={ROW_LINE}>
-      <div className="flex min-h-[60px] gap-3 py-[10px] pl-4 pr-[10px]">
-        <span aria-hidden className="flex h-6 w-[18px] shrink-0 items-center justify-center">
-          {row.tool !== undefined ? <RowMark id={row.tool} /> : null}
-        </span>
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <div className="flex h-6 items-center gap-3">
-            <span className={NAME}>{row.label}</span>
-            <RowState state={row.state} />
-          </div>
-          {acts ? (
-            <div data-k="act" className="flex items-center gap-3">
-              {waiting && row.code !== undefined ? (
-                <span data-k="code" className="font-mono text-[20px] leading-7 tabular-nums tracking-[0.04em] text-foreground">
-                  {row.code}
-                </span>
-              ) : null}
-              {waiting && row.page !== undefined ? (
-                <Button data-k="open" size="sm" variant="outline" className="h-7 font-mono text-xs sm:h-7 sm:text-xs" render={<a href={row.page} target="_blank" rel="noopener noreferrer" />}>
-                  {CLOUD_SETUP_WORDS.build.open}
-                  <span aria-hidden>↗</span>
-                </Button>
-              ) : null}
-              {onRetry !== undefined ? (
-                <Button data-k="retry" size="sm" variant="outline" className="h-7 font-mono text-xs sm:h-7 sm:text-xs" onClick={onRetry}>
-                  {CLOUD_SETUP_WORDS.build.retry}
-                </Button>
-              ) : null}
-            </div>
+    <li ref={item} data-k="signin" data-row={row.id} data-state={row.state} data-acts={acts} className={ROW_LINE}>
+      <div className={ROW}>
+        {marked ? <MarkColumn tool={row.tool} /> : null}
+        <span className={NAME}>{row.label}</span>
+        <Slot>
+          <RowState state={row.state} />
+        </Slot>
+      </div>
+      {acts ? (
+        <div data-k="act" className={cn(ACT_LINE, !marked && "pl-4")}>
+          {waiting && row.code !== undefined ? (
+            <span data-k="code" className="shrink-0 whitespace-nowrap font-mono text-[20px] leading-7 tabular-nums tracking-[0.04em] text-foreground">
+              {row.code}
+            </span>
           ) : null}
-          {lines.map((line, i) => (
-            <span key={i} data-k="handoff" className={cn(META, "truncate")}>
+          {waiting && row.page !== undefined ? (
+            <Button data-k="open" size="sm" variant="outline" className="h-7 shrink-0 font-mono text-xs sm:h-7 sm:text-xs" render={<a href={row.page} target="_blank" rel="noopener noreferrer" />}>
+              {CLOUD_SETUP_WORDS.build.open}
+              <span aria-hidden>↗</span>
+            </Button>
+          ) : null}
+          {onRetry !== undefined ? (
+            <Button data-k="retry" size="sm" variant="outline" className="h-7 shrink-0 font-mono text-xs sm:h-7 sm:text-xs" onClick={onRetry}>
+              {CLOUD_SETUP_WORDS.build.retry}
+            </Button>
+          ) : null}
+          {waiting && onCode !== undefined ? (
+            <SignInCode label={row.label} onCode={onCode} />
+          ) : line !== undefined ? (
+            <span data-k="why" className={cn(META, "min-w-0 truncate")}>
               {line}
             </span>
-          ))}
+          ) : null}
         </div>
-      </div>
-      {waiting && onCode !== undefined ? <SignInCode label={row.label} onCode={onCode} /> : null}
+      ) : null}
     </li>
+  );
+}
+
+/** The seconds a stage has run, ticking once a second, for the stages the provider says nothing during. */
+function Elapsed({ since }: { since: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(tick);
+  }, []);
+  return (
+    <span data-k="elapsed" className={META}>
+      {initElapsedLine(Math.max(0, now - since))}
+    </span>
   );
 }
 
@@ -193,6 +222,7 @@ function BuildRow({ row, focus, signIns, onRetry, onCode }: { row: InitRow; focu
         </span>
         <span className={cn(NAME, row.state === INIT_ROW_STATES.waiting && "text-muted-foreground")}>{row.label}</span>
         <Slot>
+          {running && row.since !== undefined && initRowTimed(row) ? <Elapsed since={row.since} /> : null}
           <RowState state={row.state} />
           {canOpen ? <ChevronDownIcon aria-hidden className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform duration-150", !open && "-rotate-90")} /> : null}
         </Slot>
@@ -200,7 +230,7 @@ function BuildRow({ row, focus, signIns, onRetry, onCode }: { row: InitRow; focu
       {open && signIns !== undefined ? (
         <ul data-k="sign-ins" className="border-t border-border">
           {signIns.map(s => (
-            <SignInRow key={s.id} row={s} onRetry={onRetry !== undefined && s.state === INIT_SIGN_IN_WORDS["not-signed-in"] ? () => onRetry(s.tool ?? s.id) : undefined} onCode={s.finish === "code" ? code => onCode(s.tool ?? s.id, code) : undefined} />
+            <SignInRow key={s.id} row={s} marked={marked(signIns)} onRetry={onRetry !== undefined && s.state === INIT_SIGN_IN_WORDS["not-signed-in"] ? () => onRetry(s.tool ?? s.id) : undefined} onCode={s.finish === "code" ? code => onCode(s.tool ?? s.id, code) : undefined} />
           ))}
         </ul>
       ) : null}
@@ -209,14 +239,14 @@ function BuildRow({ row, focus, signIns, onRetry, onCode }: { row: InitRow; focu
   );
 }
 
-/** One sign-in under its stage, indented a step: the company's mark where it has one, the name, the code the page
- * asks for, and in the slot the keycap that opens the page or retries, then the state word. */
-function SignInRow({ row, onRetry, onCode }: { row: InitRow; onRetry?: () => void; onCode?: (code: string) => void }) {
+/** One sign-in under its stage, indented a step: the mark's column, the name, the code the page asks for, and in the
+ * slot the keycap that opens the page or retries, then the state word. What the machine ran stays off the row. */
+function SignInRow({ row, marked, onRetry, onCode }: { row: InitRow; marked: boolean; onRetry?: () => void; onCode?: (code: string) => void }) {
   const waiting = row.state === INIT_ROW_STATES.open;
   return (
     <li data-k="row" data-row={row.id} data-state={row.state} className={cn(ROW_LINE, "first:border-t-0")}>
-      <div className={cn(ROW, "pl-10")} title={row.detail}>
-        {row.tool !== undefined ? <RowMark id={row.tool} /> : null}
+      <div className={cn(ROW, "pl-10")}>
+        {marked ? <MarkColumn tool={row.tool} /> : null}
         <span className={NAME}>{row.label}</span>
         {waiting && row.code !== undefined ? (
           <span data-k="code" className={cn(META, "text-foreground")}>
@@ -238,22 +268,23 @@ function SignInRow({ row, onRetry, onCode }: { row: InitRow; onRetry?: () => voi
           <RowState state={row.state} />
         </Slot>
       </div>
-      {waiting && onCode !== undefined ? <SignInCode label={row.label} onCode={onCode} /> : null}
+      {waiting && onCode !== undefined ? <SignInCode label={row.label} onCode={onCode} className={cn(ROW, "border-t border-border pl-10")} /> : null}
     </li>
   );
 }
 
-/** The open stage's block: eight lines high whatever the stage said (six under a 700 px window), scrolling inside
- * itself and pinned to the newest line while the stage runs. Terminal output, coloured as such: a tool's prefix dimmed, the machine's own colours
- * kept, a failed stage's last line in the danger tone, the rest the muted foreground. */
+/** The open stage's block: as tall as its lines, one to eight (six under a 700 px window), scrolling inside itself
+ * and pinned to the newest line while the stage runs. Terminal output, coloured as such: a tool's prefix dimmed, the
+ * machine's own colours kept, a failed stage's last line in the danger tone, the rest the muted foreground. */
 function StageLines({ lines, running, failed }: { lines: string[]; running: boolean; failed: boolean }) {
   const block = useRef<HTMLPreElement>(null);
   useEffect(() => {
     if (running && block.current !== null) block.current.scrollTop = block.current.scrollHeight;
   }, [lines.length, running]);
+  const shown = { "--stage-lines": Math.max(1, Math.min(lines.length, STAGE_BLOCK_LINES)), "--stage-lines-short": Math.max(1, Math.min(lines.length, STAGE_BLOCK_LINES_SHORT)) } as CSSProperties;
   // The padding sits outside the scrolling part (7 px over it under the hairline, 8 under), so the scroller is exactly the lines' height and a block pinned to its newest line shows whole lines, no sliver of the one before.
   return (
-    <div data-k="lines" className={cn("border-t border-border bg-background/40 pt-[7px] pb-2", STAGE_BLOCK)}>
+    <div data-k="lines" data-lines={lines.length} style={shown} className={cn("border-t border-border bg-background/40 pt-[7px] pb-2", STAGE_BLOCK)}>
       <pre ref={block} data-k="lines-scroll" className="h-full overflow-y-auto whitespace-pre-wrap break-words pl-[46px] pr-[10px] font-mono text-xs leading-[20px] text-muted-foreground">
         {lines.map((line, i) => (
           <TerminalLine key={i} line={line} danger={failed && i === lines.length - 1} />

@@ -20,7 +20,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
-import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, NETWORK_LOST_LINE, SIGN_IN_STAGE_ID, initStageCountLine, keyRefusedLine } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, NETWORK_LOST_LINE, SIGN_IN_STAGE_ID, initSignInLine, initStageCountLine, keyRefusedLine } from "@wsp/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { textContrast, textHue } from "./contrast";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
@@ -413,10 +413,32 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     expect(await page!.locator("[role=dialog] [data-k=title]").textContent()).toBe(CLOUD_SETUP_WORDS.build.slideHeadline);
     expect(await page!.locator("[role=dialog] [data-k=stages-folded]").textContent()).toMatch(/^Building your image · \d+ of \d+$/);
     expect(await page!.locator("[role=dialog] [data-row^='agent/']").count(), "no MCP rows").toBe(0);
-    expect(await page!.locator("[role=dialog] [data-k=signin]").count()).toBe(4);
-    for (const h of await boxes("[role=dialog] [data-k=signin] > div:first-child")) expect(h.height, `a slide row ${h.height}`).toBeGreaterThanOrEqual(60);
+    expect(await page!.locator("[role=dialog] [data-k=signin]").count()).toBe(5);
+    // One 48 px line per row; only a row with something to do grows by one 40 px action line, so a row is 48 or 88 px and never between. The state word sits on the name's line, and every name starts at one x, the row without a mark of its own included.
+    const slideRows = await page!.locator("[role=dialog] [data-k=signin]").evaluateAll(els =>
+      els.map(el => {
+        const box = el.getBoundingClientRect();
+        const line = el.firstElementChild!.getBoundingClientRect();
+        return { row: el.getAttribute("data-row"), acts: el.getAttribute("data-acts"), height: box.height, line: line.height, lineY: line.y, act: el.querySelector("[data-k=act]")?.getBoundingClientRect().height ?? 0, name: el.querySelector("span[class*='text-[15px]']")!.getBoundingClientRect().x, stateY: el.querySelector("[data-k=state]")!.getBoundingClientRect().y };
+      }),
+    );
+    for (const r of slideRows) {
+      expect(near(r.line, SPEC.row), `${r.row}: line ${r.line}`).toBe(true);
+      expect(near(r.height, r.acts === "true" ? 88 : 48, 1.5), `${r.row}: row ${r.height}`).toBe(true);
+      if (r.acts === "true") expect(near(r.act, 40), `${r.row}: action line ${r.act}`).toBe(true);
+      expect(r.stateY >= r.lineY - 1 && r.stateY < r.lineY + SPEC.row, `${r.row}: the state word on the name's line`).toBe(true);
+    }
+    expect(slideRows.filter(r => r.acts === "true").map(r => r.row)).toEqual(["sign-in/gh", "sign-in/wrangler", "sign-in/gcloud"]);
+    expect(new Set(slideRows.map(r => Math.round(r.name))).size, "names start at one x").toBe(1);
     expect((await style("[role=dialog] [data-k=signin] [data-k=code]", "font-size"))[0]).toBe("20px");
-    expect(await page!.locator("[role=dialog] [data-k=handoff]").count()).toBeGreaterThan(0);
+    const codeBox = await box("[role=dialog] [data-k=signin] [data-k=code]");
+    expect(near(codeBox.height, 28), `the code on one line, ${codeBox.height}`).toBe(true);
+    expect(await page!.locator("[role=dialog] [data-k=handoff]").count(), "no hand-off lines").toBe(0);
+    // Nothing on the slide is cut: every element that holds words shows them whole, the sentence beside the code and the keycap included.
+    const cut = await page!.locator("[role=dialog] [data-k=signin] *").evaluateAll(els => els.filter(el => el.children.length === 0 && (el.textContent ?? "").trim() !== "" && el.scrollWidth > el.clientWidth + 1).map(el => el.textContent));
+    expect(cut, "no text on the slide is cut").toEqual([]);
+    expect(await page!.locator("[role=dialog] [data-k=card]").textContent()).not.toMatch(/exited|codex login|wrangler login/);
+    expect(await page!.locator('[role=dialog] [data-row="sign-in/gh"] [data-k=why]').textContent()).toBe(initSignInLine({ state: INIT_ROW_STATES.open, code: "8F4A-C21B" }));
     // The slide's card takes no row cap: every sign-in row whole, the code field included, no scrolling while the window holds them.
     expect(await page!.locator("[role=dialog] [data-slot=scroll-area-viewport]").evaluate(el => el.scrollHeight > el.clientHeight + 1), "the slide's card scrolls").toBe(false);
     // The cancel link is quiet at rest: the muted ink, the danger tone on hover.
@@ -462,6 +484,13 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     expect(await scroller.evaluate(el => el.clientHeight % 20 === 0 && Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) < 1), "whole lines, no sliver").toBe(true);
     expect(await page!.locator("[role=dialog] [data-k=lines] span[class*='--terminal-ansi-2']").count(), "the machine's green, from the pane's own palette").toBeGreaterThan(0);
     expect(await page!.locator("[role=dialog] [data-k=lines] span[class*='opacity-60']").count(), "the tool prefix dimmed").toBeGreaterThan(0);
+    // A stage with one line gets a block one line tall, never an empty band, and the snapshot counts its own seconds beside the spinner with no snapshot name in sight.
+    await goTo("retry", theme);
+    const one = await box("[role=dialog] [data-row='stage/snapshotting'] [data-k=lines]");
+    expect(near(one.height, 36), `one line, block ${one.height}`).toBe(true);
+    expect(await page!.locator("[role=dialog] [data-row='stage/snapshotting'] [data-k=lines]").textContent()).toMatch(/^snapshotting about 13 GB, usually under a minute$/);
+    expect(await page!.locator("[role=dialog] [data-row='stage/snapshotting'] [data-k=elapsed]").textContent()).toMatch(/^4\d s?$|^4\ds$/);
+    expect((await style("[role=dialog] [data-k=elapsed]", "font-family"))[0]!.toLowerCase()).toMatch(/mono|menlo|consolas/);
     await goTo("signing", theme);
     expect(await page!.locator('[role=dialog] [data-row="sign-in/gh"] [data-k=open]').getAttribute("href")).toBe("https://github.com/login/device");
     expect(await page!.locator('[role=dialog] [data-row="sign-in/gh"] [data-k=code]').textContent()).toBe("8F4A-C21B");
