@@ -15,7 +15,7 @@ import { GOLDEN_STAGE_WORDS, INIT_SIGN_IN_WORDS, InitJob, Recipe, SIGN_IN_OPEN_S
 import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localWiring, type Keys } from "../src/cli.js";
-import { InitJobs, type InitJobDeps } from "../src/init-job.js";
+import { InitJobs, NEVER_REACHED, NO_FIRST_WORKSPACE, type InitJobDeps } from "../src/init-job.js";
 import { saveSmallRecipe, smallRecipePath } from "../src/recipe-file.js";
 import { workspaceRoads } from "../src/server.js";
 import type { AgentHere } from "../src/agents-here.js";
@@ -354,6 +354,41 @@ describe("the init job, manual road", () => {
     expect((await f.jobs.get()).job?.phase).toBe("done");
   });
 
+  it("a name forks the first workspace whatever the list already holds: this computer is a workspace and the build still ends with the cloud one on the golden it just sealed", async () => {
+    const f = fake();
+    // The app's list is never empty: this computer is a workspace of its own from the first launch.
+    await f.rt.workspaces.createLocal("this-mac");
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
+    const building = await f.jobs.build({ firstWorkspace: "e2e" });
+    expect(building.rows.at(-1)).toMatchObject({ id: "workspace/e2e", kind: "workspace", label: "e2e", state: "waiting" });
+    await f.settled();
+    const done = f.jobs.view()!;
+    expect(done.phase).toBe("done");
+    expect(done.workspace).toMatchObject({ name: "e2e" });
+    expect(done.rows.at(-1)).toMatchObject({ kind: "workspace", label: "e2e", state: "forked" });
+    expect((await f.rt.workspaces.list()).map(w => w.name).sort()).toEqual(["e2e", "this-mac"]);
+    expect((await f.rt.workspaces.list()).find(w => w.name === "e2e")!.golden).toBe(goldenHead(await f.rt.golden.get())!.snapshotId);
+  });
+
+  it("a build with an empty name forks nothing and says so on the row it still draws, so the list never ends on a step nobody can read", async () => {
+    const f = fake();
+    await f.rt.workspaces.createLocal("this-mac");
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
+    const building = await f.jobs.build({ firstWorkspace: "   ", importFolder: f.home });
+    expect(building.rows.at(-1)).toMatchObject({ kind: "workspace", state: "skipped", detail: NO_FIRST_WORKSPACE });
+    expect(building.rows.some(r => r.kind === "project")).toBe(false);
+    await f.settled();
+    const done = f.jobs.view()!;
+    expect(done.phase).toBe("done");
+    expect(done.workspace).toBeUndefined();
+    expect(done.rows.at(-1)).toMatchObject({ kind: "workspace", state: "skipped" });
+    expect((await f.rt.workspaces.list()).map(w => w.name)).toEqual(["this-mac"]);
+  });
+
   it("cancel during the sign-ins stops the job: the sign-in in flight ends not signed in, the machine goes, nothing is sealed; a cancel during the seal is refused and the view says the job cannot be stopped", async () => {
     const f = fake();
     await f.jobs.start({ road: "manual" });
@@ -361,7 +396,7 @@ describe("the init job, manual road", () => {
     await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "machine", "logins/codex": "skip" } });
     expect((await f.jobs.get()).job!.stoppable).toBe(true);
     f.setLink(scriptedLink({ signedIn: false, hold: true, missing: false }));
-    await f.jobs.build({});
+    await f.jobs.build({ firstWorkspace: "alpha" });
     // The first sign-in's page is up and the person is waited on; the job says it can still be stopped.
     await new Promise<void>(resolve => {
       const off = f.jobs.on(e => {
@@ -379,6 +414,8 @@ describe("the init job, manual road", () => {
     expect(view.phase).toBe("cancelled");
     expect(view.stoppable).toBe(false);
     expect(view.rows.find(r => r.id === "sign-in/gh")).toMatchObject({ state: "not signed in" });
+    // A run stopped before the fork still ends the workspace row, so no row is left waiting on a build that is over.
+    expect(view.rows.at(-1)).toMatchObject({ id: "workspace/alpha", state: "skipped", detail: NEVER_REACHED });
     expect(view.golden).toBeUndefined();
     expect(goldenHead(await f.rt.golden.get()) ?? null).toBeNull();
     expect(f.backend.machines.filter(m => !m.killed)).toHaveLength(0);

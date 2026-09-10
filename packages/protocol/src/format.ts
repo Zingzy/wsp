@@ -1100,6 +1100,8 @@ export const INIT_ROW_STATES = {
   open: "waiting for you",
   /** A sign-in answered with an API key the home held, so the machine has it and nothing is asked. */
   keySet: "key set",
+  /** A step the build left out: a sign-in it never reached, or a first workspace it carried no name for. */
+  skipped: "skipped",
   /** An agent on this computer whose config carries the wsp tools. */
   mcpAdded: "MCP added",
 } as const;
@@ -1111,7 +1113,7 @@ export const INIT_SIGN_IN_WORDS: Record<LoginState, string> = {
   "not-signed-in": "not signed in",
   copied: "copied from this Mac",
   "not-verified": "not verified",
-  skipped: "skipped",
+  skipped: INIT_ROW_STATES.skipped,
 };
 
 /** Every build stage in plain words, the one table the app's rows and the terminal's lines read. */
@@ -1142,7 +1144,7 @@ export const SIGN_IN_OPEN_STATE = INIT_ROW_STATES.open;
 /** The state word of an agent on this computer whose config carries the wsp tools. */
 export const MCP_ADDED_WORD = INIT_ROW_STATES.mcpAdded;
 
-const ROW_OVER: ReadonlySet<string> = new Set([INIT_ROW_STATES.done, INIT_ROW_STATES.failed, INIT_ROW_STATES.forked, INIT_ROW_STATES.imported, INIT_ROW_STATES.keySet, INIT_ROW_STATES.mcpAdded, ...Object.values(INIT_SIGN_IN_WORDS), ...Object.values(LOGIN_STATE_WORDS)]);
+const ROW_OVER: ReadonlySet<string> = new Set([INIT_ROW_STATES.done, INIT_ROW_STATES.failed, INIT_ROW_STATES.forked, INIT_ROW_STATES.imported, INIT_ROW_STATES.keySet, INIT_ROW_STATES.mcpAdded, INIT_ROW_STATES.skipped, ...Object.values(INIT_SIGN_IN_WORDS), ...Object.values(LOGIN_STATE_WORDS)]);
 
 /** Whether a row's state word is one it ends on: what the progress count and a section's count read. */
 export const initRowOver = (state: string): boolean => ROW_OVER.has(state);
