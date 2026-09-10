@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The order the host's start has to hold: the login shell PATH is taken before
-// anything builds a runtime. The local wiring copies the environment for this
-// computer's agents when it is made, so a runtime built first carries launchd's
-// PATH into every turn however the process environment moves afterwards, which
-// is the exit 127 line a person reads.
+// The login shell PATH and the turns that run under it: the read comes before
+// anything builds a runtime, and a runtime built before it still runs its turns
+// under the PATH the read left, since the local wiring is asked once per turn.
+// A turn that runs under launchd's four folders is the exit 127 line a person
+// reads.
 //
 // Its own file: the shell is read once per process, so a case sharing a file
 // with another host start would read the PATH that start already took.
@@ -11,8 +11,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync, chmodSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cli, serve } from "../src/cli.js";
-import { LAUNCHD_PATH } from "../src/login-path.js";
+import type { Runtime } from "@wsp/runtime";
+import { cli, makeRuntime, serve } from "../src/cli.js";
+import { LAUNCHD_PATH, takeLoginPath } from "../src/login-path.js";
 import type { HostHandle } from "../src/server.js";
 import { PAGE, captured } from "./verbs-fixture.js";
 
@@ -23,6 +24,7 @@ describe("the login shell PATH and the runtime built over it", () => {
   let statePath: string;
   let shellPath: string;
   let handle: HostHandle | undefined;
+  let runtime: Runtime | undefined;
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "wsp-login-runtime-"));
@@ -32,6 +34,7 @@ describe("the login shell PATH and the runtime built over it", () => {
     writeFileSync(join(webDir, "assets", "app.js"), "console.log('app')\n");
     writeFileSync(join(webDir, "index.html"), PAGE);
     statePath = join(dir, "home", "state.json");
+    mkdirSync(join(dir, "home"), { recursive: true });
     // What the person's shell prints: their own folder in front of the four launchd gave this launch.
     shellPath = `${join(dir, "their-bin")}:${LAUNCHD_PATH.join(":")}`;
     const shell = join(dir, "login-shell");
@@ -47,6 +50,8 @@ describe("the login shell PATH and the runtime built over it", () => {
   afterEach(async () => {
     await handle?.close();
     handle = undefined;
+    await runtime?.close();
+    runtime = undefined;
     vi.unstubAllEnvs();
     rmSync(dir, { recursive: true, force: true });
   });
@@ -61,5 +66,19 @@ describe("the login shell PATH and the runtime built over it", () => {
     const code = await cli(["exec", "--state", statePath, workspace.id, "--", "sh", "-c", 'printf %s "$PATH"'], ran);
     expect(code).toBe(0);
     expect(ran.lines.join("")).toContain(shellPath);
+  });
+
+  it("a runtime built on launchd's PATH runs its turns under the PATH the read leaves afterwards", async () => {
+    runtime = makeRuntime({}, statePath);
+    const workspace = await runtime.workspaces.createLocal("mac");
+    // The read is what moves this process's PATH, and here it lands after the runtime was built.
+    await takeLoginPath({ env: process.env, log: () => {} });
+    expect(process.env["PATH"]).toBe(shellPath);
+
+    const stream = await runtime.workspaces.execStream(workspace.id, ["sh", "-c", 'printf %s "$PATH"']);
+    let out = "";
+    for await (const line of stream.lines) out += line;
+    expect(await stream.exited).toBe(0);
+    expect(out.trim()).toBe(shellPath);
   });
 });

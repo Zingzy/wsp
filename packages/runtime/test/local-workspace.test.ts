@@ -137,7 +137,7 @@ describe("local workspace", () => {
       },
       home: () => join(root, ".claude"),
       homeDir: root,
-      env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
+      env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
     };
   });
   afterEach(() => {
@@ -174,7 +174,23 @@ describe("local workspace", () => {
     await (await rt.sessions.start(ws.id, { prompt: "say pong" })).finished;
     expect(seen.length).toBeGreaterThan(0);
     expect(seen.every(c => c.env["IS_SANDBOX"] === undefined)).toBe(true);
-    expect(seen.every(c => c.env["PATH"] === localWiring.env["PATH"])).toBe(true);
+    expect(seen.every(c => c.env["PATH"] === localWiring.env()["PATH"])).toBe(true);
+  });
+
+  it("the local kind asks the wiring for that environment at every turn, so a runtime outlives the environment it was built on", async () => {
+    const seen: HarnessAdapterContext[] = [];
+    const seeing: HarnessAdapterFactory = ctx => {
+      seen.push(ctx);
+      return echoAdapter(ctx);
+    };
+    let bin = "/first/bin";
+    localWiring.env = () => ({ PATH: bin });
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: seeing }, local: localWiring });
+    const ws = await rt.workspaces.createLocal("mac");
+    await (await rt.sessions.start(ws.id, { prompt: "say pong" })).finished;
+    bin = "/second/bin";
+    await (await rt.sessions.start(ws.id, { prompt: "say pong" })).finished;
+    expect(seen.at(-1)!.env["PATH"]).toBe("/second/bin");
   });
 
   it("a thread starts on the local workspace and its reply lands, run through the local exec stream", async () => {
@@ -629,7 +645,7 @@ describe("a local turn and a host restart", () => {
       execStream: o => localExecStream({ root, ...o }),
       home: () => join(root, ".claude"),
       homeDir: root,
-      env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
+      env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
     };
   });
   afterEach(() => {

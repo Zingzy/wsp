@@ -829,7 +829,7 @@ describe("the doctor's local road", () => {
         backend: new NoProviderBackend(),
         store: memoryStore(),
         adapters,
-        local: { backend: new LocalBackend({ root }), execStream: o => localExecStream({ root, ...o }), home: () => join(root, ".claude"), homeDir: root, env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" } },
+        local: { backend: new LocalBackend({ root }), execStream: o => localExecStream({ root, ...o }), home: () => join(root, ".claude"), homeDir: root, env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }) },
         hostId: "box:h1",
       }),
     };

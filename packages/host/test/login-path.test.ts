@@ -156,8 +156,8 @@ describe("the login shell PATH", () => {
     }
   });
 
-  // The local wiring copies the environment when a runtime is made, so a road that builds one before the read hands
-  // launchd's PATH to every turn it ever runs. The read is once per process, so saying it on each road is free.
+  // The order law src/login-path.ts states, held road by road. The read is once per process, so saying it on each
+  // road is free.
   it("every road that builds a runtime awaits the read before it", () => {
     const source = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8");
     // Each top level declaration of cli.ts, so a road is judged on its own body and not on the file's order.

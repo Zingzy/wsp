@@ -8,10 +8,10 @@
 // make the start depend on the machine's rc files for no reason.
 //
 // Every road into the app awaits this before it builds a runtime, not merely
-// before it serves: the local wiring copies the environment for this computer's
-// agents when it is made, so a runtime built first carries launchd's PATH into
-// every turn whatever the process environment does afterwards. The read is once
-// per process, so a road that follows another pays nothing for saying so.
+// before it serves: building one asks this computer what it holds, and every
+// lookup and spawn the host makes on the way reads the PATH this process has at
+// that moment. The read is once per process, so a road that follows another
+// pays nothing for saying so.
 import { execFile } from "node:child_process";
 import { loginPathLine } from "@wsp/protocol";
 

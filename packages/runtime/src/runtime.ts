@@ -658,7 +658,9 @@ export interface LocalWiring {
   /** The person's own home: where this computer's daemon browses from and keeps its roots file, and what a path
    * under it is shortened against. */
   homeDir: string;
-  env: Readonly<Record<string, string>>;
+  /** The environment a turn on this computer runs under, asked every time rather than copied: this process's own
+   * environment moves after a host is built, the login shell PATH among them, and a copy would outlive the change. */
+  env: () => Readonly<Record<string, string>>;
   /** Where this computer's daemon listens and the token that opens it, in the shape a cloud fork's preview route
    * arrives in, so the panes and the status probe read one view. The host starts that daemon on the first call and
    * closes it in close(); a host that wires none leaves the local workspace's panes with nothing to dial. */
@@ -1576,7 +1578,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             folder: local.backend.folder,
             home: (_entry, id) => local.home(id),
             homeDir: () => local.homeDir,
-            env: () => local.env,
+            env: () => local.env(),
             relayed: () => false,
             hasDaemon: () => local.daemonRoad !== undefined,
             daemonRoad: localRoad,

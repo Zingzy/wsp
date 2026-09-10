@@ -132,7 +132,7 @@ describe("a permission prompt relayed into the chat", () => {
       execStream: o => localExecStream({ root, ...o }),
       home: () => join(root, ".claude"),
       homeDir: root,
-      env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
+      env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
     };
     rt = runtime();
   });
@@ -293,7 +293,7 @@ describe("the access a thread starts at", () => {
       execStream: o => localExecStream({ root, ...o }),
       home: () => join(root, ".claude"),
       homeDir: root,
-      env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
+      env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
     };
   });
   afterEach(() => {
@@ -489,7 +489,7 @@ describe("an access picked while a turn runs", () => {
       execStream: o => localExecStream({ root, ...o }),
       home: () => join(root, ".claude"),
       homeDir: root,
-      env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
+      env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
     };
     return { rt: createRuntime({ backend: stubBackend(), store, adapters: { claude: adapter }, local }), turns, picks };
   };

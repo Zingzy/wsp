@@ -160,6 +160,17 @@ describe("wsp up", () => {
     await rt.close();
   });
 
+  it("the wiring answers this computer's environment as it is when it is asked, not as it was when the wiring was made", async () => {
+    vi.stubEnv("WSP_LOGIN_PROBE", "before");
+    const wiring = localWiring(home);
+    expect(wiring.env()["WSP_LOGIN_PROBE"]).toBe("before");
+    vi.stubEnv("WSP_LOGIN_PROBE", "after");
+    expect(wiring.env()["WSP_LOGIN_PROBE"]).toBe("after");
+    // A variable the process no longer holds leaves nothing behind for a turn to read.
+    vi.stubEnv("WSP_LOGIN_PROBE", undefined);
+    expect("WSP_LOGIN_PROBE" in wiring.env()).toBe(false);
+  });
+
   it("closing the wiring ends the turns running on this computer and what those turns started", async () => {
     const wiring = localWiring(home);
     // Launched off the wiring alone, with no workspace record loaded: the road makes the folder the turn starts in.
