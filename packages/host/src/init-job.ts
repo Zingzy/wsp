@@ -880,9 +880,12 @@ export class InitJobs implements InitDoor {
     const stages = STAGE_WORDS.filter(w => s.phase !== "done" || view.steps.some(x => x.stage === w.stage)).map((w): InitRow => {
       const step = view.steps.find(x => x.stage === w.stage);
       // A stage a person's stop ended did not fail: on a cancelled job it reads stopped, so the row never wears a
-      // failure's cross under a headline that says the stop was theirs.
+      // failure's cross under a headline that says the stop was theirs. A stage still current when the build ended
+      // is not running either: nothing closed its frame, and a spinner on a build that is over is a lie.
       const ended = s.phase === "cancelled" ? STATE.stopped : STATE.failed;
-      const state = step === undefined ? STATE.waiting : step.state === "current" ? (s.slotWait === w.stage ? STATE.slot : STATE.running) : step.state === "done" ? STATE.done : ended;
+      const halted = s.phase === "failed" || s.phase === "cancelled";
+      const running = halted ? ended : s.slotWait === w.stage ? STATE.slot : STATE.running;
+      const state = step === undefined ? STATE.waiting : step.state === "current" ? running : step.state === "done" ? STATE.done : ended;
       // A failed stage ends with the reason, so a row read on its own says why and a build that stopped before any
       // stage ran still has one line saying what stopped it. The terminal's block draws the failure itself.
       const failure = step?.state === "failed" && view.failure !== undefined ? view.failure.split("\n").filter(l => l !== "") : [];

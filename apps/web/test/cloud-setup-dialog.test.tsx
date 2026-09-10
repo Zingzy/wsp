@@ -657,6 +657,11 @@ describe("the cloud setup sheet", () => {
     expect(t.api.initDraft).not.toHaveBeenCalled();
     fireEvent.blur(name);
     await waitFor(() => expect(t.api.initDraft).toHaveBeenCalledWith({ at: "build", ticks: [], answers: { name: "e2e", folder: "" } }));
+    // Leaving a field the person did not change keeps nothing: tabbing through pushes no view to any client.
+    const kept = t.api.initDraft.mock.calls.length;
+    fireEvent.blur(name);
+    fireEvent.blur(t.dialog.querySelector<HTMLInputElement>("#setup-first-folder")!);
+    expect(t.api.initDraft.mock.calls.length).toBe(kept);
     // Back to the sign-ins and forward again: the name is where it was left, not back at the default.
     fireEvent.click(k(t.dialog, "secondary"));
     await waitFor(() => expect(k(t.dialog, "screen-logins")).toBeDefined());

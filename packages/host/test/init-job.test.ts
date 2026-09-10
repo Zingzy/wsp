@@ -721,6 +721,31 @@ describe("the init job, manual road", () => {
     expect(view.rows.find(r => r.id === "workspace/e2e-cancel")).toMatchObject({ state: INIT_ROW_STATES.notMade });
   });
 
+  it("a stop that lands while a stage is running leaves that stage reading stopped, not failed, so the list agrees with the headline", async () => {
+    let reached: (() => void) | undefined;
+    const atStage = new Promise<void>(r => (reached = r));
+    const f = fake({
+      deployDaemon: async () => {
+        reached!();
+        // Held open so the stop lands with this stage running, which is the case the word is for.
+        await new Promise(() => {});
+        return "";
+      },
+    });
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
+    await f.jobs.build({});
+    await atStage;
+    await f.jobs.cancel();
+    await f.settled();
+    const view = f.jobs.view()!;
+    expect(view.phase).toBe("cancelled");
+    const daemon = view.rows.find(r => r.id === "stage/deploying-daemon")!;
+    expect(daemon.state).toBe(INIT_ROW_STATES.stopped);
+    expect(view.rows.some(r => r.state === INIT_ROW_STATES.failed)).toBe(false);
+  });
+
   it("a stop the provider would not take the kill for leaves a row saying the machine is still running, and the kill is tried again until it lands", async () => {
     const f = fake();
     await f.jobs.start({ road: "manual" });
