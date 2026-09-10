@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, threadFromHash, workspaceFromHash, workspaceStateOf, type Capabilities, type HarnessCatalog, type InitJob, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, cloudCreateRefusal, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, threadFromHash, workspaceFromHash, workspaceStateOf, type Capabilities, type HarnessCatalog, type InitJob, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { sidebarWorkspaceOrder } from "../adapt/workspaces.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
@@ -219,6 +219,16 @@ export const useStore = create<State>((set, get) => {
       selectedId: s.selectedId === key ? workspaceId : s.selectedId,
     }));
   };
+  /** Whether a fork of the golden head is held back, having said so in the toast: the refusal is spoken before a
+   * creation row exists, so a person who asks too early reads where the image is rather than a row that only failed.
+   * A fork of a named snapshot has its own image and is never held back here. */
+  const holdCreate = (golden: string | undefined): boolean => {
+    if (golden !== undefined) return false;
+    const refusal = cloudCreateRefusal({ hasGolden: get().hasGolden, job: get().initJob });
+    if (refusal === null) return false;
+    set({ toast: refusal.line, toastAction: { for: refusal.line, word: refusal.word, run: () => get().openSetup() } });
+    return true;
+  };
   const runCreation = async (key: string, name: string, golden?: string, size?: WorkspaceSize): Promise<string | null> => {
     const api = get().api;
     if (!api) return null;
@@ -375,7 +385,7 @@ export const useStore = create<State>((set, get) => {
       }
     },
     async createWorkspace(name, golden, size) {
-      if (!get().api) return null;
+      if (!get().api || holdCreate(golden)) return null;
       const key = `creating:${++creationSeq}`;
       set(s => ({ creations: [...s.creations, { key, name, ...(golden !== undefined ? { golden } : {}), ...(size !== undefined ? { size } : {}), workspaceId: null, lines: NO_LINES, failed: null }], selectedId: key, selectedThreadId: null }));
       return runCreation(key, name, golden, size);
@@ -403,7 +413,7 @@ export const useStore = create<State>((set, get) => {
     },
     async retryCreation(key) {
       const creation = get().creations.find(c => c.key === key);
-      if (!creation) return;
+      if (!creation || holdCreate(creation.golden)) return;
       patchCreation(key, c => ({ ...c, workspaceId: null, lines: NO_LINES, failed: null }));
       await runCreation(key, creation.name, creation.golden, creation.size);
     },

@@ -3,6 +3,7 @@
 // dispatches and unwraps the field its reply carries. The same socket plays a
 // runtime that dies and comes back for the reconnect tests.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CLOUD_SETUP_WORDS } from "@wsp/protocol";
 import { DisconnectedError, makeApi, ProtocolClient, type ConnStatus, type ProtocolClientOptions } from "../src/protocol/client.js";
 import { ScriptedSocket, type Frame } from "./scripted-socket.js";
 
@@ -213,6 +214,13 @@ describe("makeApi golden wrappers", () => {
     expect(await api.getGolden()).toEqual(manifest);
   });
 
+  it("a fork of a head that is not there refuses in the app's words, never with a command to run", async () => {
+    const { api, lastSent } = await connect();
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true });
+    await expect(api.createFromGoldenHead("beta")).rejects.toThrow(CLOUD_SETUP_WORDS.create.none);
+    await expect(api.createFromGoldenHead("beta")).rejects.not.toThrow(/wspx|golden build/);
+    expect(lastSent()).toMatchObject({ op: "golden.get" });
+  });
 });
 
 describe("ProtocolClient reconnect", () => {

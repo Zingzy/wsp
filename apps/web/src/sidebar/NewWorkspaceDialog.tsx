@@ -19,6 +19,7 @@ import {
 import { Input } from "../components/ui/input.js";
 import { Label } from "../components/ui/label.js";
 import { Radio, RadioGroup } from "../components/ui/radio-group.js";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 
 export type WorkspaceStart = "fresh" | "import";
 
@@ -33,6 +34,7 @@ export function NewWorkspaceDialog({
   initialName,
   sizes,
   goldenSize,
+  refusal,
   onCreate,
   onCancel,
 }: {
@@ -41,6 +43,8 @@ export function NewWorkspaceDialog({
   sizes: readonly MachineSizeOffer[];
   /** The golden head's size, the row checked until the person picks; null while unknown or when no golden says. */
   goldenSize: WorkspaceSize | null;
+  /** Why there is nothing to fork yet, which holds the keycap and rides its tooltip; null when the fork can go ahead. */
+  refusal: string | null;
   /** `size` is the row the person picked; absent, they left the golden's size standing. */
   onCreate: (name: string, start: WorkspaceStart, size?: WorkspaceSize) => void;
   onCancel: () => void;
@@ -50,8 +54,9 @@ export function NewWorkspaceDialog({
   const [picked, setPicked] = useState<WorkspaceSize | null>(null);
   const trimmed = name.trim();
   const checked = picked ?? (goldenSize !== null && offeredSize(sizes, goldenSize) ? goldenSize : null);
+  const held = trimmed.length === 0 || refusal !== null;
   const submit = (): void => {
-    if (trimmed.length === 0) return;
+    if (held) return;
     if (picked === null) onCreate(trimmed, start);
     else onCreate(trimmed, start, picked);
   };
@@ -131,9 +136,21 @@ export function NewWorkspaceDialog({
             <Button type="button" variant="outline" onClick={onCancel}>
               Cancel
             </Button>
-            <Button type="submit" disabled={trimmed.length === 0}>
-              Create
-            </Button>
+            {refusal === null ? (
+              <Button type="submit" disabled={held}>
+                Create
+              </Button>
+            ) : (
+              // A disabled control cannot be hovered, so its reason rides on a wrapper the tooltip reads.
+              <Tooltip>
+                <TooltipTrigger data-k="create-reason" render={<span className="inline-flex" />}>
+                  <Button type="submit" disabled>
+                    Create
+                  </Button>
+                </TooltipTrigger>
+                <TooltipPopup side="top">{refusal}</TooltipPopup>
+              </Tooltip>
+            )}
           </DialogFooter>
         </form>
       </DialogPopup>

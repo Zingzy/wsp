@@ -18,6 +18,7 @@ import {
   SIGN_IN_CODE_MAX,
   SOLARI_CONSOLE,
   SignInFinish,
+  cloudCreateRefusal,
   initAgentNoRecipeLine,
   initAgentPrompt,
   initAgentStep,
@@ -398,5 +399,31 @@ describe("the words the clients print for the job", () => {
     const text = JSON.stringify(CLOUD_SETUP_WORDS);
     expect(text).not.toMatch(/wsp init|terminal/i);
     expect(CLOUD_SETUP_WORDS.row).toBe("Set up cloud machines");
+  });
+
+  it("holds a new cloud workspace back while there is no image to fork, in the app's own words", () => {
+    const stages: InitRow[] = [
+      row({ id: "stage/creating", state: "done" }),
+      row({ id: "stage/tools", state: "done" }),
+      row({ id: "stage/snapshotting", state: "running" }),
+    ];
+    const building = { ...JOB, phase: "building" as const, rows: stages };
+    expect(cloudCreateRefusal({ hasGolden: false, job: building })).toEqual({ line: "the image is still building · 2 of 3", word: "Open the build" });
+    // The count is the build's own, so the sign-ins fold into one stage here as they do on the build screen.
+    const withSignIns = { ...building, rows: [...stages, row({ id: "sign-in/gh", kind: "sign-in" as const, label: "GitHub CLI login", state: "waiting" }), row({ id: "sign-in/claude", kind: "sign-in" as const, label: "Claude Code", state: "waiting" })] };
+    expect(cloudCreateRefusal({ hasGolden: false, job: withSignIns })?.line).toBe("the image is still building · 2 of 4");
+    // Every stretch of the build says it, since the image is sealed at the end of all of them.
+    for (const phase of ["signing-in", "sealing", "finishing"] as const) {
+      expect(cloudCreateRefusal({ hasGolden: false, job: { ...building, phase } })?.line).toMatch(/^the image is still building/);
+    }
+    // No build to point at: the answers, a job that stopped, and no job at all all send the person to the setup.
+    const setup = { line: "set up cloud machines first", word: CLOUD_SETUP_WORDS.row };
+    expect(cloudCreateRefusal({ hasGolden: false, job: null })).toEqual(setup);
+    expect(cloudCreateRefusal({ hasGolden: false, job: { ...building, phase: "answering" } })).toEqual(setup);
+    expect(cloudCreateRefusal({ hasGolden: false, job: { ...building, phase: "failed" } })).toEqual(setup);
+    // A sealed image has a head to fork, so a later build over it holds nothing back; nor does a state not read yet.
+    expect(cloudCreateRefusal({ hasGolden: true, job: building })).toBeNull();
+    expect(cloudCreateRefusal({ hasGolden: null, job: building })).toBeNull();
+    expect(JSON.stringify(CLOUD_SETUP_WORDS.create)).not.toMatch(/wspx|golden build|terminal/i);
   });
 });
