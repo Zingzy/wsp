@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // wsp init as a job on the serving host: the one run the terminal's screens,
 // the app's modal and an agent over MCP all read. The manual road reads this
-// computer once and hands the five screens over as data; the agent road opens
+// computer once and hands the screens over as data; the agent road opens
 // a thread on this computer that writes the recipe with the recipe tools and
 // then shows the same screens prefilled; the build is wsp init's own
 // non-interactive run, on the host's one runtime with the answered recipe

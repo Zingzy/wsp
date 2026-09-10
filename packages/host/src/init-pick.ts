@@ -10,11 +10,11 @@ import type { Readable, Writable } from "node:stream";
 import { CATALOG_AGENTS, CATALOG_TOOLS, MCP_AGENTS, catalogEntry, type AgentEntry, type CatalogEntry, type Size, type ToolEntry, agentName as catalogName, sizeBytes } from "@wsp/catalog";
 import { withProject, type LoginChoice, type Manifest, type ManifestEntry, type ProjectScan, floorApplies } from "@wsp/collect";
 import { estimateDisk, isMcpRow, parseMcpId, plural, type BrewTable, type DiskEstimate } from "@wsp/engine";
-import { CLOUD_SETUP_WORDS, customRows, fmtBytes, wspToolsRowId, type Recipe, type RecipeCustomRow, type RecipeRow } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, customRows, fmtBytes, initShownScreens, initStepCounter, wspToolsRowId, type Recipe, type RecipeCustomRow, type RecipeRow } from "@wsp/protocol";
 import { mcpConfigFile } from "./mcp-install.js";
 import { GUTTER, card, colourDepth, isTTY, table, textPrompt } from "./init-layout.js";
 import { agentName, applyRecipe, comingRows, defaultAnswers, initialChoice, isTickable, loginEntryId, loginShown, loginTool, rowsHere } from "./init-recipe.js";
-import { ALSO_EMPTY, ALSO_EMPTY_TOP, ALSO_TITLE, ALSO_TOP, alsoGroupLine, alsoItems, buildLine, scannedTicks, withScanned } from "./init-also.js";
+import { ALSO_TITLE, ALSO_TOP, alsoGroupLine, alsoItems, buildLine, scannedTicks, withScanned } from "./init-also.js";
 import { outsideCatalog } from "./recipe-file.js";
 import { answerOf, rungSelect, type Choice, type FooterLine, type RungAnswer, type RungSelectResult, type SelectItem } from "./init-select.js";
 import { BASE_GROUP, FLOOR_LINE, PROJECT_GROUP, agentRows, candidatesLine, groupTotal, recipeTable, sizeCell, totalsLine, whyCell, type TableRow, UNKNOWN_SIZE } from "./init-table.js";
@@ -23,8 +23,7 @@ import { asksThePerson, hasLogin, loginWords, signInFor, type SignIn } from "./s
 import { SIGN_IN_CHOICES, SIGN_IN_WORDS, signInChoice } from "./signin-words.js";
 import type { ScanRow } from "./scan.js";
 
-/** The six screens of a run, in order, with the one sentence each opens with. Screen 3 is the manager scan's, and
- * screen 6 is the build itself. */
+/** The screens of a run, in order, with the one sentence each opens with; the build comes after them. */
 export const AGENTS_TITLE = "Agents";
 export const AGENTS_TOP = "Which agents go on the image";
 export const TOOLS_TITLE = "Tools";
@@ -33,8 +32,6 @@ export const SIGN_INS_TITLE = "Sign-ins";
 export const SIGN_INS_TOP = "How sign-ins reach the machine";
 export const WSP_TITLE = "wsp for your agents on this Mac";
 export const WSP_TOP = "Add wsp's MCP server and skill to the agents installed here, so they can drive your workspaces";
-/** How many screens a run has, the build counted; the counter on every screen reads against it. */
-export const SCREENS = 6;
 /** The first screen's own question when no folder was named on the command line; nothing has to answer it. */
 export const PROJECT_QUESTION = "Which project are you bringing first?";
 const PROJECT_HINT = "optional; a folder on this Mac, read for what its own files say it needs";
@@ -190,7 +187,7 @@ export function signInGroupLine(items: readonly SelectItem[], a: RungAnswer): st
     .join(GUTTER);
 }
 
-/** Screen four's rows: everything the machine has to be signed in to, one row each with the choice it starts on.
+/** The sign-ins screen's rows: everything the machine has to be signed in to, one row each with the choice it starts on.
  * The agents' own logins first, then the developer CLIs, then the MCP servers the agents' configs carry auth for.
  * A row whose command is not coming, or that the catalog locked out, is here with its reason and skip as its only
  * answer, so nothing on the screen is silent. */
@@ -255,7 +252,7 @@ const WSP_TOOLS = wspToolsRowId("");
 /** The agent a wsp tools row is for; nothing for any other row on the screen. */
 export const wspToolsAgent = (id: string): string | undefined => (id.startsWith(WSP_TOOLS) ? id.slice(WSP_TOOLS.length) : undefined);
 
-/** Screen five's rows: one per agent on this Mac whose config the catalog can place the wsp MCP server in, whatever
+/** The wsp tools screen's rows: one per agent on this Mac whose config the catalog can place the wsp MCP server in, whatever
  * its tick for the machine. The file the tick writes reads under the row; an agent this computer has run threads
  * with starts on, since it is the one that would use the server. */
 export function wspToolsItems(recipe: Recipe, home: string): { items: SelectItem[]; initial: Set<string> } {
@@ -293,7 +290,7 @@ export function tableItems(rows: readonly TableRow[], recipe: Recipe, manifest: 
 export interface TableScreenOptions {
   title: string;
   top: string;
-  /** The section counter shown after the title ("2/6"). */
+  /** The section counter shown after the title ("2/5"). */
   counter: string;
   rows: readonly TableRow[];
   recipe: Recipe;
@@ -347,8 +344,8 @@ export interface PickOptions {
   from: "agents" | "logins";
   /** The person's home, where an agent's config is read for the wsp tools rows. */
   home: string;
-  /** What the package managers here could put on the image: the rows of screen three. With none, that screen keeps
-   * its place and says nothing was found. */
+  /** What the package managers here could put on the image: the rows of the Also on this Mac screen. With none, that
+   * screen is not shown. */
   scan?: readonly ScanRow[];
   /** The project folder named on the command line, already weighed into the recipe; absent, the run asks for one
    * before the first screen. */
@@ -368,10 +365,33 @@ export interface Picked {
 }
 
 export type Screen = "agents" | "tools" | "also" | "logins" | "wsp";
-/** Where each screen sits in the six a run has; the build is the sixth. */
-export const SCREEN_AT: Record<Screen, number> = { agents: 1, tools: 2, also: 3, logins: 4, wsp: 5 };
-/** The counter every screen shows after its title ("2/6"). */
-export const screenCounter = (screen: Screen): string => `${SCREEN_AT[screen]}/${SCREENS}`;
+
+/** What each screen draws as the recipe stands, built once per pass of the walk: the shown check and the screen's own
+ * draw read these same rows, so the counter can never count a screen that is not drawn or draw one it did not count.
+ * Built again after every answer, since an answer can take a later screen's rows away. */
+interface ScreenRows {
+  agents: TableRow[];
+  tools: TableRow[];
+  also: SelectItem[];
+  logins: SignInScreen;
+  wsp: { items: SelectItem[]; initial: Set<string> };
+}
+function screenRows(o: PickOptions, recipe: Recipe): ScreenRows {
+  return {
+    agents: agentRows(recipe),
+    tools: recipeTable(recipe, CATALOG_TOOLS),
+    also: alsoItems(o.scan ?? [], recipe, row => buildLine(o.manifest, row, o.brew)),
+    logins: signInItems(applyRecipe(o.manifest, recipe), o.brew),
+    wsp: wspToolsItems(recipe, o.home),
+  };
+}
+
+/** Which of the run's screens are shown, by the protocol's rule, over the rows each would draw; the counter over
+ * each title counts these and the build after them. */
+function shownScreens(screens: readonly Screen[], rows: ScreenRows): Screen[] {
+  const items: Record<Screen, readonly unknown[]> = { agents: rows.agents, tools: rows.tools, also: rows.also, logins: rows.logins.items, wsp: rows.wsp.items };
+  return initShownScreens(screens.map(id => ({ id, items: items[id] }))).map(s => s.id);
+}
 
 /** The recipe with the answered folder's needs ticked and a card naming them; an empty answer leaves it as it was,
  * and a folder that is not there is said so rather than read as a project that needs nothing. */
@@ -385,9 +405,9 @@ async function askProject(o: PickOptions, recipe: Recipe): Promise<Recipe | "can
   return scan === undefined ? recipe : withProject(recipe, scan);
 }
 
-/** The screens in order, esc stepping back one; the recipe carries the ticks and the answers between them. */
+/** The screens in order, esc stepping back one, so back from the screen after one that is not shown lands on the
+ * last one shown; the recipe carries the ticks and the answers between them. */
 export async function pickScreens(o: PickOptions): Promise<Picked | "cancel"> {
-  // The scan screen keeps its place in the six whether or not the managers here had anything to offer.
   const scan = o.scan ?? [];
   const screens: readonly Screen[] = o.from === "agents" ? ["agents", "tools", "also", "logins", "wsp"] : ["logins", "wsp"];
   let recipe = o.recipe;
@@ -397,26 +417,28 @@ export async function pickScreens(o: PickOptions): Promise<Picked | "cancel"> {
     recipe = asked;
   }
   let logins = new Map<string, LoginChoice>();
-  // What screens four and five were left on, so esc back onto them shows the answers again, as the recipe shows the
-  // ticks; undefined until the screen has been answered once, since an empty set is an answer of its own.
+  // What the sign-ins and the wsp tools screens were left on, so esc back onto them shows the answers again, as the
+  // recipe shows the ticks; undefined until the screen has been answered once, since an empty set is an answer of its own.
   let wspTicks: Set<string> | undefined;
   let wspTools = new Set<string>();
   const streams = { input: o.input, output: o.output };
   let i = 0;
-  while (i < screens.length) {
-    const screen = screens[i]!;
-    const counter = screenCounter(screen);
+  for (;;) {
+    const rows = screenRows(o, recipe);
+    const shown = shownScreens(screens, rows);
+    if (i >= shown.length) break;
+    const screen = shown[i]!;
+    const counter = initStepCounter(i + 1, shown.length + 1);
     const step = (r: RungSelectResult): void => {
       i += r.kind === "next" ? 1 : -1;
     };
     switch (screen) {
       case "agents": {
-        const rows = agentRows(recipe);
         const r = await tableScreen({
           title: AGENTS_TITLE,
           top: AGENTS_TOP,
           counter,
-          rows,
+          rows: rows.agents,
           recipe,
           manifest: o.manifest,
           grouped: false,
@@ -433,7 +455,7 @@ export async function pickScreens(o: PickOptions): Promise<Picked | "cancel"> {
           title: TOOLS_TITLE,
           top: TOOLS_TOP,
           counter,
-          rows: recipeTable(recipe, CATALOG_TOOLS),
+          rows: rows.tools,
           recipe,
           manifest: o.manifest,
           grouped: true,
@@ -452,11 +474,10 @@ export async function pickScreens(o: PickOptions): Promise<Picked | "cancel"> {
         // The Disk line follows the ticks here too: these are the heavy rows, and they are what the boot check reads.
         const r = await rungSelect({
           title: ALSO_TITLE,
-          top: scan.length > 0 ? ALSO_TOP : ALSO_EMPTY_TOP,
+          top: ALSO_TOP,
           counter,
-          items: alsoItems(scan, recipe, row => buildLine(o.manifest, row, o.brew)),
+          items: rows.also,
           initial: scannedTicks(recipe, scan),
-          empty: ALSO_EMPTY,
           groupLine: alsoGroupLine(scan),
           footer: a => [diskFooter(pickEstimate(o.manifest, withScanned(recipe, scan, a.ticks), o.brew))],
           ...streams,
@@ -467,7 +488,7 @@ export async function pickScreens(o: PickOptions): Promise<Picked | "cancel"> {
         break;
       }
       case "logins": {
-        const s = signInItems(applyRecipe(o.manifest, recipe), o.brew);
+        const s = rows.logins;
         const answers = new Map([...s.initial].map(([id, choice]): [string, LoginChoice] => [id, logins.get(id) ?? choice]));
         const r = await rungSelect({
           title: SIGN_INS_TITLE,
@@ -486,9 +507,9 @@ export async function pickScreens(o: PickOptions): Promise<Picked | "cancel"> {
         break;
       }
       case "wsp": {
-        const w = wspToolsItems(recipe, o.home);
+        const w = rows.wsp;
         const initial = wspTicks === undefined ? w.initial : new Set([...wspTicks].filter(id => w.items.some(i => i.id === id)));
-        const r = await rungSelect({ title: WSP_TITLE, top: WSP_TOP, counter, items: w.items, initial, empty: "no agent here takes the wsp tools yet", ...streams });
+        const r = await rungSelect({ title: WSP_TITLE, top: WSP_TOP, counter, items: w.items, initial, ...streams });
         if (r.kind === "cancel") return "cancel";
         wspTicks = new Set(r.ticks);
         wspTools = new Set([...r.ticks].flatMap(id => wspToolsAgent(id) ?? []));

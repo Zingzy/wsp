@@ -45,7 +45,7 @@ export function SetupScreen({
   refusal = null,
 }: {
   k: string;
-  /** The step's place in its run ("2/6"), over the title on the steps that have one. */
+  /** The step's place in the steps its run shows ("2/5"), over the title on the steps that have one. */
   counter?: string;
   headline: string;
   /** The sentence under the title; a step with none has no slot for it and its content follows the title. */

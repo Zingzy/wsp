@@ -650,7 +650,7 @@ function buildCounts(
   };
 }
 
-/** The build screen's own line: what the five screens before it settled on, how long the build takes, how big the
+/** The build screen's own line: what the screens before it settled on, how long the build takes, how big the
  * image lands, and that a machine left alone stops billing. What it costs an hour is the boot question's, under it. */
 export function readyLine(
   manifest: Manifest,
@@ -928,7 +928,8 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   if (projectScan !== undefined) card(PROJECT_GROUP, projectNote(projectScan), io.output);
 
   let answers: Answers;
-  // The agents here whose config gets the wsp MCP server: a tick on screen five, never a default and never --yes,
+  // The agents here whose config gets the wsp MCP server: a tick on the wsp tools screen, never a default and never
+  // --yes,
   // since a run that asks nothing writes nothing on this computer.
   let wspTools = new Set<string>();
   if (interactive) {
@@ -1201,7 +1202,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   if (attach !== undefined) {
     log.step(`Attaching to your earlier builder: ${describeBuilder(attach)}. Nothing new boots; stages already applied are skipped.`, out);
   } else if (stop.length === 0 && interactive) {
-    // Enter takes the defaults the five screens showed, so a run that changes nothing is six keypresses.
+    // Enter takes the defaults every screen showed, so a run that changes nothing is one keypress a screen and one here.
     const go = await confirmPrompt({ message: `${ready}\n${question}`, hint: "No costs nothing and keeps the recipe for wsp init --recipe.", initialValue: true, input: io.input, output: io.output });
     if (isCancel(go) || !go) {
       cancel("Nothing was booted. The recipe is kept.", out);

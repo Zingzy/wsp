@@ -109,7 +109,7 @@ export interface RecipeInput {
   projects?: readonly string[];
   /** Keeps what each session file came to, so a second run reads only the histories that changed. */
   cache?: HistoryCache;
-  /** What else a package manager on this computer has, as the third screen reads it. Handed in as it is to the
+  /** What else a package manager on this computer has, as the Also on this Mac screen reads it. Handed in as it is to the
    * scan, since the reader reaches the engine and the MCP server may not. Both a `--set` word naming a package and
    * an `--add` word are answered against it. Without it nothing is here, so a `--set` no catalog row and no row of
    * the file answers is refused, and an `--add` is taken as a row of its own: only a package the scan lists is a
@@ -169,7 +169,7 @@ const namesRule = (input: RecipeInput): boolean => input.tick !== undefined || (
 
 /** Which row a `--set` word's id names, and the package it named when it named one. Three ids reach a row: a catalog
  * row's own, a row the file already carries outside the catalog, and a package a manager on this Mac has, by the id
- * the scan gives it. That last one is the third screen's row: its tick lands on the collector's id for the package,
+ * the scan gives it. That last one is the Also on this Mac screen's row: its tick lands on the collector's id for the package,
  * so the build installs it by the road the plan resolves rather than by a line of its own. */
 export function setTarget(id: string, saved: Recipe | undefined, scan: readonly ScanRow[]): { id: string; pkg?: ScanRow } | undefined {
   if (catalogEntry(id) !== undefined || outsideRowsOf(saved).some(r => r.id === id)) return { id };

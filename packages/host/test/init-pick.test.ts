@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The five screens as pure rows and as a fake terminal: what the agents screen
+// The screens as pure rows and as a fake terminal: what the agents screen
 // says about each agent, what the tools screen makes of the table, what every
 // sign-in row's choice is and where its default comes from, which agents here
 // are offered the wsp tools, and the screens drawn whole.
@@ -12,7 +12,6 @@ import { CATALOG, CATALOG_AGENTS, CATALOG_TOOLS, THREAD_AGENTS, type CatalogEntr
 import { computeRecipe, type ManifestEntry } from "@wsp/collect";
 import type { Recipe } from "@wsp/protocol";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { ALSO_EMPTY } from "../src/init-also.js";
 import {
   AGENT_LOGINS,
   AGENTS_TITLE,
@@ -415,44 +414,82 @@ describe("the whole flow", () => {
     // The folder is named on the command line, so the run does not ask for one; the tests that answer the question drop it.
     pickScreens({ manifest: withCatalogAgents(laptop), recipe: RECIPE, brew: new Map(), from: "agents", home: tmpdir(), project: NAMED_PROJECT, scanProject: async () => undefined, input: o.input, output: o.output, ...over });
 
-  it("five screens in order, each numbered against the six a run has, the scan screen holding its slot until it lands", async () => {
+  it("the screens with a row to pick, each numbered against those and the build: with no manager row the Also screen is not shown and the sign-ins follow the tools", async () => {
     const o = streams(100, 30);
     const p = flow(o);
+    await settle(20);
+    expect(o.text()).toContain("◆  Agents  1/5");
+    o.input.write(KEY.enter);
+    await settle(20);
+    expect(o.text()).toContain("◆  Tools  2/5");
+    expect(o.text()).toContain(FLOOR_LINE);
+    o.input.write(KEY.enter);
+    await settle(20);
+    expect(o.text()).not.toContain("Also on this Mac");
+    const signIns = o.text().slice(o.text().lastIndexOf("◆  Sign-ins"));
+    expect(signIns).toContain("◆  Sign-ins  3/5");
+    expect(signIns).toContain(SIGN_INS_TOP);
+    o.input.write(KEY.enter);
+    await settle(20);
+    expect(o.text()).toContain("◆  wsp for your agents on this Mac  4/5");
+    o.input.write(KEY.enter);
+    const picked = await p;
+    expect(picked).not.toBe("cancel");
+    if (picked === "cancel") return;
+    // Four keypresses, and every answer is the one each screen opened on.
+    expect(picked.recipe.rows.filter(r => r.on).map(r => r.id)).toEqual(RECIPE.rows.filter(r => r.on).map(r => r.id));
+    expect([...picked.logins].sort()).toEqual([["logins/claude", "machine"], ["logins/gh", "machine"]]);
+    expect([...picked.wspTools]).toEqual([]);
+  });
+
+  it("with a manager row to offer the Also screen is the third of six, and the screens after it count against six", async () => {
+    const o = streams(100, 30);
+    const scan = [{ id: "brew/jq", name: "jq", manager: "brew" as const, group: "Homebrew formulae", install: "brew install jq", check: "command -v jq", size: 2 * 1024 * 1024 }];
+    const p = flow(o, { scan });
     await settle(20);
     expect(o.text()).toContain("◆  Agents  1/6");
     o.input.write(KEY.enter);
     await settle(20);
     expect(o.text()).toContain("◆  Tools  2/6");
-    expect(o.text()).toContain(FLOOR_LINE);
     o.input.write(KEY.enter);
     await settle(20);
     const mac = o.text().slice(o.text().lastIndexOf("◆  Also on this Mac"));
     expect(mac).toContain("◆  Also on this Mac  3/6");
-    expect(mac).toContain("What else this Mac could bring");
-    expect(mac).toContain(ALSO_EMPTY);
+    expect(mac).toContain("What else this Mac brings");
+    expect(mac).toMatch(/○ jq\s+2 MB/);
     o.input.write(KEY.enter);
     await settle(20);
-    const signIns = o.text().slice(o.text().lastIndexOf("◆  Sign-ins"));
-    expect(signIns).toContain("◆  Sign-ins  4/6");
-    expect(signIns).toContain(SIGN_INS_TOP);
+    expect(o.text()).toContain("◆  Sign-ins  4/6");
     o.input.write(KEY.enter);
     await settle(20);
     expect(o.text()).toContain("◆  wsp for your agents on this Mac  5/6");
+    o.input.write(KEY.ctrlC);
+    expect(await p).toBe("cancel");
+  });
+
+  it("esc from the screen after one that is not shown lands on the last screen shown, never on the empty one", async () => {
+    const o = streams(100, 30);
+    const p = flow(o);
+    await settle(20);
     o.input.write(KEY.enter);
-    const picked = await p;
-    expect(picked).not.toBe("cancel");
-    if (picked === "cancel") return;
-    // Five keypresses, and every answer is the one each screen opened on.
-    expect(picked.recipe.rows.filter(r => r.on).map(r => r.id)).toEqual(RECIPE.rows.filter(r => r.on).map(r => r.id));
-    expect([...picked.logins].sort()).toEqual([["logins/claude", "machine"], ["logins/gh", "machine"]]);
-    expect([...picked.wspTools]).toEqual([]);
+    await settle(20);
+    o.input.write(KEY.enter);
+    await settle(20);
+    expect(o.text().slice(o.text().lastIndexOf("◆  "))).toContain("Sign-ins  3/5");
+    o.input.write(KEY.esc);
+    await settle(90);
+    const back = o.text().slice(o.text().lastIndexOf("◆  "));
+    expect(back).toContain("Tools  2/5");
+    expect(o.text()).not.toContain("Also on this Mac");
+    o.input.write(KEY.ctrlC);
+    expect(await p).toBe("cancel");
   });
 
   it("an answer stands when the screen is left and come back to, as a tick does", async () => {
     const o = streams(100, 30);
     const p = flow(o);
     await settle(20);
-    for (let i = 0; i < 3; i += 1) {
+    for (let i = 0; i < 2; i += 1) {
       o.input.write(KEY.enter);
       await settle(20);
     }
@@ -465,8 +502,8 @@ describe("the whole flow", () => {
     expect(at()).toMatch(/Claude Code login\s+[^\n]*API key/);
     o.input.write(KEY.enter);
     await settle(20);
-    expect(o.text()).toContain("◆  wsp for your agents on this Mac  5/6");
-    // A tick on screen five, then esc back: the sign-in answer is still the one that was chosen.
+    expect(o.text()).toContain("◆  wsp for your agents on this Mac  4/5");
+    // A tick on the wsp tools screen, then esc back: the sign-in answer is still the one that was chosen.
     o.input.write(KEY.space);
     await settle();
     o.input.write(KEY.esc);
@@ -474,7 +511,7 @@ describe("the whole flow", () => {
     expect(at()).toMatch(/Claude Code login\s+[^\n]*API key/);
     o.input.write(KEY.enter);
     await settle(20);
-    // And screen five is still as it was left.
+    // And the wsp tools screen is still as it was left.
     expect(o.text().slice(o.text().lastIndexOf("◆  wsp for your agents on this Mac"))).toMatch(/● Claude Code/);
     o.input.write(KEY.enter);
     const picked = await p;
@@ -486,8 +523,6 @@ describe("the whole flow", () => {
   it("the sign-ins screen: a word per row, the arrows walk them, the header counts, and there is no all row", async () => {
     const o = streams(100, 30);
     const p = flow(o);
-    await settle(20);
-    o.input.write(KEY.enter);
     await settle(20);
     o.input.write(KEY.enter);
     await settle(20);
@@ -545,7 +580,7 @@ describe("the project the run is for", () => {
     const card = o.text().slice(o.text().lastIndexOf("Your project needs"));
     expect(card).toContain("go.mod needs Go");
     expect(card).toContain("Not in the catalog: Ruby (Gemfile needs Ruby)");
-    expect(o.text()).toContain("◆  Agents  1/6");
+    expect(o.text()).toContain("◆  Agents  1/5");
     o.input.write(KEY.ctrlC);
     expect(await p).toBe("cancel");
   });
@@ -593,7 +628,7 @@ describe("the project the run is for", () => {
     o.input.write(KEY.enter);
     await settle(20);
     expect(asked).toEqual([]);
-    expect(o.text()).toContain("◆  Agents  1/6");
+    expect(o.text()).toContain("◆  Agents  1/5");
     o.input.write(KEY.ctrlC);
     expect(await p).toBe("cancel");
   });

@@ -362,7 +362,7 @@ export interface Api {
   initKeys?(keys: { solari?: string; rows?: Record<string, string> }): Promise<InitSetup>;
   /** Starts the init job on a road; every change after rides init.job events. */
   initStart?(o: { road: InitRoad; harness?: string }): Promise<InitJob>;
-  /** Answers one of the five screens; the reply carries the screens recomputed and the step moved on. */
+  /** Answers one of the screens; the reply carries the screens recomputed and the step moved on. */
   initAnswer?(o: { screen: InitScreenId; ticks?: string[]; answers?: Record<string, string> }): Promise<InitJob>;
   /** Moves the job to a screen the person went back to, so a setup shut there reopens there. */
   initStep?(o: { at: number }): Promise<InitJob>;

@@ -1476,6 +1476,10 @@ export function initStageCount(rows: readonly InitRow[]): { done: number; total:
   return { done: stages.filter(r => initRowOver(r.state) && !ROW_UNDONE.has(r.state)).length, total: stages.length };
 }
 
+/** Where a step sits in the steps its run shows, over the title ("2/4"): the steps the person sees, the build or the
+ * first workspace counted as the last, a step with nothing to pick not counted since it is not shown. */
+export const initStepCounter = (at: number, total: number): string => `${at}/${total}`;
+
 /** The count as words: `3 of 12`. */
 export const initStageCountLine = (count: { done: number; total: number }): string => `${count.done} of ${count.total}`;
 

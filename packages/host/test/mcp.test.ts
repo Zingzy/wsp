@@ -1069,7 +1069,7 @@ describe("the MCP server over the host", () => {
     expect(await call("recipe", { out, set: ["jaava=on"] })).toMatchObject({ isError: true, text: `--set jaava=on: "jaava" is no catalog row and no row of ${out} outside the catalog, and no package a manager on this Mac has that id` });
     expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).rows.find(r => r.id === "java")?.on).toBe(true);
 
-    // The id the scan gives a package this computer has ticks that package's own row, the road the third screen takes.
+    // The id the scan gives a package this computer has ticks that package's own row, the road the Also on this Mac screen takes.
     const ticked = RecipeAnswer.parse((await call("recipe", { out, set: [`${diskbloom.id}=on`] })).structured);
     expect(allRows(ticked).some(r => r.id === diskbloom.id)).toBe(false);
     expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).rows.find(r => r.id === "tools/brew/zingzy/tap/diskbloom")).toMatchObject({ on: true, kind: "tool" });

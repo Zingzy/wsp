@@ -9,7 +9,7 @@
 // answers and what was ticked or typed since in place, until Start over or the
 // build.
 import { useCallback, useEffect, useState } from "react";
-import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, INIT_BUILD_STEP, KEY_REFUSED, KEY_UNCHECKED, initAgentStep, initDiskOverLine, initImageBytes, initJobOver, wspToolsRowId, type InitDraft, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, INIT_BUILD_STEP, KEY_REFUSED, KEY_UNCHECKED, initAgentStep, initDiskOverLine, initImageBytes, initJobOver, initStepCounter, wspToolsRowId, type InitDraft, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { Dialog, DialogSheet, DialogTitle } from "../components/ui/dialog.js";
 import { errorText } from "../lib/utils.js";
 import { RequestError } from "../protocol/client.js";
@@ -35,7 +35,8 @@ const FIRST_LAUNCH_SCREEN = "wsp";
 const ASK_NAME = "name";
 const ASK_FOLDER = "folder";
 
-/** The screens the app walks: the host's, less the one the first launch answered. */
+/** The steps the app walks: the screens the host shows, less the one the first launch answered, then the first
+ * workspace's question; the count over each title is of these. */
 const shownOf = (job: InitJob): InitScreen[] => job.screens.filter(s => s.id !== FIRST_LAUNCH_SCREEN);
 
 /** What the host kept of a step the person left mid-answer, if anything. */
@@ -179,7 +180,7 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
       body = (
         <SetupAsk
           setup={setup}
-          counter={`${total}/${total}`}
+          counter={initStepCounter(total, total)}
           refusal={refusal}
           name={typed[ASK_NAME] ?? FIRST_WORKSPACE}
           folder={typed[ASK_FOLDER] ?? ""}
@@ -205,7 +206,7 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
         <SetupAnswers
           key={`${job.id}:${key}`}
           screen={screen}
-          counter={`${index + 1}/${total}`}
+          counter={initStepCounter(index + 1, total)}
           draft={current}
           onDraft={next => {
             setDraft({ key, draft: next });

@@ -105,24 +105,18 @@ export function SetupAnswers({ screen, counter, draft, onDraft, primary, seconda
     });
   return (
     <SetupScreen k={`screen-${screen.id}`} counter={counter} headline={screen.top} refusal={refusal} primary={primary} secondary={secondary}>
-      {screen.items.length === 0 ? (
-        <p data-k="empty" className={cn(STATE_WORD, "pt-3 text-center")}>
-          {screen.empty}
-        </p>
-      ) : (
-        <Card label={screen.title}>
-          {grouped
-            ? groups.map(group => (
-                <li key={group} className={ROW_LINE}>
-                  <ul>
-                    {group !== "" ? <GroupLabel>{group}</GroupLabel> : null}
-                    {rows(screen.items.filter(i => (i.group ?? "") === group))}
-                  </ul>
-                </li>
-              ))
-            : rows(screen.items)}
-        </Card>
-      )}
+      <Card label={screen.title}>
+        {grouped
+          ? groups.map(group => (
+              <li key={group} className={ROW_LINE}>
+                <ul>
+                  {group !== "" ? <GroupLabel>{group}</GroupLabel> : null}
+                  {rows(screen.items.filter(i => (i.group ?? "") === group))}
+                </ul>
+              </li>
+            ))
+          : rows(screen.items)}
+      </Card>
       {tally !== undefined && screen.tally !== undefined ? (
         <p data-k="tally" className={cn(META, "mt-3 flex items-center justify-center gap-2")}>
           <span>

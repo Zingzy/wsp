@@ -1,19 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The five screens of wsp init as data, for a client that draws them itself:
-// the app's setup. The rows come from the same builders the terminal's list
-// draws (the agents table, the tools table, the manager scan, the sign-ins,
-// the wsp tools), the ticks and answers from the same recipe, and an answer
-// moves the recipe the way the terminal's screen moves it, so the two draw one
-// state and the build reads one recipe. Where the app's words differ from the
-// terminal's (a tools row is one number, a sign-in row a mark, a file and a
-// picker) they are set here, once.
+// The screens of wsp init as data, for a client that draws them itself: the
+// app's setup. A screen with no row to pick is left out by the protocol's rule,
+// the one the terminal's run reads too, so the two show the same steps. The
+// rows come from the same builders the terminal's list draws (the agents
+// table, the tools table, the manager scan, the sign-ins, the wsp tools), the
+// ticks and answers from the same recipe, and an answer moves the recipe the
+// way the terminal's screen moves it, so the two draw one state and the build
+// reads one recipe. Where the app's words differ from the terminal's (a tools
+// row is one number, a sign-in row a mark, a file and a picker) they are set
+// here, once.
 import { basename } from "node:path";
 import { CATALOG_AGENTS, CATALOG_TOOLS, agentName as catalogName, catalogEntry, hasLogin } from "@wsp/catalog";
 import { floorApplies, type LoginChoice, type Manifest } from "@wsp/collect";
 import { BUILDER_DISK_GB, isMcpRow } from "@wsp/engine";
-import { CLOUD_SETUP_WORDS, fmtCalls, type InitScreen, type InitScreenId, type InitScreenItem, type Recipe } from "@wsp/protocol";
-import { ALSO_EMPTY, ALSO_EMPTY_TOP, ALSO_TITLE, ALSO_TOP, alsoItems, buildLine, scannedTicks, withScanned } from "./init-also.js";
-import { AGENTS_TITLE, AGENTS_TOP, SIGN_INS_TITLE, SIGN_INS_TOP, TOOLS_TITLE, TOOLS_TOP, WSP_TITLE, WSP_TOP, mcpAgents, pickEstimate, screenCounter, signInItems, tableItems, withAgents, withTools, wspToolsItems } from "./init-pick.js";
+import { CLOUD_SETUP_WORDS, fmtCalls, initShownScreens, type InitScreen, type InitScreenId, type InitScreenItem, type Recipe } from "@wsp/protocol";
+import { ALSO_TITLE, ALSO_TOP, alsoItems, buildLine, scannedTicks, withScanned } from "./init-also.js";
+import { AGENTS_TITLE, AGENTS_TOP, SIGN_INS_TITLE, SIGN_INS_TOP, TOOLS_TITLE, TOOLS_TOP, WSP_TITLE, WSP_TOP, mcpAgents, pickEstimate, signInItems, tableItems, withAgents, withTools, wspToolsItems } from "./init-pick.js";
 import { agentName, isLoginChoice, isTickable } from "./init-recipe.js";
 import type { SelectItem } from "./init-select.js";
 import { agentRows, recipeTable, type TableRow } from "./init-table.js";
@@ -136,7 +138,7 @@ export function diskOf(reading: Reading, recipe: Recipe, statePath: string): { f
   return { fixed: total - est.room + est.files, total };
 }
 
-/** The five screens as they stand for these answers, in the terminal's order and numbering. */
+/** The screens as they stand for these answers, in the terminal's order, less any with no row to pick. */
 export function screensOf(reading: Reading, a: ScreenAnswers, at: ScreensAt): InitScreen[] {
   const manifest = manifestFor(reading, a.recipe, at.statePath);
   const { recipe, logins } = a;
@@ -146,12 +148,11 @@ export function screensOf(reading: Reading, a: ScreenAnswers, at: ScreensAt): In
   const signIns = signInItems(manifest, reading.brew);
   const wsp = wspToolsItems(recipe, at.home);
   const answers = Object.fromEntries([...signIns.initial].map(([id, choice]): [string, string] => [id, logins.get(id) ?? choice]));
-  return [
+  return initShownScreens([
     {
       id: "agents",
       title: AGENTS_TITLE,
       top: AGENTS_TOP,
-      counter: screenCounter("agents"),
       items: tableItems(agents, recipe, manifest, PLAIN, false).map(i => item(i, sizeOf(agents.find(r => r.id === i.id)))),
       ticks: agents.filter(r => r.on).map(r => r.id),
       answers: {},
@@ -162,7 +163,6 @@ export function screensOf(reading: Reading, a: ScreenAnswers, at: ScreensAt): In
       id: "tools",
       title: TOOLS_TITLE,
       top: TOOLS_TOP,
-      counter: screenCounter("tools"),
       items: toolItems(tools, recipe, manifest),
       ticks: tools.filter(r => r.on).map(r => r.id),
       answers: {},
@@ -172,20 +172,17 @@ export function screensOf(reading: Reading, a: ScreenAnswers, at: ScreensAt): In
     {
       id: "also",
       title: ALSO_TITLE,
-      top: scan.length > 0 ? ALSO_TOP : ALSO_EMPTY_TOP,
-      counter: screenCounter("also"),
+      top: ALSO_TOP,
       tally: "more",
       items: alsoItems(scan, recipe, row => buildLine(manifest, row, reading.brew)).map(i => item(i, scan.find(r => r.id === i.id)?.size ?? null)),
       ticks: [...scannedTicks(recipe, scan)],
       answers: {},
       footer: [],
-      empty: ALSO_EMPTY,
     },
     {
       id: "logins",
       title: SIGN_INS_TITLE,
       top: SIGN_INS_TOP,
-      counter: screenCounter("logins"),
       items: loginItems(signIns.items, manifest, at.saved()),
       ticks: [],
       answers,
@@ -195,14 +192,12 @@ export function screensOf(reading: Reading, a: ScreenAnswers, at: ScreensAt): In
       id: "wsp",
       title: WSP_TITLE,
       top: WSP_TOP,
-      counter: screenCounter("wsp"),
       items: wsp.items.map(i => item(i)),
       ticks: [...(a.wspTicks === undefined ? wsp.initial : new Set([...a.wspTicks].filter(id => wsp.items.some(i => i.id === id))))],
       answers: {},
       footer: [],
-      empty: "no agent here takes the wsp tools yet",
     },
-  ];
+  ]);
 }
 
 /** The answers with one screen answered: ticks move the recipe as that screen's own step does, a sign-in answer is

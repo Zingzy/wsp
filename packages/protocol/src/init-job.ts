@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The init job as every client reads it: wsp init's run on the host, from the
 // first read of this computer through the screens, the build, the sign-ins,
-// the seal and the first workspace. The terminal draws it in its six screens,
+// the seal and the first workspace. The terminal draws it screen by screen,
 // the app in the modal behind the sidebar's cloud row, an agent over MCP as
 // one object; there is one job and one view of it, and its rows and progress
 // are the same numbers wherever they are shown.
@@ -17,7 +17,7 @@ export type InitRoad = z.infer<typeof InitRoad>;
 export const InitPhase = z.enum(["agent", "reading", "answering", "building", "signing-in", "sealing", "finishing", "done", "failed", "cancelled"]);
 export type InitPhase = z.infer<typeof InitPhase>;
 
-/** The five screens a person answers; the sixth is the build, which the rows below draw. */
+/** The screens a person can answer, in the terminal's order; the build after them is what the rows below draw. */
 export const InitScreenId = z.enum(["agents", "tools", "also", "logins", "wsp"]);
 export type InitScreenId = z.infer<typeof InitScreenId>;
 
@@ -53,20 +53,22 @@ export const InitScreen = z.object({
   id: InitScreenId,
   title: z.string(),
   top: z.string(),
-  /** Where the screen sits in the six ("2/6"). */
-  counter: z.string(),
   items: z.array(InitScreenItem),
   /** The rows ticked as the screen stands. */
   ticks: z.array(z.string()),
   /** Each answering row's answer, by row id. */
   answers: z.record(z.string()),
   footer: z.array(InitFooterLine),
-  /** What the screen says with no rows at all. */
-  empty: z.string().optional(),
   /** The noun the line under the card counts the ticked rows in ("agents", "tools"); absent on a screen with no tally. */
   tally: z.string().optional(),
 });
 export type InitScreen = z.infer<typeof InitScreen>;
+
+/** The screens a person is shown: one with no row to pick is left out, whichever it is. The agents and tools screens
+ * always have rows; Also on this Mac, the sign-ins and the wsp tools may have none on a computer with no formula, no
+ * sign-in or no agent installed. The app's screens and the terminal's run both read this one rule, and each counts
+ * its steps over what it keeps. */
+export const initShownScreens = <S extends { items: readonly unknown[] }>(screens: readonly S[]): S[] => screens.filter(s => s.items.length > 0);
 
 /** What a row of the job is: a fact read off this computer while it is read, a stage of the image, a sign-in the
  * person finishes in their browser, a secret set on the machine, an agent here given the wsp tools, the first
@@ -153,7 +155,7 @@ export const InitJob = z.object({
   /** What the image's disk holds before any tick (the base and the files that travel) and the disk the build asks
    * the provider for, in bytes; absent when the provider reports no disk. */
   disk: z.object({ fixed: z.number().nonnegative(), total: z.number().positive() }).optional(),
-  /** The five screens, filled once this computer is read; empty before. */
+  /** The screens shown, filled once this computer is read; empty before. */
   screens: z.array(InitScreen),
   rows: z.array(InitRow),
   /** Rows over, rows in all: what the collapsed sidebar row counts. */
