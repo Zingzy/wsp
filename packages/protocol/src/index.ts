@@ -491,6 +491,15 @@ export type HarnessModel = z.infer<typeof HarnessModel>;
 export const HarnessCatalogSource = z.enum(["harness", "table"]);
 export type HarnessCatalogSource = z.infer<typeof HarnessCatalogSource>;
 
+/** Where wsp keeps the control one of a CLI's screen-only commands stands for: its sign-in road, the composer's model
+ * and access pickers, wsp's own settings and docs. The composer's line for the command is written per control. */
+export const ScreenControl = z.enum(["sign-in", "model", "access", "settings", "docs"]);
+export type ScreenControl = z.infer<typeof ScreenControl>;
+/** A command of a CLI that works only in its own interactive terminal, by name without its slash, and the wsp control
+ * that serves the same intent. */
+export const ScreenCommand = z.object({ name: z.string(), control: ScreenControl });
+export type ScreenCommand = z.infer<typeof ScreenCommand>;
+
 /** What one harness's CLI takes at launch. A list is empty when the CLI has no such flag or its values are open,
  * and the composer hides that picker; sessions.start refuses a value a non-empty list does not carry and passes any
  * value through where the list is empty. source says whether the binary on the workspace's machine answered or the
@@ -520,6 +529,10 @@ export const HarnessCatalog = z.object({
    * it before any workspace exists; a runtime test pins every row to its adapter's declaration. Read it through
    * takesMcpServers: absent is a no, since a catalog from before the field was declared knew of no such road. */
   mcpServers: z.boolean().optional(),
+  /** This CLI's commands that work only in its own terminal, which a headless turn answers are not available. Like
+   * mcpServers this is the adapter's own declaration and no binary's, so a table row is the answer and a client reads
+   * it before any machine exists; absent is none. The composer lists none of them and sends nothing for one. */
+  screenCommands: z.array(ScreenCommand).optional(),
   /** Set on the harness a start without one runs, so a client can pick its list without the catalog package. */
   isDefault: z.boolean().optional(),
   /** Why the binary described nothing, in its own adapter's words, when it ran and refused for a reason it can name
@@ -603,6 +616,21 @@ export function readsImages(catalog: HarnessCatalog | null | undefined): boolean
  * machine exists. Absent is a no, which is a catalog from before the field was declared. */
 export function takesMcpServers(catalog: Pick<HarnessCatalog, "mcpServers"> | null | undefined): boolean {
   return catalog?.mcpServers === true;
+}
+
+/** The commands of this harness that work only in its CLI's own terminal; none for a catalog from before the field. */
+export function screenCommandsOf(catalog: Pick<HarnessCatalog, "screenCommands"> | null | undefined): ReadonlyArray<ScreenCommand> {
+  return catalog?.screenCommands ?? NO_SCREEN_COMMANDS;
+}
+
+const NO_SCREEN_COMMANDS: ReadonlyArray<ScreenCommand> = [];
+
+/** The screen-only command a message would hand the CLI, or null. Only a slash that opens the whole message is a
+ * command to the CLI; anywhere else it reads the words as text, so this reads the first word alone. */
+export function screenCommandTyped(catalog: Pick<HarnessCatalog, "screenCommands"> | null | undefined, prompt: string): ScreenCommand | null {
+  const name = /^\/(\S+)/.exec(prompt.trim())?.[1];
+  if (name === undefined) return null;
+  return screenCommandsOf(catalog).find(c => c.name === name) ?? null;
 }
 
 /** The option a list marks as its default, if one is: what an unpicked picker shows and an unnamed start runs. */
@@ -2550,7 +2578,7 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
-export { actionRefusal, computerOffline, goneRefusal, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, type SendBlock, sendRefusal, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
+export { actionRefusal, computerOffline, goneRefusal, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, type SendBlock, sendRefusal, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";

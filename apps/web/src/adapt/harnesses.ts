@@ -2,10 +2,11 @@
 // The client's own facts per harness: the slash commands its menu is seeded
 // with before a session has announced any, and the mark drawn beside its
 // models and threads. One module per harness; a harness without one gets an
-// empty seed and its initials. Each mark is the agent's published glyph, one
-// svg under src/assets/agents (its source and licence in THIRD_PARTY_NOTICES)
-// read here for its viewBox and paths. The runtime's catalog answers
-// everything else.
+// empty seed and its initials. No seed names a command the CLI runs only in
+// its own terminal; those are the runtime catalog's table, read by the menu.
+// Each mark is the agent's published glyph, one svg under src/assets/agents
+// (its source and licence in THIRD_PARTY_NOTICES) read here for its viewBox
+// and paths. The runtime's catalog answers everything else.
 import claudeSvg from "../assets/agents/claude.svg?raw";
 import codexSvg from "../assets/agents/codex.svg?raw";
 import geminiSvg from "../assets/agents/gemini.svg?raw";
@@ -49,11 +50,7 @@ export interface HarnessClient {
 
 const NO_SLASH_SEED: ReadonlyArray<ProviderSlashCommand> = [];
 
-export const CLAUDE_CLIENT: HarnessClient = {
-  harness: "claude",
-  slashCommands: [{ name: "model", description: "Show or change the model for this session", input: { hint: "model name" } }],
-  mark: glyphOf(claudeSvg, "text-agent-claude"),
-};
+export const CLAUDE_CLIENT: HarnessClient = { harness: "claude", slashCommands: NO_SLASH_SEED, mark: glyphOf(claudeSvg, "text-agent-claude") };
 
 export const CODEX_CLIENT: HarnessClient = { harness: "codex", slashCommands: NO_SLASH_SEED, mark: glyphOf(codexSvg) };
 

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AdapterEvent, ExecStream, ExecStreamFactory, TurnResult } from "@wsp/protocol";
 import { createClaudeAdapter, type ClaudeSession } from "../src/adapter.js";
+import { CLAUDE_SCREEN_COMMANDS } from "../src/catalog.js";
 import { userMessageLine } from "../src/landmines.js";
 
 const FIXTURE_SESSION_ID = "e16ed170-8257-4668-879e-fe836341633c";
@@ -131,6 +132,19 @@ function collect(): { events: AdapterEvent[]; onEvent: (e: AdapterEvent) => void
   const events: AdapterEvent[] = [];
   return { events, onEvent: (e) => events.push(e) };
 }
+
+describe("the commands this CLI runs only in its own terminal", () => {
+  it("are one table the adapter declares, by name without a slash, each with the wsp control that serves it", () => {
+    const exec = scriptedExec(fixtureLines());
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    expect(adapter.screenCommands).toBe(CLAUDE_SCREEN_COMMANDS);
+    // A headless turn answers each of these with "isn't available in this environment" (seen from wsp 0.2.0, 2026-09-10).
+    expect(CLAUDE_SCREEN_COMMANDS.map(c => c.name)).toEqual(["login", "logout", "model", "permissions", "config", "help"]);
+    expect(CLAUDE_SCREEN_COMMANDS.map(c => c.control)).toEqual(["sign-in", "sign-in", "model", "access", "settings", "docs"]);
+    for (const c of CLAUDE_SCREEN_COMMANDS) expect(c.name).not.toMatch(/^\//);
+    expect(new Set(CLAUDE_SCREEN_COMMANDS.map(c => c.name)).size).toBe(CLAUDE_SCREEN_COMMANDS.length);
+  });
+});
 
 describe("ClaudeAdapter over the recorded fixture", () => {
   it("launches with the picked model, effort and permission mode", async () => {

@@ -12,7 +12,8 @@
 // workspaces and the model picker's agent marks for their size and colour;
 // ?ws=ws_a&linger=1 replays a turn that replied but whose process has not
 // exited; ?ws=ws_a&chat=1 replays one whose reply is markdown of every kind the
-// chat draws, so the message body and its code blocks can be measured;
+// chat draws, so the message body and its code blocks can be measured, and
+// whose init announced the CLI's slash commands, its own screens among them;
 // ?local=1&ws=ws_m&perm=1 replays a turn on this computer with one permission
 // prompt answered and one still open, so the relayed prompt row can be laid
 // out and photographed in both states; ?shell=desktop puts a desktop bridge on the page so the workspace
@@ -175,6 +176,15 @@ const catalogs: HarnessCatalog[] = [
       images: true,
       keptMode: "default",
       bypassMode: "bypassPermissions",
+      // The CLI's own screens, as the runtime's table names them; the chat replay announces them beside the rest.
+      screenCommands: [
+        { name: "login", control: "sign-in" },
+        { name: "logout", control: "sign-in" },
+        { name: "model", control: "model" },
+        { name: "permissions", control: "access" },
+        { name: "config", control: "settings" },
+        { name: "help", control: "docs" },
+      ],
     },
     THIS_COMPUTER,
   ),
@@ -268,8 +278,10 @@ const CHAT_MARKDOWN = [
   "",
   "Full notes in [the tracker](https://example.invalid/439).",
 ].join("\n");
+// The init's slash_commands as the CLI lists them: the built-ins that run headless, its own screens, and a skill.
+const CHAT_SLASH_COMMANDS = ["compact", "context", "cost", "init", "review", "login", "logout", "model", "permissions", "config", "help", "unslop"];
 const chatHistory: SessionEvent[] = [
-  { type: "session.start", ...chatTurn, prompt: "Bump the lockfile and run the gate." },
+  { type: "session.start", ...chatTurn, prompt: "Bump the lockfile and run the gate.", harness: { slashCommands: CHAT_SLASH_COMMANDS } },
   { type: "session.delta", ...chatTurn, kind: "text", text: CHAT_MARKDOWN },
   { type: "session.done", ...chatTurn, result: { status: "completed", durationMs: 2400, costUsd: 0.004 } },
 ];

@@ -7,12 +7,25 @@
 // 2.1.257: one line, exit 0 on stdin EOF, no API call.
 
 import { shellQuote } from "@wsp/protocol";
-import type { HarnessCatalogModelProbe, HarnessCatalogProbe } from "@wsp/protocol";
+import type { HarnessCatalogModelProbe, HarnessCatalogProbe, ScreenCommand } from "@wsp/protocol";
 import { buildEnv } from "./landmines.js";
 
 const SEP = "__WSP_CATALOG_SEP__";
 const INIT_REQUEST = JSON.stringify({ type: "control_request", request_id: "init", request: { subtype: "initialize", hooks: {} } });
 const ONE_M = /\[1m\]$/;
+
+/** The CLI's commands that open a screen of its own and so work only in its interactive terminal: a headless turn
+ * handed one answers "isn't available in this environment" (seen from wsp 0.2.0 on 2026-09-10). Its init still lists
+ * them in slash_commands beside the custom commands and skills that do run, so the composer reads this table to keep
+ * them out of its menu; adding one is a row here. */
+export const CLAUDE_SCREEN_COMMANDS: ReadonlyArray<ScreenCommand> = [
+  { name: "login", control: "sign-in" },
+  { name: "logout", control: "sign-in" },
+  { name: "model", control: "model" },
+  { name: "permissions", control: "access" },
+  { name: "config", control: "settings" },
+  { name: "help", control: "docs" },
+];
 
 export const CONTEXT_WINDOWS = ["200k", "1m"] as const;
 export type ContextWindow = (typeof CONTEXT_WINDOWS)[number];

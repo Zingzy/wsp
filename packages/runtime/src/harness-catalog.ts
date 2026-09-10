@@ -10,6 +10,7 @@
 // adapter yet; their catalogs name the flags their CLIs document, so they
 // carry no pin of our own reading and the pickers are right the day one lands.
 // A list is empty where the CLI has no such flag or takes open values.
+import { CLAUDE_SCREEN_COMMANDS } from "@wsp/adapter-claude";
 import type { HarnessCatalog, HarnessCatalogProbe, HarnessModel, HarnessOption } from "@wsp/protocol";
 
 /** What one row's table was read against: what was run on the row's own binary, the version it reported and the day it
@@ -65,6 +66,7 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     pin: { read: "--help", version: "2.1.257", date: "2026-09-05" },
     // --mcp-config takes the servers as JSON on the launch (read off `claude --help` at 2.1.257, 2026-09-10).
     mcpServers: true,
+    screenCommands: [...CLAUDE_SCREEN_COMMANDS],
     // The cheapest of the three at $2/$10 per Mtok, as the CLI's own handshake prices them (read 2026-09-07).
     smallModel: "claude-sonnet-5",
     models: [

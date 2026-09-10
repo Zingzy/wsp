@@ -4,7 +4,7 @@
 // it. Every client renders these words, and the runtime refuses a send with
 // the same sentence the composer shows, so one screen never says two things.
 import { OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
-import type { MachineState, ReachState, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
+import type { HarnessCatalog, MachineState, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
 
 export type WorkspaceState = "running" | "pausing" | "paused" | "waking" | "unreachable" | "gone";
 
@@ -171,6 +171,26 @@ export function sendRefusal(kind: SendRefusalKind, goneWords?: string): string |
 }
 
 const isBlock = (kind: SendRefusalKind): kind is SendBlock => kind in BLOCK_WORDS;
+
+const CONTROL_WORDS: Record<Exclude<ScreenControl, "sign-in">, string> = {
+  model: "pick the model in the row under the box",
+  access: "pick the access mode in the row under the box",
+  settings: "wsp's settings open from the command palette",
+  docs: "wsp's docs are at wsp.apidocumentation.com",
+};
+
+/** The composer's line for a slash command the CLI runs only in its own terminal, in place of a turn that would answer
+ * the command is not available: what the command is, then the wsp control that serves the same intent. The sign-in
+ * road is the machine's: the Machine tab signs a machine in, and this computer is signed in from its own terminal. */
+export function screenCommandLine(command: ScreenCommand, catalog: Pick<HarnessCatalog, "label">, view: Pick<WorkspaceView, "kind">): string {
+  const control =
+    command.control === "sign-in"
+      ? isLocalWorkspace(view)
+        ? `sign in from a terminal on ${THIS_COMPUTER}`
+        : "sign this machine in from the Machine tab"
+      : CONTROL_WORDS[command.control];
+  return `/${command.name} works only in ${catalog.label}'s own terminal; ${control}`;
+}
 
 /** A probe that found the machine: the edge answered, promptly or late. */
 const ANSWERED: ReadonlySet<ReachState> = new Set<ReachState>(["reachable", "slow"]);

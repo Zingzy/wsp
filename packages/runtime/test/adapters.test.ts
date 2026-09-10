@@ -2,7 +2,7 @@
 // Which agents wsp can open a thread on: one list, the adapter registry keyed
 // by exactly it, and every id a catalog agent.
 import { CATALOG_AGENTS, THREAD_AGENTS } from "@wsp/catalog";
-import { takesMcpServers } from "@wsp/protocol";
+import { screenCommandsOf, takesMcpServers } from "@wsp/protocol";
 import type { Machine } from "@wsp/engine";
 import { describe, expect, it } from "vitest";
 import { HARNESS_ADAPTERS } from "../src/adapters.js";
@@ -22,7 +22,12 @@ describe("the agents wsp can open a thread on", () => {
       const adapter = HARNESS_ADAPTERS[id]({ machine, workspaceId: "ws_1", execStream: machineExecStream(machine), home: () => "/root/.state", env: {} });
       const row = HARNESS_CATALOGS.find(c => c.harness === id);
       expect(takesMcpServers(row), id).toBe(adapter.mcpServers === true);
+      // The row carries the adapter's own table of screen-only commands, so the composer reads it off the table before
+      // a machine answers and a command added to the adapter's table needs no second edit.
+      expect(screenCommandsOf(row), id).toEqual(adapter.screenCommands ?? []);
     }
+    expect(screenCommandsOf(HARNESS_CATALOGS.find(c => c.harness === "claude")).map(c => c.name)).toContain("login");
+    expect(screenCommandsOf(HARNESS_CATALOGS.find(c => c.harness === "codex"))).toEqual([]);
     // Where the two stand today: Claude Code takes the servers on its launch, Codex has no per-launch road yet.
     expect(takesMcpServers(HARNESS_CATALOGS.find(c => c.harness === "claude"))).toBe(true);
     expect(takesMcpServers(HARNESS_CATALOGS.find(c => c.harness === "codex"))).toBe(false);

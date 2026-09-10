@@ -29,16 +29,21 @@
 // at the head for the turn's end. A harness that does not steer gets the turn
 // stopped first, with the one-line notice. A new thread owes nothing to the
 // turn it left behind: the runtime runs a workspace's threads side by side
-// and holds each to one turn, so the fresh composer opens at once. The
-// checkout row under the composer picks the folder a fresh thread starts in;
-// a resumed one is started where its harness last said it was. The model,
-// effort, context window and access picks in the box's footer ride every
-// start, so a change mid-thread applies at the next turn.
+// and holds each to one turn, so the fresh composer opens at once. The slash
+// menu offers what the session's harness announced less the commands the
+// runtime catalog says run only in the CLI's own terminal, and Enter on one
+// of those sends nothing: the line names the wsp control that serves it and
+// goes with the next edit, and a block on the send outranks it. A slash
+// command nobody announced still goes as text, since the words may be meant.
+// The checkout row under the composer picks the folder a fresh thread starts
+// in; a resumed one is started where its harness last said it was. The
+// model, effort, context window and access picks in the box's footer ride
+// every start, so a change mid-thread applies at the next turn.
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent } from "react";
 import { ImageIcon } from "lucide-react";
-import { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, noImagesLine, readsImages, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
+import { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
-import { useStore, useWorkspaceState } from "../../protocol/store";
+import { useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { onComposerFocusRequest } from "../../shell/shellRequests";
 import { useThreadStart } from "../../files/root";
 import { composerSubmissionIntentForEnter, detectComposerTrigger, replaceTextRange } from "../../composer-logic";
@@ -100,7 +105,9 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const conn = useStore(s => s.conn);
   const sessions = useStore(s => s.sessions[workspaceId]);
   const state = useWorkspaceState(workspaceId);
+  const workspace = useWorkspace(workspaceId);
   const [stop, setStop] = useState<StopAttempt | null>(null);
+  const [screenLine, setScreenLine] = useState<string | null>(null);
   const [steering, setSteering] = useState<string | null>(null);
   const [steered, setSteered] = useState<SteerAttempt | null>(null);
   const draft = useComposerDraft(workspaceId);
@@ -174,9 +181,10 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const canStop = runningTurn !== null && api?.interruptSession !== undefined;
   // The catalog answers before the click: a harness that steers takes the row into the turn, any other gets the turn stopped.
   const canSteer = canStop && harnessCatalog?.steers === true && api?.steerSession !== undefined;
-  // One line in the slot above the box: the newest failure, else what blocks a send, else the turn that replied but
-  // still runs, in the runtime's own words, since a message sent now waits for that process and runs as the next
-  // turn, else an access pick the running turn's harness would not take mid-turn.
+  // One line in the slot above the box: the newest failure, else what blocks a send, else the screen command Enter
+  // refused, since a box the block disabled has nothing to edit and the block is the one thing to say, else the turn
+  // that replied but still runs, in the runtime's own words, since a message sent now waits for that process and runs
+  // as the next turn, else an access pick the running turn's harness would not take mid-turn.
   const line =
     imageRefusal !== null
       ? imageRefusal
@@ -186,15 +194,17 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
         ? sendNowFailedLine(steerAttempt.error)
         : unavailable !== null
           ? unavailable
-          : runningTurn?.replied === true
-            ? stillWorkingLine(threadKey)
-            : accessPick.line;
+          : screenLine !== null
+            ? screenLine
+            : runningTurn?.replied === true
+              ? stillWorkingLine(threadKey)
+              : accessPick.line;
 
   const trigger = useMemo(() => detectComposerTrigger(draft.prompt, draft.cursor), [draft]);
   const searchKey = trigger ? `${trigger.kind}:${trigger.query.trim().toLowerCase()}` : null;
   const menuOpen = trigger !== null && trigger.rangeStart === 0 && dismissedSearchKey !== searchKey && unavailable === null;
   const { harness } = thread.view;
-  const catalog = useMemo(() => catalogFromHarness({ id: harnessId, harness }), [harnessId, harness]);
+  const catalog = useMemo(() => catalogFromHarness({ id: harnessId, harness, screen: screenCommandsOf(harnessCatalog) }), [harness, harnessCatalog, harnessId]);
   const items = useMemo<ComposerCommandItem[]>(() => {
     if (!menuOpen || trigger === null) return [];
     const all = catalog.slashCommands.map(command => ({
@@ -215,7 +225,13 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
 
   useEffect(() => onComposerFocusRequest(workspaceId, () => editorRef.current?.focus()), [workspaceId]);
 
-  const onChange = useCallback((value: string, cursor: number) => setDraft(workspaceId, { prompt: value, cursor }), [setDraft, workspaceId]);
+  const onChange = useCallback(
+    (value: string, cursor: number) => {
+      setScreenLine(null);
+      setDraft(workspaceId, { prompt: value, cursor });
+    },
+    [setDraft, workspaceId],
+  );
 
   /** The one road every image takes into the composer: the paste, the drop and the picker all end here, so the caps
    * and the refusal words are said once. An agent that reads no image is turned away before a file is even read. */
@@ -304,6 +320,15 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     const snapshot = editorRef.current?.readSnapshot() ?? { value: draft.prompt, cursor: draft.cursor };
     const prompt = snapshot.value.trim();
     if (prompt === "") return;
+    // A command the CLI runs only in its own terminal would come back as not available; the draft stays for editing,
+    // and the menu's empty state goes so the line alone speaks.
+    const screen = screenCommandTyped(harnessCatalog, prompt);
+    if (screen !== null && harnessCatalog !== null) {
+      setScreenLine(screenCommandLine(screen, harnessCatalog, workspace ?? {}));
+      setImageRefusal(null);
+      setDismissedSearchKey(searchKey);
+      return;
+    }
     // A queued row keeps only its words, so a message with images waits for the turn rather than losing them.
     if (busy && images.length > 0) {
       setImageRefusal(IMAGES_AFTER_TURN);
@@ -324,7 +349,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     }
     enqueue(threadKey, prompt, held ? "head" : "tail");
     release(threadKey);
-  }, [busy, draft, enqueue, held, images, release, sending, setDraft, start, threadKey, unavailable, workspaceId]);
+  }, [busy, draft, enqueue, harnessCatalog, held, images, release, searchKey, sending, setDraft, start, threadKey, unavailable, workspace, workspaceId]);
 
   // The head row goes as soon as nothing blocks a send; starting flips busy, so the rest wait for the next end.
   const head = queue[0];

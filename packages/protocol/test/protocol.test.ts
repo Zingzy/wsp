@@ -599,6 +599,12 @@ describe("runtime wire types", () => {
     const bare = { harness: "pi", label: "Pi", source: "table", version: null, models: [], efforts: [], contextWindows: [], permissionModes: [], steers: false, renames: false, images: false };
     expect(HarnessCatalog.parse(bare)).toEqual(bare);
     // steers says whether a running turn of this harness takes a message; the composer decides send-now from it before the click
+    // screenCommands names the CLI's commands that work only in its own terminal, each with the wsp control that serves
+    // it; the composer lists none of them and sends nothing for one. Absent is none, a catalog from before the field.
+    const screen = { ...catalog, screenCommands: [{ name: "login", control: "sign-in" }, { name: "model", control: "model" }] };
+    expect(HarnessCatalog.parse(screen)).toEqual(screen);
+    expect(() => HarnessCatalog.parse({ ...catalog, screenCommands: ["login"] })).toThrow();
+    expect(() => HarnessCatalog.parse({ ...catalog, screenCommands: [{ name: "login", control: "terminal" }] })).toThrow();
     expect(() => HarnessCatalog.parse({ ...catalog, steers: undefined })).toThrow();
     expect(() => HarnessCatalog.parse({ ...catalog, steers: "yes" })).toThrow();
     // renames says whether a name of a person's survives in the harness's own store; a client offers the rename from it

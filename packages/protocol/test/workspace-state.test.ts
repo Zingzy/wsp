@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { actionRefusal, computerOffline, goneRefusal, isBilling, isLocalWorkspace, kindWords, machineWord, needsRebuild, NOT_ON_THIS_KIND, OVER_SSH, reachShown, relayedRefusal, sendRefusal, servesReading, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, workspaceStateOf, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
+import { actionRefusal, computerOffline, screenCommandLine, screenCommandTyped, screenCommandsOf, goneRefusal, isBilling, isLocalWorkspace, kindWords, machineWord, needsRebuild, NOT_ON_THIS_KIND, OVER_SSH, reachShown, relayedRefusal, sendRefusal, servesReading, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, workspaceStateOf, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
 
 describe("workspaceState", () => {
   it("phase alone: running, pausing, napping and waking each have one word", () => {
@@ -192,5 +192,53 @@ describe("what a workspace's kind changes about its words", () => {
     expect(relayedRefusal("mac")).toContain(THIS_COMPUTER);
     expect(undrivenRefusal("mac", machineWord("local"), "be paused")).toBe(`mac is ${THIS_COMPUTER}, not a machine wsp runs; it cannot be paused`);
     expect(undrivenRefusal("box", machineWord("ssh"), "be paused")).toBe(`box is ${OVER_SSH}, not a machine wsp runs; it cannot be paused`);
+  });
+});
+
+describe("a slash command that works only in the CLI's own terminal", () => {
+  const SCREEN = [
+    { name: "login", control: "sign-in" as const },
+    { name: "logout", control: "sign-in" as const },
+    { name: "model", control: "model" as const },
+    { name: "permissions", control: "access" as const },
+    { name: "config", control: "settings" as const },
+    { name: "help", control: "docs" as const },
+  ];
+  const catalog = { label: "Claude Code", screenCommands: SCREEN };
+
+  it("is read off the message only where the slash opens it, by name without its slash, and nothing else is one", () => {
+    expect(screenCommandTyped(catalog, "/login")).toEqual({ name: "login", control: "sign-in" });
+    expect(screenCommandTyped(catalog, "  /login  ")).toEqual({ name: "login", control: "sign-in" });
+    expect(screenCommandTyped(catalog, "/model opus")).toEqual({ name: "model", control: "model" });
+    expect(screenCommandTyped(catalog, "/loginx")).toBeNull();
+    expect(screenCommandTyped(catalog, "/compact")).toBeNull();
+    expect(screenCommandTyped(catalog, "see /login")).toBeNull();
+    expect(screenCommandTyped(catalog, "login")).toBeNull();
+    expect(screenCommandTyped(catalog, "")).toBeNull();
+  });
+
+  it("a catalog from before the field, or none at all, names no screen command", () => {
+    expect(screenCommandsOf(null)).toEqual([]);
+    expect(screenCommandsOf(undefined)).toEqual([]);
+    expect(screenCommandsOf({})).toEqual([]);
+    expect(screenCommandsOf(catalog)).toBe(SCREEN);
+    expect(screenCommandTyped(null, "/login")).toBeNull();
+    expect(screenCommandTyped({}, "/login")).toBeNull();
+  });
+
+  it("the composer's line says the command is the CLI's own screen and names wsp's control for the same intent", () => {
+    const cloud = { kind: "cloud" as const };
+    const local = { kind: "local" as const };
+    expect(screenCommandLine(SCREEN[0]!, catalog, cloud)).toBe("/login works only in Claude Code's own terminal; sign this machine in from the Machine tab");
+    expect(screenCommandLine(SCREEN[1]!, catalog, cloud)).toBe("/logout works only in Claude Code's own terminal; sign this machine in from the Machine tab");
+    expect(screenCommandLine(SCREEN[0]!, catalog, local)).toBe(`/login works only in Claude Code's own terminal; sign in from a terminal on ${THIS_COMPUTER}`);
+    expect(screenCommandLine(SCREEN[2]!, catalog, cloud)).toBe("/model works only in Claude Code's own terminal; pick the model in the row under the box");
+    expect(screenCommandLine(SCREEN[3]!, catalog, local)).toBe("/permissions works only in Claude Code's own terminal; pick the access mode in the row under the box");
+    expect(screenCommandLine(SCREEN[4]!, catalog, cloud)).toBe("/config works only in Claude Code's own terminal; wsp's settings open from the command palette");
+    expect(screenCommandLine(SCREEN[5]!, catalog, cloud)).toBe("/help works only in Claude Code's own terminal; wsp's docs are at wsp.apidocumentation.com");
+    // A record from before kinds existed is a provider fork, so it reads the machine's road.
+    expect(screenCommandLine(SCREEN[0]!, catalog, {})).toContain("Machine tab");
+    // Every line is one sentence for the composer's slot: no line break, sentence case, nothing but words.
+    for (const command of SCREEN) for (const view of [cloud, local]) expect(screenCommandLine(command, catalog, view)).toMatch(/^\/[a-z]+ works only in [^\n]+; [a-z][^\n]+[^.]$/);
   });
 });
