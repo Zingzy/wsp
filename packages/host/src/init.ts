@@ -64,7 +64,7 @@ import { secretsStage, type SecretOutcome } from "./init-secrets.js";
 import { buildTakes, buildTimes, readBuildTimes } from "./init-times.js";
 import { keptBuilder, stopKeptBuilder, updateRoad } from "./init-upgrade.js";
 import { retentionOffer } from "./storage.js";
-import { DONE_LINE, appUrl, askFirst, checkImportFolder, runFirst, runLocal, type FirstResult } from "./init-first.js";
+import { DONE_LINE, appUrl, askFirst, checkImportFolder, firstWorkspaceName, runFirst, runLocal, type FirstResult } from "./init-first.js";
 import type { Tone } from "./init-select.js";
 import { diskLine, diskTone } from "./init-weight.js";
 import { builderLink, flowHooks, keyAsks, noteOutcomes, signInStage, stageLogins, type BuilderLink, type HostHooks, type LoginOutcome, type SignInCodes, type SignInFlow } from "./init-signin.js";
@@ -1467,17 +1467,19 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     }
   }
   const roads: WorkspaceRoads = handle ?? opts.roads(rt);
-  // Only the first seal ever offers a workspace; a rebuild leaves the existing ones on the version they came from.
+  // A named workspace is forked whatever the list holds. With no name only the first seal offers one, so a rebuild
+  // leaves the existing ones on the version they came from.
+  const named = firstWorkspaceName(opts.firstWorkspace);
   const existing = await rt.workspaces.list();
   let first: FirstResult | undefined;
   let local: WorkspaceView | undefined;
-  if (existing.length > 0) {
+  if (named === undefined && existing.length > 0) {
     log.step(`Your ${existing.length} workspace${existing.length === 1 ? " stays" : "s stay"} on the golden version ${existing.length === 1 ? "it was" : "they were"} forked from; upgrade ${existing.length === 1 ? "it" : "them"} from the app. New workspaces fork v${version}.`, out);
   } else {
     const ask = await askFirst({
       interactive,
       unattended: !serves,
-      ...(opts.firstWorkspace !== undefined ? { name: opts.firstWorkspace } : {}),
+      ...(named !== undefined ? { name: named } : {}),
       ...(opts.importFolder !== undefined ? { folder: opts.importFolder } : {}),
       ...(opts.noLocal === true ? { noLocal: true } : {}),
       input: io.input,

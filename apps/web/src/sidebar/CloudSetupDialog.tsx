@@ -9,13 +9,13 @@
 // answers and what was ticked or typed since in place, until Start over or the
 // build.
 import { useCallback, useEffect, useState } from "react";
-import { CLOUD_SETUP_WORDS, INIT_BUILD_STEP, initAgentStep, initDiskOverLine, initJobOver, wspToolsRowId, type InitDraft, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, INIT_BUILD_STEP, initAgentStep, initDiskOverLine, initJobOver, wspToolsRowId, type InitDraft, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { Dialog, DialogSheet, DialogTitle } from "../components/ui/dialog.js";
 import { errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
 import { draftOf, SetupAnswers, tallyOf, type Draft } from "./cloud-setup/SetupAnswers.js";
 import { SetupAgent } from "./cloud-setup/SetupAgent.js";
-import { FIRST_WORKSPACE, SetupAsk } from "./cloud-setup/SetupAsk.js";
+import { SetupAsk } from "./cloud-setup/SetupAsk.js";
 import { SetupBuild } from "./cloud-setup/SetupBuild.js";
 import { SetupChoice, type RoadPick } from "./cloud-setup/SetupChoice.js";
 import { SetupFacts } from "./cloud-setup/SetupFacts.js";
