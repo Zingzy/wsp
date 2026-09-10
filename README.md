@@ -68,7 +68,7 @@ The command line and the MCP tools are the same verbs: `new`, `fork`, `snapshot`
 Open the macOS disk image and drag wsp onto the Applications folder it shows. One image holds both Apple silicon and Intel.
 
 <!-- unsigned:start -->
-The bundles are not signed yet, so the first open of `wsp.app` is refused: right click it in Finder, pick Open, and pick Open again in the dialog. Every open after that is a double click.
+The bundles are not signed yet, so macOS refuses the first open of `wsp.app`. Open it once, dismiss the refusal, then in System Settings under Privacy & Security find the line saying wsp was blocked and pick Open Anyway. Or from a terminal: `xattr -dr com.apple.quarantine /Applications/wsp.app`. Every open after that is a double click.
 <!-- unsigned:end -->
 
 The Linux AppImage needs the run bit before it starts: `chmod +x wsp-*.AppImage`.

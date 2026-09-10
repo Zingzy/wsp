@@ -60,7 +60,7 @@ describe("the change list", () => {
 describe("the lines about opening a downloaded bundle", () => {
   it("come out of the README, so the page and the notes cannot drift", () => {
     expect(bundleNote(readme, false)).toContain("not signed yet");
-    expect(bundleNote(readme, false)).toContain("right click it in Finder");
+    expect(bundleNote(readme, false)).toContain("Open Anyway");
     expect(bundleNote(readme, false)).toContain("drag wsp onto the Applications folder");
     expect(bundleNote(readme, false)).toContain("chmod +x");
     expect(bundleNote(readme, false)).not.toContain("<!--");
@@ -69,7 +69,7 @@ describe("the lines about opening a downloaded bundle", () => {
   it("drop the paragraph on unsigned bundles once an identity signs them, and keep the rest", () => {
     const signed = bundleNote(readme, true);
     expect(signed).not.toContain("not signed yet");
-    expect(signed).not.toContain("right click");
+    expect(signed).not.toContain("Open Anyway");
     expect(signed).toContain("### Opening a downloaded bundle\n\nOpen the macOS disk image");
     expect(signed).toContain("chmod +x");
     expect(signed).not.toContain("<!--");
@@ -111,7 +111,7 @@ describe("the notes on the draft release", () => {
   it("carry the README's lines on opening a downloaded bundle, for the signing the release got", () => {
     expect(notes()).toContain(bundleNote(readme, false));
     expect(notes(true)).toContain(bundleNote(readme, true));
-    expect(notes(true)).not.toContain("right click");
+    expect(notes(true)).not.toContain("Open Anyway");
   });
 
   it("say it is the first release when there is no tag before it", () => {
