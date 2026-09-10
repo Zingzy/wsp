@@ -39,7 +39,7 @@ async function settle() {
 
 async function mountOn(port: number, api: Api) {
   useStore.setState({ api });
-  const tabId = useBrowserTabs.getState().createTab(WS, port);
+  const tabId = useBrowserTabs.getState().createTab(WS, { port, path: "/" });
   const view = render(<BrowserSurface workspaceId={WS} surface={{ id: `browser:${tabId}`, kind: "preview", resourceId: tabId }} />);
   await settle();
   return { ...view, tabId };

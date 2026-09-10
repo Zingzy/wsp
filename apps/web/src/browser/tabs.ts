@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The browser surface's tabs: which port each one frames and where it has
-// been. The right panel store owns the tab strip (browser:<tabId> surfaces);
+// The browser surface's tabs: which port and path each one frames and where
+// it has been. The right panel store owns the tab strip (browser:<tabId> surfaces);
 // this owns what is behind each id. A cross-origin frame tells us nothing
-// about its own navigation, so history is the ports we framed, not pages.
+// about its own navigation, so history is the addresses typed, not the pages
+// the frame went on to.
 import { create } from "zustand";
 import type { KnownPort } from "../adapt/ports.js";
 import type { PreviewTabSnapshot } from "../components/RightPanelTabs.js";
-import { loopbackUrl } from "./url.js";
+import { loopbackUrl, portAndPath, type Address } from "./url.js";
 
 export interface BrowserTabState {
   readonly id: string;
-  /** Framed ports in visit order; null is the servers list. */
-  readonly entries: ReadonlyArray<number | null>;
+  /** Framed addresses in visit order; null is the servers list. */
+  readonly entries: ReadonlyArray<Address | null>;
   readonly index: number;
   /** Keys the frame so a bump remounts it. */
   readonly reloadNonce: number;
@@ -26,8 +27,8 @@ type TabsByWorkspace = Record<string, Record<string, BrowserTabState>>;
 
 interface BrowserTabsStore {
   byWorkspaceId: TabsByWorkspace;
-  createTab: (workspaceId: string, port: number | null) => string;
-  navigate: (workspaceId: string, tabId: string, port: number | null) => void;
+  createTab: (workspaceId: string, address: Address | null) => string;
+  navigate: (workspaceId: string, tabId: string, address: Address | null) => void;
   back: (workspaceId: string, tabId: string) => void;
   forward: (workspaceId: string, tabId: string) => void;
   reload: (workspaceId: string, tabId: string) => void;
@@ -55,10 +56,10 @@ function updateTab(
 
 export const useBrowserTabs = create<BrowserTabsStore>()(set => ({
   byWorkspaceId: {},
-  createTab: (workspaceId, port) => {
+  createTab: (workspaceId, address) => {
     const id = `t${++seq}`;
     // A tab always starts on the servers list so back has somewhere to go.
-    const entries: (number | null)[] = port === null ? [null] : [null, port];
+    const entries: (Address | null)[] = address === null ? [null] : [null, address];
     set(state => ({
       byWorkspaceId: {
         ...state.byWorkspaceId,
@@ -72,11 +73,11 @@ export const useBrowserTabs = create<BrowserTabsStore>()(set => ({
   },
   // A surface id the right panel persisted across a reload has no tab here
   // yet; navigating it brings one into being under the same id.
-  navigate: (workspaceId, tabId, port) =>
+  navigate: (workspaceId, tabId, address) =>
     set(state => {
       const known = state.byWorkspaceId[workspaceId]?.[tabId];
       if (!known) {
-        const entries: (number | null)[] = port === null ? [null] : [null, port];
+        const entries: (Address | null)[] = address === null ? [null] : [null, address];
         return {
           byWorkspaceId: {
             ...state.byWorkspaceId,
@@ -89,8 +90,8 @@ export const useBrowserTabs = create<BrowserTabsStore>()(set => ({
       }
       return {
         byWorkspaceId: updateTab(state.byWorkspaceId, workspaceId, tabId, tab => {
-          if (tab.entries[tab.index] === port) return tab;
-          const entries = [...tab.entries.slice(0, tab.index + 1), port];
+          if (sameAddress(tab.entries[tab.index] ?? null, address)) return tab;
+          const entries = [...tab.entries.slice(0, tab.index + 1), address];
           return { ...tab, entries, index: entries.length - 1 };
         }),
       };
@@ -140,21 +141,26 @@ export function useWorkspaceBrowserTabs(workspaceId: string): Record<string, Bro
   return useBrowserTabs(s => s.byWorkspaceId[workspaceId] ?? NO_TABS);
 }
 
-export function currentPort(tab: BrowserTabState | null): number | null {
+export function currentAddress(tab: BrowserTabState | null): Address | null {
   return tab?.entries[tab.index] ?? null;
 }
 
-/** What each tab's strip entry shows: the process behind the port when the directory knows it. */
+function sameAddress(a: Address | null, b: Address | null): boolean {
+  return a === b || (a !== null && b !== null && a.port === b.port && a.path === b.path);
+}
+
+/** What each tab's strip entry shows: the process behind the port when the directory knows it, and the path. */
 export function previewTabSnapshots(
   tabs: Record<string, BrowserTabState>,
   ports: ReadonlyArray<KnownPort>,
 ): Record<string, PreviewTabSnapshot> {
   return Object.fromEntries(
     Object.values(tabs).map(tab => {
-      const port = currentPort(tab);
-      if (port === null) return [tab.id, { tabId: tab.id, url: null, title: "" }];
-      const process = ports.find(p => p.port === port)?.process;
-      return [tab.id, { tabId: tab.id, url: loopbackUrl(port), title: process ? `${process} :${port}` : `:${port}` }];
+      const at = currentAddress(tab);
+      if (at === null) return [tab.id, { tabId: tab.id, url: null, title: "" }];
+      const process = ports.find(p => p.port === at.port)?.process;
+      const where = portAndPath(at.port, at.path);
+      return [tab.id, { tabId: tab.id, url: loopbackUrl(at.port, at.path), title: process ? `${process} ${where}` : where }];
     }),
   );
 }

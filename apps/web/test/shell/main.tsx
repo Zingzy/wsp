@@ -39,7 +39,9 @@
 // this computer the same two and a third with a long name; ?efforts=1 gives
 // the claude row its effort and context lists so the composer's row carries
 // every picker; ?panel=preview opens the right panel inline with nothing in
-// it, the narrowest the centre column gets at a width; ?drop=1 holds the page
+// it, the narrowest the centre column gets at a width; ?panel=browser&at=<address>
+// opens it on a browser tab framing that address, so the bar can be measured
+// with a path and a query in it; ?drop=1 holds the page
 // mid-drag of a folder from the desktop, with the desktop bridge that reads a
 // dropped path, so every workspace row's drop tile can be measured; ?import=1
 // opens the import dialog on ws_a already reading a folder, as a drop on its
@@ -57,6 +59,8 @@ import type { Api } from "../../src/protocol/client";
 import { getLive } from "../../src/machine/live";
 import { useStore } from "../../src/protocol/store";
 import { useRightPanelStore } from "../../src/rightPanelStore";
+import { useBrowserTabs } from "../../src/browser/tabs";
+import { parseAddress } from "../../src/browser/url";
 import { SettingsPage } from "../../src/settings/SettingsPage";
 import { useThemeEffect } from "../../src/settings/theme";
 import { AppShell } from "../../src/shell/AppShell";
@@ -469,6 +473,13 @@ useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", ph
 if (params.get("panel") === "preview" && shown !== null) {
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useRightPanelStore.getState().open(shown, "preview");
+}
+// The fake route's host resolves nowhere, so the frame under the bar stays blank.
+const at = params.get("at");
+if (params.get("panel") === "browser" && shown !== null && at !== null) {
+  useRightPanelStore.setState({ byWorkspaceId: {} });
+  useRightPanelStore.getState().open(shown, "preview");
+  useRightPanelStore.getState().openBrowser(shown, useBrowserTabs.getState().createTab(shown, parseAddress(at)));
 }
 if (params.get("panel") === "machine" && shown !== null) {
   useRightPanelStore.setState({ byWorkspaceId: {} });
