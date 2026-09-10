@@ -35,6 +35,7 @@ import { agentsHere } from "./agents-here.js";
 import { InitJobs } from "./init-job.js";
 import { agentKeyEnvs, parseEnvFile, savedEnv, type Keys } from "./env-keys.js";
 import { keychainReader } from "./init-import.js";
+import { adoptLoginPath } from "./login-path.js";
 import { CACHE_RULE } from "./project-bundle.js";
 import { readBrewTable } from "./init-brew.js";
 import { exitCodeOf, runInit, type InitIO } from "./init.js";
@@ -875,6 +876,9 @@ async function hostFor(
   io: CliIO,
   run: RunningWsp = runningWsp(),
 ): Promise<HostHandle> {
+  // First of all, and once: every lookup and every child of this host reads process.env.PATH, and a launch from
+  // Finder or the Dock was given launchd's four system folders rather than the person's.
+  await adoptLoginPath(line => io.log(line));
   const lockPath = lockPathFor(opts.statePath);
   const lock = takeLock(lockPath, opts.statePath, { port: opts.port, wsPort: opts.wsPort });
   try {

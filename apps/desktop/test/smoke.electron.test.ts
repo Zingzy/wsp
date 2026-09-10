@@ -7,7 +7,7 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { serve, shimPath, startHost, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
+import { LAUNCHD_PATH, serve, shimPath, startHost, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
 import { CLOUD_SETUP_WORDS, GET_THE_APP_WORD, fmtSize, kindWords } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
@@ -375,8 +375,9 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
   });
 
   it("first launch with no key: the welcome, the agents found here with the MCP to add, Esc to the recap's one line, then the app on this computer with the cloud row, and the shim runs", async () => {
-    // Labs on, since the settings page that picks the light side for the photograph is a labs surface.
-    launched = await launch({ PATH: "/usr/bin:/bin", WSP_LABS: "1" }, twoAgents);
+    // Labs on, since the settings page that picks the light side for the photograph is a labs surface. The PATH is
+    // launchd's own, what a Finder or Dock launch is handed, so this run is the one a tester's Mac makes.
+    launched = await launch({ PATH: LAUNCHD_PATH.join(":"), WSP_LABS: "1" }, twoAgents);
     const { app, home } = launched;
     const shim = shimPath(home);
     // The command is installed before any window, so an agent configured on the next screen has something to run.
