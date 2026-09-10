@@ -3,7 +3,7 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { GoldenMissingTool, GoldenStage, HarnessCatalog, InitJob, InitPhase, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, SessionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
+import type { GoldenMissingTool, GoldenStage, HarnessCatalog, InitJob, InitPhase, InitRow, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, SessionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
 import { shellLine } from "./shell-quote.js";
 import type { ThreadMessage } from "./thread-read.js";
@@ -28,7 +28,30 @@ export const UNKNOWN_SIZE = "size unknown";
 export const fmtCalls = (n: number): string => `${n.toLocaleString("en-US")} ${n === 1 ? "call" : "calls"}`;
 
 /** The line under a screen's card: what the ticked rows come to. */
-export const initTallyLine = (count: number, noun: string, bytes: number): string => `${plural(count, noun.replace(/s$/, ""))} on the image · ${fmtBytes(bytes)}`;
+export const initTallyLine = (count: number, noun: string, bytes: number): string => `${initTallyCount(count, noun)} · ${fmtBytes(bytes)}`;
+/** The tally's first half, the count of rows on the image, so a view can colour the size after it on its own. The noun
+ * is the screen's plural ("agents", "tools"), or a word that does not count ("more") kept as it is. */
+export const initTallyCount = (count: number, noun: string): string => `${noun.endsWith("s") ? plural(count, noun.replace(/s$/, "")) : `${count} ${noun}`} on the image`;
+
+/** The tone a size is read in, by weight, the one table every size cell, tally total and meter reads: a gigabyte and
+ * over is the danger tone, 300 MB and over the warning tone, 100 MB and over the yellow tone, anything under muted. */
+export type SizeTone = "danger" | "warning" | "yellow" | "muted";
+const SIZE_TONES: readonly (readonly [number, SizeTone])[] = [
+  [1024 * MIB, "danger"],
+  [300 * MIB, "warning"],
+  [100 * MIB, "yellow"],
+];
+export function sizeTone(bytes: number): SizeTone {
+  return SIZE_TONES.find(([from]) => bytes >= from)?.[1] ?? "muted";
+}
+
+/** The tone of the disk meter by the share the estimate takes of the disk: muted under 70 percent, the warning tone
+ * from 70, the danger tone from 90 and when over. */
+export function diskTone(used: number, total: number): "muted" | "warning" | "danger" {
+  const share = total > 0 ? used / total : 1;
+  if (share >= 0.9) return "danger";
+  return share >= 0.7 ? "warning" : "muted";
+}
 
 /** The disk ring's tooltip: what the image holds against the machine's disk. */
 export const initDiskLine = (used: number, total: number): string => `about ${fmtBytes(used)} of ${fmtBytes(total)} on the image`;
@@ -953,7 +976,6 @@ export const CLOUD_SETUP_WORDS = {
   row: "Set up cloud machines",
   title: "Cloud machines",
   choice: {
-    label: "CLOUD MACHINES",
     headline: "Set up cloud machines",
     top: "Your setup goes on one machine image, built once and forked for every thread",
     manual: "Choose what goes on the image",
@@ -966,11 +988,14 @@ export const CLOUD_SETUP_WORDS = {
     keycap: "Continue",
   },
   keys: {
-    label: "PROVIDER KEY",
     headline: "Your Solari key",
-    top: "Solari runs the machines; the key is saved in wsp's home on this computer and never leaves it",
-    solari: "Solari API key",
+    top: "Solari runs the machines",
+    solari: "API key",
+    /** The empty field's ghost: the start every Solari key has, and no more. */
+    placeholder: "slr_live_...",
     where: "Get one at Solari",
+    /** Why Save is disabled, as its tooltip. */
+    pasteFirst: "paste the key first",
     saved: "saved",
     unset: "not set",
     keycap: "Save",
@@ -988,7 +1013,6 @@ export const CLOUD_SETUP_WORDS = {
     disk: "Disk on the image",
   },
   ask: {
-    label: "BUILD",
     headline: "Your first cloud workspace",
     top: "Forked from the image as soon as the build finishes",
     name: "Name",
@@ -997,21 +1021,21 @@ export const CLOUD_SETUP_WORDS = {
     choose: "Choose",
   },
   build: {
-    label: "BUILD",
     headline: "Building your image",
     top: "The machine boots, installs what you ticked and is saved as the image every thread forks",
-    image: "IMAGE",
-    signIns: "SIGN-INS",
-    computer: "THIS COMPUTER",
-    workspace: "WORKSPACE",
+    /** The one stage row the sign-ins fold into, its sub-rows one per sign-in. */
+    signingIn: "Signing in on the machine",
+    /** The slide the build becomes while that stage runs: room to act on each sign-in. */
+    slideHeadline: "Sign in on the machine",
+    slideTop: "Each one opens a page on this computer, and the machine keeps the sign-in",
     open: "Open sign-in",
     retry: "Retry",
     codeAsk: "Paste the code from the page",
     codeSubmit: "Submit",
-    keeps: "The build keeps running; the sidebar shows its progress",
+    keeps: "You can close this. The build keeps going and wsp tells you when it needs you",
     cancel: "Cancel the build",
     /** Why the cancel link is disabled while the seal runs: the host's refusal and the app's tooltip, one sentence. */
-    cannotStop: "The image is being saved; the snapshot and the save cannot be stopped",
+    cannotStop: "The image is being saved. The snapshot and the save cannot be stopped.",
     cancelSure: "Stop the build",
     cancelWhy: "The machine is thrown away and nothing is saved",
     cancelKeep: "Keep building",
@@ -1021,7 +1045,6 @@ export const CLOUD_SETUP_WORDS = {
     again: "Start over",
   },
   agent: {
-    label: "AGENT",
     headline: "Reading what your agents used",
     top: "Your agent reads this computer and writes the recipe the next screens start from",
     title: "Set up cloud machines",
@@ -1037,9 +1060,10 @@ export const CLOUD_SETUP_WORDS = {
     waiting: "waiting for the thread's first line",
   },
   reading: {
-    label: "THIS COMPUTER",
     headline: "Reading this computer",
     top: "What is installed here and what your agents used decides what the image starts with",
+    /** The one row the card shows until the first fact lands, so the work reads as started. */
+    first: "This computer",
   },
 } as const;
 
@@ -1176,15 +1200,59 @@ export function initProgressState(job: Pick<InitJob, "phase" | "rows" | "progres
   return { fraction: job.progress.total > 0 ? job.progress.done / job.progress.total : 0, waitingOnYou: open || job.phase === "answering" };
 }
 
+/** The id of the stage row the build's sign-ins fold into. */
+export const SIGN_IN_STAGE_ID = "stage/sign-ins";
+
+/** The build's list as the app draws it: stages only, in the job's order, the sign-ins folded into one stage row where
+ * the first of them sits, whose state is the sign-ins' own (waiting for you while a page waits on the person, running
+ * while one runs, not signed in once every one is over and one ran out, done once every one is over well, waiting
+ * before any starts); the agent rows are not build stages and leave. The sign-ins come back beside it, for the stage's sub-rows. */
+export function initBuildRows(rows: readonly InitRow[]): { rows: InitRow[]; signIns: InitRow[] } {
+  const signIns = rows.filter(r => r.kind === "sign-in");
+  const out: InitRow[] = [];
+  let folded = false;
+  for (const row of rows) {
+    if (row.kind === "agent") continue;
+    if (row.kind !== "sign-in") {
+      out.push(row);
+      continue;
+    }
+    if (folded) continue;
+    folded = true;
+    const state = signIns.some(r => r.state === SIGN_IN_OPEN_STATE)
+      ? SIGN_IN_OPEN_STATE
+      : signIns.some(r => r.state === INIT_ROW_STATES.running)
+        ? INIT_ROW_STATES.running
+        : signIns.every(r => initRowOver(r.state))
+          ? signIns.some(r => r.state === INIT_SIGN_IN_WORDS["not-signed-in"])
+            ? INIT_SIGN_IN_WORDS["not-signed-in"]
+            : INIT_ROW_STATES.done
+          : signIns.every(r => r.state === INIT_ROW_STATES.waiting)
+            ? INIT_ROW_STATES.waiting
+            : INIT_ROW_STATES.running;
+    out.push({ id: SIGN_IN_STAGE_ID, kind: "stage", label: CLOUD_SETUP_WORDS.build.signingIn, state });
+  }
+  return { rows: out, signIns };
+}
+
+/** How many of the build's rows ended well, of all of them: what the line along the card's top edge and the count
+ * beside the title read. A failed row is over but not done, so a failed build never reads complete. */
+export function initStageCount(rows: readonly InitRow[]): { done: number; total: number } {
+  return { done: rows.filter(r => initRowOver(r.state) && r.state !== INIT_ROW_STATES.failed).length, total: rows.length };
+}
+
+/** The count as words: `3 of 12`. */
+export const initStageCountLine = (count: { done: number; total: number }): string => `${count.done} of ${count.total}`;
+
 /** The sidebar button's words for a running job: `waiting for you` while the person is waited on, the progress line
  * otherwise. */
 export function initButtonLine(job: Pick<InitJob, "phase" | "rows" | "progress">): string {
   return initProgressState(job).waitingOnYou ? WAITING_FOR_YOU : initProgressLine(job);
 }
 
-/** What the machine the build boots costs, said once on the key screen from the backend's own rate. */
+/** What the machine the build boots costs, said once under the key screen's title from the backend's own rate. */
 export function initCostLine(size: WorkspaceSize, rateUsdPerHour: number): string {
-  return `A ${fmtSize(size)} machine costs about ${fmtRate(rateUsdPerHour)} while it runs; it naps when idle.`;
+  return `A ${fmtSize(size)} machine costs about $${rateUsdPerHour.toFixed(2)} an hour while it runs and naps when idle`;
 }
 
 /** The cloud setup as wsp setup prints it: which keys are held, the agents here with their tools, the price, and the

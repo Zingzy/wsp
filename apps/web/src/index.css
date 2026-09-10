@@ -157,6 +157,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --color-warning: var(--warning);
   --color-warning-surface: var(--warning-surface);
   --color-caution-foreground: var(--caution-foreground);
+  --color-yellow-foreground: var(--yellow-foreground);
   --color-error-foreground: var(--error-foreground);
   --color-error: var(--error);
   --color-error-surface: var(--error-surface);
@@ -987,6 +988,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --warning-foreground: var(--color-amber-700);
   --warning-surface: color-mix(in srgb, var(--warning) 8%, transparent);
   --caution-foreground: var(--color-orange-700);
+  --yellow-foreground: var(--color-yellow-700);
   --update: var(--primary);
   --update-foreground: var(--primary);
   --update-surface: color-mix(in srgb, var(--update) 12%, transparent);
@@ -1076,6 +1078,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
     --warning-foreground: var(--color-amber-400);
     --warning-surface: color-mix(in srgb, var(--warning) 16%, transparent);
     --caution-foreground: var(--color-orange-400);
+    --yellow-foreground: var(--color-yellow-400);
     --update-foreground: var(--color-blue-400);
     --update-surface: color-mix(in srgb, var(--update) 18%, transparent);
     --sidebar: var(--card);

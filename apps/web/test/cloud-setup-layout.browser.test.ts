@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The cloud setup sheet in a real Chromium, both themes, at 1280 by 800 and at
 // 980 by 700, on every step the ticket names: the whole window in three bands,
-// one 560 px column starting 96 px under the top edge (48 on a short window),
-// the caps mono label, the title, the sentence and the card at the first
-// launch's numbers, a middle that scrolls inside itself and a footer in view at
-// every height, rows of 48 px, the agent step's mono block with its spinner and
-// the two ways on once its turn stopped, the disk ring 20 px from the bottom
-// right from the agents step on, state words that read at AA, nothing at rest
-// and no badge. Photographed at each. Runs only when asked for (WSP_RENDER=1)
-// and skips without Playwright's Chromium.
+// one 560 px column, centred in the window when its bands fit and otherwise 48
+// px under the top edge with its footer 40 px over the bottom edge and its
+// card, the one thing that scrolls, scrolling inside its own border under a
+// cap of half the window or eight rows; the title (the step's count over it
+// where it has one), the sentence and the card at the first launch's numbers,
+// rows of 48 px, the agent step's mono block with its spinner and the two ways
+// on once its turn stopped, the disk meter inline after the tally on the steps
+// that change the image's size, sizes coloured by weight, state words that read
+// at AA, nothing animating at rest and no badge. Photographed at each. Runs only
+// when asked for (WSP_RENDER=1) and skips without Playwright's Chromium.
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,14 +34,16 @@ interface Box {
 }
 
 /** Every step the sheet has, in the order a person meets them. */
-const STEPS = ["choice", "keys", "agent", "agent-stopped", "reading", "agents", "tools", "also", "logins", "ask", "building", "signing", "done", "failed"] as const;
+const STEPS = ["choice", "keys", "agent", "agent-stopped", "reading", "agents", "tools", "also", "logins", "ask", "building", "signing", "retry", "done", "failed"] as const;
 type StepName = (typeof STEPS)[number];
+/** The answer steps, which carry their count over the title. */
+const COUNTED: ReadonlySet<StepName> = new Set<StepName>(["agents", "tools", "also", "logins", "ask"]);
 /** The frame's data-k for each, where it differs from the step's own name. */
-const FRAME: Record<StepName, string> = { choice: "choice", keys: "keys", agent: "agent", "agent-stopped": "agent", reading: "reading", agents: "screen-agents", tools: "screen-tools", also: "screen-also", logins: "screen-logins", ask: "ask", building: "build", signing: "build", done: "build", failed: "build" };
-/** The steps that carry the disk ring: from the agents step on. */
-const RINGED = new Set<StepName>(["agents", "tools", "also", "logins", "ask", "building", "signing", "done", "failed"]);
+const FRAME: Record<StepName, string> = { choice: "choice", keys: "keys", agent: "agent", "agent-stopped": "agent", reading: "reading", agents: "screen-agents", tools: "screen-tools", also: "screen-also", logins: "screen-logins", ask: "ask", building: "build", signing: "build", retry: "build", done: "build", failed: "build" };
+/** The steps whose tally carries the disk meter: the ones that change the image's size. */
+const METERED = new Set<StepName>(["agents", "tools", "also"]);
 /** The first launch's numbers: what every step is measured against. */
-const SPEC = { column: 560, top: 96, topMin: 48, label: 11, labelToTitle: 14, title: 34, titleLine: 1.15, titleToSentence: 12, sentence: 15, sentenceMax: 440, sentenceToContent: 32, row: 48, rowLeft: 16, rowRight: 10, mark: 18, name: 15, meta: 12, field: 32, fieldRow: 72, tally: 12, tallyGap: 12, primary: 40, primaryPad: 22, primaryLabel: 15, secondary: 15, ring: 24, ringInset: 20, close: 20 } as const;
+const SPEC = { column: 560, topMin: 48, bottomMin: 40, counter: 11, counterToTitle: 14, title: 34, titleLine: 1.15, titleToSentence: 16, sentence: 15, sentenceMax: 440, headToContent: 64, contentToFoot: 56, row: 48, rowLeft: 16, rowRight: 10, mark: 18, name: 15, meta: 12, field: 32, loneField: 48, fieldRow: 72, tally: 12, tallyGap: 12, primary: 40, primaryPad: 22, primaryLabel: 15, secondary: 15, meter: 64, meterLine: 2, cardMaxRows: 8, close: 20 } as const;
 const VIEWPORTS = [
   { width: 1280, height: 800 },
   { width: 980, height: 700 },
@@ -82,6 +86,22 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
   const centre = (b: Box): number => b.x + b.width / 2;
   const near = (a: number, b: number, tolerance = 2): boolean => Math.abs(a - b) <= tolerance;
 
+  /** The card's rule on a step: never taller than half the window or eight rows, its radius whole, scrolling inside its border with a fade at the edge more rows lie past; says whether it scrolls. */
+  const cardScrolls = async (frame: string, height: number, step: string): Promise<boolean> => {
+    const cards = await boxes(`${frame} [data-k=card]`);
+    if (cards.length === 0) return false;
+    const card = cards[0]!;
+    expect(card.height, `${step}: card ${card.height} under the cap`).toBeLessThanOrEqual(Math.min(height / 2, SPEC.cardMaxRows * SPEC.row + 2) + 1);
+    expect((await style(`${frame} [data-k=card]`, "border-radius"))[0], `${step}: the radius stays`).toBe("10px");
+    const viewport = page!.locator(`${frame} [data-slot=scroll-area-viewport]`);
+    const scrolls = await viewport.evaluate(el => el.scrollHeight > el.clientHeight + 1);
+    const mask = (await style(`${frame} [data-slot=scroll-area-viewport]`, "mask-image"))[0] ?? "";
+    if (scrolls) expect(mask, `${step}: a fade where more rows lie`).toContain("gradient");
+    const bar = await boxes(`${frame} [data-slot=scroll-area-scrollbar][data-orientation=vertical]`);
+    if (bar.length > 0) expect(near(bar[0]!.width, 6), `${step}: the thin bar, ${bar[0]!.width}`).toBe(true);
+    return scrolls;
+  };
+
   const goTo = async (step: StepName, theme: "dark" | "light"): Promise<string> => {
     await page!.goto(`${base}/test/cloud-setup/index.html?theme=${theme}&screen=${step}`);
     const frame = `[role=dialog] [data-k="${FRAME[step]}"]`;
@@ -92,9 +112,8 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     return frame;
   };
 
-  it.each(["dark", "light"] as const)("in the %s theme every step is the whole window with one 560 px column at the first launch's numbers, the footer at one y, rows of 48 px and state words that read", async theme => {
+  it.each(["dark", "light"] as const)("in the %s theme every step is the whole window with one 560 px column at the first launch's numbers, centred or pinned by its height, rows of 48 px and state words that read", async theme => {
     await page!.setViewportSize({ ...VIEWPORTS[0] });
-    const footers: Record<string, number> = {};
     for (const step of STEPS) {
       const frame = await goTo(step, theme);
       const dialog = await box("[role=dialog]");
@@ -102,20 +121,30 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
       const column = await box(frame);
       expect(near(column.width, SPEC.column), `${step}: column ${column.width}`).toBe(true);
       expect(near(centre(column), VIEWPORTS[0].width / 2), `${step}: column centred`).toBe(true);
-      // The column starts 96 px under the top edge; a step taller than the window gives that margin up first, to 48, and scrolls its middle.
-      const label = await box(`${frame} [data-k=label]`);
-      const scrolls = await page!.locator(`${frame} [data-k=middle]`).evaluate(el => el.scrollHeight > el.clientHeight);
-      expect(near(label.y, scrolls ? SPEC.topMin : SPEC.top), `${step}: label starts at ${label.y}, middle scrolls ${scrolls}`).toBe(true);
-      expect(px((await style(`${frame} [data-k=label]`, "font-size"))[0])).toBe(SPEC.label);
-      expect((await style(`${frame} [data-k=label]`, "text-transform"))[0]).toBe("uppercase");
-      expect((await style(`${frame} [data-k=label]`, "font-family"))[0]!.toLowerCase()).toMatch(/mono|menlo|consolas/);
+      // A step whose bands fit stands centred: as much room over its head as under its footer, never less than 48; one that does not keeps 48 over the head and 40 under the footer, and its card gives up the rest.
+      const label = await box(`${frame} [data-k=head]`);
+      const footBox = await box(`${frame} [data-k=foot]`);
+      const under = VIEWPORTS[0].height - (footBox.y + footBox.height);
+      expect(near(label.y, under) || (near(label.y, SPEC.topMin) && near(under, SPEC.bottomMin)), `${step}: ${label.y} over the head, ${under} under the footer`).toBe(true);
+      expect(label.y, `${step}: head at ${label.y}`).toBeGreaterThanOrEqual(SPEC.topMin - 1);
+      // The middle never scrolls; the card does, inside its border, capped at half the window or eight rows, with its radius whole and a fade where more rows lie.
+      expect(await page!.locator(`${frame} [data-k=middle]`).evaluate(el => el.scrollHeight > el.clientHeight + 1), `${step}: the middle does not scroll`).toBe(false);
+      const scrolls = await cardScrolls(frame, VIEWPORTS[0].height, step);
+      // No caps label over the title; the answer steps carry their count there, 11 px mono, 14 px over the title.
+      expect(await page!.locator(`${frame} [data-k=label]`).count(), `${step}: no label`).toBe(0);
       const title = await box(`${frame} [data-k=title]`);
-      expect(near(title.y - (label.y + label.height), SPEC.labelToTitle), `${step}: label to title ${title.y - (label.y + label.height)}`).toBe(true);
+      const counters = await boxes(`${frame} [data-k=counter]`);
+      expect(counters.length, `${step}: counter`).toBe(COUNTED.has(step) ? 1 : 0);
+      if (counters.length > 0) {
+        expect(near(title.y - (counters[0]!.y + counters[0]!.height), SPEC.counterToTitle), `${step}: counter to title`).toBe(true);
+        expect(px((await style(`${frame} [data-k=counter]`, "font-size"))[0])).toBe(SPEC.counter);
+        expect((await style(`${frame} [data-k=counter]`, "font-family"))[0]!.toLowerCase()).toMatch(/mono|menlo|consolas/);
+      }
       expect(px((await style(`${frame} [data-k=title]`, "font-size"))[0])).toBe(SPEC.title);
       expect(px((await style(`${frame} [data-k=title]`, "font-weight"))[0])).toBe(600);
       expect(near(px((await style(`${frame} [data-k=title]`, "line-height"))[0]), SPEC.title * SPEC.titleLine, 0.6)).toBe(true);
       expect(near(centre(title), centre(column)), `${step}: title centred`).toBe(true);
-      // A step with a sentence puts the content 32 px under it; one without puts the content at the title's own margin.
+      // The content sits 40 px under the head, whether it ends in a sentence or the title; the footer 40 px under the content.
       const sentences = await boxes(`${frame} [data-k=sentence]`);
       const content = await box(`${frame} [data-k=content]`);
       if (sentences.length > 0) {
@@ -124,19 +153,34 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
         expect(px((await style(`${frame} [data-k=sentence]`, "font-size"))[0])).toBe(SPEC.sentence);
         expect(px((await style(`${frame} [data-k=sentence]`, "max-width"))[0])).toBe(SPEC.sentenceMax);
         expect(sentence.width).toBeLessThanOrEqual(SPEC.sentenceMax + 1);
-        expect(near(content.y - (sentence.y + sentence.height), SPEC.sentenceToContent), `${step}: sentence to content`).toBe(true);
+        expect(near(content.y - (sentence.y + sentence.height), SPEC.headToContent), `${step}: sentence to content`).toBe(true);
       } else {
-        expect(near(content.y - (title.y + title.height), SPEC.titleToSentence), `${step}: content at the title's margin`).toBe(true);
+        expect(near(content.y - (title.y + title.height), SPEC.headToContent), `${step}: title to content`).toBe(true);
+      }
+      if (!scrolls) {
+        const footTop = (await box(`${frame} [data-k=foot]`)).y;
+        expect(near(footTop - (content.y + content.height), 0), `${step}: the footer follows the content`).toBe(true);
+        const firstInFoot = await boxes(`${frame} [data-k=foot] > *`);
+        if (firstInFoot.length > 0) expect(near(firstInFoot[0]!.y - (content.y + content.height), SPEC.contentToFoot), `${step}: content to footer ${firstInFoot[0]!.y - (content.y + content.height)}`).toBe(true);
       }
       expect(near(title.height, SPEC.title * SPEC.titleLine, 1), `${step}: one line of title, ${title.height}`).toBe(true);
       expect(near(content.width, SPEC.column), `${step}: content is the column`).toBe(true);
       // The card, where the step has one, is the column wide with 48 px rows, 16 px left and 10 px right inside them.
-      const cards = await boxes(`${frame} [data-k=content] > ul, ${frame} [data-k=content] > div[class*=rounded]`);
+      const cards = await boxes(`${frame} [data-k=content] > ul, ${frame} [data-k=content] > div[class*=rounded], ${frame} [data-k=card]`);
       if (cards.length > 0) expect(near(cards[0]!.width, SPEC.column), `${step}: card width ${cards[0]!.width}`).toBe(true);
-      const rows = await boxes(`${frame} [data-k=row] > div, ${frame} li[data-k=row]:not(:has(> div))`);
+      const rows = await boxes(`${frame} [data-k=row] > div:first-child, ${frame} li[data-k=row]:not(:has(> div))`);
       for (const r of rows) expect(near(r.height, SPEC.row), `${step}: row height ${r.height}`).toBe(true);
       const fields = await boxes(`${frame} [data-slot=input-control]`);
-      for (const f of fields) expect(near(f.height, SPEC.field), `${step}: field ${f.height}`).toBe(true);
+      for (const f of fields) expect(near(f.height, step === "keys" || step === "ask" ? SPEC.loneField : SPEC.field), `${step}: field ${f.height}`).toBe(true);
+      if (step === "ask") {
+        // Two bare fields 24 px apart, no card, the Choose keycap inside the folder field's right end.
+        expect(await page!.locator(`${frame} [data-k=card]`).count(), "no card on the first-workspace step").toBe(0);
+        expect(fields.length).toBe(2);
+        const labelTwo = await box(`${frame} [data-k=folder-row]`);
+        expect(near(labelTwo.y - (fields[0]!.y + fields[0]!.height), 24), `fields ${labelTwo.y - (fields[0]!.y + fields[0]!.height)} apart`).toBe(true);
+        const choose = await box(`${frame} [data-k=choose]`);
+        expect(near(fields[1]!.x + fields[1]!.width - (choose.x + choose.width), 8) && near(choose.y - fields[1]!.y, 8) && near(choose.height, 32), `choose at ${choose.x},${choose.y} ${choose.height}`).toBe(true);
+      }
       const marks = await boxes(`${frame} [data-row-mark]`);
       for (const m of marks) expect(near(m.width, SPEC.mark) && near(m.height, SPEC.mark), `${step}: mark ${m.width}x${m.height}`).toBe(true);
       const names = await style(`${frame} [data-k=row] span[class*='text-[15px]']`, "font-size");
@@ -162,99 +206,176 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
       const foot = await box(`${frame} [data-k=foot]`);
       expect(foot.y + foot.height, `${step}: the footer's bottom edge`).toBeLessThanOrEqual(VIEWPORTS[0].height);
       for (const b of [...primaries, ...(await boxes(`${frame} [data-k=secondary]`))]) expect(b.y + b.height, `${step}: a control in view`).toBeLessThanOrEqual(VIEWPORTS[0].height - 8);
-      footers[step] = foot.y + foot.height;
-      // The ring: 24 px, 20 px from the bottom right, on the steps from agents onward and nowhere else.
-      const rings = await boxes("[role=dialog] [data-k=disk]");
-      expect(rings.length, `${step}: ring`).toBe(RINGED.has(step) ? 1 : 0);
-      if (rings.length > 0) {
-        const ring = rings[0]!;
-        expect(near(ring.width, SPEC.ring) && near(ring.height, SPEC.ring)).toBe(true);
-        expect(near(VIEWPORTS[0].width - (ring.x + ring.width), SPEC.ringInset) && near(VIEWPORTS[0].height - (ring.y + ring.height), SPEC.ringInset), `${step}: ring at ${ring.x},${ring.y}`).toBe(true);
+      // The meter: a 64 px hairline inline after the tally on the steps that change the image's size, and nowhere else; the tally centred under the card.
+      const meters = await boxes("[role=dialog] [data-k=disk]");
+      expect(meters.length, `${step}: meter`).toBe(METERED.has(step) ? 1 : 0);
+      if (meters.length > 0) {
+        const line = await box("[role=dialog] [data-k=disk] > span");
+        expect(near(line.width, SPEC.meter) && near(line.height, SPEC.meterLine), `${step}: meter ${line.width}x${line.height}`).toBe(true);
+        expect(near(centre(tally[0]!), centre(column)), `${step}: tally centred`).toBe(true);
+        expect(line.x, `${step}: the meter follows the words`).toBeGreaterThan(tally[0]!.x + 100);
       }
+      // No initials in a ring: a mark is an svg or nothing, and every size cell wears the tone its weight earns.
+      expect(await page!.locator(`${frame} [data-row-mark]:not(svg)`).count(), `${step}: no drawn initials`).toBe(0);
+      for (const [bytes, tone] of await page!.locator(`${frame} [data-k=size]`).evaluateAll(els => els.map(el => [el.textContent, el.getAttribute("data-tone")]))) expect(["danger", "warning", "yellow", "muted"], `${step}: ${bytes} in ${tone}`).toContain(tone);
       const close = await box("[role=dialog] [aria-label=Close]");
       expect(near(close.y, SPEC.close) && near(VIEWPORTS[0].width - (close.x + close.width), SPEC.close), `${step}: close at ${close.x},${close.y}`).toBe(true);
       expect(await page!.locator("[role=dialog] [class*=animate-]:not([role=status]), [role=dialog] [data-badge]").count(), `${step}: nothing animates at rest, no badge`).toBe(0);
-      const words = await textContrast(page!, "[role=dialog] [data-k=state], [role=dialog] [data-k=why], [role=dialog] [data-k=size], [role=dialog] [data-k=tally], [role=dialog] [data-k=counter], [role=dialog] [data-k=sentence]");
+      const words = await textContrast(page!, "[role=dialog] [data-k=state], [role=dialog] [data-k=why], [role=dialog] [data-k=size], [role=dialog] [data-k=tally], [role=dialog] [data-k=tally-size], [role=dialog] [data-k=counter], [role=dialog] [data-k=sentence]");
       for (const ratio of words) expect(ratio, `${step}: words read`).toBeGreaterThanOrEqual(4.5);
       // Nothing wider than the window, the window itself never scrolls, and the middle opens at its top, not scrolled to its keycap.
       expect(await page!.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth && document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
       expect(await page!.locator("[role=dialog]").evaluate(el => el.scrollHeight <= el.clientHeight), `${step}: the sheet does not scroll`).toBe(true);
-      expect(await page!.locator(`${frame} [data-k=middle]`).evaluate(el => el.scrollTop)).toBe(0);
+      // A card opens at its top, except the build's, which brings the stage that opened on its own into view.
+      if (scrolls && FRAME[step] !== "build") expect(await page!.locator(`${frame} [data-slot=scroll-area-viewport]`).evaluate(el => el.scrollTop), `${step}: the card opens at its top`).toBe(0);
       const path = join(SHOTS, `cloud-setup-${step}-${theme}.png`);
       await page!.screenshot({ path });
       console.info(`cloud setup ${step} ${theme}: ${path}`);
     }
-    // The footer is pinned inside the window, so its bottom edge is at one y on every step.
-    expect(new Set(Object.values(footers).map(y => Math.round(y))).size, `footers at ${JSON.stringify(footers)}`).toBe(1);
   }, 240_000);
 
-  it.each(["dark", "light"] as const)("in the %s theme at 980 by 700 the column keeps its width, its top margin gives way first (96 down to 48), the footer stays in view, the middle scrolls, and the ring keeps its corner", async theme => {
+  it.each(["dark", "light"] as const)("in the %s theme at 980 by 700 the column keeps its width, a step that fits stays centred and one that does not pins its footer and its card scrolls", async theme => {
     await page!.setViewportSize({ ...VIEWPORTS[1] });
-    for (const step of ["agents", "tools", "logins", "signing", "done"] as const) {
+    for (const step of ["keys", "agents", "tools", "logins", "signing", "done"] as const) {
       const frame = await goTo(step, theme);
       const dialog = await box("[role=dialog]");
       expect([dialog.width, dialog.height]).toEqual([VIEWPORTS[1].width, VIEWPORTS[1].height]);
       const column = await box(frame);
       expect(near(column.width, SPEC.column), `${step}: column ${column.width}`).toBe(true);
       expect(near(centre(column), VIEWPORTS[1].width / 2)).toBe(true);
-      const label = await box(`${frame} [data-k=label]`);
-      expect(label.y, `${step}: label at ${label.y}`).toBeGreaterThanOrEqual(SPEC.topMin - 1);
-      expect(label.y, `${step}: label at ${label.y}`).toBeLessThanOrEqual(SPEC.top + 1);
+      const label = await box(`${frame} [data-k=head]`);
       const foot = await box(`${frame} [data-k=foot]`);
-      expect(foot.y + foot.height, `${step}: the footer's bottom edge`).toBeLessThanOrEqual(VIEWPORTS[1].height);
+      const under = VIEWPORTS[1].height - (foot.y + foot.height);
+      expect((near(label.y, under) || (near(label.y, SPEC.topMin) && near(under, SPEC.bottomMin))) && label.y >= SPEC.topMin - 1, `${step}: ${label.y} over, ${under} under`).toBe(true);
+      await cardScrolls(frame, VIEWPORTS[1].height, step);
       for (const b of await boxes(`${frame} [data-k=primary], ${frame} [data-k=secondary]`)) expect(b.y + b.height, `${step}: a control in view`).toBeLessThanOrEqual(VIEWPORTS[1].height - 8);
-      const ring = await box("[role=dialog] [data-k=disk]");
-      expect(near(VIEWPORTS[1].width - (ring.x + ring.width), SPEC.ringInset) && near(VIEWPORTS[1].height - (ring.y + ring.height), SPEC.ringInset), `${step}: ring at ${ring.x},${ring.y} ${ring.width}x${ring.height}`).toBe(true);
       expect(await page!.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
       const path = join(SHOTS, `cloud-setup-${step}-${theme}-980.png`);
       await page!.screenshot({ path });
       console.info(`cloud setup ${step} ${theme} 980: ${path}`);
     }
-    // Shortening the window under the agents step: the top margin gives way first, then, at its least, the middle scrolls.
+    // Shortening the window under the agents step: the block keeps its centre, each margin losing 10 px for 20 px of window, until both are at their least and the card gives up height and scrolls.
     const agents = await goTo("agents", theme);
-    const room = Math.floor((await box(`${agents} [data-k=middle]`)).height - (await box(`${agents} [data-k=content]`)).height);
+    const over = (await box(`${agents} [data-k=head]`)).y;
+    const room = Math.floor((over - SPEC.topMin) * 2);
     expect(room).toBeGreaterThan(40);
-    await page!.setViewportSize({ width: VIEWPORTS[1].width, height: VIEWPORTS[1].height - room - 20 });
+    await page!.setViewportSize({ width: VIEWPORTS[1].width, height: VIEWPORTS[1].height - 20 });
     await page!.waitForTimeout(100);
-    const eased = await box(`${agents} [data-k=label]`);
-    expect(near(eased.y, SPEC.top - 20, 3), `the margin gives way first, ${eased.y}`).toBe(true);
-    expect(await page!.locator(`${agents} [data-k=middle]`).evaluate(el => el.scrollHeight > el.clientHeight), "nothing scrolls yet").toBe(false);
-    await page!.setViewportSize({ width: VIEWPORTS[1].width, height: VIEWPORTS[1].height - room - 120 });
+    const eased = await box(`${agents} [data-k=head]`);
+    expect(near(eased.y, over - 10, 3), `the block keeps its centre, ${eased.y}`).toBe(true);
+    expect(await page!.locator(`${agents} [data-slot=scroll-area-viewport]`).evaluate(el => el.scrollHeight > el.clientHeight), "nothing scrolls yet").toBe(false);
+    await page!.setViewportSize({ width: VIEWPORTS[1].width, height: VIEWPORTS[1].height - room - 100 });
     await page!.waitForTimeout(100);
-    expect(near((await box(`${agents} [data-k=label]`)).y, SPEC.topMin), "the margin at its least").toBe(true);
-    expect(await page!.locator(`${agents} [data-k=middle]`).evaluate(el => el.scrollHeight > el.clientHeight), "then the middle scrolls").toBe(true);
+    expect(near((await box(`${agents} [data-k=head]`)).y, SPEC.topMin), "the margin at its least").toBe(true);
+    expect(await page!.locator(`${agents} [data-slot=scroll-area-viewport]`).evaluate(el => el.scrollHeight > el.clientHeight), "then the card scrolls").toBe(true);
     const short = await box(`${agents} [data-k=foot]`);
-    expect(short.y + short.height, "the footer stays in view").toBeLessThanOrEqual(VIEWPORTS[1].height - room - 120);
+    expect(near(VIEWPORTS[1].height - room - 100 - (short.y + short.height), SPEC.bottomMin), "the footer pins 40 px over the bottom edge").toBe(true);
     await page!.setViewportSize({ ...VIEWPORTS[1] });
-    // The done step is far taller than the window: the margin is at its least and the middle scrolls inside the sheet.
+    // The done step is far taller than the window: the margin is at its least and the card scrolls inside its border.
     const frame = await goTo("done", theme);
-    expect(near((await box(`${frame} [data-k=label]`)).y, SPEC.topMin), "the margin at its least on a long step").toBe(true);
-    const middle = page!.locator(`${frame} [data-k=middle]`);
-    expect(await middle.evaluate(el => el.scrollHeight > el.clientHeight), "the middle scrolls").toBe(true);
-    await middle.evaluate(el => el.scrollTo(0, el.scrollHeight));
-    const ring = await box("[role=dialog] [data-k=disk]");
-    expect(near(VIEWPORTS[1].height - (ring.y + ring.height), SPEC.ringInset), "the ring never moves").toBe(true);
+    expect(near((await box(`${frame} [data-k=head]`)).y, SPEC.topMin), "the margin at its least on a long step").toBe(true);
+    const viewport = page!.locator(`${frame} [data-slot=scroll-area-viewport]`);
+    expect(await viewport.evaluate(el => el.scrollHeight > el.clientHeight), "the card scrolls").toBe(true);
+    await viewport.evaluate(el => el.scrollTo(0, el.scrollHeight));
     const foot = await box(`${frame} [data-k=foot]`);
     expect(foot.y + foot.height, "the footer never moves").toBeLessThanOrEqual(VIEWPORTS[1].height);
     await page!.setViewportSize({ ...VIEWPORTS[0] });
   }, 180_000);
 
-  it.each(["dark", "light"] as const)("in the %s theme the ring's tooltip reads the numbers, the arc moves with a tick, the sign-in rows carry a mark each, the open one its page and code, and the one whose page hands a code back a mono field under it", async theme => {
+  it.each(["dark", "light"] as const)("in the %s theme at 1280 by 633 the build card keeps the active row and its block in view, done rows under the top fade, and the slide its first waiting sign-in", async theme => {
+    await page!.setViewportSize({ width: 1280, height: 633 });
+    const inView = async (selector: string): Promise<boolean> => {
+      const el = await box(selector);
+      const viewport = await box("[role=dialog] [data-slot=scroll-area-viewport]");
+      return el.y >= viewport.y - 1 && el.y + el.height <= viewport.y + viewport.height + 1;
+    };
+    // The floor: five rows on the tools step, whose head and footer leave room for them.
+    await goTo("tools", theme);
+    expect((await box("[role=dialog] [data-k=card]")).height, "five rows at 633").toBeGreaterThanOrEqual(SPEC.row * 5 + 1);
+    // The build's head, note and footer leave less than five rows here, so the card takes what is left and scrolls the running row to its top; under 700 px the block drops to six lines and stands whole under the row, the note one line across the column.
+    await goTo("building", theme);
+    expect(await inView("[role=dialog] [data-row='stage/installing-harness'] > div"), "the running row").toBe(true);
+    const block = await box("[role=dialog] [data-row='stage/installing-harness'] [data-k=lines]");
+    expect(near(block.height, 136), `six lines, ${block.height}`).toBe(true);
+    expect(await inView("[role=dialog] [data-row='stage/installing-harness'] [data-k=lines]"), "and its block, whole").toBe(true);
+    const note = await box("[role=dialog] [data-k=note]");
+    expect(near(note.height, 19.5, 1) && near(note.width, SPEC.column), `the note one line across the column, ${note.width}x${note.height}`).toBe(true);
+    expect(await inView("[role=dialog] [data-row='stage/creating'] > div"), "a done row scrolled away").toBe(false);
+    expect(await page!.locator("[role=dialog] [data-slot=scroll-area-viewport]").evaluate(el => el.scrollTop), "scrolled").toBeGreaterThan(0);
+    await page!.screenshot({ path: join(SHOTS, `cloud-setup-building-633-${theme}.png`) });
+    await goTo("signing", theme);
+    expect(await inView("[role=dialog] [data-row='sign-in/gh'] > div:first-child"), "the first waiting sign-in").toBe(true);
+    await page!.setViewportSize({ ...VIEWPORTS[0] });
+  }, 60_000);
+
+  it.each(["dark", "light"] as const)("in the %s theme the meter's tooltip reads the numbers, its fill grows with a tick, the sign-in rows carry a mark each, the open one its page and code, and the one whose page hands a code back a mono field under it", async theme => {
     await page!.setViewportSize({ ...VIEWPORTS[0] });
     const frame = await goTo("agents", theme);
-    const arc = page!.locator("[role=dialog] [data-k=disk-arc]");
-    const before = await arc.getAttribute("stroke-dasharray");
+    const fill = page!.locator("[role=dialog] [data-k=disk-fill]");
+    const before = (await fill.boundingBox())!.width;
     await page!.locator(`${frame} [data-row="hermes"] [role=checkbox]`).click();
     await page!.waitForTimeout(400);
-    expect(await arc.getAttribute("stroke-dasharray")).not.toBe(before);
-    expect(parseFloat((await arc.getAttribute("stroke-dasharray"))!)).toBeGreaterThan(parseFloat(before!));
+    expect((await fill.boundingBox())!.width).toBeGreaterThan(before);
     await page!.locator("[role=dialog] [data-k=disk]").hover();
     const tip = page!.locator("[data-slot=tooltip-popup]");
     await tip.waitFor();
     expect(await tip.textContent()).toMatch(/^about [\d.]+ GB of 20 GB on the image$/);
     expect(await style("[data-slot=tooltip-popup]", "font-size")).toEqual(["12px"]);
     await goTo("signing", theme);
+    // While the sign-in stage runs the build is a slide: its own title, the stages folded to one line, one large row per sign-in with its mark, the code in 20 px mono, the hand-off's line, the keycap.
+    expect(await page!.locator("[role=dialog] [data-k=title]").textContent()).toBe(CLOUD_SETUP_WORDS.build.slideHeadline);
+    expect(await page!.locator("[role=dialog] [data-k=stages-folded]").textContent()).toMatch(/^Building your image · \d+ of \d+$/);
+    expect(await page!.locator("[role=dialog] [data-row^='agent/']").count(), "no MCP rows").toBe(0);
+    expect(await page!.locator("[role=dialog] [data-k=signin]").count()).toBe(4);
+    for (const h of await boxes("[role=dialog] [data-k=signin] > div:first-child")) expect(h.height, `a slide row ${h.height}`).toBeGreaterThanOrEqual(60);
+    expect((await style("[role=dialog] [data-k=signin] [data-k=code]", "font-size"))[0]).toBe("20px");
+    expect(await page!.locator("[role=dialog] [data-k=handoff]").count()).toBeGreaterThan(0);
+    // The slide's card takes no row cap: every sign-in row whole, the code field included, no scrolling while the window holds them.
+    expect(await page!.locator("[role=dialog] [data-slot=scroll-area-viewport]").evaluate(el => el.scrollHeight > el.clientHeight + 1), "the slide's card scrolls").toBe(false);
+    // The cancel link is quiet at rest: the muted ink, the danger tone on hover.
+    const [restInk] = await style("[role=dialog] [data-k=secondary]", "color");
+    expect(restInk).toBe((await style("[role=dialog] [data-k=stages-folded]", "color"))[0]);
+    await page!.locator("[role=dialog] [data-k=secondary]").hover();
+    await page!.waitForTimeout(250);
+    expect((await style("[role=dialog] [data-k=secondary]", "color"))[0]).not.toBe(restInk);
+    await page!.mouse.move(0, 0);
     expect(await page!.locator("[role=dialog] [data-row^='sign-in/'] [data-row-mark]").count()).toBe(4);
+    const slideShot = join(SHOTS, `cloud-setup-signin-slide-${theme}.png`);
+    await page!.screenshot({ path: slideShot });
+    // Once the sign-ins settle the list is back; with one to retry while the seal runs, its stage is open on the sub-rows, indented a step, with Retry, and the cancel link disabled with its reason.
+    await goTo("retry", theme);
+    expect(await page!.locator("[role=dialog] [data-k=title]").textContent()).toBe(CLOUD_SETUP_WORDS.build.headline);
+    expect(await page!.locator("[role=dialog] [data-row='stage/sign-ins'][data-open=true]").count()).toBe(1);
+    const stageRow = await box("[role=dialog] [data-row='stage/sign-ins'] > div");
+    const subRow = await box("[role=dialog] [data-row='sign-in/gh'] > div [data-row-mark]");
+    expect(near(subRow.x - (stageRow.x + SPEC.rowLeft), 24), `sub-rows indented ${subRow.x - (stageRow.x + SPEC.rowLeft)}`).toBe(true);
+    expect(await page!.locator("[role=dialog] [data-row='sign-in/gh'] [data-k=retry]").count()).toBe(1);
+    expect(await page!.locator("[role=dialog] [data-k=secondary]").isDisabled()).toBe(true);
+    // The disabled cancel link reads disabled, half opacity, in the muted ink, and its reason opens as the kit's tooltip.
+    expect(parseFloat((await style("[role=dialog] [data-k=secondary]", "opacity"))[0]!)).toBeCloseTo(0.5, 1);
+    expect((await style("[role=dialog] [data-k=secondary]", "color"))[0]).toBe((await style("[role=dialog] [data-k=stages-folded], [role=dialog] [data-k=count]", "color"))[0]);
+    await page!.locator("[role=dialog] [data-k=secondary-reason]").hover();
+    await page!.locator("[data-slot=tooltip-popup]").waitFor();
+    expect(await page!.locator("[data-slot=tooltip-popup]").textContent()).toBe(CLOUD_SETUP_WORDS.build.cannotStop);
+    await page!.mouse.move(0, 0);
+    // The progress line lies along the card's top edge inside the border, 2 px, and the count sits at the right over the card.
+    const card = await box("[role=dialog] [data-k=card]");
+    const line = await box("[role=dialog] [data-k=progress]");
+    expect(near(line.height, 2) && near(line.y - card.y, 1) && near(line.width, card.width - 2), `progress ${line.width}x${line.height} at ${line.y - card.y}`).toBe(true);
+    const count = await box("[role=dialog] [data-k=count]");
+    expect(near(card.x + card.width - (count.x + count.width), 0, 1) && count.y + count.height <= card.y, "the count at the right over the card").toBe(true);
+    expect((await style("[role=dialog] [data-k=count]", "font-family"))[0]!.toLowerCase()).toMatch(/mono|menlo|consolas/);
+    // The open stage's block is eight lines high whatever it holds, scrolls inside itself, and its lines wear the terminal's colours.
+    await goTo("building", theme);
+    const block = await box("[role=dialog] [data-k=lines]");
+    expect(near(block.height, 176), `block ${block.height}`).toBe(true);
+    const scroller = page!.locator("[role=dialog] [data-k=lines-scroll]");
+    expect(await scroller.evaluate(el => el.scrollHeight > el.clientHeight && el.scrollTop > 0), "scrolls, pinned to the newest line").toBe(true);
+    // Pinned, the scroller shows whole lines: its height is a multiple of the 20 px line and it sits at its very end.
+    expect(await scroller.evaluate(el => el.clientHeight % 20 === 0 && Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) < 1), "whole lines, no sliver").toBe(true);
+    expect(await page!.locator("[role=dialog] [data-k=lines] span[class*='--terminal-ansi-2']").count(), "the machine's green, from the pane's own palette").toBeGreaterThan(0);
+    expect(await page!.locator("[role=dialog] [data-k=lines] span[class*='opacity-60']").count(), "the tool prefix dimmed").toBeGreaterThan(0);
+    await goTo("signing", theme);
     expect(await page!.locator('[role=dialog] [data-row="sign-in/gh"] [data-k=open]').getAttribute("href")).toBe("https://github.com/login/device");
     expect(await page!.locator('[role=dialog] [data-row="sign-in/gh"] [data-k=code]').textContent()).toBe("8F4A-C21B");
     expect(await page!.locator('[role=dialog] [data-row="sign-in/gh"] [data-k=state]').textContent()).toBe("waiting for you");

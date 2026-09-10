@@ -46,6 +46,9 @@ describe("the screens as data", () => {
     expect(claude.detail[0]).toContain("on this Mac");
     expect(agents!.footer).toEqual([]);
     expect(agents!.tally).toBe("agents");
+    // The what-else screen counts too, in a word that does not take a plural: "3 more on the image".
+    const also = screensOf(reading(), fresh(), at()).find(s => s.id === "also")!;
+    expect(also.tally).toBe("more");
   });
 
   it("the tools screen is two groups, the base checked and locked under one divider and the rest by calls, each usage row one number, no footer lines", () => {

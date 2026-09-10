@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Served by Vite to a real browser: the cloud setup sheet over a fake api at
 // each of its steps (?screen=choice|keys|agent|agent-stopped|reading|agents|
-// tools|also|logins|ask|building|signing|done|failed), in either theme
+// tools|also|logins|ask|building|signing|retry|done|failed), in either theme
 // (?theme=light), so a test
 // can lay out and photograph every state the ticket names. The screens' data
 // is what the host hands over for a small laptop: three agents, the tools with
@@ -65,6 +65,7 @@ const SCREENS: InitScreen[] = [
   },
   {
     id: "also",
+    tally: "more",
     title: "Also on this Mac",
     top: "What else this Mac brings",
     counter: "3/6",
@@ -105,7 +106,11 @@ const STAGES: InitJob["rows"] = [
   stage("deploying-daemon", "done", { ms: 61_000 }),
   stage("applying-setup", "done", { ms: 8_000 }),
   stage("uploading-files", "done", { ms: 4_000, lines: ["~/.zshrc", "~/.gitconfig", "~/.config/starship.toml", "3 files, 5 KB"] }),
-  stage("installing-harness", "running", { detail: "npm i -g @anthropic-ai/claude-code", lines: ["npm i -g @anthropic-ai/claude-code", "added 1 package in 41s", "claude --version", "2.1.4 (Claude Code)"] }),
+  stage("installing-harness", "running", {
+    detail: "npm i -g @anthropic-ai/claude-code",
+    // Terminal output as the machine sends it: a tool's prefix, its own colours, more lines than the block shows at once.
+    lines: ["pnpm: fetching @anthropic-ai/claude-code@2.1.4", "npm i -g @anthropic-ai/claude-code", "\u001b[2mnpm\u001b[22m \u001b[33mWARN\u001b[39m deprecated inflight@1.0.6", "\u001b[32m✓\u001b[39m added 1 package in 41s", "claude --version", "2.1.4 (Claude Code)", "pnpm: fetching @openai/codex@0.42.0", "\u001b[32m✓\u001b[39m added 1 package in 12s", "codex --version", "codex-cli 0.42.0", "pnpm: linking binaries"],
+  }),
   stage("installing-tools", "waiting"),
   stage("installing-mcp", "waiting"),
   stage("ready", "waiting"),
@@ -118,10 +123,10 @@ const STAGES: InitJob["rows"] = [
 const done = (rows: InitJob["rows"]): InitJob["rows"] => rows.map(r => (r.kind === "stage" ? { ...r, state: "done", detail: undefined } : r));
 const signIns: InitJob["rows"] = [
   { id: "sign-in/claude", kind: "sign-in", tool: "claude", label: "Sign in to Claude Code", state: INIT_ROW_STATES.keySet },
-  { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "Sign in to GitHub CLI", state: SIGN_IN_OPEN_STATE, page: "https://github.com/login/device", code: "8F4A-C21B" },
+  { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "Sign in to GitHub CLI", state: SIGN_IN_OPEN_STATE, page: "https://github.com/login/device", code: "8F4A-C21B", detail: "gh auth login is waiting on the machine for the code" },
   { id: "sign-in/codex", kind: "sign-in", tool: "codex", label: "Sign in to Codex", state: INIT_SIGN_IN_WORDS.copied },
   // The row whose page hands a code back: the field for it sits under the row.
-  { id: "sign-in/gcloud", kind: "sign-in", tool: "gcloud", label: "Sign in to Google Cloud", state: SIGN_IN_OPEN_STATE, page: "https://accounts.google.com/o/oauth2/auth", finish: "code" },
+  { id: "sign-in/gcloud", kind: "sign-in", tool: "gcloud", label: "Sign in to Google Cloud", state: SIGN_IN_OPEN_STATE, page: "https://accounts.google.com/o/oauth2/auth", finish: "code", detail: "the page hands you a code to paste here" },
 ];
 
 const FACTS: InitJob["rows"] = [
@@ -153,6 +158,15 @@ const JOBS: Record<string, InitJob> = {
     rows: [...done(STAGES.slice(0, 9)), ...signIns, ...STAGES.slice(9)],
     progress: { done: 11, total: 18 },
   },
+  // A sign-in that ran out while the seal runs: the list is back, its stage open on the sub-rows with Retry, and the cancel link disabled.
+  retry: {
+    ...base,
+    phase: "sealing",
+    stoppable: false,
+    screens: [],
+    rows: [...done(STAGES.slice(0, 9)), ...signIns.map(r => (r.id === "sign-in/gh" ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, state: INIT_SIGN_IN_WORDS["not-signed-in"], detail: "no sign-in within 16m" } : r.state === SIGN_IN_OPEN_STATE ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, state: INIT_SIGN_IN_WORDS["signed-in"] } : r)), stage("snapshotting", INIT_ROW_STATES.running, { lines: ["snapshot wsp-h1-default-v1 requested", "waiting on the provider"] }), ...STAGES.slice(10)],
+    progress: { done: 12, total: 18 },
+  },
   done: {
     ...base,
     phase: "done",
@@ -173,7 +187,7 @@ const setup: InitSetup = {
     { id: "codex", name: "Codex", configured: false, takesTools: false },
   ],
   pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 },
-  job: JOBS[at] ?? (screenAt >= 0 ? { ...base, step: screenAt } : null),
+  job: at === "reading" ? { ...JOBS.reading!, rows: [] } : (JOBS[at] ?? (screenAt >= 0 ? { ...base, step: screenAt } : null)),
 };
 
 const api: Api = {
@@ -220,6 +234,20 @@ const api: Api = {
 
 useStore.setState({ conn: "live", hasGolden: false, initJob: setup.job });
 useStore.getState().bind(api);
+
+// The reading step plays the read the runtime would send: a row lands every 600 ms with the spinner, then its word, and the next follows.
+if (at === "reading") {
+  let landed = 0;
+  const land = setInterval(() => {
+    landed += 1;
+    const rows = FACTS.slice(0, landed).map((r, i) => (i === landed - 1 && landed < FACTS.length ? { id: r.id, kind: r.kind, label: r.label, state: INIT_ROW_STATES.running } : r));
+    useStore.setState({ initJob: { ...JOBS.reading!, rows } });
+    if (landed >= FACTS.length) clearInterval(land);
+  }, 600);
+}
+
+// The first-workspace step shows the desktop's Choose keycap, so the fixture stands in for the bridge there.
+if (at === "ask") window.wsp = { ...window.wsp, pickFolder: async () => "/Users/zingzy/code/app", droppedPath: file => `/Users/zingzy/${file.name}` };
 
 // The key screen is one press past the choice, as it is for a person: the fixture presses Continue once the choice is drawn.
 if (at === "keys") {

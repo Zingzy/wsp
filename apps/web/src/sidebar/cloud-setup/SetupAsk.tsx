@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The last question before the build, as the terminal's last screen asks it:
 // the first cloud workspace's name, and a folder on this computer whose
-// project lands on it, which may stay empty. The folder field takes the
-// desktop's own picker where the desktop bridge is there, a folder dragged
-// onto it, or what is typed; in a browser it is typed alone.
+// project lands on it, which may stay empty. Two bare fields in the key
+// field's grammar, 24 px apart, the folder's Choose keycap inside its right
+// end where the desktop bridge is there; a folder dragged onto it or typed
+// works everywhere.
 import { useState, type DragEvent } from "react";
 import { CLOUD_SETUP_WORDS, initForkLine, type InitSetup } from "@wsp/protocol";
 import { Button } from "../../components/ui/button.js";
@@ -11,7 +12,7 @@ import { Input } from "../../components/ui/input.js";
 import { desktopBridge } from "../../lib/desktopShell.js";
 import { cn } from "../../lib/utils.js";
 import { carriesFiles, droppedFolder } from "../folderDrag.js";
-import { CARD, FIELD, FIELD_LABEL, FIELD_ROW, ROW_LINE, STATE_WORD } from "./rows.js";
+import { FIELD_LABEL, LONE_FIELD, STATE_WORD } from "./rows.js";
 import { SetupScreen } from "./SetupScreen.js";
 
 /** The name a first workspace takes when nobody names one; the terminal's own default. */
@@ -35,30 +36,27 @@ export function SetupAsk({ setup, counter, onBuild, onBack, refusal }: { setup: 
     const path = file !== null ? bridge?.droppedPath?.(file) : undefined;
     if (path !== undefined) setFolder(path);
   };
+  const canChoose = bridge?.pickFolder !== undefined;
   return (
-    <SetupScreen k="ask" label={words.label} counter={counter} headline={words.headline} top={setup.pricing !== null ? initForkLine(setup.pricing.size) : words.top} refusal={refusal} primary={{ word: CLOUD_SETUP_WORDS.screen.build, onPress: build, disabled: !ready, focus: false }} secondary={{ word: CLOUD_SETUP_WORDS.screen.back, onPress: onBack }}>
-      <div className={CARD}>
-        <div className={cn(FIELD_ROW, ROW_LINE)}>
-          <label htmlFor="setup-first-name" className={FIELD_LABEL}>
-            {words.name}
-          </label>
-          <Input id="setup-first-name" size="compact" autoFocus value={name} onChange={e => setName(e.target.value)} onKeyDown={e => (e.key === "Enter" && ready ? build() : undefined)} className={FIELD} />
-        </div>
-        <div className={cn(FIELD_ROW, ROW_LINE)} onDragOver={e => (carriesFiles(e.dataTransfer) ? e.preventDefault() : undefined)} onDrop={drop} data-k="folder-row">
-          <div className="flex items-center justify-between">
-            <label htmlFor="setup-first-folder" className={FIELD_LABEL}>
-              {words.folder}
-              <span className={cn(STATE_WORD, "ml-2")}>{words.optional}</span>
-            </label>
-          </div>
-          <div className="flex items-center gap-2">
-            <Input id="setup-first-folder" size="compact" value={folder} placeholder={`${setup.home}/code/project`} spellCheck={false} onChange={e => setFolder(e.target.value)} onKeyDown={e => (e.key === "Enter" && ready ? build() : undefined)} className={cn(FIELD, "min-w-0 flex-1")} />
-            {bridge?.pickFolder !== undefined ? (
-              <Button data-k="choose" size="sm" variant="outline" className="h-8 shrink-0 font-mono text-xs sm:h-8 sm:text-xs" onClick={() => void choose()}>
-                {words.choose}
-              </Button>
-            ) : null}
-          </div>
+    <SetupScreen k="ask" counter={counter} headline={words.headline} top={setup.pricing !== null ? initForkLine(setup.pricing.size) : words.top} refusal={refusal} primary={{ word: CLOUD_SETUP_WORDS.screen.build, onPress: build, disabled: !ready, focus: false }} secondary={{ word: CLOUD_SETUP_WORDS.screen.back, onPress: onBack }}>
+      <div className="flex w-full flex-col gap-2">
+        <label htmlFor="setup-first-name" className={FIELD_LABEL}>
+          {words.name}
+        </label>
+        <Input id="setup-first-name" size="compact" autoFocus value={name} onChange={e => setName(e.target.value)} onKeyDown={e => (e.key === "Enter" && ready ? build() : undefined)} className={LONE_FIELD} />
+      </div>
+      <div className="mt-6 flex w-full flex-col gap-2" onDragOver={e => (carriesFiles(e.dataTransfer) ? e.preventDefault() : undefined)} onDrop={drop} data-k="folder-row">
+        <label htmlFor="setup-first-folder" className={FIELD_LABEL}>
+          {words.folder}
+          <span className={cn(STATE_WORD, "ml-2")}>{words.optional}</span>
+        </label>
+        <div className="relative w-full">
+          <Input id="setup-first-folder" size="compact" value={folder} placeholder={`${setup.home}/code/project`} spellCheck={false} onChange={e => setFolder(e.target.value)} onKeyDown={e => (e.key === "Enter" && ready ? build() : undefined)} className={cn(LONE_FIELD, "min-w-0", canChoose && "[&_input]:pr-[96px]")} />
+          {canChoose ? (
+            <Button data-k="choose" size="sm" variant="outline" className="absolute top-2 right-2 h-8 font-mono text-xs sm:h-8 sm:text-xs" onClick={() => void choose()}>
+              {words.choose}
+            </Button>
+          ) : null}
         </div>
       </div>
     </SetupScreen>
