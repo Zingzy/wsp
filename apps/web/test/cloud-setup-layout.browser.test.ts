@@ -43,12 +43,12 @@ interface Box {
 const STEPS = ["choice", "keys", "agent", "agent-stopped", "reading", "agents", "tools", "also", "logins", "ask", "building", "signing", "retry", "done", "failed"] as const;
 /** States of a step rather than steps of the walk, and the error states of the end-to-end run: each is
  * photographed on its own, not walked with the rest. */
-const STATES = ["keys-refused", "failed-key", "stopped", "you-stopped", "slot", "over", "sweeping"] as const;
+const STATES = ["keys-refused", "keys-saved", "failed-key", "stopped", "you-stopped", "slot", "over", "sweeping"] as const;
 type StepName = (typeof STEPS)[number] | (typeof STATES)[number];
 /** The answer steps, which carry their count over the title. */
 const COUNTED: ReadonlySet<StepName> = new Set<StepName>(["agents", "tools", "also", "logins", "ask"]);
 /** The frame's data-k for each, where it differs from the step's own name. */
-const FRAME: Record<StepName, string> = { choice: "choice", keys: "keys", "keys-refused": "keys", agent: "agent", "agent-stopped": "agent", reading: "reading", agents: "screen-agents", tools: "screen-tools", also: "screen-also", logins: "screen-logins", ask: "ask", building: "build", signing: "build", retry: "build", done: "build", failed: "build", "failed-key": "build", stopped: "build", "you-stopped": "build", slot: "build", over: "screen-also", sweeping: "build" };
+const FRAME: Record<StepName, string> = { choice: "choice", keys: "keys", "keys-refused": "keys", "keys-saved": "keys", agent: "agent", "agent-stopped": "agent", reading: "reading", agents: "screen-agents", tools: "screen-tools", also: "screen-also", logins: "screen-logins", ask: "ask", building: "build", signing: "build", retry: "build", done: "build", failed: "build", "failed-key": "build", stopped: "build", "you-stopped": "build", slot: "build", over: "screen-also", sweeping: "build" };
 /** The steps whose tally carries the disk meter: the ones that change the image's size. */
 const METERED = new Set<StepName>(["agents", "tools", "also"]);
 /** The first launch's numbers: what every step is measured against. */
@@ -540,9 +540,30 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     console.info(`cloud setup agent stopped ${theme}: ${stopped}`);
   }, 120_000);
 
-  it.each(["dark", "light"] as const)("in the %s theme a key the provider refused reads under the field in the danger tone with the field itself in it, and a saved key refused at build time offers Change the key", async theme => {
+  it.each(["dark", "light"] as const)("in the %s theme a key the provider refused reads under the field in the danger tone with the field itself in it, a saved key shows as dots with saved and a Change link that empties the field, and a saved key refused at build time offers Change the key", async theme => {
     await page!.setViewportSize({ ...VIEWPORTS[0] });
-    let frame = await goTo("keys-refused", theme);
+    // With a key in the home the step still shows: the field reads the key as dots and cannot be typed in, saved sits at its right end, Continue is live, and Change is the one quiet link.
+    let frame = await goTo("keys-saved", theme);
+    const savedField = page!.locator(`${frame} #setup-key-solari`);
+    expect(await savedField.inputValue()).toMatch(/^•+$/);
+    expect(await savedField.getAttribute("readonly")).not.toBeNull();
+    expect(await page!.locator(`${frame} [data-k=solari-state]`).textContent()).toBe(CLOUD_SETUP_WORDS.keys.saved);
+    const savedWord = await box(`${frame} [data-k=solari-state]`);
+    const savedBox = await box(`${frame} #setup-key-solari`);
+    expect(savedWord.x + savedWord.width <= savedBox.x + savedBox.width && savedWord.y >= savedBox.y, "saved inside the field's right end").toBe(true);
+    expect(await page!.locator(`${frame} [data-k=primary]`).textContent()).toContain(CLOUD_SETUP_WORDS.screen.keycap);
+    expect(await page!.locator(`${frame} [data-k=primary]`).isEnabled()).toBe(true);
+    expect(await page!.locator(`${frame} [data-k=where]`).count(), "no link to get a key while one is saved").toBe(0);
+    for (const ratio of await textContrast(page!, `${frame} [data-k=solari-state], ${frame} [data-k=change]`)) expect(ratio, "the word and the link read").toBeGreaterThanOrEqual(4.5);
+    await shoot("keys-saved", theme);
+    await page!.click(`${frame} [data-k=change]`);
+    expect(await savedField.inputValue()).toBe("");
+    expect(await savedField.getAttribute("readonly")).toBeNull();
+    expect(await page!.locator(`${frame} [data-k=solari-state]`).count()).toBe(0);
+    expect(await page!.locator(`${frame} [data-k=primary]`).textContent()).toContain(CLOUD_SETUP_WORDS.keys.keycap);
+    expect(await page!.locator(`${frame} [data-k=primary]`).isDisabled()).toBe(true);
+    expect(await page!.locator(`${frame} [data-k=where]`).count()).toBe(1);
+    frame = await goTo("keys-refused", theme);
     await page!.waitForSelector(`${frame} [data-k=key-check]`);
     // The provider's own word under the field, inside the column, not in the footer's slot.
     const line = await box(`${frame} [data-k=key-check]`);

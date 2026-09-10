@@ -51,6 +51,8 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
   const [draft, setDraft] = useState<{ key: string; draft: Draft } | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [check, setCheck] = useState<KeyCheckShown | null>(null);
+  // Whether the key step opens on an empty field though a key is saved: after a build the saved key failed, yes.
+  const [keyChange, setKeyChange] = useState(false);
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     void api?.initGet?.().then(setSetup, e => setRefusal(errorText(e)));
@@ -87,21 +89,27 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
       setStep("job");
     });
   };
+  // The key step is on every run, so a person always sees that a key is set and can change it.
   const onContinueChoice = (): void => {
     if (setup === null) return;
-    if (!setup.keys.solari) setStep("keys");
-    else start();
+    setKeyChange(false);
+    setStep("keys");
   };
   // The host checks the key with the provider before it saves it, so Save spins for as long as that call takes and a
-  // key the provider would not take leaves the person on this step with what it said under the field.
-  const onSaveKeys = (keys: { solari: string }): void => {
+  // key the provider would not take leaves the person on this step with what it said under the field. A saved key the
+  // person left as it was is not sent again: Continue starts the job on it.
+  const onSaveKeys = (keys: { solari?: string }): void => {
+    if (keys.solari === undefined) {
+      start();
+      return;
+    }
     if (api?.initKeys === undefined) return;
     setRefusal(null);
     setCheck(null);
     setSaving(true);
     void (async () => {
       try {
-        setSetup(await api.initKeys!(keys));
+        setSetup(await api.initKeys!({ solari: keys.solari }));
         start();
       } catch (e) {
         const kind = e instanceof RequestError ? e.kind : undefined;
@@ -115,6 +123,7 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
   /** The build read the saved key and the provider refused it: back to the step that takes one, with the field clear. */
   const onChangeKey = (): void => {
     setCheck(null);
+    setKeyChange(true);
     setStep("keys");
     void api?.initGet?.().then(setSetup, () => {});
   };
@@ -128,7 +137,7 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
   if (step === "choice" || setup === null) {
     body = setup === null ? <SetupScreen k="loading" headline={CLOUD_SETUP_WORDS.choice.headline} top={CLOUD_SETUP_WORDS.choice.top} refusal={refusal} /> : <SetupChoice agents={setup.agents} pick={pick} onPick={setPick} onContinue={onContinueChoice} refusal={refusal} />;
   } else if (step === "keys") {
-    body = <SetupKeys setup={setup} onSave={onSaveKeys} onBack={() => setStep("choice")} refusal={refusal} check={check} busy={saving} />;
+    body = <SetupKeys setup={setup} onSave={onSaveKeys} onBack={() => setStep("choice")} refusal={refusal} check={check} busy={saving} change={keyChange} />;
   } else if (job !== null && initAgentStep(job)) {
     body = (
       <SetupAgent

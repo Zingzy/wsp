@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Served by Vite to a real browser: the cloud setup sheet over a fake api at
-// each of its steps (?screen=choice|keys|keys-refused|agent|agent-stopped|
+// each of its steps (?screen=choice|keys|keys-refused|keys-saved|agent|agent-stopped|
 // reading|agents|tools|also|logins|ask|building|signing|retry|done|failed|
 // failed-key|stopped|you-stopped|slot|over|sweeping), in either theme
 // (?theme=light), so a test
@@ -236,6 +236,7 @@ const JOBS: Record<string, InitJob> = {
 const withProgress = (job: InitJob): InitJob => ({ ...job, progress: initStageCount(initBuildRows(job.rows).rows) });
 
 const setup: InitSetup = {
+  // The saved-key state is the key step reached with a key in the home, one Continue past the choice like the others.
   keys: { solari: at !== "keys" && at !== "keys-refused" },
   home: "/Users/zingzy",
   agents: [
@@ -309,7 +310,7 @@ if (at === "reading") {
 if (at === "ask") window.wsp = { ...window.wsp, pickFolder: async () => "/Users/zingzy/code/app", droppedPath: file => `/Users/zingzy/${file.name}` };
 
 // The key screen is one press past the choice, as it is for a person: the fixture presses Continue once the choice is drawn.
-if (at === "keys" || at === "keys-refused") {
+if (at === "keys" || at === "keys-refused" || at === "keys-saved") {
   const press = setInterval(() => {
     const key = document.querySelector<HTMLButtonElement>("[data-k=choice] [data-k=primary]");
     if (key !== null) {

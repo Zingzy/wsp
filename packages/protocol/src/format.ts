@@ -1046,6 +1046,8 @@ export const CLOUD_SETUP_WORDS = {
     retry: "Try again",
     /** What the build offers when the saved key was refused: back to this step, not another build. */
     changeKey: "Change the key",
+    /** The quiet link under a saved key's dots that empties the field for a new one. */
+    change: "Change",
   },
   screen: {
     keycap: "Continue",

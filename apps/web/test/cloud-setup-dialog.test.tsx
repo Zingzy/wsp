@@ -215,10 +215,16 @@ const k = (root: HTMLElement, key: string): HTMLElement => {
   if (el === null) throw new Error(`no [data-k=${key}] in the dialog`);
   return el;
 };
-/** Walks a fresh job to the screen named, as the person would, answering each screen with what it opened on. */
-async function walkTo(t: Awaited<ReturnType<typeof open>>, screenId: string): Promise<void> {
+/** Continue on the choice, then Continue on the key step, which every run passes through and a held key does not stop. */
+async function pressPastKeys(t: Awaited<ReturnType<typeof open>>): Promise<void> {
+  fireEvent.click(k(t.dialog, "primary"));
+  await waitFor(() => expect(k(t.dialog, "keys")).toBeDefined());
   fireEvent.click(k(t.dialog, "primary"));
   await waitFor(() => expect(t.api.initStart).toHaveBeenCalled());
+}
+/** Walks a fresh job to the screen named, as the person would, answering each screen with what it opened on. */
+async function walkTo(t: Awaited<ReturnType<typeof open>>, screenId: string): Promise<void> {
+  await pressPastKeys(t);
   t.emit(JOB);
   await waitFor(() => expect(k(t.dialog, "screen-agents")).toBeDefined());
   for (const id of ["agents", "tools", "also", "logins"]) {
@@ -365,19 +371,50 @@ describe("the cloud setup sheet", () => {
     await waitFor(() => expect(t.api.initKeys).toHaveBeenCalledTimes(2));
   });
 
-  it("with a key held, Continue starts the job on the road picked; the agent road names its harness; a refused start leaves the choice up with the refusal", async () => {
+  it("with a key held the key step still shows: the key as dots with saved, Continue starts the job on the road picked without sending a key, Change empties the field for a new one, and a refused start leaves the step up with the refusal", async () => {
     const { api, dialog } = await open({ setup: HELD });
     await waitFor(() => expect(k(dialog, "choice")).toBeDefined());
     fireEvent.click(k(dialog, "road-agent"));
     await waitFor(() => expect(k(dialog, "road-agent").getAttribute("aria-checked")).toBe("true"));
     fireEvent.click(k(dialog, "primary"));
+    await waitFor(() => expect(k(dialog, "keys")).toBeDefined());
+    // The saved key reads as dots, never the key, in a field that cannot be typed in; saved stands at its right; the link to get a key is gone.
+    const field = dialog.querySelector<HTMLInputElement>("#setup-key-solari")!;
+    expect(field.value).toMatch(/^•+$/);
+    expect(field.readOnly).toBe(true);
+    expect(k(dialog, "solari-state").textContent).toBe(CLOUD_SETUP_WORDS.keys.saved);
+    expect(dialog.querySelector("[data-k=where]")).toBeNull();
+    expect(k(dialog, "primary").textContent).toContain(CLOUD_SETUP_WORDS.screen.keycap);
+    expect((k(dialog, "primary") as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(k(dialog, "primary"));
     await waitFor(() => expect(api.initStart).toHaveBeenCalledWith({ road: "agent", harness: "claude" }));
     expect(api.initKeys).not.toHaveBeenCalled();
+    // Change empties the field for a new key: Save is held until one is typed, and the typed one goes to the host once.
+    const again = await open({ setup: HELD });
+    await waitFor(() => expect(k(again.dialog, "choice")).toBeDefined());
+    fireEvent.click(k(again.dialog, "primary"));
+    await waitFor(() => expect(k(again.dialog, "keys")).toBeDefined());
+    fireEvent.click(k(again.dialog, "change"));
+    const emptied = again.dialog.querySelector<HTMLInputElement>("#setup-key-solari")!;
+    expect(emptied.value).toBe("");
+    expect(emptied.readOnly).toBe(false);
+    expect(again.dialog.querySelector("[data-k=solari-state]")).toBeNull();
+    expect(again.dialog.querySelector("[data-k=change]")).toBeNull();
+    expect(k(again.dialog, "where")).toBeDefined();
+    expect(k(again.dialog, "primary").textContent).toContain(CLOUD_SETUP_WORDS.keys.keycap);
+    expect((k(again.dialog, "primary") as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(emptied, { target: { value: "slr_live_new_key" } });
+    fireEvent.click(k(again.dialog, "primary"));
+    await waitFor(() => expect(again.api.initKeys).toHaveBeenCalledWith({ solari: "slr_live_new_key" }));
+    await waitFor(() => expect(again.api.initStart).toHaveBeenCalledWith({ road: "manual" }));
+    expect(again.dialog.textContent).not.toContain("slr_live_new_key");
     const refused = await open({ setup: HELD, refuse: "start" });
     await waitFor(() => expect(k(refused.dialog, "choice")).toBeDefined());
     fireEvent.click(k(refused.dialog, "primary"));
+    await waitFor(() => expect(k(refused.dialog, "keys")).toBeDefined());
+    fireEvent.click(k(refused.dialog, "primary"));
     await waitFor(() => expect(k(refused.dialog, "refusal").textContent).toMatch(/already running/));
-    expect(k(refused.dialog, "choice")).toBeDefined();
+    expect(k(refused.dialog, "keys")).toBeDefined();
   });
 
   it("while this computer is read the step shows the work as rows: the spinner on the row being read, a mono word once done, no bare sentence", async () => {
@@ -494,8 +531,7 @@ describe("the cloud setup sheet", () => {
     const heavy: InitScreen = { ...TOOLS, items: [...TOOLS.items, { id: "big", label: "big", size: 18 * GIB, group: "from your usage", detail: [] }] };
     const t = await open({ setup: HELD });
     await waitFor(() => expect(k(t.dialog, "choice")).toBeDefined());
-    fireEvent.click(k(t.dialog, "primary"));
-    await waitFor(() => expect(t.api.initStart).toHaveBeenCalled());
+    await pressPastKeys(t);
     t.emit({ ...JOB, step: 1, screens: [AGENTS, heavy, ALSO, LOGINS, WSP] });
     await waitFor(() => expect(k(t.dialog, "screen-tools")).toBeDefined());
     expect(k(t.dialog, "disk").getAttribute("data-tone")).toBe("muted");
@@ -555,8 +591,7 @@ describe("the cloud setup sheet", () => {
   it("the build's question: the title, the sentence from the recipe's numbers, both fields in the input grammar, the first launch's MCP answer handed to the job with the build", async () => {
     const t = await open({ setup: HELD });
     await waitFor(() => expect(k(t.dialog, "choice")).toBeDefined());
-    fireEvent.click(k(t.dialog, "primary"));
-    await waitFor(() => expect(t.api.initStart).toHaveBeenCalled());
+    await pressPastKeys(t);
     t.emit({ ...JOB, step: 4 });
     const { dialog, api } = t;
     await waitFor(() => expect(k(dialog, "ask")).toBeDefined());
@@ -582,8 +617,7 @@ describe("the cloud setup sheet", () => {
   it("the build's question with the name cleared: the keycap is held and says why, so a folder can never be sent with nothing to fork", async () => {
     const t = await open({ setup: HELD });
     await waitFor(() => expect(k(t.dialog, "choice")).toBeDefined());
-    fireEvent.click(k(t.dialog, "primary"));
-    await waitFor(() => expect(t.api.initStart).toHaveBeenCalled());
+    await pressPastKeys(t);
     t.emit({ ...JOB, step: 4 });
     const { dialog, api } = t;
     await waitFor(() => expect(k(dialog, "ask")).toBeDefined());
@@ -1130,6 +1164,12 @@ describe("the cloud setup sheet", () => {
     await waitFor(() => expect(k(t.dialog, "keys")).toBeDefined());
     expect(t.dialog.querySelector("[data-k=key-check]")).toBeNull();
     expect(t.api.initStart).not.toHaveBeenCalled();
+    // The refused key is not the one to keep: the step opens on an empty field for a new one, not on the saved dots.
+    const field = t.dialog.querySelector<HTMLInputElement>("#setup-key-solari")!;
+    expect(field.value).toBe("");
+    expect(field.readOnly).toBe(false);
+    expect(t.dialog.querySelector("[data-k=solari-state]")).toBeNull();
+    expect((k(t.dialog, "primary") as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("a build that could not ask the provider about the key offers Start over: the saved key may be fine", async () => {
