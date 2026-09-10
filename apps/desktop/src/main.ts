@@ -4,13 +4,14 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { agentHistories, agentsHere, assetDir, currentHome, installEach, mcpServerSpec, runningWsp, shimPath, wspHome, type CliIO } from "@wsp/host";
-import { DEFAULT_PORT, DEFAULT_WS_PORT, ThemePreference } from "@wsp/protocol";
+import { DEFAULT_PORT, DEFAULT_WS_PORT, InitNeedsYou, ThemePreference } from "@wsp/protocol";
 import type { Runtime } from "@wsp/runtime";
-import { BrowserWindow, Menu, app, dialog, ipcMain, nativeTheme, shell, type IpcMainInvokeEvent } from "electron";
+import { BrowserWindow, Menu, Notification, app, dialog, ipcMain, nativeTheme, shell, type IpcMainInvokeEvent } from "electron";
 import { chooseFrom, parseContextMenuItems } from "./context-menu.js";
 import { fontDirs, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { locateHost, openHost, statePathIn, type HostSession, type Located } from "./host-lifecycle.js";
 import { offerMove, type MoveGate } from "./move.js";
+import { sayNeedsYou, type Notifier } from "./needs-you.js";
 import { fromAppPage, fromOnboardingPage } from "./origin.js";
 import { pagePreviews } from "./previews.js";
 import { checkSetup, recordThisComputer } from "./setup.js";
@@ -90,6 +91,28 @@ ipcMain.on("theme:set", (event, theme: unknown) => {
   if (session === undefined || !fromAppPage(event.senderFrame?.url, session.url)) return;
   const parsed = ThemePreference.safeParse(theme);
   if (parsed.success) nativeTheme.themeSource = parsed.data;
+});
+
+/** How this shell shows a system notification; the module decides whether to, this says with what. */
+const NOTIFIER: Notifier = { supported: () => Notification.isSupported(), make: o => new Notification(o) };
+
+/** The window brought back in front of the person: a minimised one is restored first, and on a Mac the app itself has
+ * to be raised or the window comes up behind whatever they were in. */
+function raiseWindow(win: BrowserWindow): void {
+  if (win.isMinimized()) win.restore();
+  app.focus({ steal: true });
+  win.show();
+  win.focus();
+}
+
+// A build waiting on the person, said over the system while the window is not the one they are looking at. Only the
+// host's own page may speak here, and only its own sentence: what a notification says is whatever the field holds.
+ipcMain.on("needs-you:say", (event, need: unknown) => {
+  if (session === undefined || !fromAppPage(event.senderFrame?.url, session.url)) return;
+  const parsed = InitNeedsYou.safeParse(need);
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!parsed.success || win === null) return;
+  sayNeedsYou(parsed.data, { focused: () => win.isFocused(), raise: () => raiseWindow(win), open: () => win.webContents.send("needs-you:open") }, NOTIFIER);
 });
 
 function locate(): Promise<Located> {

@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { NOTIFY_ME, applyPreferencesPatch, foldThreads, goldenHead, isLocalWorkspace, threadFromHash, workspaceFromHash, workspaceStateOf, type Capabilities, type HarnessCatalog, type InitJob, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, threadFromHash, workspaceFromHash, workspaceStateOf, type Capabilities, type HarnessCatalog, type InitJob, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { sidebarWorkspaceOrder } from "../adapt/workspaces.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
@@ -83,6 +83,12 @@ interface State {
   /** Guest ports the host forwards to localhost here, from the host's list and its forward events. */
   forwards: PortForward[];
   toast: string | null;
+  /** The one action on the toast that carries one, keyed by the words it was set with: a later toast whose words are
+   * not those hides it, so a toast set anywhere else can never inherit an action meant for another sentence. */
+  toastAction: { for: string; word: string; run: () => void } | null;
+  /** Whether the cloud setup sheet stands open. Here rather than in the row that opens it, since the toast's Open and
+   * a system notification's click open the same sheet. */
+  setupOpen: boolean;
   /** A workspace id, or a creation's key while that create runs. */
   selectedId: string | null;
   /** A thread of the selected workspace the person picked in the sidebar; null shows the workspace's latest thread. */
@@ -130,6 +136,10 @@ interface State {
   /** The row leaves on the host's forward.close; a refusal is a toast. */
   stopForward(workspaceId: string, port: number): Promise<void>;
   clearToast(): void;
+  /** Opens the cloud setup sheet on wherever the job stands, which while a build waits on the person is its build
+   * screen: what the sidebar's row, the toast's Open and a system notification's click all call. */
+  openSetup(): void;
+  closeSetup(): void;
   applyEvent(e: ProtocolEvent): void;
   /** Rows come from the runtime (only it knows harness and final status); events say when to ask. */
   reloadSessions(workspaceId: string): Promise<void>;
@@ -249,6 +259,15 @@ export const useStore = create<State>((set, get) => {
     }
   };
 
+  /** Takes the standing toast away when it is a need's and that need is no longer the job's: every road that lands a
+   * whole job on the store passes through here, so a toast can never outlive its wait. A toast said anywhere else is
+   * left alone, since only the need's own case sets an action beside one. */
+  const clearEndedNeed = (need: InitJob["needsYou"]): void => {
+    const s = get();
+    const line = need === undefined ? null : initNeedsYouLine(need.what);
+    if (s.toastAction !== null && s.toastAction.for === s.toast && s.toast !== line) set({ toast: null, toastAction: null });
+  };
+
   // What bind fetches and a reconnect fetches again: the list plus the status snapshot that also arms status.subscribe.
   const pull = (api: Api): void => {
     void get().refresh().catch(() => {});
@@ -263,7 +282,10 @@ export const useStore = create<State>((set, get) => {
       .catch((e: unknown) => set({ forwards: [], toast: `forward list unavailable: ${e instanceof Error ? e.message : String(e)}` }));
     void api
       .initGet?.()
-      .then(setup => set({ initJob: setup.job }))
+      .then(setup => {
+        set({ initJob: setup.job });
+        clearEndedNeed(setup.job?.needsYou);
+      })
       .catch(() => {});
     void api
       .preferences?.()
@@ -290,6 +312,8 @@ export const useStore = create<State>((set, get) => {
     spending: {},
     forwards: [],
     toast: null,
+    toastAction: null,
+    setupOpen: false,
     selectedId: null,
     selectedThreadId: null,
     creations: [],
@@ -477,7 +501,9 @@ export const useStore = create<State>((set, get) => {
         if (!(e instanceof DisconnectedError)) set({ toast: `localhost:${port}: ${e instanceof Error ? e.message : String(e)}` });
       }
     },
-    clearToast() { set({ toast: null }); },
+    clearToast() { set({ toast: null, toastAction: null }); },
+    openSetup() { set({ setupOpen: true }); },
+    closeSetup() { set({ setupOpen: false }); },
     applyWorkspace(workspace) {
       set(s => ({
         workspaces: s.workspaces.map(w => (w.id === workspace.id ? { ...w, ...workspace } : w)),
@@ -600,8 +626,19 @@ export const useStore = create<State>((set, get) => {
         case "preferences.changed":
           if (preferenceSetsInFlight === 0) set({ preferences: e.preferences });
           return;
+        case "job.needs-you": {
+          // One event per need, so the toast is said once and stands until the need ends, it is clicked, or another
+          // toast takes its place.
+          const text = initNeedsYouLine(e.needsYou.what);
+          set({ toast: text, toastAction: { for: text, word: CLOUD_SETUP_WORDS.needsYou.open, run: () => get().openSetup() } });
+          return;
+        }
         case "init.job": {
           set({ initJob: e.job });
+          // The need's toast belongs to the need: a view that no longer carries it, because the row moved on or the
+          // job is over, takes the sentence away too, so the toast cannot outlive a wait the keycap and the title
+          // have already dropped. A view of the same standing need leaves it alone.
+          clearEndedNeed(e.job.needsYou);
           // A seal is what the cloud row waits on, and the provider the host wired in is what the sizes come from.
           if (e.job.phase === "done") {
             set({ hasGolden: true });
