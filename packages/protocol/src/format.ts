@@ -1068,6 +1068,10 @@ export const CLOUD_SETUP_WORDS = {
     /** The one row the card shows until the first fact lands, so the work reads as started. */
     first: "This computer",
   },
+  needsYou: {
+    /** The one action on the toast and the one thing a system notification's click does. */
+    open: "Open",
+  },
 } as const;
 
 /** The state of a sign-in as a word, the one spelling the terminal's rows and the modal's rows print. */
@@ -1192,21 +1196,52 @@ export const initJobBuilding = (phase: InitPhase): boolean => phase === "buildin
 export const initAgentStep = (job: Pick<InitJob, "road" | "phase" | "screens">): boolean =>
   job.road === "agent" && (job.phase === "agent" || (initJobOver(job.phase) && job.screens.length === 0));
 
+/** The sentence a sign-in whose page is open makes: one spelling for the sidebar's line, the toast and a system
+ * notification. */
+const signInTo = (label: string): string => `sign in to ${label}`;
+
+/** The sign-in row whose page waits for the person, if one does. */
+const openSignIn = (rows: InitJob["rows"]): InitJob["rows"][number] | undefined => rows.find(r => r.kind === "sign-in" && r.state === SIGN_IN_OPEN_STATE);
+
+/** What the job waits on the person for, or nothing: a sign-in whose page is open on the machine and nothing else
+ * today. Only a wait the person is not already looking at counts, so the screens they just opened are not one; the
+ * phase word says where those stand. The host writes the job's needsYou from this and every surface reads that
+ * field, so nothing derives the wait twice. */
+export function initNeedWhat(job: Pick<InitJob, "rows">): string | undefined {
+  const open = openSignIn(job.rows);
+  return open === undefined ? undefined : signInTo(open.label);
+}
+
+/** What the app says when it needs the person: the toast's opening and a system notification's title. */
+export const NEEDS_YOU = "wsp needs you";
+
+/** The one line the toast and a system notification say for a need. */
+export const initNeedsYouLine = (what: string): string => `${NEEDS_YOU}: ${what}`;
+
+/** What a window or tab title leads with while a need stands, so a person reading only the title sees it. */
+export const NEEDS_YOU_MARK = "• ";
+
+/** The title with the mark on it while a need stands and without it otherwise, from a title that may already carry
+ * one: the same title goes through this on every change, so the mark can never double or stick. */
+export function titleWithNeed(title: string, needed: boolean): string {
+  const plain = title.startsWith(NEEDS_YOU_MARK) ? title.slice(NEEDS_YOU_MARK.length) : title;
+  return needed ? `${NEEDS_YOU_MARK}${plain}` : plain;
+}
+
 /** The one line the collapsed sidebar row shows for a running job: the sign-in waited on while one is open, the phase
  * with the count of rows over while it builds, the phase word alone otherwise. */
 export function initProgressLine(job: Pick<InitJob, "phase" | "rows" | "progress">): string {
-  const open = job.rows.find(r => r.kind === "sign-in" && r.state === SIGN_IN_OPEN_STATE);
-  if (open !== undefined) return `sign in to ${open.label}`;
+  const open = openSignIn(job.rows);
+  if (open !== undefined) return signInTo(open.label);
   const word = initPhaseWord(job.phase);
   return initJobBuilding(job.phase) && job.progress.total > 0 ? `${word} · ${job.progress.done}/${job.progress.total}` : word;
 }
 
 /** The facts the sidebar's button and the build screen's bar draw: the rows over as a fraction of the total (0 before
- * the build has rows), and whether the job waits on the person (the answers, or a sign-in's open page) rather than on
- * the machine. */
-export function initProgressState(job: Pick<InitJob, "phase" | "rows" | "progress">): { fraction: number; waitingOnYou: boolean } {
-  const open = job.rows.some(r => r.kind === "sign-in" && r.state === SIGN_IN_OPEN_STATE);
-  return { fraction: job.progress.total > 0 ? job.progress.done / job.progress.total : 0, waitingOnYou: open || job.phase === "answering" };
+ * the build has rows), and whether the job waits on the person rather than on the machine, which is the host's own
+ * needsYou field and nothing derived beside it. */
+export function initProgressState(job: Pick<InitJob, "progress" | "needsYou">): { fraction: number; waitingOnYou: boolean } {
+  return { fraction: job.progress.total > 0 ? job.progress.done / job.progress.total : 0, waitingOnYou: job.needsYou !== undefined };
 }
 
 /** The id of the stage row the build's sign-ins fold into. */
@@ -1255,7 +1290,7 @@ export const initStageCountLine = (count: { done: number; total: number }): stri
 
 /** The sidebar button's words for a running job: `waiting for you` while the person is waited on, the progress line
  * otherwise. */
-export function initButtonLine(job: Pick<InitJob, "phase" | "rows" | "progress">): string {
+export function initButtonLine(job: Pick<InitJob, "phase" | "rows" | "progress" | "needsYou">): string {
   return initProgressState(job).waitingOnYou ? WAITING_FOR_YOU : initProgressLine(job);
 }
 

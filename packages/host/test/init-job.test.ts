@@ -11,7 +11,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
 import { SNAPSHOT_STORAGE, type BackendPricing } from "@wsp/engine";
-import { GOLDEN_STAGE_WORDS, INIT_SIGN_IN_WORDS, InitJob, Recipe, SIGN_IN_OPEN_STATE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, noMcpServersLine, type InitJobEvent } from "@wsp/protocol";
+import { GOLDEN_STAGE_WORDS, INIT_SIGN_IN_WORDS, InitJob, InitNeedsYouEvent, Recipe, SIGN_IN_OPEN_STATE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, noMcpServersLine, type InitJobEvent } from "@wsp/protocol";
 import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localWiring, type Keys } from "../src/cli.js";
@@ -46,6 +46,10 @@ interface Fake {
   backend: StubBackend;
   statePath: string;
   events: InitJobEvent[];
+  /** Every arrival of a wait on the person, in order: one per need. */
+  needs: InitNeedsYouEvent[];
+  /** Subscribes to the views alone, for a test that watches the job move; the need's own event is not a view. */
+  onJob(fn: (job: InitJob) => void): () => void;
   saved: Record<string, string>[];
   swapped: Keys[];
   installed: string[][];
@@ -60,7 +64,7 @@ interface Fake {
   settled(): Promise<void>;
 }
 
-function fake(over: { env?: Record<string, string>; configured?: boolean; read?: Partial<InitJobDeps["read"]>; agent?: { adapter: HarnessAdapterFactory; starts: HarnessStartOptions[] }; writesRecipe?: boolean; agents?: AgentHere[]; adapters?: Record<string, HarnessAdapterFactory> } = {}): Fake {
+function fake(over: { env?: Record<string, string>; configured?: boolean; read?: Partial<InitJobDeps["read"]>; now?: () => number; agent?: { adapter: HarnessAdapterFactory; starts: HarnessStartOptions[] }; writesRecipe?: boolean; agents?: AgentHere[]; adapters?: Record<string, HarnessAdapterFactory> } = {}): Fake {
   const dir = mkdtempSync(join(tmpdir(), "wsp-init-job-"));
   dirs.push(dir);
   const home = mkdtempSync(join(tmpdir(), "wsp-init-job-home-"));
@@ -134,10 +138,16 @@ function fake(over: { env?: Record<string, string>; configured?: boolean; read?:
     },
     retry: { waitMs: 1, attempts: 3 },
     pollMs: 5,
+    ...(over.now !== undefined ? { now: over.now } : {}),
   };
   const jobs = new InitJobs(deps);
   const events: InitJobEvent[] = [];
+  const needs: InitNeedsYouEvent[] = [];
   jobs.on(e => {
+    if (e.type === "job.needs-you") {
+      needs.push(InitNeedsYouEvent.parse(e));
+      return;
+    }
     events.push(e);
     // Every view on the wire parses as the protocol's.
     InitJob.parse(e.job);
@@ -148,6 +158,8 @@ function fake(over: { env?: Record<string, string>; configured?: boolean; read?:
     backend,
     statePath,
     events,
+    needs,
+    onJob: fn => jobs.on(e => (e.type === "init.job" ? fn(e.job) : undefined)),
     saved,
     swapped,
     installed,
@@ -232,8 +244,8 @@ describe("the init job, manual road", () => {
         },
       },
     });
-    f.jobs.on(e => {
-      if (e.job.phase === "reading") seen.push(e.job.rows.map(r => `${r.label}: ${r.state}${r.detail !== undefined ? ` (${r.detail})` : ""}`));
+    f.onJob(job => {
+      if (job.phase === "reading") seen.push(job.rows.map(r => `${r.label}: ${r.state}${r.detail !== undefined ? ` (${r.detail})` : ""}`));
     });
     await f.jobs.start({ road: "manual" });
     await f.settled();
@@ -420,6 +432,48 @@ describe("the init job, manual road", () => {
     expect(projects[0]).toMatchObject({ label: basename(f.home), state: "imported" });
   });
 
+  it("the job carries what it waits on the person for and the event says it arrived, once per need: each sign-in's open page and nothing else, cleared when the row moves on, and never the screens the person just opened", async () => {
+    let clock = 1_760_000_000_000;
+    const f = fake({ now: () => (clock += 1_000) });
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    // The screens wait on the person, but they are what the person is looking at: no need, no event, and the phase
+    // word is what the sidebar's keycap carries there.
+    const answering = f.jobs.view()!;
+    expect(answering.phase).toBe("answering");
+    expect(answering.needsYou).toBeUndefined();
+    expect(f.needs).toEqual([]);
+    await f.jobs.answer({ screen: "agents", ticks: ["claude", "codex"] });
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "machine", "logins/codex": "copy" } });
+    expect(f.jobs.view()!.needsYou).toBeUndefined();
+    expect(f.needs).toEqual([]);
+
+    await f.jobs.build({ firstWorkspace: "first" });
+    // The build waits on the machine, so nothing is waited on until a sign-in's page is up.
+    expect(f.jobs.view()!.needsYou).toBeUndefined();
+    await f.settled();
+    const waited = f.events.map(e => e.job.needsYou?.what).filter(w => w !== undefined);
+    expect(waited).toContain("sign in to GitHub CLI login");
+    // Every sign-in whose page opened is one need, and each carries the clock of its own arrival.
+    expect(f.needs.map(e => e.needsYou.what)).toEqual(["sign in to GitHub CLI login", "sign in to Claude Code login"]);
+    expect(f.needs.map(e => e.needsYou.since)).toEqual([...f.needs].map(e => e.needsYou.since).sort((a, b) => a - b));
+    expect(new Set(f.needs.map(e => e.needsYou.since)).size).toBe(2);
+    // The same need over many views is one need: while a page stands open the clock does not move and nothing fires again.
+    const standing = f.events.filter(e => e.job.needsYou?.what === "sign in to GitHub CLI login");
+    expect(standing.length).toBeGreaterThan(1);
+    expect(new Set(standing.map(e => e.job.needsYou!.since)).size).toBe(1);
+    // A view carrying a need is a view whose row is open, in every phase without exception, and the need goes with the row.
+    for (const e of f.events) {
+      const open = e.job.rows.some(r => r.kind === "sign-in" && r.state === SIGN_IN_OPEN_STATE);
+      expect(e.job.needsYou !== undefined, `${e.job.phase} ${String(e.job.needsYou?.what)}`).toBe(open);
+    }
+    // The build ended, so the last word on the wire is a view with no need for the app to clear its toast on.
+    expect(f.jobs.view()!.needsYou).toBeUndefined();
+    expect(f.events.at(-1)!.job.needsYou).toBeUndefined();
+    // Every need event parses on the wire and names the job it belongs to.
+    expect(f.needs.every(e => InitNeedsYouEvent.safeParse(e).success && e.jobId === answering.id)).toBe(true);
+  });
+
   it("cancel during the sign-ins stops the job: the sign-in in flight ends not signed in, the machine goes, nothing is sealed; a cancel during the seal is refused and the view says the job cannot be stopped", async () => {
     const f = fake();
     await f.jobs.start({ road: "manual" });
@@ -430,8 +484,8 @@ describe("the init job, manual road", () => {
     await f.jobs.build({ firstWorkspace: "alpha" });
     // The first sign-in's page is up and the person is waited on; the job says it can still be stopped.
     await new Promise<void>(resolve => {
-      const off = f.jobs.on(e => {
-        if (e.job.rows.some(r => r.kind === "sign-in" && r.page !== undefined)) {
+      const off = f.onJob(job => {
+        if (job.rows.some(r => r.kind === "sign-in" && r.page !== undefined)) {
           off();
           resolve();
         }
@@ -462,8 +516,8 @@ describe("the init job, manual road", () => {
     await f.jobs.build({});
     // The build goes on past the failed sign-in and seals; the row says not signed in.
     await new Promise<void>(resolve => {
-      const off = f.jobs.on(e => {
-        if (e.job.rows.some(r => r.id === "sign-in/gh" && r.state === "not signed in") && e.job.phase === "sealing") {
+      const off = f.onJob(job => {
+        if (job.rows.some(r => r.id === "sign-in/gh" && r.state === "not signed in") && job.phase === "sealing") {
           off();
           resolve();
         }
@@ -494,16 +548,16 @@ describe("the init job, manual road", () => {
     const builderId = (await f.rt.golden.builders()).find(b => b.name === "default")!.id;
     expect(f.relay.hooks[0]!.autoOpen(builderId, "https://dash.cloudflare.com/oauth2?state=x", 8976)).toBe(false);
     await new Promise<void>(resolve => {
-      const off = f.jobs.on(e => {
-        if (e.job.rows.some(r => r.id === "sign-in/gh" && r.page === "https://dash.cloudflare.com/oauth2?state=x")) {
+      const off = f.onJob(job => {
+        if (job.rows.some(r => r.id === "sign-in/gh" && r.page === "https://dash.cloudflare.com/oauth2?state=x")) {
           off();
           resolve();
         }
       });
     });
     await new Promise<void>(resolve => {
-      const off = f.jobs.on(e => {
-        if (e.job.rows.some(r => r.id === "sign-in/gh" && r.state === "done")) {
+      const off = f.onJob(job => {
+        if (job.rows.some(r => r.id === "sign-in/gh" && r.state === "done")) {
           off();
           resolve();
         }

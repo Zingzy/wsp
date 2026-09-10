@@ -806,7 +806,7 @@ describe("serveRuntime init door (the host's init job, read and driven from the 
   const SETUP = { keys: { solari: true }, home: "/Users/me", agents: [{ id: "claude", name: "Claude Code", configured: true, takesTools: true }], pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 }, job: null };
   function fakeDoor() {
     const calls: unknown[] = [];
-    const listeners = new Set<(e: { type: "init.job"; job: typeof JOB }) => void>();
+    const listeners = new Set<Parameters<InitDoor["on"]>[0]>();
     const door: InitDoor = {
       get: async () => SETUP,
       keys: async k => {
@@ -846,7 +846,13 @@ describe("serveRuntime init door (the host's init job, read and driven from the 
         return () => listeners.delete(fn);
       },
     };
-    return { door, calls, emit: (job: typeof JOB) => listeners.forEach(fn => fn({ type: "init.job", job })), listeners };
+    return {
+      door,
+      calls,
+      emit: (job: typeof JOB) => listeners.forEach(fn => fn({ type: "init.job", job })),
+      need: (needsYou: { what: string; since: number }) => listeners.forEach(fn => fn({ type: "job.needs-you", jobId: JOB.id, needsYou })),
+      listeners,
+    };
   }
 
   it("every init op reaches the door with its fields and answers with its view; a key never comes back", async () => {
@@ -887,15 +893,20 @@ describe("serveRuntime init door (the host's init job, read and driven from the 
     c.close();
   });
 
-  it("init.job events reach subscribed sockets and the subscription dies with the socket", async () => {
-    const { door, emit, listeners } = fakeDoor();
+  it("init.job and job.needs-you events reach subscribed sockets and the subscription dies with the socket", async () => {
+    const { door, emit, need, listeners } = fakeDoor();
     srv = await serveRuntime(rt(), { port: 0, authToken: "secret", init: door });
     const sub = await WsClient.connect(srv.port, { token: "secret" });
     const quiet = await WsClient.connect(srv.port, { token: "secret" });
     await sub.request("events.subscribe");
     emit({ ...JOB, phase: "building" });
-    await until(() => sub.events.length === 1);
-    expect(sub.events).toEqual([{ type: "init.job", job: { ...JOB, phase: "building" } }]);
+    // The wait on the person rides the same channel, so a client that speaks once per need has its one signal.
+    need({ what: "sign in to GitHub CLI login", since: 1_760_000_000_000 });
+    await until(() => sub.events.length === 2);
+    expect(sub.events).toEqual([
+      { type: "init.job", job: { ...JOB, phase: "building" } },
+      { type: "job.needs-you", jobId: JOB.id, needsYou: { what: "sign in to GitHub CLI login", since: 1_760_000_000_000 } },
+    ]);
     expect(quiet.events).toEqual([]);
     sub.close();
     await until(() => listeners.size === 0);

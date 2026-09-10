@@ -25,6 +25,7 @@ import { deriveSidebarProjects, type SidebarProjectSnapshot, type SidebarThreadS
 import { useOutOfMemoryReadings } from "../machine/live.js";
 import { ForgetWorkspaceDialog } from "../components/ForgetWorkspaceDialog.js";
 import { WorkspaceLookPopover } from "../components/look/WorkspaceLookPopover.js";
+import { Button } from "../components/ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
 import { SidebarContent, SidebarGroup, SidebarGroupAction, SidebarGroupContent, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarMenuSub, SidebarMenuSubItem } from "../components/ui/sidebar.js";
 import { Spinner } from "../components/ui/spinner.js";
@@ -119,6 +120,8 @@ export function WorkspaceSidebar() {
   const costs = useStore(s => s.costs);
   const toast = useStore(s => s.toast);
   const clearToast = useStore(s => s.clearToast);
+  // Keyed by the words it was set with, so a toast said since it took the slot never shows another sentence's action.
+  const toastAction = useStore(s => (s.toastAction !== null && s.toastAction.for === s.toast ? s.toastAction : null));
   const select = useStore(s => s.select);
   const creations = useStore(s => s.creations);
   const createWorkspace = useStore(s => s.createWorkspace);
@@ -579,9 +582,24 @@ export function WorkspaceSidebar() {
               role="status"
               aria-label={toast}
               onClick={clearToast}
-              className="mb-1 cursor-pointer rounded-lg border border-sidebar-border bg-sidebar-control-surface px-3 py-2 text-xs break-words text-sidebar-foreground"
+              className="mb-1 flex cursor-pointer items-center gap-2 rounded-lg border border-sidebar-border bg-sidebar-control-surface px-3 py-2 text-xs break-words text-sidebar-foreground"
             >
-              {toast}
+              <span className="min-w-0 flex-1">{toast}</span>
+              {toastAction !== null ? (
+                <Button
+                  data-toast-action
+                  size="xs"
+                  variant="outline"
+                  className="shrink-0 font-mono"
+                  onClick={event => {
+                    event.stopPropagation();
+                    toastAction.run();
+                    clearToast();
+                  }}
+                >
+                  {toastAction.word}
+                </Button>
+              ) : null}
             </div>
           ) : null}
           {mode === "spaces" ? (

@@ -10,7 +10,7 @@
 import { z } from "zod";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
 import { openingTitle, titleLine } from "./format.js";
-import { InitJob, InitJobEvent, InitAgent, InitKeys, InitRoad, InitScreenId, SIGN_IN_CODE_MAX } from "./init-job.js";
+import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, SIGN_IN_CODE_MAX } from "./init-job.js";
 import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
 import { WorkspaceGlyph, WorkspaceLook, WorkspaceTheme } from "./workspace-look.js";
@@ -1360,6 +1360,12 @@ export interface DesktopBridge {
   onShellChord(handler: (chord: ShellChord) => void): () => void;
   /** The theme the page draws, so the window's frame, glass and traffic-light bar follow it. */
   setTheme(theme: ThemePreference): void;
+  /** A build waits on the person: the shell shows a system notification while its window has no focus, and nothing
+   * while it has, since the page already says it. The page decides nothing about focus; the shell owns that. */
+  needsYou(need: InitNeedsYou): void;
+  /** A click on that notification, after the shell has raised its window: the page opens the build screen. Returns
+   * the unsubscribe. */
+  onNeedsYouOpen(handler: () => void): () => void;
 }
 
 // --- golden image (manifest, interactive builder, build stages) ---------------
@@ -1724,6 +1730,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   ProjectExportEvent.extend(sequenced),
   PreferencesChangedEvent.extend(sequenced),
   InitJobEvent.extend(sequenced),
+  InitNeedsYouEvent.extend(sequenced),
 ]);
 export type EventUnion = z.infer<typeof EventUnion>;
 

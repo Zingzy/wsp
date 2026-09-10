@@ -9,8 +9,10 @@ import {
   FIRST_WORKSPACE,
   InitJob,
   InitJobEvent,
+  InitNeedsYouEvent,
   InitSetup,
   LOGIN_STATE_WORDS,
+  NEEDS_YOU,
   RuntimeRequest,
   INIT_ROW_STATES,
   SIGN_IN_CODE_MAX,
@@ -23,10 +25,13 @@ import {
   initCostLine,
   initJobBuilding,
   initJobOver,
+  initNeedWhat,
+  initNeedsYouLine,
   initPhaseWord,
   initProgressLine,
   initProgressState,
   initRowOver,
+  titleWithNeed,
   initSetupLines,
   initTallyLine,
   threadWorkingLine,
@@ -61,6 +66,14 @@ const JOB: InitJob = {
   rows: [row(), row({ id: "stage/deploying-daemon", label: "Installing the base tools", state: "running" }), row({ id: "stage/ready", label: "Waiting for the machine", state: "waiting" })],
   progress: { done: 1, total: 3 },
   log: ["Recipe saved to /tmp/recipe.json"],
+};
+
+/** The same job with a sign-in's page open on the machine and the need the host wrote for it. */
+const WAITING: InitJob = {
+  ...JOB,
+  phase: "signing-in",
+  rows: [...JOB.rows, row({ id: "sign-in/gh", kind: "sign-in", label: "GitHub CLI login", state: INIT_ROW_STATES.open, page: "https://github.com/login/device", code: "8F4A-C21B" })],
+  needsYou: { what: "sign in to GitHub CLI login", since: 1_760_000_000_000 },
 };
 
 describe("the init job view", () => {
@@ -158,16 +171,51 @@ describe("the words the clients print for the job", () => {
     expect(initProgressLine({ ...JOB, phase: "failed", rows: [] })).toBe("failed");
   });
 
-  it("the sidebar button's facts: the rows over as a fraction of the total, whether the person is waited on, and its words", () => {
+  it("the sidebar button's facts: the rows over as a fraction of the total, the host's own needsYou for whether the person is waited on, and its words", () => {
     expect(initProgressState(JOB)).toEqual({ fraction: 1 / 3, waitingOnYou: false });
     expect(initButtonLine(JOB)).toBe("building · 1/3");
-    const waiting = { ...JOB, phase: "signing-in" as const, progress: { done: 2, total: 4 }, rows: [...JOB.rows, row({ id: "sign-in/gh", kind: "sign-in", label: "GitHub CLI login", state: INIT_ROW_STATES.open, page: "https://github.com/login/device", code: "8F4A-C21B" })] };
+    const waiting = { ...WAITING, progress: { done: 2, total: 4 } };
     expect(initProgressState(waiting)).toEqual({ fraction: 0.5, waitingOnYou: true });
     expect(initButtonLine(waiting)).toBe("waiting for you");
-    const answering = { ...JOB, phase: "answering" as const, rows: [], progress: { done: 0, total: 0 } };
-    expect(initProgressState(answering)).toEqual({ fraction: 0, waitingOnYou: true });
-    expect(initButtonLine(answering)).toBe("waiting for you");
     expect(initButtonLine({ ...JOB, phase: "sealing", progress: { done: 3, total: 3 } })).toBe("sealing · 3/3");
+    // The rows alone no longer say it: a job whose host wrote no need waits on the machine, whatever its rows hold.
+    expect(initProgressState({ ...waiting, needsYou: undefined })).toEqual({ fraction: 0.5, waitingOnYou: false });
+    // The screens are not a need, so nothing is waited on there; the phase word still carries them on the button.
+    const answering = { ...JOB, phase: "answering" as const, rows: [], progress: { done: 0, total: 0 } };
+    expect(initProgressState(answering)).toEqual({ fraction: 0, waitingOnYou: false });
+    expect(initButtonLine(answering)).toBe(initPhaseWord("answering"));
+  });
+
+  it("only a wait the person is not looking at is a need: a sign-in's open page, never the screens they just opened", () => {
+    expect(initNeedWhat(JOB)).toBeUndefined();
+    expect(initNeedWhat(WAITING)).toBe("sign in to GitHub CLI login");
+    // The screens wait on the person, but they are the thing the person is looking at, so they are no one's need.
+    // The phase is not even an argument here, which is what keeps any of them from becoming one by accident.
+    for (const phase of ["agent", "reading", "answering"] as const) {
+      const job: InitJob = { ...JOB, phase, rows: [] };
+      expect(initNeedWhat(job), phase).toBeUndefined();
+    }
+    // A sign-in that moved on waits on nobody, whatever it once said.
+    expect(initNeedWhat({ ...WAITING, rows: WAITING.rows.map(r => (r.kind === "sign-in" ? { ...r, state: INIT_SIGN_IN_WORDS["signed-in"] } : r)) })).toBeUndefined();
+    // The sidebar's line and the need are one spelling, so the toast never says it a second way.
+    expect(initProgressLine(WAITING)).toBe(initNeedWhat(WAITING));
+  });
+
+  it("the toast and the system notification say the app's name and the need, and a title carries the mark once however often it is set", () => {
+    expect(NEEDS_YOU).toBe("wsp needs you");
+    expect(initNeedsYouLine("sign in to GitHub CLI login")).toBe("wsp needs you: sign in to GitHub CLI login");
+    expect(titleWithNeed("wsp", true)).toBe("• wsp");
+    expect(titleWithNeed("wsp", false)).toBe("wsp");
+    expect(titleWithNeed(titleWithNeed("wsp", true), true)).toBe("• wsp");
+    expect(titleWithNeed(titleWithNeed("wsp", true), false)).toBe("wsp");
+  });
+
+  it("the need's arrival is its own event on the same channel, one per need, and the wire refuses a need without its clock", () => {
+    const event = InitNeedsYouEvent.parse({ type: "job.needs-you", jobId: "init_1", needsYou: { what: "sign in to GitHub CLI login", since: 1_760_000_000_000 } });
+    expect(EventUnion.parse({ ...event, seq: 4 })).toEqual({ ...event, seq: 4 });
+    expect(InitNeedsYouEvent.safeParse({ type: "job.needs-you", jobId: "init_1", needsYou: { what: "sign in" } }).success).toBe(false);
+    expect(InitJob.parse(WAITING).needsYou).toEqual(WAITING.needsYou);
+    expect(InitJob.safeParse({ ...JOB, needsYou: { what: "sign in", since: -1 } }).success).toBe(false);
   });
 
   it("the cost line names the size and the rate once, from the backend's own number", () => {
