@@ -2,7 +2,7 @@
 // Served by Vite to a real browser: the cloud setup sheet over a fake api at
 // each of its steps (?screen=choice|keys|keys-refused|keys-saved|agent|agent-stopped|
 // reading|agents|tools|also|logins|ask|building|signing|retry|done|failed|
-// failed-key|stopped|you-stopped|slot|over|sweeping), in either theme
+// failed-key|stopped|you-stopped|slot|over|sweeping|no-extras), in either theme
 // (?theme=light), so a test
 // can lay out and photograph every state the ticket names. The screens' data
 // is what the host hands over for a small laptop: three agents, the tools with
@@ -34,7 +34,6 @@ const SCREENS: InitScreen[] = [
     id: "agents",
     title: "Agents",
     top: "Which agents go on the image",
-    counter: "1/6",
     items: [
       { id: "claude", label: "Claude Code", size: 208 * MIB, why: "used here, 215 sessions", detail: ["on this Mac; its config (40 KB) comes along"] },
       { id: "codex", label: "Codex", size: 455 * MIB, why: "not installed here", detail: ["not on this Mac; try it on the machine, nothing here changes"] },
@@ -50,7 +49,6 @@ const SCREENS: InitScreen[] = [
     id: "tools",
     title: "Tools",
     top: "Tools from your usage",
-    counter: "2/6",
     items: [
       { id: "node", label: "Node 22 with npm", size: 60 * MIB, group: "always on the image", detail: [], lock: "on" },
       { id: "git", label: "git", size: 12 * MIB, group: "always on the image", detail: [], lock: "on" },
@@ -72,7 +70,6 @@ const SCREENS: InitScreen[] = [
     tally: "more",
     title: "Also on this Mac",
     top: "What else this Mac brings",
-    counter: "3/6",
     items: [
       { id: "brew/jq", label: "jq", size: 1.2 * MIB, group: "Homebrew", detail: ["brew install jq"] },
       { id: "brew/ffmpeg", label: "ffmpeg", size: 412 * MIB, group: "Homebrew", detail: ["brew install ffmpeg"] },
@@ -81,13 +78,11 @@ const SCREENS: InitScreen[] = [
     ticks: ["brew/jq"],
     answers: {},
     footer: [],
-    empty: "nothing found here yet",
   },
   {
     id: "logins",
     title: "Sign-ins",
     top: "How sign-ins reach the machine",
-    counter: "4/6",
     items: [
       { id: "logins/claude", label: "Claude Code login", group: "Agents", mark: "claude", why: "Keychain", detail: ["Keychain: Claude Code-credentials", "claude auth login"], choices: SIGN_IN_CHOICES, key: { name: "ANTHROPIC_API_KEY", saved: false } },
       { id: "logins/codex", label: "Codex login", group: "Agents", mark: "codex", why: "auth.json", detail: ["~/.codex/auth.json", "codex login"], choices: SIGN_IN_CHOICES, key: { name: "OPENAI_API_KEY", saved: true } },
@@ -100,7 +95,7 @@ const SCREENS: InitScreen[] = [
     answers: { "logins/claude": "key", "logins/codex": "machine", "logins/gh": "copy", "logins/gcloud": "skip", "logins/kube": "skip", "agents/mcp/claude/github": "skip" },
     footer: [],
   },
-  { id: "wsp", title: "wsp for your agents on this Mac", top: "Add wsp's MCP server and skill to the agents installed here, so they can drive your workspaces", counter: "5/6", items: [{ id: "wsp-tools/claude", label: "Claude Code", detail: ["writes ~/.claude.json"] }], ticks: ["wsp-tools/claude"], answers: {}, footer: [], empty: "no agent here takes the wsp tools yet" },
+  { id: "wsp", title: "wsp for your agents on this Mac", top: "Add wsp's MCP server and skill to the agents installed here, so they can drive your workspaces", items: [{ id: "wsp-tools/claude", label: "Claude Code", detail: ["writes ~/.claude.json"] }], ticks: ["wsp-tools/claude"], answers: {}, footer: [] },
 ];
 
 const stage = (id: keyof typeof GOLDEN_STAGE_WORDS, state: string, over: Partial<InitJob["rows"][number]> = {}): InitJob["rows"][number] => ({ id: `stage/${id}`, kind: "stage", label: GOLDEN_STAGE_WORDS[id], state, ...over });
@@ -161,6 +156,8 @@ const JOBS: Record<string, InitJob> = {
   agent: { ...base, road: "agent", phase: "agent", screens: [], line: "read /Users/zingzy/.claude/projects", thread: THREAD },
   "agent-stopped": { ...base, road: "agent", phase: "failed", screens: [], line: "Permission for Bash: wsp recipe scan --json", error: initAgentNoRecipeLine("/Users/zingzy/.wsp/recipe.json"), thread: THREAD },
   ask: { ...base, step: SCREENS.length },
+  // A Mac with no formula to offer: the host shows no Also screen, so the agents step is the first of four.
+  "no-extras": { ...base, screens: SCREENS.filter(s => s.id !== "also") },
   building: { ...base, phase: "building", screens: [], rows: STAGES },
   signing: {
     ...base,

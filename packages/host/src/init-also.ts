@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Also on this Mac: the tools a package manager here could install on the
-// image, grouped by manager, every row off until it is ticked. A tick on a
+// image, grouped by manager, every row off until it is ticked; with no such
+// tool the screen is not shown at all, by the protocol's rule. A tick on a
 // package this computer's collector listed as a tools row ticks that row in
 // the recipe, so the build installs it by the road the plan resolves (a tap
 // formula from its release, pinned); a tick on any other package writes a row
@@ -21,9 +22,6 @@ import { customFromScan, type ScanRow } from "./scan.js";
 
 export const ALSO_TITLE = "Also on this Mac";
 export const ALSO_TOP = "What else this Mac brings";
-/** What the screen says when no manager here offered a row: it keeps its place in the six either way. */
-export const ALSO_EMPTY_TOP = "What else this Mac could bring";
-export const ALSO_EMPTY = "nothing found here yet";
 
 /** What the build does with a scanned package that has a row of its own: the road in its words with the line the
  * step runs, or the plan's reason for setting it aside; nothing for a package with no such row, whose custom row runs

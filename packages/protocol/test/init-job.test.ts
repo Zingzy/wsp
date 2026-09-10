@@ -40,8 +40,10 @@ import {
   INIT_SIGN_IN_WORDS,
   initDiskLine,
   initBuildRows,
+  initShownScreens,
   initStageCount,
   initStageCountLine,
+  initStepCounter,
   initSweeping,
   MACHINE_GONE_LINE,
   MACHINE_ROW_LABEL,
@@ -75,7 +77,7 @@ const MIB = 1024 * 1024;
 
 const row = (over: Partial<InitRow> = {}): InitRow => ({ id: "stage/creating", kind: "stage", label: "Creating the machine", state: "done", ...over });
 
-const SCREEN: InitScreen = { id: "agents", title: "Agents", top: "Which agents go on the image", counter: "1/6", items: [], ticks: [], answers: {}, footer: [] };
+const SCREEN: InitScreen = { id: "agents", title: "Agents", top: "Which agents go on the image", items: [], ticks: [], answers: {}, footer: [] };
 
 const JOB: InitJob = {
   id: "init_1",
@@ -107,7 +109,6 @@ describe("the init job view", () => {
       id: "agents",
       title: "Agents",
       top: "Which agents go on the image",
-      counter: "1/6",
       items: [{ id: "claude", label: "Claude Code", size: 208 * MIB, why: "on this Mac", detail: ["on this Mac", "about 208 MB installed on the machine (measured 2026-09-01)"] }],
       ticks: ["claude"],
       answers: {},
@@ -122,9 +123,19 @@ describe("the init job view", () => {
       { id: "yq", label: "yq", size: null, detail: [] },
       { id: "logins/claude", label: "Claude Code login", detail: [], choices: [{ value: "machine", label: "sign in during the build" }, { value: "key", label: "paste an API key" }], key: { name: "ANTHROPIC_API_KEY", saved: false } },
     ];
-    const screen = { id: "logins", title: "Sign-ins", top: "Each row is something the machine needs to be signed in to", counter: "4/6", items, ticks: [], answers: { "logins/claude": "key" }, footer: [] };
+    const screen = { id: "logins", title: "Sign-ins", top: "Each row is something the machine needs to be signed in to", items, ticks: [], answers: { "logins/claude": "key" }, footer: [] };
     expect(InitJob.parse({ ...JOB, screens: [screen] }).screens[0]!.items).toEqual(items);
     expect(InitJob.safeParse({ ...JOB, screens: [{ ...screen, items: [{ id: "x", label: "x", size: "208 MB", detail: [] }] }] }).success).toBe(false);
+  });
+
+  it("a screen with no row to pick is not shown, whichever screen it is, and a step's counter counts the steps shown", () => {
+    const withRow = (id: InitScreen["id"]): InitScreen => ({ ...SCREEN, id, items: [{ id: `${id}/row`, label: id, detail: [] }] });
+    const bare = (id: InitScreen["id"]): InitScreen => ({ ...SCREEN, id });
+    expect(initShownScreens([withRow("agents"), withRow("tools"), bare("also"), bare("logins"), withRow("wsp")]).map(s => s.id)).toEqual(["agents", "tools", "wsp"]);
+    expect(initShownScreens([withRow("agents"), withRow("tools"), withRow("also"), withRow("logins"), withRow("wsp")]).map(s => s.id)).toEqual(["agents", "tools", "also", "logins", "wsp"]);
+    expect(initShownScreens([withRow("agents"), withRow("tools"), bare("also"), withRow("logins"), bare("wsp")]).map(s => s.id)).toEqual(["agents", "tools", "logins"]);
+    expect(initStepCounter(1, 4)).toBe("1/4");
+    expect(initStepCounter(4, 4)).toBe("4/4");
   });
 
   it("the job says which step the person is on and what the image's disk holds before their ticks, so a reopened setup lands where it was closed and the ring has a base", () => {
@@ -422,9 +433,9 @@ describe("the words the clients print for the job", () => {
 
   it("every step's tally reads the step's count and the running image estimate against the disk, one function computes that estimate from the job's drafts over its answers, and only the tools and what-else screens weigh their sizes", () => {
     const GIB = 1024 * MIB;
-    const agents: InitScreen = { id: "agents", title: "Agents", top: "Which agents go on the image", counter: "1/6", items: [{ id: "claude", label: "Claude Code", size: 208 * MIB, detail: [] }, { id: "codex", label: "Codex", size: 455 * MIB, detail: [] }, { id: "hermes", label: "Hermes Agent", size: 484 * MIB, detail: [] }], ticks: ["claude", "codex"], answers: {}, footer: [], tally: "agents" };
-    const tools: InitScreen = { id: "tools", title: "Tools", top: "Tools from your usage", counter: "2/6", items: [{ id: "node", label: "Node", size: 300 * MIB, lock: "on", detail: [] }, { id: "rust", label: "Rust", size: 4 * GIB, detail: [] }, { id: "swift", label: "Swift", size: 3 * GIB, detail: [] }, { id: "bun", label: "bun", size: null, detail: [] }], ticks: ["rust", "bun"], answers: {}, footer: [], tally: "tools" };
-    const logins: InitScreen = { id: "logins", title: "Sign-ins", top: "How sign-ins reach the machine", counter: "4/6", items: [{ id: "logins/gh", label: "GitHub CLI login", detail: [], choices: [{ value: "copy", label: "copy" }] }], ticks: [], answers: {}, footer: [] };
+    const agents: InitScreen = { id: "agents", title: "Agents", top: "Which agents go on the image", items: [{ id: "claude", label: "Claude Code", size: 208 * MIB, detail: [] }, { id: "codex", label: "Codex", size: 455 * MIB, detail: [] }, { id: "hermes", label: "Hermes Agent", size: 484 * MIB, detail: [] }], ticks: ["claude", "codex"], answers: {}, footer: [], tally: "agents" };
+    const tools: InitScreen = { id: "tools", title: "Tools", top: "Tools from your usage", items: [{ id: "node", label: "Node", size: 300 * MIB, lock: "on", detail: [] }, { id: "rust", label: "Rust", size: 4 * GIB, detail: [] }, { id: "swift", label: "Swift", size: 3 * GIB, detail: [] }, { id: "bun", label: "bun", size: null, detail: [] }], ticks: ["rust", "bun"], answers: {}, footer: [], tally: "tools" };
+    const logins: InitScreen = { id: "logins", title: "Sign-ins", top: "How sign-ins reach the machine", items: [{ id: "logins/gh", label: "GitHub CLI login", detail: [], choices: [{ value: "copy", label: "copy" }] }], ticks: [], answers: {}, footer: [] };
     const job = { disk: { fixed: 0, total: 20 * GIB }, screens: [agents, tools, logins] };
     // A locked row is on, a row with a picker is not counted, and a row nothing measured adds nothing.
     expect(initTallyOf(tools, new Set(["rust", "bun"]))).toEqual({ count: 3, bytes: 300 * MIB + 4 * GIB });

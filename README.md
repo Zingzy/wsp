@@ -46,7 +46,7 @@ Then, in that agent: *"set up wsp for me"*. It reads what you use on this comput
 wsp init
 ```
 
-Six screens: the agents on this computer, their tools, what else to bring from this Mac, sign-ins, wsp for your own agents, and the build. Everything is ticked from what you actually use; Enter through every screen takes the defaults. Nothing leaves your disk before the confirm.
+One screen at a time: the agents on this computer, their tools, what else to bring from this Mac, sign-ins, wsp for your own agents, then the build; a screen with nothing to pick is skipped. Everything is ticked from what you actually use; Enter through every screen takes the defaults. Nothing leaves your disk before the confirm.
 
 ![wsp init: the agents screen, ticked from what this computer runs](docs/screenshots/init.png)
 

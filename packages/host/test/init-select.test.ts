@@ -209,11 +209,11 @@ describe("rungSelect", () => {
     await q;
   });
 
-  it("a screen with no rows says the words its own screen chose", async () => {
+  it("a list with no rows says so", async () => {
     const { input, output, text } = streams();
-    const p = rungSelect({ title: "Also on this Mac", counter: "3/6", top: "We found these installed on this Mac.", items: [], initial: new Set(), empty: "nothing found here yet", input, output });
+    const p = rungSelect({ title: "Also on this Mac", counter: "3/6", top: "We found these installed on this Mac.", items: [], initial: new Set(), input, output });
     await settle();
-    expect(text()).toContain("nothing found here yet");
+    expect(text()).toContain("nothing found");
     await press(input, KEY.enter);
     expect((await p).kind).toBe("next");
   });

@@ -88,11 +88,12 @@ usage:
   wsp status         whether a host is serving this state file, on which ports,
                      and what keeps it there, with a non-zero exit code when
                      none does
-  wsp init           set up your first golden image in six screens: Agents,
-                     Tools, Also on this Mac, Sign-ins, wsp for your agents
-                     on this Mac, and Build, then the browser. With no provider
-                     key it seals nothing and makes this computer your
-                     workspace instead
+  wsp init           set up your first golden image one screen at a time:
+                     Agents, Tools, Also on this Mac, Sign-ins, wsp for your
+                     agents on this Mac, each shown when it has a row to pick,
+                     then Build, then the browser. With no provider key it
+                     seals nothing and makes this computer your workspace
+                     instead
   wsp doctor         run the reach loop end to end against one live machine
                      (--yes also deletes the snapshots this host left behind);
                      --local proves the other half instead, a thread on this

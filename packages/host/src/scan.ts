@@ -29,7 +29,7 @@ export interface ScanRow {
   version?: string;
 }
 
-/** The id a scanned package has on the third screen and in a `wsp recipe --set` word, the one spelling of it: the
+/** The id a scanned package has on the Also on this Mac screen and in a `wsp recipe --set` word, the one spelling of it: the
  * manager and the package, unique across managers since two of them can carry one name (uv and pipx both list ruff). */
 export const scanRowId = (manager: string, pkg: string): string => `${manager}/${pkg}`;
 

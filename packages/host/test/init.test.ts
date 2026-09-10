@@ -375,8 +375,8 @@ function withGhCopy(f: Fake): void {
   f.opts.recipe = async () => answeredCopy("gh");
 }
 
-/** The five screens a run asks before the build, in order. */
-const SCREENS = ["Agents", "Tools", "Also on this Mac", "Sign-ins", "wsp for your agents on this Mac"];
+/** The screens a run asks before the build, in order, on a computer whose managers have nothing to offer. */
+const SCREENS = ["Agents", "Tools", "Sign-ins", "wsp for your agents on this Mac"];
 
 /** Enter through every screen, taking the defaults each one opens on. */
 async function throughScreens(f: Fake, screens: readonly string[] = SCREENS): Promise<void> {
@@ -405,7 +405,7 @@ describe("wsp init, interactive", () => {
     await throughScreens(f, ["Agents", "Tools"]);
     await f.until("Also on this Mac");
     const screen = f.text().slice(f.text().lastIndexOf("◆  Also on this Mac"));
-    // The third of the six screens, its own sentence over it, and every row starts off with its manager's count and weight.
+    // The Also on this Mac screen, its own sentence over it, and every row starts off with its manager's count and weight.
     expect(screen).toMatch(/Also on this Mac\s+3\/6/);
     expect(screen).toContain("What else this Mac brings");
     expect(screen).toMatch(/▾ Homebrew formulae\s+0 of 1\s+0 B\n┃\s+○ llvm\s+2 GB\n/);
@@ -431,7 +431,7 @@ describe("wsp init, interactive", () => {
     ]);
   });
 
-  it("a scanned tap formula this Mac's collector listed is its own row: ticked on the third screen it installs from its GitHub release, its pin is recorded under the row's id and no custom row is written; a --yes re-run reads as no change", async () => {
+  it("a scanned tap formula this Mac's collector listed is its own row: ticked on the Also on this Mac screen it installs from its GitHub release, its pin is recorded under the row's id and no custom row is written; a --yes re-run reads as no change", async () => {
     const sha = "a".repeat(64);
     const tap: ManifestEntry = { rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", label: "zingzy/tap/diskbloom", group: "Homebrew", paths: [], bytes: 0, default: "skip", linux: "unknown" };
     const table = new Map([["zingzy/tap/diskbloom", { name: "diskbloom", fullName: "zingzy/tap/diskbloom", deps: [], bytes: 4 * 1024 * 1024, macosOnly: false, source: { repo: "Zingzy/diskbloom", tag: "v0.1.0" } }]]);
@@ -534,16 +534,17 @@ describe("wsp init, interactive", () => {
     expect(f.backends.flatMap(b => b.machines)).toHaveLength(0);
   });
 
-  it("with no manager row to offer, the third screen keeps its place and says so", async () => {
+  it("with no manager row to offer, the Also screen is not shown and the count is of the screens seen", async () => {
     const f = fake();
     const run = runInit(f.opts, f.io);
-    await throughScreens(f, ["Agents", "Tools"]);
-    await f.until("Also on this Mac  3/6");
-    const screen = f.text().slice(f.text().lastIndexOf("◆  Also on this Mac"));
-    expect(screen).toContain("What else this Mac could bring");
-    expect(screen).toContain("nothing found here yet");
+    await f.until("Agents  1/5");
     await f.press(KEY.enter);
-    await throughScreens(f, ["Sign-ins", "wsp for your agents on this Mac"]);
+    await f.until("Tools  2/5");
+    await f.press(KEY.enter);
+    await f.until("Sign-ins  3/5");
+    expect(f.text()).not.toContain("Also on this Mac");
+    await f.press(KEY.enter);
+    await throughScreens(f, ["wsp for your agents on this Mac  4/5"]);
     await f.until(BOOT);
     await f.press("n");
     expect((await run).code).toBe(1);
@@ -735,7 +736,7 @@ describe("wsp init, interactive", () => {
       },
     });
     const run = runInit(f.opts, f.io);
-    await f.until("1/6");
+    await f.until("1/5");
     const t = f.text();
     expect(t).toContain("Reading this computer  Identity 3");
     expect(t).toContain("Reading this computer  Identity 3, Shell 2, Toolchains 1, Tools 4, Agents 2, Sign-ins 3");
@@ -759,7 +760,7 @@ describe("wsp init, interactive", () => {
       },
     });
     const run = runInit(f.opts, f.io);
-    await f.until("1/6");
+    await f.until("1/5");
     const t = f.text();
     // The count is on the spinner's own line while it reads, and the counts each store came to land after it.
     expect(t).toContain("Reading what your agents used  Claude Code: reading session 2 of 3");
@@ -785,7 +786,7 @@ describe("wsp init, interactive", () => {
       },
     });
     const run = runInit(f.opts, f.io);
-    await f.until("1/6");
+    await f.until("1/5");
     expect(f.text()).toMatch(/Read 2 sessions in \d+m?s/);
     await throughScreens(f);
     await f.until(BOOT);
@@ -802,7 +803,7 @@ describe("wsp init, interactive", () => {
       },
     });
     const run = runInit(f.opts, f.io);
-    await f.until("1/6");
+    await f.until("1/5");
     const spins = f.text().split("\r").filter(l => l.includes("Reading this computer"));
     expect(spins.length).toBeGreaterThan(1);
     expect(spins.map(l => l.length).filter(n => n > 48)).toEqual([]);
@@ -825,21 +826,15 @@ describe("wsp init, interactive", () => {
     expect(f.text()).toContain("On: 0 agents, 0 B");
     for (const name of ["Claude Code", "Codex", "Gemini CLI", "OpenCode", "Pi", "Hermes Agent"]) expect(f.text()).toMatch(new RegExp(`○ ${name}\\s+catalog\\s+not installed here\\s+[\\d.]+ MB`));
     await f.press(KEY.enter);
-    await f.until("Tools  2/6");
+    await f.until("Tools  2/3");
     // Nothing here and nothing ticked: the base rows still come, and every other row is on the screen at its size.
     // Sixteen base rows fold behind the visible two, and the why column is cut to the screen's width.
     expect(f.text()).toMatch(/• fd\s+base\s+always on th[^\n]*?\s+3 MB\n/);
     expect(f.text()).toContain("On: 16 tools, 1.5 GB");
-    await f.press(KEY.enter);
-    await f.until("Also on this Mac");
-    expect(f.text()).toContain("nothing found here yet");
-    await f.press(KEY.enter);
-    await f.until("Sign-ins  4/6");
-    expect(f.text()).toContain("nothing found");
-    await f.press(KEY.enter);
-    await f.until("wsp for your agents on this Mac");
+    // No formula, no sign-in and no agent here that takes the wsp tools: none of those three screens is shown.
     await f.press(KEY.enter);
     await f.until(BOOT);
+    for (const title of ["Also on this Mac", "Sign-ins", "wsp for your agents on this Mac"]) expect(f.text()).not.toContain(`◆  ${title}`);
     await f.press("n");
     expect((await run).code).toBe(1);
   });
@@ -865,12 +860,12 @@ describe("wsp init, the project the run is for", () => {
     expect(card).toContain("Not in the catalog: Ruby (Gemfile needs Ruby)");
     await f.until("Agents");
     await f.press(KEY.enter);
-    await f.until("Tools  2/6");
+    await f.until("Tools  2/5");
     // Go is off in the catalog and never used here; the folder's own go.mod put it on the machine, in its own group.
     expect(f.text()).toMatch(/▾ Your project needs\s+1 of 1\s+239 MB/);
     expect(f.text()).toMatch(/● +Go +project +go\.mod needs[^\n]*? +239 MB/);
     await f.press(KEY.enter);
-    await throughScreens(f, ["Also on this Mac", "Sign-ins", "wsp for your agents"]);
+    await throughScreens(f, ["Sign-ins", "wsp for your agents"]);
     await f.until(BOOT);
     await f.press("n");
     expect((await run).code).toBe(1);
@@ -948,7 +943,7 @@ describe("wsp init, the summary-first screens", () => {
     ],
   };
 
-  it("five screens: the agents with what this computer did with each, the tools table, the scan slot, a choice per sign-in and the wsp tools; then the build installs the agent ticked here and signs it in on the machine", async () => {
+  it("four screens: the agents with what this computer did with each, the tools table, a choice per sign-in and the wsp tools; then the build installs the agent ticked here and signs it in on the machine", async () => {
     const f = fake({ collect: async () => LAPTOP, recipe: async () => MEASURED, columns: 100 });
     // A tall terminal, so the whole tools list is on screen at once.
     Object.assign(f.io.output, { rows: 50 });
@@ -964,7 +959,7 @@ describe("wsp init, the summary-first screens", () => {
     expect(one).toContain("21 found on this computer. Nothing has left this computer.");
     expect(one).not.toContain("not in this build");
     // The catalog's six in its order, a size beside each, the three on this Mac ticked.
-    expect(one).toMatch(/◆  Agents  1\/6\n┃ {2}Which agents go on the image\n┃ {2}You can change this later\.\n┃ {2}search/);
+    expect(one).toMatch(/◆  Agents  1\/5\n┃ {2}Which agents go on the image\n┃ {2}You can change this later\.\n┃ {2}search/);
     expect(one).toContain("On: 3 agents, 1.1 GB");
     expect(one).toMatch(/● Hermes Agent\s+installed\s+installed here, never used\s+484 MB\n┃\s+● Claude Code\s+installed\s+installed here, never used\s+208 MB\n┃\s+● Codex\s+catalog\s+not installed here\s+455 MB\n/);
     // Down onto Gemini CLI: the detail says wsp cannot drive it yet and what installs; space ticks it for the machine.
@@ -976,14 +971,14 @@ describe("wsp init, the summary-first screens", () => {
     await f.until(/● Gemini CLI/);
     await f.press(KEY.enter);
 
-    await f.until("Tools  2/6");
+    await f.until("Tools  2/5");
     const two = f.text().slice(f.text().lastIndexOf("◆  Tools"));
     // Screen two is the list itself: the base as bullets under the title, then a group per why, every row with its
     // count and its size, the totals and the Disk line under them. Nothing is hidden behind a key.
-    expect(two).toMatch(/^◆  Tools  2\/6\n┃ {2}Tools from your usage\n┃ {2}You can change this later\.\n┃ {2}search/);
+    expect(two).toMatch(/^◆  Tools  2\/5\n┃ {2}Tools from your usage\n┃ {2}You can change this later\.\n┃ {2}search/);
     expect(two).toMatch(/▾ Always on the image\s+16\s+1\.5 GB\n┃\s+• Docker engine and compose\s+base\s+always on the image\s+517 MB\n/);
     expect(two).toMatch(/▾ You use these\s+1 of 2\s+239 MB\n┃\s+○ Go\s+used\s+below the floor, 2 commands in 1[^\n]*?239 MB\n┃\s+● Cloudflare Wrangler\s+used\s+40 commands in 3 sessions\s+239 MB\n/);
-    // This Mac's npm global the catalog does not carry is no row here: the catalog is the Tools screen, the third screen is its.
+    // This Mac's npm global the catalog does not carry is no row here: the catalog is the Tools screen, the Also screen is its.
     expect(two).toMatch(/▾ Installed here, never used\s+2 of 2\s+54 MB\n┃\s+● GitHub CLI\s+installed\s+installed here, never used\s+40 MB\n┃\s+● yq\s+installed\s+installed here, never used\s+14 MB\n/);
     expect(two).not.toContain("tsx");
     expect(two).toMatch(/On: 19 tools, 1\.8 GB\n┃ {2}on when used in 2 sessions and 5 commands; heavy rows 3 and 20\n┃ {2}Disk: [\d.]+ GB of 15\.2 GB on the 20 GB builder\n┗ {2}space on or off • ← → fold • enter next • esc back/);
@@ -997,10 +992,7 @@ describe("wsp init, the summary-first screens", () => {
     expect(f.text().slice(f.text().lastIndexOf("◆  Tools"))).toContain("On: 18 tools");
     await f.press(KEY.enter);
 
-    await f.until("Also on this Mac  3/6");
-    await f.press(KEY.enter);
-
-    await f.until("Sign-ins  4/6");
+    await f.until("Sign-ins  3/5");
     const four = f.text().slice(f.text().lastIndexOf("◆  Sign-ins"));
     // Every row carries the word it will act on, the agents first, then the CLIs, then the servers with auth.
     expect(four).toMatch(/▾ Agents\s+2 copy\s+3 sign in\s+0 API key\s+0 skip\n/);
@@ -1027,7 +1019,7 @@ describe("wsp init, the summary-first screens", () => {
     await f.until(/▾ MCP servers from your agents' configs\s+1 copy\s+0 skip\n┃ ❯\s+github\s+in Claude Code's config\s+copy from this Mac\n/);
     await f.press(KEY.enter);
 
-    await f.until("wsp for your agents on this Mac  5/6");
+    await f.until("wsp for your agents on this Mac  4/5");
     await f.press(KEY.enter);
 
     await f.until(BOOT);
@@ -1098,27 +1090,24 @@ describe("wsp init, the summary-first screens", () => {
     await f.until("Agents");
     await f.press(KEY.esc);
     await new Promise(r => setTimeout(r, 100));
-    expect(f.text()).not.toContain("Tools  2/6");
+    expect(f.text()).not.toContain("Tools  2/5");
     // Down onto Gemini CLI and space: the tick stands when the screen is left and come back to.
     await f.press(KEY.down, KEY.down, KEY.down, KEY.down, KEY.space, KEY.enter);
-    await f.until("Tools  2/6");
+    await f.until("Tools  2/5");
     await f.press(KEY.esc);
-    await f.until(/Agents  1\/6[\s\S]*Agents  1\/6/);
+    await f.until(/Agents  1\/5[\s\S]*Agents  1\/5/);
     expect(f.text().slice(f.text().lastIndexOf("◆  Agents"))).toMatch(/● Gemini CLI/);
     await f.press(KEY.enter);
-    await f.until(/Tools  2\/6[\s\S]*Tools  2\/6/);
+    await f.until(/Tools  2\/5[\s\S]*Tools  2\/5/);
     await f.press(KEY.enter);
-    await f.until("Also on this Mac");
+    // Esc from the sign-ins lands on the tools: the Also screen between them has no row and is not shown.
+    await f.until("Sign-ins  3/5");
     await f.press(KEY.esc);
-    await f.until(/Tools  2\/6[\s\S]*Tools  2\/6[\s\S]*Tools  2\/6/);
+    await f.until(/Tools  2\/5[\s\S]*Tools  2\/5[\s\S]*Tools  2\/5/);
     await f.press(KEY.enter);
+    await f.until(/Sign-ins  3\/5[\s\S]*Sign-ins  3\/5/);
     await f.press(KEY.enter);
-    await f.until("Sign-ins  4/6");
-    await f.press(KEY.esc);
-    await f.until(/Also on this Mac  3\/6[\s\S]*Also on this Mac  3\/6/);
-    await f.press(KEY.enter);
-    await f.press(KEY.enter);
-    await f.until("wsp for your agents on this Mac  5/6");
+    await f.until("wsp for your agents on this Mac  4/5");
     await f.press(KEY.enter);
     await f.until(BOOT);
     await f.press("n");
@@ -1128,11 +1117,11 @@ describe("wsp init, the summary-first screens", () => {
     expect(saved.get("tools/catalog/wrangler")).toMatchObject({ label: "Cloudflare Wrangler", bring: true });
   });
 
-  it("the fifth screen offers the wsp tools to each agent on this Mac whose config the catalog knows; ticked, the server is in that config here when the screens end", async () => {
+  it("the wsp tools screen offers them to each agent on this Mac whose config the catalog knows; ticked, the server is in that config here when the screens end", async () => {
     const f = fake({ collect: async () => LAPTOP, recipe: async () => MEASURED });
     const run = runInit(f.opts, f.io);
-    await throughScreens(f, ["Agents", "Tools", "Also on this Mac", "Sign-ins"]);
-    await f.until("wsp for your agents on this Mac  5/6");
+    await throughScreens(f, ["Agents", "Tools", "Sign-ins"]);
+    await f.until("wsp for your agents on this Mac  4/5");
     const five = f.text().slice(f.text().lastIndexOf("◆  wsp for your agents on this Mac"));
     // Claude Code is the one agent here whose config the catalog can place a server in: Hermes is here without one, Codex is not here.
     expect(five).toContain("Add wsp's MCP server and skill to the agents installed here, so they can");
@@ -1171,8 +1160,8 @@ describe("wsp init, the summary-first screens", () => {
     const broken = fake({ collect: async () => LAPTOP, recipe: async () => MEASURED });
     writeFileSync(join(broken.opts.home, ".claude.json"), "[]\n");
     const second = runInit(broken.opts, broken.io);
-    await throughScreens(broken, ["Agents", "Tools", "Also on this Mac", "Sign-ins"]);
-    await broken.until("wsp for your agents on this Mac  5/6");
+    await throughScreens(broken, ["Agents", "Tools", "Sign-ins"]);
+    await broken.until("wsp for your agents on this Mac  4/5");
     await broken.press(KEY.space);
     await broken.until(/● Claude Code/);
     await broken.press(KEY.enter);
@@ -1184,7 +1173,7 @@ describe("wsp init, the summary-first screens", () => {
   });
 
   it("--yes never writes an agent's config on this computer, however this Mac's own sessions would have ticked it, and says how to do it by hand", async () => {
-    // Claude Code has run here, so screen five would have opened with its row on; nobody answered it.
+    // Claude Code has run here, so the wsp tools screen would have opened with its row on; nobody answered it.
     const used: Recipe = { ...MEASURED, histories: [{ agent: "claude", state: "read", sessions: 151, calls: 4102 }] };
     const f = fake({ yes: true, collect: async () => LAPTOP, recipe: async () => used });
     expect((await runInit(f.opts, f.io)).code).toBe(0);
@@ -1200,7 +1189,7 @@ describe("wsp init, the summary-first screens", () => {
     }
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     const out = f.text();
-    expect(out).not.toMatch(/Agents  1\/6|Tools  2\/6|Sign-ins  4\/6/);
+    expect(out).not.toMatch(/◆  Agents|◆  Tools|◆  Sign-ins/);
     expect(existsSync(join(f.opts.home, ".claude.json"))).toBe(false);
     expect(out).not.toContain("not in this build");
     expect(out.replace(/\n\s*│?\s+/g, " ")).toMatch(/Installs\s+Claude Code, Codex, Hermes Agent, 3 tools plus Homebrew's toolchain, 1 MCP server/);
@@ -1705,7 +1694,7 @@ describe("wsp init, flags and no terminal", () => {
     expect(result.handle).toBeUndefined();
     expect(f.hosts).toBe(0);
     const out = f.text();
-    expect(out).not.toMatch(/Agents  1\/6|Sign-ins  4\/6/);
+    expect(out).not.toMatch(/◆  Agents|◆  Sign-ins/);
     expect(out).not.toContain("is in use on this computer");
     expect(out).toContain("Taken as yes (--non-interactive)");
     expect(out).toContain("Sealing golden v1. Taken as yes (--non-interactive).");
@@ -1831,11 +1820,11 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.reads).toEqual(["gh:github.com"]);
     expect(f.text()).toContain("GitHub CLI login: copied");
     // The screens never ran, so nothing was typed at: the only pty is the one sign-in chosen for the machine.
-    expect(f.text()).not.toMatch(/Agents  1\/6|Sign-ins  4\/6/);
+    expect(f.text()).not.toMatch(/◆  Agents|◆  Sign-ins/);
     expect(f.link.ptys.map(p => p.writes[0])).toEqual(["exec claude auth login || exit\r"]);
   });
 
-  it("on a terminal without the flag the six screens still run", async () => {
+  it("on a terminal without the flag the screens still run", async () => {
     const f = fake();
     const run = runInit(f.opts, f.io);
     await throughScreens(f);
@@ -3347,7 +3336,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(roadRuns()).toHaveLength(2);
   });
 
-  it("a recipe file wsp recipe --set wrote for a tap formula this Mac has installs it from its GitHub release, the road the third screen takes, and the same file read again builds nothing", async () => {
+  it("a recipe file wsp recipe --set wrote for a tap formula this Mac has installs it from its GitHub release, the road the Also on this Mac screen takes, and the same file read again builds nothing", async () => {
     const sha = "c".repeat(64);
     const tap: ManifestEntry = { rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", label: "zingzy/tap/diskbloom", group: "Homebrew", paths: [], bytes: 0, default: "skip", linux: "unknown" };
     const table = new Map([["zingzy/tap/diskbloom", { name: "diskbloom", fullName: "zingzy/tap/diskbloom", deps: [], bytes: 4 * 1024 * 1024, macosOnly: false, source: { repo: "Zingzy/diskbloom", tag: "v0.1.0" } }]]);
@@ -3874,15 +3863,15 @@ describe("wsp init --recipe", () => {
     // The machine was still read; the card says what ticked it and counts the collector's rows, not the catalog's bare one.
     expect(out).toContain("15 found on this computer, ticked by the recipe.");
     expect(out).not.toContain("not in this build");
-    // No Agents or Tools screen: the run opens on the sign-ins.
-    expect(out).not.toContain("1/6");
-    expect(out).toMatch(/Sign-ins\s+4\/6/);
+    // No Agents or Tools screen: the run opens on the sign-ins, the first of the three steps it shows.
+    expect(out).not.toContain("◆  Agents");
+    expect(out).toMatch(/Sign-ins\s+1\/3/);
     // Codex is on and Claude Code off, so only Codex's login is listed, to sign in on the machine; the saved copy answer for gh is a ticked keys row.
     expect(out).toMatch(/Codex login\s+[^\n]*sign in on the machine/);
     expect(out).not.toContain("Claude Code login");
     expect(out).toMatch(/GitHub CLI login\s+[^\n]*copy from this Mac/);
     await f.press(KEY.enter);
-    await f.until("wsp for your agents on this Mac  5/6");
+    await f.until("wsp for your agents on this Mac  2/3");
     await f.press(KEY.enter);
     await f.until(BOOT);
     await f.press("n");
@@ -3972,9 +3961,9 @@ describe("wsp init --recipe", () => {
     writeFileSync(join(f.opts.home, ".gemini", "settings.json"), '{\n  // the theme\n  "theme": "dark"\n}\n');
     const run = runInit(f.opts, f.io);
     // A recipe file decides the agents and the tools, so the run opens on the sign-ins and the wsp tools follow.
-    await f.until("Sign-ins  4/6");
+    await f.until("Sign-ins  1/3");
     await f.press(KEY.enter);
-    await f.until("wsp for your agents on this Mac  5/6");
+    await f.until("wsp for your agents on this Mac  2/3");
     const screen = f.text().slice(f.text().lastIndexOf("◆  wsp for your agents on this Mac"));
     expect(screen).toMatch(/○ Claude Code\n┃\s+○ Gemini CLI\n/);
     expect(screen).not.toContain("Codex");

@@ -306,7 +306,7 @@ describe("wsp recipe", () => {
     const byHand = { kind: "custom" as const, id: DISKBLOOM.id, name: DISKBLOOM.name, install: [DISKBLOOM.install], check: DISKBLOOM.check, why: "added by the agent" };
     saveSmallRecipe(out, { version: 1, at: at().toISOString(), histories: [], rows: [], custom: [byHand] });
     const table = await runRecipe(laptop(), { out, set: [`${DISKBLOOM.id}=on`], alsoHere: scan.alsoHere }, quiet, at);
-    // The scan is asked what the file already installs by another hand, as the third screen asks it.
+    // The scan is asked what the file already installs by another hand, as the Also on this Mac screen asks it.
     expect(scan.asked).toEqual([[byHand]]);
     expect(file().rows.find(r => r.id === TAP_ROW)).toEqual({ id: TAP_ROW, kind: "tool", on: true, source: { kind: "installed", paths: [], bin: true } });
     expect(file().custom).toEqual([]);

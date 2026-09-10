@@ -58,7 +58,7 @@ export type Entry =
 
 export interface RungSelectOptions {
   title: string;
-  /** The section counter shown after the title ("2/6"). */
+  /** The section counter shown after the title ("2/5"). */
   counter: string;
   /** The one sentence under the title saying what this screen decides. */
   top?: string;
@@ -76,8 +76,6 @@ export interface RungSelectOptions {
   lockedTitle?: string;
   /** What a group's header says after its name; the ticked count of its rows unless the screen has more to say. */
   groupLine?: (items: readonly SelectItem[], a: RungAnswer) => string;
-  /** What the screen says when it has no rows at all. */
-  empty?: string;
   input?: Readable;
   output?: Writable;
 }
@@ -516,7 +514,7 @@ class RungPrompt extends Prompt<RungAnswer> {
     lines.push(`${accent(S_STEP_ACTIVE)}  ${accent(this.o.title)}${counter}`);
     for (const t of top) lines.push(`${bar}  ${dim(t)}`);
     lines.push(`${bar}  ${dim("search")}  ${this.userInput}${styleText("inverse", " ")}`);
-    if (this.o.items.length === 0) lines.push(`${bar}  ${dim(this.o.empty ?? EMPTY_WORD)}`);
+    if (this.o.items.length === 0) lines.push(`${bar}  ${dim(EMPTY_WORD)}`);
     else if (entries.length === 0) lines.push(`${bar}  ${dim("no match")}`);
     if (start > 0) lines.push(`${bar}  ${dim(`↑ ${start} more`)}`);
     for (let i = start; i < end; i++) lines.push(`${bar} ${this.row(entries[i]!, i === this.cursor, cols, cuts)}`);

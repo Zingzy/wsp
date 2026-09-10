@@ -24,7 +24,6 @@ const AGENTS: InitScreen = {
   id: "agents",
   title: "Agents",
   top: "Which agents go on the image",
-  counter: "1/6",
   items: [
     { id: "claude", label: "Claude Code", size: 208 * MIB, why: "used here, 12 sessions", detail: ["on this Mac"] },
     { id: "codex", label: "Codex", size: 455 * MIB, why: "not installed here", detail: ["not on this Mac; try it on the machine"] },
@@ -39,7 +38,6 @@ const TOOLS: InitScreen = {
   id: "tools",
   title: "Tools",
   top: "Tools from your usage",
-  counter: "2/6",
   items: [
     { id: "node", label: "node", size: 60 * MIB, group: "always on the image", detail: [], lock: "on" },
     { id: "gh", label: "gh", size: 12 * MIB, why: "29,623 calls", group: "from your usage", detail: [] },
@@ -50,7 +48,7 @@ const TOOLS: InitScreen = {
   footer: [],
   tally: "tools",
 };
-const ALSO: InitScreen = { id: "also", title: "Also on this Mac", top: "What else this Mac could bring", counter: "3/6", items: [], ticks: [], answers: {}, footer: [], empty: "nothing found here yet" };
+const ALSO: InitScreen = { id: "also", title: "Also on this Mac", top: "What else this Mac brings", items: [{ id: "brew/jq", label: "jq", size: 2 * MIB, group: "Homebrew", detail: [] }], ticks: [], answers: {}, footer: [], tally: "more" };
 const CHOICES = [
   { value: "copy", label: "copy from this Mac" },
   { value: "machine", label: "sign in on the machine" },
@@ -61,7 +59,6 @@ const LOGINS: InitScreen = {
   id: "logins",
   title: "Sign-ins",
   top: "How sign-ins reach the machine",
-  counter: "4/6",
   items: [
     { id: "logins/claude", label: "Claude Code login", group: "Agents", mark: "claude", why: "Keychain", detail: ["Keychain: Claude Code-credentials", "claude auth login"], choices: CHOICES, key: { name: "ANTHROPIC_API_KEY", saved: false } },
     { id: "logins/gh", label: "GitHub CLI login", group: "Developer CLIs", mark: "gh", why: "hosts.yml", detail: ["~/.config/gh/hosts.yml", "gh auth login"], choices: CHOICES.filter(c => c.value !== "key") },
@@ -71,7 +68,7 @@ const LOGINS: InitScreen = {
   answers: { "logins/claude": "machine", "logins/gh": "copy", "logins/kube": "skip" },
   footer: [],
 };
-const WSP: InitScreen = { id: "wsp", title: "wsp for your agents on this Mac", top: "Add wsp's MCP server and skill to the agents installed here, so they can drive your workspaces", counter: "5/6", items: [{ id: "wsp-tools/claude", label: "Claude Code", detail: ["writes ~/.claude.json"] }, { id: "wsp-tools/codex", label: "Codex", detail: ["writes ~/.codex/config.toml"] }], ticks: ["wsp-tools/claude"], answers: {}, footer: [], empty: "no agent here takes the wsp tools yet" };
+const WSP: InitScreen = { id: "wsp", title: "wsp for your agents on this Mac", top: "Add wsp's MCP server and skill to the agents installed here, so they can drive your workspaces", items: [{ id: "wsp-tools/claude", label: "Claude Code", detail: ["writes ~/.claude.json"] }, { id: "wsp-tools/codex", label: "Codex", detail: ["writes ~/.codex/config.toml"] }], ticks: ["wsp-tools/claude"], answers: {}, footer: [] };
 
 const DISK = { fixed: 2 * GIB, total: 20 * GIB };
 const JOB: InitJob = { id: "init_1", road: "manual", phase: "answering", keys: { solari: true }, step: 0, stoppable: true, disk: DISK, screens: [AGENTS, TOOLS, ALSO, LOGINS, WSP], rows: [], progress: { done: 0, total: 0 }, log: [] };
@@ -599,6 +596,33 @@ describe("the cloud setup sheet", () => {
     await waitFor(() => expect(k(dialog, "ask")).toBeDefined());
     expect(k(dialog, "counter").textContent).toBe("5/5");
     expect(dialog.querySelector('[data-k="screen-wsp"]')).toBeNull();
+  });
+
+  it("the steps are the screens the host shows and the first workspace's question: with no formulae and no sign-ins three, counted so, and Back from the question lands on the tools step, the last one shown; with no formulae four", async () => {
+    const three: InitJob = { ...JOB, screens: [AGENTS, TOOLS, WSP] };
+    const t = await open({ setup: { ...HELD, job: three } });
+    await waitFor(() => expect(k(t.dialog, "screen-agents")).toBeDefined());
+    expect(k(t.dialog, "counter").textContent).toBe("1/3");
+    fireEvent.click(k(t.dialog, "primary"));
+    await waitFor(() => expect(k(t.dialog, "screen-tools")).toBeDefined());
+    expect(k(t.dialog, "counter").textContent).toBe("2/3");
+    fireEvent.click(k(t.dialog, "primary"));
+    await waitFor(() => expect(k(t.dialog, "ask")).toBeDefined());
+    expect(k(t.dialog, "counter").textContent).toBe("3/3");
+    expect(t.dialog.querySelector('[data-k="screen-also"]')).toBeNull();
+    expect(t.dialog.querySelector('[data-k="screen-logins"]')).toBeNull();
+    fireEvent.click(k(t.dialog, "secondary"));
+    await waitFor(() => expect(t.api.initStep).toHaveBeenCalledWith({ at: 1 }));
+    await waitFor(() => expect(k(t.dialog, "screen-tools")).toBeDefined());
+    expect(k(t.dialog, "counter").textContent).toBe("2/3");
+    cleanup();
+    const four = await open({ setup: { ...HELD, job: { ...JOB, step: 2, screens: [AGENTS, TOOLS, LOGINS, WSP] } } });
+    await waitFor(() => expect(k(four.dialog, "screen-logins")).toBeDefined());
+    expect(k(four.dialog, "counter").textContent).toBe("3/4");
+    fireEvent.click(k(four.dialog, "secondary"));
+    await waitFor(() => expect(four.api.initStep).toHaveBeenCalledWith({ at: 1 }));
+    await waitFor(() => expect(k(four.dialog, "screen-tools")).toBeDefined());
+    expect(k(four.dialog, "counter").textContent).toBe("2/4");
   });
 
   it("the build's question: the title, the sentence from the recipe's numbers, both fields in the input grammar, the first launch's MCP answer handed to the job with the build", async () => {

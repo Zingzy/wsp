@@ -20,7 +20,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
-import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MACHINE_ROW_LABEL, NETWORK_LOST_LINE, SIGN_IN_STAGE_ID, initSignInLine, initStageCountLine, keyRefusedLine } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MACHINE_ROW_LABEL, NETWORK_LOST_LINE, SIGN_IN_STAGE_ID, initSignInLine, initStageCountLine, initStepCounter, keyRefusedLine } from "@wsp/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { textContrast, textHue } from "./contrast";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
@@ -43,12 +43,12 @@ interface Box {
 const STEPS = ["choice", "keys", "agent", "agent-stopped", "reading", "agents", "tools", "also", "logins", "ask", "building", "signing", "retry", "done", "failed"] as const;
 /** States of a step rather than steps of the walk, and the error states of the end-to-end run: each is
  * photographed on its own, not walked with the rest. */
-const STATES = ["keys-refused", "keys-saved", "failed-key", "stopped", "you-stopped", "slot", "over", "sweeping"] as const;
+const STATES = ["keys-refused", "keys-saved", "failed-key", "stopped", "you-stopped", "slot", "over", "sweeping", "no-extras"] as const;
 type StepName = (typeof STEPS)[number] | (typeof STATES)[number];
 /** The answer steps, which carry their count over the title. */
 const COUNTED: ReadonlySet<StepName> = new Set<StepName>(["agents", "tools", "also", "logins", "ask"]);
 /** The frame's data-k for each, where it differs from the step's own name. */
-const FRAME: Record<StepName, string> = { choice: "choice", keys: "keys", "keys-refused": "keys", "keys-saved": "keys", agent: "agent", "agent-stopped": "agent", reading: "reading", agents: "screen-agents", tools: "screen-tools", also: "screen-also", logins: "screen-logins", ask: "ask", building: "build", signing: "build", retry: "build", done: "build", failed: "build", "failed-key": "build", stopped: "build", "you-stopped": "build", slot: "build", over: "screen-also", sweeping: "build" };
+const FRAME: Record<StepName, string> = { choice: "choice", keys: "keys", "keys-refused": "keys", "keys-saved": "keys", agent: "agent", "agent-stopped": "agent", reading: "reading", agents: "screen-agents", tools: "screen-tools", also: "screen-also", logins: "screen-logins", ask: "ask", building: "build", signing: "build", retry: "build", done: "build", failed: "build", "failed-key": "build", stopped: "build", "you-stopped": "build", slot: "build", over: "screen-also", sweeping: "build", "no-extras": "screen-agents" };
 /** The steps whose tally carries the disk meter: the ones that change the image's size. */
 const METERED = new Set<StepName>(["agents", "tools", "also"]);
 /** The first launch's numbers: what every step is measured against. */
@@ -254,6 +254,13 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
       await shoot(step, theme);
     }
   }, 240_000);
+
+  it.each(["dark", "light"] as const)("in the %s theme a run with no extras step counts its first step 1/4: the steps the person sees, the first workspace among them", async theme => {
+    await page!.setViewportSize({ ...VIEWPORTS[0] });
+    const frame = await goTo("no-extras", theme);
+    expect(await page!.locator(`${frame} [data-k=counter]`).textContent()).toBe(initStepCounter(1, 4));
+    await shoot("no-extras", theme);
+  });
 
   it.each(["dark", "light"] as const)("in the %s theme the error states read as themselves: the sentence a stopped build gives, the cap wait on its own row, the whole list kept in order, and the refusal past the disk above the footer in the ring's tone", async theme => {
     await page!.setViewportSize({ ...VIEWPORTS[0] });

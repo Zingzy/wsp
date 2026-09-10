@@ -1,5 +1,5 @@
 # The init screenshot in the README, recorded with vhs (charm.sh/vhs) from a
-# fresh state file so the six screens start from the first one.
+# fresh state file so the screens start from the first one.
 Set Shell zsh
 Set FontSize 15
 Set Width 1120

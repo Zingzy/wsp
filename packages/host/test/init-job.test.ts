@@ -214,6 +214,9 @@ function fake(over: { env?: Record<string, string>; configured?: boolean; read?:
 
 const phases = (f: Fake): string[] => f.events.map(e => e.job.phase).filter((p, i, all) => i === 0 || all[i - 1] !== p);
 
+/** One formula a manager here could put on the image, so a run that wants the Also screen shown has a row for it. */
+const JQ = { id: "brew/jq", name: "jq", manager: "brew" as const, group: "Homebrew formulae", install: "brew install jq", check: "command -v jq", size: 2 * 1024 * 1024 };
+
 describe("the init job, manual road", () => {
   it("opens with the provider key's presence, the agents here and the price, and no job", async () => {
     const f = fake();
@@ -246,14 +249,14 @@ describe("the init job, manual road", () => {
     try {
       await f.jobs.start({ road: "manual" });
       await f.settled();
-      const logins = f.jobs.view()!.screens[3]!;
+      const logins = f.jobs.view()!.screens.find(s => s.id === "logins")!;
       expect(logins.items.find(i => i.id === "logins/claude")!.key).toEqual({ name: "ANTHROPIC_API_KEY", saved: false });
       // A row that takes no key is refused, so nothing a client names reaches the file.
       await expect(f.jobs.keys({ rows: { "logins/gh": "ghp_fake" } })).rejects.toThrow(/takes no API key/);
       expect(f.saved).toEqual([]);
       const setup = await f.jobs.keys({ rows: { "logins/claude": "sk-ant-x-typed" } });
       expect(f.saved).toEqual([{ ANTHROPIC_API_KEY: "sk-ant-x-typed" }]);
-      expect(setup.job!.screens[3]!.items.find(i => i.id === "logins/claude")!.key).toEqual({ name: "ANTHROPIC_API_KEY", saved: true });
+      expect(setup.job!.screens.find(s => s.id === "logins")!.items.find(i => i.id === "logins/claude")!.key).toEqual({ name: "ANTHROPIC_API_KEY", saved: true });
       expect(JSON.stringify(setup)).not.toMatch(/sk-ant-x/);
     } finally {
       delete process.env["ANTHROPIC_API_KEY"];
@@ -309,7 +312,7 @@ describe("the init job, manual road", () => {
   });
 
   it("the step follows the answers and a step back, so a setup shut mid-way reopens where it was; a step off the screens is refused", async () => {
-    const f = fake();
+    const f = fake({ read: { scan: async () => [JQ] } });
     await f.jobs.start({ road: "manual" });
     await f.settled();
     expect(f.jobs.view()!.step).toBe(0);
@@ -324,7 +327,7 @@ describe("the init job, manual road", () => {
   });
 
   it("what a step ticked and typed and did not send is kept beside the step, so a sheet shut mid-answer reopens on it; Continue spends it and a step the job has not got is refused", async () => {
-    const f = fake();
+    const f = fake({ read: { scan: async () => [JQ] } });
     await f.jobs.start({ road: "manual" });
     await f.settled();
     // Everything ticked since the last Continue rides the job, not the client: a view taken now carries it.
@@ -344,14 +347,19 @@ describe("the init job, manual road", () => {
     await expect(f.jobs.draft({ at: "nowhere", ticks: [] })).rejects.toThrow(/no step nowhere/);
   });
 
-  it("start reads this computer once and hands the five screens over; answers move the recipe; the build is wsp init's own run on the host's runtime, its sign-ins as rows, ending with the golden sealed and the first workspace forked", async () => {
-    const f = fake();
+  it("start reads this computer once and hands the screens over; answers move the recipe; the build is wsp init's own run on the host's runtime, its sign-ins as rows, ending with the golden sealed and the first workspace forked", async () => {
+    const f = fake({ read: { scan: async () => [JQ] } });
     const started = await f.jobs.start({ road: "manual" });
     expect(started).toMatchObject({ road: "manual", phase: "reading", keys: { solari: true }, step: 0 });
     await f.settled();
     const read = f.jobs.view()!;
     expect(read.phase).toBe("answering");
     expect(read.screens.map(s => s.id)).toEqual(["agents", "tools", "also", "logins", "wsp"]);
+    // With no manager row the Also screen is not among them, by the protocol's rule the terminal reads too.
+    const bare = fake();
+    await bare.jobs.start({ road: "manual" });
+    await bare.settled();
+    expect(bare.jobs.view()!.screens.map(s => s.id)).toEqual(["agents", "tools", "logins", "wsp"]);
     expect(read.screens[0]!.ticks).toEqual(["claude"]);
 
     const answered = await f.jobs.answer({ screen: "agents", ticks: ["claude", "codex"] });
