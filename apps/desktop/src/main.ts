@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { agentHistories, agentsHere, assetDir, currentHome, installEach, mcpServerSpec, runningWsp, shimPath, wspHome, type CliIO } from "@wsp/host";
+import { adoptLoginPath, agentHistories, agentsHere, assetDir, currentHome, installEach, mcpServerSpec, runningWsp, shimPath, wspHome, type CliIO } from "@wsp/host";
 import { DEFAULT_PORT, DEFAULT_WS_PORT, InitNeedsYou, ThemePreference } from "@wsp/protocol";
 import type { Runtime } from "@wsp/runtime";
 import { BrowserWindow, Menu, Notification, app, dialog, ipcMain, nativeTheme, shell, type IpcMainInvokeEvent } from "electron";
@@ -273,7 +273,12 @@ app
     });
     // Electron quits this process and starts the moved bundle, which writes the command from its settled path.
     if (moved === "moving") return;
+    // The command is written first and waits on nothing: it needs no PATH, and a launch is expected to have left it
+    // in place by the time a window is up.
     installCommand();
+    // Then, before the setup gate that builds the runtime this window serves and before the first launch reads the
+    // agents on this computer: a window opened from Finder or the Dock was handed launchd's PATH.
+    await adoptLoginPath(line => io.log(line));
     const located = await locate();
     if (located.stalePointer !== undefined) io.error(`~/.wsp/current-home names ${located.stalePointer}, but no host is serving it; opening ${located.home}`);
     if (!(await showApp(located))) await showOnboarding(located);

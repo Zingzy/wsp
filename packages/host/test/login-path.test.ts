@@ -156,10 +156,31 @@ describe("the login shell PATH", () => {
     }
   });
 
-  it("one place resolves it, and it is the host start both wsp up and the desktop's host go through", () => {
-    const cliSource = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8");
-    expect(cliSource.match(/adoptLoginPath\(/g)).toHaveLength(1);
-    // hostFor is that place, and the call comes before the server it brings up, so nothing has looked a command up yet.
-    expect(cliSource.indexOf("adoptLoginPath(")).toBeLessThan(cliSource.indexOf("startHost("));
+  // The local wiring copies the environment when a runtime is made, so a road that builds one before the read hands
+  // launchd's PATH to every turn it ever runs. The read is once per process, so saying it on each road is free.
+  it("every road that builds a runtime awaits the read before it", () => {
+    const source = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8");
+    // Each top level declaration of cli.ts, so a road is judged on its own body and not on the file's order.
+    const roads = source.split(/\n(?=(?:export )?(?:async )?function |(?:export )?const [A-Za-z]+: )/);
+    const builders = roads.filter(road => road.includes("makeRuntime(") && !road.includes("export function makeRuntime("));
+    expect(builders.length).toBeGreaterThan(0);
+    for (const road of builders) {
+      const name = /^(?:export )?(?:async )?(?:function|const) (\w+)/.exec(road)?.[1] ?? road.slice(0, 40);
+      expect(road.indexOf("adoptLoginPath("), `${name} builds a runtime without reading the login shell PATH first`).toBeGreaterThanOrEqual(0);
+      expect(road.indexOf("adoptLoginPath("), `${name} builds its runtime before the read`).toBeLessThan(road.indexOf("makeRuntime("));
+    }
+  });
+
+  // The wsp command needs no PATH and a launch is expected to have written it by the time a window is up, so the
+  // read, which waits on a shell, goes after it and before everything that does need the PATH.
+  it("the desktop window writes the command, then reads the PATH, then opens anything", () => {
+    const main = readFileSync(new URL("../../../apps/desktop/src/main.ts", import.meta.url), "utf8");
+    const shim = main.indexOf("installCommand();");
+    const read = main.indexOf("await adoptLoginPath(");
+    const gate = main.indexOf("await locate()");
+    expect(shim, "the desktop never writes the wsp command").toBeGreaterThanOrEqual(0);
+    expect(read, "the desktop never reads the login shell PATH").toBeGreaterThanOrEqual(0);
+    expect(shim, "the read waits on a shell before the command is written").toBeLessThan(read);
+    expect(read, "the setup gate builds its runtime before the read").toBeLessThan(gate);
   });
 });
