@@ -12,13 +12,17 @@ import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { isCancel, log } from "@clack/prompts";
-import { canTravel, defaultAgents, defaultConsent, fmtBytes, importRequest, plural, THIS_COMPUTER, workspaceHash, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
+import { canTravel, defaultAgents, defaultConsent, FIRST_WORKSPACE, fmtBytes, importRequest, plural, THIS_COMPUTER, workspaceHash, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
 import type { CreatedWorkspace } from "@wsp/runtime";
 import { confirmPrompt, textPrompt } from "./init-layout.js";
 import type { HostHandle, WorkspaceRoads } from "./server.js";
 
-/** The name a first workspace takes when nobody names one. */
-export const FIRST_WORKSPACE = "first";
+/** The name the workspace step was answered with, or none. The step's answer is what decides the fork, not how many
+ * workspaces the list already holds: a name forks whatever is there, and an empty field forks nothing. */
+export function firstWorkspaceName(name: string | undefined): string | undefined {
+  const text = name?.trim();
+  return text === undefined || text === "" ? undefined : text;
+}
 
 export const FIRST_QUESTION = "Make your first workspace and import a project now?";
 export const FOLDER_QUESTION = "Which folder on this Mac?";

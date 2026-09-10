@@ -14,10 +14,11 @@ import { stripVTControlCharacters } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
 import { keyCheckLine, type BackendPricing, type KeyCheck } from "@wsp/engine";
 import { RUNGS } from "@wsp/collect";
-import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, KEY_REFUSED, KEY_UNCHECKED, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initJobOver, initNeedWhat, initRowOver, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type LoginState, type McpServerSpec, type TurnResult } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, KEY_REFUSED, KEY_UNCHECKED, shellQuote, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initJobOver, initNeedWhat, initRowOver, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type LoginState, type McpServerSpec, type TurnResult } from "@wsp/protocol";
 import { harnessCatalog, smallestModel, type GoldenRecipe, type InitDoor, type Runtime, type SessionHandle } from "@wsp/runtime";
 import type { AgentHere } from "./agents-here.js";
 import { SOLARI_KEY, agentKeysIn, keysOf, type Keys } from "./env-keys.js";
+import { firstWorkspaceName, folderOf } from "./init-first.js";
 import { wspToolsAgent, wspToolsItems } from "./init-pick.js";
 import { RUNG_TITLE, agentName, recipeWithAnswers } from "./init-recipe.js";
 import { answerScreen, diskOf, keyNameFor, screensOf, type ScreenAnswers } from "./init-screens.js";
@@ -77,6 +78,10 @@ const RECIPE_POLL_MS = 250;
 const takesTools = (harness: string): boolean => takesMcpServers(harnessCatalog(harness));
 /** What a sign-in row says when the run ended without reaching it. */
 export const SIGN_IN_NEVER_REACHED = "the build never reached this sign-in";
+/** What any other row says when the build ended with it unfinished, whether or not it had started. */
+export const NEVER_REACHED = "the build ended before this step";
+/** What the first workspace's row says when the build carried no name, which is the answer that forks nothing. */
+export const NO_FIRST_WORKSPACE = "no name was given, so nothing was forked";
 /** The stage rows in the order the build runs them: the prepare's, then the seal's. */
 const STAGE_WORDS: readonly StageWords[] = [...PREPARE_STEPS, ...SEAL_STEPS];
 const SEAL_STAGES = new Set<string>(SEAL_STEPS.map(w => w.stage));
@@ -372,8 +377,12 @@ export class InitJobs implements InitDoor {
     // Every sign-in the screens chose is a row from the first frame, waiting for its turn: the handoff's own events
     // fill in the page and the outcome when they reach it, and a row the run never reaches ends as skipped, said so.
     for (const row of this.chosenSignIns(s)) s.rows.push(row);
-    if (o.firstWorkspace !== undefined) s.rows.push({ id: `workspace/${o.firstWorkspace}`, kind: "workspace", label: o.firstWorkspace, state: STATE.waiting });
-    if (o.importFolder !== undefined) s.rows.push({ id: `project/${o.importFolder}`, kind: "project", label: basename(o.importFolder), state: STATE.waiting });
+    const first = firstWorkspaceName(o.firstWorkspace);
+    // The import rides the fork, so with no name the folder goes with it and the row below says why for both.
+    const folder = first === undefined ? undefined : folderOf(o.importFolder);
+    // The workspace row is drawn either way, so the list never ends on a step whose answer nobody can read.
+    s.rows.push(first === undefined ? { id: "workspace", kind: "workspace", label: CLOUD_SETUP_WORDS.ask.headline, state: STATE.skipped, detail: NO_FIRST_WORKSPACE } : { id: `workspace/${first}`, kind: "workspace", label: first, state: STATE.waiting });
+    if (folder !== undefined) s.rows.push({ id: `project/${folder}`, kind: "project", label: basename(folder), state: STATE.waiting });
     this.emit();
     const offs: (() => void)[] = [];
     const io = this.io(s);
@@ -383,8 +392,8 @@ export class InitJobs implements InitDoor {
       recipeFile: path,
       reading: { ...reading, catalogRecipe: recipe },
       noLocal: true,
-      ...(o.firstWorkspace !== undefined ? { firstWorkspace: o.firstWorkspace } : {}),
-      ...(o.importFolder !== undefined ? { importFolder: o.importFolder } : {}),
+      ...(first !== undefined ? { firstWorkspace: first } : {}),
+      ...(folder !== undefined ? { importFolder: folder } : {}),
       ...this.deps.read,
       agentKeys: agentKeysIn(saved),
       signIns: ctx => {
@@ -398,7 +407,7 @@ export class InitJobs implements InitDoor {
       runtime: r => buildingOn(this.deps.rt, this.deps.build.recipe(r), offs),
       ports: { port: 0, wsPort: 0, named: true },
       upCommand: "wsp up",
-      forkCommand: `wsp new ${o.firstWorkspace ?? "first"}`,
+      forkCommand: `wsp new ${shellQuote(first ?? FIRST_WORKSPACE)}`,
       relay: this.deps.build.relay,
       codes: this.codes,
       roads: () => this.deps.build.roads(),
@@ -417,11 +426,11 @@ export class InitJobs implements InitDoor {
         }
       } finally {
         for (const off of offs) off();
+        // Every row the run left unfinished, not only the ones it never started: forking and importing hang too.
         for (const row of s.rows) {
-          if (row.kind === "sign-in" && (row.state === STATE.waiting || row.state === STATE.running)) {
-            row.state = INIT_SIGN_IN_WORDS.skipped;
-            row.detail = SIGN_IN_NEVER_REACHED;
-          }
+          if (initRowOver(row.state)) continue;
+          row.state = STATE.skipped;
+          row.detail = row.kind === "sign-in" ? SIGN_IN_NEVER_REACHED : NEVER_REACHED;
         }
       }
     });
@@ -757,7 +766,7 @@ export class InitJobs implements InitDoor {
         break;
       }
       case "first-workspace": {
-        const name = text("name") ?? "first";
+        const name = text("name") ?? FIRST_WORKSPACE;
         const had = row(`workspace/${name}`) ?? (s.rows[s.rows.push({ id: `workspace/${name}`, kind: "workspace", label: name, state: STATE.waiting }) - 1] as InitRow);
         had.state = text("state") === "forked" ? STATE.forked : text("state") === "failed" ? STATE.failed : STATE.forking;
         if (text("error") !== undefined) had.detail = text("error")!;
