@@ -9,8 +9,9 @@
 // happen. Esc hides it with the job running on.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLOUD_SETUP_WORDS, SIGN_IN_STAGE_ID, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MACHINE_SWEEP_LINE, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initBuildRows, initDiskLine, initDiskOverLine, initMachineRowLabel, initStageCount, initStageCountLine, initTallyLine, initButtonLine, initProgressLine, type EventUnion, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
-import type { Api } from "../src/protocol/client.js";
+import { CLOUD_SETUP_WORDS, KEY_REFUSED, KEY_UNCHECKED, SIGN_IN_STAGE_ID, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MACHINE_SWEEP_LINE, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initBuildRows, initDiskLine, initDiskOverLine, initMachineRowLabel, initStageCount, initStageCountLine, initTallyLine, initButtonLine, initProgressLine, keyRefusedLine, keyUncheckedLine, type EventUnion, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { RequestError, type Api } from "../src/protocol/client.js";
+import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS, keyStoppedRows } from "./cloud-setup/keyRefusedJob.js";
 import { useStore } from "../src/protocol/store.js";
 import { CloudSetupDialog } from "../src/sidebar/CloudSetupDialog.js";
 import { CloudSetupRow } from "../src/sidebar/CloudSetupRow.js";
@@ -79,9 +80,17 @@ const AGENT_JOB: InitJob = { ...JOB, road: "agent", phase: "agent", screens: [],
 const SETUP: InitSetup = { keys: { solari: false }, home: "/Users/me", agents: [{ id: "claude", name: "Claude Code", configured: true, takesTools: true }, { id: "codex", name: "Codex", configured: false, takesTools: false }], pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 }, job: null };
 const HELD: InitSetup = { ...SETUP, keys: { solari: true } };
 
-function fakeApi(over: { setup?: InitSetup; refuse?: string } = {}) {
+/** How the fake host answers a key: what it refuses with, and whether the answer waits for the test to let it go. */
+interface KeyAnswer {
+  refusal?: { message: string; kind: string };
+  hold?: boolean;
+}
+
+function fakeApi(over: { setup?: InitSetup; refuse?: string; key?: KeyAnswer } = {}) {
   const listeners = new Set<(e: EventUnion) => void>();
   let setup = over.setup ?? SETUP;
+  /** Lets a held key answer go, so a test reads the Save keycap while the provider is still being asked. */
+  let letKeyGo: () => void = () => {};
   /** The job as the host holds it: answers move its step and step moves it back, and every change is an event. */
   let job: InitJob | null = setup.job;
   const emit = (next: InitJob): void => {
@@ -125,6 +134,11 @@ function fakeApi(over: { setup?: InitSetup; refuse?: string } = {}) {
     }),
     initGet: vi.fn(async () => ({ ...setup, job })),
     initKeys: vi.fn(async (keys: { solari?: string; rows?: Record<string, string> }) => {
+      if (keys.solari !== undefined && over.key !== undefined) {
+        // The host checks the key with the provider before it saves it, so this answer is what that check said.
+        if (over.key.hold === true) await new Promise<void>(r => (letKeyGo = r));
+        if (over.key.refusal !== undefined) throw new RequestError(over.key.refusal.message, over.key.refusal.kind);
+      }
       if (keys.solari !== undefined) setup = { ...setup, keys: { solari: true } };
       if (keys.rows !== undefined && job !== null) {
         const saved = new Set(Object.keys(keys.rows));
@@ -173,7 +187,7 @@ function fakeApi(over: { setup?: InitSetup; refuse?: string } = {}) {
       return job ?? JOB;
     }),
   } satisfies Api;
-  return { api, emit, held: () => job };
+  return { api, emit, held: () => job, letKeyGo: () => letKeyGo() };
 }
 
 beforeEach(() => {
@@ -186,15 +200,15 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function open(over: { setup?: InitSetup; refuse?: string } = {}) {
-  const { api, emit, held } = fakeApi(over);
+async function open(over: { setup?: InitSetup; refuse?: string; key?: KeyAnswer } = {}) {
+  const { api, emit, held, letKeyGo } = fakeApi(over);
   useStore.setState({ initJob: over.setup?.job ?? null });
   useStore.getState().bind(api);
   const onClose = vi.fn();
   render(<CloudSetupDialog onClose={onClose} />);
   const dialog = await screen.findByRole("dialog");
   await waitFor(() => expect(api.initGet).toHaveBeenCalled());
-  return { api, emit, held, dialog, onClose };
+  return { api, emit, held, letKeyGo, dialog, onClose };
 }
 const k = (root: HTMLElement, key: string): HTMLElement => {
   const el = root.querySelector<HTMLElement>(`[data-k="${key}"]`);
@@ -286,6 +300,69 @@ describe("the cloud setup sheet", () => {
     await waitFor(() => expect(api.initKeys).toHaveBeenCalledWith({ solari: "slr_live_typed_key" }));
     await waitFor(() => expect(api.initStart).toHaveBeenCalledWith({ road: "manual" }));
     expect(dialog.textContent).not.toContain("slr_live_typed_key");
+  });
+
+  it("Save spins while the host asks the provider about the key, and does not send twice", async () => {
+    const t = await open({ key: { hold: true } });
+    await waitFor(() => expect(k(t.dialog, "choice")).toBeDefined());
+    fireEvent.click(k(t.dialog, "primary"));
+    await waitFor(() => expect(k(t.dialog, "keys")).toBeDefined());
+    fireEvent.change(t.dialog.querySelector("input")!, { target: { value: "slr_live_typed_key" } });
+    fireEvent.click(k(t.dialog, "primary"));
+    await waitFor(() => expect(k(t.dialog, "primary").getAttribute("data-busy")).toBe("true"));
+    const keycap = k(t.dialog, "primary") as HTMLButtonElement;
+    expect(keycap.querySelector('[data-k="busy"]')).not.toBeNull();
+    expect(keycap.disabled).toBe(true);
+    expect(keycap.textContent).toContain(CLOUD_SETUP_WORDS.keys.keycap);
+    fireEvent.click(keycap);
+    expect(t.api.initKeys).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      t.letKeyGo();
+    });
+    await waitFor(() => expect(t.api.initStart).toHaveBeenCalled());
+    // The spinner ends with the step: the key was taken, so the sheet is on the job.
+    expect(t.dialog.querySelector("[data-k=keys]")).toBeNull();
+  });
+
+  it("a key the provider refused stays on the step: the field takes the danger tone with the provider's own word under it, and no job starts", async () => {
+    const line = keyRefusedLine("401 Unauthorized");
+    const t = await open({ key: { refusal: { message: line, kind: KEY_REFUSED } } });
+    await waitFor(() => expect(k(t.dialog, "choice")).toBeDefined());
+    fireEvent.click(k(t.dialog, "primary"));
+    await waitFor(() => expect(k(t.dialog, "keys")).toBeDefined());
+    fireEvent.change(t.dialog.querySelector("input")!, { target: { value: "slr_live_wrong" } });
+    fireEvent.click(k(t.dialog, "primary"));
+    await waitFor(() => expect(k(t.dialog, "key-check").textContent).toBe(line));
+    // The refusal reads under the field, not in the footer's slot, and the field itself carries the danger tone.
+    const field = t.dialog.querySelector("input")!;
+    expect(field.getAttribute("aria-invalid")).toBe("true");
+    expect(field.getAttribute("aria-describedby")).toBe(k(t.dialog, "key-check").id);
+    expect(t.dialog.querySelector("[data-k=refusal]")).toBeNull();
+    // The person stays on the step, the keycap still says Save, and nothing was started.
+    expect(k(t.dialog, "keys")).toBeDefined();
+    expect(k(t.dialog, "primary").textContent).toContain(CLOUD_SETUP_WORDS.keys.keycap);
+    expect(t.api.initStart).not.toHaveBeenCalled();
+    expect(t.dialog.textContent).not.toContain("slr_live_wrong");
+    // Typing another key takes the refusal with it: it was about the key that was sent, not about this one.
+    fireEvent.change(field, { target: { value: "slr_live_another" } });
+    await waitFor(() => expect(t.dialog.querySelector("[data-k=key-check]")).toBeNull());
+    expect(t.dialog.querySelector("input")!.getAttribute("aria-invalid")).toBe("false");
+  });
+
+  it("a check nothing answered says so in the same place, and the keycap turns to Try again", async () => {
+    const line = keyUncheckedLine("fetch failed");
+    const t = await open({ key: { refusal: { message: line, kind: KEY_UNCHECKED } } });
+    await waitFor(() => expect(k(t.dialog, "choice")).toBeDefined());
+    fireEvent.click(k(t.dialog, "primary"));
+    await waitFor(() => expect(k(t.dialog, "keys")).toBeDefined());
+    fireEvent.change(t.dialog.querySelector("input")!, { target: { value: "slr_live_maybe" } });
+    fireEvent.click(k(t.dialog, "primary"));
+    await waitFor(() => expect(k(t.dialog, "key-check").textContent).toBe(line));
+    await waitFor(() => expect(k(t.dialog, "primary").textContent).toContain(CLOUD_SETUP_WORDS.keys.retry));
+    expect(t.api.initStart).not.toHaveBeenCalled();
+    // Pressing again asks the host again, which is the point of that word.
+    fireEvent.click(k(t.dialog, "primary"));
+    await waitFor(() => expect(t.api.initKeys).toHaveBeenCalledTimes(2));
   });
 
   it("with a key held, Continue starts the job on the road picked; the agent road names its harness; a refused start leaves the choice up with the refusal", async () => {
@@ -940,6 +1017,46 @@ describe("the cloud setup sheet", () => {
     expect(useStore.getState().selectedId).toBe("ws_first");
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(screen.queryByRole("button", { name: CLOUD_SETUP_WORDS.row })).toBeNull();
+  });
+
+  it("a saved key refused at build time draws the job the host leaves: the first stage failed with the refusal, the rows after it never reached, nothing counted as done, and Change the key back to the keys step", async () => {
+    const stopped: InitJob = { ...JOB, phase: "failed", screens: [], rows: KEY_REFUSED_ROWS, progress: { done: 0, total: KEY_REFUSED_ROWS.length }, error: KEY_REFUSED_LINE, keyRefused: true };
+    const t = await open({ setup: { ...HELD, job: stopped } });
+    await waitFor(() => expect(k(t.dialog, "build")).toBeDefined());
+    expect(k(t.dialog, "title").textContent).toBe(CLOUD_SETUP_WORDS.build.failed);
+    expect(k(t.dialog, "sentence").textContent).toBe(KEY_REFUSED_LINE);
+    expect(t.dialog.textContent).not.toContain("Nothing was booted");
+    // Nothing on the screen reads as work done: the count is none of the stages and the bar is at nothing.
+    const { rows } = initBuildRows(KEY_REFUSED_ROWS);
+    expect(initStageCount(rows).done).toBe(0);
+    expect(k(t.dialog, "count").textContent).toBe(initStageCountLine(initStageCount(rows)));
+    expect(k(t.dialog, "progress").getAttribute("aria-valuenow")).toBe("0");
+    // The first stage carries the refusal as its line; the sign-in fold and the workspace read as never reached.
+    const state = (row: string): string | null => t.dialog.querySelector(`[data-row="${row}"]`)!.getAttribute("data-state");
+    expect(state("stage/creating")).toBe(INIT_ROW_STATES.failed);
+    expect(within(t.dialog.querySelector<HTMLElement>('[data-row="stage/creating"]')!).getByText(KEY_REFUSED_LINE)).toBeDefined();
+    expect(state(SIGN_IN_STAGE_ID)).toBe(INIT_ROW_STATES.skipped);
+    // A workspace nothing made reads not made; skipped would read as a step the build chose to pass on.
+    expect(state("workspace/first")).toBe(INIT_ROW_STATES.notMade);
+    expect([...t.dialog.querySelectorAll("[data-row]")].map(r => r.getAttribute("data-state"))).not.toContain(INIT_ROW_STATES.done);
+    // The way on is the step that takes a key, not another build off the same one.
+    const keycap = k(t.dialog, "primary");
+    expect(keycap.textContent).toContain(CLOUD_SETUP_WORDS.keys.changeKey);
+    expect(keycap.textContent).not.toContain(CLOUD_SETUP_WORDS.build.again);
+    fireEvent.click(keycap);
+    await waitFor(() => expect(k(t.dialog, "keys")).toBeDefined());
+    expect(t.dialog.querySelector("[data-k=key-check]")).toBeNull();
+    expect(t.api.initStart).not.toHaveBeenCalled();
+  });
+
+  it("a build that could not ask the provider about the key offers Start over: the saved key may be fine", async () => {
+    const line = keyUncheckedLine("fetch failed");
+    const rows = keyStoppedRows(line);
+    const stopped: InitJob = { ...JOB, phase: "failed", screens: [], rows, progress: { done: 0, total: rows.length }, error: line };
+    const t = await open({ setup: { ...HELD, job: stopped } });
+    await waitFor(() => expect(k(t.dialog, "build")).toBeDefined());
+    expect(k(t.dialog, "sentence").textContent).toBe(line);
+    expect(k(t.dialog, "primary").textContent).toContain(CLOUD_SETUP_WORDS.build.again);
   });
 
   it("the sidebar row reads the job's line while it runs and the sheet is shut, and the plain words otherwise", async () => {

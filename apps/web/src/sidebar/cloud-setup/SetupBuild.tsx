@@ -13,7 +13,7 @@
 // stops the job after asking once.
 import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, SIGN_IN_STAGE_ID, initBuildRows, initJobBuilding, initJobOver, initRowOver, initStageCount, initStageCountLine, type InitJob, type InitRow } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, SIGN_IN_STAGE_ID, initBuildRows, initJobBuilding, initJobOver, initRowOver, initRowUnrun, initStageCount, initStageCountLine, type InitJob, type InitRow } from "@wsp/protocol";
 import { Button } from "../../components/ui/button.js";
 import { cn } from "../../lib/utils.js";
 import { ansiSpans, toolPrefix } from "./ansi.js";
@@ -36,7 +36,7 @@ const STAGE_BLOCK = "h-[176px] [@media(max-height:699px)]:h-[136px]";
  * the same block, saying so. */
 const onIt = (state: string): boolean => state === INIT_ROW_STATES.running || state === INIT_ROW_STATES.slot;
 
-export function SetupBuild({ job, onCancel, onRetry, onCode, onOpenWorkspace, onAgain, refusal }: { job: InitJob; onCancel: () => void; onRetry: (tool: string) => void; onCode: (o: { tool: string; code: string }) => void; onOpenWorkspace: () => void; onAgain: () => void; refusal: string | null }) {
+export function SetupBuild({ job, onCancel, onRetry, onCode, onOpenWorkspace, onAgain, onChangeKey, refusal }: { job: InitJob; onCancel: () => void; onRetry: (tool: string) => void; onCode: (o: { tool: string; code: string }) => void; onOpenWorkspace: () => void; onAgain: () => void; onChangeKey: () => void; refusal: string | null }) {
   const words = CLOUD_SETUP_WORDS.build;
   const [asking, setAsking] = useState(false);
   const over = initJobOver(job.phase);
@@ -51,7 +51,9 @@ export function SetupBuild({ job, onCancel, onRetry, onCode, onOpenWorkspace, on
   const attention = building && signIns.some(s => s.state === INIT_SIGN_IN_WORDS["not-signed-in"]);
   const focusId = attention && signInStage !== undefined ? signInStage.id : (rows.find(r => onIt(r.state) || r.state === INIT_ROW_STATES.failed) ?? rows.find(r => r.state === INIT_ROW_STATES.retrying))?.id;
   const slideFocusId = (signIns.find(s => s.state === INIT_ROW_STATES.open) ?? signIns.find(s => s.state === INIT_SIGN_IN_WORDS["not-signed-in"]))?.id;
-  const primary: ScreenAction | undefined = job.phase === "done" && job.workspace !== undefined ? { word: words.keycap, onPress: onOpenWorkspace } : job.phase === "failed" || job.phase === "cancelled" ? { word: words.again, onPress: onAgain } : undefined;
+  // A saved key the provider refused offers the step that fixes it, not another build off the same key.
+  const primary: ScreenAction | undefined =
+    job.phase === "done" && job.workspace !== undefined ? { word: words.keycap, onPress: onOpenWorkspace } : job.keyRefused === true ? { word: CLOUD_SETUP_WORDS.keys.changeKey, onPress: onChangeKey } : job.phase === "failed" || job.phase === "cancelled" ? { word: words.again, onPress: onAgain } : undefined;
   const secondary: ScreenAction | undefined = building
     ? asking
       ? { word: words.cancelSure, onPress: onCancel, destructive: true }
@@ -186,7 +188,7 @@ function BuildRow({ row, focus, signIns, onRetry, onCode }: { row: InitRow; focu
   return (
     <li ref={item} data-k="row" data-row={row.id} data-state={row.state} data-open={open} className={ROW_LINE}>
       <div className={cn(ROW, canOpen && "cursor-pointer hover:bg-accent/30")} title={row.detail} onClick={canOpen ? () => setOpened(o => !(o === true)) : undefined} role={canOpen ? "button" : undefined} aria-expanded={canOpen ? open : undefined}>
-        <span aria-hidden className="flex size-[18px] shrink-0 items-center justify-center text-foreground">
+        <span data-k="glyph" aria-hidden className="flex size-[18px] shrink-0 items-center justify-center text-foreground">
           <StageGlyph state={row.state} />
         </span>
         <span className={cn(NAME, row.state === INIT_ROW_STATES.waiting && "text-muted-foreground")}>{row.label}</span>
@@ -276,11 +278,12 @@ function TerminalLine({ line, danger }: { line: string; danger: boolean }) {
   );
 }
 
-/** A stage's, a workspace's or a machine's glyph: a hollow ring while it waits and where it was never made or the
- * person's stop ended it, a filled dot while it runs or a machine is still being removed (the slot's spinner and
- * the row's word say which), a check once it ended well, a cross when it failed. */
+/** A stage's, a workspace's or a machine's glyph: a hollow ring while it waits, nothing while it runs (the slot's
+ * spinner says so), a filled dot while a machine is still being removed, a check once it ended well, a cross when
+ * it failed. A row that ended without running keeps the ring it waited with: it is over, but a check beside it
+ * would read as work that happened. */
 function StageGlyph({ state }: { state: string }) {
-  if (state === INIT_ROW_STATES.notMade || state === INIT_ROW_STATES.stopped) return <span className="size-2 rounded-full border border-muted-foreground/60" />;
+  if (initRowUnrun(state)) return <span className="size-2 rounded-full border border-muted-foreground/60" />;
   if (state === INIT_ROW_STATES.retrying) return <span className="size-2 rounded-full bg-foreground" />;
   if (state === INIT_ROW_STATES.failed) {
     return (

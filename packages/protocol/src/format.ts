@@ -999,6 +999,16 @@ export const CLOUD_SETUP_WORDS = {
     saved: "saved",
     unset: "not set",
     keycap: "Save",
+    /** Under the field when the provider answered and refused what was typed; its own status and word follow. */
+    refused: "Solari refused this key",
+    /** The build's line for a key already saved that the provider refuses, read before the first stage. */
+    refusedSaved: "Solari refused the saved key",
+    /** Under the field when nothing came back about the key at all; what this computer saw follows. */
+    unchecked: "Solari could not be reached to check the key",
+    /** What the Save keycap says after a check nothing answered, since pressing it again is worth something. */
+    retry: "Try again",
+    /** What the build offers when the saved key was refused: back to this step, not another build. */
+    changeKey: "Change the key",
   },
   screen: {
     keycap: "Continue",
@@ -1187,6 +1197,13 @@ export const FIRST_WORKSPACE = "first";
 /** The sentence under the first workspace's title: when it comes and on what, from the recipe's own numbers. */
 export const initForkLine = (size: WorkspaceSize): string => `Forked from the image as soon as the build finishes, on a ${fmtSize(size)} machine`;
 
+/** What a sign-in row says when the run ended without reaching it. */
+export const SIGN_IN_NEVER_REACHED = "the build never reached this sign-in";
+/** What any other row says when the build ended with it unfinished, whether or not it had started. */
+export const NEVER_REACHED = "the build ended before this step";
+/** What the first workspace's row says when the build carried no name, which is the answer that forks nothing. */
+export const NO_FIRST_WORKSPACE = "no name was given, so nothing was forked";
+
 /** The state word of a sign-in row while its page waits for the person. */
 export const SIGN_IN_OPEN_STATE = INIT_ROW_STATES.open;
 
@@ -1195,9 +1212,16 @@ export const MCP_ADDED_WORD = INIT_ROW_STATES.mcpAdded;
 
 const ROW_OVER: ReadonlySet<string> = new Set([INIT_ROW_STATES.done, INIT_ROW_STATES.failed, INIT_ROW_STATES.stopped, INIT_ROW_STATES.forked, INIT_ROW_STATES.imported, INIT_ROW_STATES.keySet, INIT_ROW_STATES.mcpAdded, INIT_ROW_STATES.skipped, INIT_ROW_STATES.notMade, INIT_ROW_STATES.gone, ...Object.values(INIT_SIGN_IN_WORDS), ...Object.values(LOGIN_STATE_WORDS)]);
 
-/** The end states that are not an end well: what the count leaves out of its done, so a build that failed or was
- * stopped never reads complete. */
-const ROW_UNDONE: ReadonlySet<string> = new Set([INIT_ROW_STATES.failed, INIT_ROW_STATES.stopped]);
+const ROW_UNRUN: ReadonlySet<string> = new Set([INIT_ROW_STATES.skipped, INIT_ROW_STATES.notMade, INIT_ROW_STATES.stopped]);
+
+/** Whether a row's state is one it ended on without anything having run: the build never reached it, or a person's
+ * stop ended it. The count leaves these out of its done, and a glyph gives them the ring they waited with rather
+ * than a check, which would read as work that happened. */
+export const initRowUnrun = (state: string): boolean => ROW_UNRUN.has(state);
+
+/** The end states that are not an end well: what the count leaves out of its done, so a build that failed, was
+ * stopped, or never reached a stage never reads complete. */
+const ROW_UNDONE: ReadonlySet<string> = new Set([INIT_ROW_STATES.failed, ...ROW_UNRUN]);
 
 /** Whether a row's state word is one it ends on: what the progress count and a section's count read. */
 export const initRowOver = (state: string): boolean => ROW_OVER.has(state);
@@ -1328,7 +1352,10 @@ export function initBuildRows(rows: readonly InitRow[]): { rows: InitRow[]; sign
         : signIns.every(r => initRowOver(r.state))
           ? signIns.some(r => r.state === INIT_SIGN_IN_WORDS["not-signed-in"])
             ? INIT_SIGN_IN_WORDS["not-signed-in"]
-            : INIT_ROW_STATES.done
+            : // A build that ended before it reached any of them signed none in, so the fold says so rather than done.
+              signIns.every(r => r.state === INIT_ROW_STATES.skipped)
+              ? INIT_ROW_STATES.skipped
+              : INIT_ROW_STATES.done
           : signIns.every(r => r.state === INIT_ROW_STATES.waiting)
             ? INIT_ROW_STATES.waiting
             : INIT_ROW_STATES.running;
@@ -1341,7 +1368,8 @@ export function initBuildRows(rows: readonly InitRow[]): { rows: InitRow[]; sign
  * card's top edge, the count beside the title and the host's own progress field, so the sidebar and the sheet can
  * never say two things. Stages alone, so the bar measures the build and not the agents given the tools, the first
  * workspace or its project; it takes the rows initBuildRows hands over, with the sign-ins folded into their stage.
- * A failed or stopped stage is over but not done, so neither build ever reads complete. */
+ * A stage that failed, that a stop ended, or that the build never reached is over without having run, so a build
+ * that stopped never reads complete however early it stopped. */
 export function initStageCount(rows: readonly InitRow[]): { done: number; total: number } {
   const stages = rows.filter(r => r.kind === "stage");
   return { done: stages.filter(r => initRowOver(r.state) && !ROW_UNDONE.has(r.state)).length, total: stages.length };
@@ -1355,6 +1383,31 @@ export const initStageCountLine = (count: { done: number; total: number }): stri
 export function initButtonLine(job: Pick<InitJob, "phase" | "rows" | "progress" | "needsYou">): string {
   return initProgressState(job).waitingOnYou ? WAITING_FOR_YOU : initProgressLine(job);
 }
+
+/** The provider's own answer about a key: the status it replied with and the word it used, so a person reads whose
+ * refusal they are looking at rather than ours. */
+export function providerSaidLine(status: number, said: string): string {
+  return said === "" ? String(status) : `${status} ${said}`;
+}
+
+/** Under the keys field when the provider answered and refused the key typed there. */
+export function keyRefusedLine(said: string): string {
+  return `${CLOUD_SETUP_WORDS.keys.refused}: ${said}`;
+}
+
+/** The same for a key already saved, which is what the build reads before its first stage. */
+export function savedKeyRefusedLine(said: string): string {
+  return `${CLOUD_SETUP_WORDS.keys.refusedSaved}: ${said}`;
+}
+
+/** Either place when nothing came back about the key at all: what this computer saw instead, with Try again beside it. */
+export function keyUncheckedLine(said: string): string {
+  return `${CLOUD_SETUP_WORDS.keys.unchecked}: ${said}`;
+}
+
+/** How a terminal run closes when the check stopped it before the first stage. The refusal itself is said above this
+ * line, so this one carries the way on alone; wsp init asks for a key it can use, so running it again is that road. */
+export const SAVED_KEY_STOPPED_LINE = "Save a key Solari takes and run wsp init again; nothing booted, and the recipe is kept.";
 
 /** What the machine the build boots costs, said once under the key screen's title from the backend's own rate. */
 export function initCostLine(size: WorkspaceSize, rateUsdPerHour: number): string {

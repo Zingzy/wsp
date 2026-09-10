@@ -12,9 +12,9 @@ import { basename } from "node:path";
 import { PassThrough, Writable } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
-import type { BackendPricing } from "@wsp/engine";
+import { keyCheckLine, type BackendPricing, type KeyCheck } from "@wsp/engine";
 import { RUNGS } from "@wsp/collect";
-import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, STOP_LEFT_MACHINE_LINE, shellQuote, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobOver, initMachineRowLabel, initNeedWhat, initRowOver, initStageCount, initStoppedAt, initStoppedLine, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type LoginState, type McpServerSpec, type TurnResult } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, KEY_REFUSED, KEY_UNCHECKED, NEVER_REACHED, NO_FIRST_WORKSPACE, STOP_LEFT_MACHINE_LINE, shellQuote, SIGN_IN_NEVER_REACHED, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobOver, initMachineRowLabel, initNeedWhat, initRowOver, initStageCount, initStoppedAt, initStoppedLine, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type LoginState, type McpServerSpec, type TurnResult } from "@wsp/protocol";
 import { harnessCatalog, smallestModel, type GoldenRecipe, type InitDoor, type Runtime, type SessionHandle } from "@wsp/runtime";
 import type { AgentHere } from "./agents-here.js";
 import { SOLARI_KEY, agentKeysIn, keysOf, type Keys } from "./env-keys.js";
@@ -43,6 +43,9 @@ export interface InitJobDeps {
   saveKeys(set: Record<string, string>): void;
   /** Wires the provider module the keys name into the runtime, so a host that started with none forks after the seal. */
   provider(keys: Keys): void;
+  /** Whether the provider takes these keys, asked before they are saved: the provider module the keys name makes one
+   * cheap authenticated call, and a refusal is the person's to fix on the step that typed the key. */
+  checkKey(keys: Keys): Promise<KeyCheck>;
   /** What the machine the build boots costs; the provider's own table, which needs no key to read. */
   pricing(): BackendPricing;
   agents(): Promise<AgentHere[]>;
@@ -73,16 +76,10 @@ const RECIPE_POLL_MS = 250;
 /** Whether the agent road can run on this agent at all: its thread is handed the wsp server on the launch, so an
  * agent whose adapter renders none would write no recipe. The harness table is the one place that says which do. */
 const takesTools = (harness: string): boolean => takesMcpServers(harnessCatalog(harness));
-/** What a sign-in row says when the run ended without reaching it. */
-export const SIGN_IN_NEVER_REACHED = "the build never reached this sign-in";
 /** How often, and how many times, a stop that could not reach the provider tries the kill again. Twenty minutes of
  * trying outlasts the network outages this has been seen with; past that the row says the machine is still there.
  * A caller that sets its own retry (only a test does) is taken at its word, so a run of this takes milliseconds. */
 const SWEEP_RETRY = { attempts: 40, waitMs: 30_000 };
-/** What any other row says when the build ended with it unfinished, whether or not it had started. */
-export const NEVER_REACHED = "the build ended before this step";
-/** What the first workspace's row says when the build carried no name, which is the answer that forks nothing. */
-export const NO_FIRST_WORKSPACE = "no name was given, so nothing was forked";
 /** The stage rows in the order the build runs them: the prepare's, then the seal's. */
 const STAGE_WORDS: readonly StageWords[] = [...PREPARE_STEPS, ...SEAL_STEPS];
 const SEAL_STAGES = new Set<string>(SEAL_STEPS.map(w => w.stage));
@@ -113,6 +110,8 @@ interface State {
   building: boolean;
   log: string[];
   error?: string;
+  /** Set when the build's own read of the saved key came back refused: the way on is the keys step. */
+  keyRefused?: boolean;
   thread?: { id: string; workspaceId: string; session: string; harness: string };
   /** The one line the agent's thread is on, from its own events; the block on the agent step shows it. */
   line?: string;
@@ -237,6 +236,7 @@ export class InitJobs implements InitDoor {
       ...(s.thread !== undefined ? { thread: s.thread } : {}),
       ...(s.line !== undefined ? { line: s.line } : {}),
       ...(s.error !== undefined ? { error: s.error } : {}),
+      ...(s.keyRefused === true ? { keyRefused: true } : {}),
       ...(s.golden !== undefined ? { golden: s.golden } : {}),
       ...(s.workspace !== undefined ? { workspace: s.workspace } : {}),
     };
@@ -255,11 +255,19 @@ export class InitJobs implements InitDoor {
   }
 
   /** Saves the provider key, and an agent's API key by the sign-in row that took it, under the variable the agent's
-   * sign-in declares; a row that takes no key is refused, so nothing a client names lands in the file. */
+   * sign-in declares; a row that takes no key is refused, so nothing a client names lands in the file. The provider
+   * key is put to the provider before anything is written, so a key it refuses is never saved and the setup cannot
+   * move on with one; the refusal carries its kind, since a road that never answered is worth pressing again and a
+   * refused key is not. */
   async keys(k: { solari?: string; rows?: Record<string, string> }): Promise<InitSetup> {
     const set: Record<string, string> = {};
     const solari = k.solari?.trim();
-    if (solari !== undefined && solari !== "") set[SOLARI_KEY] = solari;
+    if (solari !== undefined && solari !== "") {
+      const check = await this.deps.checkKey({ solari });
+      const line = keyCheckLine(check);
+      if (line !== undefined) throw Object.assign(new Error(line), { kind: check.state === "refused" ? KEY_REFUSED : KEY_UNCHECKED });
+      set[SOLARI_KEY] = solari;
+    }
     for (const [row, value] of Object.entries(k.rows ?? {})) {
       const typed = value.trim();
       if (typed === "") continue;
@@ -819,6 +827,13 @@ export class InitJobs implements InitDoor {
         if (text("dest") !== undefined) had.detail = text("dest")!;
         break;
       }
+      case "key-check-failed":
+        // The build's own read of the saved key, before its first stage: the provider's word is the failure, and a
+        // refusal names the step that fixes it rather than offering another build.
+        s.phase = "failed";
+        s.error = text("message") ?? CLOUD_SETUP_WORDS.keys.refusedSaved;
+        if (record["refused"] === true) s.keyRefused = true;
+        break;
       case "seal-failed":
         s.phase = "failed";
         this.fail(s, text("message") ?? "the seal failed");
@@ -868,12 +883,18 @@ export class InitJobs implements InitDoor {
       // failure's cross under a headline that says the stop was theirs.
       const ended = s.phase === "cancelled" ? STATE.stopped : STATE.failed;
       const state = step === undefined ? STATE.waiting : step.state === "current" ? (s.slotWait === w.stage ? STATE.slot : STATE.running) : step.state === "done" ? STATE.done : ended;
-      const detail = step?.running?.command ?? step?.tail.at(-1);
-      const failure = step?.state === "failed" && view.failure !== undefined ? [view.failure] : [];
-      const lines = step === undefined ? [] : [...step.tail.slice(-STAGE_LINES), ...(step.running !== undefined ? [step.running.command] : []), ...failure];
+      // A failed stage ends with the reason, so a row read on its own says why and a build that stopped before any
+      // stage ran still has one line saying what stopped it. The terminal's block draws the failure itself.
+      const failure = step?.state === "failed" && view.failure !== undefined ? view.failure.split("\n").filter(l => l !== "") : [];
+      const tail = step === undefined ? [] : [...step.tail, ...failure.filter(l => l !== step.tail.at(-1))];
+      const detail = step?.running?.command ?? tail.at(-1);
+      const lines = [...tail.slice(-STAGE_LINES), ...(step?.running !== undefined ? [step.running.command] : [])];
       return { id: `stage/${w.stage}`, kind: "stage", label: w.start, state, ...(detail !== undefined ? { detail } : {}), ...(step?.ms !== undefined ? { ms: step.ms } : {}), ...(lines.length > 0 ? { lines } : {}) };
     });
-    const answered = stages.findIndex(r => r.id === "stage/ready") + 1;
+    // The sign-ins sit after the machine answers. A build that ended before that stage has no row for it, and the
+    // sign-ins belong after every stage it did reach rather than ahead of all of them.
+    const ready = stages.findIndex(r => r.id === "stage/ready");
+    const answered = ready >= 0 ? ready + 1 : stages.length;
     return [...agents, ...stages.slice(0, answered), ...signIns, ...stages.slice(answered), ...rest];
   }
 

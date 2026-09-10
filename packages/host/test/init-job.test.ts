@@ -10,12 +10,12 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
-import { SNAPSHOT_STORAGE, type BackendPricing } from "@wsp/engine";
-import { GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, InitJob, InitNeedsYouEvent, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, Recipe, SIGN_IN_OPEN_STATE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, initMachineRowLabel, initProgressLine, initStageCount, noMcpServersLine, type InitJobEvent } from "@wsp/protocol";
+import { SNAPSHOT_STORAGE, checkProviderKey, type BackendPricing } from "@wsp/engine";
+import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, initMachineRowLabel, initProgressLine, initStageCount, keyRefusedLine, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
 import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localWiring, type Keys } from "../src/cli.js";
-import { InitJobs, NEVER_REACHED, NO_FIRST_WORKSPACE, type InitJobDeps } from "../src/init-job.js";
+import { InitJobs, type InitJobDeps } from "../src/init-job.js";
 import { saveSmallRecipe, smallRecipePath } from "../src/recipe-file.js";
 import { workspaceRoads } from "../src/server.js";
 import type { AgentHere } from "../src/agents-here.js";
@@ -31,6 +31,18 @@ const PRICING: BackendPricing = { rateUsdPerHour: s => s.cpu * 0.035 + (s.memMb 
 /** What the agent's thread writes: RECIPE with Codex ticked on too. */
 const AGENT_RECIPE: Recipe = { ...RECIPE, rows: RECIPE.rows.map(r => (r.id === "codex" ? { ...r, on: true } : r)) };
 /** The wsp server as this host's install would write it: one spec, read by the install road and by the launch. */
+/** The rows the host leaves when the saved key is refused, in the order a client draws them. The app's fixture and
+ * its dialog test stand in for this job (apps/web/test/cloud-setup/keyRefusedJob.ts), so a change here is a change
+ * there; the words themselves are the protocol's, which both sides read. */
+const waitingStage = (id: keyof typeof GOLDEN_STAGE_WORDS): unknown[] => [`stage/${id}`, INIT_ROW_STATES.waiting, undefined];
+const KEY_REFUSED_ROWS = [
+  ["stage/creating", INIT_ROW_STATES.failed, savedKeyRefusedLine("401 Unauthorized")],
+  ...(["deploying-daemon", "applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp", "ready"] as const).map(waitingStage),
+  ["sign-in/claude", INIT_ROW_STATES.skipped, SIGN_IN_NEVER_REACHED],
+  ["sign-in/gh", INIT_ROW_STATES.skipped, SIGN_IN_NEVER_REACHED],
+  ...(["snapshotting", "promoting", "smoke-forking", "sealed"] as const).map(waitingStage),
+  ["workspace/first", INIT_ROW_STATES.notMade, NEVER_REACHED],
+];
 const WSP_SERVER = { command: "/usr/local/bin/node", args: ["/opt/wsp/bin.js", "mcp", "--state", "/tmp/state.json"] };
 
 const dirs: string[] = [];
@@ -104,6 +116,8 @@ function fake(over: { env?: Record<string, string>; configured?: boolean; read?:
       env = { ...env, ...set };
     },
     provider: k => void swapped.push(k),
+    // The provider module the typed key would name is this test's stub, so the check the keys step runs is its own.
+    checkKey: () => checkProviderKey(backend),
     pricing: () => PRICING,
     agents: async () =>
       over.agents ?? [
@@ -839,6 +853,89 @@ describe("the init job, manual road", () => {
     await f.jobs.start({ road: "manual" });
     await f.settled();
     await expect(f.jobs.build({})).rejects.toThrow(/Solari/);
+  });
+
+  it("Save puts the key to the provider first: a refused key is not written, nothing is wired, and the refusal carries the provider's own word", async () => {
+    const f = fake({ env: {} });
+    f.backend.keyRefusal = Object.assign(new Error("Unauthorized"), { kind: "auth", status: 401 });
+    await expect(f.jobs.keys({ solari: "slr_live_wrong" })).rejects.toThrow(keyRefusedLine("401 Unauthorized"));
+    expect(f.backend.keyChecks).toBe(1);
+    // Nothing was written and no provider module was swapped in, so the setup cannot move on with a refused key.
+    expect(f.saved).toEqual([]);
+    expect(f.swapped).toEqual([]);
+    expect((await f.jobs.get()).keys).toEqual({ solari: false });
+    // The refusal's kind says the key is the person's to change, not something to press again.
+    await expect(f.jobs.keys({ solari: "slr_live_wrong" })).rejects.toMatchObject({ kind: KEY_REFUSED });
+    // A key the provider takes goes through the one writer as before.
+    f.backend.keyRefusal = undefined;
+    expect((await f.jobs.keys({ solari: "slr_live_right" })).keys).toEqual({ solari: true });
+    expect(f.saved).toEqual([{ SOLARI_API_KEY: "slr_live_right" }]);
+    expect(f.backend.keyChecks).toBe(3);
+  });
+
+  it("a check nothing answered says so instead of blaming the key, and its kind marks it worth pressing again", async () => {
+    const f = fake({ env: {} });
+    f.backend.keyRefusal = Object.assign(new TypeError("fetch failed"), { cause: { code: "ENOTFOUND" } });
+    await expect(f.jobs.keys({ solari: "slr_live_maybe" })).rejects.toMatchObject({ message: keyUncheckedLine("fetch failed"), kind: KEY_UNCHECKED });
+    expect(f.saved).toEqual([]);
+    expect((await f.jobs.get()).keys).toEqual({ solari: false });
+  });
+
+  it("a saved key the provider refuses stops the build before its first stage, in the provider's words, with the keys step as the way on", async () => {
+    const f = fake();
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    f.backend.keyRefusal = Object.assign(new Error("Unauthorized"), { kind: "auth", status: 401 });
+    const building = await f.jobs.build({ firstWorkspace: "first" });
+    expect(building.phase).toBe("building");
+    await f.settled();
+    const stopped = f.jobs.view()!;
+    expect(stopped.phase).toBe("failed");
+    expect(stopped.error).toBe(savedKeyRefusedLine("401 Unauthorized"));
+    expect(stopped.keyRefused).toBe(true);
+    // The run says the refusal and then the one way on; never the generic sentence, and never a machine, since the
+    // refusal was read before anything could boot.
+    const said = stopped.log.join("\n");
+    expect(said).toContain(savedKeyRefusedLine("401 Unauthorized"));
+    expect(said).toContain(SAVED_KEY_STOPPED_LINE);
+    expect(said).not.toContain("Nothing was booted");
+    expect(f.backend.machines).toEqual([]);
+    expect(f.backend.keyChecks).toBe(1);
+    // The rows the host leaves, which are what every client draws and what the app's fixture stands in for: the first
+    // stage failed with the refusal as its line, and every row after it reads as one the build never reached.
+    expect(stopped.rows.map(r => [r.id, r.state, r.detail])).toEqual(KEY_REFUSED_ROWS);
+    expect(stopped.rows.find(r => r.id === "stage/creating")!.lines).toEqual([savedKeyRefusedLine("401 Unauthorized")]);
+    // Nothing on it reads as work done: the count is none of them, so the bar cannot read as progress.
+    const { rows } = initBuildRows(stopped.rows);
+    expect(initStageCount(rows).done).toBe(0);
+    expect(stopped.progress).toEqual(initStageCount(rows));
+    expect(rows.find(r => r.id === SIGN_IN_STAGE_ID)!.state).toBe(INIT_ROW_STATES.skipped);
+    expect(rows.map(r => r.state)).not.toContain(INIT_ROW_STATES.done);
+  });
+
+  it("a build the provider could not be asked about fails on that, and offers no key step: the saved key may be fine", async () => {
+    const f = fake();
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    f.backend.keyRefusal = Object.assign(new TypeError("fetch failed"), { cause: { code: "ENOTFOUND" } });
+    await f.jobs.build({});
+    await f.settled();
+    const stopped = f.jobs.view()!;
+    expect(stopped.phase).toBe("failed");
+    expect(stopped.error).toBe(keyUncheckedLine("fetch failed"));
+    expect(stopped.keyRefused).toBeUndefined();
+    expect(f.backend.machines).toEqual([]);
+  });
+
+  it("a key the provider takes leaves the build as it was: one check, then the first stage", async () => {
+    const f = fake();
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.build({ firstWorkspace: "first" });
+    await f.settled();
+    expect(f.jobs.view()!.phase).toBe("done");
+    expect(f.backend.keyChecks).toBe(1);
+    expect(CLOUD_SETUP_WORDS.keys.refusedSaved).toBe("Solari refused the saved key");
   });
 });
 
