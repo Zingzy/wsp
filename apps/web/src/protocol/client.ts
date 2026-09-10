@@ -267,6 +267,8 @@ export interface Api {
   watchStatuses(): Promise<WorkspaceStatus[]>;
   nap(id: string): Promise<WorkspaceView>;
   wake(id: string): Promise<WorkspaceView>;
+  /** Stops a wake that is asking the provider again on its own. Optional so a fixture that never wakes need not fake it. */
+  stopWake?(id: string): Promise<WorkspaceView>;
   /** A person typed into the workspace; the runtime's idle window starts over. Optional so fixtures that never open a terminal need not fake it. */
   touch?(id: string): Promise<void>;
   /** Replaces the machine with a fresh golden fork at the new size; gate on capabilities().resize. */
@@ -475,6 +477,7 @@ export function makeApi(c: ProtocolClient): Api {
     watchStatuses: async () => (await c.request<{ statuses: WorkspaceStatus[] }>("status.subscribe")).statuses,
     nap: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.nap", { workspaceId: id })).workspace,
     wake: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.wake", { workspaceId: id })).workspace,
+    stopWake: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.stopWake", { workspaceId: id })).workspace,
     touch: async id => void (await c.request("workspaces.touch", { workspaceId: id })),
     upgrade: async (id, size) =>
       (await c.request<{ workspace: WorkspaceView }>("workspaces.upgrade", { workspaceId: id, ...size })).workspace,

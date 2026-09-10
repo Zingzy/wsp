@@ -11,7 +11,7 @@ import { createRuntime, type HarnessAdapterFactory, type RuntimeOptions } from "
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
-import { stubBackend, type StubBackend } from "./stub-backend.js";
+import { abortedCall, cappedCall, stubBackend, type StubBackend } from "./stub-backend.js";
 import { until } from "./until.js";
 import { wsRequest } from "./ws-client.js";
 
@@ -539,15 +539,19 @@ describe("a pause the runtime did not start", () => {
 // Waking.
 describe("a provider move that never answers", () => {
   /** The provider's call hangs; after `land` the machine reaches the state under the hanging call anyway, as a
-   * pause that took late would. */
-  function hang(backend: StubBackend, move: "pause" | "resume"): { calls: number; land: () => void } {
+   * pause that took late would. A resume also carries the engine's cap, which `cap()` fires, since the runtime no
+   * longer holds a timer of its own on that call. */
+  function hang(backend: StubBackend, move: "pause" | "resume"): { calls: number; land: () => void; cap: () => void } {
     const m = backend.machines[0]!;
     let lands = false;
-    const counter = { calls: 0, land: () => { lands = true; } };
-    m[move] = async () => {
+    const counter = { calls: 0, land: () => { lands = true; }, cap: () => {} };
+    m[move] = async (signal?: AbortSignal) => {
       counter.calls++;
       if (lands) m.paused = move === "pause";
-      await new Promise<never>(() => {});
+      return new Promise<never>((_resolve, reject) => {
+        counter.cap = () => reject(cappedCall(`${move} of ${m.id}`));
+        signal?.addEventListener("abort", () => reject(abortedCall(`${move} of ${m.id}`)), { once: true });
+      });
     };
     return counter;
   }
@@ -606,26 +610,27 @@ describe("a provider move that never answers", () => {
     expect(hung.calls).toBe(1);
   });
 
-  it("a wake whose resume never lands is tried twice, then the record is paused with the words on the row and the wake control open, and the next wake works", async () => {
-    const { backend, store, fc, rt, events } = rig({ wake: { deadlineMs: 20 } });
+  // Asking again is the host's own road and has its own file; a runtime given no asks ends the wake on the first one.
+  it("a wake the provider never takes ends with its silence on the row and the wake control open, and the next wake works", async () => {
+    const { backend, store, fc, rt, events } = rig({ wake: { deadlineMs: 20, asksAgain: 0 } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
     await rt.workspaces.nap(ws.id);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const hung = hang(backend, "resume");
     try {
-      const failed = expect(rt.workspaces.wake(ws.id)).rejects.toThrow("wake did not complete in 20ms; the provider did not answer and reads the machine paused; try again");
-      await giveUp(fc, () => hung.calls, 1, 10);
-      await giveUp(fc, () => hung.calls, 2, 10);
+      const failed = expect(rt.workspaces.wake(ws.id)).rejects.toThrow(/^the provider answered none of 1 resume request over /);
+      await until(() => hung.calls === 1);
+      hung.cap();
       await failed;
     } finally {
       warn.mockRestore();
     }
-    expect(hung.calls).toBe(2);
+    expect(hung.calls).toBe(1);
     expect((await rt.workspaces.get(ws.id)).phase).toBe("napping");
     expect(await store.get("workspaces", ws.id)).toMatchObject({ phase: "napping" });
     const last = pushes(events).at(-1)!;
     expect(last).toMatchObject({ phase: "napping", machineState: "paused" });
-    expect(last.reason).toMatch(/^wake did not complete in /);
+    expect(last.reason).toMatch(/^the provider answered none of 1 resume request over /);
     expect(workspaceWord(workspaceState({ phase: last.phase }))).toBe("Paused");
     const m = backend.machines[0]!;
     m.resume = async () => { m.paused = false; };
@@ -633,13 +638,14 @@ describe("a provider move that never answers", () => {
   });
 
   it("a resume whose call never answers but landed at the provider goes on to the wake check: one call, the record runs", async () => {
-    const { backend, fc, rt } = rig({ wake: { deadlineMs: 20 } });
+    const { backend, rt } = rig({ wake: { deadlineMs: 20 } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
     await rt.workspaces.nap(ws.id);
     const hung = hang(backend, "resume");
     hung.land();
     const woken = rt.workspaces.wake(ws.id);
-    await giveUp(fc, () => hung.calls, 1, 10);
+    await until(() => hung.calls === 1);
+    hung.cap();
     expect((await woken).phase).toBe("running");
     expect(hung.calls).toBe(1);
   });
@@ -708,15 +714,15 @@ describe("a provider move that never answers", () => {
   });
 
   it("a resume that lands after the wake gave up is found by one later read: the record follows to running instead of billing under a paused row", async () => {
-    const { backend, store, fc, rt, events } = rig({ wake: { deadlineMs: 20, lateReadMs: 50 } });
+    const { backend, store, fc, rt, events } = rig({ wake: { deadlineMs: 20, lateReadMs: 50, asksAgain: 0 } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
     await rt.workspaces.nap(ws.id);
     const hung = hang(backend, "resume");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const failed = expect(rt.workspaces.wake(ws.id)).rejects.toThrow(/^wake did not complete in /);
-      await giveUp(fc, () => hung.calls, 1, 10);
-      await giveUp(fc, () => hung.calls, 2, 10);
+      const failed = expect(rt.workspaces.wake(ws.id)).rejects.toThrow(/^the provider answered none of 1 resume request over /);
+      await until(() => hung.calls === 1);
+      hung.cap();
       await failed;
     } finally {
       warn.mockRestore();

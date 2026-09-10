@@ -301,6 +301,10 @@ export const WorkspaceView = z.object({
    * once a nap stores one. Persisted, unlike the nap's own status line: the files stay unbacked until the next nap
    * stores one, so every row keeps saying it rather than the person having to have seen the nap. */
   vaultRefused: z.string().optional(),
+  /** Why the last wake gave up: the host asked the provider for half an hour and the machine never came back, in the
+   * words that also name the rebuild road. Persisted, unlike the wake's own status line, since the machine stays
+   * unreachable until something replaces it; cleared by a wake that lands and by the rebuild. */
+  wakeRefused: z.string().optional(),
 });
 export type WorkspaceView = z.infer<typeof WorkspaceView>;
 
@@ -320,6 +324,10 @@ export const WorkspaceStatus = WorkspaceView.extend({
   facts: MachineFacts.optional(),
   /** Why the runtime pushed this status outside the poll: a wake that had to retry or replace the machine, or "idle 20 min". */
   reason: z.string().optional(),
+  /** Which ask a wake the provider has not taken is on, of the ones the host will make; absent unless the host is
+   * asking again on its own. The numbers ride, never a sentence: the row and the Machine tab read the same
+   * `wakeAskingAgainLine` at different lengths, and a line built here would fit one of them and be cut in the other. */
+  wakeAsk: z.object({ ask: z.number(), of: z.number() }).optional(),
   /** Epoch ms when the runtime's idle policy naps this workspace; absent while napping, held by a running session, or with auto-nap off. */
   idleAt: z.number().optional(),
 });
@@ -330,7 +338,7 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
  * handed over by having been forgotten, which is how the display stream rode these doors until now. */
 const WORKSPACE_OUT = {
   id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, projects: true, folder: true, home: true,
-  claudeSessionId: true, gone: true, theme: true, glyph: true, daemonNote: true, vaultedAt: true, vaultRefused: true,
+  claudeSessionId: true, gone: true, theme: true, glyph: true, daemonNote: true, vaultedAt: true, vaultRefused: true, wakeRefused: true,
 } as const;
 
 /** A workspace as every verb answers with it: the view without the display stream a desktop machine carries, which
@@ -2177,6 +2185,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("workspaces.get"), workspaceId: z.string() }),
   z.object({ id: reqId, op: z.literal("workspaces.nap"), workspaceId: z.string() }),
   z.object({ id: reqId, op: z.literal("workspaces.wake"), workspaceId: z.string() }),
+  /** Stops a wake that is asking the provider again on its own and replies with the record it leaves behind. */
+  z.object({ id: reqId, op: z.literal("workspaces.stopWake"), workspaceId: z.string() }),
   z.object({
     id: reqId,
     op: z.literal("workspaces.upgrade"),

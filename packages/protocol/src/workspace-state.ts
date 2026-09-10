@@ -78,6 +78,9 @@ export interface WorkspaceStateInput {
   phase: WorkspacePhase;
   machineState?: MachineState | null | undefined;
   reach?: ReachState | null | undefined;
+  /** Set on a record whose last wake ran its asks out with the machine still paused at the provider; the state words
+   * are unchanged by it (the machine is paused, and a wake may be tried again) but the rebuild is offered. */
+  wakeRefused?: string | null | undefined;
 }
 
 export function workspaceState(input: WorkspaceStateInput): WorkspaceState {
@@ -221,16 +224,17 @@ export function isBilling(state: WorkspaceState): boolean {
   return state === "running" || state === "unreachable";
 }
 
-/** Rebuild is the one action left: the machine is gone, or a zombie the provider still calls running. Every
- * surface that offers the rebuild (sidebar row, palette, Machine tab, the command line and its tool) asks this and
- * nothing else. */
+/** Rebuild is a road out: the machine is gone, a zombie the provider still calls running, or one the provider would
+ * not resume for the whole of a wake's asking. Every surface that offers the rebuild (sidebar row, palette, Machine
+ * tab, the command line and its tool) asks this and nothing else. It is the only one left on the first two; on the
+ * third the wake can be tried again beside it, since the fault is the provider's and may pass. */
 export function needsRebuild(input: WorkspaceStateInput): boolean {
-  return workspaceState(input) === "gone" || input.reach === "zombie";
+  return workspaceState(input) === "gone" || input.reach === "zombie" || (input.wakeRefused ?? null) !== null;
 }
 
 /** The one sentence for a rebuild asked of a machine that still answers, so the row's disabled tooltip and the
  * command line refuse in the same words. A caller holding only the record reads no reach, so this is its gone rule. */
-export const NO_REBUILD_NEEDED = "Rebuild replaces a gone or zombie machine; this one answers";
+export const NO_REBUILD_NEEDED = "Rebuild replaces a machine wsp cannot get back; this one answers";
 
 /** The one sentence for a verb a gone machine cannot take (send, wake, fork), with the provider's words when the
  * caller holds them; rebuild and delete are the roads out. */

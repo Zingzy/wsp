@@ -148,6 +148,10 @@ export interface StatusRecord extends WorkspaceView {
   /** Which write of the record this view is of; the poll drops a row built on a view the record has moved past. */
   generation: number;
   idleAt?: number;
+  /** A line the runtime keeps saying about this workspace, which every status built from the record carries: what a
+   * wake still asking the provider says, and what it left behind when its asking ran out, so the row neither falls
+   * silent between two asks nor forgets at the next tick that the rebuild is the road left. */
+  reason?: string;
   /** Where this machine's daemon answers and when that route expires; the probe fetches the one and the row carries
    * the other, so whatever else a kind's road hands out (a token) stays off this. */
   daemonReach?: () => Promise<Pick<PreviewReach, "url" | "expiresAt">>;

@@ -110,8 +110,9 @@ function raiseWindow(win: BrowserWindow): void {
   win.focus();
 }
 
-// A build waiting on the person, said over the system while the window is not the one they are looking at. Only the
-// host's own page may speak here, and only its own sentence: what a notification says is whatever the field holds.
+// A build waiting on the person, or a machine that came up, said over the system while the window is not the one they
+// are looking at. Only the host's own page may speak here, and only its own sentence: what a notification says is
+// whatever the field holds.
 ipcMain.on("needs-you:say", (event, need: unknown) => {
   if (session === undefined || !fromAppPage(event.senderFrame?.url, session.url)) return;
   const parsed = InitNeedsYou.safeParse(need);

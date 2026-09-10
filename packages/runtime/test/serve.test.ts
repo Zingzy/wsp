@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createServer } from "node:http";
 import { HOST_STOPPING_CLOSE, type AdapterEvent, type ForwardEvent, type InitJob, type PortForward, type TurnResult } from "@wsp/protocol";
 import { DAEMON_TOKEN_SET } from "../src/daemon-token.js";
@@ -6,7 +6,7 @@ import { createRuntime, type HarnessAdapterFactory, type HarnessSession, type Ha
 import { serveRuntime, type ForwardsSource, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
 import { WsClient } from "./ws-client.js";
-import { stubBackend, type StubBackend } from "./stub-backend.js";
+import { abortedCall, stubBackend, type StubBackend } from "./stub-backend.js";
 import { fakeClock } from "./fake-clock.js";
 import { until } from "./until.js";
 
@@ -797,6 +797,33 @@ describe("serveRuntime workspaces.exec", () => {
     expect(c.events.filter(e => e.type === "exec.exit")).toEqual([
       { type: "exec.exit", execId, exitCode: null, error: "machine paused while the agent was working" },
     ]);
+    c.close();
+  });
+
+  it("carries the stop of a wake the provider never took, so the row's own stop reaches the runtime", async () => {
+    const backend = stubBackend();
+    const runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, wake: { askEveryMs: 10 } });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
+    const c = await WsClient.connect(srv.port, { token: "secret" });
+    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const workspaceId = (created["workspace"] as { id: string }).id;
+    await c.request("workspaces.nap", { workspaceId });
+    const m = backend.machines[0]!;
+    let asked = 0;
+    m.resume = async (signal?: AbortSignal) => {
+      asked++;
+      return new Promise<never>((_resolve, reject) => signal?.addEventListener("abort", () => reject(abortedCall(`resume of ${m.id}`)), { once: true }));
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const waking = c.request("workspaces.wake", { workspaceId });
+      await until(() => asked === 1);
+      const stopped = await c.request("workspaces.stopWake", { workspaceId });
+      expect((stopped["workspace"] as { phase: string }).phase).toBe("napping");
+      expect((await waking).ok).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
     c.close();
   });
 });

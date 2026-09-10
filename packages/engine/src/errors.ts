@@ -46,6 +46,13 @@ export function isNetworkError(e: unknown): boolean {
   return e.message === "fetch failed" || NETWORK_CODES.has(codeOf(e) ?? "") || NETWORK_CODES.has(codeOf(e.cause) ?? "");
 }
 
+/** Whether the call was cut off by the cap its caller gave it rather than answered or refused by the far end. The
+ * name is fetch's own for an AbortSignal.timeout; DOMException carries it and is an Error here, but the check reads
+ * the name off any object so a fetch a test stands in for needs no DOMException of its own. */
+export function isCapped(e: unknown): boolean {
+  return typeof e === "object" && e !== null && (e as { name?: unknown }).name === "TimeoutError";
+}
+
 /** The system errors under a failed fetch that mean this computer has no road out: the name would not resolve, or
  * there is no route to anything. A refused or reset connection and a timeout are the far end's and stay the
  * machine's miss (a dropped edge request is how the poll finds a machine gone). */

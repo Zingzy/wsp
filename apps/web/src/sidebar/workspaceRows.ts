@@ -3,7 +3,7 @@
 // adapter names the state; this file turns it into the words and classes a
 // row shows.
 import { agentName } from "@wsp/catalog";
-import { FREE_WORD, fmtSize, isBilling, kindWords, outOfMemoryRowLine, vaultStaleLine, workspaceKind, workspaceStateOf, type MemoryReading, type ReachState, type SessionOrigin, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
+import { FREE_WORD, fmtSize, isBilling, kindWords, outOfMemoryRowLine, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspaceStateOf, type MemoryReading, type ReachState, type SessionOrigin, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
@@ -28,6 +28,12 @@ export function idleCountdownLabel(status: WorkspaceStatus | null, nowMs: number
 /** Slow is the only reach state the indicator does not already carry as a label. */
 export function reachNote(reach: ReachState | null): string | null {
   return reach === "slow" ? "edge slow" : null;
+}
+
+/** Which ask the host is on while it asks the provider again for a wake it never took, in the two words this slot
+ * has room for beside the spend and the nap countdown; the Machine tab reads the same fact at its full length. */
+export function wakeAskNote(status: WorkspaceStatus | null): string | null {
+  return status?.wakeAsk === undefined ? null : wakeAskingAgainLine(status.wakeAsk.ask, status.wakeAsk.of, "short");
 }
 
 /** The row's line for a daemon that is not there, and which of the two facts it is: no-daemon is a machine that
@@ -78,11 +84,13 @@ export function workspaceMetaLine({ project, cost, outOfMemory, nowMs }: Workspa
   return costLine({ project, cost, nowMs });
 }
 
-/** The row's third line: free for a machine wsp does not pay for, else what it cost today, the rate while it bills,
- * the edge note and the nap countdown, in that order. */
+/** The row's third line: free for a machine wsp does not pay for, else what it cost today, the ask a wake the
+ * provider has not taken is on, the edge note and the nap countdown, in that order. */
 function costLine({ project, cost, nowMs }: Omit<WorkspaceMetaInput, "outOfMemory">): string {
   if (!kindWords(workspaceKind(project.workspace)).driven) return FREE_WORD;
-  return [spendLine({ project, cost }), reachNote(project.reach), idleCountdownLabel(project.status, nowMs)].filter((part): part is string => part !== null).join(" · ");
+  return [spendLine({ project, cost }), wakeAskNote(project.status), reachNote(project.reach), idleCountdownLabel(project.status, nowMs)]
+    .filter((part): part is string => part !== null)
+    .join(" · ");
 }
 
 /** What the machine costs, as the row's line and the Spaces header both lead with: free for a machine wsp does not

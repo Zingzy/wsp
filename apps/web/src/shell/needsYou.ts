@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // What the app does with the job's one needsYou field beyond the sidebar's
 // row: the window or tab title leads with the mark while a need stands, and
-// each need's arrival is said once outside the app. Which road that takes
-// belongs to the shell, so there is one road per shell and the app picks by
-// which one holds: the desktop shell owns its window's focus, so the page
-// hands it the need and it decides whether to show anything; a browser tab has
-// the browser's own notifications, asked for on the press that opens the setup
-// and spoken only while the tab is hidden. Nothing is said while the app is in
-// front of the person, and nothing makes a sound.
-import { NEEDS_YOU, initJobBuilding, titleWithNeed, type InitNeedsYou } from "@wsp/protocol";
+// each need's arrival is said once outside the app. A machine that came up
+// takes the same road, so a wake and a build speak in one voice. Which road
+// that takes belongs to the shell, so there is one road per shell and the app
+// picks by which one holds: the desktop shell owns its window's focus, so the
+// page hands it the sentence and it decides whether to show anything; a
+// browser tab has the browser's own notifications, asked for on the press that
+// opens the setup and spoken only while the tab is hidden. Nothing is said
+// while the app is in front of the person, and nothing makes a sound.
+import { NEEDS_YOU, initJobBuilding, titleWithNeed, workspaceAwakeLine, type InitNeedsYou } from "@wsp/protocol";
 import { useCallback, useEffect, useRef } from "react";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { useProtocolEvents, useStore } from "../protocol/store.js";
@@ -92,17 +93,19 @@ export const needsYouRoad = (onOpen: () => void): NeedsYouRoad => ROADS.find(r =
 /** Mounted once under the store: the title carries the mark for as long as the job's need stands, and each need's
  * arrival, which is its own event and so already one per need, is said once on this shell's road. */
 export function useNeedsYouEffect(): void {
-  const openSetup = useStore(s => s.openSetup);
   const needed = useStore(s => s.initJob?.needsYou !== undefined);
   const road = useRef<NeedsYouRoad | null>(null);
+  /** What a click on the last thing said opens: the build for a need, the workspace for a machine that came up. One
+   * ref rather than one road per kind, since a shell hands a click back for whatever it showed last. */
+  const opens = useRef<() => void>(() => useStore.getState().openSetup());
   useEffect(() => {
-    const built = needsYouRoad(openSetup);
+    const built = needsYouRoad(() => opens.current());
     road.current = built;
     return () => {
       built.close();
       road.current = null;
     };
-  }, [openSetup]);
+  }, []);
   useEffect(() => {
     document.title = titleWithNeed(document.title, needed);
   }, [needed]);
@@ -110,7 +113,18 @@ export function useNeedsYouEffect(): void {
     // A build already running when this page loaded never saw the press that asks, so it asks here too; the flag
     // above keeps it to one ask, and a browser that wants a gesture has already had the better road.
     if (e.type === "init.job" && initJobBuilding(e.job.phase)) road.current?.ready();
-    if (e.type === "job.needs-you") road.current?.say(e.needsYou);
+    if (e.type === "job.needs-you") {
+      opens.current = () => useStore.getState().openSetup();
+      road.current?.say(e.needsYou);
+    }
+    // A machine that came up rides the same road: a wake the provider took minutes to accept lands with the person
+    // looking somewhere else, and the road itself is what stays quiet while they are looking at the app.
+    if (e.type === "workspace.woken") {
+      const woken = useStore.getState().workspaces.find(w => w.id === e.workspaceId);
+      if (woken === undefined) return;
+      opens.current = () => useStore.getState().select(woken.id);
+      road.current?.say({ what: workspaceAwakeLine(woken.name), since: Date.now() });
+    }
   }, []);
   useProtocolEvents(onEvent);
 }

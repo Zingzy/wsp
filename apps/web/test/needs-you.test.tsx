@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // What the app does with the job's needsYou field beyond the sidebar's row:
 // the tab or window title leads with the mark while a need stands, and each
-// need is said once outside the app on this shell's own road. Both roads run
-// here against a stubbed Notification and a stubbed bridge; nothing real is
-// shown and nothing makes a sound.
+// need is said once outside the app on this shell's own road, and a machine
+// that came up while the person looked away is said on that same road. Both
+// roads run here against a stubbed Notification and a stubbed bridge; nothing
+// real is shown and nothing makes a sound.
 import { act, render } from "@testing-library/react";
-import { NEEDS_YOU, type InitNeedsYou } from "@wsp/protocol";
+import { NEEDS_YOU, workspaceAwakeLine, type InitNeedsYou } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -165,6 +166,41 @@ describe("a browser tab's road out of the app", () => {
     hidden = true;
     FakeNotification.permission = "denied";
     emit({ type: "job.needs-you", jobId: "init_1", needsYou: NEED });
+    expect(FakeNotification.built).toEqual([]);
+  });
+});
+
+
+describe("a machine that came up while the person looked away", () => {
+  const WOKEN = { id: "ws_1", name: "b1", machineId: "m1", phase: "running" as const, golden: "snap_g", createdAt: "2026-09-10T00:00:00Z", projects: [] };
+
+  it("says the workspace is awake on the same road as a build's need, and a click opens that workspace", () => {
+    const emit = bindEvents();
+    render(<Harness />);
+    act(() => useStore.setState({ workspaces: [WOKEN], selectedId: null }));
+    const focus = vi.spyOn(window, "focus").mockImplementation(() => {});
+    act(() => emit({ type: "workspace.woken", workspaceId: "ws_1", machineId: "m1", resurrected: false }));
+    expect(FakeNotification.built).toEqual([{ title: NEEDS_YOU, body: workspaceAwakeLine("b1"), silent: true }]);
+    FakeNotification.last!.onclick!();
+    expect(focus).toHaveBeenCalled();
+    // The click lands on the machine that came up, not on the build screen a need's click opens.
+    expect([useStore.getState().selectedId, useStore.getState().setupOpen]).toEqual(["ws_1", false]);
+    focus.mockRestore();
+  });
+
+  it("says nothing while the app is the thing in front of the person", () => {
+    const emit = bindEvents();
+    render(<Harness />);
+    act(() => useStore.setState({ workspaces: [WOKEN] }));
+    hidden = false;
+    act(() => emit({ type: "workspace.woken", workspaceId: "ws_1", machineId: "m1", resurrected: false }));
+    expect(FakeNotification.built).toEqual([]);
+  });
+
+  it("says nothing about a workspace this page never knew", () => {
+    const emit = bindEvents();
+    render(<Harness />);
+    act(() => emit({ type: "workspace.woken", workspaceId: "ws_gone", machineId: "m9", resurrected: false }));
     expect(FakeNotification.built).toEqual([]);
   });
 });

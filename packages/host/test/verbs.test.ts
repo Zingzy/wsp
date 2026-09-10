@@ -352,7 +352,7 @@ describe("wsp verbs over the host", () => {
     const [alpha] = await rt.workspaces.list();
     const refused = await run("rebuild", "alpha");
     expect(refused.code).toBe(1);
-    expect(refused.io.errors).toEqual(["wsp rebuild: Rebuild replaces a gone or zombie machine; this one answers"]);
+    expect(refused.io.errors).toEqual(["wsp rebuild: Rebuild replaces a machine wsp cannot get back; this one answers"]);
     expect(backend.machines).toHaveLength(1);
 
     await handle!.close();
@@ -376,7 +376,7 @@ describe("wsp verbs over the host", () => {
     const asJson = await run("rebuild", "alpha", "--json");
     expect(asJson.code).toBe(1);
     expect(asJson.io.lines).toEqual([]);
-    expect(asJson.io.errors.map(l => JSON.parse(l) as unknown)).toEqual([{ error: "Rebuild replaces a gone or zombie machine; this one answers", class: "provider", exit: EXIT_CODES.provider }]);
+    expect(asJson.io.errors.map(l => JSON.parse(l) as unknown)).toEqual([{ error: "Rebuild replaces a machine wsp cannot get back; this one answers", class: "provider", exit: EXIT_CODES.provider }]);
     const missing = await run("rebuild", "nope");
     expect(missing.code).toBe(1);
     expect(missing.io.errors).toEqual(["wsp rebuild: no workspace nope"]);

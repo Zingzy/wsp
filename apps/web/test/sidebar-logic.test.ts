@@ -3,7 +3,7 @@
 // pill rollup over wsp thread snapshots, plus our row labels and the
 // new-workspace helpers.
 import { describe, expect, it } from "vitest";
-import { FREE_WORD, OVER_SSH, THREAD_ARCHIVE_MS, kindWords, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, OVER_SSH, THREAD_ARCHIVE_MS, kindWords, wakeAskingAgainLine, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { RequestError } from "../src/protocol/client.js";
 import { explainCreateRefusal } from "../src/protocol/store.js";
 import {
@@ -32,6 +32,7 @@ import {
   threadPill,
   reachNote,
   daemonGoneLine,
+  wakeAskNote,
   workspaceMetaLine,
 } from "../src/sidebar/workspaceRows.js";
 import { formatRelativeTimeLabel } from "../src/lib/timestampFormat.js";
@@ -168,6 +169,18 @@ describe("workspace row labels", () => {
     expect(meta({ phase: "napping", machineState: "paused", reach: { state: "napping" } }, null)).toBe("$0.00 today");
     // The tick's rate leads the size's: a resize is priced from the meter, not the status.
     expect(meta({}, tick(0.5, 0.15))).toBe("$0.50 today · $0.150/hr · active");
+  });
+
+  it("a wake the provider has not taken puts the ask it is on beside the spend, in the two words the slot holds", () => {
+    const meta = (over: Partial<WorkspaceStatus>) => workspaceMetaLine({ project: project(over), cost: tick(0.29), outOfMemory: undefined, nowMs: now });
+    const waking = { phase: "waking" as const, machineState: "paused" as const, reach: { state: "napping" as const } };
+    expect(meta({ ...waking, wakeAsk: { ask: 3, of: 30 } })).toBe("$0.29 today · asking 3/30");
+    // The short reading is the long one's own words cut to the slot; the Machine tab shows the long one.
+    expect(wakeAskNote(status({ ...waking, wakeAsk: { ask: 3, of: 30 } }))).toBe("asking 3/30");
+    expect(wakeAskingAgainLine(3, 30)).toBe("waking, asking again (3 of 30)");
+    // No ask in flight is no word: a paused row that gave up says its sentence on the tab and offers the rebuild.
+    expect(meta({ phase: "napping", machineState: "paused", reach: { state: "napping" } })).toBe("$0.29 today");
+    expect(wakeAskNote(null)).toBeNull();
   });
 
   it("what the runtime is doing to the machine's helper, or a drop with memory near full, takes the whole line", () => {

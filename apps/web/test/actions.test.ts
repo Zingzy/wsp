@@ -4,9 +4,9 @@
 // the palette, the row buttons, the Machine tab and the context menus all
 // read the same list. These tests pin the rules per kind and the shapes the
 // menus are built from.
-import { PauseIcon, PlayIcon } from "lucide-react";
+import { PauseIcon, PlayIcon, SquareIcon } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
-import { goneRefusal, machineWord, undrivenRefusal, type HarnessCatalog, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { goneRefusal, machineWord, NO_REBUILD_NEEDED, undrivenRefusal, type HarnessCatalog, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { fileActions, type FileVerbs } from "../src/actions/fileActions.js";
 import { FILE_WORDS, SIDEBAR_MODE_WORDS, TERMINAL_WORDS, THIS_COMPUTER_HINTS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
 import { NEW_LOCAL_ACTION, SIDEBAR_MODE_ACTION, sidebarActions, type SidebarTarget, type SidebarVerbs } from "../src/actions/sidebarActions.js";
@@ -28,6 +28,7 @@ const workspace = (state: WorkspaceState, over: Partial<WorkspaceTarget> = {}): 
   machineState: state === "gone" ? "gone" : null,
   reach: state === "gone" ? "gone" : state === "paused" ? "napping" : state === "unreachable" ? "unreachable" : "reachable",
   reason: null,
+  wakeRefused: null,
   ...over,
 });
 
@@ -88,7 +89,7 @@ describe("workspace actions", () => {
     actionById(actions, "theme").run();
     expect(verbs.pickLook).toHaveBeenCalledWith("ws_a", "theme");
     expect(actionById(actions, "fork").refusal).toBe("Forking a workspace is not in the runtime yet; take a project snapshot in the Machine tab and start a workspace from it");
-    expect(actionById(actions, "rebuild").refusal).toBe("Rebuild replaces a gone or zombie machine; this one answers");
+    expect(actionById(actions, "rebuild").refusal).toBe("Rebuild replaces a machine wsp cannot get back; this one answers");
     expect(actionById(actions, "forget").refusal).toBe("Only a workspace whose machine is gone can be forgotten; this one is running");
   });
 
@@ -100,9 +101,11 @@ describe("workspace actions", () => {
     expect(paused.title).toBe(WORKSPACE_WORDS.wake);
     expect(paused.refusal).toBeNull();
     expect(actionById(resolveActions(workspaceActions, workspace("pausing"), verbs), "phase").refusal).toBe("Workspace is pausing; it can be woken once it is paused");
+    // A waking workspace is the one moving state with something to offer: the stop on the host's own asking again.
     const waking = actionById(resolveActions(workspaceActions, workspace("waking"), verbs), "phase");
-    expect(waking.title).toBe(WORKSPACE_WORDS.wake);
-    expect(waking.refusal).toBe("Workspace is waking");
+    expect(waking.title).toBe(WORKSPACE_WORDS.stopWake);
+    expect(waking.refusal).toBeNull();
+    expect(waking.rowLabel).toBe("Stop api");
     expect(actionById(resolveActions(workspaceActions, workspace("gone"), verbs), "phase").refusal).toBe(goneRefusal("wake"));
   });
 
@@ -169,10 +172,11 @@ describe("workspace actions", () => {
     const verbs = workspaceVerbs();
     const phaseOf = (state: WorkspaceState, over: Partial<WorkspaceTarget> = {}) => actionById(resolveActions(workspaceActions, workspace(state, over), verbs), "phase");
     expect([phaseOf("running").buttonWord, phaseOf("unreachable").buttonWord, phaseOf("paused").buttonWord, phaseOf("gone").buttonWord]).toEqual(["Pause", "Pause", "Wake", "Wake"]);
-    expect([phaseOf("pausing").buttonWord, phaseOf("waking").buttonWord]).toEqual(["Pausing…", "Waking…"]);
-    expect([phaseOf("running").icon, phaseOf("paused").icon, phaseOf("waking").icon]).toEqual([PauseIcon, PlayIcon, PlayIcon]);
+    expect([phaseOf("pausing").buttonWord, phaseOf("waking").buttonWord]).toEqual(["Pausing…", "Stop"]);
+    expect([phaseOf("running").icon, phaseOf("paused").icon, phaseOf("waking").icon]).toEqual([PauseIcon, PlayIcon, SquareIcon]);
     expect(phaseOf("running").hint).toBe("Suspend the VM and keep the disk");
     expect(phaseOf("paused").hint).toBe("Boot the VM from its disk");
+    expect(phaseOf("waking").hint).toBe("Stop asking the provider to resume this machine");
     // A record that still says running while the provider holds the machine paused reads Wake, as its label does.
     const behind = phaseOf("running", { machineState: "paused" });
     expect([behind.buttonWord, behind.rowLabel, behind.title]).toEqual(["Wake", "Wake api", WORKSPACE_WORDS.wake]);
@@ -189,10 +193,26 @@ describe("workspace actions", () => {
   it("one target builder serves every surface: the status's phase, machine state, reach and reason lead, the record fills in", () => {
     const view: WorkspaceView = { id: "ws_a", name: "api", machineId: "m_old", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z", gone: "the record's words" };
     const status: WorkspaceStatus = { ...view, machineId: "m_new", phase: "napping", machineState: "paused", reach: { state: "napping" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11, reason: "the status's words" };
-    expect(workspaceTarget(view, status)).toEqual({ id: "ws_a", displayName: "api", kind: "cloud", machineId: "m_new", phase: "napping", machineState: "paused", reach: "napping", reason: "the status's words" });
-    expect(workspaceTarget(view, null)).toEqual({ id: "ws_a", displayName: "api", kind: "cloud", machineId: "m_old", phase: "running", machineState: null, reach: null, reason: "the record's words" });
+    expect(workspaceTarget(view, status)).toEqual({ id: "ws_a", displayName: "api", kind: "cloud", machineId: "m_new", phase: "napping", machineState: "paused", reach: "napping", reason: "the status's words", wakeRefused: null });
+    expect(workspaceTarget(view, null)).toEqual({ id: "ws_a", displayName: "api", kind: "cloud", machineId: "m_old", phase: "running", machineState: null, reach: null, reason: "the record's words", wakeRefused: null });
+    // The record's own wake words ride apart from the reason, which the next status push replaces.
+    expect(workspaceTarget({ ...view, wakeRefused: "the provider answered none of 31 resume requests over 30m" }, null).wakeRefused).toBe("the provider answered none of 31 resume requests over 30m");
     // A record from before local workspaces existed carries no kind and reads as a fork; one that does keeps it.
     expect(workspaceTarget({ ...view, kind: "local" }, null).kind).toBe("local");
+  });
+
+  it("a paused machine the provider would not resume offers the rebuild beside the wake, with the record's own words on it", () => {
+    const words = "the provider answered none of 31 resume requests over 30m; the work on this machine's disk stays with the provider, and a rebuild starts a new machine from the image";
+    const target = workspace("paused", { wakeRefused: words });
+    const actions = resolveActions(workspaceActions, target, workspaceVerbs());
+    const rebuild = actionById(actions, "rebuild");
+    expect(rebuild.refusal).toBeNull();
+    expect(rebuild.hint).toBe(words);
+    // The wake stands beside it: the fault is the provider's and may pass, so nothing takes the other road away.
+    expect(actionById(actions, "phase").refusal).toBeNull();
+    expect(actionById(actions, "phase").buttonWord).toBe("Wake");
+    // The same machine before its wake ran out is refused the rebuild, in the sentence every surface refuses with.
+    expect(actionById(resolveActions(workspaceActions, workspace("paused"), workspaceVerbs()), "rebuild").refusal).toBe(NO_REBUILD_NEEDED);
   });
 
   it("the row buttons' labels name the workspace, and the keybindings come from the one table", () => {

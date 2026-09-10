@@ -263,7 +263,7 @@ describe("machine facts", () => {
     expect(document.body.textContent).not.toContain("Waking…");
   });
 
-  it("renders napping as Paused with Wake offered, and waking as Waking with no button at all: Wake shows only while the machine is paused", async () => {
+  it("renders napping as Paused with Wake offered, and waking as Waking with the stop on the host's own asking again", async () => {
     await mount([view("ws_a", "api", "napping")]);
     expect(fact("state")).toBe("Paused");
     expect(screen.getByRole("button", { name: "Wake api" })).toBeDefined();
@@ -273,7 +273,9 @@ describe("machine facts", () => {
     expect(fact("state")).toBe("Waking");
     expect(screen.queryByRole("button", { name: "Wake api" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Pause api" })).toBeNull();
-    expect(document.querySelectorAll("footer button")).toHaveLength(1);
+    const stop = (await screen.findByRole("button", { name: "Stop api" })) as HTMLButtonElement;
+    expect([stop.textContent, stop.disabled, stop.title]).toEqual(["Stop", false, "Stop asking the provider to resume this machine"]);
+    expect(document.querySelectorAll("footer button")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "upgrade api" })).toBeDefined();
   });
 

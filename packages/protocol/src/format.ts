@@ -1727,6 +1727,47 @@ export function moveTimedOutLine(move: "pause" | "wake", elapsedMs: number, read
   return `${move} did not complete in ${fmtDuration(elapsedMs)}; the provider did not answer and ${provider}; try again`;
 }
 
+/** How long one resume the provider has not taken is waited on, and how the host keeps asking after that. Measured
+ * 2026-09-10 on this account: every read of a paused machine answered in 0.4 s while POST resume answered nothing
+ * for the 30 s a curl gave it, so a wake that sits on the call tells the person nothing for as long as it sits.
+ * The engine's request takes RESUME_CAP_MS as the cap on its own call and the runtime stops waiting on the same
+ * number; nothing else holds a wake's clock. */
+export const RESUME_CAP_MS = 30_000;
+/** How often the host asks again after a resume the provider did not take, and how many such asks it makes: thirty
+ * minutes of asking, so a provider that comes back inside its own outage wakes the machine with nobody watching. */
+export const WAKE_ASK_EVERY_MS = 60_000;
+export const WAKE_ASKS_AGAIN = 30;
+
+/** The row's line the moment a resume runs its cap out with nothing back. Not a refusal and not a failed resume: the
+ * provider's mutating calls hang at the HTTP level while the operation goes through (probed 2026-09-10, a pause that
+ * answered nothing in 30 s had the machine paused 40 s later), so the machine's own state is what settles it and the
+ * sentence says that is what is happening next. */
+export const RESUME_UNANSWERED = "the provider has not answered the resume request; reading the machine";
+
+/** The line for an ask the host is making on its own: which ask this is, of the ones it will make. Two readings of
+ * the one fact, since two surfaces show it: the long one is the Machine tab's, which has a line to spend on prose,
+ * and the short one is the sidebar row's, whose meta slot holds a couple of words beside the spend and the nap
+ * countdown and cuts from the right. The count is passed rather than read off WAKE_ASKS_AGAIN so a runtime given a
+ * shorter cadence says the number it will keep to. */
+export function wakeAskingAgainLine(ask: number, of: number, style: "long" | "short" = "long"): string {
+  return style === "short" ? `asking ${ask}/${of}` : `waking, asking again (${ask} of ${of})`;
+}
+
+/** The row's line, and what the wake ends with, when the person stopped the host asking from the row. */
+export const WAKE_STOPPED = "waking stopped; the machine is still paused";
+
+/** The row's line once the host's asking ran out and the machine is still paused there, which is the fault probed on
+ * 2026-09-10: machines paused for days never resume, while a fresh pause resumes in seconds. Three facts in the order
+ * a person needs them: what the provider did, that their work is where they left it, and the one road to a machine
+ * now. The disk clause is about the machine as it stands, not about the rebuild, which kills the old machine and
+ * lands the nap-time vault instead; the rebuild's own dialog says that. */
+export function wakeGaveUpLine(asks: number, overMs: number): string {
+  return `the provider answered none of ${plural(asks, "resume request")} over ${fmtDuration(overMs)}; the work on this machine's disk stays with the provider, and a rebuild starts a new machine from the image`;
+}
+
+/** What the needs-you road says outside the app when a machine came up while the person was looking elsewhere. */
+export const workspaceAwakeLine = (name: string): string => `${name} is awake`;
+
 /** One noun's change in a golden build line: "2 tools added". */
 export interface GoldenChange {
   count: number;

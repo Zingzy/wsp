@@ -130,6 +130,8 @@ interface State {
   toggle(id: string): Promise<void>;
   /** The wake alone: what every Wake button calls, whatever the row says. A running workspace is left as it is. */
   wake(id: string): Promise<void>;
+  /** Stops the host asking the provider again for a wake it never took; the row repaints on the runtime's own push. */
+  stopWake(id: string): Promise<void>;
   /** A workspace view the runtime handed back to a caller, over the one in the rail: no event carries the image a
    * workspace forks from, so a move to a newer golden version would read stale until the next full refresh. */
   applyWorkspace(workspace: WorkspaceView): void;
@@ -502,13 +504,24 @@ export const useStore = create<State>((set, get) => {
     async toggle(id) {
       const w = get().workspaces.find(x => x.id === id);
       if (!w) return;
-      if (w.phase === "running") await move(id, "pausing");
+      // A workspace already waking is one the host may be asking the provider again for; the one slot stops that.
+      if (w.phase === "waking") await get().stopWake(id);
+      else if (w.phase === "running") await move(id, "pausing");
       else await get().wake(id);
     },
     async wake(id) {
       const w = get().workspaces.find(x => x.id === id);
       if (!w || w.phase === "running") return;
       await move(id, "waking");
+    },
+    async stopWake(id) {
+      const api = get().api;
+      if (!api?.stopWake) return;
+      try {
+        get().applyWorkspace(await api.stopWake(id));
+      } catch (e) {
+        if (!(e instanceof DisconnectedError)) set({ toast: e instanceof Error ? e.message : String(e) });
+      }
     },
     async stopForward(workspaceId, port) {
       const api = get().api;

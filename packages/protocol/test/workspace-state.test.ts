@@ -78,12 +78,17 @@ describe("workspaceState", () => {
     for (const state of ["running", "pausing", "paused", "waking", "unreachable", "gone"] as const) expect(actionRefusal(state, "send", "x")).toBe(sendRefusal(state, "x"));
   });
 
-  it("needsRebuild: the rebuild is the one action for a gone machine or a zombie, and for nothing else", () => {
+  it("needsRebuild: the rebuild is a road for a gone machine, a zombie, or one the provider would not resume", () => {
     expect(needsRebuild({ phase: "gone" })).toBe(true);
     expect(needsRebuild({ phase: "running", machineState: "gone", reach: "gone" })).toBe(true);
     expect(needsRebuild({ phase: "running", machineState: "running", reach: "zombie" })).toBe(true);
     expect(needsRebuild({ phase: "running", machineState: "running", reach: "unreachable" })).toBe(false);
     expect(needsRebuild({ phase: "napping", machineState: "paused", reach: "napping" })).toBe(false);
+    // A paused machine whose last wake ran its asking out: the words are the record's, and a cleared one is null.
+    expect(needsRebuild({ phase: "napping", machineState: "paused", reach: "napping", wakeRefused: "the provider answered none of 31 resume requests over 30m" })).toBe(true);
+    expect(needsRebuild({ phase: "napping", machineState: "paused", reach: "napping", wakeRefused: null })).toBe(false);
+    // The state words never move for it: the machine is paused, and the wake is offered beside the rebuild.
+    expect(workspaceState({ phase: "napping", machineState: "paused", wakeRefused: "x" })).toBe("paused");
     expect(needsRebuild({ phase: "running" })).toBe(false);
   });
 

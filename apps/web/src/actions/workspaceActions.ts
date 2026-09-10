@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The workspace's actions, one registry: what a workspace row, the palette,
 // the Machine tab and the row's context menu offer for one machine.
-import { CopyIcon, FolderInputIcon, FolderOutputIcon, GlobeIcon, GitForkIcon, MessageSquarePlusIcon, PaletteIcon, PauseIcon, PencilIcon, PlayIcon, RefreshCwIcon, ServerIcon, ShapesIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
+import { CopyIcon, FolderInputIcon, FolderOutputIcon, GlobeIcon, GitForkIcon, MessageSquarePlusIcon, PaletteIcon, PauseIcon, PencilIcon, PlayIcon, RefreshCwIcon, ServerIcon, ShapesIcon, SquareIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
 import { NO_REBUILD_NEEDED, isBilling, kindWords, machineWord, needsRebuild, undrivenRefusal, workspaceKind, workspaceState, type LookPart, type MachineState, type ReachState, type WorkspaceKind, type WorkspacePhase, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import {
   CLIENT_CANNOT_EXPORT,
@@ -41,6 +41,9 @@ export interface WorkspaceTarget {
   readonly reach: ReachState | null;
   /** The provider's or the runtime's words on why the machine is gone or a zombie; null while it answers. */
   readonly reason: string | null;
+  /** The record's own words when the last wake ran its asking out with the machine still paused at the provider;
+   * null on every other machine. Carried apart from `reason`, which the next status push replaces. */
+  readonly wakeRefused: string | null;
 }
 
 /** The one target every surface builds from the record and its status: the status leads where it has arrived. */
@@ -54,6 +57,7 @@ export function workspaceTarget(workspace: WorkspaceView, status: WorkspaceStatu
     machineState: status?.machineState ?? null,
     reach: status?.reach.state ?? null,
     reason: status?.reason ?? workspace.gone ?? null,
+    wakeRefused: status?.wakeRefused ?? workspace.wakeRefused ?? null,
   };
 }
 
@@ -85,8 +89,8 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
   {
     id: "phase",
     group: "state",
-    icon: target => (isBilling(stateOf(target)) ? PauseIcon : PlayIcon),
-    searchTerms: ["pause workspace", "nap", "sleep", "wake workspace", "resume", "start"],
+    icon: target => (stateOf(target) === "waking" ? SquareIcon : isBilling(stateOf(target)) ? PauseIcon : PlayIcon),
+    searchTerms: ["pause workspace", "nap", "sleep", "wake workspace", "resume", "start", "stop waking"],
     title: target => phaseWord(stateOf(target)),
     rowLabel: target => rowVerb(phaseWord(stateOf(target)).split(" ")[0]!, target.displayName),
     buttonWord: target => phaseButtonWord(stateOf(target)),
@@ -104,7 +108,7 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     title: () => WORKSPACE_WORDS.rebuild,
     rowLabel: target => rowVerb("Rebuild", target.displayName),
     buttonWord: () => "Rebuild",
-    hint: target => target.reason ?? REBUILD_HINT,
+    hint: target => target.wakeRefused ?? target.reason ?? REBUILD_HINT,
     refusal: (target, verbs) => (!dead(target) ? NO_REBUILD_NEEDED : verbs.rebuild === undefined ? CLIENT_CANNOT_REBUILD : null),
     run: (target, verbs) => verbs.rebuild?.(target.id),
   },
