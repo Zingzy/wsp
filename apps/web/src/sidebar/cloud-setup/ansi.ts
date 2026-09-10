@@ -1,25 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A terminal line as spans for the build's stage block: the machine's own
 // ANSI colours honoured (the eight colours and their bright pair, bold, dim),
-// everything else left to the block's muted foreground. Codes the block has no
-// colour for are dropped, never shown.
+// everything else left to the block's muted foreground. The colours are the
+// terminal pane's own sixteen slots, the app's ghostty theme as tokens.css
+// carries it, so the block and the pane agree. Codes the block has no colour
+// for are dropped, never shown.
 
 export interface AnsiSpan {
   text: string;
   className?: string;
 }
 
-/** Tailwind classes for the terminal's colours, each with its pair for the light theme so the line reads on both. */
-const COLOURS: Readonly<Record<number, string>> = {
-  0: "text-foreground",
-  1: "text-red-600 dark:text-red-400",
-  2: "text-emerald-600 dark:text-emerald-400",
-  3: "text-yellow-700 dark:text-yellow-400",
-  4: "text-blue-600 dark:text-blue-400",
-  5: "text-fuchsia-600 dark:text-fuchsia-400",
-  6: "text-cyan-600 dark:text-cyan-400",
-  7: "text-foreground",
-};
+/** The class for palette slot n of the terminal's sixteen, the pane's own tokens; the theme swaps them under it. */
+const slot = (n: number): string => `text-[var(--terminal-ansi-${n})]`;
 
 const SGR = /\[([\d;]*)m/g;
 
@@ -48,8 +41,8 @@ export function ansiSpans(line: string): AnsiSpan[] {
         bold = false;
         dim = false;
       } else if (code === 39) colour = undefined;
-      else if (code >= 30 && code <= 37) colour = COLOURS[code - 30];
-      else if (code >= 90 && code <= 97) colour = COLOURS[code - 90];
+      else if (code >= 30 && code <= 37) colour = slot(code - 30);
+      else if (code >= 90 && code <= 97) colour = slot(code - 90 + 8);
     }
   }
   push(line.slice(at));

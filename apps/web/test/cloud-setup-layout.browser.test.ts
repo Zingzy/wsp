@@ -167,7 +167,7 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
       // The card, where the step has one, is the column wide with 48 px rows, 16 px left and 10 px right inside them.
       const cards = await boxes(`${frame} [data-k=content] > ul, ${frame} [data-k=content] > div[class*=rounded], ${frame} [data-k=card]`);
       if (cards.length > 0) expect(near(cards[0]!.width, SPEC.column), `${step}: card width ${cards[0]!.width}`).toBe(true);
-      const rows = await boxes(`${frame} [data-k=row] > div, ${frame} li[data-k=row]:not(:has(> div))`);
+      const rows = await boxes(`${frame} [data-k=row] > div:first-child, ${frame} li[data-k=row]:not(:has(> div))`);
       for (const r of rows) expect(near(r.height, SPEC.row), `${step}: row height ${r.height}`).toBe(true);
       const fields = await boxes(`${frame} [data-slot=input-control]`);
       for (const f of fields) expect(near(f.height, step === "keys" || step === "ask" ? SPEC.loneField : SPEC.field), `${step}: field ${f.height}`).toBe(true);
@@ -233,7 +233,7 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     }
   }, 240_000);
 
-  it.each(["dark", "light"] as const)("in the %s theme at 980 by 700 the column keeps its width, a step that fits stays centred and one that does not pins its footer and scrolls, and the ring keeps its corner", async theme => {
+  it.each(["dark", "light"] as const)("in the %s theme at 980 by 700 the column keeps its width, a step that fits stays centred and one that does not pins its footer and its card scrolls", async theme => {
     await page!.setViewportSize({ ...VIEWPORTS[1] });
     for (const step of ["keys", "agents", "tools", "logins", "signing", "done"] as const) {
       const frame = await goTo(step, theme);
@@ -368,8 +368,11 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     await goTo("building", theme);
     const block = await box("[role=dialog] [data-k=lines]");
     expect(near(block.height, 176), `block ${block.height}`).toBe(true);
-    expect(await page!.locator("[role=dialog] [data-k=lines]").evaluate(el => el.scrollHeight > el.clientHeight && el.scrollTop > 0), "scrolls, pinned to the newest line").toBe(true);
-    expect(await page!.locator("[role=dialog] [data-k=lines] span[class*='text-emerald']").count(), "the machine's green").toBeGreaterThan(0);
+    const scroller = page!.locator("[role=dialog] [data-k=lines-scroll]");
+    expect(await scroller.evaluate(el => el.scrollHeight > el.clientHeight && el.scrollTop > 0), "scrolls, pinned to the newest line").toBe(true);
+    // Pinned, the scroller shows whole lines: its height is a multiple of the 20 px line and it sits at its very end.
+    expect(await scroller.evaluate(el => el.clientHeight % 20 === 0 && Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) < 1), "whole lines, no sliver").toBe(true);
+    expect(await page!.locator("[role=dialog] [data-k=lines] span[class*='--terminal-ansi-2']").count(), "the machine's green, from the pane's own palette").toBeGreaterThan(0);
     expect(await page!.locator("[role=dialog] [data-k=lines] span[class*='opacity-60']").count(), "the tool prefix dimmed").toBeGreaterThan(0);
     await goTo("signing", theme);
     expect(await page!.locator('[role=dialog] [data-row="sign-in/gh"] [data-k=open]').getAttribute("href")).toBe("https://github.com/login/device");

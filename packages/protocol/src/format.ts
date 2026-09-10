@@ -1185,8 +1185,8 @@ export const SIGN_IN_STAGE_ID = "stage/sign-ins";
 
 /** The build's list as the app draws it: stages only, in the job's order, the sign-ins folded into one stage row where
  * the first of them sits, whose state is the sign-ins' own (waiting for you while a page waits on the person, running
- * while one runs, done once every one is over, waiting before any starts); the agent rows are not build stages and
- * leave. The sign-ins come back beside it, for the stage's sub-rows. */
+ * while one runs, not signed in once every one is over and one ran out, done once every one is over well, waiting
+ * before any starts); the agent rows are not build stages and leave. The sign-ins come back beside it, for the stage's sub-rows. */
 export function initBuildRows(rows: readonly InitRow[]): { rows: InitRow[]; signIns: InitRow[] } {
   const signIns = rows.filter(r => r.kind === "sign-in");
   const out: InitRow[] = [];
@@ -1199,7 +1199,17 @@ export function initBuildRows(rows: readonly InitRow[]): { rows: InitRow[]; sign
     }
     if (folded) continue;
     folded = true;
-    const state = signIns.some(r => r.state === SIGN_IN_OPEN_STATE) ? SIGN_IN_OPEN_STATE : signIns.some(r => r.state === INIT_ROW_STATES.running) ? INIT_ROW_STATES.running : signIns.every(r => initRowOver(r.state)) ? INIT_ROW_STATES.done : signIns.every(r => r.state === INIT_ROW_STATES.waiting) ? INIT_ROW_STATES.waiting : INIT_ROW_STATES.running;
+    const state = signIns.some(r => r.state === SIGN_IN_OPEN_STATE)
+      ? SIGN_IN_OPEN_STATE
+      : signIns.some(r => r.state === INIT_ROW_STATES.running)
+        ? INIT_ROW_STATES.running
+        : signIns.every(r => initRowOver(r.state))
+          ? signIns.some(r => r.state === INIT_SIGN_IN_WORDS["not-signed-in"])
+            ? INIT_SIGN_IN_WORDS["not-signed-in"]
+            : INIT_ROW_STATES.done
+          : signIns.every(r => r.state === INIT_ROW_STATES.waiting)
+            ? INIT_ROW_STATES.waiting
+            : INIT_ROW_STATES.running;
     out.push({ id: SIGN_IN_STAGE_ID, kind: "stage", label: CLOUD_SETUP_WORDS.build.signingIn, state });
   }
   return { rows: out, signIns };

@@ -245,12 +245,15 @@ function StageLines({ lines, running, failed }: { lines: string[]; running: bool
   useEffect(() => {
     if (running && block.current !== null) block.current.scrollTop = block.current.scrollHeight;
   }, [lines.length, running]);
+  // The padding sits outside the scrolling part (7 px over it under the hairline, 8 under), so the scroller is exactly the lines' height and a block pinned to its newest line shows whole lines, no sliver of the one before.
   return (
-    <pre data-k="lines" ref={block} className={cn("overflow-y-auto whitespace-pre-wrap break-words border-t border-border bg-background/40 py-2 pl-[46px] pr-[10px] font-mono text-xs leading-[20px] text-muted-foreground", STAGE_BLOCK)}>
-      {lines.map((line, i) => (
-        <TerminalLine key={i} line={line} danger={failed && i === lines.length - 1} />
-      ))}
-    </pre>
+    <div data-k="lines" className={cn("border-t border-border bg-background/40 pt-[7px] pb-2", STAGE_BLOCK)}>
+      <pre ref={block} data-k="lines-scroll" className="h-full overflow-y-auto whitespace-pre-wrap break-words pl-[46px] pr-[10px] font-mono text-xs leading-[20px] text-muted-foreground">
+        {lines.map((line, i) => (
+          <TerminalLine key={i} line={line} danger={failed && i === lines.length - 1} />
+        ))}
+      </pre>
+    </div>
   );
 }
 

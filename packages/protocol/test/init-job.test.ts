@@ -255,7 +255,8 @@ describe("the words the clients print for the job", () => {
     expect(folded.rows[1]).toMatchObject({ kind: "stage", label: "Signing in on the machine", state: "waiting for you" });
     expect(folded.signIns.map(r => r.id)).toEqual(["sign-in/gh", "sign-in/claude"]);
     const settled = initBuildRows(rows.map(r => (r.id === "sign-in/gh" ? { ...r, state: "not signed in" } : r)));
-    expect(settled.rows[1]!.state).toBe("done");
+    expect(settled.rows[1]!.state, "a sign-in that ran out keeps the stage from reading done").toBe("not signed in");
+    expect(initBuildRows(rows.map(r => (r.id === "sign-in/gh" ? { ...r, state: "done" } : r))).rows[1]!.state).toBe("done");
     expect(initBuildRows(rows.map(r => (r.kind === "sign-in" ? { ...r, state: "waiting" } : r))).rows[1]!.state).toBe("waiting");
     expect(initStageCount(folded.rows)).toEqual({ done: 1, total: 4 });
     expect(initStageCount([row({ state: "done" }), row({ id: "stage/ready", state: "failed" })]), "a failed row is not done").toEqual({ done: 1, total: 2 });
