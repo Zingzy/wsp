@@ -10,7 +10,7 @@ import type { Readable, Writable } from "node:stream";
 import { CATALOG_AGENTS, CATALOG_TOOLS, MCP_AGENTS, catalogEntry, type AgentEntry, type CatalogEntry, type Size, type ToolEntry, agentName as catalogName, sizeBytes } from "@wsp/catalog";
 import { withProject, type LoginChoice, type Manifest, type ManifestEntry, type ProjectScan, floorApplies } from "@wsp/collect";
 import { estimateDisk, isMcpRow, parseMcpId, plural, type BrewTable, type DiskEstimate } from "@wsp/engine";
-import { customRows, fmtBytes, wspToolsRowId, type Recipe, type RecipeCustomRow, type RecipeRow } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, customRows, fmtBytes, wspToolsRowId, type Recipe, type RecipeCustomRow, type RecipeRow } from "@wsp/protocol";
 import { mcpConfigFile } from "./mcp-install.js";
 import { GUTTER, card, colourDepth, isTTY, table, textPrompt } from "./init-layout.js";
 import { agentName, applyRecipe, comingRows, defaultAnswers, initialChoice, isTickable, loginEntryId, loginShown, loginTool, rowsHere } from "./init-recipe.js";
@@ -19,7 +19,7 @@ import { outsideCatalog } from "./recipe-file.js";
 import { answerOf, rungSelect, type Choice, type FooterLine, type RungAnswer, type RungSelectResult, type SelectItem } from "./init-select.js";
 import { BASE_GROUP, FLOOR_LINE, PROJECT_GROUP, agentRows, candidatesLine, groupTotal, recipeTable, sizeCell, totalsLine, whyCell, type TableRow, UNKNOWN_SIZE } from "./init-table.js";
 import { diskHead, diskTone } from "./init-weight.js";
-import { hasLogin, signInFor, type SignIn } from "./signin-table.js";
+import { asksThePerson, hasLogin, loginWords, signInFor, type SignIn } from "./signin-table.js";
 import { SIGN_IN_CHOICES, SIGN_IN_WORDS, signInChoice } from "./signin-words.js";
 import type { ScanRow } from "./scan.js";
 
@@ -173,11 +173,11 @@ function mcpWhy(e: ManifestEntry, manifest: Manifest): string {
 }
 
 /** The answers a login row can take: a copy when there is something here to copy, the sign-in when the catalog has a
- * flow to run there, an API key when the tool reads one, and always skip. */
+ * flow that runs there without stopping on the person, an API key when the tool reads one, and always skip. */
 export function choicesFor(e: ManifestEntry, s: SignIn): Choice[] {
   const allowed = new Set<string>(["skip"]);
   if (e.paths.length > 0 || e.bytes > 0) allowed.add("copy");
-  if (hasLogin(s)) allowed.add("machine");
+  if (hasLogin(s) && !asksThePerson(s)) allowed.add("machine");
   if (hasLogin(s) && s.keyEnv !== undefined) allowed.add("key");
   return SIGN_IN_CHOICES.filter(c => allowed.has(c.value));
 }
@@ -228,7 +228,7 @@ export function signInItems(manifest: Manifest, brew: BrewTable): SignInScreen {
       group,
       why: where,
       choices,
-      detail: [hasLogin(s) ? s.login : (s.kind !== "shell" ? (s.note ?? "") : ""), e.detail ?? "", where],
+      detail: [hasLogin(s) ? loginWords(s) : (s.kind !== "shell" ? (s.note ?? "") : ""), asksThePerson(s) ? CLOUD_SETUP_WORDS.screen.asksYou : "", e.detail ?? "", where],
     });
   }
   for (const e of mcp) {

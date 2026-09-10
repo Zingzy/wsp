@@ -7,6 +7,7 @@
 // forwarded port, which o opens instead; codes and tokens are never looked at.
 import type { Readable, Writable } from "node:stream";
 import { stripVTControlCharacters, styleText } from "node:util";
+import type { Question } from "@wsp/catalog";
 
 export interface PtyLink {
   op(op: string, extra?: Record<string, unknown>): Promise<Record<string, unknown>>;
@@ -97,6 +98,35 @@ export class UrlScanner {
   private fresh(urls: string[]): string[] {
     const out = urls.filter(u => !this.seen.has(u));
     for (const u of out) this.seen.add(u);
+    return out;
+  }
+}
+
+/** A question the tool printed, and its own words there. */
+export interface Asked {
+  question: Question;
+  /** What the shape matched, for a row that has to say which question stopped it. */
+  matched: string;
+}
+
+/** Feeds chunks and reports each question the row declares once. The tail is kept raw and the escapes come out of
+ * the joined text, so neither a question nor an escape sequence the pty split across two chunks can hide a shape. */
+export class QuestionScanner {
+  private tail = "";
+  private readonly seen = new Set<Question>();
+  constructor(private readonly questions: readonly Question[]) {}
+  feed(chunk: string): Asked[] {
+    if (this.seen.size === this.questions.length) return [];
+    const raw = this.tail + chunk;
+    this.tail = raw.slice(-TAIL_CHARS);
+    const text = stripVTControlCharacters(stripOsc8(raw));
+    const out: Asked[] = [];
+    for (const question of this.questions) {
+      const matched = this.seen.has(question) ? undefined : question.asks.exec(text)?.[0];
+      if (matched === undefined) continue;
+      this.seen.add(question);
+      out.push({ question, matched });
+    }
     return out;
   }
 }
@@ -242,8 +272,16 @@ export interface WatchOptions {
   onData?(text: string): void;
   /** Each URL the tool printed, once. */
   onUrl?(url: string): void;
+  /** The end of a chunk, once its pages have been reported: where a caller acts on what it could only judge with
+   * those in hand, like a code the tool printed under its page. */
+  onScanned?(): void;
   /** Rides the pty's environment on the machine, where the daemon's own defaults would otherwise decide. */
   env?: Record<string, string>;
+  /** The questions the row declares: an answer the row carries is typed on the tool's own pty as its line appears,
+   * once, the way the person at that terminal would press it. */
+  questions?: readonly Question[];
+  /** Each declared question as the tool printed it, once, whether or not the row answered it. */
+  onQuestion?(asked: Asked): void;
   /** Handed the pty's own input once it is attached, and nothing once it is gone: what a code from a page is typed
    * with, from wherever the person pasted it. A refused write rejects, so the caller can say so. */
   onTyping?(write: ((data: string) => Promise<void>) | undefined): void;
@@ -278,14 +316,23 @@ export async function watchPty(o: WatchOptions): Promise<WatchOutcome> {
   const report = (urls: string[]): void => {
     for (const url of urls) o.onUrl?.(url);
   };
+  const questions = new QuestionScanner(o.questions ?? []);
   const detach = o.link.onEvent(e => {
     if (e["ptyId"] !== ptyId) return;
     if (e["type"] === "pty.data") {
       const data = String(e["data"]);
       o.onData?.(data);
+      for (const asked of questions.feed(data)) {
+        if ("answer" in asked.question) void o.link.op("pty.write", { ptyId, data: asked.question.answer }).catch(() => {});
+        o.onQuestion?.(asked);
+      }
       report(scanner.feed(data));
+      o.onScanned?.();
       if (flush) clearTimeout(flush);
-      flush = setTimeout(() => report(scanner.flush()), o.flushMs ?? FLUSH_MS);
+      flush = setTimeout(() => {
+        report(scanner.flush());
+        o.onScanned?.();
+      }, o.flushMs ?? FLUSH_MS);
       flush.unref();
       return;
     }
