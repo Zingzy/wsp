@@ -1,29 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The Disk line under the wizard's screens and on the summary card, and the
-// colour a single row's size takes: one set of thresholds each, in one place.
-// Hue here means weight and nothing else.
-import { MIB } from "@wsp/catalog";
-import { isHeavy } from "@wsp/collect";
+// colour a single row's size takes. The thresholds are the protocol's tables,
+// the ones the app reads, so the terminal and the app say the same tone for the
+// same size and the same share; here they are only mapped onto the terminal's
+// three colours. Hue here means weight and nothing else.
 import { BUILDER_DISK_GB, type DiskEstimate } from "@wsp/engine";
-import { fmtBytes } from "@wsp/protocol";
+import { diskTone as diskToneOf, fmtBytes, sizeTone as sizeToneOf, type SizeTone } from "@wsp/protocol";
 import type { Tone } from "./init-select.js";
 
-/** The colour the Disk line takes against the room: plain under 50 percent, yellow from 50, bright yellow from 65,
- * red from 75; the plan itself refuses to boot at 100. */
+/** The protocol's four tones on the terminal's three: danger red, warning bright yellow, yellow yellow, muted plain. */
+const TERMINAL_TONE: Record<SizeTone, Tone | undefined> = { danger: "red", warning: "yellowBright", yellow: "yellow", muted: undefined };
+
+/** The colour the Disk line takes against the room: the protocol's disk table, plain under 70 percent, bright yellow
+ * from 70, red from 90 and over. */
 export function diskTone(total: number, room: number): Tone | undefined {
-  const share = room > 0 ? total / room : 1;
-  if (share >= 0.75) return "red";
-  if (share >= 0.65) return "yellowBright";
-  return share >= 0.5 ? "yellow" : undefined;
+  return TERMINAL_TONE[diskToneOf(total, room)];
 }
 
-/** The colour a row's own size takes on a list: the same three tiers as the Disk line, read in bytes. Nothing
- * under the heavy line, then yellow, orange from 500 MB, red past a gigabyte. */
+/** The colour a row's own size takes on a list: the protocol's size table, plain under 100 MB, yellow from 100,
+ * bright yellow from 300, red from a gigabyte. */
 export function sizeTone(bytes: number | undefined): Tone | undefined {
-  if (bytes === undefined) return undefined;
-  if (bytes >= 1024 * MIB) return "red";
-  if (bytes >= 500 * MIB) return "yellowBright";
-  return isHeavy(bytes) ? "yellow" : undefined;
+  return bytes === undefined ? undefined : TERMINAL_TONE[sizeToneOf(bytes)];
 }
 
 /** The estimate's parts that are not zero, and how many rows have no size. */

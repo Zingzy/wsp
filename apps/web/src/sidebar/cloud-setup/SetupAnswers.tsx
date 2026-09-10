@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // One of the screens of wsp init the person answers, drawn from the data the
 // host hands over: the rows the terminal's list draws, grouped where the
-// terminal groups them, each leading with its mark, a checkbox or the app's
-// picker on each, the source and the size in mono, and the tally under the
-// card counting the ticks as they change. The ticks, answers and typed keys
-// live in the dialog's one draft until Continue sends them.
-import { CLOUD_SETUP_WORDS, UNKNOWN_SIZE, fmtBytes, initTallyLine, type InitScreen, type InitScreenItem } from "@wsp/protocol";
+// terminal groups them, a checkbox or the app's picker on each, a mark where
+// the row has a real one, the source and the size in mono coloured by weight,
+// and under the card, centred, the tally counting the ticks as they change
+// with the disk meter inline after it on the steps that change the image's
+// size. The ticks, answers and typed keys live in the dialog's one draft until
+// Continue sends them.
+import { CLOUD_SETUP_WORDS, UNKNOWN_SIZE, fmtBytes, initTallyCount, sizeTone, type InitScreen, type InitScreenItem } from "@wsp/protocol";
 import { Checkbox } from "../../components/ui/checkbox.js";
 import { Input } from "../../components/ui/input.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { cn } from "../../lib/utils.js";
-import { CARD, FIELD, FIELD_LABEL, GroupLabel, META, NAME, ROW, ROW_LINE, RowPicker, STATE_WORD, Slot } from "./rows.js";
+import { Card, FIELD, FIELD_LABEL, GroupLabel, META, Meter, NAME, ROW, ROW_LINE, RowPicker, STATE_WORD, SizeCell, Slot, TONE_TEXT } from "./rows.js";
 import { RowMark } from "./SignInMark.js";
 import { SetupScreen, type ScreenAction } from "./SetupScreen.js";
 
@@ -44,7 +46,7 @@ export function tallyOf(screen: InitScreen, ticks: ReadonlySet<string>): { count
 /** The API key the row's choice is: the one answer that opens a field under the row. */
 const KEY_CHOICE = "key";
 
-export function SetupAnswers({ screen, counter, draft, onDraft, primary, secondary, refusal }: { screen: InitScreen; counter: string; draft: Draft; onDraft: (next: Draft) => void; primary: ScreenAction; secondary: ScreenAction; refusal: string | null }) {
+export function SetupAnswers({ screen, counter, draft, onDraft, primary, secondary, refusal, disk }: { screen: InitScreen; counter: string; draft: Draft; onDraft: (next: Draft) => void; primary: ScreenAction; secondary: ScreenAction; refusal: string | null; disk?: { used: number; total: number } }) {
   const groups = [...new Set(screen.items.map(i => i.group ?? ""))];
   const grouped = groups.some(g => g !== "");
   const tick = (id: string, on: boolean): void => {
@@ -64,12 +66,8 @@ export function SetupAnswers({ screen, counter, draft, onDraft, primary, seconda
       return (
         <li key={item.id} data-k="row" data-row={item.id} className={ROW_LINE}>
           <div className={ROW} title={item.detail.join("\n")}>
-            {item.choices !== undefined ? (
-              <RowMark id={item.mark ?? item.id} label={item.label} />
-            ) : (
-              <Checkbox tone="neutral" aria-label={item.label} checked={item.lock === "on" || draft.ticks.has(item.id)} disabled={item.lock !== undefined} onCheckedChange={on => tick(item.id, on === true)} />
-            )}
-            {item.choices === undefined ? <RowMark id={item.mark ?? item.id} label={item.label} /> : null}
+            {item.choices === undefined ? <Checkbox tone="neutral" aria-label={item.label} checked={item.lock === "on" || draft.ticks.has(item.id)} disabled={item.lock !== undefined} onCheckedChange={on => tick(item.id, on === true)} /> : null}
+            <RowMark id={item.mark ?? item.id} />
             <span className={cn(NAME, "flex-none max-w-[45%]")}>{item.label}</span>
             {item.why !== undefined ? (
               item.choices !== undefined && item.detail[0] !== undefined ? (
@@ -87,11 +85,7 @@ export function SetupAnswers({ screen, counter, draft, onDraft, primary, seconda
             ) : (
               <span className="flex-1" />
             )}
-            {item.size !== undefined ? (
-              <span data-k="size" className={META}>
-                {item.size === null ? UNKNOWN_SIZE : fmtBytes(item.size)}
-              </span>
-            ) : null}
+            {item.size !== undefined ? <SizeCell bytes={item.size}>{item.size === null ? UNKNOWN_SIZE : fmtBytes(item.size)}</SizeCell> : null}
             {item.choices !== undefined ? (
               <Slot>
                 {item.state !== undefined ? (
@@ -118,13 +112,13 @@ export function SetupAnswers({ screen, counter, draft, onDraft, primary, seconda
       );
     });
   return (
-    <SetupScreen k={`screen-${screen.id}`} label={screen.title} counter={counter} headline={screen.top} refusal={refusal} primary={primary} secondary={secondary}>
+    <SetupScreen k={`screen-${screen.id}`} counter={counter} headline={screen.top} refusal={refusal} primary={primary} secondary={secondary}>
       {screen.items.length === 0 ? (
         <p data-k="empty" className={cn(STATE_WORD, "pt-3 text-center")}>
           {screen.empty}
         </p>
       ) : (
-        <ul className={CARD} aria-label={screen.title}>
+        <Card label={screen.title}>
           {grouped
             ? groups.map(group => (
                 <li key={group} className={ROW_LINE}>
@@ -135,11 +129,14 @@ export function SetupAnswers({ screen, counter, draft, onDraft, primary, seconda
                 </li>
               ))
             : rows(screen.items)}
-        </ul>
+        </Card>
       )}
       {tally !== undefined && screen.tally !== undefined ? (
-        <p data-k="tally" className={cn(META, "mt-3")}>
-          {initTallyLine(tally.count, screen.tally, tally.bytes)}
+        <p data-k="tally" className={cn(META, "mt-3 flex items-center justify-center gap-2")}>
+          <span>
+            {initTallyCount(tally.count, screen.tally)} · <span data-k="tally-size" className={TONE_TEXT[sizeTone(tally.bytes)]}>{fmtBytes(tally.bytes)}</span>
+          </span>
+          {disk !== undefined ? <Meter used={disk.used} total={disk.total} /> : null}
         </p>
       ) : null}
       {screen.footer.length > 0 ? (

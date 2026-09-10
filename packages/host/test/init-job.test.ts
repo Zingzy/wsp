@@ -11,24 +11,27 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SNAPSHOT_STORAGE, type BackendPricing } from "@wsp/engine";
-import { GOLDEN_STAGE_WORDS, INIT_SIGN_IN_WORDS, InitJob, InitNeedsYouEvent, Recipe, SIGN_IN_OPEN_STATE, initAgentPrompt, type InitJobEvent } from "@wsp/protocol";
-import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type Runtime } from "@wsp/runtime";
+import { GOLDEN_STAGE_WORDS, INIT_SIGN_IN_WORDS, InitJob, InitNeedsYouEvent, Recipe, SIGN_IN_OPEN_STATE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, noMcpServersLine, type InitJobEvent } from "@wsp/protocol";
+import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localWiring, type Keys } from "../src/cli.js";
 import { InitJobs, type InitJobDeps } from "../src/init-job.js";
-import { smallRecipePath } from "../src/recipe-file.js";
+import { saveSmallRecipe, smallRecipePath } from "../src/recipe-file.js";
 import { workspaceRoads } from "../src/server.js";
+import type { AgentHere } from "../src/agents-here.js";
 import type { FakePtyLink } from "./fake-pty-link.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
 import { CLAUDE_URL, DEVICE_URL, scriptedLink } from "./init-link.js";
 import type { HostHooks } from "../src/init-signin.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
-import { scriptedAgent } from "./verbs-fixture.js";
+import { holdingAgent, scriptedAgent } from "./verbs-fixture.js";
 
 const SOLARI = "slr_live_fake_solari_key";
 const PRICING: BackendPricing = { rateUsdPerHour: s => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: SNAPSHOT_STORAGE };
 /** What the agent's thread writes: RECIPE with Codex ticked on too. */
 const AGENT_RECIPE: Recipe = { ...RECIPE, rows: RECIPE.rows.map(r => (r.id === "codex" ? { ...r, on: true } : r)) };
+/** The wsp server as this host's install would write it: one spec, read by the install road and by the launch. */
+const WSP_SERVER = { command: "/usr/local/bin/node", args: ["/opt/wsp/bin.js", "mcp", "--state", "/tmp/state.json"] };
 
 const dirs: string[] = [];
 const runtimes: Runtime[] = [];
@@ -51,6 +54,8 @@ interface Fake {
   swapped: Keys[];
   installed: string[][];
   prompts: { prompt: string; harness?: string; model?: string; title?: string }[];
+  /** Every launch the harness took, as the runtime handed it over: what the agent road's options are read off. */
+  starts: HarnessStartOptions[];
   home: string;
   /** The builder's terminal link the build dials; swapped under a running build to script the next sign-in. */
   setLink(link: FakePtyLink): void;
@@ -59,7 +64,7 @@ interface Fake {
   settled(): Promise<void>;
 }
 
-function fake(over: { env?: Record<string, string>; configured?: boolean; read?: Partial<InitJobDeps["read"]>; now?: () => number } = {}): Fake {
+function fake(over: { env?: Record<string, string>; configured?: boolean; read?: Partial<InitJobDeps["read"]>; now?: () => number; agent?: { adapter: HarnessAdapterFactory; starts: HarnessStartOptions[] }; writesRecipe?: boolean; agents?: AgentHere[]; adapters?: Record<string, HarnessAdapterFactory> } = {}): Fake {
   const dir = mkdtempSync(join(tmpdir(), "wsp-init-job-"));
   dirs.push(dir);
   const home = mkdtempSync(join(tmpdir(), "wsp-init-job-home-"));
@@ -73,12 +78,14 @@ function fake(over: { env?: Record<string, string>; configured?: boolean; read?:
   const backend = stubBackend();
   const store = memoryStore();
   const prompts: Fake["prompts"] = [];
-  const claude = scriptedAgent(prompt => {
-    // The agent's turn ends with the recipe written where the recipe tool writes it by default.
-    writeFileSync(smallRecipePath(statePath), JSON.stringify(AGENT_RECIPE));
-    return `written ${prompt.length}`;
-  });
-  const rt = createRuntime({ backend, store, adapters: { claude: claude.adapter }, local: localWiring(dir), hostId: "box:h1" });
+  const claude =
+    over.agent ??
+    scriptedAgent(prompt => {
+      // The agent's turn ends with the recipe written where the recipe tool writes it by default.
+      if (over.writesRecipe !== false) writeFileSync(smallRecipePath(statePath), JSON.stringify(AGENT_RECIPE));
+      return `written ${prompt.length}`;
+    });
+  const rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, ...over.adapters }, local: localWiring(dir), hostId: "box:h1" });
   runtimes.push(rt);
   let link = scriptedLink({ signedIn: true, hold: false, missing: false });
   const relay: Fake["relay"] = { hooks: [], closed: 0 };
@@ -98,14 +105,16 @@ function fake(over: { env?: Record<string, string>; configured?: boolean; read?:
     },
     provider: k => void swapped.push(k),
     pricing: () => PRICING,
-    agents: async () => [
-      { id: "claude", name: "Claude Code", found: true, configured: over.configured ?? false },
-      { id: "codex", name: "Codex", found: false, configured: false },
-    ],
+    agents: async () =>
+      over.agents ?? [
+        { id: "claude", name: "Claude Code", found: true, configured: over.configured ?? false },
+        { id: "codex", name: "Codex", found: false, configured: false },
+      ],
     installTools: ids => {
       installed.push([...ids].sort());
-      return { server: { command: "wsp", args: ["mcp"] }, installed: [...ids].map(id => ({ id, agent: id, path: `~/.${id}.json`, skill: `~/.${id}/skills/wsp/SKILL.md` })), failures: [] };
+      return { server: WSP_SERVER, installed: [...ids].map(id => ({ id, agent: id, path: `~/.${id}.json`, skill: `~/.${id}/skills/wsp/SKILL.md` })), failures: [] };
     },
+    mcpServer: () => WSP_SERVER,
     read: {
       collect: async () => FIXTURE,
       recipe: async () => RECIPE,
@@ -155,6 +164,7 @@ function fake(over: { env?: Record<string, string>; configured?: boolean; read?:
     swapped,
     installed,
     prompts,
+    starts: claude.starts,
     home,
     relay,
     setLink: next => {
@@ -173,7 +183,7 @@ describe("the init job, manual road", () => {
     expect(setup).toEqual({
       keys: { solari: true },
       home: f.home,
-      agents: [{ id: "claude", name: "Claude Code", configured: false }],
+      agents: [{ id: "claude", name: "Claude Code", configured: false, takesTools: true }],
       pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: expect.closeTo(0.11, 5) as unknown as number },
       job: null,
     });
@@ -588,10 +598,99 @@ describe("the init job, agent road", () => {
     expect(f.jobs.view()!.phase).toBe("answering");
   });
 
+  it("an agent whose thread cannot be handed the wsp tools is refused before any thread opens, and the setup says which agents can", async () => {
+    // Codex's own adapter is registered here, so the road's refusal is about the tools and not about a missing adapter.
+    const f = fake({
+      agents: [{ id: "claude", name: "Claude Code", found: true, configured: true }, { id: "codex", name: "Codex", found: true, configured: false }],
+      adapters: { codex: () => ({ steers: false, start: () => ({ localId: "s_codex", finished: Promise.resolve({ status: "completed" as const }), interrupt: async () => {} }) }) },
+    });
+    await f.rt.workspaces.createLocal("this-mac");
+    // Codex's adapter renders no MCP server for its CLI, so its thread would write no recipe: the road says so and
+    // the picker reads the same fact off the setup.
+    await expect(f.jobs.start({ road: "agent", harness: "codex" })).rejects.toThrow(noMcpServersLine("Codex"));
+    expect(f.jobs.view()).toBeNull();
+    expect((await f.rt.sessions.list())).toEqual([]);
+    expect((await f.jobs.get()).agents).toEqual([
+      { id: "claude", name: "Claude Code", configured: true, takesTools: true },
+      { id: "codex", name: "Codex", configured: false, takesTools: false },
+    ]);
+  });
+
   it("a harness the runtime cannot run refuses the start in one line, and the job is not left behind", async () => {
     const f = fake();
     await f.rt.workspaces.createLocal("this-mac");
     await expect(f.jobs.start({ road: "agent", harness: "codex" })).rejects.toThrow();
     expect(f.jobs.view()).toBeNull();
+  });
+
+  it("launches the thread with the wsp server on it and the harness's bypass access, and carries the thread, its turn and its agent on the view", async () => {
+    const f = fake();
+    const local = await f.rt.workspaces.createLocal("this-mac");
+    const started = await f.jobs.start({ road: "agent", harness: "claude" });
+    const launch = f.starts[0]!;
+    expect(launch.mcpServers).toEqual({ wsp: WSP_SERVER });
+    expect(launch.permissionMode).toBe(harnessCatalog("claude")!.bypassMode);
+    // The thread the link focuses, the turn a prompt would be answered on, and the agent a retry starts again.
+    const rows = await f.rt.sessions.list(local.id);
+    expect(started.thread).toEqual({ id: rows[0]!.threadId, workspaceId: local.id, session: rows[0]!.id, harness: "claude" });
+    await f.settled();
+  });
+
+  it("shows the thread's own latest line: the tool it is running, and the prompt it is blocked on", async () => {
+    const asks = holdingAgent();
+    const f = fake({ agent: asks });
+    await f.rt.workspaces.createLocal("this-mac");
+    await f.jobs.start({ road: "agent", harness: "claude" });
+    asks.say({ type: "turn.delta", kind: "tool_use", text: JSON.stringify({ command: "wsp recipe scan --json" }), toolName: "Bash", toolUseId: "toolu_1" });
+    expect(f.jobs.view()!.line).toBe("$ wsp recipe scan --json");
+    asks.say({ type: "permission.ask", ask: { askId: "ask_1", toolName: "Bash", input: "{}", detail: "wsp recipe scan --json", options: [{ id: "allow", label: "Allow", effect: "allow" }] } });
+    expect(f.jobs.view()!.line).toBe("Permission for Bash: wsp recipe scan --json");
+    asks.finish({ status: "completed", text: "done" });
+    await expect(f.settled()).resolves.toBeUndefined();
+  });
+
+  it("a recipe already beside the state is not the thread's: a turn that ends without writing one fails the job and shows no screens", async () => {
+    const f = fake({ writesRecipe: false });
+    await f.rt.workspaces.createLocal("this-mac");
+    // The first launch's own recipe, sitting where the brief tells the agent to write.
+    saveSmallRecipe(smallRecipePath(f.statePath), RECIPE);
+    await f.jobs.start({ road: "agent", harness: "claude" });
+    await f.settled();
+    const view = f.jobs.view()!;
+    expect(view.phase).toBe("failed");
+    expect(view.error).toBe(initAgentNoRecipeLine(smallRecipePath(f.statePath)));
+    expect(view.screens).toEqual([]);
+    expect(initAgentStep(view)).toBe(true);
+  });
+
+  it("the recipe file's arrival moves the setup on, with the thread's turn still running", async () => {
+    const writes = holdingAgent();
+    const f = fake({ agent: writes });
+    await f.rt.workspaces.createLocal("this-mac");
+    await f.jobs.start({ road: "agent", harness: "claude" });
+    saveSmallRecipe(smallRecipePath(f.statePath), AGENT_RECIPE);
+    await f.settled();
+    expect(f.jobs.view()!.phase).toBe("answering");
+    expect(f.jobs.view()!.screens[0]!.ticks.sort()).toEqual(["claude", "codex"]);
+    expect((await f.rt.sessions.list())[0]!.status).toBe("running");
+    writes.finish({ status: "completed", text: "done" });
+  });
+
+  it("the road runs twice in one job: Start over on the first pass leaves the second reading the recipe its own thread wrote, through the same phases", async () => {
+    const f = fake();
+    await f.rt.workspaces.createLocal("this-mac");
+    await f.jobs.start({ road: "agent", harness: "claude" });
+    await f.settled();
+    expect(f.jobs.view()!.phase).toBe("answering");
+    await f.jobs.cancel();
+    const second = await f.jobs.start({ road: "agent", harness: "claude" });
+    expect(second.phase).toBe("agent");
+    await f.settled();
+    const view = f.jobs.view()!;
+    expect(view.phase).toBe("answering");
+    // The second pass read its own thread's recipe: two threads ran, and the second's file arrived after its launch.
+    expect(f.starts).toHaveLength(2);
+    expect(view.thread!.id).not.toBe(f.events[0]!.job.thread!.id);
+    expect(phases(f)).toEqual(["agent", "reading", "answering", "cancelled", "agent", "reading", "answering"]);
   });
 });

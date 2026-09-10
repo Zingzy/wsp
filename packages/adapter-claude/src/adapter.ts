@@ -4,7 +4,7 @@
 // recorded in solari-poc/RESULTS.md.
 
 import { PERMISSION_DENY, RUN_EXIT_MS, backgroundTasksLine, endAfterResult, endRun, fmtDuration, harnessExitLine, titlePrompt } from "@wsp/protocol";
-import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogProbe, PermissionAsk, PermissionOutcome, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnResult, TurnStatus } from "@wsp/protocol";
+import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnResult, TurnStatus } from "@wsp/protocol";
 import { controlAnswerLine, controlErrorLine, controlLine, setModeLine } from "./permissions.js";
 import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
@@ -25,6 +25,8 @@ export interface StartOptions {
   title?: string;
   /** Images for this turn, read off their bytes: this CLI takes them inline, so none of them is on the machine. */
   images?: readonly TurnImage[];
+  /** MCP servers this turn gets besides the config dir's own, by the name each takes in a config. */
+  mcpServers?: Readonly<Record<string, McpServerSpec>>;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -83,6 +85,8 @@ export interface ClaudeAdapter {
   readonly steers: true;
   /** The CLI's stream-json user message carries image blocks, so an image never lands on the machine. */
   readonly attachments: "inline";
+  /** The CLI takes MCP servers on the launch itself (--mcp-config), so a turn gets one whatever the config dir holds. */
+  readonly mcpServers: true;
   /** Makes the binary describe itself under the same config dir as a session; null when it did not answer. The
    * handshake carries no reason of its own, so this probe has no refusal to hand the footer. */
   probeCatalog(exec: (command: string) => Promise<string>): Promise<HarnessCatalogProbe | null>;
@@ -491,6 +495,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       permissionMode: options.permissionMode,
       contextWindow: options.contextWindow,
       ...(options.title !== undefined ? { name: options.title } : {}),
+      ...(options.mcpServers !== undefined ? { mcpServers: options.mcpServers } : {}),
     });
     const stream = deps.exec(command, { env: { ...env }, input: [userMessageLine(options.prompt, localId, options.images)] });
     return follow({ stream, localId, announced: false, command, onEvent: options.onEvent });
@@ -511,6 +516,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     sessions,
     steers: true,
     attachments: "inline",
+    mcpServers: true,
     probeCatalog: exec => exec(catalogProbeCommand({ configDir: deps.configDir, baseEnv: deps.baseEnv })).then(parseCatalogProbe),
     sessionTitle: (sessionId, exec) => exec(sessionTitleCommand({ configDir: deps.configDir, sessionId })).then(parseSessionTitle),
     renameSession: (sessionId, title, exec) => exec(renameCommand({ configDir: deps.configDir, sessionId, title })).then(parseRename),

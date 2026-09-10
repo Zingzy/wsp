@@ -127,6 +127,16 @@ describe("buildCommand", () => {
     expect(() => buildCommand({ sessionId, contextWindow: "1m" })).toThrow(/contextWindow/);
   });
 
+  it("servers handed to a turn ride one --mcp-config as the JSON a config file holds, and the config dir's own are kept", () => {
+    const cmd = buildCommand({ sessionId, mcpServers: { wsp: { command: "/usr/local/bin/node", args: ["/opt/wsp/bin.js", "mcp", "--state", "/Users/me/.wsp/state.json"] } } });
+    const flag = /--mcp-config '(.+?)' /.exec(cmd)?.[1];
+    expect(JSON.parse(flag!)).toEqual({ mcpServers: { wsp: { command: "/usr/local/bin/node", args: ["/opt/wsp/bin.js", "mcp", "--state", "/Users/me/.wsp/state.json"] } } });
+    // Strict would drop the servers the person's own config names, which this turn still wants.
+    expect(cmd).not.toContain("--strict-mcp-config");
+    expect(buildCommand({ sessionId })).not.toContain("--mcp-config");
+    expect(buildCommand({ sessionId, mcpServers: {} })).not.toContain("--mcp-config");
+  });
+
   it("sends no model or effort flag when none was picked", () => {
     const cmd = buildCommand({ sessionId });
     expect(cmd).not.toContain("--model");
