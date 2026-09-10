@@ -1,4 +1,4 @@
-import { providerRoadRetryLine, type Capabilities } from "@wsp/protocol";
+import { providerRoadRetryLine, RESUME_CAP_MS, type Capabilities } from "@wsp/protocol";
 import { ROAD_TRIES, backoffMs, classify, isMissing, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
 import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
@@ -77,6 +77,14 @@ function fail(e: WspError): never {
   throw Object.assign(new Error(e.message || `${e.kind} (${e.status})`), e);
 }
 
+/** What a fetch is given to end it early: the cap, the caller's own signal, or both. A fresh timeout per attempt,
+ * so a call the backend sends again gets the whole cap again rather than what the first attempt left of it. */
+function abort(capMs: number | undefined, signal: AbortSignal | undefined): { signal?: AbortSignal } {
+  const caps = capMs === undefined ? undefined : AbortSignal.timeout(capMs);
+  if (caps === undefined) return signal === undefined ? {} : { signal };
+  return { signal: signal === undefined ? caps : AbortSignal.any([caps, signal]) };
+}
+
 export class SolariBackend implements MachineBackend {
   readonly capabilities: Capabilities = {
     liveCloneForks: true,
@@ -106,13 +114,15 @@ export class SolariBackend implements MachineBackend {
     this.clock = opts.clock ?? realRetryClock;
   }
 
-  async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    return (await this.call<T>(method, path, body)).value;
+  /** capMs cuts the call off here when the provider has not answered it in that long, and `signal` cuts it off when
+   * the caller has stopped waiting; both ride the one fetch, so no road grows a timer beside this one. */
+  async request<T>(method: string, path: string, body?: unknown, capMs?: number, signal?: AbortSignal): Promise<T> {
+    return (await this.call<T>(method, path, body, undefined, capMs, signal)).value;
   }
 
   /** keyed: the request carries an idempotency key the provider honours, so a fetch that throws (no answer at all) is
    * sent once more under it and a replay is the expected reply; without a key a lost answer is the caller's. */
-  private async call<T>(method: string, path: string, body?: unknown, keyed?: { "Idempotency-Key": string }): Promise<{ value: T; reply: Response }> {
+  private async call<T>(method: string, path: string, body?: unknown, keyed?: { "Idempotency-Key": string }, capMs?: number, signal?: AbortSignal): Promise<{ value: T; reply: Response }> {
     const headers: Record<string, string> = { Authorization: `Bearer ${this.apiKey}`, ...keyed };
     if (body !== undefined) headers["Content-Type"] = "application/json";
     let resent = false;
@@ -128,6 +138,7 @@ export class SolariBackend implements MachineBackend {
           method,
           headers,
           body: body !== undefined ? JSON.stringify(body) : undefined,
+          ...abort(capMs, signal),
         });
       } catch (e) {
         // A road that failed never carried the request out, so every call is safe to send again, keyed or not.
@@ -296,8 +307,10 @@ class SolariMachine implements Machine {
     await this.backend.request("POST", this.path("/pause"), {});
   }
 
-  async resume(): Promise<void> {
-    await this.backend.request("POST", this.path("/resume"), {});
+  async resume(signal?: AbortSignal): Promise<void> {
+    // The provider has answered nothing at all to this call for half an hour at a stretch (measured 2026-09-10),
+    // so it is the one call that is cut off here rather than left to the socket.
+    await this.backend.request("POST", this.path("/resume"), {}, RESUME_CAP_MS, signal);
   }
 
   async kill(): Promise<void> {

@@ -118,7 +118,7 @@ export function WorkspaceRow({
   /** Opens the box on this row, as the menu's Rename does; absent where the rename is refused, so the name is text alone. */
   onRenameOpen?: (() => void) | undefined;
 }) {
-  const dead = needsRebuild({ phase: project.phase, machineState: project.machineState, reach: project.reach });
+  const dead = needsRebuild({ phase: project.phase, machineState: project.machineState, reach: project.reach, wakeRefused: project.workspace.wakeRefused });
   const KindGlyph = workspaceKindGlyph(workspaceKind(project.workspace));
   const gone = project.state === "gone";
   const machine = machineLine(project) ?? "";

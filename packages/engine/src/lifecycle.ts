@@ -123,6 +123,7 @@ export class Workspace {
     return this.hooks.move ? this.hooks.move(this.machine, move) : this.machine[move]();
   }
 
+
   /** The provider paused this machine outside a nap (its own idle timer, a console click): the phase follows the fact, so the next wake resumes. No vault was stashed. */
   notePaused(): void {
     this.phase = "napping";
@@ -134,24 +135,31 @@ export class Workspace {
     this.phase = "running";
   }
 
-  /** Done when the resumed machine passes the wake check, not when resume()
+  /** `landed` is a resume wsp already sent that the provider took without its call ever answering: the first attempt
+   * sends no second one and goes straight to the check.
+   *
+   * Done when the resumed machine passes the wake check, not when resume()
    * returns: Solari has handed back a machine reporting running whose guest
    * never served again (resume fell back to a fresh host at default size).
    * Such a machine gets one more pause+resume, then a golden fork with the
    * stashed vault replaces it and the zombie is killed. */
-  async wake(): Promise<WakeResult> {
+  async wake(o: { landed?: boolean } = {}): Promise<WakeResult> {
     if (this.phase === "running") return { resurrected: false };
     this.phase = "waking";
     try {
       const faults: string[] = [];
       for (let attempt = 1; attempt <= WAKE_ATTEMPTS; attempt++) {
-        try {
-          await this.move("resume");
-        } catch (e) {
-          if (!isMissing(e)) throw e;
-          // Paused machines can vanish after hours (PoC overnight-pause finding).
-          faults.push(`machine ${this.machine.id} vanished while paused`);
-          break;
+        // A resume that landed without its call is a resume: the check below still runs and first life still ends,
+        // since the snapshot-fresh rule turns on the machine having been resumed and not on who heard about it.
+        if (attempt > 1 || o.landed !== true) {
+          try {
+            await this.move("resume");
+          } catch (e) {
+            if (!isMissing(e)) throw e;
+            // Paused machines can vanish after hours (PoC overnight-pause finding).
+            faults.push(`machine ${this.machine.id} vanished while paused`);
+            break;
+          }
         }
         this.firstLife = false;
         const fault = this.hooks.wakeCheck ? await this.hooks.wakeCheck(this.machine) : undefined;

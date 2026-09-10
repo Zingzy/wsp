@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { isMissing } from "../src/errors.js";
+import { RESUME_CAP_MS } from "@wsp/protocol";
+import { isCapped, isMissing } from "../src/errors.js";
 import { REQUEST_ID_HEADER, SolariBackend } from "../src/solari-backend.js";
 import { EXEC_ENV } from "../src/golden-import.js";
 
@@ -454,5 +455,52 @@ describe("SolariBackend road retries", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+describe("the cap the caller puts on one call", () => {
+  it("resume carries the protocol's cap into the fetch, and no other call carries one", async () => {
+    const seen: (number | undefined)[] = [];
+    const f = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      seen.push(init?.signal === undefined || init.signal === null ? undefined : RESUME_CAP_MS);
+      return new Response(JSON.stringify({ sandboxId: "x", kind: "sandbox", state: "paused" }), { status: 200 });
+    });
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    const m = await b.get("x");
+    await m.pause();
+    await m.resume();
+    expect(seen).toEqual([undefined, undefined, RESUME_CAP_MS]);
+  });
+
+  it("the caller's own signal ends the call, so a resume nobody waits on is not left running behind them", async () => {
+    const stop = new AbortController();
+    const f = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const signal = init?.signal ?? undefined;
+      return await new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(signal.reason as Error));
+        stop.abort();
+      });
+    });
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    // The cap rides the same fetch, so the failure is the stop's own and not the cap's: the runtime tells a wake
+    // the person ended from one the provider never answered by exactly this.
+    const failed = await b.request("POST", "/sandboxes/x/resume", {}, 30_000, stop.signal).catch((e: unknown) => e);
+    expect(isCapped(failed)).toBe(false);
+    expect((failed as Error).name).toBe("AbortError");
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+
+  it("a provider that answers nothing inside the cap ends the resume there instead of holding the socket", async () => {
+    const f = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const signal = init?.signal ?? undefined;
+      return await new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(signal.reason as Error));
+      });
+    });
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    // The failure carries fetch's own name for a cap that fired, which is what the runtime reads to tell a call
+    // nobody answered from one the provider refused.
+    await expect(b.request("POST", "/sandboxes/x/resume", {}, 20)).rejects.toSatisfy(isCapped);
+    expect(f).toHaveBeenCalledTimes(1);
   });
 });

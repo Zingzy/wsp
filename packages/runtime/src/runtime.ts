@@ -26,6 +26,7 @@ import {
   exportPathsInto,
   goldenHead,
   importInto,
+  isCapped,
   isMissing,
   isNetworkError,
   landBundle,
@@ -175,7 +176,7 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
-import { mcpServersBlocked, actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, machineCapRefusal, machineWord, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noSshImportLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, workspaceProjects, workspaceState } from "@wsp/protocol";
+import { mcpServersBlocked, actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, machineCapRefusal, machineWord, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noSshImportLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_ASK_EVERY_MS, WAKE_ASKS_AGAIN, WAKE_STOPPED, wakeAskingAgainLine, wakeGaveUpLine, workspaceProjects, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
@@ -565,6 +566,16 @@ interface LiveWorkspace {
   budget?: MoveBudget;
   /** Cancels the one read armed after a wake gave up. */
   lateRead?: () => void;
+  /** Stops the wake in flight, whether it is on a call or waiting to ask again: what the row's stop pulls. Aborting
+   * it ends the provider call under it, so nothing is left running behind a wake that is over. Absent when no wake
+   * is running. */
+  wakeStop?: AbortController;
+  /** What the row says about the wake in flight, for as long as it is in flight: every status the poll builds carries
+   * it, since a line pushed once would be wiped by the next tick and the row would fall silent between two asks. */
+  wakeSaid?: string;
+  /** Which ask the host is on and how many it will make, while it is asking again on its own; the surfaces read it
+   * at the length each has room for rather than being handed a sentence built for one of them. */
+  wakeAsk?: { ask: number; of: number };
   /** Set from the fork until the create is ready: the sweep knows the machine, nothing else can reach it yet. */
   creating?: true;
   /** Why the nap in flight kept the previous vault, for the napping status it pushes; said once. */
@@ -747,6 +758,9 @@ export interface WakeOptions {
   deadlineMs?: number;
   /** How long after a wake gave up the provider is read once more for a resume that landed late (tests shrink it). */
   lateReadMs?: number;
+  /** How long the host waits before asking the provider again, and how many such asks it makes (tests shrink both). */
+  askEveryMs?: number;
+  asksAgain?: number;
   /** A nap-time vault archive over this is not stored (a warning names the size). */
   vaultCapBytes?: number;
 }
@@ -843,6 +857,10 @@ class DeadlineError extends Error {}
 /** What settleMove ends with when the provider never answered the move (a missed deadline, a call the network
  * dropped), carrying the last such failure as its cause; a refusal the provider answered with is rethrown as itself. */
 class MoveUnansweredError extends Error {}
+
+/** What a resume ends with when the provider never took the call inside its cap and the machine is still paused:
+ * the one failure the host answers by asking again on its own rather than by handing the row back to the person. */
+class ResumeUnansweredError extends MoveUnansweredError {}
 
 /** Rejects once the deadline passes; the underlying promise is left to settle on its own. The deadline is read on
  * the clock given, so a move budget measured on an injected clock times out on that clock. */
@@ -970,6 +988,9 @@ export interface Runtime {
     list(origin?: WorkspaceOrigin): Promise<WorkspaceView[]>;
     nap(id: string, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
     wake(id: string, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
+    /** Stops a wake that is asking the provider again on its own, and answers with the record it leaves behind. The
+     * wake itself ends with WAKE_STOPPED; a workspace with no wake in flight is answered with as it stands. */
+    stopWake(id: string, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
     upgrade(id: string, spec?: WorkspaceSpec, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
     /** Moves the workspace onto its golden's head version, carrying its files across. Refused in one sentence when
      * the machine is not running, the image is a project golden, or no golden knows the image; a workspace past
@@ -1699,6 +1720,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const providerReadMs = opts.providerReadMs ?? PROVIDER_READ_MS;
   const goneConfirmMs = opts.goneConfirmMs ?? GONE_CONFIRM_MS;
   const lateReadMs = opts.wake?.lateReadMs ?? WAKE_LATE_READ_MS;
+  const wakeAskEveryMs = opts.wake?.askEveryMs ?? WAKE_ASK_EVERY_MS;
+  const wakeAsksAgain = opts.wake?.asksAgain ?? WAKE_ASKS_AGAIN;
   const clock = opts.clock ?? realClock;
   const permissionWaitMs = opts.permissionWaitMs ?? PERMISSION_WAIT_MS;
   /** Each provider move the guest has to cooperate with: the state it leaves the machine in, and the state a
@@ -1734,10 +1757,36 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       throw new MoveUnansweredError(words, { cause: unanswered });
     }
   };
+  /** What the provider says the machine is, bounded by its own read; undefined where the read could not be had. */
+  const readsState = (machine: Machine): Promise<MachineState | undefined> =>
+    until(machine.state(), clock.now() + providerReadMs, `state of ${machine.id}`, clock).catch(() => undefined);
+  /** What a read of the machine after an unanswered resume comes to: the call went through, or as far as anything
+   * here can tell it did not. Both roads that read a machine mid-wake ask this, so a landing the retry's read finds
+   * is the same landing the cap's own read finds. A read that could not be had leaves the resume unsent, and a
+   * machine the read calls gone meets its 404 on the next ask and takes the resurrect road.  */
+  const tookTheResume = (reads: MachineState | undefined): boolean => reads === "running" || reads === "starting";
+  /** One resume inside a wake. The engine's cap on the fetch is the only timer on it, and `signal` is how the person's
+   * stop ends the call rather than walking away from one that keeps running. A call that runs its cap out is not a
+   * failed resume, since the provider's mutating calls hang at the HTTP level while the operation goes through
+   * (probed 2026-09-10), so the machine's own state settles it. Nothing here sends a second; the host's own asking
+   * again does that. */
+  const settleResume = async (machine: Machine, signal: AbortSignal | undefined, said: (words: string) => Promise<void>): Promise<void> => {
+    try {
+      return await machine.resume(signal);
+    } catch (e) {
+      if (!isNetworkError(e) && !isCapped(e)) throw e;
+      await said(RESUME_UNANSWERED);
+      if (tookTheResume(await readsState(machine))) return;
+      console.warn(`${machine.id}: ${RESUME_UNANSWERED}, which still reads paused`);
+      throw new ResumeUnansweredError(RESUME_UNANSWERED, { cause: e });
+    }
+  };
   const budgetFor = (what: MoveBudget["what"], ms: number): MoveBudget => {
     const started = clock.now();
     return { what, started, deadline: started + ms };
   };
+  /** Resolves after ms on the runtime's clock. Unref'd: a host asked to exit while a wake waits to ask again exits. */
+  const sleeps = (ms: number): Promise<void> => new Promise<void>(resolve => clock.schedule(() => resolve(), ms, { unref: true }));
   const daemonHelloTimeoutMs = opts.daemonHelloTimeoutMs ?? DAEMON_HELLO_TIMEOUT_MS;
   const vaultCapBytes = opts.wake?.vaultCapBytes ?? VAULT_CAP_BYTES;
   const defaultIdleWindowMs = opts.idle?.defaultWindowMs ?? DEFAULT_IDLE_WINDOW_MS;
@@ -1976,6 +2025,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     ...(daemonNotes.has(r.id) ? { daemonNote: daemonNotes.get(r.id)! } : {}),
     ...(r.vaultedAt !== undefined ? { vaultedAt: r.vaultedAt } : {}),
     ...(r.vaultRefused !== undefined ? { vaultRefused: r.vaultRefused } : {}),
+    ...(r.wakeRefused !== undefined ? { wakeRefused: r.wakeRefused } : {}),
   });
 
   /** One fact of a workspace's look: a value sets it, null clears it back to none, and undefined leaves what the
@@ -2085,9 +2135,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         size,
         rateUsdPerHour: backendFor(entry.record.kind).pricing.rateUsdPerHour(size),
         ...(reason !== undefined ? { reason } : {}),
+        ...(entry.wakeAsk !== undefined ? { wakeAsk: entry.wakeAsk } : {}),
         ...(idleAt !== undefined ? { idleAt } : {}),
       },
     });
+  };
+
+  /** One line about the wake in flight, pushed now and kept on the entry so the poll's own statuses carry it too. */
+  const saysWaking = async (entry: LiveWorkspace, words: string): Promise<void> => {
+    entry.wakeSaid = words;
+    await emitStatus(entry, "napping", words);
   };
 
   /** The one preamble every dial this runtime makes to a machine's daemon repeats: the preview route, then this
@@ -2494,7 +2551,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         },
         move: (m, move) => {
           if (entry.budget === undefined) throw new Error(`${move} of ${m.id} outside a pause or a wake`);
-          return settleMove(m, move, entry.budget);
+          return move === "resume" ? settleResume(m, entry.wakeStop?.signal, words => saysWaking(entry, words)) : settleMove(m, move, entry.budget);
         },
         wakeCheck: async m => {
           const expected = record.shape;
@@ -3220,30 +3277,86 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (entry.record.phase === "running") return view(entry.record);
       refuseCannot(entry, "ramPreservingPause", "be woken");
       entry.waking = (async () => {
-        entry.budget = budgetFor("wake", wakeDeadlineMs);
-        entry.record.phase = "waking";
-        await persist(entry.record);
-        await emitStatus(entry, "napping");
+        // The stop the person pulls from the row. It aborts the provider call the ask is on rather than walking away
+        // from one that keeps running: an abandoned resume would go on to run its cap out, write its line back onto
+        // a row that reads Paused, and leave a second lifecycle wake beside the next one.
+        const stop = new AbortController();
+        entry.wakeStop = stop;
+        const stopped = (): boolean => stop.signal.aborted;
+        /** Resolves as its promise does, or at once when the stop is pulled; only the wait between two asks needs
+         * this, since the abort ends an ask on its own. */
+        const orStopped = <T>(p: Promise<T>): Promise<T | "stopped"> =>
+          stopped()
+            ? Promise.resolve("stopped" as const)
+            : Promise.race([p, new Promise<"stopped">(resolve => stop.signal.addEventListener("abort", () => resolve("stopped"), { once: true }))]);
+        const began = clock.now();
         try {
-          const result = await entry.ws.wake();
-          followMachine(entry);
+          entry.record.phase = "waking";
           await persist(entry.record);
-          bus.emit({ type: "workspace.woken", workspaceId: id, machineId: entry.record.machineId, resurrected: result.resurrected });
-          if (result.reason !== undefined) console.warn(`wake of ${id}: ${result.reason}`);
-          await emitStatus(entry, reachOf(entry), result.reason);
-          return view(entry.record);
-        } catch (e) {
-          entry.record.phase = entry.ws.currentPhase;
-          await persist(entry.record);
-          await emitStatus(entry, "napping", e instanceof Error ? e.message : String(e));
-          armLateRead(entry);
-          throw e;
+          await emitStatus(entry, "napping");
+          // Ask 1 is the person's wake; every ask after it is the host's own, once a cadence apart, so a provider
+          // that comes back inside its own outage wakes the machine without the person having to try again. The
+          // record stays waking between two asks: nothing about the machine changed, only who is asking.
+          // Set when the read before an ask found the machine already up: that ask sends no second resume and the
+          // engine's wake goes straight to the guest check, first life ending there as on any other road.
+          let landed = false;
+          for (let ask = 1; ; ask++) {
+            entry.budget = budgetFor("wake", wakeDeadlineMs);
+            try {
+              const result = await entry.ws.wake({ landed });
+              if (stopped()) throw new Error(WAKE_STOPPED);
+              followMachine(entry);
+              delete entry.record.wakeRefused;
+              await persist(entry.record);
+              bus.emit({ type: "workspace.woken", workspaceId: id, machineId: entry.record.machineId, resurrected: result.resurrected });
+              if (result.reason !== undefined) console.warn(`wake of ${id}: ${result.reason}`);
+              await emitStatus(entry, reachOf(entry), result.reason);
+              return view(entry.record);
+            } catch (e) {
+              if (!stopped() && e instanceof ResumeUnansweredError && ask <= wakeAsksAgain) {
+                entry.wakeAsk = { ask, of: wakeAsksAgain };
+                delete entry.wakeSaid;
+                await emitStatus(entry, "napping");
+                if ((await orStopped(sleeps(wakeAskEveryMs))) !== "stopped") {
+                  // The retry reads the machine before it asks: a call that hung at the provider can land in the
+                  // minute since, and a resume is worth sending only while the machine still reads paused.
+                  landed = tookTheResume(await readsState(entry.machine));
+                  continue;
+                }
+              }
+              // The provider would not resume it for the whole of the asking: the record carries the road out until
+              // something replaces the machine, since nothing about it changes on its own from here.
+              const gaveUp = !stopped() && e instanceof ResumeUnansweredError ? wakeGaveUpLine(ask, clock.now() - began) : undefined;
+              if (gaveUp !== undefined) entry.record.wakeRefused = gaveUp;
+              // A stop leaves the machine where the abort found it: paused, until the late read says otherwise.
+              if (stopped()) entry.ws.notePaused();
+              entry.record.phase = entry.ws.currentPhase;
+              await persist(entry.record);
+              delete entry.wakeAsk;
+              const words = stopped() ? WAKE_STOPPED : (gaveUp ?? (e instanceof Error ? e.message : String(e)));
+              await emitStatus(entry, "napping", words);
+              armLateRead(entry);
+              throw stopped() ? new Error(WAKE_STOPPED) : gaveUp !== undefined ? new Error(gaveUp) : e;
+            } finally {
+              delete entry.budget;
+            }
+          }
         } finally {
-          delete entry.budget;
+          delete entry.wakeStop;
+          delete entry.wakeSaid;
+          delete entry.wakeAsk;
           delete entry.waking;
         }
       })();
       return entry.waking;
+    },
+
+    async stopWake(id, origin) {
+      const entry = await entryOf(id, origin);
+      const waking = entry.waking;
+      entry.wakeStop?.abort();
+      await waking?.catch(() => {});
+      return view(entry.record);
     },
 
     async upgrade(id, spec, origin) {
@@ -3303,6 +3416,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const vaulted = (await store.getBlob(VAULTS, id)) !== undefined;
       await entry.ws.rebuild();
       followMachine(entry);
+      delete entry.record.wakeRefused;
       await persist(entry.record);
       bus.emit({ type: "workspace.upgraded", workspaceId: id, machineId: entry.record.machineId });
       const reason = `rebuilt: ${old} replaced by ${entry.record.machineId}, ${vaulted ? "nap-time vault imported" : "no vault to import"}`;
@@ -5418,6 +5532,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // The rate follows the machine's kind: a local workspace's backend prices it at zero, so no cost line rides its row.
         rateUsdPerHour: backendFor(e.record.kind).pricing.rateUsdPerHour(e.record.size),
         generation: e.generation,
+        // The wake's own line while one is in flight, and the words it left behind once its asking ran out: the poll
+        // builds every status from the record, so a row that carried only what was pushed would fall silent between
+        // two asks and forget the rebuild road at the next tick.
+        ...(e.wakeSaid ?? e.record.wakeRefused) !== undefined ? { reason: (e.wakeSaid ?? e.record.wakeRefused)! } : {},
+        ...(e.wakeAsk !== undefined ? { wakeAsk: e.wakeAsk } : {}),
         ...(e.record.phase === "running" && idle.idleAt(e.record.id) !== undefined ? { idleAt: idle.idleAt(e.record.id)! } : {}),
         ...(moduleOf(e.record.kind).hasDaemon(e) ? { daemonReach: () => moduleOf(e.record.kind).daemonRoad(e) } : {}),
         providerState: () => e.machine.state(),

@@ -546,6 +546,7 @@ describe("runtime wire types", () => {
       { id: 20, op: "golden.builderReach", builderId: "m1" },
       { id: 21, op: "sessions.interrupt", sessionId: "s1" },
       { id: 22, op: "workspaces.forget", workspaceId: "ws_1" },
+      { id: 23, op: "workspaces.stopWake", workspaceId: "ws_1" },
     ];
     for (const r of reqs) expect(RuntimeRequest.parse(r)).toEqual(r);
     expect(() => RuntimeRequest.parse({ id: 21, op: "sessions.interrupt" })).toThrow(); // sessionId required

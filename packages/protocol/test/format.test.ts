@@ -66,6 +66,14 @@ import {
   machineUnreachedLine,
   mcpServerCommandLine,
   moveTimedOutLine,
+  RESUME_UNANSWERED,
+  RESUME_CAP_MS,
+  WAKE_ASK_EVERY_MS,
+  WAKE_ASKS_AGAIN,
+  WAKE_STOPPED,
+  wakeAskingAgainLine,
+  wakeGaveUpLine,
+  workspaceAwakeLine,
   nameList,
   nextInsideAgentLine,
   notifyBody,
@@ -942,6 +950,39 @@ describe("a pause or a wake the provider never answered", () => {
   });
   it("says when the provider could not be read about the machine either", () => {
     expect(moveTimedOutLine("pause", 240_000, undefined)).toBe("pause did not complete in 4m; the provider did not answer and could not be read about the machine; try again");
+  });
+});
+
+describe("a resume the provider does not take", () => {
+  it("says the provider has not answered and that the machine is being read, since a hung call is not a failed resume", () => {
+    expect(RESUME_UNANSWERED).toBe("the provider has not answered the resume request; reading the machine");
+    // Neither a refusal nor a retry of the person's: the machine's own state settles it and the host asks again.
+    for (const word of ["try again", "failed", "refused"]) expect(RESUME_UNANSWERED).not.toContain(word);
+  });
+
+  it("ends the asking with what the provider did, where the work is, and the one road to a machine now", () => {
+    expect(wakeGaveUpLine(31, 30 * 60_000)).toBe(
+      "the provider answered none of 31 resume requests over 30m; the work on this machine's disk stays with the provider, and a rebuild starts a new machine from the image",
+    );
+    expect(wakeGaveUpLine(1, 30_000)).toContain("none of 1 resume request over 30s");
+  });
+
+  it("counts the host's own asks on the row, of the number it will make", () => {
+    expect(wakeAskingAgainLine(3, WAKE_ASKS_AGAIN)).toBe("waking, asking again (3 of 30)");
+    expect(wakeAskingAgainLine(1, 2)).toBe("waking, asking again (1 of 2)");
+  });
+
+  it("asks for half an hour, once a minute, and caps one call at half a minute", () => {
+    expect(RESUME_CAP_MS).toBe(30_000);
+    expect(WAKE_ASK_EVERY_MS * WAKE_ASKS_AGAIN).toBe(30 * 60_000);
+  });
+
+  it("says the machine is still paused when the person stopped the asking", () => {
+    expect(WAKE_STOPPED).toBe("waking stopped; the machine is still paused");
+  });
+
+  it("names the workspace in what the needs-you road says outside the app", () => {
+    expect(workspaceAwakeLine("b1")).toBe("b1 is awake");
   });
 });
 

@@ -691,6 +691,38 @@ describe("store workspaces", () => {
     expect(calls).toEqual(["wake:ws_b", "nap:ws_a"]);
   });
 
+  it("the one slot stops a wake the host is still asking the provider for, and paints the record it hands back", async () => {
+    const { api } = fakeApi([{ ...view("ws_a"), phase: "waking" }], []);
+    const calls: string[] = [];
+    api.stopWake = async id => {
+      calls.push(`stopWake:${id}`);
+      return { ...view(id), phase: "napping" };
+    };
+    api.nap = async id => { calls.push(`nap:${id}`); return { ...view(id), phase: "napping" }; };
+    api.wake = async id => { calls.push(`wake:${id}`); return view(id); };
+    useStore.getState().bind(api);
+    await flush();
+    await useStore.getState().toggle("ws_a");
+    expect(calls).toEqual(["stopWake:ws_a"]);
+    expect(useStore.getState().workspaces[0]!.phase).toBe("napping");
+    // And that record now offers the wake again, which is the slot's other word.
+    await useStore.getState().toggle("ws_a");
+    expect(calls).toEqual(["stopWake:ws_a", "wake:ws_a"]);
+  });
+
+  it("a client with no stop leaves the wake alone rather than napping the machine under it", async () => {
+    const { api } = fakeApi([{ ...view("ws_a"), phase: "waking" }], []);
+    const calls: string[] = [];
+    api.nap = async id => { calls.push(`nap:${id}`); return { ...view(id), phase: "napping" }; };
+    api.wake = async id => { calls.push(`wake:${id}`); return view(id); };
+    delete api.stopWake;
+    useStore.getState().bind(api);
+    await flush();
+    await useStore.getState().toggle("ws_a");
+    expect(calls).toEqual([]);
+    expect(useStore.getState().workspaces[0]!.phase).toBe("waking");
+  });
+
   it("napped carries the phase; woken and upgraded carry the phase and the new machine", async () => {
     const { api, emit } = fakeApi([view("ws_a")], []);
     useStore.getState().bind(api);

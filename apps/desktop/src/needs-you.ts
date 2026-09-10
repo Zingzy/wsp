@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The system notification the shell shows when a build waits on the person and
-// this window is not the one they are looking at. The page cannot read its own
-// window's focus, so it hands the need over and the decision is made here: a
-// focused window says nothing, since the sidebar's row, the toast and the title
-// already do. A click raises the window and tells the page to open the build.
-// No sound: a build waiting is not an alarm.
+// The system notification the shell shows when a build waits on the person, or
+// a machine of theirs came up, and this window is not the one they are looking
+// at. The page cannot read its own window's focus, so it hands the sentence
+// over and the decision is made here: a focused window says nothing, since the
+// sidebar's row, the toast and the title already do. A click raises the window
+// and tells the page to open whatever was spoken about. No sound: neither a
+// build waiting nor a machine coming up is an alarm.
 import { NEEDS_YOU, type InitNeedsYou } from "@wsp/protocol";
 
 /** The part of Electron's Notification this needs; a fake stands in for it under test. */

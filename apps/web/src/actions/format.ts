@@ -10,6 +10,7 @@ import { MAX_TERMINALS_PER_GROUP } from "../terminal/groups.js";
 export const WORKSPACE_WORDS = {
   pause: "Pause workspace",
   wake: "Wake workspace",
+  stopWake: "Stop waking",
   rebuild: "Rebuild machine",
   newThread: "New thread",
   openTerminal: "Open terminal",
@@ -55,9 +56,10 @@ export const TERMINAL_WORDS = {
   close: "Close Terminal",
 } as const;
 
-/** Pause and wake are one slot: a machine that is up offers the pause, every other state the wake, and the moving
- * states refuse it with a word. */
+/** Pause, wake and the stop are one slot: a machine that is up offers the pause, one the host is still asking the
+ * provider for offers the stop, and every other state the wake. */
 export function phaseWord(state: WorkspaceState): string {
+  if (state === "waking") return WORKSPACE_WORDS.stopWake;
   return isBilling(state) ? WORKSPACE_WORDS.pause : WORKSPACE_WORDS.wake;
 }
 
@@ -70,7 +72,7 @@ const PHASE_SLOT: Record<WorkspaceState, { button: string; cannot: string }> = {
   paused: { button: "Wake", cannot: "be woken" },
   gone: { button: "Wake", cannot: "be woken" },
   pausing: { button: "Pausing…", cannot: "be paused" },
-  waking: { button: "Waking…", cannot: "be woken" },
+  waking: { button: "Stop", cannot: "be woken" },
 };
 
 /** The word the phase button on the machine's own surface shows: the verb, or the moving state while it moves. */
@@ -79,7 +81,8 @@ export const phaseButtonWord = (state: WorkspaceState): string => PHASE_SLOT[sta
 /** The verb the machine cannot take, for the one sentence a machine wsp does not drive refuses with. */
 export const phaseCannot = (state: WorkspaceState): string => PHASE_SLOT[state].cannot;
 
-export const phaseHint = (state: WorkspaceState): string => (isBilling(state) ? "Suspend the VM and keep the disk" : "Boot the VM from its disk");
+export const phaseHint = (state: WorkspaceState): string =>
+  state === "waking" ? "Stop asking the provider to resume this machine" : isBilling(state) ? "Suspend the VM and keep the disk" : "Boot the VM from its disk";
 export const FORGET_HINT = "The machine is gone; forget the workspace to drop it from this computer";
 export const REBUILD_HINT = "The machine answers nothing; rebuild it from the golden image";
 
@@ -91,8 +94,9 @@ export function phaseRefusal(state: WorkspaceState): string | null {
       return null;
     case "pausing":
       return "Workspace is pausing; it can be woken once it is paused";
+    // A wake the host keeps asking the provider for is the one moving state with something to offer: its own stop.
     case "waking":
-      return "Workspace is waking";
+      return null;
     case "gone":
       return goneRefusal("wake");
     default: {

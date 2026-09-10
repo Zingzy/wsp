@@ -74,7 +74,9 @@ export interface Machine {
   run(script: string, opts: RunOptions): Promise<ExecResult>;
   snapshot(name: string): Promise<string>;
   pause(): Promise<void>;
-  resume(): Promise<void>;
+  /** `signal` ends the call where the caller has stopped waiting on it, so a resume nobody is waiting on is not left
+   * running behind them; the backend's own cap on how long it waits for an answer is its business, not the caller's. */
+  resume(signal?: AbortSignal): Promise<void>;
   kill(): Promise<void>;
   state(): Promise<MachineState>;
   downloadUrl(path: string): Promise<string>;
