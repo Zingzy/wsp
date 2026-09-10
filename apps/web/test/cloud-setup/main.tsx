@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Served by Vite to a real browser: the cloud setup sheet over a fake api at
 // each of its steps (?screen=choice|keys|agent|agent-stopped|reading|agents|
-// tools|also|logins|ask|building|signing|retry|done|failed|stopped|slot|over),
-// in either theme
+// tools|also|logins|ask|building|signing|retry|done|failed|stopped|slot|over|
+// sweeping), in either theme
 // (?theme=light), so a test
 // can lay out and photograph every state the ticket names. The screens' data
 // is what the host hands over for a small laptop: three agents, the tools with
 // the base locked on and the rest by calls, a manager's rows, three sign-ins.
 import { createRoot } from "react-dom/client";
-import { GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MCP_ADDED_WORD, NETWORK_LOST_LINE, SIGN_IN_OPEN_STATE, initAgentNoRecipeLine, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MCP_ADDED_WORD, NETWORK_LOST_LINE, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initAgentNoRecipeLine, initBuildRows, initMachineRowLabel, initStageCount, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api } from "../../src/protocol/client";
 import { useStore } from "../../src/protocol/store";
@@ -124,6 +124,11 @@ const STAGES: InitJob["rows"] = [
 const done = (rows: InitJob["rows"]): InitJob["rows"] => rows.map(r => (r.kind === "stage" ? { ...r, state: "done", detail: undefined } : r));
 /** The stages after the one a stopped build was on: still listed, still waiting, whatever they carry above. */
 const notYet = (rows: InitJob["rows"]): InitJob["rows"] => rows.map(r => (r.kind === "stage" ? { id: r.id, kind: r.kind, label: r.label, state: INIT_ROW_STATES.waiting } : r));
+/** A machine a stop could not reach the provider to kill, as the host's sweep rides it on the current job. */
+const machine = (state: string, detail?: string, id = "b_dlb9oeig"): InitJob["rows"][number] => ({ id: `machine/${id}`, kind: "machine", label: initMachineRowLabel(id), state, ...(detail !== undefined ? { detail } : {}) });
+/** The provider client's own words when nothing on this computer can reach it: what the host appends to the failed
+ * stage's block, under a sentence that reads as a person would say it. */
+const RAW_FETCH_FAILURE = "fetch failed; fetch failed";
 const signIns: InitJob["rows"] = [
   { id: "sign-in/claude", kind: "sign-in", tool: "claude", label: "Sign in to Claude Code", state: INIT_ROW_STATES.keySet },
   { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "Sign in to GitHub CLI", state: SIGN_IN_OPEN_STATE, page: "https://github.com/login/device", code: "8F4A-C21B", detail: "gh auth login is waiting on the machine for the code" },
@@ -153,13 +158,12 @@ const JOBS: Record<string, InitJob> = {
   agent: { ...base, road: "agent", phase: "agent", screens: [], line: "read /Users/zingzy/.claude/projects", thread: THREAD },
   "agent-stopped": { ...base, road: "agent", phase: "failed", screens: [], line: "Permission for Bash: wsp recipe scan --json", error: initAgentNoRecipeLine("/Users/zingzy/.wsp/recipe.json"), thread: THREAD },
   ask: { ...base, step: SCREENS.length },
-  building: { ...base, phase: "building", screens: [], rows: STAGES, progress: { done: 5, total: 14 } },
+  building: { ...base, phase: "building", screens: [], rows: STAGES },
   signing: {
     ...base,
     phase: "signing-in",
     screens: [],
-    rows: [...done(STAGES.slice(0, 9)), ...signIns, ...STAGES.slice(9)],
-    progress: { done: 11, total: 18 },
+    rows: [...done(STAGES.slice(0, 9)), ...signIns, ...STAGES.slice(9)]
   },
   // A sign-in that ran out while the seal runs: the list is back, its stage open on the sub-rows with Retry, and the cancel link disabled.
   retry: {
@@ -167,19 +171,17 @@ const JOBS: Record<string, InitJob> = {
     phase: "sealing",
     stoppable: false,
     screens: [],
-    rows: [...done(STAGES.slice(0, 9)), ...signIns.map(r => (r.id === "sign-in/gh" ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, state: INIT_SIGN_IN_WORDS["not-signed-in"], detail: "no sign-in within 16m" } : r.state === SIGN_IN_OPEN_STATE ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, state: INIT_SIGN_IN_WORDS["signed-in"] } : r)), stage("snapshotting", INIT_ROW_STATES.running, { lines: ["snapshot wsp-h1-default-v1 requested", "waiting on the provider"] }), ...STAGES.slice(10)],
-    progress: { done: 12, total: 18 },
+    rows: [...done(STAGES.slice(0, 9)), ...signIns.map(r => (r.id === "sign-in/gh" ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, state: INIT_SIGN_IN_WORDS["not-signed-in"], detail: "no sign-in within 16m" } : r.state === SIGN_IN_OPEN_STATE ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, state: INIT_SIGN_IN_WORDS["signed-in"] } : r)), stage("snapshotting", INIT_ROW_STATES.running, { lines: ["snapshot wsp-h1-default-v1 requested", "waiting on the provider"] }), ...STAGES.slice(10)]
   },
   done: {
     ...base,
     phase: "done",
     screens: [],
     rows: [...done(STAGES.slice(0, 9)), ...signIns.map(r => (r.state === SIGN_IN_OPEN_STATE ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, state: INIT_SIGN_IN_WORDS["signed-in"] } : r)), ...done(STAGES.slice(9, 13)), { id: "workspace/first", kind: "workspace", label: "first", state: "forked" }],
-    progress: { done: 18, total: 18 },
     golden: { version: 1 },
     workspace: { id: "ws_first", name: "first" },
   },
-  failed: { ...base, phase: "failed", screens: [], rows: [...done(STAGES.slice(0, 5)), stage("installing-harness", "failed", { lines: ["npm i -g @anthropic-ai/claude-code", "npm ERR! ENOSPC: no space left on device"] })], progress: { done: 5, total: 6 }, error: "npm i -g @anthropic-ai/claude-code exited 1: ENOSPC: no space left on device" },
+  failed: { ...base, phase: "failed", screens: [], rows: [...done(STAGES.slice(0, 5)), stage("installing-harness", "failed", { lines: ["npm i -g @anthropic-ai/claude-code", "npm ERR! ENOSPC: no space left on device"] })], error: "npm i -g @anthropic-ai/claude-code exited 1: ENOSPC: no space left on device" },
   // A build the network stopped: the list keeps its order and every row, the failed stage's block ends on the
   // error's own line, and the stages after it still read waiting.
   stopped: {
@@ -187,8 +189,7 @@ const JOBS: Record<string, InitJob> = {
     phase: "failed",
     stoppable: false,
     screens: [],
-    rows: [...done(STAGES.slice(1, 3)), stage("applying-setup", INIT_ROW_STATES.failed, { lines: ["applying your setup", NETWORK_LOST_LINE] }), ...notYet(STAGES.slice(4, 13)), { id: "workspace/e2e", kind: "workspace", label: "e2e", state: INIT_ROW_STATES.notMade }],
-    progress: { done: 2, total: 13 },
+    rows: [...done(STAGES.slice(1, 3)), stage("applying-setup", INIT_ROW_STATES.failed, { lines: ["applying your setup", RAW_FETCH_FAILURE] }), ...notYet(STAGES.slice(4, 13)), { id: "workspace/e2e", kind: "workspace", label: "e2e", state: INIT_ROW_STATES.notMade }],
     error: NETWORK_LOST_LINE,
   },
   // A build the person stopped: the run's own line for where it was and what became of the machine.
@@ -197,9 +198,17 @@ const JOBS: Record<string, InitJob> = {
     phase: "cancelled",
     stoppable: false,
     screens: [],
-    rows: [...done(STAGES.slice(1, 2)), stage("deploying-daemon", INIT_ROW_STATES.failed, { lines: ["deploy wsp-daemon", "stopped"] }), ...notYet(STAGES.slice(3, 13)), { id: "workspace/e2e-cancel", kind: "workspace", label: "e2e-cancel", state: INIT_ROW_STATES.notMade }],
-    progress: { done: 1, total: 13 },
+    rows: [...done(STAGES.slice(1, 2)), stage("deploying-daemon", INIT_ROW_STATES.stopped, { lines: ["deploy wsp-daemon"] }), ...notYet(STAGES.slice(3, 13)), { id: "workspace/e2e-cancel", kind: "workspace", label: "e2e-cancel", state: INIT_ROW_STATES.notMade }],
     error: "Stopped while installing the base tools. Builder b_dlb9oeig is gone; nothing is billing.",
+  },
+  // The stop the provider would not take: the machine's own row rides on, and it rides on the next job too.
+  sweeping: {
+    ...base,
+    phase: "cancelled",
+    stoppable: false,
+    screens: [],
+    rows: [...done(STAGES.slice(1, 2)), stage("deploying-daemon", INIT_ROW_STATES.stopped, { lines: ["deploy wsp-daemon"] }), ...notYet(STAGES.slice(3, 13)), { id: "workspace/e2e-cancel", kind: "workspace", label: "e2e-cancel", state: INIT_ROW_STATES.notMade }, machine(INIT_ROW_STATES.retrying, "getaddrinfo ENOTFOUND api.getsolari.com"), machine(INIT_ROW_STATES.gone, undefined, "b_dlbauaeb")],
+    error: `Stopped while installing the base tools. ${STOP_LEFT_MACHINE_LINE}`,
   },
   // Everything ticked past the image's disk: the ring is full in the danger tone and Continue refuses, which is
   // what the test presses to photograph the refusal line.
@@ -210,9 +219,12 @@ const JOBS: Record<string, InitJob> = {
     phase: "building",
     screens: [],
     rows: [stage("creating", INIT_ROW_STATES.slot, { lines: ["sandbox from base", "Solari account at its machine cap; waiting 30s for a slot (5/20). Nothing is killed.", "sandbox from base", "Solari account at its machine cap; waiting 30s for a slot (5/20). Nothing is killed."] }), ...notYet(STAGES.slice(2, 13)), { id: "workspace/first", kind: "workspace", label: "first", state: INIT_ROW_STATES.waiting }],
-    progress: { done: 0, total: 13 },
   },
 };
+
+/** The count the host puts on the view, from the rows themselves: one rule, so no fixture can say a number the
+ * screen it feeds would not. */
+const withProgress = (job: InitJob): InitJob => ({ ...job, progress: initStageCount(initBuildRows(job.rows).rows) });
 
 const setup: InitSetup = {
   keys: { solari: at !== "keys" },
@@ -222,7 +234,7 @@ const setup: InitSetup = {
     { id: "codex", name: "Codex", configured: false, takesTools: false },
   ],
   pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 },
-  job: at === "reading" ? { ...JOBS.reading!, rows: [] } : (JOBS[at] ?? (screenAt >= 0 ? { ...base, step: screenAt } : null)),
+  job: at === "reading" ? withProgress({ ...JOBS.reading!, rows: [] }) : (JOBS[at] !== undefined ? withProgress(JOBS[at]!) : screenAt >= 0 ? { ...base, step: screenAt } : null),
 };
 
 const api: Api = {

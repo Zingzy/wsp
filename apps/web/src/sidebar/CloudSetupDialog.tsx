@@ -160,7 +160,9 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
           name={typed[ASK_NAME] ?? FIRST_WORKSPACE}
           folder={typed[ASK_FOLDER] ?? ""}
           onType={o => setDraft({ key: INIT_BUILD_STEP, draft: asked(o) })}
-          onKeep={o => keep(INIT_BUILD_STEP, asked(o))}
+          // Leaving a field the person did not change keeps nothing: a blur is not news, and a keep is a whole view
+          // to every client watching the job.
+          onKeep={o => (o.name === (kept?.answers[ASK_NAME] ?? FIRST_WORKSPACE) && o.folder === (kept?.answers[ASK_FOLDER] ?? "") ? undefined : keep(INIT_BUILD_STEP, asked(o)))}
           onBuild={o =>
             void attempt(async () => {
               if (firstLaunch !== undefined) await api!.initAnswer!({ screen: firstLaunch.id, ticks: setup.agents.filter(a => a.configured).map(a => wspToolsRowId(a.id)).filter(id => firstLaunch.items.some(i => i.id === id)) });

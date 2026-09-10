@@ -47,9 +47,9 @@ export function SetupBuild({ job, onCancel, onRetry, onCode, onOpenWorkspace, on
   const fraction = count.total > 0 ? count.done / count.total : 0;
   const signInStage = rows.find(r => r.id === SIGN_IN_STAGE_ID);
   const slide = building && signInStage !== undefined && (signInStage.state === INIT_ROW_STATES.open || signInStage.state === INIT_ROW_STATES.running);
-  // The one row the card keeps in view, as the screen appears and whenever it changes: a sign-in to retry first, else the stage that runs or failed; on the slide, the first sign-in waiting on the person.
+  // The one row the card keeps in view, as the screen appears and whenever it changes: a sign-in to retry first, else the stage that runs or failed, else a machine still being removed, which is the one row left on a stopped screen that is still costing money; on the slide, the first sign-in waiting on the person.
   const attention = building && signIns.some(s => s.state === INIT_SIGN_IN_WORDS["not-signed-in"]);
-  const focusId = attention && signInStage !== undefined ? signInStage.id : rows.find(r => onIt(r.state) || r.state === INIT_ROW_STATES.failed)?.id;
+  const focusId = attention && signInStage !== undefined ? signInStage.id : (rows.find(r => onIt(r.state) || r.state === INIT_ROW_STATES.failed) ?? rows.find(r => r.state === INIT_ROW_STATES.retrying))?.id;
   const slideFocusId = (signIns.find(s => s.state === INIT_ROW_STATES.open) ?? signIns.find(s => s.state === INIT_SIGN_IN_WORDS["not-signed-in"]))?.id;
   const primary: ScreenAction | undefined = job.phase === "done" && job.workspace !== undefined ? { word: words.keycap, onPress: onOpenWorkspace } : job.phase === "failed" || job.phase === "cancelled" ? { word: words.again, onPress: onAgain } : undefined;
   const secondary: ScreenAction | undefined = building
@@ -276,10 +276,12 @@ function TerminalLine({ line, danger }: { line: string; danger: boolean }) {
   );
 }
 
-/** A stage's or a workspace row's glyph: a hollow ring while it waits and where it was never made, nothing while it
- * runs (the slot's spinner says so), a check once it ended well, a cross when it failed. */
+/** A stage's, a workspace's or a machine's glyph: a hollow ring while it waits and where it was never made or the
+ * person's stop ended it, a filled dot while it runs or a machine is still being removed (the slot's spinner and
+ * the row's word say which), a check once it ended well, a cross when it failed. */
 function StageGlyph({ state }: { state: string }) {
-  if (state === INIT_ROW_STATES.notMade) return <span className="size-2 rounded-full border border-muted-foreground/60" />;
+  if (state === INIT_ROW_STATES.notMade || state === INIT_ROW_STATES.stopped) return <span className="size-2 rounded-full border border-muted-foreground/60" />;
+  if (state === INIT_ROW_STATES.retrying) return <span className="size-2 rounded-full bg-foreground" />;
   if (state === INIT_ROW_STATES.failed) {
     return (
       <svg viewBox="0 0 16 16" className="size-3.5 fill-none stroke-destructive-foreground" strokeWidth={1.75} strokeLinecap="round">

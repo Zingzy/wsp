@@ -9,7 +9,7 @@
 // happen. Esc hides it with the job running on.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLOUD_SETUP_WORDS, SIGN_IN_STAGE_ID, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, initDiskLine, initDiskOverLine, initTallyLine, initButtonLine, initProgressLine, type EventUnion, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, SIGN_IN_STAGE_ID, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MACHINE_SWEEP_LINE, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initBuildRows, initDiskLine, initDiskOverLine, initMachineRowLabel, initStageCount, initStageCountLine, initTallyLine, initButtonLine, initProgressLine, type EventUnion, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { CloudSetupDialog } from "../src/sidebar/CloudSetupDialog.js";
@@ -615,6 +615,63 @@ describe("the cloud setup sheet", () => {
     // The stage the machine never got a slot for still stands in the list, waiting.
     expect(dialog.querySelector('[data-row="stage/snapshotting"] [data-k=state]')!.textContent).toBe(INIT_ROW_STATES.waiting);
     expect(k(dialog, "primary").textContent).toContain(CLOUD_SETUP_WORDS.build.again);
+  });
+
+  it("a machine the provider would not take is a row like any other, with its glyph, its name in words and its state word, and it rides on whatever job is current", async () => {
+    const sweeping: InitJob = {
+      ...JOB,
+      phase: "cancelled",
+      stoppable: false,
+      error: `Stopped while creating the machine. ${STOP_LEFT_MACHINE_LINE}`,
+      rows: [
+        { id: "stage/creating", kind: "stage", label: GOLDEN_STAGE_WORDS.creating, state: INIT_ROW_STATES.stopped, lines: ["sandbox from base"] },
+        { id: "machine/b_dlb9oeig", kind: "machine", label: initMachineRowLabel("b_dlb9oeig"), state: INIT_ROW_STATES.retrying, detail: "getaddrinfo ENOTFOUND api.getsolari.com" },
+      ],
+      progress: { done: 0, total: 1 },
+      log: [],
+    };
+    const { dialog, emit } = await open({ setup: { ...HELD, job: sweeping } });
+    await waitFor(() => expect(k(dialog, "build")).toBeDefined());
+    const row = dialog.querySelector<HTMLElement>('[data-row="machine/b_dlb9oeig"]')!;
+    expect(row).not.toBeNull();
+    expect(row.textContent).toContain("Builder b_dlb9oeig");
+    expect(row.querySelector("[data-k=state]")!.textContent).toBe(INIT_ROW_STATES.retrying);
+    // A live row, so a filled glyph and no chevron: there is nothing to open and nothing to press.
+    expect(row.querySelector("svg")).toBeNull();
+    expect(row.querySelector('[aria-hidden] > span[class*="bg-foreground"]')).not.toBeNull();
+    expect(row.getAttribute("aria-expanded")).toBeNull();
+    // The stage the person's stop ended reads stopped, not failed: no cross under a headline that says it was them.
+    const stage = dialog.querySelector<HTMLElement>('[data-row="stage/creating"]')!;
+    expect(stage.querySelector("[data-k=state]")!.textContent).toBe(INIT_ROW_STATES.stopped);
+    expect(stage.querySelector("[data-k=state]")!.className).not.toContain("text-destructive-foreground");
+    // Once the provider takes it the row says gone and wears the check every ended row wears.
+    emit({ ...sweeping, rows: sweeping.rows.map(r => (r.kind === "machine" ? { id: r.id, kind: r.kind, label: r.label, state: INIT_ROW_STATES.gone } : r)) });
+    await waitFor(() => expect(dialog.querySelector('[data-row="machine/b_dlb9oeig"] [data-k=state]')!.textContent).toBe(INIT_ROW_STATES.gone));
+    expect(dialog.querySelector('[data-row="machine/b_dlb9oeig"] svg')).not.toBeNull();
+  });
+
+  it("the sidebar's keycap and the sheet's bar are one count, and while a machine is still being removed the keycap says so", async () => {
+    const building: InitJob = {
+      ...JOB,
+      phase: "building",
+      rows: [
+        { id: "agent/claude", kind: "agent", label: "Claude Code", state: MCP_ADDED_WORD },
+        { id: "stage/creating", kind: "stage", label: GOLDEN_STAGE_WORDS.creating, state: "done" },
+        { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "Sign in to GitHub CLI", state: INIT_ROW_STATES.waiting },
+        { id: "stage/snapshotting", kind: "stage", label: GOLDEN_STAGE_WORDS.snapshotting, state: INIT_ROW_STATES.failed },
+        { id: "workspace/first", kind: "workspace", label: "first", state: INIT_ROW_STATES.notMade },
+      ],
+      progress: { done: 1, total: 3 },
+      log: [],
+    };
+    // The host's field is the sheet's own function over the sheet's own rows, so the two can never say two things.
+    expect(building.progress).toEqual(initStageCount(initBuildRows(building.rows).rows));
+    const { dialog } = await open({ setup: { ...HELD, job: building } });
+    await waitFor(() => expect(k(dialog, "build")).toBeDefined());
+    expect(k(dialog, "count").textContent).toBe(initStageCountLine(building.progress));
+    expect(initProgressLine(building)).toBe(`building · ${building.progress.done}/${building.progress.total}`);
+    // A machine still being removed takes the keycap's line, since that one bills while nobody looks.
+    expect(initProgressLine({ ...building, rows: [...building.rows, { id: "machine/b_1", kind: "machine", label: "Builder b_1", state: INIT_ROW_STATES.retrying }] })).toBe(MACHINE_SWEEP_LINE);
   });
 
   it("a stage waiting on the account's machine cap reads so on its row with the cap line in its block", async () => {

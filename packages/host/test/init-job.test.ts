@@ -11,7 +11,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
 import { SNAPSHOT_STORAGE, type BackendPricing } from "@wsp/engine";
-import { GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, InitJob, InitNeedsYouEvent, NETWORK_LOST_LINE, Recipe, SIGN_IN_OPEN_STATE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initStageCount, noMcpServersLine, type InitJobEvent } from "@wsp/protocol";
+import { GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, InitJob, InitNeedsYouEvent, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, Recipe, SIGN_IN_OPEN_STATE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, initMachineRowLabel, initProgressLine, initStageCount, noMcpServersLine, type InitJobEvent } from "@wsp/protocol";
 import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localWiring, type Keys } from "../src/cli.js";
@@ -737,9 +737,92 @@ describe("the init job, manual road", () => {
     await f.settled();
     const said = f.events.map(e => e.job.rows.find(r => r.kind === "machine")).filter(r => r !== undefined).map(r => r.state);
     expect(said).toContain(INIT_ROW_STATES.retrying);
+    // The row is words, not a bare provider id in a column of sentences.
+    expect(f.jobs.view()!.rows.find(r => r.kind === "machine")!.label).toBe(initMachineRowLabel(builder.id));
     // The kill landed once the network was back, so the row says the machine is gone and nothing bills on.
     expect(f.jobs.view()!.rows.find(r => r.kind === "machine")).toMatchObject({ state: INIT_ROW_STATES.gone });
     expect(f.backend.machines.filter(m => !m.killed)).toHaveLength(0);
+    // The stop was the person's, so the stage it ended reads stopped and wears no failure.
+    expect(f.jobs.view()!.rows.find(r => r.state === INIT_ROW_STATES.failed)).toBeUndefined();
+    // Nothing is left to remove, so the sidebar's keycap is back on the job.
+    expect(initProgressLine(f.jobs.view()!)).not.toBe(MACHINE_SWEEP_LINE);
+  });
+
+  it("the sweep belongs to the host, not to the job that died: Start over leaves the machine's row on the new job and on the sidebar's line until the provider takes it", async () => {
+    const f = fake();
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "skip", "logins/codex": "skip" } });
+    f.setLink(scriptedLink({ signedIn: false, hold: true, missing: false }));
+    await f.jobs.build({});
+    await new Promise<void>(resolve => {
+      const off = f.onJob(job => {
+        if (job.rows.some(r => r.kind === "sign-in" && r.page !== undefined)) {
+          off();
+          resolve();
+        }
+      });
+    });
+    // The stop's own delete cannot reach the provider; the sweep's next try is held open, so the machine is still
+    // running while the person starts over, which is the whole of what this has to survive.
+    const builder = f.backend.machines.find(m => !m.killed)!;
+    const real = builder.kill.bind(builder);
+    let network: (() => void) | undefined;
+    const back = new Promise<void>(r => (network = r));
+    let tried = 0;
+    builder.kill = async () => {
+      tried += 1;
+      if (tried === 1) throw Object.assign(new Error("getaddrinfo ENOTFOUND api.getsolari.com"), { code: "ENOTFOUND" });
+      await back;
+      await real();
+    };
+    await f.jobs.cancel();
+    // Waited on by hand, not through settled(): the sweep is held open on purpose, so the run's own promise is too.
+    await new Promise<void>(resolve => {
+      const off = f.onJob(job => {
+        if (job.phase === "cancelled" && job.rows.some(r => r.kind === "machine" && r.state === INIT_ROW_STATES.retrying)) {
+          off();
+          resolve();
+        }
+      });
+    });
+    expect(f.jobs.view()!.rows.find(r => r.kind === "machine")).toMatchObject({ state: INIT_ROW_STATES.retrying });
+    // Start over: a different job, and the machine that is still billing rides onto it rather than going quiet.
+    const next = await f.jobs.start({ road: "manual" });
+    expect(next.id).not.toBe("init_1");
+    expect(next.rows.find(r => r.kind === "machine")).toMatchObject({ id: `machine/${builder.id}`, state: INIT_ROW_STATES.retrying });
+    // And the sidebar's keycap says so rather than the new job's own phase.
+    expect(initProgressLine(next)).toBe(MACHINE_SWEEP_LINE);
+    network!();
+    await f.settled();
+    expect(f.jobs.view()!.rows.find(r => r.kind === "machine")).toMatchObject({ state: INIT_ROW_STATES.gone });
+    expect(f.backend.machines.filter(m => !m.killed)).toHaveLength(0);
+    // A sweep that ended belongs to the job it ended on and no further: the next job starts with a clean list.
+    await f.jobs.cancel();
+    const third = await f.jobs.start({ road: "manual" });
+    expect(third.rows.find(r => r.kind === "machine")).toBeUndefined();
+  });
+
+  it("one count for one build: the host's progress is the sheet's own bar, over the same rows", async () => {
+    const f = fake({ deployDaemon: async () => Promise.reject(new Error("the daemon would not deploy")) });
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "machine", "logins/codex": "copy" } });
+    await f.jobs.build({ firstWorkspace: "e2e" });
+    await f.settled();
+    const view = f.jobs.view()!;
+    // Sign-ins, a workspace row and a failed stage all on one job: the sheet folds the sign-ins into a stage and
+    // counts what is left, and the host's field is that same count, so the keycap and the bar cannot disagree.
+    expect(view.rows.some(r => r.kind === "sign-in")).toBe(true);
+    expect(view.rows.some(r => r.kind === "workspace")).toBe(true);
+    expect(view.rows.some(r => r.state === INIT_ROW_STATES.failed)).toBe(true);
+    expect(view.progress).toEqual(initStageCount(initBuildRows(view.rows).rows));
+    expect(view.progress.total).toBe(13);
+    // Not the row count: sixteen rows, thirteen stages, and the keycap can no longer say one while the bar says the other.
+    expect(view.rows.length).toBeGreaterThan(view.progress.total);
+    expect(initProgressLine(view)).not.toContain(`/${view.rows.length}`);
+    // Every view the job pushed said the same, not only the last.
+    for (const e of f.events) expect(e.job.progress).toEqual(initStageCount(initBuildRows(e.job.rows).rows));
   });
 
   it("cancel while the screens wait drops the job; a build cannot start without answers", async () => {

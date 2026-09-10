@@ -203,7 +203,9 @@ let creationSeq = 0;
 let preferenceSetsInFlight = 0;
 /** Every init.job view taken so far. The setup snapshot read on a connect is a view of the moment it was asked
  * for, so a job started or ended between the ask and the reply would be painted over by the older one; a snapshot
- * that raced a view is dropped and the view stands. */
+ * that raced a view is dropped and the view stands. Dropping it loses nothing because the reply and the events
+ * travel one ordered socket and the host emits on every change, so the last event before a reply carries the state
+ * that reply was computed from or newer. The day they travel separate channels this needs a stamp instead. */
 let initJobViews = 0;
 
 export const useStore = create<State>((set, get) => {

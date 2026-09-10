@@ -37,12 +37,12 @@ interface Box {
 const STEPS = ["choice", "keys", "agent", "agent-stopped", "reading", "agents", "tools", "also", "logins", "ask", "building", "signing", "retry", "done", "failed"] as const;
 /** The error states of the end-to-end run, checked and photographed on their own: the layout loop above walks the
  * steps a person meets in order, and these are the roads off it. */
-const SIDE_ROADS = ["stopped", "you-stopped", "slot", "over"] as const;
+const SIDE_ROADS = ["stopped", "you-stopped", "slot", "over", "sweeping"] as const;
 type StepName = (typeof STEPS)[number] | (typeof SIDE_ROADS)[number];
 /** The answer steps, which carry their count over the title. */
 const COUNTED: ReadonlySet<StepName> = new Set<StepName>(["agents", "tools", "also", "logins", "ask"]);
 /** The frame's data-k for each, where it differs from the step's own name. */
-const FRAME: Record<StepName, string> = { choice: "choice", keys: "keys", agent: "agent", "agent-stopped": "agent", reading: "reading", agents: "screen-agents", tools: "screen-tools", also: "screen-also", logins: "screen-logins", ask: "ask", building: "build", signing: "build", retry: "build", done: "build", failed: "build", stopped: "build", "you-stopped": "build", slot: "build", over: "screen-also" };
+const FRAME: Record<StepName, string> = { choice: "choice", keys: "keys", agent: "agent", "agent-stopped": "agent", reading: "reading", agents: "screen-agents", tools: "screen-tools", also: "screen-also", logins: "screen-logins", ask: "ask", building: "build", signing: "build", retry: "build", done: "build", failed: "build", stopped: "build", "you-stopped": "build", slot: "build", over: "screen-also", sweeping: "build" };
 /** The steps whose tally carries the disk meter: the ones that change the image's size. */
 const METERED = new Set<StepName>(["agents", "tools", "also"]);
 /** The first launch's numbers: what every step is measured against. */
@@ -249,7 +249,9 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     expect(await page!.locator(`${frame} [data-k=title]`).textContent()).toBe(CLOUD_SETUP_WORDS.build.failed);
     const listed = await page!.locator(`${frame} [data-k=row]`).evaluateAll(els => els.map(el => el.getAttribute("data-row")));
     expect(listed, "the list keeps its order and its rows").toEqual(["stage/creating", "stage/deploying-daemon", "stage/applying-setup", "stage/uploading-files", "stage/installing-harness", "stage/installing-tools", "stage/installing-mcp", "stage/ready", "stage/snapshotting", "stage/promoting", "stage/smoke-forking", "stage/sealed", "workspace/e2e"]);
-    expect(await page!.locator(`${frame} [data-row="stage/applying-setup"] [data-k=lines]`).textContent()).toContain(NETWORK_LOST_LINE);
+    // The sentence is this computer's word; the block under the failed stage keeps the provider client's own.
+    expect(await page!.locator(`${frame} [data-row="stage/applying-setup"] [data-k=lines]`).textContent()).toContain("fetch failed; fetch failed");
+    expect(await page!.locator(`${frame} [data-row="stage/applying-setup"] [data-k=lines]`).textContent()).not.toContain(NETWORK_LOST_LINE);
     expect(await page!.locator(`${frame} [data-k=count]`).textContent()).toBe("2 of 12");
     await shoot("stopped", theme);
 
@@ -258,7 +260,21 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     expect(await page!.locator(`${frame} [data-k=title]`).textContent()).toBe(CLOUD_SETUP_WORDS.build.stopped);
     expect(await page!.locator(`${frame} [data-k=sentence]`).textContent()).toContain("Stopped while installing the base tools");
     expect(await page!.locator(`${frame} [data-row="workspace/e2e-cancel"] [data-k=state]`).textContent()).toBe(INIT_ROW_STATES.notMade);
+    // The stage the stop ended reads stopped and wears no cross, so the list does not contradict the headline.
+    expect(await page!.locator(`${frame} [data-row="stage/deploying-daemon"] [data-k=state]`).textContent()).toBe(INIT_ROW_STATES.stopped);
+    expect(await page!.locator(`${frame} [data-row="stage/deploying-daemon"] > div:first-child > span[aria-hidden]:first-child svg`).count(), "no cross in the glyph").toBe(0);
     await shoot("you-stopped", theme);
+
+    // A machine the provider would not take: a row like any other, its name in words, its state a muted word.
+    frame = await goTo("sweeping", theme);
+    const machine = `${frame} [data-row="machine/b_dlb9oeig"]`;
+    expect(await page!.locator(machine).count()).toBe(1);
+    expect(await page!.locator(`${machine} [data-k=state]`).textContent()).toBe(INIT_ROW_STATES.retrying);
+    expect(await page!.locator(machine).textContent()).toContain("Builder b_dlb9oeig");
+    expect(near((await box(`${machine} > div:first-child`)).height, SPEC.row), "the machine row is a row").toBe(true);
+    expect(await page!.locator(`${frame} [data-row="machine/b_dlbauaeb"] [data-k=state]`).textContent()).toBe(INIT_ROW_STATES.gone);
+    for (const ratio of await textContrast(page!, `${machine} [data-k=state]`)) expect(ratio, "the machine's word reads").toBeGreaterThanOrEqual(4.5);
+    await shoot("sweeping", theme);
 
     // The account is at its machine cap: the row says what it waits on, and its block carries the runtime's line.
     frame = await goTo("slot", theme);

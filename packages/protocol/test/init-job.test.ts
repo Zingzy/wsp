@@ -40,6 +40,9 @@ import {
   initBuildRows,
   initStageCount,
   initStageCountLine,
+  initSweeping,
+  initMachineRowLabel,
+  MACHINE_SWEEP_LINE,
   initStageWhile,
   initStoppedLine,
   NETWORK_LOST_LINE,
@@ -280,11 +283,26 @@ describe("the words the clients print for the job", () => {
   });
 
   it("a row's state words have one table, and one predicate says which of them end the row", () => {
-    expect(INIT_ROW_STATES).toEqual({ waiting: "waiting", running: "running", done: "done", failed: "failed", forking: "forking", forked: "forked", importing: "importing", imported: "imported", open: "waiting for you", slot: "waiting for a machine slot", notMade: "not made", retrying: "machine still running, retrying", gone: "gone", keySet: "key set", skipped: "skipped", mcpAdded: "MCP added" });
-    for (const word of ["done", "failed", "forked", "imported", "MCP added", "key set", "not made", "gone", "signed in", "not signed in", "copied", "copied from this Mac", "not verified", "skipped"]) expect(initRowOver(word), word).toBe(true);
+    expect(INIT_ROW_STATES).toEqual({ waiting: "waiting", running: "running", done: "done", failed: "failed", forking: "forking", forked: "forked", importing: "importing", imported: "imported", open: "waiting for you", slot: "waiting for a machine slot", notMade: "not made", retrying: "machine still running, retrying", gone: "gone", stopped: "stopped", keySet: "key set", skipped: "skipped", mcpAdded: "MCP added" });
+    for (const word of ["done", "failed", "stopped", "forked", "imported", "MCP added", "key set", "not made", "gone", "signed in", "not signed in", "copied", "copied from this Mac", "not verified", "skipped"]) expect(initRowOver(word), word).toBe(true);
     for (const word of ["waiting", "running", "forking", "importing", "waiting for you", "waiting for a machine slot", "machine still running, retrying"]) expect(initRowOver(word), word).toBe(false);
     // The app's row words for a sign-in's outcome: done once the machine has the credential, the copy named as such.
     expect(INIT_SIGN_IN_WORDS).toEqual({ "signed-in": "done", "not-signed-in": "not signed in", copied: "copied from this Mac", "not-verified": "not verified", skipped: "skipped" });
+  });
+
+  it("the sidebar's line says a machine an earlier build left is still going before it says anything about the job it is on", () => {
+    const at = (id: string, state: string): InitRow => ({ id, kind: "stage", label: id, state });
+    const building: Pick<InitJob, "phase" | "rows" | "progress"> = { phase: "building", rows: [at("stage/creating", "done"), at("stage/ready", "running")], progress: { done: 1, total: 2 } };
+    expect(initProgressLine(building)).toBe("building · 1/2");
+    const left = (state: string): InitRow => ({ id: "machine/b_1", kind: "machine", label: "Builder b_1", state });
+    const sweeping = { ...building, rows: [...building.rows, left(INIT_ROW_STATES.retrying)] };
+    expect(initSweeping(building.rows)).toBe(false);
+    expect(initSweeping(sweeping.rows)).toBe(true);
+    expect(initProgressLine(sweeping)).toBe(MACHINE_SWEEP_LINE);
+    // Once the provider took it the line goes back to the job the person is looking at.
+    expect(initProgressLine({ ...building, rows: [...building.rows, left(INIT_ROW_STATES.gone)] })).toBe("building · 1/2");
+    // A machine row's name is words, never a bare provider id in a column of sentences.
+    expect(initMachineRowLabel("b_dlb9oeig")).toBe("Builder b_dlb9oeig");
   });
 
   it("a stopped build's sentence is this computer's own word for what happened, and a reason said twice is said once", () => {
@@ -365,6 +383,9 @@ describe("the words the clients print for the job", () => {
     // Stages alone: the bar measures the build, so the first workspace beside them moves neither end of it.
     expect(initStageCount(folded.rows)).toEqual({ done: 1, total: 3 });
     expect(initStageCount([row({ state: "done" }), row({ id: "stage/ready", state: "failed" })]), "a failed row is not done").toEqual({ done: 1, total: 2 });
+    expect(initStageCount([row({ state: "done" }), row({ id: "stage/ready", state: "stopped" })]), "nor is a stopped one").toEqual({ done: 1, total: 2 });
+    // A machine an earlier build left behind is not a stage, so it moves neither end of the count either.
+    expect(initStageCount([row({ state: "done" }), { id: "machine/b_1", kind: "machine", label: "Builder b_1", state: "machine still running, retrying" }])).toEqual({ done: 1, total: 1 });
     expect(initStageCountLine({ done: 3, total: 12 })).toBe("3 of 12");
     expect([sizeTone(1024 * MIB), sizeTone(300 * MIB), sizeTone(100 * MIB), sizeTone(99 * MIB), sizeTone(0)]).toEqual(["danger", "warning", "yellow", "muted", "muted"]);
     expect([diskTone(13, 20), diskTone(14, 20), diskTone(18, 20), diskTone(21, 20), diskTone(1, 0)]).toEqual(["muted", "warning", "danger", "danger", "danger"]);

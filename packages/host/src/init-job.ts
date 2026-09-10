@@ -14,7 +14,7 @@ import { stripVTControlCharacters } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
 import type { BackendPricing } from "@wsp/engine";
 import { RUNGS } from "@wsp/collect";
-import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, shellQuote, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initJobOver, initNeedWhat, initRowOver, initStoppedLine, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type LoginState, type McpServerSpec, type TurnResult } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, STOP_LEFT_MACHINE_LINE, shellQuote, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobOver, initMachineRowLabel, initNeedWhat, initRowOver, initStageCount, initStoppedAt, initStoppedLine, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type LoginState, type McpServerSpec, type TurnResult } from "@wsp/protocol";
 import { harnessCatalog, smallestModel, type GoldenRecipe, type InitDoor, type Runtime, type SessionHandle } from "@wsp/runtime";
 import type { AgentHere } from "./agents-here.js";
 import { SOLARI_KEY, agentKeysIn, keysOf, type Keys } from "./env-keys.js";
@@ -182,6 +182,13 @@ export class InitJobs implements InitDoor {
   private count = 0;
   /** Set while a start is opening its thread, before the job stands: a second start meanwhile is refused too. */
   private starting = false;
+  /** Every machine a stop could not reach the provider to kill, by builder id, with the row that says so. These
+   * belong to the host and not to the job that booted them: a machine bills whether or not the job that made it
+   * still stands, so the row rides whatever job is current until the provider takes it. */
+  private readonly sweeps = new Map<string, InitRow>();
+  /** The sweeps still trying, so settled() waits on them: they outlive the job that started them, so no job's own
+   * promise reaches them. */
+  private readonly sweeping = new Set<Promise<void>>();
   /** The sign-ins waiting for a code from the client, opened and closed by the hand-off as each login runs. */
   private readonly codes = new SignInCodes();
 
@@ -192,13 +199,14 @@ export class InitJobs implements InitDoor {
     return () => this.listeners.delete(fn);
   }
 
-  /** Resolves once the work the last call started is over, and anything that work queued behind it; what a test
-   * waits on. A stop's sweep of a machine the provider would not take is queued from inside the run itself, so one
-   * await of the run's own promise would come back before it. */
+  /** Resolves once the work the last call started is over, and anything queued behind it, and every sweep of a
+   * machine the provider would not take: those belong to the host and outlive the job that started them, so one
+   * await of a job's own promise would come back before them. */
   async settled(): Promise<void> {
-    for (let waited = this.running; ; waited = this.running) {
-      await waited.catch(() => {});
-      if (waited === this.running) return;
+    for (;;) {
+      const waited = this.running;
+      await Promise.allSettled([waited, ...this.sweeping]);
+      if (waited === this.running && this.sweeping.size === 0) return;
     }
   }
 
@@ -210,7 +218,7 @@ export class InitJobs implements InitDoor {
   view(): InitJob | null {
     const s = this.state;
     if (s === undefined) return null;
-    const rows = s.phase === "reading" || s.phase === "agent" ? s.facts.map(r => ({ ...r })) : this.rowsOf(s);
+    const rows = [...(s.phase === "reading" || s.phase === "agent" ? s.facts.map(r => ({ ...r })) : this.rowsOf(s)), ...[...this.sweeps.values()].map(r => ({ ...r }))];
     return {
       id: s.id,
       road: s.road,
@@ -221,7 +229,8 @@ export class InitJobs implements InitDoor {
       ...(s.disk !== undefined ? { disk: s.disk } : {}),
       screens: s.screens,
       rows,
-      progress: { done: rows.filter(r => initRowOver(r.state)).length, total: rows.length },
+      // One count for one build: the sidebar's keycap and the sheet's bar read the same function over the same rows.
+      progress: initStageCount(initBuildRows(rows).rows),
       ...(s.needsYou !== undefined ? { needsYou: s.needsYou } : {}),
       ...(s.drafts.size > 0 ? { drafts: [...s.drafts].map(([at, d]) => ({ at, ticks: [...d.ticks], answers: { ...d.answers } })) } : {}),
       log: s.log.slice(-LOG_TAIL),
@@ -274,6 +283,8 @@ export class InitJobs implements InitDoor {
   async start(o: { road: InitRoad; harness?: string }): Promise<InitJob> {
     if (this.starting || (this.state !== undefined && !initJobOver(this.state.phase))) throw new Error("an init job is already running; cancel it or let it finish first");
     this.count += 1;
+    // A sweep that ended stays on the job it belonged to and no further; one still trying rides on.
+    for (const [id, row] of this.sweeps) if (row.state !== STATE.retrying) this.sweeps.delete(id);
     const state: State = { id: `init_${this.count}`, road: o.road, phase: o.road === "agent" ? "agent" : "reading", screens: [], step: 0, drafts: new Map(), facts: [], rows: [], frames: [], building: false, log: [], signals: new EventEmitter(), cancelled: false, keys: this.held(), watching: [] };
     if (o.road === "agent") {
       const path = smallRecipePath(this.deps.statePath);
@@ -814,10 +825,13 @@ export class InitJobs implements InitDoor {
         break;
       case "stopped": {
         // The run's own word for a stop the person asked for: it names the stage it was at and what became of the
-        // machine, which is the one thing the screen must not invent a second version of.
-        this.fail(s, text("line") ?? "the build was stopped");
+        // machine, which is the one thing the screen must not invent a second version of. Where the provider would
+        // not take the kill the run tells its reader to finish the machine themselves; here the host is already
+        // trying again, so that clause goes and the machine's own row carries the rest.
         const left = text("left");
-        if (left !== undefined) this.sweep(s, left);
+        const where = text("where");
+        this.fail(s, left !== undefined && where !== undefined ? `${initStoppedAt(where)} ${STOP_LEFT_MACHINE_LINE}` : (text("line") ?? "the build was stopped"));
+        if (left !== undefined) this.sweep(left);
         break;
       }
       case "done": {
@@ -850,7 +864,10 @@ export class InitJobs implements InitDoor {
     // so they stay in the list as waiting rather than vanishing under the person reading why it stopped.
     const stages = STAGE_WORDS.filter(w => s.phase !== "done" || view.steps.some(x => x.stage === w.stage)).map((w): InitRow => {
       const step = view.steps.find(x => x.stage === w.stage);
-      const state = step === undefined ? STATE.waiting : step.state === "current" ? (s.slotWait === w.stage ? STATE.slot : STATE.running) : step.state === "done" ? STATE.done : STATE.failed;
+      // A stage a person's stop ended did not fail: on a cancelled job it reads stopped, so the row never wears a
+      // failure's cross under a headline that says the stop was theirs.
+      const ended = s.phase === "cancelled" ? STATE.stopped : STATE.failed;
+      const state = step === undefined ? STATE.waiting : step.state === "current" ? (s.slotWait === w.stage ? STATE.slot : STATE.running) : step.state === "done" ? STATE.done : ended;
       const detail = step?.running?.command ?? step?.tail.at(-1);
       const failure = step?.state === "failed" && view.failure !== undefined ? [view.failure] : [];
       const lines = step === undefined ? [] : [...step.tail.slice(-STAGE_LINES), ...(step.running !== undefined ? [step.running.command] : []), ...failure];
@@ -860,17 +877,14 @@ export class InitJobs implements InitDoor {
     return [...agents, ...stages.slice(0, answered), ...signIns, ...stages.slice(answered), ...rest];
   }
 
-  /** A builder the stop could not reach the provider to kill, killed again until the provider takes it: the row
-   * says the machine is still running for as long as that is true, so nothing bills in silence. */
-  private sweep(s: State, builderId: string): void {
-    const id = `machine/${builderId}`;
-    if (s.rows.some(r => r.id === id)) return;
-    const row: InitRow = { id, kind: "machine", label: builderId, state: STATE.retrying };
-    s.rows.push(row);
+  /** A builder the stop could not reach the provider to kill, killed again until the provider takes it. The sweep
+   * is the host's, not the ended job's: Start over replaces the job, the machine goes on billing, so the row rides
+   * whatever job is current and the sidebar's keycap says so until the provider takes it. */
+  private sweep(builderId: string): void {
+    if (this.sweeps.has(builderId)) return;
+    const row: InitRow = { id: `machine/${builderId}`, kind: "machine", label: initMachineRowLabel(builderId), state: STATE.retrying };
+    this.sweeps.set(builderId, row);
     const retry = this.deps.retry ?? SWEEP_RETRY;
-    // Start over replaces the job while a sweep may still be trying; the row it moves is that job's, so the view
-    // it would push is a later job's and nobody is waiting on it.
-    const said = (): void => (this.state === s ? this.emit() : undefined);
     const work = async (): Promise<void> => {
       for (let attempt = 0; attempt < retry.attempts; attempt++) {
         await new Promise(r => setTimeout(r, retry.waitMs));
@@ -878,16 +892,18 @@ export class InitJobs implements InitDoor {
           await this.deps.rt.golden.kill(builderId);
           row.state = STATE.gone;
           delete row.detail;
-          said();
+          this.emit();
           return;
         } catch (e) {
           row.detail = e instanceof Error ? e.message : String(e);
-          said();
+          this.emit();
         }
       }
       row.state = STATE.failed;
-      said();
+      this.emit();
     };
-    this.running = this.running.then(work, work);
+    const trying = work();
+    this.sweeping.add(trying);
+    void trying.finally(() => this.sweeping.delete(trying));
   }
 }
