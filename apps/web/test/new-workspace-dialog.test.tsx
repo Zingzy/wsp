@@ -3,7 +3,15 @@
 // one flex column of the popup, so the footer stays attached to the card,
 // and the form still submits on Enter and on the Create button.
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../src/components/ui/tooltip.js", () => ({
+  Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({ render: element, children, ...rest }: { render: ReactElement<{ children?: ReactNode }>; children?: ReactNode }) => cloneElement(element, rest, children),
+  TooltipPopup: ({ children }: { children: ReactNode }) => <div role="tooltip">{children}</div>,
+}));
+
 import { NewWorkspaceDialog } from "../src/sidebar/NewWorkspaceDialog.js";
 
 afterEach(cleanup);
@@ -13,7 +21,7 @@ const before = (a: Node, b: Node): boolean => (a.compareDocumentPosition(b) & No
 
 describe("new workspace dialog", () => {
   it("lays header, panel and footer out in one flex column that is the popup's child", async () => {
-    render(<NewWorkspaceDialog initialName="workspace-1" sizes={[]} goldenSize={null} onCreate={() => {}} onCancel={() => {}} />);
+    render(<NewWorkspaceDialog initialName="workspace-1" sizes={[]} goldenSize={null} refusal={null} onCreate={() => {}} onCancel={() => {}} />);
     const dialog = await screen.findByRole("dialog");
     const popup = dialog.closest<HTMLElement>('[data-slot="dialog-popup"]') ?? dialog;
     const header = slot(popup, "header");
@@ -30,7 +38,7 @@ describe("new workspace dialog", () => {
 
   it("Enter in the name and the Create button both submit the trimmed name", async () => {
     const onCreate = vi.fn();
-    render(<NewWorkspaceDialog initialName="workspace-1" sizes={[]} goldenSize={null} onCreate={onCreate} onCancel={() => {}} />);
+    render(<NewWorkspaceDialog initialName="workspace-1" sizes={[]} goldenSize={null} refusal={null} onCreate={onCreate} onCancel={() => {}} />);
     const dialog = await screen.findByRole("dialog");
     const input = within(dialog).getByLabelText("Name") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "  beta " } });
@@ -44,7 +52,7 @@ describe("new workspace dialog", () => {
     // Base UI's radio re-dispatches a click as a PointerEvent, which jsdom does not have.
     vi.stubGlobal("PointerEvent", class extends MouseEvent {});
     const onCreate = vi.fn();
-    render(<NewWorkspaceDialog initialName="workspace-1" sizes={[]} goldenSize={null} onCreate={onCreate} onCancel={() => {}} />);
+    render(<NewWorkspaceDialog initialName="workspace-1" sizes={[]} goldenSize={null} refusal={null} onCreate={onCreate} onCancel={() => {}} />);
     const dialog = await screen.findByRole("dialog");
     const group = within(dialog).getByRole("radiogroup", { name: "Start from" });
     const fresh = within(group).getByRole("radio", { name: /^Start fresh/ });
@@ -66,7 +74,7 @@ describe("new workspace dialog", () => {
 
   it("lists the provider's sizes as muted mono rows with the rate of each, the golden's checked; untouched, the create carries no size", async () => {
     const onCreate = vi.fn();
-    render(<NewWorkspaceDialog initialName="workspace-1" sizes={SIZES} goldenSize={{ cpu: 2, memMb: 4096 }} onCreate={onCreate} onCancel={() => {}} />);
+    render(<NewWorkspaceDialog initialName="workspace-1" sizes={SIZES} goldenSize={{ cpu: 2, memMb: 4096 }} refusal={null} onCreate={onCreate} onCancel={() => {}} />);
     const dialog = await screen.findByRole("dialog");
     const group = within(dialog).getByRole("radiogroup", { name: "Size" });
     const radios = within(group).getAllByRole("radio");
@@ -80,7 +88,7 @@ describe("new workspace dialog", () => {
   it("a picked size rides along with the name; without sizes there is no row, and a golden size off the list checks nothing", async () => {
     vi.stubGlobal("PointerEvent", class extends MouseEvent {});
     const onCreate = vi.fn();
-    render(<NewWorkspaceDialog initialName="workspace-1" sizes={SIZES} goldenSize={{ cpu: 2, memMb: 2048 }} onCreate={onCreate} onCancel={() => {}} />);
+    render(<NewWorkspaceDialog initialName="workspace-1" sizes={SIZES} goldenSize={{ cpu: 2, memMb: 2048 }} refusal={null} onCreate={onCreate} onCancel={() => {}} />);
     const dialog = await screen.findByRole("dialog");
     const group = within(dialog).getByRole("radiogroup", { name: "Size" });
     expect(within(group).getAllByRole("radio").map(r => r.getAttribute("aria-checked"))).toEqual(["false", "false"]);
@@ -89,9 +97,29 @@ describe("new workspace dialog", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
     expect(onCreate).toHaveBeenCalledWith("workspace-1", "fresh", { cpu: 2, memMb: 8192 });
     cleanup();
-    render(<NewWorkspaceDialog initialName="workspace-1" sizes={[]} goldenSize={{ cpu: 2, memMb: 4096 }} onCreate={onCreate} onCancel={() => {}} />);
+    render(<NewWorkspaceDialog initialName="workspace-1" sizes={[]} goldenSize={{ cpu: 2, memMb: 4096 }} refusal={null} onCreate={onCreate} onCancel={() => {}} />);
     const bare = await screen.findByRole("dialog");
     expect(within(bare).queryByRole("radiogroup", { name: "Size" })).toBeNull();
     vi.unstubAllGlobals();
+  });
+
+  it("with nothing to fork yet the Create keycap is held and says why, and neither road creates anything", async () => {
+    const onCreate = vi.fn();
+    const line = "the image is still building · 5 of 13";
+    render(<NewWorkspaceDialog initialName="workspace-1" sizes={[]} goldenSize={null} refusal={line} onCreate={onCreate} onCancel={() => {}} />);
+    const dialog = await screen.findByRole("dialog");
+    const create = within(dialog).getByRole("button", { name: "Create" });
+    expect(create.hasAttribute("disabled")).toBe(true);
+    expect(within(dialog).getByRole("tooltip").textContent).toBe(line);
+    fireEvent.click(create);
+    fireEvent.keyDown(within(dialog).getByLabelText("Name"), { key: "Enter" });
+    expect(onCreate).not.toHaveBeenCalled();
+    // A disabled control cannot be hovered, so the reason hangs on a wrapper around it rather than on the button.
+    expect(dialog.querySelector("[data-k=create-reason]")?.contains(create)).toBe(true);
+    cleanup();
+    render(<NewWorkspaceDialog initialName="workspace-1" sizes={[]} goldenSize={null} refusal={null} onCreate={onCreate} onCancel={() => {}} />);
+    const free = await screen.findByRole("dialog");
+    expect(within(free).getByRole("button", { name: "Create" }).hasAttribute("disabled")).toBe(false);
+    expect(free.querySelector("[data-k=create-reason]")).toBeNull();
   });
 });

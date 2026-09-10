@@ -14,7 +14,7 @@
 // sidebar-glass: nothing here paints a background.
 import { ChevronDownIcon, MessageSquarePlusIcon, PlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type WheelEvent } from "react";
-import { DROP_A_FOLDER_LINE, PROVIDER_UNREACHED_LINE, computerOffline, dropTileLine, goldenHead, isLocalWorkspace, kindWords, registerRequest, registeredLine, workspaceKind, workspaceState, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
+import { DROP_A_FOLDER_LINE, PROVIDER_UNREACHED_LINE, cloudCreateRefusal, computerOffline, dropTileLine, goldenHead, isLocalWorkspace, kindWords, registerRequest, registeredLine, workspaceKind, workspaceState, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry.js";
 import { sidebarActions } from "../actions/sidebarActions.js";
@@ -129,6 +129,10 @@ export function WorkspaceSidebar() {
   // One local workspace per host: the section's road to this computer says whether a pick makes it or goes to it.
   const hasLocal = useStore(s => s.workspaces.some(w => isLocalWorkspace(w)));
   const capabilities = useCapabilities();
+  const hasGolden = useStore(s => s.hasGolden);
+  const initJob = useStore(s => s.initJob);
+  // Read on every render of the open dialog, so a build that finishes under it frees the keycap without reopening.
+  const createRefusal = useMemo(() => cloudCreateRefusal({ hasGolden, job: initJob }), [hasGolden, initJob]);
   const selectedId = useSelectedId();
   const selectedThreadId = useSelectedThreadId();
   const selectedWorkspace = useWorkspace(useSelectedWorkspaceId());
@@ -621,6 +625,7 @@ export function WorkspaceSidebar() {
           initialName={dialog.name}
           sizes={capabilities?.sizes ?? []}
           goldenSize={dialog.goldenSize}
+          refusal={createRefusal?.line ?? null}
           onCreate={(name, start, size) => void create(name, start, size)}
           onCancel={() => setDialog(null)}
         />
