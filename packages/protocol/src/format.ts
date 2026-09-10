@@ -1005,7 +1005,7 @@ export const CLOUD_SETUP_WORDS = {
     refusedSaved: "Solari refused the saved key",
     /** Under the field when nothing came back about the key at all; what this computer saw follows. */
     unchecked: "Solari could not be reached to check the key",
-    /** What the Save keycap says after a check nothing answered, and what the failed build offers instead of a retry. */
+    /** What the Save keycap says after a check nothing answered, since pressing it again is worth something. */
     retry: "Try again",
     /** What the build offers when the saved key was refused: back to this step, not another build. */
     changeKey: "Change the key",
@@ -1183,6 +1183,13 @@ export const FIRST_WORKSPACE = "first";
 /** The sentence under the first workspace's title: when it comes and on what, from the recipe's own numbers. */
 export const initForkLine = (size: WorkspaceSize): string => `Forked from the image as soon as the build finishes, on a ${fmtSize(size)} machine`;
 
+/** What a sign-in row says when the run ended without reaching it. */
+export const SIGN_IN_NEVER_REACHED = "the build never reached this sign-in";
+/** What any other row says when the build ended with it unfinished, whether or not it had started. */
+export const NEVER_REACHED = "the build ended before this step";
+/** What the first workspace's row says when the build carried no name, which is the answer that forks nothing. */
+export const NO_FIRST_WORKSPACE = "no name was given, so nothing was forked";
+
 /** The state word of a sign-in row while its page waits for the person. */
 export const SIGN_IN_OPEN_STATE = INIT_ROW_STATES.open;
 
@@ -1280,7 +1287,10 @@ export function initBuildRows(rows: readonly InitRow[]): { rows: InitRow[]; sign
         : signIns.every(r => initRowOver(r.state))
           ? signIns.some(r => r.state === INIT_SIGN_IN_WORDS["not-signed-in"])
             ? INIT_SIGN_IN_WORDS["not-signed-in"]
-            : INIT_ROW_STATES.done
+            : // A build that ended before it reached any of them signed none in, so the fold says so rather than done.
+              signIns.every(r => r.state === INIT_ROW_STATES.skipped)
+              ? INIT_ROW_STATES.skipped
+              : INIT_ROW_STATES.done
           : signIns.every(r => r.state === INIT_ROW_STATES.waiting)
             ? INIT_ROW_STATES.waiting
             : INIT_ROW_STATES.running;
@@ -1290,9 +1300,11 @@ export function initBuildRows(rows: readonly InitRow[]): { rows: InitRow[]; sign
 }
 
 /** How many of the build's rows ended well, of all of them: what the line along the card's top edge and the count
- * beside the title read. A failed row is over but not done, so a failed build never reads complete. */
+ * beside the title read. A row that failed and a row the build never reached are both over without having run, so a
+ * build that stopped never reads complete however early it stopped. */
 export function initStageCount(rows: readonly InitRow[]): { done: number; total: number } {
-  return { done: rows.filter(r => initRowOver(r.state) && r.state !== INIT_ROW_STATES.failed).length, total: rows.length };
+  const ran = (state: string): boolean => initRowOver(state) && state !== INIT_ROW_STATES.failed && state !== INIT_ROW_STATES.skipped;
+  return { done: rows.filter(r => ran(r.state)).length, total: rows.length };
 }
 
 /** The count as words: `3 of 12`. */
@@ -1326,8 +1338,7 @@ export function keyUncheckedLine(said: string): string {
 }
 
 /** How a terminal run closes when the check stopped it before the first stage. The refusal itself is said above this
- * line, so this one carries the way on alone and never the sentence about nothing being booted, which is what left
- * the provider's own word in the run log. */
+ * line, so this one carries the way on alone; wsp init asks for a key it can use, so running it again is that road. */
 export const SAVED_KEY_STOPPED_LINE = "Save a key Solari takes and run wsp init again; nothing booted, and the recipe is kept.";
 
 /** What the machine the build boots costs, said once under the key screen's title from the backend's own rate. */

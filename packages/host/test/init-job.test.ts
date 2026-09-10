@@ -11,11 +11,11 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
 import { SNAPSHOT_STORAGE, checkProviderKey, type BackendPricing } from "@wsp/engine";
-import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_SIGN_IN_WORDS, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, Recipe, SIGN_IN_OPEN_STATE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, keyRefusedLine, keyUncheckedLine, noMcpServersLine, SAVED_KEY_STOPPED_LINE, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_SIGN_IN_WORDS, initBuildRows, INIT_ROW_STATES, initStageCount, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, NEVER_REACHED, NO_FIRST_WORKSPACE, SIGN_IN_NEVER_REACHED, SIGN_IN_STAGE_ID, Recipe, SIGN_IN_OPEN_STATE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, keyRefusedLine, keyUncheckedLine, noMcpServersLine, SAVED_KEY_STOPPED_LINE, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
 import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localWiring, type Keys } from "../src/cli.js";
-import { InitJobs, NEVER_REACHED, NO_FIRST_WORKSPACE, type InitJobDeps } from "../src/init-job.js";
+import { InitJobs, type InitJobDeps } from "../src/init-job.js";
 import { saveSmallRecipe, smallRecipePath } from "../src/recipe-file.js";
 import { workspaceRoads } from "../src/server.js";
 import type { AgentHere } from "../src/agents-here.js";
@@ -31,6 +31,15 @@ const PRICING: BackendPricing = { rateUsdPerHour: s => s.cpu * 0.035 + (s.memMb 
 /** What the agent's thread writes: RECIPE with Codex ticked on too. */
 const AGENT_RECIPE: Recipe = { ...RECIPE, rows: RECIPE.rows.map(r => (r.id === "codex" ? { ...r, on: true } : r)) };
 /** The wsp server as this host's install would write it: one spec, read by the install road and by the launch. */
+/** The rows the host leaves when the saved key is refused, in the order a client draws them. The app's fixture and
+ * its dialog test stand in for this job (apps/web/test/cloud-setup/keyRefusedJob.ts), so a change here is a change
+ * there; the words themselves are the protocol's, which both sides read. */
+const KEY_REFUSED_ROWS = [
+  ["stage/creating", INIT_ROW_STATES.failed, savedKeyRefusedLine("401 Unauthorized")],
+  ["sign-in/claude", INIT_ROW_STATES.skipped, SIGN_IN_NEVER_REACHED],
+  ["sign-in/gh", INIT_ROW_STATES.skipped, SIGN_IN_NEVER_REACHED],
+  ["workspace/first", INIT_ROW_STATES.skipped, NEVER_REACHED],
+];
 const WSP_SERVER = { command: "/usr/local/bin/node", args: ["/opt/wsp/bin.js", "mcp", "--state", "/tmp/state.json"] };
 
 const dirs: string[] = [];
@@ -669,6 +678,15 @@ describe("the init job, manual road", () => {
     expect(said).not.toContain("Nothing was booted");
     expect(f.backend.machines).toEqual([]);
     expect(f.backend.keyChecks).toBe(1);
+    // The rows the host leaves, which are what every client draws and what the app's fixture stands in for: the first
+    // stage failed with the refusal as its line, and every row after it reads as one the build never reached.
+    expect(stopped.rows.map(r => [r.id, r.state, r.detail])).toEqual(KEY_REFUSED_ROWS);
+    expect(stopped.rows.find(r => r.id === "stage/creating")!.lines).toEqual([savedKeyRefusedLine("401 Unauthorized")]);
+    // Nothing on it reads as work done: the count is none of them, so the bar cannot read as progress.
+    const { rows } = initBuildRows(stopped.rows);
+    expect(initStageCount(rows)).toEqual({ done: 0, total: rows.length });
+    expect(rows.find(r => r.id === SIGN_IN_STAGE_ID)!.state).toBe(INIT_ROW_STATES.skipped);
+    expect(rows.map(r => r.state)).not.toContain(INIT_ROW_STATES.done);
   });
 
   it("a build the provider could not be asked about fails on that, and offers no key step: the saved key may be fine", async () => {

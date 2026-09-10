@@ -18,11 +18,12 @@ import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
-import { CLOUD_SETUP_WORDS, keyRefusedLine, savedKeyRefusedLine } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, SIGN_IN_STAGE_ID, initStageCountLine, keyRefusedLine } from "@wsp/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { textContrast } from "./contrast";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
 import { startVite, type ViteChild } from "./vite-child";
+import { KEY_REFUSED_LINE } from "./cloud-setup/keyRefusedJob";
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SHOTS = join(WEB_DIR, "artifacts", "render");
@@ -446,6 +447,9 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     const [quiet = ""] = await style(`${frame} [data-k=sentence]`, "color");
     expect(border, "the field carries the danger tone").not.toBe(quiet);
     expect(ink, "and so does its line").not.toBe(quiet);
+    // The tone is no excuse for a line nobody can read: the same floor every other word on these steps meets.
+    const [read] = await textContrast(page!, `${frame} [data-k=key-check]`);
+    expect(read, `the refusal reads in the ${theme} theme`).toBeGreaterThanOrEqual(4.5);
     expect(await page!.locator(`${frame} #setup-key-solari`).getAttribute("aria-invalid")).toBe("true");
     // The person is still on this step, with Save to press again, and nothing of the key is on the page.
     expect(await page!.locator(`${frame} [data-k=primary]`).textContent()).toContain(CLOUD_SETUP_WORDS.keys.keycap);
@@ -458,12 +462,20 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     // the keycap that goes back to the keys step rather than another build.
     frame = await goTo("failed-key", theme);
     expect(await page!.locator(`${frame} [data-k=title]`).textContent()).toBe(CLOUD_SETUP_WORDS.build.failed);
-    expect(await page!.locator(`${frame} [data-k=sentence]`).textContent()).toBe(savedKeyRefusedLine("401 Unauthorized"));
+    expect(await page!.locator(`${frame} [data-k=sentence]`).textContent()).toBe(KEY_REFUSED_LINE);
     expect(await page!.locator("[role=dialog]").textContent(), "never the generic sentence").not.toContain("Nothing was booted");
     expect(await page!.locator(`${frame} [data-k=primary]`).textContent()).toContain(CLOUD_SETUP_WORDS.keys.changeKey);
-    // No stage ran, so there is no count and no empty card with a bar at nothing.
-    expect(await page!.locator(`${frame} [data-k=count]`).count()).toBe(0);
-    expect(await page!.locator(`${frame} [data-k=card]`).count()).toBe(0);
+    // Nothing on it reads as work done: the count is none of the rows and the bar is at nothing.
+    expect(await page!.locator(`${frame} [data-k=count]`).textContent()).toBe(initStageCountLine({ done: 0, total: 3 }));
+    expect(await page!.locator(`${frame} [data-k=progress]`).getAttribute("aria-valuenow")).toBe("0");
+    // The first stage carries the refusal as its line; what comes after it reads as never reached, never as done.
+    expect(await page!.locator(`${frame} [data-row="stage/creating"]`).getAttribute("data-state")).toBe(INIT_ROW_STATES.failed);
+    expect(await page!.locator(`${frame} [data-row="stage/creating"] [data-k=lines]`).textContent()).toContain(KEY_REFUSED_LINE);
+    expect(await page!.locator(`${frame} [data-row="${SIGN_IN_STAGE_ID}"]`).getAttribute("data-state")).toBe(INIT_ROW_STATES.skipped);
+    expect(await page!.locator(`${frame} [data-row="workspace/first"]`).getAttribute("data-state")).toBe(INIT_ROW_STATES.skipped);
+    expect(await page!.locator(`${frame} [data-row][data-state="${INIT_ROW_STATES.done}"]`).count(), "no row reads done").toBe(0);
+    // Nor does one wear the check a finished row wears: a never-reached row keeps the ring it waited with.
+    for (const row of [SIGN_IN_STAGE_ID, "workspace/first"]) expect(await page!.locator(`${frame} [data-row="${row}"] [data-k=glyph] svg`).count(), `${row} wears no check`).toBe(0);
     const stopped = join(SHOTS, `cloud-setup-failed-key-${theme}.png`);
     await page!.screenshot({ path: stopped });
     console.info(`cloud setup failed key ${theme}: ${stopped}`);

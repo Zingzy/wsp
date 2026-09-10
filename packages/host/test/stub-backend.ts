@@ -147,8 +147,7 @@ export function stubBackend(): StubBackend {
       if (backend.keyRefusal !== undefined) throw backend.keyRefusal;
     },
     async create(spec: MachineSpec): Promise<Machine> {
-      // A key the provider will not take refuses every authenticated call, the create included: that is how the
-      // refusal used to surface, nine stages into the build.
+      // A key the provider will not take refuses every authenticated call, the create included.
       if (backend.keyRefusal !== undefined) throw backend.keyRefusal;
       if (spec.template !== undefined && !BUILTIN_TEMPLATES.has(spec.template) && templates.get(spec.template)?.status !== "ready") {
         throw Object.assign(new Error(`TemplateNotReady ${spec.template}`), { kind: "missing", status: 404 });

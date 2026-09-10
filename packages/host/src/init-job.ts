@@ -14,7 +14,7 @@ import { stripVTControlCharacters } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
 import { keyCheckLine, type BackendPricing, type KeyCheck } from "@wsp/engine";
 import { RUNGS } from "@wsp/collect";
-import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, KEY_REFUSED, KEY_UNCHECKED, shellQuote, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initJobOver, initNeedWhat, initRowOver, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type LoginState, type McpServerSpec, type TurnResult } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, KEY_REFUSED, KEY_UNCHECKED, NEVER_REACHED, NO_FIRST_WORKSPACE, shellQuote, SIGN_IN_NEVER_REACHED, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initJobOver, initNeedWhat, initRowOver, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type LoginState, type McpServerSpec, type TurnResult } from "@wsp/protocol";
 import { harnessCatalog, smallestModel, type GoldenRecipe, type InitDoor, type Runtime, type SessionHandle } from "@wsp/runtime";
 import type { AgentHere } from "./agents-here.js";
 import { SOLARI_KEY, agentKeysIn, keysOf, type Keys } from "./env-keys.js";
@@ -76,12 +76,6 @@ const RECIPE_POLL_MS = 250;
 /** Whether the agent road can run on this agent at all: its thread is handed the wsp server on the launch, so an
  * agent whose adapter renders none would write no recipe. The harness table is the one place that says which do. */
 const takesTools = (harness: string): boolean => takesMcpServers(harnessCatalog(harness));
-/** What a sign-in row says when the run ended without reaching it. */
-export const SIGN_IN_NEVER_REACHED = "the build never reached this sign-in";
-/** What any other row says when the build ended with it unfinished, whether or not it had started. */
-export const NEVER_REACHED = "the build ended before this step";
-/** What the first workspace's row says when the build carried no name, which is the answer that forks nothing. */
-export const NO_FIRST_WORKSPACE = "no name was given, so nothing was forked";
 /** The stage rows in the order the build runs them: the prepare's, then the seal's. */
 const STAGE_WORDS: readonly StageWords[] = [...PREPARE_STEPS, ...SEAL_STEPS];
 const SEAL_STAGES = new Set<string>(SEAL_STEPS.map(w => w.stage));
@@ -823,11 +817,18 @@ export class InitJobs implements InitDoor {
     const stages = STAGE_WORDS.filter(w => !over || view.steps.some(x => x.stage === w.stage)).map((w): InitRow => {
       const step = view.steps.find(x => x.stage === w.stage);
       const state = step === undefined ? STATE.waiting : step.state === "current" ? STATE.running : step.state === "done" ? STATE.done : STATE.failed;
-      const detail = step?.running?.command ?? step?.tail.at(-1);
-      const lines = step === undefined ? [] : [...step.tail.slice(-STAGE_LINES), ...(step.running !== undefined ? [step.running.command] : [])];
+      // A failed stage ends with the reason, so a row read on its own says why and a build that stopped before any
+      // stage ran still has one line saying what stopped it. The terminal's block draws the failure itself.
+      const failure = step?.state === "failed" && view.failure !== undefined ? view.failure.split("\n").filter(l => l !== "") : [];
+      const tail = step === undefined ? [] : [...step.tail, ...failure.filter(l => l !== step.tail.at(-1))];
+      const detail = step?.running?.command ?? tail.at(-1);
+      const lines = [...tail.slice(-STAGE_LINES), ...(step?.running !== undefined ? [step.running.command] : [])];
       return { id: `stage/${w.stage}`, kind: "stage", label: w.start, state, ...(detail !== undefined ? { detail } : {}), ...(step?.ms !== undefined ? { ms: step.ms } : {}), ...(lines.length > 0 ? { lines } : {}) };
     });
-    const answered = stages.findIndex(r => r.id === "stage/ready") + 1;
+    // The sign-ins sit after the machine answers. A build that ended before that stage has no row for it, and the
+    // sign-ins belong after every stage it did reach rather than ahead of all of them.
+    const ready = stages.findIndex(r => r.id === "stage/ready");
+    const answered = ready >= 0 ? ready + 1 : stages.length;
     return [...agents, ...stages.slice(0, answered), ...signIns, ...stages.slice(answered), ...rest];
   }
 }

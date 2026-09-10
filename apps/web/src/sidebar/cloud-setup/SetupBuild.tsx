@@ -77,15 +77,6 @@ export function SetupBuild({ job, onCancel, onRetry, onCode, onOpenWorkspace, on
       </SetupScreen>
     );
   }
-  // A run that stopped before its first stage has no rows to count, so the count line and the card would be an empty
-  // frame with a bar at nothing: the sentence and the way on stand alone.
-  if (rows.length === 0) {
-    return (
-      <SetupScreen k="build" headline={headline} top={job.error ?? words.top} refusal={refusal} {...(primary !== undefined ? { primary } : {})} {...(secondary !== undefined ? { secondary } : {})} {...(building ? { note: asking ? words.cancelWhy : words.keeps } : {})}>
-        {keep}
-      </SetupScreen>
-    );
-  }
   return (
     <SetupScreen k="build" headline={headline} top={job.error ?? words.top} refusal={refusal} {...(primary !== undefined ? { primary } : {})} {...(secondary !== undefined ? { secondary } : {})} {...(building ? { note: asking ? words.cancelWhy : words.keeps } : {})}>
       <p data-k="count" className={cn(META, "mb-2 w-full text-right")}>
@@ -193,7 +184,7 @@ function BuildRow({ row, focus, signIns, onRetry, onCode }: { row: InitRow; focu
   return (
     <li ref={item} data-k="row" data-row={row.id} data-state={row.state} data-open={open} className={ROW_LINE}>
       <div className={cn(ROW, canOpen && "cursor-pointer hover:bg-accent/30")} title={row.detail} onClick={canOpen ? () => setOpened(o => !(o === true)) : undefined} role={canOpen ? "button" : undefined} aria-expanded={canOpen ? open : undefined}>
-        <span aria-hidden className="flex size-[18px] shrink-0 items-center justify-center text-foreground">
+        <span data-k="glyph" aria-hidden className="flex size-[18px] shrink-0 items-center justify-center text-foreground">
           <StageGlyph state={row.state} />
         </span>
         <span className={cn(NAME, row.state === INIT_ROW_STATES.waiting && "text-muted-foreground")}>{row.label}</span>
@@ -284,7 +275,8 @@ function TerminalLine({ line, danger }: { line: string; danger: boolean }) {
 }
 
 /** A stage's or a workspace row's glyph: a hollow ring while it waits, nothing while it runs (the slot's spinner says
- * so), a check once it ended well, a cross when it failed. */
+ * so), a check once it ended well, a cross when it failed. A row the build never reached keeps the ring it waited
+ * with: it is over, but a check beside it would read as work that happened. */
 function StageGlyph({ state }: { state: string }) {
   if (state === INIT_ROW_STATES.failed) {
     return (
@@ -293,7 +285,7 @@ function StageGlyph({ state }: { state: string }) {
       </svg>
     );
   }
-  if (initRowOver(state)) {
+  if (state !== INIT_ROW_STATES.skipped && initRowOver(state)) {
     return (
       <svg viewBox="0 0 16 16" className="size-3.5 fill-none stroke-current" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
         <path d="M3.5 8.5 6.5 11.5 12.5 5" />

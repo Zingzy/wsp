@@ -8,9 +8,10 @@
 // is what the host hands over for a small laptop: three agents, the tools with
 // the base locked on and the rest by calls, a manager's rows, three sign-ins.
 import { createRoot } from "react-dom/client";
-import { GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, KEY_REFUSED, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, initAgentNoRecipeLine, keyRefusedLine, savedKeyRefusedLine, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, KEY_REFUSED, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, initAgentNoRecipeLine, keyRefusedLine, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import { RequestError, type Api } from "../../src/protocol/client";
+import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS } from "./keyRefusedJob";
 import { useStore } from "../../src/protocol/store";
 import { CloudSetupDialog } from "../../src/sidebar/CloudSetupDialog";
 import "../../src/index.css";
@@ -178,9 +179,9 @@ const JOBS: Record<string, InitJob> = {
     workspace: { id: "ws_first", name: "first" },
   },
   failed: { ...base, phase: "failed", screens: [], rows: [...done(STAGES.slice(0, 5)), stage("installing-harness", "failed", { lines: ["npm i -g @anthropic-ai/claude-code", "npm ERR! ENOSPC: no space left on device"] })], progress: { done: 5, total: 6 }, error: "npm i -g @anthropic-ai/claude-code exited 1: ENOSPC: no space left on device" },
-  // The saved key read before the first stage and refused: no stage ran, so there are no rows, and the one way on is
-  // the step that takes a key.
-  "failed-key": { ...base, phase: "failed", screens: [], rows: [], progress: { done: 0, total: 0 }, error: savedKeyRefusedLine("401 Unauthorized"), keyRefused: true },
+  // The saved key read before the first stage and refused, as the host leaves it: the first stage failed with the
+  // refusal on it and every row after it never reached, so the one way on is the step that takes a key.
+  "failed-key": { ...base, phase: "failed", screens: [], rows: KEY_REFUSED_ROWS, progress: { done: 0, total: KEY_REFUSED_ROWS.length }, error: KEY_REFUSED_LINE, keyRefused: true },
 };
 
 const setup: InitSetup = {

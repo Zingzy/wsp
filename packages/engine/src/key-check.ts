@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Whether the provider takes a key, and the three answers that question has:
-// taken, refused in the provider's own words, or never answered at all. The
-// setup asks it before it saves a key and again before the build's first
-// stage, so a refusal is read where the key was typed instead of nine stages
-// later.
+// taken, refused in the provider's own words, or never answered at all. Asked
+// before a key is saved and again before the build's first call to the
+// provider, so a refusal is read on the step that can fix it.
 import { keyRefusedLine, keyUncheckedLine, providerSaidLine, savedKeyRefusedLine } from "@wsp/protocol";
 import type { ErrorKind, WspError } from "./errors.js";
 import type { MachineBackend } from "./machine.js";

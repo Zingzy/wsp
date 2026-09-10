@@ -9,8 +9,9 @@
 // happen. Esc hides it with the job running on.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLOUD_SETUP_WORDS, KEY_REFUSED, KEY_UNCHECKED, SIGN_IN_STAGE_ID, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, initDiskLine, initDiskOverLine, initTallyLine, initButtonLine, initProgressLine, keyRefusedLine, keyUncheckedLine, savedKeyRefusedLine, type EventUnion, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, KEY_REFUSED, KEY_UNCHECKED, SIGN_IN_STAGE_ID, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, initDiskLine, initDiskOverLine, initTallyLine, initBuildRows, initButtonLine, initProgressLine, initStageCountLine, keyRefusedLine, keyUncheckedLine, type EventUnion, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { RequestError, type Api } from "../src/protocol/client.js";
+import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS, keyStoppedRows } from "./cloud-setup/keyRefusedJob.js";
 import { useStore } from "../src/protocol/store.js";
 import { CloudSetupDialog } from "../src/sidebar/CloudSetupDialog.js";
 import { CloudSetupRow } from "../src/sidebar/CloudSetupRow.js";
@@ -793,14 +794,24 @@ describe("the cloud setup sheet", () => {
     expect(screen.queryByRole("button", { name: CLOUD_SETUP_WORDS.row })).toBeNull();
   });
 
-  it("a saved key refused at build time reads as the provider's own refusal, never the generic stopped line, and Change the key goes back to the keys step", async () => {
-    const line = savedKeyRefusedLine("401 Unauthorized");
-    const stopped: InitJob = { ...JOB, phase: "failed", screens: [], rows: [], progress: { done: 0, total: 0 }, error: line, keyRefused: true };
+  it("a saved key refused at build time draws the job the host leaves: the first stage failed with the refusal, the rows after it never reached, nothing counted as done, and Change the key back to the keys step", async () => {
+    const stopped: InitJob = { ...JOB, phase: "failed", screens: [], rows: KEY_REFUSED_ROWS, progress: { done: 0, total: KEY_REFUSED_ROWS.length }, error: KEY_REFUSED_LINE, keyRefused: true };
     const t = await open({ setup: { ...HELD, job: stopped } });
     await waitFor(() => expect(k(t.dialog, "build")).toBeDefined());
     expect(k(t.dialog, "title").textContent).toBe(CLOUD_SETUP_WORDS.build.failed);
-    expect(k(t.dialog, "sentence").textContent).toBe(line);
+    expect(k(t.dialog, "sentence").textContent).toBe(KEY_REFUSED_LINE);
     expect(t.dialog.textContent).not.toContain("Nothing was booted");
+    // Nothing on the screen reads as work done: the count is none of the three rows and the bar is at nothing.
+    const { rows } = initBuildRows(KEY_REFUSED_ROWS);
+    expect(k(t.dialog, "count").textContent).toBe(initStageCountLine({ done: 0, total: rows.length }));
+    expect(k(t.dialog, "progress").getAttribute("aria-valuenow")).toBe("0");
+    // The first stage carries the refusal as its line; the sign-in fold and the workspace read as never reached.
+    const state = (row: string): string | null => t.dialog.querySelector(`[data-row="${row}"]`)!.getAttribute("data-state");
+    expect(state("stage/creating")).toBe(INIT_ROW_STATES.failed);
+    expect(within(t.dialog.querySelector<HTMLElement>('[data-row="stage/creating"]')!).getByText(KEY_REFUSED_LINE)).toBeDefined();
+    expect(state(SIGN_IN_STAGE_ID)).toBe(INIT_ROW_STATES.skipped);
+    expect(state("workspace/first")).toBe(INIT_ROW_STATES.skipped);
+    expect([...t.dialog.querySelectorAll("[data-row]")].map(r => r.getAttribute("data-state"))).not.toContain(INIT_ROW_STATES.done);
     // The way on is the step that takes a key, not another build off the same one.
     const keycap = k(t.dialog, "primary");
     expect(keycap.textContent).toContain(CLOUD_SETUP_WORDS.keys.changeKey);
@@ -813,7 +824,8 @@ describe("the cloud setup sheet", () => {
 
   it("a build that could not ask the provider about the key offers Start over: the saved key may be fine", async () => {
     const line = keyUncheckedLine("fetch failed");
-    const stopped: InitJob = { ...JOB, phase: "failed", screens: [], rows: [], progress: { done: 0, total: 0 }, error: line };
+    const rows = keyStoppedRows(line);
+    const stopped: InitJob = { ...JOB, phase: "failed", screens: [], rows, progress: { done: 0, total: rows.length }, error: line };
     const t = await open({ setup: { ...HELD, job: stopped } });
     await waitFor(() => expect(k(t.dialog, "build")).toBeDefined());
     expect(k(t.dialog, "sentence").textContent).toBe(line);

@@ -1200,22 +1200,22 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   } else if (stop.length === 0) {
     log.step(`${question} Taken as yes (${takenAs}).`, out);
   }
-  if (attach === undefined) await stopKeptBuilder(rt, io.output);
-
-  // The saved key read before the first stage, because the create is the first call that would carry it: a key the
-  // provider refuses used to stop the build nine stages on with the line about nothing being booted, leaving the
-  // provider's own word in the run log alone.
+  // The saved key is read here, ahead of every other call this run makes to the provider: the kept builder's stop and
+  // the create both carry it, and a refusal on either of those has no word about the key in it. The failed frame is
+  // the run's own, so the first stage carries the reason and the rows after it read as never reached.
   const key = await checkProviderKey(rt.backend);
   const keyLine = keyCheckLine(key, true);
   if (keyLine !== undefined) {
     runLog.note(`failed: ${keyLine}`);
     log.error(keyLine, out);
     log.step(logLine(), out);
+    io.json?.({ event: "stage", stage: "failed", detail: keyLine });
     io.json?.({ event: "key-check-failed", message: keyLine, refused: key.state === "refused" });
     cancel(SAVED_KEY_STOPPED_LINE, out);
     await closeRuntime();
     return { code: 1 };
   }
+  if (attach === undefined) await stopKeptBuilder(rt, io.output);
 
   const stream = new StageStream(io.output, io.isTTY, PREPARE_STEPS, runLog.note, io.stderr, io.json);
   const off = rt.events.on("golden.stage", e => {
