@@ -306,7 +306,7 @@ const LOCAL_NAME = "this-mac";
 /** This computer as the fake runtime holds it: a real local backend over the run's own folder, so the workspace step's
  * tick makes a record the way it does on a person's machine. No turn is ever started here. */
 function localWiring(root: string): LocalWiring {
-  return { backend: new LocalBackend({ root }), execStream: o => localExecStream({ root, ...o }), home: () => join(root, ".claude"), homeDir: root, env: {} };
+  return { backend: new LocalBackend({ root }), execStream: o => localExecStream({ root, ...o }), home: () => join(root, ".claude"), homeDir: root, env: () => ({}) };
 }
 
 /** What the host's own create does: a fork of the golden's head under the given name. */

@@ -38,7 +38,7 @@ describe("checkSetup", () => {
 
   /** This computer as the window would hold it: a real local backend over a scratch folder, so a local record
    * hydrates rather than being left as a kind this host wired no module for. */
-  const localWiring = (root: string): LocalWiring => ({ backend: new LocalBackend({ root }), execStream: o => localExecStream({ root, ...o }), home: () => join(root, ".claude"), homeDir: root, env: {} });
+  const localWiring = (root: string): LocalWiring => ({ backend: new LocalBackend({ root }), execStream: o => localExecStream({ root, ...o }), home: () => join(root, ".claude"), homeDir: root, env: () => ({}) });
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "wsp-desktop-setup-"));

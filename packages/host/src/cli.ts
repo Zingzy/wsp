@@ -453,7 +453,6 @@ export const localWorkFolder = (home: string): string => join(home, "wsp-work");
  * made is the one a turn uses, and the work folder is the workspace's own. */
 export function localWiring(home = homedir(), env: Readonly<Record<string, string | undefined>> = process.env): LocalWiring {
   const root = localWorkFolder(home);
-  const login = Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined));
   // Started on the first dial and kept: a host nobody opens a pane on never binds a port on this computer, and
   // never dlopens the native module @wsp/daemon's import of node-pty loads. The desktop package ships that module
   // beside its bundle, so the deferred edge is about the port and the load, not about a missing file.
@@ -465,7 +464,7 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
     execStream: o => localExecStream({ root: backend.workFolder(), ...o }),
     home: id => agentHome(home, id, env),
     homeDir: home,
-    env: login,
+    env: () => Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined)),
     daemonRoad: async () => {
       // The panes stay on the person's home: the files and terminal tabs are theirs to look around in, where a
       // turn's own folder is the workspace's.
