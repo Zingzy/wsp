@@ -12,6 +12,7 @@ import { authority, fmtDuration, shellQuote } from "@wsp/protocol";
 import { addressLines, dialAddress, servingHost, type HostLock } from "./host-lock.js";
 import { providerEnvNames } from "./providers.js";
 import { publicHostname } from "./relay-link.js";
+import { homeNamed } from "./serving-home.js";
 
 export type ServiceKind = "launchd" | "systemd";
 
@@ -84,7 +85,7 @@ const FALLBACK_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
  * environment naming none forks nothing. The keys stay out: the host reads them off the `.env` it would read at a
  * terminal, so a rotated key needs no new unit file and nothing secret is copied into the manager's own folder. */
 export function serviceEnv(env: Record<string, string | undefined>): Record<string, string> {
-  const home = env["WSP_HOME"];
+  const home = homeNamed(env["WSP_HOME"]);
   return {
     PATH: env["PATH"] ?? FALLBACK_PATH,
     ...(home !== undefined ? { WSP_HOME: home } : {}),
@@ -355,6 +356,18 @@ export function logTail(logPath: string, lines = 20): string[] {
     closeSync(fd);
   }
   return text.split("\n").filter(line => line.trim() !== "").slice(-lines);
+}
+
+/** What wsp status prints for a line aimed at a host on another computer: this computer holds that host's address
+ * and a token for it and nothing else, so the rows are where it answers and whether it did, and the row for what
+ * keeps it up says where to read it. A road that carried nothing names what it was waiting on under the host row. */
+export function hostThereLines(name: string, url: string, unreached: string | undefined): string[] {
+  return [
+    `host        ${name} ${unreached === undefined ? "answering" : "did not answer"}`,
+    `app         ${url}`,
+    ...(unreached === undefined ? [] : [`            ${unreached}`]),
+    "service     what keeps it up is that computer's own; run wsp status in a terminal there",
+  ];
 }
 
 /** A host that took the lock, and whether it answered on the port the lock names. */

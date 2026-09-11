@@ -15,7 +15,7 @@ import { CATALOG, THREAD_AGENTS } from "@wsp/catalog";
 import { EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, NO_SUCH_TURN, noProjectLine, noThreadTargetLine, ProjectGolden, Recipe, registeredLine, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, workspaceKind, WorkspaceView, type ExitClass } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { localWiring, serve } from "../src/cli.js";
+import { hostPlatform, localWiring, serve } from "../src/cli.js";
 import { dialer, mcpServer, serveMcp } from "../src/mcp.js";
 import { RecipeAnswer, RecipeScan, allRows, recipePrintout, scanPrintout } from "../src/recipe-answer.js";
 import { WSP_SKILL, instructionsOf } from "../src/skill.js";
@@ -1096,7 +1096,7 @@ describe("the MCP server over the host", () => {
     expect(scan.tools.map(r => r.id).sort()).toEqual(CATALOG.filter(e => e.kind === "tool").map(e => e.id).sort());
     expect(scan.alsoHere).toEqual({ scanned: false, managers: [] });
     for (const row of [...scan.agents, ...scan.tools]) expect(row.recommended.value, row.id).toBe(row.on ? "on" : "off");
-    expect(result.text).toBe(scanPrintout(scan, "darwin").join("\n"));
+    expect(result.text).toBe(scanPrintout(scan, hostPlatform()).join("\n"));
     expect(result.text).toContain("nothing looked for them here");
   });
 });

@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, CURL_NET, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
-import { CREATED_AT_LABEL, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_SUPERVISOR_PATH, GUEST_TMP, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
+import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_SUPERVISOR_PATH, GUEST_TMP, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
 import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, DAEMON_ROOTS_PATH, GUEST_DAEMON_DIR, LOOPBACK, machineLacking, machineUnanswered, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, type SnapshotStorage, type WorkspaceKind } from "@wsp/protocol";
 import { DAEMON_TOKEN_PATH, goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
@@ -93,6 +93,9 @@ export interface DaemonPlace {
   toolsPath: string;
   /** The rest of the unit's environment, stated the same way. */
   unitEnv: Readonly<Record<string, string>>;
+  /** The file the unit reads the machine's environment from, for a provider that cannot hand it over at create and
+   * writes it there instead; the unit may lack the file. Absent on a place whose unit reads no such file. */
+  envFile?: string;
   /** What the unit is enabled under, which differs between a machine's systemd and a login's. */
   wantedBy: string;
   /** The address the daemon binds. */
@@ -259,6 +262,7 @@ export const CLOUD_PLACE: DaemonPlace = {
   unitPath: `/etc/systemd/system/${DAEMON_UNIT}`,
   toolsPath: TOOLS_PATH,
   unitEnv: GUEST_USER_ENV,
+  envFile: DAEMON_ENV_FILE,
   wantedBy: "multi-user.target",
   bind: "0.0.0.0",
   port: DAEMON_PORT,
@@ -441,12 +445,17 @@ export async function stageDaemonBundle(stageDir: string, place: DaemonPlace, da
  * doctor's scratch machine with no node at all gets the same release here. */
 export const GUEST_NODE = NODE_RELEASES[22];
 
+/** How a node is asked which major it is, in one place: the floor check below and the nodedir rule beside it both
+ * put the question to whichever node the machine will run. Neither reads the answer into a variable, since `set -e`
+ * ends a script on an assignment whose substitution failed and exempts one inside a test or an AND-OR list. */
+const NODE_MAJOR = `node -p 'process.versions.node.split(".")[0]'`;
+
 function nodeBootstrap(place: DaemonPlace): string {
   const v = GUEST_NODE.version;
   // A machine that is somebody's own may carry a node the daemon will not run on, so the major is read as well as
   // the name; a machine wsp built carries the floor's, and asking its version would only change a script that is
   // already right.
-  const old = place.nodeLeast === undefined ? "" : ` || [ "$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -lt ${place.nodeLeast} ]`;
+  const old = place.nodeLeast === undefined ? "" : ` || [ "$(${NODE_MAJOR} 2>/dev/null || echo 0)" -lt ${place.nodeLeast} ]`;
   return [
     CURL_NET,
     `if ! command -v node >/dev/null 2>&1${old}; then`,
@@ -461,10 +470,18 @@ function nodeBootstrap(place: DaemonPlace): string {
     `  tar -xzf "${place.scratch}/$pkg" -C ${sh(place, place.nodeDir)} --strip-components=1`,
     `  rm -f "${place.scratch}/$pkg"`,
     "fi",
-    // What node-gyp is pointed at is a set of headers, so the headers are what is asked for and not the path: an
-    // installer that only symlinked a foreign node into this prefix left none, and a nodedir without them dies on
-    // `gyp: <prefix>/common.gypi not found` (measured on Ubuntu 24.04, 2026-09-11).
-    `if [ "$(command -v node)" = ${sh(place, `${place.nodeDir}/bin/node`)} ] && [ -f ${sh(place, `${place.nodeDir}/include/node/node_version.h`)} ]; then export npm_config_nodedir=${sh(place, place.nodeDir)}; fi`,
+    // What node-gyp is pointed at is a set of headers of the version that will load what they build, so the
+    // headers' own major is what is asked for and not the path: an installer that only symlinked a foreign node
+    // into this prefix left none, and a nodedir without them dies on `gyp: <prefix>/common.gypi not found`, while
+    // headers of another major compile an addon against the API that other Node declared. Both measured on Ubuntu
+    // 24.04 (2026-09-11); with Node 20 headers in a Node 22 prefix an addon on the V8 macros comes out at
+    // NODE_MODULE_VERSION 115 and the node that loads it wants 127, and node-pty's own binding is Node-API, so it
+    // is every other native dependency that is at risk. Whole lines, because the pattern is the define with the
+    // answer appended and a prefix of that line is not that line: a node that is there and cannot say its major
+    // leaves the pattern ending in a space, and a major that is a digit prefix of another (2 against 22) leaves
+    // one too, both of which a substring match takes for agreement (measured 2026-09-11). With no answer at all
+    // node-gyp fetches the right headers.
+    `if [ "$(command -v node)" = ${sh(place, `${place.nodeDir}/bin/node`)} ] && grep -qx "#define NODE_MAJOR_VERSION $(${NODE_MAJOR} 2>/dev/null)" ${sh(place, `${place.nodeDir}/include/node/node_version.h`)} 2>/dev/null; then export npm_config_nodedir=${sh(place, place.nodeDir)}; fi`,
   ].join("\n");
 }
 
@@ -497,6 +514,8 @@ export function daemonUnit(place: DaemonPlace = CLOUD_PLACE, previewHostSuffix?:
     `Environment=${unitEnvLine(place, `PATH=${place.toolsPath}`)}`,
     ...Object.entries(place.unitEnv).map(([name, value]) => `Environment=${unitEnvLine(place, `${name}=${value}`)}`),
     ...(previewHostSuffix !== undefined ? [`Environment=${VITE_ALLOWED_HOSTS_ENV}=${previewHostSuffix}`] : []),
+    // The place's own file, where it has one: missing everywhere else, which the dash says is fine.
+    ...(place.envFile !== undefined ? [`EnvironmentFile=-${place.envFile}`] : []),
     // Through sh so node is found on the unit's PATH: a machine that shipped its own node keeps it where it is.
     `ExecStart=/bin/sh -c 'exec node ${place.quotePaths ? `"${place.dir}/start.mjs"` : `${place.dir}/start.mjs`}'`,
     "Restart=always",

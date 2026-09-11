@@ -6,7 +6,7 @@
 // daemon say they have. Adding a provider is a row here and its backend in the
 // engine; nothing above this file compares a provider by name.
 
-import { DockerBackend, NoProviderBackend, SolariBackend, type MachineBackend } from "@wsp/engine";
+import { BoxBackend, DockerBackend, NoProviderBackend, SolariBackend, type MachineBackend } from "@wsp/engine";
 import type { Keys } from "./env-keys.js";
 
 /** The environment a provider is picked out of: the host's own, with whatever the command line's provider words put
@@ -36,6 +36,8 @@ export const PROVIDER_ENV = "WSP_PROVIDER";
 export const DOCKER_ENV = "WSP_DOCKER";
 /** The daemon the Docker row dials, as the docker CLI's own variable words it. */
 export const DOCKER_HOST_ENV = "DOCKER_HOST";
+/** The Box by ASCII key, read from the environment the run started with. */
+export const BOX_KEY_ENV = "BOX_API_KEY";
 
 const on = (value: string | undefined): boolean => value !== undefined && value !== "" && value !== "0" && value.toLowerCase() !== "false";
 
@@ -47,6 +49,14 @@ export const PROVIDER_MODULES: readonly ProviderModule[] = [
     // machines are on their own box and the key is for another provider's.
     selects: pick => pick.env[PROVIDER_ENV] === "docker" || on(pick.env[DOCKER_ENV]),
     build: pick => new DockerBackend({ ...(pick.env[DOCKER_HOST_ENV] !== undefined ? { host: pick.env[DOCKER_HOST_ENV] } : {}) }),
+  },
+  {
+    id: "box",
+    envNames: [PROVIDER_ENV, BOX_KEY_ENV],
+    // Named alone, like Docker: the word says which cloud this computer forks on, and a missing key is the
+    // provider's own 401 on the first call rather than a guess made here.
+    selects: pick => pick.env[PROVIDER_ENV] === "box",
+    build: pick => new BoxBackend({ apiKey: pick.env[BOX_KEY_ENV] ?? "" }),
   },
   {
     id: "solari",

@@ -7,9 +7,10 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { EXIT_CODES } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { advertisedUrl, deviceLines, hostReach, hostSideOnlyLine, pairLines, pairOnLoopbackLine, reachAddresses, devicesCommand, pairCommand } from "../src/pairing.js";
-import type { CliIO } from "../src/cli.js";
+import { cli, type CliIO } from "../src/cli.js";
 import { dialAddress } from "../src/host-lock.js";
 import { setDefaultHost, writeHost, type HostRecord } from "../src/hosts.js";
 import type { HostClient } from "../src/verbs.js";
@@ -159,6 +160,29 @@ describe("a host side command aimed at a host on another computer", () => {
     // refusal has to read as a line the person can act on rather than as the host's own.
     expect(host.asked).toEqual([]);
     expect(host.closes()).toBe(0);
+  });
+
+  // The flag is one key of the shared parse: a word that does not declare it is refused before its command runs,
+  // which is how wsp devices --host box answered "Unknown option '--host'" while the help promised the flag on
+  // every verb. Each door is its own case, since each is a line a person types and the third reaches the flag
+  // through its parent's declaration rather than a list written out beside it. The home is named by the
+  // environment this call is given, so nothing here reads the person's own.
+  const typed = async (argv: readonly string[], word: string): Promise<void> => {
+    const errors: string[] = [];
+    expect(await cli([...argv], io([], errors), undefined, { WSP_HOME: homeWithBox(false) }), `wsp ${argv.join(" ")}`).toBe(EXIT_CODES.usage);
+    expect(errors).toEqual([hostSideOnlyLine(word, "box")]);
+  };
+
+  it("wsp pair takes a typed --host and answers that sentence, not the parse's unknown option", async () => {
+    await typed(["pair", "--host", "box"], "pair");
+  });
+
+  it("wsp devices takes a typed --host and answers that sentence, not the parse's unknown option", async () => {
+    await typed(["devices", "--host", "box"], "devices");
+  });
+
+  it("wsp devices revoke takes a typed --host and answers that sentence, not the parse's unknown option", async () => {
+    await typed(["devices", "revoke", "d_1a2b3c4d", "--host", "box"], "devices");
   });
 
   it("says which command it is and where the line was aimed, and where to run it", () => {
