@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { DockerBackend, LocalBackend, NoProviderBackend, SolariBackend, SshBackend, type MachineBackend } from "@wsp/engine";
+import { BoxBackend, DockerBackend, LocalBackend, NoProviderBackend, SolariBackend, SshBackend, type MachineBackend } from "@wsp/engine";
 import { goldenRecipe, makeRuntime, optsFor, providerSlotOf, swapProvider } from "../src/cli.js";
 import { PROVIDER_MODULES, providerBackendFor, providerEnvWith, providerModule } from "../src/providers.js";
 
@@ -32,17 +32,24 @@ describe("provider modules", () => {
     expect(providerEnvWith({}, { WSP_DOCKER: "1" })).toMatchObject({ WSP_DOCKER: "1" });
   });
 
+  it("takes Box when a person names it, key or no key, and hands the backend the key the environment holds", () => {
+    expect(providerModule(pick({}, { WSP_PROVIDER: "box" })).id).toBe("box");
+    expect(providerModule(pick({ solari: "sk-x" }, { WSP_PROVIDER: "box", BOX_API_KEY: "box_x" })).id).toBe("box");
+    expect(providerBackendFor(pick({}, { WSP_PROVIDER: "box", BOX_API_KEY: "box_x" }))).toBeInstanceOf(BoxBackend);
+    expect(providerBackendFor(pick({}, { WSP_PROVIDER: "box", BOX_API_KEY: "box_x" })).capabilities).toMatchObject({ pauseMode: "disk", previewUrls: true, containers: true });
+  });
+
   it("every row is reachable and the last one answers for any computer", () => {
-    expect(PROVIDER_MODULES.map(m => m.id)).toEqual(["docker", "solari", "none"]);
+    expect(PROVIDER_MODULES.map(m => m.id)).toEqual(["docker", "box", "solari", "none"]);
     expect(PROVIDER_MODULES.at(-1)!.selects(pick())).toBe(true);
   });
 
   it("every registered backend, and the two kinds outside the registry, declares a pause mode and a lifecycle together or neither", () => {
     // Built the way the host builds them, with fake picks: a key that looks fake, a daemon nothing dials.
-    const built = PROVIDER_MODULES.map(m => [m.id, m.build(pick({ solari: "sk-ant-x" }, { DOCKER_HOST: "unix:///nonexistent/docker.sock" }))] as const);
+    const built = PROVIDER_MODULES.map(m => [m.id, m.build(pick({ solari: "sk-ant-x" }, { DOCKER_HOST: "unix:///nonexistent/docker.sock", BOX_API_KEY: "box_x" }))] as const);
     const all: readonly (readonly [string, MachineBackend])[] = [...built, ["local", new LocalBackend({ root: "/tmp/wsp-providers" })], ["ssh", new SshBackend()]];
     const modes = Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.pauseMode]));
-    expect(modes).toEqual({ docker: "memory", solari: "memory", none: undefined, local: undefined, ssh: undefined });
+    expect(modes).toEqual({ docker: "memory", box: "disk", solari: "memory", none: undefined, local: undefined, ssh: undefined });
     for (const [, b] of all) expect(b.capabilities.pauseMode === undefined || ["memory", "disk"].includes(b.capabilities.pauseMode)).toBe(true);
     // The runtime reads the budgets only where a pause exists, so the two are declared together or not at all.
     for (const [id, b] of all) expect([id, b.lifecycle !== undefined]).toEqual([id, b.capabilities.pauseMode !== undefined]);
