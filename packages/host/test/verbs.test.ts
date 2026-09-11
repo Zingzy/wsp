@@ -8,7 +8,7 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { effortsFor, EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { agentsKindRefusal, effortsFor, EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -2372,14 +2372,22 @@ describe("wsp verbs over the host", () => {
       expect((await rt.workspaces.list())[0]!.agents).toEqual({ spawn: true, maxMachines: 0, maxDepth: 1 });
     });
 
-    it("a workspace that forks nothing refuses the switch rather than dropping it", async () => {
+    it("a workspace whose agents could not drive this host is refused the switch at both doors, in one sentence", async () => {
       const local = await run("new", "--local", "mine", "--spawn", "on");
       expect(local.code).toBe(EXIT_CODES.usage);
-      expect(local.io.errors[0]).toContain("runs no agents that could drive this host, so it takes no --spawn");
+      expect(local.io.errors[0]).toBe(`wsp new: ${agentsKindRefusal("local")}`);
       expect(await rt.workspaces.list()).toEqual([]);
       const ssh = await run("new", "--ssh", "maya@box", "--spawn", "on");
       expect(ssh.code).toBe(EXIT_CODES.usage);
-      expect(ssh.io.errors[0]).toContain("takes no --spawn");
+      expect(ssh.io.errors[0]).toBe(`wsp new: ${agentsKindRefusal("ssh")}`);
+      // The verb that sets it on a workspace that already exists reads the same rule and says the same thing.
+      await run("new", "--local", "mine");
+      const set = await run("workspaces", "agents", "mine", "--spawn", "on");
+      expect(set.code).toBe(1);
+      expect(set.io.errors[0]).toBe(`wsp workspaces agents: ${agentsKindRefusal("local")}`);
+      expect((await rt.workspaces.list())[0]!.agents).toBeUndefined();
+      // Off is taken wherever it is asked for: a switch that does nothing may be said to do nothing.
+      expect((await run("workspaces", "agents", "mine", "--spawn", "off")).code).toBe(0);
     });
 
     it("wsp new --spawn on turns the switch on at the create", async () => {

@@ -383,7 +383,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               };
               detaches.push(rt.events.on("*", pass));
               if (opts.forwards) detaches.push(opts.forwards.on(pass));
-              if (opts.init) detaches.push(opts.init.on(e => send(e)));
+              if (opts.init) detaches.push(opts.init.on(pass));
               send({ id: msg.id, ok: true, seq: head, stream, ...(gap ? { gap: true } : {}) });
               for (const e of events) pass(e);
               return;

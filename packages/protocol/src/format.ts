@@ -1685,17 +1685,34 @@ export function noMachineHomeLine(name: string): string {
   return `${name} carries no home folder for its machine; record it again with wsp new --ssh`;
 }
 
-/** What the roads that need a daemon are refused with on a machine reached over ssh: the connection carries a
- * command and nothing else yet, so the panes that ride a daemon have nothing to dial. */
+/** What the roads that need a daemon are refused with on a machine reached over ssh before one is on it: the
+ * record was made but the deploy has not landed, so the panes that ride a daemon have nothing to dial yet. The
+ * host tries again on its own at every start, so the line says that rather than naming a verb: nothing a person
+ * types puts a daemon on a machine already recorded, and the one thing they can do is fix what the deploy said
+ * it needed. */
 export function noSshDaemonLine(name: string): string {
-  return `${name} is reached over ssh, which carries no daemon yet: its terminal, files and ports are not served`;
+  return `${name} carries no daemon yet, so its terminal, files and ports are not served; this host tries again each time it starts`;
 }
 
-/** What import is refused with on a machine reached over ssh: no road lands a folder there yet, so the verb says
- * so before the folder is read. */
-export function noSshImportLine(name: string): string {
-  return `${name} is reached over ssh, which lands no folder yet; import to a fork, or register the folder on this computer`;
+/** What import is refused with on a kind no road lands a folder on, said before the folder is read. Every kind
+ * has a road today; the sentence stands for the next kind added without one, which is what the words table's
+ * null import road means. */
+export function noImportRoadLine(name: string, machine: string): string {
+  return `${name} is ${machine}, which lands no folder yet; import to a fork, or register the folder on this computer`;
 }
+
+/** What a machine that cannot build the daemon is refused with. node-pty ships prebuilt binaries for macOS and
+ * Windows only, so the terminal's native part is compiled where the daemon runs; a machine wsp builds carries the
+ * floor's toolchain, and a machine somebody already owns may carry none. Said before the install rather than
+ * after, since a daemon that installed half of itself restarts forever under its unit. */
+export const NO_BUILD_TOOLS_LINE =
+  "this machine has no C compiler, so the daemon's terminal cannot be built on it; install a build toolchain (on Debian or Ubuntu: sudo apt-get install build-essential) and deploy the daemon again";
+
+/** What a machine whose login does not linger is refused with. Its own systemd stops when its last session ends
+ * and takes the daemon with it, so a daemon deployed there is gone the moment the host's connection closes; the
+ * person turns linger on once and it holds for every login after. */
+export const NO_LINGER_LINE =
+  "this machine stops your login's services when you log out, so the daemon would not outlive the connection; run loginctl enable-linger on it and deploy the daemon again";
 
 /** The one sentence a socket a machine's requests arrive on is refused a ticket with. A ticket authenticates the
  * next socket, and a socket this host minted no relay ticket for is one of the person's own, so a machine that

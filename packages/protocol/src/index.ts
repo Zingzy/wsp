@@ -2136,6 +2136,7 @@ const DAEMON_CONTENTS = [
   "f90fd16f8e5d15707cda18e58524da66fb6ed6b890632fff90d396792dc5604d",
   "9ebea6a49390fd5b1af911f413e77c3e46db091812b55b41515e881e93433292",
   "da0d618fd27965a77c8c15e389fea39c8f3ae691326af0212a8f1c62b9c8499f",
+  "cbfe733de05765b706c3ff4d08aa62ee188258771dd3b02011633716fad62a48",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -2152,7 +2153,9 @@ const DAEMON_CONTENTS = [
  * through a module per kind of machine, and answers a watch only once that module has read the machine, so a
  * pane is refused where it would otherwise wait for a stream that never comes. Version 10 keeps a DISPLAY the
  * caller names on a pty it opens, so a sign-in whose page must return to the machine can be handed a browser to
- * find there. */
+ * find there. Version 11 serves a machine reached over ssh, which reads the load and the processes of the machine
+ * it runs on the way a fork does; the same daemon under the person's own login there, with every path it keeps
+ * under their home. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the daemon's sources, the dependency
@@ -2610,8 +2613,9 @@ export const RUNTIME_OPS: readonly string[] = RuntimeOp.options.map(o => o.shape
  * threads and forks machines under its own root and reads the tree it is in; every reach into a workspace is
  * refused again by the tree rule, and every act by the guard, so this list is the outer door and not the only one.
  * What is deliberately not here: the golden and its snapshots, the person's keys and their init, their preferences,
- * their folders, the provider's own capabilities, importing and exporting a folder, and every road that hands out
- * or takes away access to this host. */
+ * their folders, the provider's own capabilities, importing and exporting a folder, every road that hands out or
+ * takes away access to this host, and the two roads that move a running turn's access mode or answer a permission
+ * prompt, which are the person's guard on an agent and not an agent's to lift. */
 export const THREAD_OPS: readonly string[] = [
   "auth",
   "events.subscribe",
@@ -2630,8 +2634,6 @@ export const THREAD_OPS: readonly string[] = [
   "sessions.history",
   "sessions.interrupt",
   "sessions.steer",
-  "sessions.answer",
-  "sessions.access",
   "sessions.rename",
 ];
 
@@ -2813,7 +2815,7 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
-export { actionRefusal, computerOffline, goneRefusal, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, type SendBlock, sendRefusal, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
+export { actionRefusal, agentsKindRefusal, agentsMayDrive, computerOffline, goneRefusal, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, type SendBlock, sendRefusal, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";
@@ -2862,9 +2864,9 @@ export {
   type Rgb,
   type ThemePreset,
 } from "./workspace-look.js";
-export { rootsPathIn, underProject } from "./project-path.js";
+export { rootsPathIn, sshDaemonPaths, underProject } from "./project-path.js";
 export * from "./projects.js";
-export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, registerRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
+export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importDest, importRequest, registerRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";
 export * from "./app-ports.js";
 export * from "./init-job.js";

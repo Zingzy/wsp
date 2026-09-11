@@ -265,11 +265,18 @@ describe("the kind table", () => {
   });
 
   it("refuses a kind with no module in the words the pane prints, so no pane waits on a stream that never comes", () => {
-    expect(() => readingsFor("ssh")).toThrow(/^not on this kind/);
+    // Every kind in the enum has a module today, so the guard is proved against a kind that is not one: what it
+    // is for is a kind added to the enum without a row here.
+    const missing = "plan9" as WorkspaceKind;
+    expect(() => readingsFor(missing)).toThrow(/^not on this kind/);
     try {
-      readingsFor("ssh");
+      readingsFor(missing);
     } catch (e) {
       expect((e as OpError).code).toBe("unsupported");
     }
+  });
+
+  it("gives a machine over ssh the same /proc modules a fork gets, since the daemon on it is the same daemon", () => {
+    expect(readingsFor("ssh")).toBe(readingsFor("cloud"));
   });
 });

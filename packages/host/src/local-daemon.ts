@@ -14,6 +14,8 @@ import { platform } from "node:os";
 import { join } from "node:path";
 import { portSourceFor, startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { connectDaemon, type DaemonReach } from "@wsp/runtime";
+// LOOPBACK is the protocol's, which every road that binds or dials this computer reads. Here the reason is also
+// that a firewall prompt on macOS or Windows is a wall a local workspace must never hit.
 import { LOOPBACK, rootsPathIn, type DaemonEvent, type DaemonReachView } from "@wsp/protocol";
 
 /** The loopback token is minted when the daemon starts and lives as long as the process holding it, so the road to

@@ -70,10 +70,11 @@ describe("the projects on a workspace", () => {
 });
 
 describe("getting a project onto a workspace", () => {
-  it("the drop tile's words follow the kind: a box is imported to by name, this computer registers, a kind with no road has no tile", () => {
+  it("the drop tile's words follow the kind: a machine is imported to by name, this computer registers", () => {
     expect(dropTileLine("cloud", "b2")).toBe("import to b2");
     expect(dropTileLine("local", "zingzy-mac")).toBe(`register on ${THIS_COMPUTER}`);
-    expect(dropTileLine("ssh", "pi")).toBeNull();
+    // A machine over ssh takes a folder the way a fork does, over the connection that carries its commands.
+    expect(dropTileLine("ssh", "pi")).toBe("import to pi");
   });
 
   it("a register asks for the folder at its own path with nothing carried, rewritten or travelling, and the lines say nothing was copied", () => {
