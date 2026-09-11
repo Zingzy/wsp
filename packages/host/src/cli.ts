@@ -71,6 +71,7 @@ import { connectCommand, disconnectCommand, hostsCommand } from "./connect.js";
 import { stopRecordedConnector } from "./connector.js";
 import { readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
 import { DEFAULT_HOME, wspHome } from "./hosts.js";
+import { currentHome, currentHomePointer, servingHome } from "./serving-home.js";
 import { advertisedUrl, devicesCommand, pairCommand } from "./pairing.js";
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
@@ -160,8 +161,10 @@ options:
                      without the host token and every client pairs for a device
                      token of its own: wsp pair prints a code, wsp devices
                      lists and revokes them
-  --state PATH       state file (default ~/.wsp/state.json, or ./.wsp/state.json
-                     when the current directory has a .env)
+  --state PATH       state file (default ./.wsp/state.json when the current
+                     directory has a .env, else state.json in the home the
+                     running host serves, which is ~/.wsp unless WSP_HOME or
+                     current-home names another)
   --host ALIAS       on any verb: run the line against a host on another
                      computer, by the name wsp connect gave it. WSP_HOST names
                      one for a whole shell. That host serves its own state, so
@@ -283,19 +286,6 @@ export interface KeySources {
 // The hosts file sits under the same home, so where that home is lives beside it and is re-exported here for every
 // reader that already had it from the command line.
 export { wspHome };
-
-/** Fixed spot a launcher without WSP_HOME (Finder, a service) can read to
- * learn which home the running host serves. */
-export function currentHomePointer(): string {
-  return join(homedir(), ".wsp", "current-home");
-}
-
-export function currentHome(): string | undefined {
-  const path = currentHomePointer();
-  if (!existsSync(path)) return undefined;
-  const home = readFileSync(path, "utf8").trim();
-  return home === "" ? undefined : home;
-}
 
 type Stream<T> = T & { isTTY?: boolean };
 
@@ -482,10 +472,12 @@ export function goldenRecipe(
   };
 }
 
-function defaultStatePath(): string {
-  // A .env in cwd marks a dev checkout; share its .wsp state with wspx.
-  if (existsSync(join(process.cwd(), ".env"))) return join(process.cwd(), ".wsp", "state.json");
-  return join(wspHome(), "state.json");
+/** The state file a run works on when it names none: a .env in cwd marks a dev checkout whose .wsp state is shared
+ * with wspx, and anywhere else the home whose host is serving, so a line typed with no flags on a computer whose
+ * host runs under a moved home reaches that host rather than a state file nothing serves. */
+export function defaultStatePath(cwd: string = process.cwd(), env: Readonly<Record<string, string | undefined>> = process.env): string {
+  if (existsSync(join(cwd, ".env"))) return join(cwd, ".wsp", "state.json");
+  return join(servingHome(env), "state.json");
 }
 
 /** The state file a command works on: its `--state` word when it gave one, else this computer's default, absolute
