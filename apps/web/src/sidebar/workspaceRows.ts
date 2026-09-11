@@ -3,7 +3,7 @@
 // adapter names the state; this file turns it into the words and classes a
 // row shows.
 import { agentName } from "@wsp/catalog";
-import { FREE_WORD, fmtSize, isBilling, kindWords, outOfMemoryRowLine, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspaceStateOf, type MemoryReading, type ReachState, type SessionOrigin, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
+import { FREE_WORD, fmtSize, isBilling, kindWords, machineLacksShort, outOfMemoryRowLine, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspaceStateOf, type MemoryReading, type ReachState, type SessionOrigin, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
@@ -43,10 +43,13 @@ export function wakeAskNote(status: WorkspaceStatus | null): string | null {
  * what a machine gone dark reads, and only one of the two is a helper wsp puts back by itself while the machine is
  * fine. A machine with no road to a daemon is said only where the row has no state word to spend on it: nothing
  * wsp drives is built without the road, so a driven row saying it would be saying something that cannot be true. */
-export function daemonGoneLine(reach: ReachState | null, kind: WorkspaceKindWords): string | undefined {
+export function daemonGoneLine(reach: ReachState | null, kind: WorkspaceKindWords, lacks?: string): string | undefined {
   if (!kind.daemon) return undefined;
   if (reach === "no-daemon") return "no daemon answering";
-  return reach === "unsupported" && !kind.driven ? "no daemon on this machine" : undefined;
+  if (reach !== "unsupported" || kind.driven) return undefined;
+  // Why, where the machine said why. It is the one thing on this row a person can act on, and the whole sentence
+  // is on the Machine tab, since the instruction is at the end of it and this line cuts from the right.
+  return lacks === undefined ? "no daemon on this machine" : machineLacksShort(lacks);
 }
 
 /** The sentences a meta line can carry in place of its counts, in the order a surface draws them: what the
@@ -58,7 +61,7 @@ export function metaSentences({ project, outOfMemory }: Pick<WorkspaceMetaInput,
   return [
     daemonNote(project),
     outOfMemory === undefined ? undefined : outOfMemoryRowLine(outOfMemory),
-    daemonGoneLine(project.reach, kindWords(workspaceKind(project.workspace))),
+    daemonGoneLine(project.reach, kindWords(workspaceKind(project.workspace)), (project.status ?? project.workspace).daemonRefusedAt?.why),
     vaultStaleLine(project.status ?? project.workspace) ?? undefined,
   ].filter((line): line is string => line !== undefined);
 }

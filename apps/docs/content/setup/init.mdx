@@ -12,6 +12,12 @@ Without `--project`, the first screen is preceded by one optional question, whic
 
 <Image src="/init/project.png" alt="wsp init after the scan: the card of what it found on this computer, then the optional project question" caption="After the scan. Six counts of what was found, and the one optional question before the screens." />
 
+## Beside a host that is already serving
+
+One state file has one writer, and while a host serves it that writer is the host. So a `wsp init` run beside one shows the same screens, saves the same recipe and asks the same question about the spend, and then hands the build to that host, which builds it and records the golden in the state it is already serving. Nothing has to be stopped, which is what a box whose host runs as a service needs: install the service, pair, then build the golden. The app shows that build too, in the same place its own setup runs.
+
+Two things follow from the host being the builder. The machine is priced by that host's provider, not by anything named on this command line, and `--json` is refused, because the objects it prints are the build's own and a handed-over build says them on the host's setup, where `wsp setup --json` reads them.
+
 ## Keys
 
 - **Space** toggles a row. **Arrows** choose an answer or fold a group. **Enter** goes to the next screen. **Esc** steps back one screen; the first screen stays put.

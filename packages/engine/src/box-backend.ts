@@ -310,6 +310,7 @@ export class BoxBackend implements MachineBackend {
     signedUrls: false, // bytes go through PUT /files as JSON
     containers: true, // Docker and BuildKit are on the image and the box runs its own kernel
     callbackRelay: true, // the daemon link rides the hosted route
+    diskSnapshots: true, // a named snapshot of a running box, from any life of it
     snapshotListing: true,
     templates: true, // a named snapshot is the template: durable past its source box, deleted by name
     kept: false, // a fork wsp made and can rebuild

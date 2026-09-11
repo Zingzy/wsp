@@ -36,6 +36,9 @@ export interface StubBackend extends MachineBackend {
   puts: { machine: string; path: string; body: Buffer }[];
   /** What a download URL serves for a guest path; absent, an empty archive. */
   downloads?: (path: string) => Buffer;
+  /** Where a process inside each machine dials the computer this host runs on; absent, the machines know no road
+   * back, as a VM at a provider does. Set before a machine is made. */
+  machineHostUrl?: (port: number) => string;
   execImpl: (m: StubMachine, cmd: string) => Promise<ExecResult> | ExecResult;
   /** Runs before each snapshot is taken, with which attempt on that machine this is; one that throws is the provider refusing. */
   beforeSnapshot?: (m: StubMachine, nth: number) => void;
@@ -109,6 +112,7 @@ export function stubBackend(): StubBackend {
       signedUrls: true,
       containers: true,
       callbackRelay: true,
+      diskSnapshots: true,
       snapshotListing: true,
       templates: false,
       kept: false,
@@ -144,6 +148,7 @@ export function stubBackend(): StubBackend {
         resumes: 0,
         shape: { cpu: spec.cpu ?? 2, memMb: spec.memMb ?? 4096, createdAt: new Date().toISOString() },
         snapshotLives: [],
+        ...(backend.machineHostUrl !== undefined ? { hostUrl: backend.machineHostUrl } : {}),
         async exec(cmd: string): Promise<ExecResult> {
           if (m.killed) throw Object.assign(new Error("gone"), { kind: "missing", status: 404 });
           m.execLog.push(cmd);

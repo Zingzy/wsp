@@ -9,7 +9,7 @@
 import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname as thisComputer } from "node:os";
 import { dirname, join } from "node:path";
-import { fmtDuration, usageRefusal } from "@wsp/protocol";
+import { fmtDuration, relayUrlOf, usageRefusal } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
 import { CLOUDFLARED, connectorRunning, ensureCloudflared, startConnector, stopRecordedConnector, type Connector } from "./connector.js";
 import { publicAddressLine } from "./host-lock.js";
@@ -217,7 +217,7 @@ export async function relayHostUrl(home: string, name: string, deps: RelayDeps =
   if (found.hostname === null || found.hostname === "") {
     throw usageRefusal(`the relay has no address for ${name} yet; start it there with wsp up, which asks the relay for a tunnel and says where it landed`);
   }
-  return `https://${found.hostname}`;
+  return relayUrlOf(found.hostname);
 }
 
 /** The rows wsp relay hosts prints; never the token, which a listing has no use for. */
@@ -225,7 +225,7 @@ export function relayHostLines(hosts: readonly RelayHostView[]): string[] {
   if (hosts.length === 0) return ["Your relay account holds no box yet. Run wsp relay link <url> on the computer you want to reach."];
   return table([
     ["HOST", "ADDRESS", "CONNECTOR", "LAST SEEN"],
-    ...hosts.map(h => [h.name, h.hostname === null || h.hostname === "" ? "not up yet" : `https://${h.hostname}`, h.connectorVersion ?? "", h.lastSeen ?? ""]),
+    ...hosts.map(h => [h.name, h.hostname === null || h.hostname === "" ? "not up yet" : relayUrlOf(h.hostname), h.connectorVersion ?? "", h.lastSeen ?? ""]),
   ]);
 }
 
@@ -340,7 +340,8 @@ async function relayHostsCommand(io: CliIO, opts: RelayCommandOpts, address: str
 }
 
 export interface RelayUp {
-  /** Where this host answers from anywhere, once the tunnel has a name; nothing when the connector never got one. */
+  /** The name the start line printed, which is the first one this host's tunnel had, and nothing when the connector
+   * never got one. A quick tunnel is given another every time its child runs, so publicHostname is the live name. */
   hostname(): Promise<string | undefined>;
   close(): Promise<void>;
 }
@@ -372,22 +373,6 @@ export async function startRelay(opts: RelayStartOpts, deps: RelayDeps = systemR
   }
   if (asked.hostname === null && asked.why !== undefined) opts.log(`relay: ${asked.why}`);
 
-  let connector: Connector;
-  try {
-    connector = deps.connector({
-      bin,
-      stateDir,
-      port: opts.port,
-      ...(asked.tunnelToken !== null ? { token: asked.tunnelToken } : {}),
-      log: opts.log,
-      // wsp relay unlink stops the child and takes the record away; this host is what would otherwise start another.
-      keepRunning: () => readRelayRecord(opts.statePath) !== undefined,
-    });
-  } catch (e) {
-    opts.log(`relay: the connector would not start (${e instanceof Error ? e.message : String(e)}); this host is still served on the addresses above`);
-    return undefined;
-  }
-
   // A heartbeat carries a hostname only for a quick tunnel, which is the one name the box learns and the relay does
   // not: a managed name is the relay's own, and a box that reported one back would be refused and never read as up.
   const ownName = asked.hostname === null;
@@ -400,17 +385,49 @@ export async function startRelay(opts: RelayStartOpts, deps: RelayDeps = systemR
     });
   };
 
-  const reported = (async (): Promise<string | undefined> => {
-    const hostname = asked.hostname ?? (await connector.hostname());
-    if (hostname === undefined) return undefined;
-    opts.log(publicAddressLine(hostname));
-    writeRelayRecord(opts.statePath, { ...record, hostname });
+  /** Where this host answers, as it becomes known: the name lands in the record first, since the beats and every
+   * line that says where this host is read it there, and is said to the relay straight after. Nothing here can take
+   * the host down, so a relay that refuses the name is one line and a host that goes on serving. */
+  const learn = async (hostname: string): Promise<void> => {
     try {
+      // wsp relay unlink takes the record away while this host serves; without this, a name learned after that
+      // would put a relay.json back holding a hostname and nothing else, where the unlink had left none.
+      const held = readRelayRecord(opts.statePath);
+      if (held === undefined) return;
+      writeRelayRecord(opts.statePath, { ...held, hostname });
+      opts.log(publicAddressLine(hostname));
       await say(hostname);
     } catch (e) {
       opts.log(`relay: could not say where this host is (${e instanceof Error ? e.message : String(e)})`);
     }
-    return hostname;
+  };
+
+  let connector: Connector;
+  try {
+    connector = deps.connector({
+      bin,
+      stateDir,
+      port: opts.port,
+      ...(asked.tunnelToken !== null ? { token: asked.tunnelToken } : {}),
+      log: opts.log,
+      // wsp relay unlink stops the child and takes the record away; this host is what would otherwise start another.
+      keepRunning: () => readRelayRecord(opts.statePath) !== undefined,
+      // Only a quick tunnel is handed a new name when its child is restarted; a managed name is the relay's own and
+      // is not this box's to report, so nothing on that road listens for one.
+      ...(ownName ? { onHostname: (hostname: string): void => void learn(hostname) } : {}),
+    });
+  } catch (e) {
+    opts.log(`relay: the connector would not start (${e instanceof Error ? e.message : String(e)}); this host is still served on the addresses above`);
+    return undefined;
+  }
+
+  const reported = (async (): Promise<string | undefined> => {
+    if (asked.hostname !== null) {
+      await learn(asked.hostname);
+      return asked.hostname;
+    }
+    // Every quick tunnel name, this first one and each one a restart is given, arrives at learn through onHostname.
+    return connector.hostname();
   })();
 
   const beat = setInterval(() => {

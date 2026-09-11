@@ -92,6 +92,10 @@ export interface InitIO {
   json?(record: Record<string, unknown>): void;
 }
 
+/** What a run prices with: the rate its provider charges a size, the builder it boots by default, and the disk that
+ * provider gives a builder where it caps one. */
+export type InitPricing = Pick<BackendPricing, "rateUsdPerHour" | "defaultSize" | "builderDiskGb">;
+
 export interface InitOptions {
   /** Take every default and skip every prompt, the confirm included. */
   yes: boolean;
@@ -127,8 +131,9 @@ export interface InitOptions {
   signIns?(ctx: SignInContext): void;
   /** How often a sign-in's status is asked on the machine; the hand-off's own cadence otherwise. */
   pollMs?: number;
-  /** Prices the builder the confirm names. */
-  pricing: BackendPricing;
+  /** Prices the builder the confirm names, and sizes the disk the screens draw. The whole table belongs to a
+   * provider module; a run beside a serving host reads these off that host, which is the computer that boots it. */
+  pricing: InitPricing;
   statePath: string;
   /** This computer's home directory, where the ticked paths are read from at build time. */
   home: string;
@@ -176,6 +181,11 @@ export interface InitOptions {
   /** This computer as already read by the caller, so the run reads it once: the init job reads for its screens and
    * hands the same reading to the build, with the recipe as the screens answered it. */
   reading?: Reading;
+  /** Where the build goes when a host on this computer already serves the state file: this run asks its screens,
+   * writes the recipe and asks for the spend, then hands over and prints what comes back. Its answer is this run's
+   * exit code. Nothing after the confirm runs here: a second runtime on one state file is what the host lock
+   * refuses. */
+  handOff?(o: { interactive: boolean }): Promise<number>;
 }
 
 export type { HostHooks };
@@ -735,12 +745,12 @@ export function summaryNote(
 }
 
 /** The machine the recipe asks for: what the recipe names, else the backend's own default. */
-function builderSize(recipe: GoldenRecipe, pricing: BackendPricing): { cpu: number; memMb: number } {
+function builderSize(recipe: GoldenRecipe, pricing: InitPricing): { cpu: number; memMb: number } {
   return { cpu: recipe.cpu ?? pricing.defaultSize.cpu, memMb: recipe.memMb ?? pricing.defaultSize.memMb };
 }
 
 /** Names the builder about to bill: its size and the backend's rate for it, the one place the rate is said. */
-function bootQuestion(recipe: GoldenRecipe, pricing: BackendPricing): string {
+function bootQuestion(recipe: GoldenRecipe, pricing: InitPricing): string {
   const size = builderSize(recipe, pricing);
   // No provider is named and no bill is quoted where there is none: a container on the person's own box costs
   // nothing, and the provider a run forks on is the registry's business, not this sentence's.
@@ -918,7 +928,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const takenAs = opts.yes ? "--yes" : io.isTTY ? "--non-interactive" : "no terminal";
   // A person at a terminal gets the app served at the end, --yes or not; --non-interactive says an agent is driving,
   // and off a terminal nobody is here, so neither serves anything. Only a run that serves needs the ports.
-  const serves = io.isTTY && opts.nonInteractive !== true;
+  const serves = io.isTTY && opts.nonInteractive !== true && opts.handOff === undefined;
   let ports: AppPorts = { port: opts.ports.port, wsPort: opts.ports.wsPort };
   if (serves) {
     const chosen = await pickPorts({ ports: opts.ports, statePath: opts.statePath, output: io.output });
@@ -1075,6 +1085,29 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     return { code: 1 };
   }
   let recipe = goldenRecipeFor(bring, opts.agentKeys, { import: imp });
+  // Beside a host already serving this state file, everything from here is that host's: it owns the state, the
+  // provider and the machines, so this run ends at the confirm and the build goes through its init job. The
+  // question is asked here because the money is asked for here; the recipe the hand-off builds is the one saved
+  // above.
+  if (opts.handOff !== undefined) {
+    const asked = bootQuestion(recipe, opts.pricing);
+    if (interactive) {
+      const go = await confirmPrompt({
+        message: `${readyLine(manifest, ticks, choices, uploadBytes, brew, buildTakes(lastBuild), customRows(catalogRecipe))}\n${asked}`,
+        hint: "No costs nothing and keeps the recipe for wsp init --recipe.",
+        initialValue: true,
+        input: io.input,
+        output: io.output,
+      });
+      if (isCancel(go) || !go) {
+        cancel("Nothing was booted. The recipe is kept.", out);
+        return { code: 1 };
+      }
+    } else {
+      log.step(`${asked} Taken as yes (${takenAs}).`, out);
+    }
+    return { code: await opts.handOff({ interactive }) };
+  }
   const runLog = openRunLog(runLogPath(opts.statePath));
   runLog.note(`recipe ${imp.recipeHash} from ${path}`);
   // Every frame the golden reports, the build's and the seal's, lands in the log for the process's life.

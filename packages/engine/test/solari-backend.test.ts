@@ -24,6 +24,7 @@ describe("SolariBackend", () => {
       signedUrls: true,
       containers: false,
       callbackRelay: true,
+      diskSnapshots: true,
       snapshotListing: true,
       templates: true,
       // A fork wsp made and can rebuild: nothing on it is the person's, so a turn runs without asking.

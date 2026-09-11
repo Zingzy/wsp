@@ -182,8 +182,8 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
-import { GUEST_WSP_BIN, agentsFrom, agentsKindRefusal, agentsMayDrive, MCP_SERVER_NAME, threadWord, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, type SpawnAct } from "@wsp/protocol";
-import { mcpServersBlocked, actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState } from "@wsp/protocol";
+import { GUEST_WSP_BIN, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadWord, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct } from "@wsp/protocol";
+import { mcpServersBlocked, actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
@@ -475,7 +475,7 @@ export interface InitDoor {
   /** Keeps a step's unsent ticks, picks and typed text on the job, so a sheet shut mid-step reopens on them. */
   draft(o: { at: string; ticks?: string[]; answers?: Record<string, string> }): Promise<InitJob>;
   retry(o: { tool: string }): Promise<InitJob>;
-  build(o: { firstWorkspace?: string; importFolder?: string }): Promise<InitJob>;
+  build(o: { firstWorkspace?: string; importFolder?: string; yes?: boolean }): Promise<InitJob>;
   /** Types the code a sign-in's page handed back into the tool waiting for it on the machine; refused when none is. */
   signInCode(o: { tool: string; code: string }): Promise<InitJob>;
   cancel(): Promise<InitJob>;
@@ -760,10 +760,11 @@ export interface RuntimeOptions {
   providerReadMs?: number;
   /** How long a gone verdict waits before it reads the machine's state once more (tests shrink it; 0 reads at once). */
   goneConfirmMs?: number;
-  /** How a turn on a machine reaches back into this host: the address the machine dials, which is never loopback
-   * since the turn runs somewhere else, and the wsp command on this computer for the local kind. Without an address
-   * no turn is given a token at all, so a host that has not been told where it is reachable spawns nothing. */
-  agents?: { url?: string; wspMcp?: McpServerSpec };
+  /** How a turn on a machine reaches back into this host: what the host knows about where it answers, and the wsp
+   * command on this computer for the local kind. The address a turn is told is its kind's own answer, read off
+   * `reach` at each turn rather than once, since a host behind a relay is renamed whenever its connector runs.
+   * Without an address no turn is given a token at all, so a host no machine can reach spawns nothing. */
+  agents?: { reach?: HostReach; wspMcp?: McpServerSpec };
   /** The token every daemon this runtime reaches is given; minted fresh per process when absent (tests pin one). */
   daemonToken?: string;
   /** How long a daemon gets to announce itself when an update reads the version either side of its deploy; the
@@ -772,6 +773,17 @@ export interface RuntimeOptions {
   /** The environment labs is read from; this process's when unset, which the entry points mean and a test does not:
    * a test says the environment it means here rather than inheriting the shell that started it. */
   env?: Readonly<Record<string, string | undefined>>;
+}
+
+/** Where this host answers, as the host itself knows it: the address the person named with --advertise, which
+ * every kind of machine is told whatever it is; the address a machine somewhere else dials, which is none where
+ * nothing about this computer leaves it; and the port, present only where this host bound the wildcard, which is
+ * the one bind that answers on every address this computer has, an address a machine knows of its own included.
+ * A host bound to one address hands out no port, since it answers there and nowhere else. */
+export interface HostReach {
+  advertise?: string;
+  url?: string;
+  port?: number;
 }
 
 export interface WakeOptions {
@@ -951,6 +963,12 @@ export const GRACE_MS = 10 * 60_000;
  * watching and quick enough that a machine whose npm registry blinked is not left dark for an hour. */
 export const DAEMON_REVIVE_AGAIN_MS = 5 * 60_000;
 
+/** How long a machine that answered with what it lacks is left alone before a daemon is offered to it again. Far
+ * wider than the revive window because nothing this host does moves it: a compiler or a lingering login is a
+ * person's to put on their own machine, and until they do, every attempt spends a round trip to be told the same
+ * sentence. Read across host starts, since the refusal is on the record. */
+export const DAEMON_LACKS_AGAIN_MS = 60 * 60_000;
+
 /** A machine of this setup's the sweep found with no record and recorded again, under the id and name its fork stamped. */
 export interface AdoptedMachine {
   id: string;
@@ -1054,11 +1072,13 @@ export interface Runtime {
      * refuse this request with, or nothing when it may drive that workspace; a target no record here names, as a
      * builder whose ports the host forwards is, is nobody's to hide or refuse for. */
     originRefusal(id: string, origin?: Caller): Promise<string | undefined>;
-    /** The same rule read without asking anything, for the one road that cannot await: the event fan-out, where a
-     * per event promise would sit in the path every delta of every turn takes. A workspace this host does not hold
-     * is nobody's to refuse for, as the sentence has it, unless the caller is a thread: a thread sees its own tree,
-     * and an id no record answers for is not in it, which is what a fork still landing under somebody else is. */
-    drivenBy(id: string, origin?: Caller): boolean;
+    /** Whether one event off the bus is this caller's to see: the same rule read without asking anything, for the
+     * one road that cannot await, where a per event promise would sit in the path every delta of every turn takes.
+     * A workspace this host does not hold is nobody's to refuse for, as the sentence has it, unless the caller is a
+     * thread: a thread sees its own tree, and an id no record answers for is not in it, which is what a fork still
+     * landing under somebody else is. An event naming the thread it was asked for by is that thread's and its
+     * tree's whatever the records say, which is what a fork's own stages are before its record exists. */
+    seenBy(event: unknown, origin?: Caller): boolean;
   };
   readonly projects: {
     /** Lands the host's bundle of a folder on the workspace's machine; progress rides project.import events. */
@@ -1537,6 +1557,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
      * kind wsp puts nothing on answers none, which leaves that kind's turns without the tools. The address the
      * host is reached at goes on the end by the one caller, so no kind carries a copy of that rule. */
     wspMcp: (entry: LiveWorkspace) => McpServerSpec | undefined;
+    /** Where a turn on this workspace's machine dials this host, which the kind answers because the address is a
+     * fact about its machines and not about this computer's network cards: a container reaches the computer its
+     * daemon runs on through the gateway it was given a name for, a machine somewhere else reaches this host at
+     * the address it advertises. None leaves that turn without a token, since one with nowhere to go opens
+     * nothing. What the person named with --advertise stands above every answer here. */
+    hostUrl: (entry: LiveWorkspace) => string | undefined;
     /** Whether this machine's daemon can be dialled at all, asked before a road is opened so nothing mints a preview
      * route to find out: a cloud fork needs one, this computer's daemon is on it. Read as truthy, the way the reach
      * word and the status poller read it before this seam existed. */
@@ -1679,6 +1705,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       env: (_entry, id) => cloudEnv(id),
       relayed: () => true,
       wspMcp: () => ({ command: "node", args: [GUEST_WSP_BIN, "mcp"] }),
+      // A machine whose backend knows a road back to this computer takes it, whatever this host advertises: a
+      // container on this computer's own daemon dials the gateway, where a LAN address of this computer may reach
+      // nothing from inside it. Only where the host bound the wildcard, which is what a port here says: a host on
+      // one address does not answer on the gateway's. Every other fork dials the address the host advertises.
+      hostUrl: entry => {
+        const reach = opts.agents?.reach;
+        return (reach?.port === undefined ? undefined : entry.machine.hostUrl?.(reach.port)) ?? reach?.url;
+      },
       hasDaemon: entry => Boolean(entry.machine.previewUrl),
       daemonRoad: cloudRoad,
       scratch: () => GUEST_TMP,
@@ -1702,6 +1736,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             env: () => local.env(),
             relayed: () => false,
             wspMcp: () => opts.agents?.wspMcp,
+            // A turn here runs on the computer the host runs on, not on a machine dialling in, and the kind table
+            // lets no agent on it drive anything, so it is told no address and handed no token.
+            hostUrl: () => undefined,
             hasDaemon: () => local.daemonRoad !== undefined,
             daemonRoad: localRoad,
             scratch: () => local.backend.folder,
@@ -1742,6 +1779,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // node runs it there is the place's to say and no turn on this kind is handed a token yet: the tools
             // wait for the round that answers both.
             wspMcp: () => undefined,
+            // A machine wsp only reaches is dialled through a forward this host opens, and nothing opens one the
+            // other way yet; the round that gives this kind's turns the wsp command answers the address with it.
+            hostUrl: () => undefined,
             // The record says it: the deploy that put a daemon there wrote it down, so nothing dials a machine to
             // find out whether one is on it, and a machine recorded before the deploy landed says no.
             hasDaemon: entry => entry.record.daemon !== undefined,
@@ -1817,7 +1857,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (Object.keys(patch).length > 0) await preferences.set(patch);
   };
   /** The capability a verb reads before it runs: a machine whose capability is false refuses the verb with the one
-   * sentence, which reads for the local computer, the only machine short of these capabilities today. */
+   * sentence. Each verb names the capability its own move needs and never a neighbour's: a provider that copies a
+   * machine's disk but whose forks boot cold takes a snapshot all the same. */
   const refuseCannot = (entry: LiveWorkspace, can: keyof Omit<Capabilities, "sizes" | "pauseMode">, action: string): void => {
     if (backendFor(entry.record.kind).capabilities[can] !== true) throw new Error(undrivenRefusal(entry.record.name, machineWord(entry.record.kind), action));
   };
@@ -1893,10 +1934,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
   /** The top of the tree a thread is in: the root its own rows carry, and itself when nothing spawned it. */
   const rootOf = (threadId: string): string => rowsOn(threadId).find(v => v.rootThreadId !== undefined)?.rootThreadId ?? threadId;
-  /** Where a turn on this workspace's machine reaches this host, and the wsp command it runs there: nothing where
-   * the host was never told an address a machine can dial it at, or where this kind of machine carries no wsp. */
+  /** Where a turn on this workspace's machine reaches this host, and the wsp command it runs there: the address
+   * the person named with --advertise, else the kind's own answer for its machines, and nothing where that kind
+   * reaches this host nowhere or this kind of machine carries no wsp. */
   const agentsReach = (entry: LiveWorkspace): { url: string; wsp?: McpServerSpec } | undefined => {
-    const url = opts.agents?.url;
+    const url = opts.agents?.reach?.advertise ?? moduleOf(entry.record.kind).hostUrl(entry);
     if (url === undefined || url === "") return undefined;
     const wsp = moduleOf(entry.record.kind).wspMcp(entry);
     return { url, ...(wsp !== undefined ? { wsp } : {}) };
@@ -2199,6 +2241,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     ...(r.theme !== undefined ? { theme: r.theme } : {}),
     ...(r.glyph !== undefined ? { glyph: r.glyph } : {}),
     ...(daemonNotes.has(r.id) ? { daemonNote: daemonNotes.get(r.id)! } : {}),
+    ...(r.daemonRefusedAt !== undefined ? { daemonRefusedAt: r.daemonRefusedAt } : {}),
     ...(r.vaultedAt !== undefined ? { vaultedAt: r.vaultedAt } : {}),
     ...(r.vaultRefused !== undefined ? { vaultRefused: r.vaultRefused } : {}),
     ...(r.wakeRefused !== undefined ? { wakeRefused: r.wakeRefused } : {}),
@@ -2300,7 +2343,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const reachOf = (entry: LiveWorkspace): ReachState => {
     const seen = polledReach.get(entry.record.id);
     if (seen !== undefined && seen.machineId === entry.machine.id) return seen.reach;
-    return moduleOf(entry.record.kind).hasDaemon(entry) ? "reachable" : "unsupported";
+    // The same reading the status poll makes: a machine wsp can ask at all, by a route or by its own answer.
+    return moduleOf(entry.record.kind).hasDaemon(entry) || entry.machine.daemonAnswers !== undefined ? "reachable" : "unsupported";
   };
   const emitStatus = async (entry: LiveWorkspace, reach: ReachState, reason?: string): Promise<void> => {
     const size = entry.record.size;
@@ -2337,14 +2381,27 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return connectDaemon({ previewUrl: reach.url, token, onEvent: o.onEvent ?? (() => {}), ...(o.heartbeatMs !== undefined ? { heartbeatMs: o.heartbeatMs } : {}) });
   };
 
-  /** The daemon answering through the edge is what proves a resumed guest
-   * serves; resume() returning does not (a zombie reports running for 10+
-   * minutes while exec and the edge 502). Backends without preview routes
-   * have no edge to ask, so the check falls back to the shape comparison. */
+  /** The daemon answering is what proves a resumed guest serves; resume() returning does not (a zombie reports
+   * running for 10+ minutes while exec and the edge 502). Asked over the machine's own road where it has one and
+   * through the edge where the route is the only way in, since the two readings of one machine's reach would
+   * otherwise disagree: a container's published port is on the loopback of the computer its Docker daemon runs on,
+   * and a host that is not that computer would fail this check on a live guest, which on a backend whose wake
+   * takes one attempt throws the container away and forks the golden again. A machine with neither road has
+   * nothing to ask, so the check falls back to the shape comparison. */
   const pingDaemon = async (entry: LiveWorkspace): Promise<string | undefined> => {
     const machine = entry.machine;
-    if (!machine.previewUrl) return undefined;
     const answersMs = lifecycleOf(entry).budgets.daemonAnswersMs;
+    if (machine.daemonAnswers !== undefined) {
+      try {
+        const up = await until(machine.daemonAnswers({ timeoutMs: answersMs }), Date.now() + answersMs, "daemon answer");
+        return up ? undefined : `nothing listens on the daemon's port inside ${machine.id}`;
+      } catch (e) {
+        // The error is in hand here, so it is what the row says: only the edge road, which learns nothing but that
+        // it waited, reports the budget.
+        return `the daemon on ${machine.id} could not be asked (${e instanceof Error ? e.message : String(e)})`;
+      }
+    }
+    if (!machine.previewUrl) return undefined;
     const deadline = Date.now() + answersMs;
     let link: DaemonReach | null = null;
     try {
@@ -2446,6 +2503,46 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const canDeployDaemon = (entry: LiveWorkspace): boolean =>
     moduleOf(entry.record.kind).deployDaemon !== undefined && landsBytes(backendFor(entry.record.kind).capabilities, entry.machine);
 
+  /** Every road that puts a daemon on a machine runs the kind's deploy through here, and this is the one place
+   * that writes down how it went: a machine that answered with what it lacks keeps its own sentence and the
+   * moment it said it, and every other ending takes them off. The record rather than a map in this process,
+   * because the whole point of remembering is the next host start. */
+  const deployDaemonOn = async (entry: LiveWorkspace, deploy: (e: LiveWorkspace) => Promise<void | string>): Promise<void | string> => {
+    const forget = async (): Promise<void> => {
+      if (entry.record.daemonRefusedAt === undefined) return;
+      delete entry.record.daemonRefusedAt;
+      await persist(entry.record);
+    };
+    try {
+      const detail = await deploy(entry);
+      await forget();
+      return detail;
+    } catch (e) {
+      // Which of the three endings this is decides what the record keeps. A deploy that got past the machine's
+      // own checks and fell over later proves the machine no longer lacks what it named, whatever else went
+      // wrong. A machine that never answered proves nothing either way, and a box switched off has not stopped
+      // lacking a compiler, so what the record already knows stands and its hour keeps running.
+      const lacks = machineLacksLine(e);
+      if (lacks !== undefined) {
+        entry.record.daemonRefusedAt = { machineId: entry.machine.id, at: new Date(clock.now()).toISOString(), why: lacks };
+        await persist(entry.record);
+      } else if (!machineNeverAnswered(e)) await forget();
+      throw e;
+    }
+  };
+
+  /** What the machine under this record last said it lacks, and nothing another machine said: a machine replaced
+   * under the record answers for itself, so the old one's sentence comes off rather than sitting on the record
+   * for good and being shown on a row for a machine that is gone. */
+  const lacksSaid = async (entry: LiveWorkspace): Promise<{ at: string; why: string } | undefined> => {
+    const refused = entry.record.daemonRefusedAt;
+    if (refused === undefined) return undefined;
+    if (refused.machineId === entry.machine.id) return refused;
+    delete entry.record.daemonRefusedAt;
+    await persist(entry.record);
+    return undefined;
+  };
+
   /** Everything the runtime settles with a machine's daemon the moment it can reach it, and the only place that
    * does: the folders the record says it may browse, then a daemon older than this wsp replaced with this one's,
    * waiting out any running turn first. Nobody asks for it, and nothing about it is a person's to know: the panes
@@ -2459,12 +2556,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (held !== undefined) return held;
     const work = (async () => {
       await writeDaemonRoots(entry);
-      const version = await moduleOf(entry.record.kind).daemonVersion(entry);
+      const module = moduleOf(entry.record.kind);
+      const version = await module.daemonVersion(entry);
       if (version === null || version >= DAEMON_VERSION) return;
       if (!canDeployDaemon(entry)) return;
+      // A machine with none yet is being given its first daemon, not having one replaced, and the two are told
+      // apart here because everything below reads differently for them: a machine that already answered with what
+      // it lacks is left alone until its window is out, and the words say installing rather than updating.
+      const placing = !module.hasDaemon(entry);
+      const said = await lacksSaid(entry);
+      if (placing && said !== undefined && clock.now() - Date.parse(said.at) < DAEMON_LACKS_AGAIN_MS) return;
       await whenNoTurnRuns(entry.record.id);
       if (entry.record.phase !== "running") return;
-      await noteDaemon(entry, DAEMON_UPDATING);
+      await noteDaemon(entry, placing ? DAEMON_INSTALLING : DAEMON_UPDATING);
       // Marking the row awaits a push, which is several ticks wide; a turn that opened inside that window would
       // lose its ptys to the deploy, so the wait runs again until nothing is running as the deploy starts.
       while (turnRuns(entry.record.id)) await whenNoTurnRuns(entry.record.id);
@@ -2477,8 +2581,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         await noteDaemon(entry, undefined);
         // A machine that napped or went under the update did not fail one: its row says what its phase says.
         if (entry.record.phase !== "running") return;
-        console.warn(`daemon on ${entry.machine.id} (workspace ${entry.record.id}) not updated: ${reason}`);
-        await flashDaemon(entry, DAEMON_UPDATE_FAILED);
+        console.warn(`daemon on ${entry.machine.id} (workspace ${entry.record.id}) ${placing ? "not installed" : "not updated"}: ${reason}`);
+        // The machine's own sentence where it gave one: it is one line, it names the thing the machine has not
+        // got, and a person can act on it. A deploy that failed further in gives an npm log instead, which is
+        // hundreds of characters of nothing anybody reading a row can do.
+        await flashDaemon(entry, machineLacksLine(e) ?? (placing ? DAEMON_INSTALL_FAILED : DAEMON_UPDATE_FAILED));
       }
     })();
     daemonSyncs.set(key, work);
@@ -3313,18 +3420,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
     }
     const entry = live.get(id)!;
-    if (entry.machine.previewUrl) {
-      // A daemon that does not answer is reported, not fatal: the workspace exists either way, and the status check
-      // keeps asking and names a zombie. The route minted here is the one the ping and the first client reuse.
-      let fault: string | undefined;
-      try {
-        await until(entry.ws.daemonReach(), Date.now() + lifecycleOf(entry).budgets.daemonAnswersMs, "preview route");
-        report("preview-route", "Preview route to the daemon minted.");
-        fault = await pingDaemon(entry);
-      } catch (e) {
-        fault = `preview route for ${entry.machine.id} not minted (${e instanceof Error ? e.message : String(e)})`;
+    if (entry.machine.previewUrl !== undefined || entry.machine.daemonAnswers !== undefined) {
+      // The route and the daemon are two questions, and the create asks them apart: minting is what the app and
+      // the first client will dial, and a mint that fails is its own line rather than a verdict on the guest.
+      if (entry.machine.previewUrl !== undefined) {
+        try {
+          await until(entry.ws.daemonReach(), Date.now() + lifecycleOf(entry).budgets.daemonAnswersMs, "preview route");
+          report("preview-route", "Preview route to the daemon minted.");
+        } catch (e) {
+          report("preview-route", "No preview route to the daemon.", `preview route for ${entry.machine.id} not minted (${e instanceof Error ? e.message : String(e)})`);
+        }
       }
-      report("daemon-answering", fault === undefined ? "Daemon answered through the edge." : "Daemon did not answer through the edge.", fault);
+      // A daemon that does not answer is reported, not fatal: the workspace exists either way, and the status check
+      // keeps asking and names a zombie. Asked the way the wake and the poll ask, so a machine reached without a
+      // route is asked here too rather than left with no word at all.
+      const fault = await pingDaemon(entry);
+      report("daemon-answering", fault === undefined ? "Daemon answered." : "Daemon did not answer.", fault);
       void syncDaemon(entry);
     }
     await persist(record);
@@ -3398,21 +3509,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * did not. */
   const deploySshDaemon = async (workspace: WorkspaceView): Promise<string | undefined> => {
     const entry = live.get(workspace.id);
-    const module = moduleOf("ssh");
-    if (entry === undefined || module.deployDaemon === undefined) return undefined;
+    const deploy = moduleOf("ssh").deployDaemon;
+    if (entry === undefined || deploy === undefined) return undefined;
     const began = clock.now();
     const report: StageReport = (stage, message) => {
       bus.emit({ type: "workspace.creating", workspaceId: workspace.id, name: workspace.name, stage, message, elapsedMs: clock.now() - began });
     };
     report("daemon-answering", `Putting the daemon on ${workspace.name} under its own login.`);
     try {
-      const detail = await module.deployDaemon(entry);
+      const detail = await deployDaemonOn(entry, deploy);
       report("ready", `Daemon answering on ${workspace.name}${typeof detail === "string" && detail !== "" ? ` (${detail})` : ""}.`);
       return undefined;
     } catch (e) {
       const reason = e instanceof Error ? e.message : String(e);
       report("ready", `The daemon did not go on ${workspace.name}.`);
-      return `${reason}\nits terminal, files and ports wait on a daemon; this host tries again each time it starts, so put right what the machine asked for and nothing else is needed`;
+      return `${reason}\nits terminal, files and ports wait on a daemon; this host offers it again later on its own, so put right what the machine asked for and nothing else is needed`;
     }
   };
 
@@ -3440,8 +3551,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       forking.add(o.name);
       const id = `ws_${randomBytes(4).toString("hex")}`;
       const began = clock.now();
+      // Who asked rides every stage from the first, which is emitted before the fork has a record: the stream's
+      // tree rule has nothing to read until then, so a thread watching its own fork boot would see it start midway.
+      const askedBy = spawned !== undefined ? { threadId: spawned.threadId, rootThreadId: spawned.rootThreadId } : undefined;
       const report: StageReport = (stage, message, notice) => {
-        bus.emit({ type: "workspace.creating", workspaceId: id, name: o.name, stage, message, elapsedMs: clock.now() - began, ...(notice !== undefined ? { notice } : {}) });
+        bus.emit({
+          type: "workspace.creating",
+          workspaceId: id,
+          name: o.name,
+          stage,
+          message,
+          elapsedMs: clock.now() - began,
+          ...(notice !== undefined ? { notice } : {}),
+          ...(askedBy !== undefined ? { askedBy } : {}),
+        });
       };
       try {
         return await createStaged(o, id, report, spawned, freePlace);
@@ -3732,7 +3855,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async snapshot(id, origin) {
       const entry = await entryOf(id, origin);
-      refuseCannot(entry, "liveCloneForks", "be snapshotted");
+      refuseCannot(entry, "diskSnapshots", "be snapshotted");
       const { name } = entry.record;
       // The snapshot is the whole disk and carries every project on it; it is named after the one the rule would
       // start a thread in, else the newest import.
@@ -3758,10 +3881,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async updateDaemon(id, origin) {
       const entry = await entryOf(id, origin);
-      const module = moduleOf(entry.record.kind);
-      if (module.deployDaemon === undefined) throw new Error("this runtime cannot deploy a daemon; the host wires the bundle");
+      const deploy = moduleOf(entry.record.kind).deployDaemon;
+      if (deploy === undefined) throw new Error("this runtime cannot deploy a daemon; the host wires the bundle");
       if (entry.record.phase !== "running") throw new Error(`wake ${entry.record.name} before updating its daemon`);
-      await module.deployDaemon(entry);
+      await deployDaemonOn(entry, deploy);
     },
 
     async delete(id, origin) {
@@ -3863,10 +3986,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return refusalFor(live.get(id)?.record, origin);
     },
 
-    drivenBy(id, origin) {
-      const record = live.get(id)?.record;
-      if (record === undefined) return scopeOf(origin) === undefined;
-      return refusalFor(record, origin) === undefined;
+    seenBy(event, origin) {
+      const scope = scopeOf(origin);
+      if (scope === undefined) return true;
+      const asked = askerOf(event);
+      if (asked !== undefined) return asked.threadId === scope.threadId || asked.rootThreadId === scope.rootThreadId;
+      const id = workspaceIdOf(event);
+      const record = id === undefined ? undefined : live.get(id)?.record;
+      return record !== undefined && refusalFor(record, origin) === undefined;
     },
   };
 
@@ -5924,6 +6051,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(e.wakeAsk !== undefined ? { wakeAsk: e.wakeAsk } : {}),
         ...(e.record.phase === "running" && idle.idleAt(e.record.id) !== undefined ? { idleAt: idle.idleAt(e.record.id)! } : {}),
         ...(moduleOf(e.record.kind).hasDaemon(e) ? { daemonReach: () => moduleOf(e.record.kind).daemonRoad(e) } : {}),
+        ...(e.machine.daemonAnswers !== undefined ? { daemonAnswers: e.machine.daemonAnswers.bind(e.machine) } : {}),
         providerState: () => e.machine.state(),
         ...(e.machine.metrics !== undefined ? { metrics: e.machine.metrics.bind(e.machine) } : {}),
         ...(e.machine.facts !== undefined ? { facts: e.machine.facts.bind(e.machine) } : {}),

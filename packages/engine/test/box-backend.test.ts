@@ -154,6 +154,7 @@ describe("BoxBackend declarations", () => {
       signedUrls: false,
       containers: true,
       callbackRelay: true,
+      diskSnapshots: true,
       snapshotListing: true,
       templates: true,
       kept: false,

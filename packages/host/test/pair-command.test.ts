@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { advertisedUrl, deviceLines, hostSideOnlyLine, pairLines, pairOnLoopbackLine, reachAddresses, devicesCommand, pairCommand } from "../src/pairing.js";
+import { advertisedUrl, deviceLines, hostReach, hostSideOnlyLine, pairLines, pairOnLoopbackLine, reachAddresses, devicesCommand, pairCommand } from "../src/pairing.js";
 import type { CliIO } from "../src/cli.js";
 import { dialAddress } from "../src/host-lock.js";
 import { setDefaultHost, writeHost, type HostRecord } from "../src/hosts.js";
@@ -36,6 +36,9 @@ function fakeHost(answers: Record<string, Record<string, unknown>>): { client: H
     closed: new Promise<void>(() => {}),
     closeWords: () => "closed",
     close: () => {
+      closed++;
+    },
+    terminate: () => {
       closed++;
     },
   };
@@ -204,6 +207,34 @@ describe("the addresses a client may use", () => {
     expect(advertisedUrl("0.0.0.0", 4700, "  ", interfaces)).toBe("http://192.168.1.20:4700");
     // An IPv6 address is bracketed, so the url is one a machine's client parses.
     expect(advertisedUrl("2001:db8::5", 4700, undefined, interfaces)).toBe("http://[2001:db8::5]:4700");
+  });
+
+  it("what a turn is told about this host: the person's word, the relay's name while it holds, else the bind", () => {
+    const at = { address: "0.0.0.0", port: 4700 };
+    const none = (): undefined => undefined;
+    // Nothing named and no tunnel up: the address this computer answers on, and the port, which is what a kind
+    // whose machines know an address of their own writes with.
+    expect({ ...hostReach(at, undefined, none, interfaces) }).toEqual({ url: "http://192.168.1.20:4700", port: 4700 });
+    // A connector holding a tunnel beats it: a machine at a provider reaches a name from anywhere and a LAN
+    // address from nowhere. Read at each turn, since a quick tunnel is renamed every time its connector runs.
+    let name: string | undefined;
+    const relayed = hostReach(at, undefined, () => name, interfaces);
+    expect(relayed.url).toBe("http://192.168.1.20:4700");
+    name = "wsp-box.example.com";
+    expect(relayed.url).toBe("https://wsp-box.example.com");
+    // What the person named stands above both, and above every kind's own answer at the launch.
+    expect({ ...hostReach(at, "https://box.example/wsp/", () => name, interfaces) }).toEqual({ advertise: "https://box.example/wsp", url: "https://wsp-box.example.com", port: 4700 });
+    // The wildcard on a computer that answers on nothing else: no address to hand a machine somewhere else, and
+    // still the port, since a container reaches the gateway whatever this computer's own cards say.
+    const onlyLoopback = { lo0: [{ address: "127.0.0.1", family: "IPv4", internal: true }] } as unknown as Interfaces;
+    expect({ ...hostReach(at, undefined, none, onlyLoopback) }).toEqual({ url: undefined, port: 4700 });
+    // A host bound to one address names no port: it answers there and nowhere else, so a kind that would write
+    // an address of its own with it would write one this host does not listen on.
+    expect({ ...hostReach({ address: "192.168.1.20", port: 4700 }, undefined, none, interfaces) }).toEqual({ url: "http://192.168.1.20:4700" });
+    // A host bound to this computer alone names no port either: nothing outside this computer reaches it there,
+    // so a kind that would write an address of its own with it is told none.
+    expect({ ...hostReach({ address: "127.0.0.1", port: 4700 }, undefined, none, interfaces) }).toEqual({ url: undefined });
+    expect({ ...hostReach({ address: "127.0.0.1", port: 4700 }, "http://10.0.0.9:4700", none, interfaces) }).toEqual({ advertise: "http://10.0.0.9:4700", url: undefined });
   });
 
   it("brackets an IPv6 address in the line it prints, so the URL is one a browser takes", () => {

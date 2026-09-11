@@ -121,6 +121,9 @@ export interface ConnectorOptions {
   /** Asked before a connector that exited is started again: a box that was unlinked while its host runs has no
    * tunnel left to carry, so nothing is started for it. Absent, an exited connector is always started again. */
   keepRunning?(): boolean;
+  /** Told the name a start of a quick tunnel printed, whenever it is not the name last told: cloudflared hands out
+   * a fresh one every time the child runs, and only the caller knows where that name is written down and reported. */
+  onHostname?(hostname: string): void;
   spawnChild?: typeof spawn;
 }
 
@@ -144,23 +147,28 @@ export function startConnector(opts: ConnectorOptions): Connector {
   let stopping = false;
   let timer: NodeJS.Timeout | undefined;
   let pause = opts.restartMs ?? 2_000;
+  /** The last name told to the caller, so a start that was handed the same name again is not reported as a change. */
   let found: string | undefined;
   let tellHostname: ((hostname: string | undefined) => void) | undefined;
   const hostname = new Promise<string | undefined>(done => (tellHostname = done));
 
-  const read = (chunk: unknown): void => {
-    for (const line of String(chunk).split("\n")) {
-      if (line.trim() === "") continue;
-      const name = quickHostname(line);
-      if (name !== undefined && found === undefined) {
-        found = name;
-        tellHostname?.(name);
-      }
-    }
-  };
-
   const run = (): void => {
     mkdirSync(opts.stateDir, { recursive: true });
+    // Each start reads its own name, since a quick tunnel is given a new one every time: the reader belongs to this
+    // child, so a line the one before it left in the pipe cannot be read as this child's name.
+    let printed: string | undefined;
+    const read = (chunk: unknown): void => {
+      if (printed !== undefined) return;
+      const name = String(chunk).split("\n").map(quickHostname).find(seen => seen !== undefined);
+      if (name === undefined) return;
+      printed = name;
+      if (name === found) return;
+      found = name;
+      // Told before handed over: what the caller does with a name is done by the time anything waiting on the
+      // first one reads what the caller wrote down.
+      opts.onHostname?.(name);
+      tellHostname?.(name);
+    };
     const started = spawnChild(opts.bin, args, {
       stdio: ["ignore", "pipe", "pipe"],
       // Three things and no more: this process holds the person's provider and model keys, and a connector has no

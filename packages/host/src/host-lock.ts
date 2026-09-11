@@ -3,7 +3,7 @@
 // ports it bound, so a second host refuses and other local tools find it.
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { authority, isWildcard, LOOPBACK } from "@wsp/protocol";
+import { authority, isWildcard, LOOPBACK, relayUrlOf } from "@wsp/protocol";
 
 export interface HostLock {
   pid: number;
@@ -93,7 +93,7 @@ export function addressLines(statePath: string, at: { port: number; wsPort: numb
 /** The one line naming where this host answers from anywhere: printed at start when the relay already had a name
  * for it, and again by whatever learns the name later, so both readings are the same sentence. */
 export function publicAddressLine(hostname: string): string {
-  return `public      https://${hostname}`;
+  return `public      ${relayUrlOf(hostname)}`;
 }
 
 /** Where a tool on this computer dials the host serving this state file: the address the host bound, and loopback

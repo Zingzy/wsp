@@ -15,13 +15,13 @@ import { connect as netConnect } from "node:net";
 import { join, posix } from "node:path";
 import { Duplex } from "node:stream";
 import { connect as tlsConnect } from "node:tls";
-import type { Capabilities } from "@wsp/protocol";
+import { authority, type Capabilities } from "@wsp/protocol";
 import { classify, isMissing, type WspError } from "./errors.js";
 import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
 import { WSP_LABEL } from "./labels.js";
 import type { BackendPricing, DaemonSupervisor, ExecResult, Lifecycle, Machine, MachineBackend, MachineKind, MachineLife, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
-import { DAEMON_PORT } from "./preview.js";
+import { DAEMON_LISTENING_CHECK, DAEMON_PORT } from "./preview.js";
 import { makeSshControlDir, SSH_CONTROL_PERSIST_S, sshControlPath } from "./ssh-backend.js";
 
 /** How long a fetch of an image may take before the call is cut off: a base image is a few hundred megabytes over
@@ -31,6 +31,12 @@ export const PULL_MS = 600_000;
 /** The Engine API version every call is made under. Docker 29 refuses a client below 1.44, and nothing here needs a
  * field newer than that, so the version is pinned rather than negotiated on every dial. */
 export const DOCKER_API_VERSION = "v1.44";
+
+/** The name every container this backend makes reaches the computer its daemon runs on at, written into the
+ * container's hosts file at create against the daemon's own `host-gateway`: on Linux that is the bridge gateway,
+ * on Docker Desktop the address of the computer outside the VM, and neither is a fact a container can work out for
+ * itself. It is how a turn on a fork dials a wsp host on that computer. */
+export const DOCKER_HOST_GATEWAY = "host.docker.internal";
 
 /** The daemon's socket on a computer whose DOCKER_HOST names nothing. */
 export const DOCKER_DEFAULT_SOCKET = "/var/run/docker.sock";
@@ -423,6 +429,7 @@ export class DockerBackend implements MachineBackend {
       // The daemon's port is published on the box's loopback, which this host dials when the box is this computer,
       // so a sign-in a guest opens reaches the person's browser. A daemon on another box needs a forward first.
       callbackRelay: this.onThisComputer,
+      diskSnapshots: true, // a commit of the container's filesystem, whatever the container has done since it booted
       snapshotListing: true,
       templates: true,
       kept: false, // a fork wsp made and can rebuild: a turn that wrecks its disk costs nothing else
@@ -483,6 +490,9 @@ export class DockerBackend implements MachineBackend {
         // Bound to the loopback of the computer the daemon runs on: the token in the first frame is the only gate on
         // the daemon, and a port on the box's public address would put it where anyone can knock.
         PortBindings: { [`${DAEMON_PORT}/tcp`]: [{ HostIp: "127.0.0.1", HostPort: "" }] },
+        // The one address a process in the container can dial the computer the daemon runs on at; the daemon fills
+        // the gateway in, since the container cannot read the box's network from inside.
+        ExtraHosts: [`${DOCKER_HOST_GATEWAY}:host-gateway`],
       },
       // spec.diskGb is not asked for: a per container quota needs overlay2 on xfs mounted with pquota, and a
       // container on any other filesystem is refused at create rather than given the box's disk.
@@ -633,6 +643,10 @@ export class DockerMachine implements Machine {
    * whose daemon died, re-paused, resurrected and redeployed on every wake. Absent is what every road above reads
    * (`hasDaemon` is the presence of this) and absent is the truth on a box until a forward exists. */
   readonly previewUrl?: (port: number) => Promise<PreviewReach>;
+  /** Only on a machine whose daemon runs on this computer, for the same reason: the gateway the container was
+   * given a name for leads to the computer the daemon runs on, which is this one only then. A container on a box
+   * reaches that box there, and the wsp host asking is not on it. */
+  readonly hostUrl?: (port: number) => string;
 
   constructor(
     private readonly backend: DockerBackend,
@@ -643,7 +657,10 @@ export class DockerMachine implements Machine {
     readonly seen?: { state: MachineState; createdAt?: string },
     readonly replayed?: boolean,
   ) {
-    if (onThisComputer) this.previewUrl = port => this.publishedPort(port);
+    if (onThisComputer) {
+      this.previewUrl = port => this.publishedPort(port);
+      this.hostUrl = port => `http://${authority(DOCKER_HOST_GATEWAY, port)}`;
+    }
   }
 
   private path(suffix = ""): string {
@@ -727,6 +744,15 @@ export class DockerMachine implements Machine {
     }
     const host = bound.HostIp === undefined || bound.HostIp === "" || bound.HostIp === "0.0.0.0" ? "127.0.0.1" : bound.HostIp;
     return { url: `http://${host}:${bound.HostPort}`, token: "", expiresAt: Number.MAX_SAFE_INTEGER };
+  }
+
+  /** Whether the guest's daemon is listening, asked from inside the container over the road every call to this
+   * machine takes. The published port is on the loopback of the computer the Docker daemon runs on, so a host
+   * dialling it from anywhere else reads silence off a live daemon and the row calls the machine unreachable
+   * while its turns run (a box dialling the Mac's socket read both its forks unreachable, 2026-09-11). */
+  async daemonAnswers(opts: { timeoutMs?: number } = {}): Promise<boolean> {
+    const res = await this.exec(DAEMON_LISTENING_CHECK, opts);
+    return res.exitCode === 0;
   }
 
   /** Bytes onto the container through the archive road: one file in a tar, extracted where it belongs. */

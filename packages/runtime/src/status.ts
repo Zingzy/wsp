@@ -3,11 +3,12 @@
 // @wsp/host so every protocol client reads one implementation; the host's
 // REST endpoint and the web app's rail both consume this.
 //
-// Machine state is the runtime's own phase plus a reach probe over the preview
-// URL. The provider is asked only after a failed reach (at most once per
-// reconcile window) or on an explicit refresh: every GET /sandboxes/:id resets
-// Solari's idle timer, so a poller that asked per tick kept every workspace
-// awake and billing forever.
+// Machine state is the runtime's own phase plus a reach probe, over the preview
+// URL where that route is the daemon's own word and over the machine's own road
+// where it is not. The provider is asked only after a failed reach (at most once
+// per reconcile window) or on an explicit refresh: every GET /sandboxes/:id
+// resets Solari's idle timer, so a poller that asked per tick kept every
+// workspace awake and billing forever.
 
 import { isMissing, roadFailed, type ExecResult, type MachineState, type PreviewReach } from "@wsp/engine";
 import { appendCostPoint, goneWords, reachShown, type EventUnion, type MachineFacts, type ReachState, type ReachStatus, type WorkspaceCostEvent, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
@@ -93,6 +94,24 @@ export async function probeReach(url: string, o: ProbeOptions, now: () => number
   }
 }
 
+/** One look at a machine that answers for its own daemon, over the road its own calls take. A guest that says the
+ * daemon's port is closed is the dead daemon behind a live machine that a prompt 502 is on a backend with an edge;
+ * a guest that will not answer at all is silence, and a call that never left this computer is the computer's. */
+export async function askDaemon(
+  answers: (opts?: { timeoutMs?: number }) => Promise<boolean>,
+  o: ProbeOptions,
+  now: () => number = Date.now,
+): Promise<Probed> {
+  const started = now();
+  try {
+    const up = await bounded(answers({ timeoutMs: o.timeoutMs }), o.timeoutMs);
+    if (now() - started > o.promptMs) return { state: "slow", fromDaemon: up };
+    return { state: up ? "reachable" : "no-daemon", fromDaemon: up };
+  } catch (e) {
+    return missed(e);
+  }
+}
+
 /** Whose run of probes a status read joins. The dampening rule wants two silences in a row before a row's word
  * turns, so every read is dampened by the run it belongs to and moves that run on: the app keeps the one a sidebar
  * row rides, and every listing door shares another. An agent polling `wsp workspaces` therefore cannot spend the
@@ -155,6 +174,9 @@ export interface StatusRecord extends WorkspaceView {
   /** Where this machine's daemon answers and when that route expires; the probe fetches the one and the row carries
    * the other, so whatever else a kind's road hands out (a token) stays off this. */
   daemonReach?: () => Promise<Pick<PreviewReach, "url" | "expiresAt">>;
+  /** Present on a machine that answers for its own daemon: the reach is asked of it rather than dialled from here,
+   * and the route above is then only what the app is handed to dial. */
+  daemonAnswers?: (opts?: { timeoutMs?: number }) => Promise<boolean>;
   providerState: () => Promise<MachineState>;
   /** The host's own word on the machine; absent on backends without one. */
   metrics?: () => Promise<void>;
@@ -489,7 +511,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
 
     return Promise.all(
       records.map(async (r): Promise<WorkspaceStatus> => {
-        const { size, idleAt, daemonReach, providerState, metrics, facts, exec, generation, ...view } = r;
+        const { size, idleAt, daemonReach, daemonAnswers, providerState, metrics, facts, exec, generation, ...view } = r;
         void providerState;
         void metrics;
         void exec;
@@ -511,17 +533,27 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
           suspects.delete(r.id);
           return done(await machineState(r, reconcile, false), { state: "napping" });
         }
-        if (!daemonReach) return done(await machineState(r, reconcile, false), { state: "unsupported" });
-
-        const memory = probesOf(r, opts?.reader ?? "app");
         let route: Pick<PreviewReach, "url" | "expiresAt"> | undefined;
         let probed: Probed;
-        try {
-          route = await daemonReach();
-          probed = await probeReach(route.url, probe, clock.now);
-        } catch (e) {
-          probed = missed(e);
+        if (daemonAnswers !== undefined) {
+          // The machine's own road, which is the one its turns run on. The route is still minted for the app to
+          // dial, and a mint that fails says nothing about the guest: on such a machine the route is a road out of
+          // this computer, not the daemon's own word.
+          route = daemonReach === undefined ? undefined : await daemonReach().catch(() => undefined);
+          probed = await askDaemon(daemonAnswers, probe, clock.now);
+        } else if (daemonReach !== undefined) {
+          try {
+            route = await daemonReach();
+            probed = await probeReach(route.url, probe, clock.now);
+          } catch (e) {
+            probed = missed(e);
+          }
+        } else {
+          // No way at all to ask: no route this computer could dial and no machine that answers for its own
+          // daemon. That, and nothing else, is what unsupported says.
+          return done(await machineState(r, reconcile, false), { state: "unsupported" });
         }
+        const memory = probesOf(r, opts?.reader ?? "app");
         const at = route === undefined ? {} : { url: route.url, expiresAt: route.expiresAt };
         // Nothing was learnt about the machine: the row keeps its word, the run of probes under it is left as it was.
         if (probed.offline === true) return done(await machineState(r, reconcile, false), { state: memory.shown, ...at, offline: true });
@@ -529,8 +561,10 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
         const shown = reachShown(memory.last, probed.state);
         memory.last = probed.state;
         memory.shown = shown;
-        // A route the provider would not mint is a failed reach with no zombie window: the guest was never dialled.
-        if (route === undefined) return done(await machineState(r, reconcile, true), { state: shown });
+        // A route the reach itself depended on and could not get is a failed reach with no zombie window: the guest
+        // was never dialled. Where the machine answered for its own daemon the route is only the app's road, and
+        // its absence says nothing about the guest.
+        if (route === undefined && daemonAnswers === undefined) return done(await machineState(r, reconcile, true), { state: shown });
         const status: ReachStatus = { state: probed.state, ...at };
         if (probed.state !== "slow" && probed.state !== "unreachable") {
           suspects.delete(r.id);

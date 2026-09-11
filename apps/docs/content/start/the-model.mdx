@@ -24,7 +24,7 @@ A workspace has a phase: running, pausing, paused, waking, unreachable or gone. 
 
 ## Project golden
 
-A project golden is a snapshot of a running workspace with a project imported, taken with `wsp snapshot`. `wsp new <name> --from <project golden>` starts a machine with the project and its installed dependencies already there, so nothing installs the same dependencies twice. It can only be taken from a first-life machine, so take it on a fresh workspace after the import, not on one that has napped.
+A project golden is a snapshot of a running workspace with a project imported, taken with `wsp snapshot`. `wsp new <name> --from <project golden>` starts a machine with the project and its installed dependencies already there, so nothing installs the same dependencies twice. Which life it can be taken from is the provider's rule: the cloud provider takes one only from a machine that was never resumed, so take it on a fresh workspace after the import rather than one that has napped, while a container fork is copied whatever it has done since it booted.
 
 ## Thread
 

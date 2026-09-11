@@ -136,7 +136,9 @@ export const InitSetup = z.object({
   /** This computer's home directory, so a field can show a real path of the person's as its example. */
   home: z.string(),
   agents: z.array(InitAgent),
-  pricing: z.object({ size: WorkspaceSize, rateUsdPerHour: z.number() }).nullable(),
+  /** What a machine costs on this host's provider, and the disk that provider gives a builder where it caps one;
+   * null where the host forks none, so there is no golden to build here and nothing to price. */
+  pricing: z.object({ size: WorkspaceSize, rateUsdPerHour: z.number(), builderDiskGb: z.number().positive().optional() }).nullable(),
   job: InitJob.nullable(),
 });
 export type InitSetup = z.infer<typeof InitSetup>;
@@ -164,6 +166,12 @@ export const Capabilities = z.object({
   /** A daemon link exists, so sign-in URLs a guest tool opens land in the laptop's browser and the
    * callback port is forwarded back; false means the person finishes sign-ins by copy and paste. */
   callbackRelay: z.boolean(),
+  /** The provider copies a running machine's disk into an image it keeps, which is what a version and a project
+   * golden are sealed as and what a fork boots from. False where the disk is the person's own and nothing copies it
+   * (this computer, a machine reached over ssh). Which life the copy may be taken from is the provider's own rule.
+   * Whether a fork of that image comes up with the processes still running is liveCloneForks and says nothing about
+   * whether one can be taken. */
+  diskSnapshots: z.boolean(),
   /** The provider lists every snapshot on the account with its size, so storage can be counted and priced. */
   snapshotListing: z.boolean(),
   /** The provider promotes a snapshot to a template that survives its own restarts, so a sealed version is recorded
@@ -279,6 +287,12 @@ export const ThreadScope = z.object({
 });
 export type ThreadScope = z.infer<typeof ThreadScope>;
 
+/** Who an event is on behalf of, taken off the scope that asked so the two cannot drift: the thread and the root of
+ * its tree. An event about work that has no record yet carries this, since the reading that hides a workspace from
+ * a caller has nothing to read until the record exists. */
+export const EventAsker = ThreadScope.pick({ threadId: true, rootThreadId: true });
+export type EventAsker = z.infer<typeof EventAsker>;
+
 /** Where a request reached the host from, as every verb takes it: the road alone, or the road with the thread a
  * machine's turn sent it out of. A bare word is `here` or `relayed` and says nothing about who; the object is a
  * socket the host authed on a thread scoped token, and the scope is the host's own reading of that token, never
@@ -358,6 +372,12 @@ export const WorkspaceView = z.object({
    * once a nap stores one. Persisted, unlike the nap's own status line: the files stay unbacked until the next nap
    * stores one, so every row keeps saying it rather than the person having to have seen the nap. */
   vaultRefused: z.string().optional(),
+  /** What this machine answered when the daemon was last offered to it and it refused: which machine said so, when
+   * it said it, and the sentence naming what it has not got. Persisted, unlike the daemon note: a compiler is a
+   * person's to install on their own machine, so the row keeps saying it rather than the person having to have
+   * been watching the one host start that tried. The stamp is what leaves such a machine alone between attempts;
+   * cleared by a deploy that gets past the machine's own checks. */
+  daemonRefusedAt: z.object({ machineId: z.string(), at: z.string(), why: z.string() }).optional(),
   /** Why the last wake gave up: the host asked the provider for half an hour and the machine never came back, in the
    * words that also name the rebuild road. Persisted, unlike the wake's own status line, since the machine stays
    * unreachable until something replaces it; cleared by a wake that lands and by the rebuild. */
@@ -402,7 +422,7 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
  * handed over by having been forgotten, which is how the display stream rode these doors until now. */
 const WORKSPACE_OUT = {
   id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, projects: true, folder: true, home: true,
-  claudeSessionId: true, gone: true, theme: true, glyph: true, daemonNote: true, vaultedAt: true, vaultRefused: true, wakeRefused: true,
+  claudeSessionId: true, gone: true, theme: true, glyph: true, daemonNote: true, daemonRefusedAt: true, vaultedAt: true, vaultRefused: true, wakeRefused: true,
   agents: true, parentThreadId: true, rootThreadId: true,
 } as const;
 
@@ -927,8 +947,8 @@ export const NOTIFY_ME = "me";
 
 /** The host a turn on a machine drives, off its own environment: the address the launch put there and the token
  * beside it. Nothing unless both are there, since an address with no token opens nothing and a token with no
- * address names no host. The pair is the lowest precedence road a wsp line takes, under every host on this
- * computer's own hosts file. */
+ * address names no host. The pair goes ahead of every host a computer holds on its own, under only what a line
+ * names: it is the identity the launch handed the turn, and the machine's own state file is a path nothing serves. */
 export function hostFromEnv(env: Readonly<Record<string, string | undefined>>): { url: string; token: string } | undefined {
   const url = env[HOST_URL_ENV]?.trim();
   const token = env[HOST_TOKEN_ENV]?.trim();
@@ -943,7 +963,10 @@ export const GUEST_DAEMON_DIR = "/root/wsp-daemon";
 /** The name the wsp MCP server has in every agent's config and in every launch that carries it, so an agent's
  * config on this computer and the launch a turn on a machine gets name one server and not two. */
 export const MCP_SERVER_NAME = "wsp";
-export const GUEST_WSP_BIN = `${GUEST_DAEMON_DIR}/wsp/bin.js`;
+/** The command sits in the bundle as npm lays the published package out, its package.json beside a dist folder,
+ * because the bin reads its own version through that file (`../package.json` from the bin) and announces it in
+ * every MCP handshake; a client refuses a server that names none. */
+export const GUEST_WSP_BIN = `${GUEST_DAEMON_DIR}/wsp/dist/bin.js`;
 
 /** The token a client puts on its requests, off its own environment; nothing when it is not running inside a turn. */
 export function turnTokenOf(env: Readonly<Record<string, string | undefined>>): string | undefined {
@@ -1061,6 +1084,10 @@ export const WorkspaceCreatingEvent = z.object({
   message: z.string(),
   elapsedMs: z.number(),
   notice: z.string().optional(),
+  /** The thread this fork was asked for by, from the first stage: a create streams stages before the workspace has
+   * a record, so the stream's tree rule reads who asked off the event rather than off a record that is not there
+   * yet. Absent where a person asked for the machine. */
+  askedBy: EventAsker.optional(),
 });
 export type WorkspaceCreatingEvent = z.infer<typeof WorkspaceCreatingEvent>;
 /** found is set when the provider had already paused the machine and this host only followed it: the awake
@@ -2589,7 +2616,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * sign-in declares. Replies with { setup: InitSetup }, which says a key is held and never says what it is. */
   z.object({ id: reqId, op: z.literal("init.keys"), solari: z.string().optional(), rows: z.record(z.string()).optional() }),
   /** Starts the init job on the road named, an agent's harness on the agent road; replies with { job: InitJob } and
-   * every change after rides init.job events. One job runs at a time; a second start while one runs is refused. */
+   * every change after rides init.job events. One job runs at a time; a second start while one runs is refused. The
+   * terminal road takes its answers from the recipe beside the state, which wsp init wrote from its own screens, and
+   * is refused when there is none there. */
   z.object({ id: reqId, op: z.literal("init.start"), road: InitRoad, harness: z.string().optional() }),
   /** Answers one screen: the rows ticked, the answers chosen; replies with { job: InitJob }, its screens recomputed
    * and its step moved to the next. */
@@ -2602,8 +2631,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("init.draft"), at: z.string().min(1).max(64), ticks: z.array(z.string()).optional(), answers: z.record(z.string()).optional() }),
   /** Runs a sign-in that ran out or failed again on the machine while the build goes on; replies with { job: InitJob }. */
   z.object({ id: reqId, op: z.literal("init.retry"), tool: z.string() }),
-  /** Writes the recipe as answered and starts the build; replies with { job: InitJob } at once, the build riding on. */
-  z.object({ id: reqId, op: z.literal("init.build"), firstWorkspace: z.string().optional(), importFolder: z.string().optional() }),
+  /** Writes the recipe as answered and starts the build; replies with { job: InitJob } at once, the build riding on.
+   * `yes` skips the sign-ins on the machine, as wsp init --yes does: a caller that asked for no waiting gets none. */
+  z.object({ id: reqId, op: z.literal("init.build"), firstWorkspace: z.string().optional(), importFolder: z.string().optional(), yes: z.boolean().optional() }),
   /** Types the code a sign-in's page handed back into the tool waiting for it on the machine, as the person would at
    * that terminal; replies with { job: InitJob }. The code is never logged, kept or carried on the view. Refused when
    * no sign-in for that tool is waiting for one. */
@@ -2662,15 +2692,21 @@ export const RUNTIME_OPS: readonly string[] = RuntimeOp.options.map(o => o.shape
  * the openings, so an op added later reaches no thread until somebody puts it here on purpose. A thread opens
  * threads and forks machines under its own root and reads the tree it is in; every reach into a workspace is
  * refused again by the tree rule, and every act by the guard, so this list is the outer door and not the only one.
- * What is deliberately not here: the golden and its snapshots, the person's keys and their init, their preferences,
- * their folders, the provider's own capabilities, importing and exporting a folder, every road that hands out or
- * takes away access to this host, and the two roads that move a running turn's access mode or answer a permission
+ * What is deliberately not here: sealing the golden and rolling its snapshots, the project goldens, the person's
+ * keys and their init, their preferences, their folders, importing and exporting a folder, every road that hands out
+ * or takes away access to this host, and the two roads that move a running turn's access mode or answer a permission
  * prompt, which are the person's guard on an agent and not an agent's to lift. */
 export const THREAD_OPS: readonly string[] = [
   "auth",
   "events.subscribe",
   "status.list",
   "status.subscribe",
+  // A fork is asked for by snapshot id, and the head of the golden is where wsp new reads it: a thread that may fork
+  // has to be able to say from what. The manifest describes the image its own machine runs, nothing the person holds.
+  "golden.get",
+  // Read ahead of every fork for whether this host forks at all and at which sizes, so the refusal for a host that
+  // mints nothing comes in one sentence before any stage is streamed; the wsp command asks it under any token.
+  "capabilities.get",
   "workspaces.create",
   "workspaces.list",
   "workspaces.get",
@@ -2700,6 +2736,14 @@ export function workspaceIdOf(event: unknown): string | undefined {
   const e = event as { workspaceId?: unknown; workspace?: { id?: unknown }; status?: { id?: unknown }; forward?: { workspaceId?: unknown } };
   for (const found of [e.workspaceId, e.workspace?.id, e.status?.id, e.forward?.workspaceId]) if (typeof found === "string") return found;
   return undefined;
+}
+
+/** The thread an event is on behalf of, beside the reading above and for the same door: an event about a workspace
+ * that has no record yet is nobody's by the reading above, so the caller it was asked for by is named on it. */
+export function askerOf(event: unknown): EventAsker | undefined {
+  const asked = (event as { askedBy?: { threadId?: unknown; rootThreadId?: unknown } }).askedBy;
+  if (typeof asked?.threadId !== "string" || typeof asked.rootThreadId !== "string") return undefined;
+  return { threadId: asked.threadId, rootThreadId: asked.rootThreadId };
 }
 export type RuntimeRequest = z.infer<typeof RuntimeRequest>;
 

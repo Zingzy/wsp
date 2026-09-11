@@ -401,6 +401,7 @@ export class SshBackend implements MachineBackend {
     signedUrls: false,
     containers: false,
     callbackRelay: false,
+    diskSnapshots: false,
     snapshotListing: false,
     templates: false,
     sizes: [],

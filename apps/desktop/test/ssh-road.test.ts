@@ -6,9 +6,13 @@
 // reached by reading the lock again, so a service that came back on another
 // port or another address is found there. Every ssh is a fake child here; the
 // words, the argv and the pids are what is checked.
+import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { noWspLine, sshFailedLine, sshRoad, type ChildLike, type SshRoadDeps } from "../src/ssh-road.js";
 
 const LOCK = { pid: 12, port: 4400, wsPort: 4410, address: "127.0.0.1", startedAt: "2026-09-11T10:00:00.000Z" };
@@ -82,6 +86,19 @@ const isProbe = (args: string[]): boolean => !isForward(args) && remote(args).in
 const probeAnswer = (lock: typeof LOCK | undefined, wsp = WSP): string => `${wsp === "" ? "no-wsp" : `wsp ${wsp}`}\n${lock === undefined ? "none" : `lock ${JSON.stringify(lock)}`}\n`;
 const forwardTarget = (args: string[]): string => args[args.indexOf("-L") + 1]!;
 const settle = (): Promise<void> => new Promise(r => setImmediate(r));
+
+/** A pid that was real a moment ago and is not alive now. */
+function deadPid(): number {
+  const child = spawnSync(process.execPath, ["-e", "0"]);
+  expect(child.status).toBe(0);
+  return child.pid;
+}
+
+let dirs: string[] = [];
+afterEach(() => {
+  for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  dirs = [];
+});
 
 describe("sshRoad", () => {
   it("a box without wsp answers the one sentence with the install line, and no ssh is left running", async () => {
@@ -209,6 +226,51 @@ describe("sshRoad", () => {
     road.closeForward("maya@box");
     expect(await road.reach({ address: "maya@box" })).toBe("http://127.0.0.1:52009");
     road.closeAll();
+  });
+
+  it("a box serving a moved home is forwarded and paired for the host that home runs, with the probe run by a real sh", async () => {
+    // The box's folders are real here and the probe script is run by sh over them, so what the road forwards to is
+    // the home the box's own wsp pair would work on and not a second reading of the pointer.
+    const dir = mkdtempSync(join(tmpdir(), "wsp-ssh-box-"));
+    dirs.push(dir);
+    const bin = join(dir, "bin");
+    const user = join(dir, "user");
+    const moved = join(dir, "moved");
+    for (const d of [bin, join(user, ".wsp"), moved]) mkdirSync(d, { recursive: true });
+    writeFileSync(join(bin, "wsp"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    writeFileSync(join(user, ".wsp", "current-home"), `${moved}\n`);
+    const wsp = join(bin, "wsp");
+    const box = (args: string[], child: FakeChild): void => {
+      if (isForward(args)) return;
+      const command = remote(args);
+      if (isProbe(args)) {
+        const ran = spawnSync("/bin/sh", ["-c", command], { env: { PATH: `${bin}:/usr/bin:/bin`, HOME: user }, encoding: "utf8" });
+        return child.say(ran.stdout, ran.status ?? 0);
+      }
+      if (command === `${wsp} pair`) return child.say("code        ABCDEFGH\n");
+      child.fail(`unexpected: ${command}`);
+    };
+
+    // Nothing serves yet, on either home: the pointer alone is no host to reach.
+    const cold = fakeDeps(box);
+    await expect(sshRoad(cold).reach({ address: "maya@box" })).rejects.toThrow(/no wsp host is serving on maya@box/);
+
+    writeFileSync(join(moved, "host.lock"), JSON.stringify({ pid: process.pid, port: 4400, wsPort: 4410, address: "127.0.0.1", startedAt: "2026-09-11T10:00:00.000Z" }));
+    const d = fakeDeps(box);
+    const road = sshRoad(d);
+    expect(await road.open({ address: "maya@box", port: 2222 })).toEqual({ url: "http://127.0.0.1:52001", code: "ABCDEFGH" });
+    expect(forwardTarget(d.spawned.find(isForward)!)).toBe("127.0.0.1:52001:127.0.0.1:4400");
+    expect(d.spawned.map(remote).filter(c => c.startsWith(wsp))).toEqual([`${wsp} pair`]);
+    road.closeAll();
+
+    // The moved home's host is gone: the pointer goes unfollowed and the box's own home is what answers.
+    writeFileSync(join(moved, "host.lock"), JSON.stringify({ pid: deadPid(), port: 4400, wsPort: 4410, startedAt: "2026-09-11T10:00:00.000Z" }));
+    writeFileSync(join(user, ".wsp", "host.lock"), JSON.stringify({ pid: process.pid, port: 4700, wsPort: 4710, startedAt: "2026-09-11T10:00:00.000Z" }));
+    const after = fakeDeps(box);
+    const second = sshRoad(after);
+    expect(await second.reach({ address: "maya@box" })).toBe("http://127.0.0.1:52001");
+    expect(forwardTarget(after.spawned.find(isForward)!)).toBe("127.0.0.1:52001:127.0.0.1:4700");
+    second.closeAll();
   });
 
   it("reaching a saved host on a box where nothing serves any more says so, and starts nothing", async () => {

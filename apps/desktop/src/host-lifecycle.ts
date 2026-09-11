@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { serve, servingHost, type CliIO, type RunningWsp, type UrlOpener } from "@wsp/host";
+import { defaultHomeIn, homeNamed, serve, servingHost, type CliIO, type RunningWsp, type UrlOpener } from "@wsp/host";
 import { hereWord } from "@wsp/protocol";
 import type { Runtime } from "@wsp/runtime";
 
@@ -91,10 +91,6 @@ function attached(port: number): HostSession {
   return { url: `http://127.0.0.1:${port}`, port, owned: false, remote: false, label: hereWord(process.platform === "darwin"), close: async () => {} };
 }
 
-/** The home WSP_HOME names, or nothing: unset and empty are one answer, and every road that reads the variable
- * reads it here. */
-const homeNamed = (env: string | undefined): string | undefined => (env !== undefined && env !== "" ? env : undefined);
-
 /** Same rule as the bin: a .env in cwd marks a dev checkout whose .wsp state is shared with wspx. It holds for a
  * development run and nothing else, since a packaged app is launched from a folder it did not choose, and WSP_HOME
  * names the home over it in every case, which is what the locate doc says. */
@@ -115,7 +111,7 @@ async function lockedHost(statePath: string): Promise<HostSession | undefined> {
  * not followed: its home may be gone, and the truth of setup left with the host. */
 export async function locateHost(opts: LocateOptions): Promise<Located> {
   const env = homeNamed(opts.env);
-  const home = env !== undefined ? resolve(env) : join(homedir(), ".wsp");
+  const home = env !== undefined ? resolve(env) : defaultHomeIn(homedir());
   let stalePointer: string | undefined;
   if (env === undefined && opts.pointer !== undefined) {
     const pointed = await lockedHost(statePathIn(opts.pointer, opts));

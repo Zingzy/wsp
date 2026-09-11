@@ -7,7 +7,7 @@
 import { hostname } from "node:os";
 import { servedHostname, usageRefusal } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
-import { aliasFrom, checkedAlias, defaultHost, listHosts, noSuchHostLine, readHost, removeHost, setDefaultHost, writeHost, type HostRecord } from "./hosts.js";
+import { aliasFrom, checkedAlias, defaultHost, dialWindowMs, listHosts, noAnswerWithin, noSuchHostLine, readHost, removeHost, setDefaultHost, writeHost, type HostAim, type HostRecord } from "./hosts.js";
 import { relayHostUrl } from "./relay-link.js";
 import { dialHost, table, type DialOpts, type HostClient } from "./verbs.js";
 
@@ -22,16 +22,20 @@ export interface ConnectOpts {
   home: string;
 }
 
-interface ConnectDeps {
+/** What these commands read of the world: the dial, the clock, this computer's name, the relay that says where a
+ * host answers, and how long a road is given to answer. */
+export interface ConnectDeps {
   dial(statePath: string, opts: DialOpts): Promise<HostClient>;
   now(): number;
   /** What the host calls this computer in its own listing; the person at that terminal reads it to know who paired. */
   deviceName(): string;
   /** Where a host on the person's relay answers, for the one road that names a host rather than an address. */
   relayUrl(home: string, name: string): Promise<string>;
+  /** How long the hand back waits on the road, which is the window a dial to that host gets. */
+  window(aim: HostAim): number;
 }
 
-const systemDeps: ConnectDeps = { dial: dialHost, now: Date.now, deviceName: hostname, relayUrl: (home, name) => relayHostUrl(home, name) };
+const systemDeps: ConnectDeps = { dial: dialHost, now: Date.now, deviceName: hostname, relayUrl: (home, name) => relayHostUrl(home, name), window: dialWindowMs };
 
 /** What wsp connect prints: which host this computer now holds and where, never the token it holds it by. */
 export function connectedLines(alias: string, record: HostRecord, madeDefault: boolean): string[] {
@@ -101,23 +105,64 @@ export async function hostsCommand(io: CliIO, opts: ConnectOpts, args: readonly 
   return 0;
 }
 
+/** A reply, or the host's own words for a road that went quiet once the window is out. A socket that opened and
+ * then carried nothing has nothing to close it, so a wait with no window of its own is as long as the operating
+ * system holds the connection, which on a relayed road is minutes of a line saying nothing. The race is what
+ * leaves the abandoned reply handled: a socket closed behind it fails it with nobody waiting, and a bare timer
+ * beside the reply rather than racing it would end the line on that rejection. */
+async function answerWithin<T>(work: Promise<T>, windowMs: number, where: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, fail) => {
+        timer = setTimeout(() => fail(noAnswerWithin(where, windowMs)), windowMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function disconnectCommand(io: CliIO, opts: ConnectOpts, args: readonly string[], deps: ConnectDeps = systemDeps): Promise<number> {
   const alias = args[0];
   if (alias === undefined || args.length !== 1) throw usageRefusal(DISCONNECT_USAGE);
   const record = readHost(opts.home, alias);
   if (record === undefined) throw usageRefusal(noSuchHostLine(alias, opts.home));
+  // One window for the whole act, read once off the road this host is on: the dial and the reply that hands the
+  // token back are two halves of one hand back, and a reply nobody waits for is a device left standing over there.
+  const aim: HostAim = { kind: "alias", alias, record };
+  const windowMs = deps.window(aim);
+  const handBack = async (): Promise<void> => {
+    // One reading of an address, the file's own: a record holds whatever a hand wrote into it, and a word that is
+    // no address must not reach the URL parser, whose line says nothing a person can act on.
+    if (servedHostname(record.url) === undefined) throw new Error(`${JSON.stringify(record.url)} is not an address this computer can dial, so there was nothing to hand the token back to`);
+    const client = await deps.dial(opts.statePath, { aim, home: opts.home, env: {}, deadlineMs: windowMs });
+    try {
+      await answerWithin(client.request("devices.revoke", { deviceId: record.deviceId }), windowMs, record.url);
+    } catch (e) {
+      // The window is out, so this road is carrying nothing: a close waits on an answer that is not coming and the
+      // socket holds the line long after its last word, where dropping it costs the person nothing.
+      client.terminate();
+      throw e;
+    }
+    client.close();
+  };
   // The record goes whatever the host says: a host that is off, gone or unreachable must not leave this computer
   // holding a token it cannot use, and the line below says what is left to do over there.
   let refused: unknown;
-  try {
-    const client = await deps.dial(opts.statePath, { host: alias, home: opts.home, env: {} });
-    try {
-      await client.request("devices.revoke", { deviceId: record.deviceId });
-    } finally {
-      client.close();
-    }
-  } catch (e) {
-    refused = e;
+  // Twice at most, and only for a road that did not answer: this is the one act nobody can redo from this computer
+  // once the record is gone, and a cold edge or a box that answered a moment late is not a host that is gone.
+  // Anything the host itself said, a token it has taken away or a refusal, stands on the first answer.
+  for (let tries = 2; tries > 0; tries--) {
+    refused = await handBack().then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    if (refused === undefined || (refused as { kind?: unknown }).kind !== "unreachable") break;
+    // A road that is dead for both tries is half a minute of a line saying nothing, so it says what it is waiting
+    // on and how long this try has before it gives up.
+    if (tries > 1) io.error(`still asking the host at ${record.url}; this try waits up to ${windowMs} ms`);
   }
   removeHost(opts.home, alias);
   io.log(`disconnected from ${alias}; this computer no longer holds a token for ${record.url}`);

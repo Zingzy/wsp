@@ -11,8 +11,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CliIO } from "../src/cli.js";
 import { connectCommand } from "../src/connect.js";
-import { readHost } from "../src/hosts.js";
-import { startConnector } from "../src/connector.js";
+import { dialWindowMs, readHost } from "../src/hosts.js";
+import { startConnector, type Connector } from "../src/connector.js";
 import { publicHostname, readRelayClient, readRelayRecord, relayCommand, relayHostUrl, relayRecordPath, startRelay, type RelayDeps } from "../src/relay-link.js";
 import { CLOUDFLARED } from "../src/connector.js";
 import type { DialOpts, HostClient } from "../src/verbs.js";
@@ -64,6 +64,9 @@ interface FakeRelay {
   refuse?: { status: number; error: string };
 }
 
+/** The one shape a box may report, as the Worker reads it (isQuickTunnel in infra/relay/src/env.ts). */
+const isQuickTunnel = (name: string): boolean => /^[a-z0-9-]+\.trycloudflare\.com$/i.test(name);
+
 async function fakeRelay(): Promise<FakeRelay> {
   const state: FakeRelay = { url: "", calls: [], pending: 1, tunnel: { tunnelToken: null, hostname: null, why: "this relay has no zone" }, hosts: [], clients: [] };
   const server = createServer((req, res) => {
@@ -97,12 +100,18 @@ async function fakeRelay(): Promise<FakeRelay> {
       }
       if (line === "POST /hosts/hbox1/tunnel") return send(200, state.tunnel);
       if (line === "POST /hosts/hbox1/heartbeat") {
-        // The Worker's own rule, held here too: a box may report the quick tunnel it was given and no other name,
-        // so a heartbeat naming a managed hostname is refused exactly as the relay refuses it.
+        // The Worker's own heartbeat rule (hostHeartbeat in infra/relay/src/hosts.ts), in the four parts a box can
+        // tell apart: a name is lowercased, only the quick tunnel it was given is allowed, a row already holding a
+        // managed name keeps it, and what is left is written onto the row a listing reads. A managed row here is one
+        // whose name is not a quick tunnel's, since the zone the Worker derives that name from is the relay's own.
         const said = body["hostname"];
-        if (typeof said === "string" && !/^[a-z0-9-]+\.trycloudflare\.com$/i.test(said)) {
+        const reported = typeof said === "string" && said !== "" ? said.toLowerCase() : undefined;
+        if (reported !== undefined && !isQuickTunnel(reported)) {
           return send(400, { error: "a host may report the quick tunnel it was given and no other name; a managed hostname is the relay's own" });
         }
+        const row = state.hosts.find(h => h.id === "hbox1");
+        const managed = row !== undefined && row.hostname !== null && !isQuickTunnel(row.hostname);
+        if (row !== undefined && reported !== undefined && !managed) row.hostname = reported;
         return send(200, { ok: true });
       }
       if (line === "GET /hosts") return send(200, { hosts: state.hosts });
@@ -127,6 +136,24 @@ function fakeConnector(dir: string, hostname = "blue-sky-1234.trycloudflare.com"
   const bin = join(dir, "fake-cloudflared");
   writeFileSync(bin, `#!/bin/sh\necho "$@" > "${join(dir, "argv")}"\n>&2 echo 'INF |  https://${hostname}  |'\nsleep 30\n`, { mode: 0o755 });
   return bin;
+}
+
+/** A connector handed a fresh quick tunnel name every time it runs, as cloudflared is: the first child prints one
+ * and goes, the next prints another and stays. */
+function restartingConnector(dir: string): string {
+  const bin = join(dir, "restarting-cloudflared");
+  const runs = join(dir, "runs");
+  writeFileSync(
+    bin,
+    `#!/bin/sh\nn=$(cat "${runs}" 2>/dev/null || echo 0)\nn=$((n+1))\necho "$n" > "${runs}"\n>&2 echo "INF |  https://name-$n.trycloudflare.com  |"\nif [ "$n" -ge 2 ]; then sleep 30; else exit 1; fi\n`,
+    { mode: 0o755 },
+  );
+  return bin;
+}
+
+/** The connector, restarted fast enough for a test: the two seconds a real box waits are the box's constraint. */
+function restarting(dir: string): Partial<RelayDeps> {
+  return { cloudflared: async () => restartingConnector(dir), connector: opts => startConnector({ ...opts, restartMs: 20 }) };
 }
 
 function deps(dir: string, extra: Partial<RelayDeps> = {}): RelayDeps {
@@ -263,6 +290,85 @@ describe("a linked box starting up", () => {
     expect(lines.join("\n")).toContain("public      https://hbox1.boxes.example");
     expect(lines.join("\n")).not.toContain("tunnel-token");
     expect(readRelayRecord(statePath)!.hostname).toBe("hbox1.boxes.example");
+  });
+
+  it("reports the fresh name a restarted quick tunnel was given, and is listed under it", async () => {
+    const relay = await fakeRelay();
+    relay.hosts = [{ id: "hbox1", name: "the box", hostname: null }];
+    const { statePath, home, dir } = box();
+    await relayCommand(io(), { statePath, home }, ["link", relay.url], {}, deps(dir));
+
+    const lines: string[] = [];
+    const up = (await startRelay({ statePath, port: 4400, log: line => lines.push(line) }, deps(dir, restarting(dir))))!;
+    closers.push(() => up.close());
+    expect(await up.hostname()).toBe("name-1.trycloudflare.com");
+
+    // The first child goes and the next is given another name; nothing else tells the relay the old one is dead.
+    await vi.waitUntil(() => readRelayRecord(statePath)!.hostname === "name-2.trycloudflare.com", { timeout: 4000 });
+    await vi.waitUntil(() => relay.calls.some(c => c.line === "POST /hosts/hbox1/heartbeat" && c.body["hostname"] === "name-2.trycloudflare.com"), { timeout: 4000 });
+    expect(lines.join("\n")).toContain("public      https://name-2.trycloudflare.com");
+
+    relay.pending = 1;
+    const listed: string[] = [];
+    expect(await relayCommand(io(listed), { statePath, home }, ["hosts", relay.url], {}, deps(dir))).toBe(0);
+    expect(listed.join("\n")).toContain("https://name-2.trycloudflare.com");
+    expect(listed.join("\n")).not.toContain("name-1.trycloudflare.com");
+  });
+
+  it("sends no hostname when a managed tunnel's connector restarts, whatever the child prints", async () => {
+    const relay = await fakeRelay();
+    relay.tunnel = { tunnelToken: "tunnel-token", hostname: "hbox1.boxes.example" };
+    const { statePath, home, dir } = box();
+    await relayCommand(io(), { statePath, home }, ["link", relay.url], {}, deps(dir));
+
+    const lines: string[] = [];
+    const up = (await startRelay({ statePath, port: 4400, log: line => lines.push(line) }, deps(dir, restarting(dir))))!;
+    closers.push(() => up.close());
+    expect(await up.hostname()).toBe("hbox1.boxes.example");
+
+    // A managed name is the relay's own: it does not change when the child does, and a box that reported one back
+    // would be refused and never read as up. This child prints a quick tunnel's line at every start regardless.
+    await vi.waitUntil(() => existsSync(join(dir, "runs")) && Number(readFileSync(join(dir, "runs"), "utf8").trim()) >= 2, { timeout: 4000 });
+    await vi.waitUntil(() => relay.calls.filter(c => c.line === "POST /hosts/hbox1/heartbeat").length >= 2, { timeout: 4000 });
+    for (const beat of relay.calls.filter(c => c.line === "POST /hosts/hbox1/heartbeat")) expect(beat.body).toEqual({ version: CLOUDFLARED.version });
+    expect(readRelayRecord(statePath)!.hostname).toBe("hbox1.boxes.example");
+    expect(lines.join("\n")).not.toContain("trycloudflare.com");
+    expect(lines.join("\n")).not.toContain("could not say where this host is");
+  });
+
+  it("puts no record back when a name arrives after the unlink took it away", async () => {
+    const relay = await fakeRelay();
+    const { statePath, home, dir } = box();
+    await relayCommand(io(), { statePath, home }, ["link", relay.url], {}, deps(dir));
+
+    // The one moment the guard is for: the record is cleared while a connector child is still coming up, so the
+    // name it prints arrives with nothing left on disk to write it into. The connector is a stand-in here, since a
+    // child started for a box that has been unlinked is exactly what must not happen.
+    let arrived: ((hostname: string) => void) | undefined;
+    const stub: Connector = { pid: undefined, hostname: async () => undefined, stop: async () => {} };
+    const lines: string[] = [];
+    const up = (await startRelay(
+      { statePath, port: 4400, log: line => lines.push(line) },
+      deps(dir, {
+        connector: opts => {
+          arrived = opts.onHostname;
+          return stub;
+        },
+      }),
+    ))!;
+    closers.push(() => up.close());
+
+    expect(await relayCommand(io(), { statePath, home }, ["unlink"], {}, deps(dir))).toBe(0);
+    expect(existsSync(relayRecordPath(statePath))).toBe(false);
+    relay.calls.length = 0;
+
+    arrived!("late-name-9.trycloudflare.com");
+    await new Promise(done => setTimeout(done, 100));
+    // The file itself, not what readRelayRecord makes of it: a record put back holding a hostname alone is one the
+    // reader rejects, so a box would read as never linked and the file would sit there with nothing to clear it.
+    expect(existsSync(relayRecordPath(statePath))).toBe(false);
+    expect(lines.join("\n")).not.toContain("late-name-9");
+    expect(relay.calls.some(c => c.body["hostname"] === "late-name-9.trycloudflare.com")).toBe(false);
   });
 
   it("starts nothing at all on a box that never linked", async () => {
@@ -432,6 +538,7 @@ describe("wsp connect --relay", () => {
     closeWords: () => "",
     paired: { deviceId: "d_1", deviceToken: "device-token" },
     close: () => {},
+    terminate: () => {},
   };
 
   it("pairs with a host on the relay by the name it has there, over the address the relay named", async () => {
@@ -450,6 +557,7 @@ describe("wsp connect --relay", () => {
       now: () => Date.parse("2026-09-11T12:00:00.000Z"),
       deviceName: () => "the Mac",
       relayUrl: (at, name) => relayHostUrl(at, name, deps(dir)),
+      window: dialWindowMs,
     });
 
     expect(code).toBe(0);
@@ -468,6 +576,7 @@ describe("wsp connect --relay", () => {
         now: () => 0,
         deviceName: () => "the Mac",
         relayUrl: async () => "https://never.example",
+        window: dialWindowMs,
       }),
     ).rejects.toThrow(/--relay/);
   });
