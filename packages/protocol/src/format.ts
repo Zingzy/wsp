@@ -1721,20 +1721,40 @@ export const NO_BUILD_TOOLS_LINE =
 export const NO_LINGER_LINE =
   "this login does not linger, so its services stop when you log out and the daemon would not outlive the connection; run loginctl enable-linger on it and deploy the daemon again";
 
-/** The mark a refusal above carries, put on where the check throws rather than matched against a list of the
- * sentences: a check added to a place's preflight is then one shell line and one sentence here, and nothing keeps
- * a second copy of which sentences mean this. What reads it is the row, which shows a machine its own words about
- * what it lacks and shows a deploy that failed further in the general line, since that one is an npm log. */
+/** Every sentence a machine's own checks refuse with, in one place beside them. Read by the rule that keeps each
+ * one's first clause short enough for a row, so a refusal added later takes that rule without anyone remembering
+ * where it is checked. Nothing decides anything by searching this: which ending a throw is comes off its mark. */
+export const MACHINE_LACKS_LINES: readonly string[] = [NO_BUILD_TOOLS_LINE, NO_LINGER_LINE];
+
+/** The marks the checks a machine takes before a daemon is put on it end with, put on where the throw happens
+ * rather than matched against text: a check added to a place's preflight is then one shell line and one sentence,
+ * and nothing keeps a second copy of which sentences mean what. Two of them, because the two endings lead
+ * opposite ways. A machine that answered and refused has said what it has not got, which a row shows and which
+ * stands until a person puts that thing there. A check that never reached the machine has said nothing about it
+ * either way: those are the client's own words, they belong in no row, and whatever the record already knew about
+ * that machine still holds. Every other failure is a deploy log and carries neither mark. */
 const MACHINE_LACKS = "wspMachineLacks";
+const MACHINE_UNANSWERED = "wspMachineUnanswered";
 
 export function machineLacking(said: string): Error {
   return Object.assign(new Error(said), { [MACHINE_LACKS]: true });
 }
 
+export function machineUnanswered(said: string): Error {
+  return Object.assign(new Error(said), { [MACHINE_UNANSWERED]: true });
+}
+
 /** The sentence a machine refused with, or undefined for every other failure. */
 export function machineLacksLine(e: unknown): string | undefined {
-  return e instanceof Error && (e as unknown as Record<string, unknown>)[MACHINE_LACKS] === true ? e.message : undefined;
+  return marked(e, MACHINE_LACKS) ? e.message : undefined;
 }
+
+/** Whether the check never reached the machine, so nothing about what that machine has was learned. */
+export function machineNeverAnswered(e: unknown): boolean {
+  return marked(e, MACHINE_UNANSWERED);
+}
+
+const marked = (e: unknown, mark: string): e is Error => e instanceof Error && (e as unknown as Record<string, unknown>)[mark] === true;
 
 /** A refusal cut to its first clause, which is what the machine has not got. Every sentence above is written in
  * that order, what is wrong, then why it matters, then what to do, and its head is short enough for a row about

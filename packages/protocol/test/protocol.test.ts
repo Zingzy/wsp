@@ -8,6 +8,7 @@ import {
   PauseMode,
   GoldenVersion,
   DAEMON_ROOTS_PATH,
+  MACHINE_LACKS_LINES,
   machineLacking,
   machineLacksLine,
   machineLacksShort,
@@ -936,7 +937,11 @@ describe("daemon files and diff ops", () => {
     // and fits the row, and the whole sentence keeps the command a person types.
     expect(machineLacksShort(NO_BUILD_TOOLS_LINE)).toBe("this machine has no C compiler");
     expect(machineLacksShort(NO_LINGER_LINE)).toBe("this login does not linger");
-    for (const line of [NO_BUILD_TOOLS_LINE, NO_LINGER_LINE]) {
+    // Off the one list beside the sentences, not a copy of it here: a refusal added to a place's preflight takes
+    // this rule by being listed once, rather than by somebody remembering that this loop exists.
+    expect(MACHINE_LACKS_LINES).toContain(NO_BUILD_TOOLS_LINE);
+    expect(MACHINE_LACKS_LINES).toContain(NO_LINGER_LINE);
+    for (const line of MACHINE_LACKS_LINES) {
       expect(machineLacksShort(line).length).toBeLessThanOrEqual(30);
       expect(line.length).toBeGreaterThan(machineLacksShort(line).length);
     }

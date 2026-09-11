@@ -10,7 +10,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, st
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { machineLacksShort, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, sshDaemonPaths } from "@wsp/protocol";
+import { machineLacksLine, machineLacksShort, machineNeverAnswered, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, sshDaemonPaths } from "@wsp/protocol";
 import { putBytesScript } from "@wsp/engine";
 import type { Machine } from "@wsp/engine";
 import { BOOT_SCRIPT, CLOUD_PLACE, CONTAINER_PLACE, DAEMON_GONE_LINE, daemonLogCommand, guestPlace, SYSTEMD, deployDaemon, PREFLIGHT_OK_LINE, preflightScript, DAEMON_UNIT, daemonUnit, deployScript, removeDaemonScript, sshDaemonPlace, stageDaemonBundle, startMjs, stopDaemonScript } from "../src/doctor.js";
@@ -19,7 +19,7 @@ const LOGIN = { home: "/home/maya", path: "/usr/local/bin:/usr/bin:/bin" };
 
 /** A machine that writes nothing and remembers what it was asked to write and run, so a deploy that must put
  * nothing on a machine can be held to it. */
-function fakeMachine(over: { preflight?: { exitCode: number; stdout: string } } = {}): { machine: Machine; wrote: string[]; ran: string[] } {
+function fakeMachine(over: { preflight?: { exitCode: number; stdout: string; stderr?: string } } = {}): { machine: Machine; wrote: string[]; ran: string[] } {
   const wrote: string[] = [];
   const ran: string[] = [];
   const machine = {
@@ -28,7 +28,7 @@ function fakeMachine(over: { preflight?: { exitCode: number; stdout: string } } 
     putBytes: async (path: string) => void wrote.push(path),
     run: async (script: string) => {
       ran.push(script);
-      if (script.includes(PREFLIGHT_OK_LINE) && over.preflight !== undefined) return { ...over.preflight, stderr: "" };
+      if (script.includes(PREFLIGHT_OK_LINE) && over.preflight !== undefined) return { stderr: "", ...over.preflight };
       return { exitCode: 0, stdout: script.includes(PREFLIGHT_OK_LINE) ? `${PREFLIGHT_OK_LINE}\n` : "", stderr: "" };
     },
     exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
@@ -250,6 +250,22 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
     const guest = fakeMachine();
     await deployDaemon(guest.machine, { place: CLOUD_PLACE, daemonDir: emptyBundle() }).catch(() => {});
     expect(guest.ran.some(r => r.includes(PREFLIGHT_OK_LINE))).toBe(false);
+  });
+
+  it("marks the machine's own refusal apart from a check that never reached the machine", async () => {
+    const place = sshDaemonPlace(LOGIN);
+    // The refusing line echoes its sentence and exits 1, so the words are the machine's own and are marked as
+    // what it has not got: that is the sentence a row shows.
+    const refused = await deployDaemon(fakeMachine({ preflight: { exitCode: 1, stdout: `${NO_BUILD_TOOLS_LINE}\n` } }).machine, { place, daemonDir: emptyBundle() }).catch((e: unknown) => e);
+    expect(machineLacksLine(refused)).toBe(NO_BUILD_TOOLS_LINE);
+    expect(machineNeverAnswered(refused)).toBe(false);
+
+    // A box that is switched off: nothing ran on it, so ssh answers 255 with its own words on stderr and nothing
+    // on stdout. Those words say nothing about what that machine has, so they carry no lack and never reach a row.
+    const off = await deployDaemon(fakeMachine({ preflight: { exitCode: 255, stdout: "", stderr: "ssh: connect to host box port 2222: Connection refused\n" } }).machine, { place, daemonDir: emptyBundle() }).catch((e: unknown) => e);
+    expect(machineLacksLine(off)).toBeUndefined();
+    expect(machineNeverAnswered(off)).toBe(true);
+    expect((off as Error).message).toContain("Connection refused");
   });
 
   it("refuses a login whose services stop with it, naming the one command that turns that off", () => {

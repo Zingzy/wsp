@@ -24,10 +24,11 @@ const runtime = (ssh: SshWiring, store: Store = memoryStore(), clock?: Clock): R
 
 /** A host that reaches machines over ssh and can put a daemon on one, with the machine answering the port file
  * with `port` and everything else with nothing. */
-function host(over: { port?: string; refuse?: string; lacks?: boolean; refuseRemoval?: string; store?: Store; clock?: Clock } = {}): { rt: Runtime; daemon: FakeSshDaemon; carried: { script: string; stdin?: Uint8Array }[] } {
+function host(over: { port?: string; refuse?: string; lacks?: boolean; unanswered?: boolean; refuseRemoval?: string; store?: Store; clock?: Clock } = {}): { rt: Runtime; daemon: FakeSshDaemon; carried: { script: string; stdin?: Uint8Array }[] } {
   const daemon = fakeSshDaemon({
     ...(over.refuse !== undefined ? { refuse: over.refuse } : {}),
     ...(over.lacks !== undefined ? { lacks: over.lacks } : {}),
+    ...(over.unanswered !== undefined ? { unanswered: over.unanswered } : {}),
     ...(over.refuseRemoval !== undefined ? { refuseRemoval: over.refuseRemoval } : {}),
   });
   const { wiring, carried } = fakeSsh(script => (script.startsWith(`cat '${AT.portFile}'`) ? { stdout: over.port ?? "42891\n" } : {}), daemon);
@@ -288,6 +289,35 @@ describe("putting a daemon on a machine already recorded", () => {
     // The old machine's sentence is off the record; this machine's own went on in its place.
     await vi.waitFor(async () => expect(((await store.get("workspaces", ws.id)) as { daemonRefusedAt: { machineId: string } }).daemonRefusedAt.machineId).toBe("ssh://dev@box:22"));
     await next.rt.close();
+  });
+
+  it("keeps what a machine said it lacks through a dial that never reached it, and takes none of that dial's words", async () => {
+    const store = memoryStore();
+    const fc = fakeClock();
+    const first = host({ store, clock: fc.clock, refuse: NO_BUILD_TOOLS_LINE, lacks: true });
+    const ws = await first.rt.workspaces.createSsh("dev@box");
+    await first.rt.close();
+    const refusal = (): Promise<{ daemonRefusedAt?: { why: string } }> => store.get("workspaces", ws.id) as Promise<{ daemonRefusedAt?: { why: string } }>;
+    expect((await refusal()).daemonRefusedAt?.why).toBe(NO_BUILD_TOOLS_LINE);
+
+    // The box is switched off by the time the window is out. ssh answers with its own words, which say nothing
+    // about the compiler: the record keeps what the machine itself said and its hour goes on running.
+    fc.advance(DAEMON_LACKS_AGAIN_MS);
+    const off = host({ store, clock: fc.clock, refuse: "ssh: connect to host box port 22: Connection refused", unanswered: true });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await off.rt.workspaces.list();
+      await vi.waitFor(() => expect(off.daemon.deploys).toHaveLength(1));
+    } finally {
+      warn.mockRestore();
+    }
+    const kept = (await refusal()).daemonRefusedAt;
+    expect(kept?.why).toBe(NO_BUILD_TOOLS_LINE);
+    // The ssh client's words are in neither the record nor the row: a row saying a machine lacks "Connection
+    // refused" would be saying something about that machine that nobody learned.
+    expect(kept?.why).not.toContain("Connection refused");
+    expect((await off.rt.workspaces.get(ws.id)).daemonRefusedAt?.why).toBe(NO_BUILD_TOOLS_LINE);
+    await off.rt.close();
   });
 
   it("says what the machine lacks, rather than that a helper it never had is being updated", async () => {
