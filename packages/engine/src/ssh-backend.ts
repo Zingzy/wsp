@@ -494,6 +494,7 @@ export class SshBackend implements MachineBackend {
   readonly capabilities: Capabilities = {
     liveCloneForks: false,
     resize: false,
+    replacesMachine: false, // the machine is the person's own: wsp made it no image and throws it away for nothing
     previewUrls: false,
     signedUrls: false,
     containers: false,

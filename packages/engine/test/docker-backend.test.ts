@@ -137,6 +137,9 @@ describe("DockerBackend against a fake Engine API", () => {
       liveCloneForks: false,
       pauseMode: "memory",
       resize: false,
+      // A container that exists takes no new size, and a fresh one from the same image stands in for it: the pair
+      // that says the three verbs read three flags rather than one fact about forks.
+      replacesMachine: true,
       previewUrls: false,
       signedUrls: false,
       containers: false,
