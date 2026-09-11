@@ -13,7 +13,7 @@ import { servingHost } from "./host-lock.js";
 export const defaultHomeIn = (user: string): string => join(user, ".wsp");
 
 /** The home WSP_HOME names, or nothing: unset and empty are one answer, and every road that reads the variable
- * reads it here. `wspHome` is the one reading still outside this, since it takes an empty value as a home. */
+ * reads it here. */
 export const homeNamed = (value: string | undefined): string | undefined => (value !== undefined && value !== "" ? value : undefined);
 
 /** Fixed spot a launcher without WSP_HOME (Finder, a service) can read to

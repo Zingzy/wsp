@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { DockerBackend, LocalBackend, NoProviderBackend, SolariBackend, SshBackend, type MachineBackend } from "@wsp/engine";
+import { BoxBackend, DockerBackend, LocalBackend, NoProviderBackend, SolariBackend, SshBackend, type MachineBackend } from "@wsp/engine";
 import { goldenRecipe, makeRuntime, optsFor, providerSlotOf, swapProvider } from "../src/cli.js";
 import { PROVIDER_MODULES, providerBackendFor, providerEnvNames, providerEnvWith, providerModule, type ProviderModule } from "../src/providers.js";
 
@@ -32,23 +32,30 @@ describe("provider modules", () => {
     expect(providerEnvWith({}, { WSP_DOCKER: "1" })).toMatchObject({ WSP_DOCKER: "1" });
   });
 
+  it("takes Box when a person names it, key or no key, and hands the backend the key the environment holds", () => {
+    expect(providerModule(pick({}, { WSP_PROVIDER: "box" })).id).toBe("box");
+    expect(providerModule(pick({ solari: "sk-x" }, { WSP_PROVIDER: "box", BOX_API_KEY: "box_x" })).id).toBe("box");
+    expect(providerBackendFor(pick({}, { WSP_PROVIDER: "box", BOX_API_KEY: "box_x" }))).toBeInstanceOf(BoxBackend);
+    expect(providerBackendFor(pick({}, { WSP_PROVIDER: "box", BOX_API_KEY: "box_x" })).capabilities).toMatchObject({ pauseMode: "disk", previewUrls: true, containers: true });
+  });
+
   it("every row is reachable and the last one answers for any computer", () => {
-    expect(PROVIDER_MODULES.map(m => m.id)).toEqual(["docker", "solari", "none"]);
+    expect(PROVIDER_MODULES.map(m => m.id)).toEqual(["docker", "box", "solari", "none"]);
     expect(PROVIDER_MODULES.at(-1)!.selects(pick())).toBe(true);
   });
 
   it("every registered backend, and the two kinds outside the registry, declares a pause mode and a lifecycle together or neither, and says on its own whether it copies a disk", () => {
     // Built the way the host builds them, with fake picks: a key that looks fake, a daemon nothing dials.
-    const built = PROVIDER_MODULES.map(m => [m.id, m.build(pick({ solari: "sk-ant-x" }, { DOCKER_HOST: "unix:///nonexistent/docker.sock" }))] as const);
+    const built = PROVIDER_MODULES.map(m => [m.id, m.build(pick({ solari: "sk-ant-x" }, { DOCKER_HOST: "unix:///nonexistent/docker.sock", BOX_API_KEY: "box_x" }))] as const);
     const all: readonly (readonly [string, MachineBackend])[] = [...built, ["local", new LocalBackend({ root: "/tmp/wsp-providers" })], ["ssh", new SshBackend()]];
     const modes = Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.pauseMode]));
-    expect(modes).toEqual({ docker: "memory", solari: "memory", none: undefined, local: undefined, ssh: undefined });
+    expect(modes).toEqual({ docker: "memory", box: "disk", solari: "memory", none: undefined, local: undefined, ssh: undefined });
     for (const [, b] of all) expect(b.capabilities.pauseMode === undefined || ["memory", "disk"].includes(b.capabilities.pauseMode)).toBe(true);
     // The runtime reads the budgets only where a pause exists, so the two are declared together or not at all.
     for (const [id, b] of all) expect([id, b.lifecycle !== undefined]).toEqual([id, b.capabilities.pauseMode !== undefined]);
     // Which providers copy a machine's disk into an image, the one fact the snapshot verb reads: a fork that boots
     // cold is still snapshotted, so this row is its own and never liveCloneForks.
-    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.diskSnapshots]))).toEqual({ docker: true, solari: true, none: false, local: false, ssh: false });
+    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.diskSnapshots]))).toEqual({ docker: true, box: true, solari: true, none: false, local: false, ssh: false });
     for (const [, b] of all) if (b.lifecycle !== undefined) {
       expect(b.lifecycle.budgets.wakeAttempts).toBeGreaterThanOrEqual(1);
       expect(b.lifecycle.budgets.daemonAnswersMs).toBeGreaterThan(0);
@@ -84,11 +91,11 @@ describe("provider modules", () => {
   });
 
   it("the variables a service carries are the rows' own, so a provider added brings its variable with it", () => {
-    expect(providerEnvNames()).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST"]);
+    expect(providerEnvNames()).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST", "BOX_API_KEY"]);
     // The row a provider is added as: the list follows it, and nothing else has to be remembered for the unit its
     // host is installed as to be given the variable that selects it.
     const fly: ProviderModule = { id: "fly", envNames: ["WSP_PROVIDER", "FLY_API_TOKEN"], selects: p => p.env["FLY_API_TOKEN"] !== undefined, build: () => new NoProviderBackend() };
-    expect(providerEnvNames([...PROVIDER_MODULES, fly])).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST", "FLY_API_TOKEN"]);
+    expect(providerEnvNames([...PROVIDER_MODULES, fly])).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST", "BOX_API_KEY", "FLY_API_TOKEN"]);
     // What a row selects on is what it names: a row reading a variable it never listed would be carried by neither.
     for (const m of PROVIDER_MODULES) for (const name of m.envNames) expect(providerEnvNames()).toContain(name);
   });

@@ -51,6 +51,7 @@ import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 import { addressLines, dialAddress, hostLogPath, hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
 import type { LocalDaemon } from "./local-daemon.js";
 import {
+  hostThereLines,
   httpProbe,
   installService,
   logTail,
@@ -72,18 +73,18 @@ import {
 import { connectCommand, disconnectCommand, hostsCommand } from "./connect.js";
 import { stopRecordedConnector } from "./connector.js";
 import { publicHostname, readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
-import { DEFAULT_HOME, wspHome } from "./hosts.js";
+import { aimAddress, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnoredLine, wspHome } from "./hosts.js";
 import { currentHome, currentHomePointer, servingHome } from "./serving-home.js";
 import { advertiseWord, devicesCommand, hostReach, pairCommand } from "./pairing.js";
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, registeredLine, removeEach, removeLines, runningWsp, type RunningWsp } from "./mcp-install.js";
-import { CLI_VERBS, COMMON, dialHost, failed, findVerb, type HostClient, jsonAsked, runVerb, toolName, verbHelp, verbUsage, type LocalRuntime, type VerbDeps } from "./verbs.js";
+import { CLI_VERBS, COMMON, type DialOpts, dialHost, failed, findVerb, type HostClient, jsonAsked, runVerb, toolName, verbHelp, verbUsage, type LocalRuntime, type VerbDeps } from "./verbs.js";
 import { VERSION } from "./version.js";
 
 /** The computer every screen and every reader here is told it is on; the one reading, so a run, its hand-off and
  * the init job a host serves never disagree about which of the two this is. */
-const hostPlatform = (): Platform => (platform() === "darwin" ? "darwin" : "linux");
+export const hostPlatform = (): Platform => (platform() === "darwin" ? "darwin" : "linux");
 
 /** One line per exit class, the code first, wrapped to the help's width. */
 const exitCodeHelp = (): string => ExitClass.options.map(cls => wrap(`  ${EXIT_CODES[cls]} ${cls.padEnd(8)}  ${EXIT_WORDS[cls]}`, 80, " ".repeat(14)).join("\n")).join("\n");
@@ -175,13 +176,21 @@ options:
                      directory has a .env, else state.json in the home the
                      running host serves, which is ~/.wsp unless WSP_HOME or
                      current-home names another)
-  --host ALIAS       on any verb: run the line against a host on another
-                     computer, by the name wsp connect gave it. WSP_HOST names
-                     one for a whole shell. That host serves its own state, so
-                     --state is not read beside it and a line that gives both
-                     says so. With neither, a line goes to the host serving the
-                     state file here, and only when none does to the default
-                     alias wsp hosts marks
+  --host ALIAS       on any verb, and on wsp status: run the line against a
+                     host on another computer, by the name wsp connect gave it.
+                     WSP_HOST names one for a whole shell. That host serves its
+                     own state, so --state is not read beside it and a line that
+                     gives both says so. With neither, a line goes to the host
+                     serving the state file here, and only when none does to the
+                     default alias wsp hosts marks. wsp status beside it, or
+                     WSP_HOST, reads that host rather than this computer: where
+                     it answers and whether it did, the service holding it up
+                     being that computer's own to read. Naming one is the only
+                     thing that moves that line: with neither word it answers
+                     for this computer whatever alias wsp hosts marks, since it
+                     is the question whether the host here is serving. The
+                     lines that start, stop or hand out access to something
+                     here refuse it
   --code CODE        connect: the code wsp pair printed on the other computer
   --name ALIAS       connect: the name to call that host here (default what its
                      address calls it); relay link: the name the approval page
@@ -225,8 +234,10 @@ options:
                      the only workspace there is
   --provider NAME    up, init: which machine provider this computer forks on.
                      docker forks containers on a Docker daemon, yours or one
-                     on a box; without this a saved Solari key takes the cloud
-                     and no key leaves this computer as the only workspace
+                     on a box; box forks Box by ASCII machines with BOX_API_KEY
+                     in the environment; without this a saved Solari key takes
+                     the cloud and no key leaves this computer as the only
+                     workspace
   --docker-host URL  up, init: the Docker daemon to dial, as DOCKER_HOST words
                      it (unix:///var/run/docker.sock, ssh://you@box); this
                      computer's own socket without it
@@ -1216,6 +1227,8 @@ export interface ServiceDeps {
   keys: KeySources;
   /** Whether the host the lock names answers on its port. */
   answers: HostProbe;
+  /** The one dial, for the status of a host on another computer: nothing on this computer says whether it is up. */
+  dial(statePath: string, opts: DialOpts): Promise<HostClient>;
 }
 
 /** A load or a stop is a process starting or ending on this computer, not a network call. */
@@ -1223,7 +1236,7 @@ const SERVICE_WAIT_MS = 20_000;
 
 export function systemService(): ServiceDeps {
   const os = platform();
-  return { platform: os, manager: serviceManagerFor(os), run: systemRunner, waitMs: SERVICE_WAIT_MS, keys: keySources(), answers: httpProbe };
+  return { platform: os, manager: serviceManagerFor(os), run: systemRunner, waitMs: SERVICE_WAIT_MS, keys: keySources(), answers: httpProbe, dial: dialHost };
 }
 
 /** Which service this is: one per state file, under this person's home and this user. */
@@ -1358,7 +1371,32 @@ export async function downCommand(io: CliIO, opts: { statePath: string }, deps: 
   return 0;
 }
 
-export async function statusCommand(io: CliIO, opts: { statePath: string }, deps: ServiceDeps): Promise<number> {
+export async function statusCommand(io: CliIO, opts: { statePath: string; state?: string } & HostPick, deps: ServiceDeps): Promise<number> {
+  // The one line that leaves this computer only when a person named a host: --host or WSP_HOST and nothing else.
+  // A verb has a host to speak to whatever the line said, so it follows the fallbacks under those two, the default
+  // alias among them; this line is the question whether the host here is serving, and an alias answering for a box
+  // would hide the one thing it was run to learn.
+  const aim = namedHost(opts);
+  if (aim !== undefined) {
+    // The same note the verbs leave, in the same words: a line that named both a file here and a host over there
+    // reads neither one from the other.
+    if (opts.state !== undefined) io.error(stateIgnoredLine(aimName(aim)));
+    // A host on another computer keeps its own lock and its own service manager, neither of which is a file here:
+    // what this computer can say is where it answers and whether it did, which is one dial and nothing else. A road
+    // that carried nothing is the reading; anything the host itself said stands as this line's own failure.
+    const unreached = await deps.dial(opts.statePath, { aim }).then(
+      client => {
+        client.close();
+        return undefined;
+      },
+      (e: unknown) => {
+        if ((e as { kind?: unknown }).kind !== "unreachable") throw e;
+        return e instanceof Error ? e.message : String(e);
+      },
+    );
+    for (const line of hostThereLines(aimName(aim), aimAddress(aim), unreached)) io.log(line);
+    return unreached === undefined ? 0 : 1;
+  }
   const reading = await serviceReading(deps.manager, serviceAddress(opts.statePath), deps.run, deps.platform);
   const lock = servingHost(opts.statePath);
   const host = lock === undefined ? undefined : { lock, answering: await deps.answers(lock) };
@@ -1388,6 +1426,7 @@ interface SharedFlags {
   code?: string;
   name?: string;
   relay?: string;
+  host?: string;
   "no-relay"?: boolean;
   provider?: string;
   "docker-host"?: string;
@@ -1396,6 +1435,10 @@ interface SharedFlags {
 interface Command {
   /** Whether stdout is objects under --json; a command without it refuses the flag rather than hand prose to whoever reads them. */
   json: boolean;
+  /** Whether the line runs against the host --host names; a command that reads this computer's own files refuses
+   * the flag rather than take it and aim nowhere. One parse reads it for every word, so the refusal is what keeps
+   * the ones that have nothing to do with it from swallowing it. */
+  host: boolean;
   /** Why the MCP server has no tool for it. */
   cliOnly: string;
   run(io: CliIO, opts: SharedOpts, values: SharedFlags, args: string[]): Promise<number>;
@@ -1405,6 +1448,7 @@ interface Command {
 const COMMANDS: Readonly<Record<string, Command>> = {
   up: {
     json: false,
+    host: false,
     cliOnly: "starts the host on the person's computer; a tool runs against a host that is already up",
     run: async (io, opts, values) => {
       if (values.service === true) return upServiceCommand(io, opts, systemService());
@@ -1414,46 +1458,60 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
   down: {
     json: false,
+    host: false,
     cliOnly: "stops the service holding the host up on the person's computer, which a tool would be cutting the ground from under",
     run: (io, opts) => downCommand(io, opts, systemService()),
   },
   status: {
     json: false,
-    cliOnly: "reads this computer's lock and service manager; a tool that answers at all is proof a host is up",
-    run: (io, opts) => statusCommand(io, opts, systemService()),
+    host: true,
+    cliOnly: "reads this computer's lock and service manager, or dials the host named beside it; a tool that answers at all is proof a host is up",
+    run: (io, opts, values) =>
+      statusCommand(
+        io,
+        { statePath: opts.statePath, home: opts.home, env: opts.env, ...(values.host !== undefined ? { host: values.host } : {}), ...(values.state !== undefined ? { state: values.state } : {}) },
+        systemService(),
+      ),
   },
   pair: {
     json: false,
+    host: false,
     cliOnly: "hands out a code that lets another computer drive this host; only a person at the host's own terminal gives that away",
     run: (io, opts, _values, args) => pairCommand(io, { statePath: opts.statePath, home: opts.home, env: opts.env }, args),
   },
   devices: {
     json: false,
+    host: false,
     cliOnly: "lists and takes away the computers that may drive this host, which belongs with the terminal that handed them the code",
     run: (io, opts, _values, args) => devicesCommand(io, { statePath: opts.statePath, home: opts.home, env: opts.env }, args),
   },
   connect: {
     json: false,
+    host: false,
     cliOnly: "spends a pairing code and keeps the token it buys in this person's own files; where their wsp points is theirs to say",
     run: (io, opts, values, args) => connectCommand(io, opts, values, args),
   },
   relay: {
     json: false,
+    host: false,
     cliOnly: "puts this computer on a person's relay account and runs the tunnel it sits behind, which is theirs to give away and theirs to take back",
     run: (io, opts, values, args) => relayCommand(io, opts, args, values),
   },
   hosts: {
     json: false,
+    host: false,
     cliOnly: "reads and moves which host every line on this computer runs against, which no thread decides for the person",
     run: (io, opts, _values, args) => hostsCommand(io, opts, args),
   },
   disconnect: {
     json: false,
+    host: false,
     cliOnly: "hands a host back the token this computer drives it by, which belongs with the terminal that took it",
     run: (io, opts, _values, args) => disconnectCommand(io, opts, args),
   },
   init: {
     json: true,
+    host: false,
     cliOnly: "builds the golden and serves for hours; an agent runs it from a shell and relays the sign-ins it prints",
     run: (io, opts, values) =>
       init(io, opts, {
@@ -1472,6 +1530,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
   doctor: {
     json: false,
+    host: false,
     cliOnly: "forks a live machine and bills while it runs, or with --local runs a thread on this computer; a person decides that at a terminal",
     run: async (io, opts, values) => {
       await adoptLoginPath(line => io.log(line));
@@ -1496,6 +1555,9 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     },
   },
 };
+
+/** The words of the shared parse that run against a host somewhere else, the one fact its refusal reads. */
+export const HOST_COMMANDS: readonly string[] = Object.keys(COMMANDS).filter(w => COMMANDS[w]!.host);
 
 /** The words that take --json on the shared parse and those that refuse it, the one fact the refusal and its test read. */
 export const JSON_COMMANDS: readonly string[] = Object.keys(COMMANDS).filter(w => COMMANDS[w]!.json);
@@ -1605,9 +1667,20 @@ export const SHARED_OPTIONS: Options = {
   code: { type: "string" },
   name: { type: "string" },
   relay: { type: "string" },
+  host: { type: "string" },
 };
 
 const without = (options: Options, names: readonly string[]): Options => Object.fromEntries(Object.entries(options).filter(([name]) => !names.includes(name)));
+
+/** The flags a line of the shared parse takes, read off the command that runs it: a line of two words or more is
+ * selected by its first word, so it advertises exactly what that word's `json` and `host` say and never a list
+ * written out beside it, which is how a flag added to the shared parse reached seven lines that refuse it. */
+function optionsFor(words: string): Options {
+  const word = words.split(" ")[0]!;
+  const command = COMMANDS[word];
+  if (command === undefined) throw new Error(`wsp ${words} is in the command lines and no command answers wsp ${word}`);
+  return without(SHARED_OPTIONS, [...(command.json ? [] : ["json"]), ...(command.host ? [] : ["host"])]);
+}
 
 /** A line `wsp` answers: the words after `wsp` that select it, every flag it parses (anything else is a usage error),
  * and its other door: the MCP tool it is served as, or why it has none. */
@@ -1618,14 +1691,14 @@ export const COMMAND_LINES: readonly CommandLine[] = [
   ...CLI_VERBS.map(v => ({ words: v.name, options: { ...COMMON, ...v.options }, tool: toolName(v.name) })),
   { words: MCP_COMMAND, options: MCP_OPTIONS, cliOnly: "is the tool server itself" },
   { words: `${MCP_COMMAND} install`, options: MCP_OPTIONS, cliOnly: "writes an agent's own config and skills folder, which is done once from a shell" },
-  { words: "devices revoke", options: without(SHARED_OPTIONS, ["json"]), cliOnly: "takes away a computer's token, which belongs with the terminal that handed it the code" },
-  { words: "hosts default", options: without(SHARED_OPTIONS, ["json"]), cliOnly: "moves which host every line on this computer runs against, which no thread decides for the person" },
-  { words: "relay link", options: without(SHARED_OPTIONS, ["json"]), cliOnly: "shows a code a person approves in their own browser, which only somebody at this computer's terminal starts" },
-  { words: "relay unlink", options: without(SHARED_OPTIONS, ["json"]), cliOnly: "takes this computer off a person's relay account and stops the tunnel, which belongs with the terminal that put it there" },
-  { words: "relay hosts", options: without(SHARED_OPTIONS, ["json"]), cliOnly: "signs this person in to their relay and lists the boxes on their account, which no thread does for them" },
-  { words: "relay clients", options: without(SHARED_OPTIONS, ["json"]), cliOnly: "reads and takes away the computers holding a token for this person's relay account, which belongs with the person whose account it is" },
-  { words: "relay clients revoke", options: without(SHARED_OPTIONS, ["json"]), cliOnly: "signs another of this person's computers out of their relay, which no thread decides for them" },
-  ...Object.entries(COMMANDS).map(([words, command]) => ({ words, options: command.json ? SHARED_OPTIONS : without(SHARED_OPTIONS, ["json"]), cliOnly: command.cliOnly })),
+  { words: "devices revoke", options: optionsFor("devices revoke"), cliOnly: "takes away a computer's token, which belongs with the terminal that handed it the code" },
+  { words: "hosts default", options: optionsFor("hosts default"), cliOnly: "moves which host every line on this computer runs against, which no thread decides for the person" },
+  { words: "relay link", options: optionsFor("relay link"), cliOnly: "shows a code a person approves in their own browser, which only somebody at this computer's terminal starts" },
+  { words: "relay unlink", options: optionsFor("relay unlink"), cliOnly: "takes this computer off a person's relay account and stops the tunnel, which belongs with the terminal that put it there" },
+  { words: "relay hosts", options: optionsFor("relay hosts"), cliOnly: "signs this person in to their relay and lists the boxes on their account, which no thread does for them" },
+  { words: "relay clients", options: optionsFor("relay clients"), cliOnly: "reads and takes away the computers holding a token for this person's relay account, which belongs with the person whose account it is" },
+  { words: "relay clients revoke", options: optionsFor("relay clients revoke"), cliOnly: "signs another of this person's computers out of their relay, which no thread decides for them" },
+  ...Object.entries(COMMANDS).map(([words, command]) => ({ words, options: optionsFor(words), cliOnly: command.cliOnly })),
 ];
 
 /** `run` is how this process was started, which the MCP install writes into an agent's config as the way to start it
@@ -1668,6 +1741,9 @@ export async function cli(argv: string[], io: CliIO = terminalIO(), run: Running
   const json = values.json === true;
   if (command === undefined) return failed(io, json, usageRefusal(commandUsage(word) ?? `unknown command: ${word}\n\n${HELP}`));
   if (json && !command.json) return failed(io, json, usageRefusal(`Unknown option '--json' for wsp ${word}: only ${JSON_COMMANDS.map(w => `wsp ${w}`).join(", ")} prints JSON.`));
+  if (values.host !== undefined && !command.host) {
+    return failed(io, json, usageRefusal(`Unknown option '--host' for wsp ${word}: it runs on this computer. ${HOST_COMMANDS.map(w => `wsp ${w}`).join(", ")} reads it, and so does every verb.`));
+  }
   try {
     return await command.run(io, opts, values, positionals.slice(1));
   } catch (e) {
