@@ -11,3 +11,11 @@ export const LABS_ENV = "WSP_LABS";
  * turn's token, minted by the host at the launch and forgotten when the turn's process exits. The host is the only
  * thing that maps it to a thread, so a caller cannot name a thread it did not come from. */
 export const TURN_TOKEN_ENV = "WSP_TURN";
+
+/** The address a machine dials this host at, in the launch environment of every turn on a workspace whose agents
+ * may spawn: the host's own reachable address, which is not loopback, since the turn runs on another computer. */
+export const HOST_URL_ENV = "WSP_HOST_URL";
+
+/** The token that turn presents there: a device of this host's, scoped to the thread, minted at the launch and
+ * taken away when the turn's process exits. It never reaches a config file or an argument, only the environment. */
+export const HOST_TOKEN_ENV = "WSP_HOST_TOKEN";

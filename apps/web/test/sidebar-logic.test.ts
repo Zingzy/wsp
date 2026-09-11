@@ -12,6 +12,7 @@ import {
   isThreadWorking,
   resolveAdjacentThreadId,
   searchSidebarThreadsByTitle,
+  nestSpawnedThreads,
   sidebarThreadOrder,
   sortSettledThreadsForSidebar,
   sortThreadsForSidebar,
@@ -375,6 +376,26 @@ describe("what a space walks", () => {
     expect(topSidebarThread(threads)?.id).toBe("working-new");
     expect(sidebarThreadOrder([])).toEqual([]);
     expect(topSidebarThread([])).toBeNull();
+  });
+
+  it("draws a thread an agent spawned under the thread that spawned it, in the order it holds otherwise", () => {
+    const spawned = (id: string, startedAt: string, parentThreadId?: string) => ({ ...row(id, "running", startedAt), ...(parentThreadId !== undefined ? { parentThreadId } : {}) });
+    const threads = [
+      spawned("lead", "2026-09-01T00:01:00Z"),
+      spawned("other", "2026-09-01T00:09:00Z"),
+      spawned("builder-b", "2026-09-01T00:03:00Z", "lead"),
+      spawned("builder-a", "2026-09-01T00:04:00Z", "lead"),
+      spawned("deeper", "2026-09-01T00:05:00Z", "builder-a"),
+    ];
+    // The sort puts the newest first; the tree then pulls each thread's own under it, keeping that order inside.
+    expect(sidebarThreadOrder(threads).map(t => t.id)).toEqual(["other", "lead", "builder-a", "deeper", "builder-b"]);
+    // A parent that is not in this list leaves the row where the sort put it rather than dropping it.
+    expect(nestSpawnedThreads([spawned("orphan", "2026-09-01T00:01:00Z", "gone")]).map(t => t.id)).toEqual(["orphan"]);
+    // A row naming itself as its own parent is drawn once, not forever, and two rows naming each other are both
+    // drawn: a thread the sidebar leaves out is a thread nobody can reach.
+    expect(nestSpawnedThreads([spawned("loop", "2026-09-01T00:01:00Z", "loop")]).map(t => t.id)).toEqual(["loop"]);
+    const pair = [spawned("a", "2026-09-01T00:01:00Z", "b"), spawned("b", "2026-09-01T00:02:00Z", "a")];
+    expect(nestSpawnedThreads(pair).map(t => t.id).sort()).toEqual(["a", "b"]);
   });
 
   it("shows the selected workspace, and the first in the sidebar's order while what is selected is not one", () => {

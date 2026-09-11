@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vitest";
-import { API_UNAUTHORIZED, listenBeyondLoopbackLine, LOOPBACK, WS_PATH, type BootPayload } from "@wsp/protocol";
+import { agentsOffRefusal, API_UNAUTHORIZED, listenBeyondLoopbackLine, LOOPBACK, WS_PATH, type BootPayload } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { serve, type CliIO } from "../src/cli.js";
 import { addressLines } from "../src/host-lock.js";
@@ -155,6 +155,25 @@ describe("a host that listens beyond this computer", () => {
 
     const wrong = await fetch(`http://127.0.0.1:${h.port}/api/workspaces`, { headers: { authorization: "Bearer nope" } });
     expect(wrong.status).toBe(401);
+  });
+
+  it("a token scoped to a thread is that thread on the JSON routes too, not a paired computer", async () => {
+    const { handle: h, runtime } = await up("0.0.0.0");
+    const own = await runtime.workspaces.create({ golden: GOLDEN.versions[0]!.snapshotId, name: "lead" });
+    const thread = await runtime.devices.mint("thread abcd1234", { kind: "thread", threadId: "t_1", workspaceId: own.id, rootThreadId: "t_1" }, Date.now());
+    const auth = { authorization: `Bearer ${thread.deviceToken}` };
+
+    // The listing is the one that thread may drive: the workspace it runs on, and nothing outside its tree.
+    const listed = await fetch(`http://127.0.0.1:${h.port}/api/workspaces`, { headers: auth });
+    expect(listed.status).toBe(200);
+    expect(((await listed.json()) as { workspaces: { name: string }[] }).workspaces.map(w => w.name)).toEqual(["lead"]);
+
+    // And the route that forks a machine is held to what that thread may do, which on a workspace with no switch
+    // is nothing; a paired computer's token still forks.
+    const made = await fetch(`http://127.0.0.1:${h.port}/api/workspaces`, { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ name: "b1" }) });
+    expect(made.status).toBe(500);
+    expect((await made.json()) as { error: string }).toEqual({ error: agentsOffRefusal("lead", "fork") });
+    expect((await runtime.workspaces.list()).map(w => w.name)).toEqual(["lead"]);
   });
 
   it("still serves the page and its assets to anyone who reaches the port, since pairing is the gate", async () => {

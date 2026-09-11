@@ -1928,6 +1928,34 @@ describe("a turn the host comes back to", () => {
     await rt2.close();
   });
 
+  it("a turn the host restart did not end keeps the device its launch carried, and hands it back at its own exit", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const agents = { url: "http://10.0.0.2:4700" };
+    const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter }, agents });
+    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a", agents: { spawn: true, maxMachines: 3, maxDepth: 1 } });
+    await rt1.sessions.start(ws.id, { prompt: "coordinate the builders" });
+    await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.start"));
+    const device = (await rt1.devices.list())[0]!;
+    // The row the next host reads carries the device beside the run, for the same reason it carries the token: the
+    // process out there still holds both, and only the row knows which device to take away when that turn ends.
+    const stored = (await store.get("sessions", ws.id)) as { sessions: { status: string; scopeDeviceId?: string }[] };
+    expect(stored.sessions.map(s => [s.status, s.scopeDeviceId])).toEqual([["running", device.id]]);
+    await rt1.close();
+
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter }, agents });
+    expect((await rt2.sessions.list(ws.id)).map(s => s.status)).toEqual(["running"]);
+    // The load's sweep spares a device whose thread is running, so the re-opened turn is what hands it back.
+    expect((await rt2.devices.list()).map(d => d.id)).toEqual([device.id]);
+    const run = h.handles()[0]!;
+    h.emit(run, { type: "turn.done", sessionId: "sess-1", result: { status: "completed", text: "done" } });
+    h.emit(run, { type: "session.end", sessionId: "sess-1", exitCode: 0, sawResult: true });
+    await until(async () => (await rt2.devices.list()).length === 0);
+    expect(await rt2.devices.list()).toEqual([]);
+    await rt2.close();
+  });
+
   it("a host with no adapter for the harness cannot re-open the run, so the turn reads as one the restart cut", async () => {
     const backend = stubBackend();
     const store = memoryStore();

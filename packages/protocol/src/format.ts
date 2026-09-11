@@ -1610,6 +1610,64 @@ export function relayedRecordRefusal(named: string): string {
   return `recording ${named} is this computer's own act; a request relayed from a machine cannot record a machine here`;
 }
 
+/** The short form of a thread id every sentence about a thread uses, so a refusal, a table and a tree all name a
+ * thread the same way. */
+export const threadWord = (threadId: string): string => threadId.slice(0, 8);
+
+/** Every act a thread scoped token can be refused for, and the word each is refused by name with. The table is
+ * the whole rule: an act absent from it is one no thread may ask for, and adding an act is one row here. */
+export const SPAWN_ACTS = {
+  thread_new: "open a thread",
+  fork: "fork a machine",
+  send: "send into a thread",
+  delete: "delete a workspace",
+  pause: "pause a machine",
+  import: "import a folder",
+  export: "export a folder",
+  agents: "change what agents may do",
+} as const;
+export type SpawnAct = keyof typeof SPAWN_ACTS;
+
+/** The acts a thread may ask for at all; every other act in the table is refused whatever the caps say. */
+export const SPAWN_ACTS_ALLOWED: readonly SpawnAct[] = ["thread_new", "fork", "send"];
+
+/** The one sentence a thread's own token is refused with when the workspace it runs on lets its agents spawn
+ * nothing. Off is what every workspace reads as until a person turns it on. */
+export function agentsOffRefusal(workspace: string, act: SpawnAct): string {
+  return `agents on ${workspace} may not ${SPAWN_ACTS[act]}; turn it on with wsp workspaces agents ${workspace} --spawn on`;
+}
+
+/** The one sentence a thread's own token is refused with for an act no thread may ask for, whatever the caps. */
+export function spawnActRefusal(threadId: string, act: SpawnAct): string {
+  return `this request came out of thread ${threadWord(threadId)} on a machine, and a thread may only ${SPAWN_ACTS_ALLOWED.map(a => SPAWN_ACTS[a]).join(", ")}, never ${SPAWN_ACTS[act]}`;
+}
+
+/** The one sentence a fork past the machine cap is refused with, naming the root the machines were counted under. */
+export function spawnCapRefusal(rootThreadId: string, standing: number, cap: number): string {
+  return `thread ${threadWord(rootThreadId)} already holds ${standing} of its ${cap} machines; delete one before forking another`;
+}
+
+/** The one sentence a spawn deeper than the workspace allows is refused with. */
+export function spawnDepthRefusal(threadId: string, depth: number, cap: number): string {
+  return `thread ${threadWord(threadId)} is ${depth} deep under its root and this workspace allows ${cap}; a thread this deep may not spawn`;
+}
+
+/** The one sentence a thread is refused with for reaching a workspace outside its own tree. */
+export function spawnReachRefusal(threadId: string, name: string): string {
+  return `thread ${threadWord(threadId)} may drive the workspace it runs on and the ones it forked, and ${name} is neither`;
+}
+
+/** The workspace table's cell for the switch: empty where agents spawn nothing, which is nearly every row, so the
+ * column is quiet until a workspace has one. */
+export function agentsWord(agents: { spawn: boolean; maxMachines: number } | undefined): string {
+  return agents?.spawn !== true ? "" : `${agents.maxMachines} ${agents.maxMachines === 1 ? "machine" : "machines"}`;
+}
+
+/** What a listing and the workspace card say about a workspace's switch, one line either way. */
+export function agentsLine(agents: { spawn: boolean; maxMachines: number; maxDepth: number } | undefined): string {
+  return agents?.spawn !== true ? "agents may not spawn" : `agents may spawn: up to ${agents.maxMachines} ${agents.maxMachines === 1 ? "machine" : "machines"}`;
+}
+
 /** What a first dial says about the machine it reached: the host key it answered with, for the person to compare
  * against the machine's own before they trust the road. Printed once, when the workspace is recorded. */
 export function sshHostKeyNotice(hostKey: string): string {

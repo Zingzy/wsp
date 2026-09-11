@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFile } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,7 +10,7 @@ import { CURL_NET } from "@wsp/catalog";
 import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { WebSocketServer } from "ws";
 import { GUEST_SUPERVISOR_PATH, GUEST_USER_ENV, TOOLS_PATH } from "@wsp/engine";
-import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, GUEST_DAEMON_DIR, GUEST_WSP_BIN, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { isReserved, LocalBackend, NoProviderBackend } from "@wsp/engine";
@@ -311,6 +311,16 @@ describe("verifyNoneLeft", () => {
   });
 });
 
+/** A wsp command folder for a test to stage: the bundle's own build is a downstream package's, which a fresh
+ * worktree has not built, so no test here reads it. */
+function fakeCliDir(root: string): string {
+  const cli = join(root, "cli");
+  mkdirSync(cli, { recursive: true });
+  writeFileSync(join(cli, "bin.js"), 'import "./chunk-1.js";\n');
+  writeFileSync(join(cli, "chunk-1.js"), "export const y = 2;\n");
+  return cli;
+}
+
 describe("stageDaemonBundle", () => {
   let dir: string | undefined;
   afterEach(() => {
@@ -329,7 +339,7 @@ describe("stageDaemonBundle", () => {
     writeFileSync(join(daemonDir, "dist", "index.js"), "export const x = 1;");
 
     const stage = join(dir, "stage");
-    await stageDaemonBundle(stage, CLOUD_PLACE, daemonDir);
+    await stageDaemonBundle(stage, CLOUD_PLACE, daemonDir, fakeCliDir(dir));
 
     const pkg = JSON.parse(readFileSync(join(stage, "package.json"), "utf8")) as {
       type: string;
@@ -348,6 +358,39 @@ describe("stageDaemonBundle", () => {
     expect(statSync(join(stage, "wsp-open")).mode & 0o111).toBe(0o111);
   });
 
+  it("carries the wsp command beside the daemon, whole, at the path a turn's tools are launched from", async () => {
+    dir = tmp("wsp-bundle-cli-");
+    const daemonDir = join(dir, "daemon");
+    mkdirSync(join(daemonDir, "dist"), { recursive: true });
+    writeFileSync(join(daemonDir, "package.json"), JSON.stringify({ name: "@wsp/daemon", dependencies: {} }));
+    writeFileSync(join(daemonDir, "dist", "index.js"), "export const x = 1;");
+    // The published build is split across chunk files bin.js imports by name, so the folder travels whole.
+    const cliDir = fakeCliDir(dir);
+
+    const stage = join(dir, "stage");
+    await stageDaemonBundle(stage, CLOUD_PLACE, daemonDir, cliDir);
+
+    expect(readFileSync(join(stage, "wsp", "bin.js"), "utf8")).toContain("./chunk-1.js");
+    expect(existsSync(join(stage, "wsp", "chunk-1.js"))).toBe(true);
+    // Where it lands on a fork is the protocol's one reading, which the runtime builds the launch from, and it is
+    // under the folder the place unpacks the bundle into.
+    expect(GUEST_WSP_BIN).toBe(`${GUEST_DAEMON_DIR}/wsp/bin.js`);
+    expect(CLOUD_PLACE.dir).toBe(GUEST_DAEMON_DIR);
+    expect(deployScript(CLOUD_PLACE, "aabbcc").split("\n")).toContain(`tar -xzf ${GUEST_DAEMON_DIR}.tgz -C ${GUEST_DAEMON_DIR}`);
+  });
+
+  it("names an asset folder that was never built rather than failing halfway through a copy", async () => {
+    dir = tmp("wsp-bundle-unbuilt-");
+    const daemonDir = join(dir, "daemon");
+    mkdirSync(join(daemonDir, "dist"), { recursive: true });
+    writeFileSync(join(daemonDir, "package.json"), JSON.stringify({ name: "@wsp/daemon", dependencies: {} }));
+    writeFileSync(join(daemonDir, "dist", "index.js"), "export const x = 1;");
+    const empty = join(dir, "never-built");
+    mkdirSync(empty, { recursive: true });
+    await expect(stageDaemonBundle(join(dir, "stage"), CLOUD_PLACE, daemonDir, empty)).rejects.toThrow(`wsp command bundle missing: ${join(empty, "bin.js")}`);
+    expect(existsSync(join(dir, "stage"))).toBe(false);
+  });
+
   it("start.mjs sets the golden's PATH before the daemon loads, so a relaunch from a bare environment runs agents with it", async () => {
     dir = tmp("wsp-start-mjs-");
     const daemonDir = join(dir, "daemon");
@@ -359,7 +402,7 @@ describe("stageDaemonBundle", () => {
       'export const OPEN_SOCKET_PATH = "/root/.wsp/open.sock";\nexport async function startDaemon(o) { console.log(JSON.stringify({ path: process.env.PATH, ...o })); return { port: 7070 }; }\n',
     );
     const stage = join(dir, "stage");
-    await stageDaemonBundle(stage, CLOUD_PLACE, daemonDir);
+    await stageDaemonBundle(stage, CLOUD_PLACE, daemonDir, fakeCliDir(dir));
 
     const { stdout, stderr } = await promisify(execFile)(process.execPath, [join(stage, "start.mjs")], { env: { PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" } });
     const started = JSON.parse(stdout.split("\n")[0]!) as { path: string; host: string; openSocketPath: string };
@@ -688,7 +731,8 @@ describe("deployDaemon", () => {
       const port = (server.address() as { port: number }).port;
       stub.uploadUrl = async () => `http://127.0.0.1:${port}/put`;
 
-      const out = await deployDaemon(machine, { token: "abc123", daemonDir });
+      const cliDir = fakeCliDir(dir);
+      const out = await deployDaemon(machine, { token: "abc123", daemonDir, cliDir });
       expect(out).toEqual({ token: "abc123", node: "v22.23.2" });
       expect(stub.execLog).toEqual([deployScript(CLOUD_PLACE, "abc123")]);
       // npm install on the guest can run past what one exec is allowed, so the deploy is a run.
@@ -703,7 +747,7 @@ describe("deployDaemon", () => {
       const edgedStub = backend.machines[1]!;
       edgedStub.uploadUrl = async () => `http://127.0.0.1:${port}/put`;
       edgedStub.previewUrl = async p => ({ url: `https://${edgedStub.id}-${p}.preview.example.com/?pt_token=x`, token: "x", expiresAt: 0 });
-      await deployDaemon(edged, { token: "abc123", daemonDir });
+      await deployDaemon(edged, { token: "abc123", daemonDir, cliDir });
       expect(edgedStub.execLog).toEqual([deployScript(CLOUD_PLACE, "abc123", ".preview.example.com")]);
 
       // A backend that mints no signed URL lands the bundle on its own road, and says what supervises the daemon,
@@ -714,7 +758,7 @@ describe("deployDaemon", () => {
       boxedStub.uploadUrl = async () => { throw new Error("a container serves no signed upload URL"); };
       boxedStub.putBytes = async (path: string, bytes: Buffer) => { landed.push({ path, bytes: bytes.length }); };
       boxedStub.daemonSupervisor = "entrypoint";
-      await deployDaemon(boxed, { token: "abc123", daemonDir });
+      await deployDaemon(boxed, { token: "abc123", daemonDir, cliDir });
       expect(landed.map(l => l.path)).toEqual(["/root/wsp-daemon.tgz"]);
       expect(landed[0]!.bytes).toBeGreaterThan(0);
       expect(boxedStub.execLog).toEqual([deployScript(CONTAINER_PLACE, "abc123")]);

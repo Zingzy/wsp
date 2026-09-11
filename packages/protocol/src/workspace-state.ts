@@ -48,6 +48,11 @@ export interface WorkspaceKindWords {
    * somebody already owns takes the folder into their own home under its own name, since a path from this
    * computer is neither theirs to write nor theirs to find. */
   importsAt: "same path" | "under home";
+  /** Whether the agents on a machine of this kind could drive this host at all, which is what says the spawn switch
+   * means anything there. A fork's agents reach the host over the road a scoped token opens; this computer answers
+   * no request relayed from a machine, and a machine somebody already owns is handed no wsp to drive one with, so
+   * on both the switch would hand out a token that opens nothing. */
+  agents: boolean;
 }
 
 /** The two readings a pane waits on. Each is one module per kind: the cloud kind and a machine over ssh read
@@ -57,9 +62,9 @@ export type KindReading = "metrics" | "processes";
 /** The words per kind, the one table every client reads instead of comparing a kind itself. Adding a kind (an ssh
  * machine) is a row here. */
 export const WORKSPACE_KIND_WORDS: Record<WorkspaceKind, WorkspaceKindWords> = {
-  cloud: { machine: null, cpu: "vCPU", driven: true, daemon: true, metrics: true, processes: true, imports: "copies", importsAt: "same path" },
-  local: { machine: null, cpu: "cores", driven: false, daemon: true, metrics: true, processes: true, imports: "registers", importsAt: "same path" },
-  ssh: { machine: OVER_SSH, cpu: "cores", driven: false, daemon: true, metrics: true, processes: true, imports: "copies", importsAt: "under home" },
+  cloud: { machine: null, cpu: "vCPU", driven: true, daemon: true, metrics: true, processes: true, imports: "copies", importsAt: "same path", agents: true },
+  local: { machine: null, cpu: "cores", driven: false, daemon: true, metrics: true, processes: true, imports: "registers", importsAt: "same path", agents: false },
+  ssh: { machine: OVER_SSH, cpu: "cores", driven: false, daemon: true, metrics: true, processes: true, imports: "copies", importsAt: "under home", agents: false },
 };
 
 export function kindWords(kind: WorkspaceKind): WorkspaceKindWords {
@@ -76,6 +81,17 @@ export function servesReading(kind: WorkspaceKind, reading: KindReading): boolea
 /** What a refusal calls this workspace's machine. Only a kind wsp does not drive reaches one, since the capability
  * behind every driven move is what refuses on the others, so a kind with no words of its own falls back to this
  * computer's rather than carrying a second phrase no sentence prints. */
+/** Whether the spawn switch means anything on a workspace of this kind, the one reading both doors that set it
+ * take: the create that names it on a new workspace and the verb that turns it on for one that exists. */
+export function agentsMayDrive(kind: WorkspaceKind): boolean {
+  return WORKSPACE_KIND_WORDS[kind].agents;
+}
+
+/** The one sentence both those doors refuse with, so a person reads the same thing whichever they typed. */
+export function agentsKindRefusal(kind: WorkspaceKind): string {
+  return `agents on ${machineWord(kind)} cannot drive this host, so the spawn switch would hand out a token that opens nothing; it is for the machines wsp forks`;
+}
+
 export function machineWord(kind: WorkspaceKind): string {
   return WORKSPACE_KIND_WORDS[kind].machine ?? THIS_COMPUTER;
 }

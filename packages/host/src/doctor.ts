@@ -5,17 +5,17 @@
 
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { isIP } from "node:net";
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, CURL_NET, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_SUPERVISOR_PATH, GUEST_TMP, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
-import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, DAEMON_ROOTS_PATH, LOOPBACK, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, type SnapshotStorage, type WorkspaceKind } from "@wsp/protocol";
+import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, DAEMON_ROOTS_PATH, GUEST_DAEMON_DIR, LOOPBACK, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, type SnapshotStorage, type WorkspaceKind } from "@wsp/protocol";
 import { DAEMON_TOKEN_PATH, goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
-import { assetDir } from "./assets.js";
+import { assetDir, assetName, assetProof } from "./assets.js";
 import { describeDeleted, describeOrphanOffer, describeOrphans, describeStorage } from "./storage.js";
 import type { CliIO } from "./cli.js";
 
@@ -230,7 +230,9 @@ export const BOOT_SCRIPT: DaemonSupervision = {
  * ships neither ss nor curl. */
 const BOOT_PORT_CHECK = `(exec 3<>/dev/tcp/${LOOPBACK}/${DAEMON_PORT}) 2>/dev/null`;
 
-const GUEST_DIR = "/root/wsp-daemon";
+/** The protocol's own reading of the folder, since the wsp command the runtime hands every fork sits under it:
+ * two spellings of one path would have those two agreeing by luck. */
+const GUEST_DIR = GUEST_DAEMON_DIR;
 const GUEST_BIN = "/usr/local/bin";
 
 /** The place a machine wsp forked keeps its daemon: root's own, under a system unit, bound on every address
@@ -408,15 +410,24 @@ exit 0
 `;
 }
 
-/** Lay out an installable copy of the daemon for one place: its dist build, a
- * start script, and a package.json whose dependency pins mirror the daemon's
- * (node-pty has no linux prebuilds, so the machine's npm install compiles it, ~5s). */
-export async function stageDaemonBundle(stageDir: string, place: DaemonPlace, daemonDir = assetDir("daemon")): Promise<void> {
+/** Lay out an installable copy of the daemon for one place: its dist build, a start script, the wsp command, and a
+ * package.json whose dependency pins mirror the daemon's (node-pty has no linux prebuilds, so the machine's npm
+ * install compiles it, ~5s). */
+export async function stageDaemonBundle(stageDir: string, place: DaemonPlace, daemonDir = assetDir("daemon"), cliDir = assetDir("cli")): Promise<void> {
   const daemonPkg = JSON.parse(readFileSync(join(daemonDir, "package.json"), "utf8")) as {
     dependencies: Record<string, string>;
   };
+  // Read before anything is copied: an asset folder that was never built is named here, in the words the asset
+  // table gives it, rather than as a raw copy failure halfway through a bundle.
+  for (const [kind, from] of [["daemon", daemonDir] as const, ["cli", cliDir] as const]) {
+    const proof = join(from, assetProof(kind));
+    if (!existsSync(proof)) throw new Error(`${assetName(kind)} missing: ${proof}`);
+  }
   mkdirSync(stageDir, { recursive: true });
   cpSync(join(daemonDir, "dist"), join(stageDir, "dist"), { recursive: true });
+  // The wsp command rides with the daemon so every machine that has one has wsp under the place's own folder, with
+  // no install of its own and nothing on the image: it is what a turn's own agent runs to reach back into this host.
+  cpSync(cliDir, join(stageDir, "wsp"), { recursive: true });
   writeFileSync(join(stageDir, "start.mjs"), startMjs(place));
   writeFileSync(join(stageDir, "wsp-open"), openShimScript(place), { mode: 0o755 });
   writeFileSync(
@@ -700,7 +711,7 @@ export async function packBundle(stage: string, tgz: string): Promise<void> {
  * for how bytes reach it, so a machine whose provider mints no signed URL is deployed to over its own connection. */
 export async function deployDaemon(
   machine: Machine,
-  opts: { token?: string; daemonDir?: string; place?: DaemonPlace } = {},
+  opts: { token?: string; daemonDir?: string; cliDir?: string; place?: DaemonPlace } = {},
 ): Promise<{ token: string; node: string; port?: number }> {
   const place = opts.place ?? guestPlace(machine.daemonSupervisor ?? "systemd");
   const token = opts.token ?? randomBytes(24).toString("hex");
@@ -710,7 +721,7 @@ export async function deployDaemon(
     // Before the bundle is even packed: what wsp puts on a machine somebody owns goes when the record does, and
     // the surest way to keep that promise for a machine that refuses is to have put nothing there at all.
     await preflight(machine, place);
-    await stageDaemonBundle(stage, place, opts.daemonDir);
+    await stageDaemonBundle(stage, place, opts.daemonDir, opts.cliDir);
     await packBundle(stage, tgz);
     await landBytes(machine, place.bundle, new Uint8Array(readFileSync(tgz)));
     // Before the script rather than in it, where the place says the machine may carry other accounts: the bytes

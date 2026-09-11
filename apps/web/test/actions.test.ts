@@ -252,7 +252,7 @@ describe("thread actions", () => {
     machine: { catalog?: HarnessCatalog | null; state?: WorkspaceState; goneWords?: string } = {},
   ): ThreadTarget =>
     threadTarget(
-      { id: "thr_1", sessionId: "s1", threadId, workspaceId: "ws_a", harness, title: "fix the port list", status, startedAt: null, endedAt: null, indicator: null, startedBy: "person", project: null },
+      { id: "thr_1", sessionId: "s1", threadId, workspaceId: "ws_a", harness, title: "fix the port list", status, startedAt: null, endedAt: null, indicator: null, startedBy: "person", project: null, parentThreadId: null },
       { catalog: machine.catalog === undefined ? row(harness) : machine.catalog, state: machine.state ?? "running", ...(machine.goneWords !== undefined ? { goneWords: machine.goneWords } : {}) },
     );
   const threadVerbs = (over: Partial<ThreadVerbs> = {}): ThreadVerbs => ({ stop: vi.fn(async () => {}), rename: vi.fn(), copyText: vi.fn(async () => {}), ...over });

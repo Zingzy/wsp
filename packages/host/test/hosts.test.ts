@@ -140,6 +140,29 @@ describe("which host a line runs against", () => {
     expect(aimedHost("/nowhere/state.json", { env: { WSP_HOST: "https://attic.example" }, home })).toEqual({ kind: "url", url: "https://attic.example" });
   });
 
+  it("takes the pair a turn's launch left in the environment last of all, under every host on this computer", () => {
+    const home = tempDir("hosts-home");
+    const carried = { WSP_HOST_URL: "http://10.0.0.2:4700", WSP_HOST_TOKEN: "scoped-token" };
+    const gone = join(tempDir("hosts-empty"), "state.json");
+    // On a machine there is no hosts folder and no host of its own, so the pair is the only road there is.
+    expect(aimedHost(gone, { env: carried, home })).toEqual({ kind: "url", url: "http://10.0.0.2:4700", token: "scoped-token" });
+    // A host on this computer and a default alias both beat it.
+    expect(aimedHost(servedState(4600), { env: carried, home })).toEqual({ kind: "here" });
+    writeHost(home, "attic", record("https://attic.example", "d_attic"));
+    setDefaultHost(home, "attic");
+    expect(aimedHost(gone, { env: carried, home })).toMatchObject({ kind: "alias", alias: "attic" });
+    // An address with no token beside it opens nothing, so the pair reads as absent.
+    expect(aimedHost(gone, { env: { WSP_HOST_URL: "http://10.0.0.2:4700" }, home: tempDir("hosts-none") })).toEqual({ kind: "here" });
+  });
+
+  it("gives a --host address the token the environment carries for that same address, and nothing for another", () => {
+    const home = tempDir("hosts-none");
+    const carried = { WSP_HOST_URL: "http://10.0.0.2:4700", WSP_HOST_TOKEN: "scoped-token" };
+    expect(aimedHost("/nowhere/state.json", { host: "http://10.0.0.2:4700", env: carried, home })).toEqual({ kind: "url", url: "http://10.0.0.2:4700", token: "scoped-token" });
+    expect(aimedHost("/nowhere/state.json", { host: "http://other.example:4700", env: carried, home })).toEqual({ kind: "url", url: "http://other.example:4700" });
+    expect(hostAddress("/nowhere/state.json", { host: "http://10.0.0.2:4700", env: carried, home })).toEqual({ url: `ws://10.0.0.2:4700${WS_PATH}`, token: "scoped-token" });
+  });
+
   it("refuses an alias nothing is stored for in one sentence naming the ones that are", () => {
     const home = tempDir("hosts-home");
     writeHost(home, "box", record("http://box.local:4400"));

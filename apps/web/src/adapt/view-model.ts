@@ -264,6 +264,9 @@ export interface SidebarThreadSnapshot {
   readonly startedBy: SessionOrigin;
   /** The name of the workspace's project the thread's folder sits in; null outside every project or before a turn named one. */
   readonly project: string | null;
+  /** The thread whose own agent opened this one; null on every thread a person or the command line opened. The row
+   * is drawn one step in under it. */
+  readonly parentThreadId: string | null;
 }
 
 /** One wsp workspace (a machine) as a sidebar project; its sessions are the threads. */

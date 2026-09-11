@@ -56,10 +56,16 @@ import {
   ThreadView,
   TurnStatus,
   UpgradeResult,
+  WorkspaceAgents,
+  type WorkspaceKind,
   WorkspaceListing,
   WorkspaceOut,
   WorkspaceView,
   actionRefusal,
+  agentsKindRefusal,
+  agentsLine,
+  agentsMayDrive,
+  agentsWord,
   authRefusal,
   authority,
   canTravel,
@@ -152,6 +158,7 @@ import {
   registerTakesNoConsentLine,
   shellQuote,
   threadOpenedLine,
+  threadWord,
   workspaceForFolder,
   workspaceProjects,
 } from "@wsp/protocol";
@@ -204,7 +211,7 @@ export interface DialOpts extends HostPick {
  * typed on the line carries no token, which only a redeem can make up for. */
 export function hostAddress(statePath: string, pick: HostPick & { aim?: HostAim } = {}): { url: string; token: string } {
   const aim = pick.aim ?? aimedHost(statePath, pick);
-  if (aim.kind === "url") return { url: wsUrlOf(aim.url), token: "" };
+  if (aim.kind === "url") return { url: wsUrlOf(aim.url), token: aim.token ?? "" };
   if (aim.kind === "alias") return { url: wsUrlOf(aim.record.url), token: aim.record.deviceToken };
   const lock = servingHost(statePath);
   if (lock === undefined) throw new Error(`no wsp host is serving ${statePath}; run wsp up first`);
@@ -225,7 +232,7 @@ export async function dialHost(statePath: string, opts: DialOpts = {}): Promise<
   const aim = opts.aim ?? aimedHost(statePath, opts);
   // An address is the road wsp connect takes and no other: every other line needs the token a redeem bought, and
   // this computer holds one only under a name.
-  if (aim.kind === "url" && opts.redeem === undefined) throw usageRefusal(addressNotPairedLine(aim.url));
+  if (aim.kind === "url" && aim.token === undefined && opts.redeem === undefined) throw usageRefusal(addressNotPairedLine(aim.url));
   const { url, token } = hostAddress(statePath, { aim });
   const ws = new WebSocket(url);
   const opened = new Promise<void>((done, fail) => {
@@ -629,20 +636,24 @@ export async function awake(client: HostClient, workspace: WorkspaceView, action
 export interface Stopped {
   threadId: string;
   outcome: SessionInterruptOutcome;
+  /** The threads this thread's agents spawned that were running and stopped with it. */
+  under?: readonly string[];
 }
 
 /** Stops the running turn of the thread a person names, through the runtime as the app's stop button does; the
  * machine is not touched. Parsed, not trusted: an outcome outside the enum must not read as stopped. */
 export async function stop(client: HostClient, ref: string): Promise<Stopped> {
   const thread = await threadOf(client, ref);
-  const { outcome } = SessionInterruptResult.parse(await client.request("sessions.interrupt", { sessionId: thread.sessionId }));
-  return { threadId: thread.id, outcome };
+  const { outcome, under } = SessionInterruptResult.parse(await client.request("sessions.interrupt", { sessionId: thread.sessionId }));
+  return { threadId: thread.id, outcome, ...(under !== undefined && under.length > 0 ? { under } : {}) };
 }
 
 const STOP_WORDS: Record<SessionInterruptOutcome, string> = { accepted: "stopped", "not-running": "not running", "not-found": "not found by the host" };
 
 export function stopLine(stopped: Stopped): string {
-  return `thread ${stopped.threadId} ${STOP_WORDS[stopped.outcome]}`;
+  const under = stopped.under ?? [];
+  const tree = under.length === 0 ? "" : `, and with it ${under.length} ${under.length === 1 ? "thread" : "threads"} its agents spawned: ${under.map(threadWord).join(", ")}`;
+  return `thread ${stopped.threadId} ${STOP_WORDS[stopped.outcome]}${tree}`;
 }
 
 /** What a rename came to, as every director prints it: the runtime's five answers, none an error. `error` is the
@@ -736,8 +747,31 @@ export function shortenedEnd(text: string, width: number): string {
   return text.length <= width ? text : `${text.slice(0, width - 1)}…`;
 }
 
-function threadLine(t: ThreadRow): string[] {
-  return [t.id, t.workspaceName, t.harness, t.status, t.startedBy, t.cwd !== undefined ? shortenedFront(t.cwd, FOLDER_WIDTH) : "", shortenedEnd(t.title, TITLE_WIDTH)];
+function threadLine(t: ThreadRow, indent = ""): string[] {
+  return [`${indent}${t.id}`, t.workspaceName, t.harness, t.status, t.startedBy, t.cwd !== undefined ? shortenedFront(t.cwd, FOLDER_WIDTH) : "", shortenedEnd(t.title, TITLE_WIDTH)];
+}
+
+/** The rows a --tree listing prints: every thread a person or the command line opened, each followed by the ones
+ * its agents spawned, indented one step per level. A row whose parent is not in the listing stands at the top
+ * rather than vanishing, so a workspace filter never hides a thread. */
+export function threadTree(rows: readonly ThreadRow[]): { row: ThreadRow; depth: number }[] {
+  const held = new Set(rows.map(r => r.id));
+  const parentOf = (row: ThreadRow): string | undefined => (row.parentThreadId !== undefined && held.has(row.parentThreadId) ? row.parentThreadId : undefined);
+  const out: { row: ThreadRow; depth: number }[] = [];
+  const drawn = new Set<string>();
+  const walk = (parent: string | undefined, depth: number): void => {
+    for (const row of rows) {
+      if (drawn.has(row.id) || parentOf(row) !== parent) continue;
+      drawn.add(row.id);
+      out.push({ row, depth });
+      walk(row.id, depth + 1);
+    }
+  };
+  walk(undefined, 0);
+  // A row whose parents lead round in a circle is under no top row, and a listing prints every row it was given:
+  // it stands at the top rather than vanishing, since a thread nobody can see is worse than one drawn flat.
+  for (const row of rows) if (!drawn.has(row.id)) out.push({ row, depth: 0 });
+  return out;
 }
 
 /** A workspace row: what its machine is, its state where the kind has one, and how many projects it holds. The
@@ -749,7 +783,7 @@ function threadLine(t: ThreadRow): string[] {
 function workspaceLine(w: WorkspaceListing): string[] {
   const kind = kindWords(workspaceKind(w));
   const machine = kind.machine ?? (kind.driven ? w.machineId : fmtSize(w.size, kind.cpu));
-  return [w.name, w.id, machine, kind.driven ? workspaceWord(workspaceStateOf(w, w)) : "", projectCountCell(workspaceProjects(w))];
+  return [w.name, w.id, machine, kind.driven ? workspaceWord(workspaceStateOf(w, w)) : "", projectCountCell(workspaceProjects(w)), agentsWord(w.agents)];
 }
 
 /** One project's row: its name, the folder it landed at, its size where the import measured one, and the day it landed. */
@@ -786,12 +820,38 @@ async function forkable(client: HostClient): Promise<Capabilities> {
 }
 
 /** Forks the golden's head into a new workspace, the way the app's create does, with the stages streamed as they land. */
-export async function createFromHead(client: HostClient, out: Out, name: string, size?: string): Promise<WorkspaceCreateResult> {
+export async function createFromHead(client: HostClient, out: Out, name: string, size?: string, agents?: Partial<WorkspaceAgents>): Promise<WorkspaceCreateResult> {
   await forkable(client);
   const { manifest } = await client.request<{ manifest?: GoldenManifest }>("golden.get", { name: "default" });
   const head = goldenHead(manifest);
   if (head === undefined) throw new Error("no golden yet; run wsp init");
-  return create(client, out, head.snapshotId, name, size);
+  return create(client, out, head.snapshotId, name, size, agents);
+}
+
+/** What a --spawn line asks for, the one reading of it: nothing when nobody named a switch, so a workspace made
+ * without one is off, and a cap named without --spawn on is refused rather than quietly turning it on. */
+export function agentsAsked(spawn: string | boolean | undefined, maxMachines?: string | number, maxDepth?: string | number): (Partial<WorkspaceAgents> & { spawn: boolean }) | undefined {
+  const on = typeof spawn === "string" ? onOffWord(spawn) : spawn;
+  const machines = maxMachines === undefined ? undefined : countAsked("--max-machines", maxMachines, 0);
+  // One level is the least a switch that is on can mean; none of them is what --spawn off already says.
+  const depth = maxDepth === undefined ? undefined : countAsked("--max-depth", maxDepth, 1);
+  if (on === undefined) {
+    if (machines === undefined && depth === undefined) return undefined;
+    throw usageRefusal("--max-machines and --max-depth say how far agents may go, so they need --spawn on beside them");
+  }
+  return { spawn: on, ...(machines !== undefined ? { maxMachines: machines } : {}), ...(depth !== undefined ? { maxDepth: depth } : {}) };
+}
+
+function onOffWord(word: string): boolean {
+  if (word === "on") return true;
+  if (word === "off") return false;
+  throw usageRefusal(`--spawn takes on or off, not ${JSON.stringify(word)}`);
+}
+
+function countAsked(flagName: string, word: string | number, least: number): number {
+  const n = Number(word);
+  if (!Number.isInteger(n) || n < least) throw usageRefusal(`${flagName} takes a whole number of ${least === 0 ? "zero" : "one"} or more, not ${JSON.stringify(String(word))}`);
+  return n;
 }
 
 /** The size a --size word names, checked against what the host's provider offers before anything is minted. */
@@ -812,6 +872,12 @@ export async function projectGoldenOf(client: HostClient, ref: string): Promise<
   throw new Error(`no project golden named ${ref}; wsp snapshot <workspace> takes one`);
 }
 
+/** Sets what the agents on the workspace a person names may ask of this host; the record, as every director shows it. */
+export async function setAgents(client: HostClient, ref: string, agents: Partial<WorkspaceAgents>): Promise<WorkspaceOut> {
+  const source = await workspaceOf(client, ref);
+  return (await client.request<{ workspace: WorkspaceOut }>("workspaces.agents", { workspaceId: source.id, ...agents })).workspace;
+}
+
 /** Snapshots the workspace a person names as a project golden; the record, as every director shows it. */
 export async function snapshot(client: HostClient, ref: string): Promise<ProjectGolden> {
   const source = await workspaceOf(client, ref);
@@ -825,7 +891,7 @@ export function projectGoldenLine(g: ProjectGolden): string {
 }
 
 /** `size` is the --size word; absent, the workspace takes the golden's size. */
-export async function create(client: HostClient, out: Out, golden: string, name: string, size?: string): Promise<WorkspaceCreateResult> {
+export async function create(client: HostClient, out: Out, golden: string, name: string, size?: string, agents?: Partial<WorkspaceAgents>): Promise<WorkspaceCreateResult> {
   // Read before a frame is followed, so a host that mints nothing says so once and streams no stage for a machine
   // that will never exist.
   const capabilities = await forkable(client);
@@ -840,7 +906,7 @@ export async function create(client: HostClient, out: Out, golden: string, name:
     },
   );
   try {
-    const { workspace, notice } = await client.request<{ workspace: WorkspaceOut; notice?: string }>("workspaces.create", { golden, name, ...chosen });
+    const { workspace, notice } = await client.request<{ workspace: WorkspaceOut; notice?: string }>("workspaces.create", { golden, name, ...chosen, ...(agents !== undefined ? { agents } : {}) });
     const created: WorkspaceCreateResult = { workspace, ...(notice !== undefined ? { notice } : {}) };
     out.emit(created, `created ${workspace.name} ${workspace.id}${projectsInPlace(workspaceProjects(workspace))}${notice !== undefined ? `\n${notice}` : ""}`);
     return created;
@@ -1628,6 +1694,9 @@ const PICK_INPUTS = {
 };
 /** The same word on new and fork; the refusal for a size the provider does not offer names the ones it does. */
 const SizeIn = z.string().optional().describe("the machine size as <cpu>x<memGb>, like 2x4; absent takes the golden's size. A size the provider does not offer is refused with the list it does, so read that list rather than guessing twice; a build wants the largest memory offered");
+const SpawnIn = z.enum(["on", "off"]).optional().describe("whether the agents on this workspace may drive this host: open threads and fork machines under the thread they run in, capped. Absent is off, which is what every workspace made without it reads as");
+const MaxMachinesIn = z.number().int().min(0).optional().describe("how many machines may stand at once under one root thread when spawn is on; needs spawn on beside it, and defaults to 3");
+const MaxDepthIn = z.number().int().min(1).optional().describe("how many levels deep the tree under a root thread may go when spawn is on; 1 is the root's own children and no further, which is the default, and it needs spawn on beside it");
 
 const PROJECT_FOLDERS = z.array(z.string()).optional().describe("folders on this computer, absolute, to weigh the histories by: only sessions that ran in one of them or under it count");
 /** The same folders on the write verb, where naming them is also naming a rule input, so it re-decides the ticks. */
@@ -1693,7 +1762,7 @@ export const VERBS: readonly Verb[] = [
     run: async ctx => {
       if (ctx.args.length !== 0) throw usageRefusal("wsp workspaces takes no positional arguments");
       const rows = await workspaceStatuses(await ctx.client());
-      ctx.out.emit({ workspaces: rows }, table([["WORKSPACE", "ID", "MACHINE", "STATE", "PROJECTS"], ...rows.map(workspaceLine)]).join("\n"));
+      ctx.out.emit({ workspaces: rows }, table([["WORKSPACE", "ID", "MACHINE", "STATE", "PROJECTS", "AGENTS"], ...rows.map(workspaceLine)]).join("\n"));
       return 0;
     },
     tool: tool({
@@ -1727,17 +1796,18 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "threads",
-    usage: "wsp threads [--in <workspace>]",
-    about: "every thread as the sidebar lists it: agent, state, who opened it, the folder it works in",
-    options: { in: { type: "string" } },
+    usage: "wsp threads [--in <workspace>] [--tree]",
+    about: "every thread as the sidebar lists it: agent, state, who opened it, the folder it works in; --tree indents the threads an agent spawned under the one that spawned them",
+    options: { in: { type: "string" }, tree: { type: "boolean" } },
     run: async ctx => {
       if (ctx.args.length !== 0) throw usageRefusal("wsp threads takes no positional arguments; wsp threads wait is its one subcommand");
       const rows = await threadRows(await ctx.client(), flag(ctx.flags, "in"));
-      ctx.out.emit({ threads: rows }, table([["THREAD", "WORKSPACE", "AGENT", "STATE", "BY", "FOLDER", "TITLE"], ...rows.map(threadLine)]).join("\n"));
+      const lines = ctx.flags["tree"] === true ? threadTree(rows).map(t => threadLine(t.row, "  ".repeat(t.depth))) : rows.map(t => threadLine(t));
+      ctx.out.emit({ threads: rows }, table([["THREAD", "WORKSPACE", "AGENT", "STATE", "BY", "FOLDER", "TITLE"], ...lines]).join("\n"));
       return 0;
     },
     tool: tool({
-      description: "Every thread as the sidebar lists it: the workspace, the agent inside, its state, who opened it (person, cli or agent), the folder it works in and its title. Optionally within one workspace.",
+      description: "Every thread as the sidebar lists it: the workspace, the agent inside, its state, who opened it (person, cli or agent), the folder it works in and its title. Optionally within one workspace. A thread an agent inside another thread opened carries parentThreadId and rootThreadId, which is the tree stop ends as one.",
       input: { workspace: WorkspaceIn.optional() },
       output: { threads: z.array(ThreadRowOut) },
       call: async ({ workspace: within }, deps) => asJson({ threads: await threadRows(await deps.client(), within) }),
@@ -1875,20 +1945,24 @@ export const VERBS: readonly Verb[] = [
     name: "new",
     usage: "wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>] | wsp new --local [name] | wsp new --ssh <user@host> [name] [--ssh-port <port>] [--ssh-key <path>]",
     about: "a workspace from the golden's head or, with --from, a project golden; --local is this computer, --ssh a machine of your own",
-    options: { from: { type: "string" }, size: { type: "string" }, local: { type: "boolean" }, ssh: { type: "string" }, "ssh-port": { type: "string" }, "ssh-key": { type: "string" } },
+    options: { from: { type: "string" }, size: { type: "string" }, local: { type: "boolean" }, ssh: { type: "string" }, "ssh-port": { type: "string" }, "ssh-key": { type: "string" }, spawn: { type: "string" }, "max-machines": { type: "string" }, "max-depth": { type: "string" } },
     run: async ctx => {
       const [name] = ctx.args;
       const from = flag(ctx.flags, "from");
       const size = flag(ctx.flags, "size");
       const address = flag(ctx.flags, "ssh");
       // Neither forks anything, so both refuse the words that pick an image or a size.
-      const forksNothing = (word: string): void => {
+      const agents = agentsAsked(flag(ctx.flags, "spawn"), flag(ctx.flags, "max-machines"), flag(ctx.flags, "max-depth"));
+      const forksNothing = (word: string, kind: WorkspaceKind): void => {
         if (from !== undefined || size !== undefined) throw usageRefusal(`${word} forks nothing, so it takes no --from or --size`);
+        // The same rule and the same sentence the verb that sets the switch on a workspace that exists reads: the
+        // kind is named here and the table is asked, so which kinds may have the switch has one home.
+        if (agents?.spawn === true && !agentsMayDrive(kind)) throw usageRefusal(agentsKindRefusal(kind));
         if (ctx.args.length > 1) throw usageRefusal(`${word} takes at most a name`);
       };
       if (ctx.flags["local"] === true) {
         if (address !== undefined) throw usageRefusal("wsp new takes --local or --ssh, not both");
-        forksNothing("wsp new --local");
+        forksNothing("wsp new --local", "local");
         // With no host serving the record is written straight into the state file: the way into an empty state.
         const here = runtimeHere(ctx);
         if (here !== undefined) await createLocalWorkspaceHere(await here(ctx.statePath), ctx.out, name);
@@ -1896,7 +1970,7 @@ export const VERBS: readonly Verb[] = [
         return 0;
       }
       if (address !== undefined) {
-        forksNothing("wsp new --ssh");
+        forksNothing("wsp new --ssh", "ssh");
         const asked = sshAsked(name, flag(ctx.flags, "ssh-port"), flag(ctx.flags, "ssh-key"));
         const here = runtimeHere(ctx);
         if (here !== undefined) await createSshWorkspaceHere(await here(ctx.statePath), ctx.out, address, asked);
@@ -1905,8 +1979,8 @@ export const VERBS: readonly Verb[] = [
       }
       const client = await ctx.client();
       if (name === undefined || ctx.args.length !== 1) throw usageRefusal("wsp new takes one name");
-      if (from === undefined) await createFromHead(client, ctx.out, name, size);
-      else await create(client, ctx.out, (await projectGoldenOf(client, from)).snapshotId, name, size);
+      if (from === undefined) await createFromHead(client, ctx.out, name, size, agents);
+      else await create(client, ctx.out, (await projectGoldenOf(client, from)).snapshotId, name, size, agents);
       return 0;
     },
     tool: tool({
@@ -1917,12 +1991,16 @@ export const VERBS: readonly Verb[] = [
         size: SizeIn,
         local: z.boolean().optional().describe("true makes the one local workspace, this computer, forking nothing"),
         ssh: z.string().optional().describe("a machine of the person's own as user@host, reached over ssh; forks nothing"),
+        spawn: SpawnIn,
+        max_machines: MaxMachinesIn,
+        max_depth: MaxDepthIn,
         ssh_port: z.number().int().optional().describe("the port ssh dials, when it is not the port in the address or 22"),
         ssh_key: z.string().optional().describe("the private key file ssh logs in with, absolute; absent leaves ssh its own config and agent"),
       },
       output: Created.shape,
-      call: async ({ name, from, size: word, local, ssh, ssh_port: sshPort, ssh_key: sshKey }, deps) => {
+      call: async ({ name, from, size: word, local, ssh, ssh_port: sshPort, ssh_key: sshKey, spawn, max_machines: maxMachines, max_depth: maxDepth }, deps) => {
         const client = await deps.client();
+        const agents = agentsAsked(spawn, maxMachines, maxDepth);
         if (local === true || ssh !== undefined) {
           if (from !== undefined || word !== undefined) throw usageRefusal("a workspace on a machine that already exists forks nothing, so it takes no from or size");
           if (local === true && ssh !== undefined) throw usageRefusal("a workspace is local or reached over ssh, not both");
@@ -1932,8 +2010,33 @@ export const VERBS: readonly Verb[] = [
           return asJson(await createLocalWorkspace(client, QUIET, name));
         }
         if (name === undefined) throw usageRefusal("a cloud workspace needs a name");
-        if (from === undefined) return asJson(await createFromHead(client, QUIET, name, word));
-        return asJson(await create(client, QUIET, (await projectGoldenOf(client, from)).snapshotId, name, word));
+        if (from === undefined) return asJson(await createFromHead(client, QUIET, name, word, agents));
+        return asJson(await create(client, QUIET, (await projectGoldenOf(client, from)).snapshotId, name, word, agents));
+      },
+    }),
+  },
+  {
+    name: "workspaces agents",
+    usage: "wsp workspaces agents <workspace> --spawn on|off [--max-machines <n>] [--max-depth <n>]",
+    about: "what the agents inside the workspace may ask of this host: off, or threads and machines under the thread they run in, capped",
+    options: { spawn: { type: "string" }, "max-machines": { type: "string" }, "max-depth": { type: "string" } },
+    run: async ctx => {
+      const [ref] = ctx.args;
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp workspaces agents takes one workspace");
+      const asked = agentsAsked(flag(ctx.flags, "spawn"), flag(ctx.flags, "max-machines"), flag(ctx.flags, "max-depth"));
+      if (asked === undefined) throw usageRefusal("wsp workspaces agents takes --spawn on or --spawn off");
+      const workspace = await setAgents(await ctx.client(), ref, asked);
+      ctx.out.emit({ workspace }, `${workspace.name}: ${agentsLine(workspace.agents)}`);
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Turns the workspace's agents switch on or off and names its caps. With it on, a turn on this workspace is launched with a token into this host scoped to its own thread: that thread may open threads and fork machines under itself, up to maxMachines machines at once under one root thread and maxDepth levels deep, and may touch no other workspace, delete nothing, pause nothing and pair no computer. Off, which is what every workspace reads as until this is called, its agents reach this host not at all. A caller that is itself a thread on a machine is refused: what agents may do is the person's to decide.",
+      input: { workspace: WorkspaceIn, spawn: z.enum(["on", "off"]), max_machines: MaxMachinesIn, max_depth: MaxDepthIn },
+      output: { workspace: WorkspaceOut },
+      call: async ({ workspace: ref, spawn, max_machines: maxMachines, max_depth: maxDepth }, deps) => {
+        const workspace = await setAgents(await deps.client(), ref, agentsAsked(spawn, maxMachines, maxDepth)!);
+        return asText(`${workspace.name}: ${agentsLine(workspace.agents)}`, { workspace });
       },
     }),
   },
@@ -1983,7 +2086,7 @@ export const VERBS: readonly Verb[] = [
     name: "fork",
     usage: 'wsp fork <workspace> [--name <n>] [--size <cpu>x<memGb>] [--send "<task>" [thread new\'s flags]]',
     about: "a new machine from the source's golden version, not a copy of its live disk; --size as new's",
-    options: { name: { type: "string" }, size: { type: "string" }, send: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, cwd: { type: "string" }, notify: { type: "string", multiple: true } },
+    options: { name: { type: "string" }, size: { type: "string" }, send: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, cwd: { type: "string" }, notify: { type: "string", multiple: true }, spawn: { type: "string" }, "max-machines": { type: "string" }, "max-depth": { type: "string" } },
     run: async ctx => {
       const [ref] = ctx.args;
       if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp fork takes one workspace");
@@ -1998,22 +2101,22 @@ export const VERBS: readonly Verb[] = [
       const harness = flag(ctx.flags, "agent");
       const picks = pickFlags(ctx.flags);
       if (task !== undefined) await checkedStart(client, task, harness, picks, source.id);
-      const created = await create(client, ctx.out, source.golden, flag(ctx.flags, "name") ?? `${source.name}-fork`, flag(ctx.flags, "size"));
+      const created = await create(client, ctx.out, source.golden, flag(ctx.flags, "name") ?? `${source.name}-fork`, flag(ctx.flags, "size"), agentsAsked(flag(ctx.flags, "spawn"), flag(ctx.flags, "max-machines"), flag(ctx.flags, "max-depth")));
       if (task === undefined) return 0;
       ctx.out.emit({ turn: turnView(await followVerb(ctx, client, openingOf(ctx.env, created.workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify }), true)) });
       return 0;
     },
     tool: tool({
       description: "A sibling workspace from the source's golden version (a new machine, not a copy of its live disk); with a task, its first thread is opened and the reply returned. When that first turn fails, the error still names the workspace, which exists: continue with thread_new on it rather than forking again.",
-      input: { workspace: WorkspaceIn, name: z.string().optional().describe("defaults to <source>-fork"), size: SizeIn, task: z.string().optional(), agent: AgentIn, ...PICK_INPUTS, cwd: CwdIn, notify: NotifyIn },
+      input: { workspace: WorkspaceIn, name: z.string().optional().describe("defaults to <source>-fork"), size: SizeIn, task: z.string().optional(), agent: AgentIn, ...PICK_INPUTS, cwd: CwdIn, notify: NotifyIn, spawn: SpawnIn, max_machines: MaxMachinesIn, max_depth: MaxDepthIn },
       output: Created.extend({ turn: TurnOut.optional(), failure: z.string().optional() }).shape,
       stream: ["workspace", "notice"],
-      call: async ({ workspace: ref, name, size: word, task, agent: harness, cwd: folder, notify: tell, ...input }, deps) => {
+      call: async ({ workspace: ref, name, size: word, task, agent: harness, cwd: folder, notify: tell, spawn, max_machines: maxMachines, max_depth: maxDepth, ...input }, deps) => {
         absoluteFolder(folder);
         const client = await deps.client();
         const source = await workspaceOf(client, ref);
         if (task !== undefined) await checkedStart(client, task, harness, input, source.id);
-        const created = await create(client, QUIET, source.golden, name ?? `${source.name}-fork`, word);
+        const created = await create(client, QUIET, source.golden, name ?? `${source.name}-fork`, word, agentsAsked(spawn, maxMachines, maxDepth));
         if (task === undefined) return asJson(created);
         let failure: string;
         try {
@@ -2331,9 +2434,9 @@ export const VERBS: readonly Verb[] = [
       return 0;
     },
     tool: tool({
-      description: "Stops the thread's running turn (by id, or a prefix of it), as the app's stop button does; the machine stays up and the thread takes the next send. outcome accepted means the turn ended interrupted; not-running means it had already ended, which is an answer, not an error.",
+      description: "Stops the thread's running turn (by id, or a prefix of it), as the app's stop button does; the machine stays up and the thread takes the next send. outcome accepted means the turn ended interrupted; not-running means it had already ended, which is an answer, not an error. A thread whose agents spawned threads of their own stops as one: under names each of those that was running and was stopped with it.",
       input: { thread: z.string() },
-      output: { threadId: z.string(), outcome: SessionInterruptOutcome },
+      output: { threadId: z.string(), outcome: SessionInterruptOutcome, under: z.array(z.string()).optional() },
       call: async ({ thread: ref }, deps) => {
         const stopped = await stop(await deps.client(), ref);
         return asText(stopLine(stopped), { ...stopped });
