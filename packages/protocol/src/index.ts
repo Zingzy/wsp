@@ -2238,7 +2238,7 @@ const DAEMON_CONTENTS = [
   "877eda4200afad3842bedad0e49d6efc942ef1ef3ea7181af22f9e726d72b669",
   "206d96d53b9734c3dce0e84bf11d5455e210b2419b6c9572748ebf69861afca5",
   "6875c912371aadfb9947191e4d887b9fb6576ed57d0268de91811a6d3ac4f4cd",
-  "267ea40600ad43a8ead5359a96e5c7af1f7d8bb52fd268e2c64674fabbcc3cab",
+  "4c81908db0c4d29e74f00ddd5513e94137f01afeb39b9afbed242368be6097c6",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers

@@ -3,7 +3,7 @@ import { execFile, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
 import { gunzipSync } from "node:zlib";
 import { CURL_NET } from "@wsp/catalog";
@@ -833,43 +833,85 @@ describe("deployScript", () => {
     // The link is made from the node the deploy resolved, before the modules are built under it and before the
     // unit that reads it exists.
     const lines = deployScript(CLOUD_PLACE, "aabbcc").split("\n");
-    // The name is read through to the file before it is linked: a hard link to a symlink is another symlink under
-    // GNU's ln, so a pin taken from the name would be a second name for a target the restore can take away.
-    expect(lines).toContain('node_pin="$(readlink -f "$(command -v node)")"');
+    // The node itself says where it is, rather than a name being read through: a name may be a symlink, which
+    // GNU's ln hard-links as another symlink, or a version manager's shim, which reading through only names.
+    expect(lines).toContain(`node_pin="$(node -p 'process.execPath')"`);
     const pin = lines.findIndex(line => line.startsWith(`ln -f "$node_pin" ${daemonNodePath(CLOUD_PLACE)} `));
     expect(pin).toBeGreaterThan(-1);
     expect(pin).toBeLessThan(lines.findIndex(line => line.includes("npm install")));
     expect(pin).toBeLessThan(lines.findIndex(line => line.includes("ExecStart=")));
   });
 
-  it("the pin holds the binary the deploy read, not the name, and the unit's command runs it once both are gone", async () => {
-    // The line is decided on the machine and not in the script's text, so it is run here: a node reached through
-    // the kind of symlink an image keeps for it, and both the link and the folder it points into taken away after
-    // the pin the way a restore took them away from a fork.
-    const home = tmp("wsp-node-pin-");
+  /** The pin is decided on the machine and not in the script's text, so the generated lines are run here against
+   * a stand-in node reached the two ways a machine offers one: the symlink an image keeps for it, and the shim a
+   * version manager writes. The stand-in answers `-p process.execPath` with its own path, as a node does, and
+   * says a word otherwise, so what the unit's own ExecStart runs at the end can be read. */
+  function nodeAt(dir: string): string {
+    mkdirSync(dir, { recursive: true });
+    const at = join(dir, "node");
+    writeFileSync(at, `#!/bin/sh\n[ "$1" = -p ] && echo ${at} && exit 0\necho the node the deploy read\n`, { mode: 0o755 });
+    return at;
+  }
+
+  for (const [shape, put] of [
+    ["a symlink", (real: string, at: string): void => symlinkSync(real, at)],
+    ["a shim", (real: string, at: string): void => writeFileSync(at, `#!/bin/sh\nexec ${real} "$@"\n`, { mode: 0o755 })],
+  ] as const) {
+    it(`the pin holds the binary the deploy read through ${shape}, and the unit's command runs it once the name is gone`, async () => {
+      const home = tmp("wsp-node-pin-");
+      try {
+        const place = sshDaemonPlace({ home, path: "/usr/bin:/bin" });
+        const real = nodeAt(join(home, "image-node"));
+        const onPath = join(home, "elsewhere");
+        mkdirSync(onPath, { recursive: true });
+        put(real, join(onPath, "node"));
+        mkdirSync(place.dir, { recursive: true });
+        const pin = deployScript(place, "aabbcc").split("\n").filter(line => line.includes("node_pin"));
+        expect(pin).toHaveLength(2);
+        const exec = /ExecStart=\/bin\/sh -c '(.*)'$/m.exec(daemonUnit(place))?.[1];
+        expect(exec).toBeDefined();
+        const { stdout } = await promisify(execFile)("/bin/bash", ["-ec", [
+          ...pin,
+          // What the machine called node, and what that name led to, are both gone: a pin that kept either would
+          // start nothing here, and a start that resolves nothing is a unit restarting every second forever.
+          `rm -rf ${shellQuote(onPath)} ${shellQuote(dirname(real))}`,
+          "export PATH=/usr/bin:/bin",
+          `test -f ${shellQuote(join(place.dir, "node"))} && test ! -L ${shellQuote(join(place.dir, "node"))}`,
+          `${exec!.replace(`"${place.dir}/start.mjs"`, "--- ignored")}`,
+        ].join("\n")], { env: { PATH: `${onPath}:/usr/bin:/bin` } });
+        expect(stdout.trim()).toBe("the node the deploy read");
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+  }
+
+  it("the pin is laid again on a machine being deployed a second time, by both of its roads", async () => {
+    const home = tmp("wsp-node-repin-");
     try {
       const place = sshDaemonPlace({ home, path: "/usr/bin:/bin" });
-      const real = join(home, "image-node");
-      const onPath = join(home, "elsewhere");
-      mkdirSync(real, { recursive: true });
-      mkdirSync(onPath, { recursive: true });
-      writeFileSync(join(real, "node"), "#!/bin/sh\necho the node the deploy read\n", { mode: 0o755 });
-      symlinkSync(join(real, "node"), join(onPath, "node"));
+      const onPath = dirname(nodeAt(join(home, "image-node")));
       mkdirSync(place.dir, { recursive: true });
       const pin = deployScript(place, "aabbcc").split("\n").filter(line => line.includes("node_pin"));
-      expect(pin).toHaveLength(2);
-      const exec = /ExecStart=\/bin\/sh -c '(.*)'$/m.exec(daemonUnit(place))?.[1];
-      expect(exec).toBeDefined();
-      const { stdout } = await promisify(execFile)("/bin/bash", ["-ec", [
-        ...pin,
-        // What the machine called node, and where that name pointed, are both gone: a pin that kept either would
-        // start nothing here, and a start that resolves nothing is a unit restarting every second forever.
-        `rm -rf ${shellQuote(onPath)} ${shellQuote(real)}`,
-        "export PATH=/usr/bin:/bin",
-        `test -f ${shellQuote(join(place.dir, "node"))} && test ! -L ${shellQuote(join(place.dir, "node"))}`,
-        `${exec!.replace(`"${place.dir}/start.mjs"`, "--- ignored")}`,
+      const at = shellQuote(join(place.dir, "node"));
+      // The link road, twice over: the second deploy of a machine finds the pin already there and the daemon
+      // running it, and every line of a deploy has to be re-runnable or set -e ends it where it stands.
+      const { stdout: twice } = await promisify(execFile)("/bin/bash", ["-ec", [
+        ...pin, ...pin, `${at} --- && echo LAID TWICE`,
       ].join("\n")], { env: { PATH: `${onPath}:/usr/bin:/bin` } });
-      expect(stdout.trim()).toBe("the node the deploy read");
+      expect(twice.trim().endsWith("LAID TWICE")).toBe(true);
+      // The copy road, which is the one that cannot write over what it finds: a destination whose open fails in
+      // place stands in for the running binary a second deploy meets (ETXTBSY on a machine, measured on Ubuntu
+      // 24.04). The fallback is taken out of the generated line rather than written again here.
+      const fallback = pin[1]!.split("|| ")[1]!;
+      expect(fallback).toContain("rm -f ");
+      const { stdout: copied } = await promisify(execFile)("/bin/bash", ["-ec", [
+        pin[0]!,
+        `ln -sfn ${shellQuote(join(home, "no-such-folder", "node"))} ${at}`,
+        fallback,
+        `${at} --- && echo COPIED OVER`,
+      ].join("\n")], { env: { PATH: `${onPath}:/usr/bin:/bin` } });
+      expect(copied.trim().endsWith("COPIED OVER")).toBe(true);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

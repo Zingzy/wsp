@@ -132,7 +132,10 @@ export const daemonPidPath = (place: DaemonPlace): string => `${place.dir}/daemo
  * node was gone with the folder it lived in, and the daemon started on the distro's Node 20 rather than the Node
  * 24 that built its node-pty (measured 2026-09-11). A start that resolves nothing exits 127, and under
  * Restart=always with no start limit that is a machine restarting the daemon every second for the rest of its
- * life: 261 restarts in five minutes on that same box, with no daemon at the end of them. */
+ * life: 261 restarts in five minutes on that same box, with no daemon at the end of them. A link where the
+ * daemon's folder and that node share a filesystem, which every machine wsp forks does and which costs its disk
+ * and its snapshots nothing; on a login whose home is on another filesystem it is a copy of about 100 MB instead,
+ * replaced rather than added to on each deploy, and swept with the folder when the daemon comes off. */
 export const daemonNodePath = (place: DaemonPlace): string => `${place.dir}/node`;
 
 /** The script that keeps the daemon running on a guest with no service manager: the machine's own boot runs it, so
@@ -594,11 +597,14 @@ export function deployScript(place: DaemonPlace, token: string, previewHostSuffi
     'echo "NODE_VERSION $(node --version)"',
     // The node this deploy is about to compile the native modules under, put where every road that starts the
     // daemon reads it. The binary itself and not the name that found it: what a machine calls node is a symlink
-    // chain the machine may rewrite, and a restore left one of those chains pointing at a Node the disk no longer
-    // carries. A hard link where the two paths share a filesystem, which costs the machine and its snapshots
-    // nothing and holds this binary even once the machine has moved every name for it; a copy where they do not.
-    `node_pin="$(readlink -f "$(command -v node)")"`,
-    `ln -f "$node_pin" ${sh(place, daemonNodePath(place))} 2>/dev/null || cp "$node_pin" ${sh(place, daemonNodePath(place))}`,
+    // chain or a version manager's shim, either of which the machine may rewrite, and a restore left one of those
+    // chains pointing at a Node the disk no longer carries. The node is asked where it is rather than the name
+    // read through, since a shim is a script and reading it through only names the script. A hard link where the
+    // two paths share a filesystem, which holds this binary even once the machine has moved every name for it; a
+    // copy where they do not, and the old pin goes first because the daemon of a machine being deployed again is
+    // executing it, which a copy in place cannot open (ETXTBSY, measured on Ubuntu 24.04).
+    `node_pin="$(node -p 'process.execPath')"`,
+    `ln -f "$node_pin" ${sh(place, daemonNodePath(place))} 2>/dev/null || { rm -f ${sh(place, daemonNodePath(place))}; cp "$node_pin" ${sh(place, daemonNodePath(place))}; }`,
     `cd ${sh(place, place.dir)}`,
     `npm install --omit=dev --no-audit --no-fund > ${sh(place, `${place.scratch}/wsp-npm.log`)} 2>&1 || { tail -3 ${sh(place, `${place.scratch}/wsp-npm.log`)}; echo NPM_FAIL; exit 1; }`,
     `rm -rf ${sh(place, `${place.dir}/node_modules/node-pty/prebuilds`)}`,
