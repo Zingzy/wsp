@@ -1,6 +1,9 @@
 import type { Capabilities, MachineFacts } from "@wsp/protocol";
 
 export type MachineKind = "sandbox" | "desktop";
+/** What keeps the daemon running on a machine: the guest's own service manager, or the machine's boot itself on a
+ * guest that has none (a container, whose PID 1 is the only thing that outlives an exec). */
+export type DaemonSupervisor = "systemd" | "entrypoint";
 export type MachineState = "starting" | "running" | "paused" | "gone";
 
 export interface MachineSpec {
@@ -34,8 +37,10 @@ export interface RunOptions {
   pollMs?: number;
 }
 
-/** A minted public route to one guest port: URL with the pt_token embedded,
- * the same token standalone, and its expiry in epoch ms (60-min TTL). */
+/** The route this host takes to one guest port. On a backend whose capabilities say previewUrls it is a public URL
+ * with the provider's token embedded, the token standalone, and its expiry in epoch ms (60-min TTL); on one that
+ * says otherwise it is a route only the computer holding the backend can take, with no token and an expiry at the
+ * end of the machine's life. */
 export interface PreviewReach {
   url: string;
   token: string;
@@ -81,12 +86,14 @@ export interface Machine {
   state(): Promise<MachineState>;
   downloadUrl(path: string): Promise<string>;
   uploadUrl(path: string): Promise<string>;
-  /** Optional: a machine that carries a file's bytes over its own connection instead of a signed URL. Every road
-   * that puts bytes on a machine goes through landBytes, which reads this first and mints a URL where it is absent,
-   * so a backend without signed URLs is a machine with this and nothing else changes. */
-  putBytes?(path: string, bytes: Uint8Array, opts?: { timeoutMs?: number }): Promise<void>;
-  /** Optional: only backends whose capabilities include previewUrls have it. */
+  /** Optional: the backends that have a route to a guest port at all. */
   previewUrl?(port: number): Promise<PreviewReach>;
+  /** Optional: bytes onto the machine on a backend that mints no signed upload URL. `landBytes` is what reads it,
+   * so no caller picks between the two roads itself. */
+  putBytes?(path: string, bytes: Uint8Array, opts?: { timeoutMs?: number }): Promise<void>;
+  /** Optional: what keeps a process running on this machine, read by the daemon deploy. Absent means the guest has
+   * a service manager and the deploy registers a unit with it. */
+  readonly daemonSupervisor?: DaemonSupervisor;
   /** Optional: backends that expose size and creation time per machine. */
   describe?(): Promise<MachineShape>;
   /** Optional: a machine that already existed before wsp says what it is; the status poll carries the answer. */
@@ -135,11 +142,17 @@ export interface BackendPricing {
   rateUsdPerHour(size: { cpu: number; memMb: number }): number;
   defaultSize: { cpu: number; memMb: number };
   snapshotStorage: SnapshotStoragePricing;
+  /** The root disk every builder and fork asks for on this provider, in GiB; absent where a machine takes no disk
+   * request at all (a container's disk is the box's, and a quota on one needs a filesystem most boxes do not run). */
+  builderDiskGb?: number;
 }
 
 export interface MachineBackend {
   readonly capabilities: Capabilities;
   readonly pricing: BackendPricing;
+  /** Optional: what a machine of each kind boots from on this provider when nothing names a template. Absent leaves
+   * the built-in names the engine knows. */
+  readonly baseTemplates?: Readonly<Record<MachineKind, string>>;
   create(spec: MachineSpec): Promise<Machine>;
   /** Optional: only backends the person holds a key for. One cheap authenticated read that boots nothing and touches
    * no machine's idle clock, so a key the provider refuses is known before anything is saved or billed. Rejects with

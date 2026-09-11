@@ -21,7 +21,7 @@ const GOLDEN: GoldenManifest = {
   versions: [{ version: 1, snapshotId: "snap_g", baseTemplate: "default", setupSha: "s", createdAt: "c", smoke: { cmd: "true", exitCode: 0 } }],
 };
 
-const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, kept: false, sizes: [] };
+const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: false, kept: false, sizes: [] };
 
 function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
   const listeners = new Set<(e: ProtocolEvent) => void>();

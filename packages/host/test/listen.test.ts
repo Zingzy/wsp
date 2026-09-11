@@ -191,13 +191,13 @@ describe("where a tool on this computer dials", () => {
       writeFileSync(join(dir, "host.lock"), JSON.stringify({ pid: process.pid, port: 4400, wsPort: 4410, startedAt: new Date().toISOString(), ...(address !== undefined ? { address } : {}) }));
 
     lock("100.64.0.3");
-    expect(hostAddress(statePath)).toMatchObject({ host: "100.64.0.3", wsPort: 4410, token: "a-token" });
+    expect(hostAddress(statePath)).toEqual({ url: "ws://100.64.0.3:4410", token: "a-token" });
     lock("::1");
-    expect(hostAddress(statePath).host).toBe("::1");
+    expect(hostAddress(statePath).url).toBe("ws://[::1]:4410");
     lock("0.0.0.0");
-    expect(hostAddress(statePath).host).toBe(LOOPBACK);
+    expect(hostAddress(statePath).url).toBe(`ws://${LOOPBACK}:4410`);
     lock();
-    expect(hostAddress(statePath).host).toBe(LOOPBACK);
+    expect(hostAddress(statePath).url).toBe(`ws://${LOOPBACK}:4410`);
   });
 });
 

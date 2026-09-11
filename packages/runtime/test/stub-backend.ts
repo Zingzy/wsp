@@ -107,6 +107,7 @@ export function stubBackend(): StubBackend {
       callbackRelay: true,
       snapshotListing: true,
       templates: false,
+      firstLifeSnapshots: true,
       kept: false,
       sizes: [{ cpu: 2, memMb: 2048, rateUsdPerHour: 0.09 }, { cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }, { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 }, { cpu: 4, memMb: 8192, rateUsdPerHour: 0.22 }],
     },

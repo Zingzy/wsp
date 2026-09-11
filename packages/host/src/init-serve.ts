@@ -6,10 +6,10 @@
 import type { Writable } from "node:stream";
 import { styleText } from "node:util";
 import { cancel, log } from "@clack/prompts";
-import { PORT_TAKEN_REFUSAL, portTakenLine, portsPickedLine, stateFileLine, type AppPorts, type PortsAsked } from "@wsp/protocol";
+import { PORT_TAKEN_REFUSAL, authority, isLoopback, portTakenLine, portsPickedLine, stateFileLine, type AppPorts, type PortsAsked } from "@wsp/protocol";
+import { dialAddress } from "./host-lock.js";
 import { choosePorts, type PortProbes } from "./ports.js";
 import type { InitIO } from "./init.js";
-import type { HostHandle } from "./server.js";
 
 const dim = (s: string): string => styleText("dim", s);
 
@@ -32,14 +32,25 @@ function overSsh(env: Record<string, string | undefined>): boolean {
   return env["SSH_CONNECTION"] !== undefined || env["SSH_TTY"] !== undefined || env["SSH_CLIENT"] !== undefined;
 }
 
+/** Where the app a run hands over is served. The address is named and not optional: a host handle carries the port
+ * and no address, so a caller allowed to hand one over here leaves the forward hint reading loopback while the url
+ * reads the address the host bound. */
+export interface ServedAt {
+  port: number;
+  address: string | undefined;
+}
+
 /** The app's address once the run has something to open: opened here on a terminal the person is at, printed (with
- * the ssh forward when the address is remote) under --yes or over ssh. */
-export async function openApp(url: string, handle: Pick<HostHandle, "port">, io: Pick<InitIO, "output" | "env" | "open">, interactive: boolean, logLine?: string): Promise<void> {
+ * the ssh forward when that address answers on this computer alone) under --yes or over ssh. The forward follows
+ * the address the url carries, so a host bound beyond this computer is offered as it stands and a wildcard, which
+ * the url hands over at loopback, still gets one. */
+export async function openApp(url: string, at: ServedAt, io: Pick<InitIO, "output" | "env" | "open">, interactive: boolean, logLine?: string): Promise<void> {
   const out = { output: io.output };
   const under = logLine === undefined ? [] : [logLine];
   if (!interactive || overSsh(io.env)) {
+    const dialed = dialAddress(at);
     const lines = [`Open ${url}`];
-    if (overSsh(io.env)) lines.push(dim(`loopback address; forward it first: ssh -L ${handle.port}:127.0.0.1:${handle.port} <this host>`));
+    if (overSsh(io.env) && isLoopback(dialed)) lines.push(dim(`loopback address; forward it first: ssh -L ${at.port}:${authority(dialed, at.port)} <this host>`));
     log.step([...lines, ...under].join("\n"), out);
     return;
   }

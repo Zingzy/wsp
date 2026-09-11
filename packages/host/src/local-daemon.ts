@@ -14,11 +14,9 @@ import { platform } from "node:os";
 import { join } from "node:path";
 import { portSourceFor, startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { connectDaemon, type DaemonReach } from "@wsp/runtime";
+// LOOPBACK is the protocol's, which every road that binds or dials this computer reads. Here the reason is also
+// that a firewall prompt on macOS or Windows is a wall a local workspace must never hit.
 import { LOOPBACK, rootsPathIn, type DaemonEvent, type DaemonReachView } from "@wsp/protocol";
-
-// Loopback only: a firewall prompt on macOS or Windows is a wall a local workspace must never hit, and nothing
-// off this computer has any business on its daemon. The address is the protocol's, the one every road that binds
-// or dials this computer reads.
 
 /** The loopback token is minted when the daemon starts and lives as long as the process holding it, so the road to
  * it never expires; the view's expiry is a number, so it carries the furthest one. */
@@ -48,6 +46,9 @@ export class LocalDaemon {
     // This daemon's root is the person's home, so rootsPathIn names its roots file; the option's default names the
     // guest's, /root, which on a Linux computer is another user's folder and answers EACCES on every op.
     const rootsPath = rootsPathIn(opts.root);
+    // Loopback only: a firewall prompt on macOS or Windows is a wall a local workspace must never hit, and nothing
+    // off this computer has any business on its daemon.
+    //
     // The kind is what picks the modules the Live rows and the Processes tab read: this computer answers for itself,
     // with os, df and ps, where a guest daemon reads the /proc a Mac does not have.
     const handle = await startDaemon({ host: LOOPBACK, port: 0, token, kind: "local", root: opts.root, workFolder: opts.workFolder, inboxDir, rootsPath, portsSource: portSourceFor(platform()) });

@@ -4,10 +4,11 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { alsoTitle } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
 import { runScan, type RecipeIo } from "../src/recipe-command.js";
 import { FLOOR_LINE, USED_GROUP, type TableRow } from "../src/init-table.js";
-import { ALSO_HERE_TITLE, COMMANDS_TITLE, NOT_SCANNED, RecipeScan, SIGN_INS_TITLE, alsoHereLines, scanPrintout, signInAdvice, tickAdvice } from "../src/recipe-answer.js";
+import { COMMANDS_TITLE, NOT_SCANNED, RecipeScan, SIGN_INS_TITLE, alsoHereLines, scanPrintout, signInAdvice, tickAdvice } from "../src/recipe-answer.js";
 import { claudeLine, fakeHost, HOME } from "./recipe-fixture.js";
 import { loginOf } from "./signin-questions.js";
 
@@ -111,7 +112,7 @@ describe("wsp recipe scan", () => {
     expect(tool(past, "java")).toMatchObject({ on: true, why: "30 commands in 4 sessions", recommended: { value: "on", why: "30 commands in 4 sessions; 585 MB on the machine, worth a question" } });
     expect(tool(past, "wrangler")).toMatchObject({ on: true, why: "6 commands in 2 sessions", recommended: { value: "on", why: "6 commands in 2 sessions" } });
     // The footer names the floor once, right under the Tools table's totals.
-    const lines = scanPrintout(scan);
+    const lines = scanPrintout(scan, "darwin");
     expect(lines.filter(l => l === FLOOR_LINE)).toHaveLength(1);
     expect(lines[lines.indexOf(FLOOR_LINE) - 1]).toMatch(/^On: \d+ tools/);
   });
@@ -124,20 +125,22 @@ describe("wsp recipe scan", () => {
   });
 
   it("prints the heading for the tools no catalog row carries, telling nothing looked from nothing found", () => {
-    expect(alsoHereLines({ scanned: false, managers: [] })).toEqual([ALSO_HERE_TITLE, `  ${NOT_SCANNED}`]);
-    expect(alsoHereLines({ scanned: true, managers: [] })).toEqual([ALSO_HERE_TITLE, "  none"]);
-    const lines = alsoHereLines({ scanned: true, managers: [{ manager: "brew", rows: [{ id: "jj", install: "brew install jj", size: 40 * MB }] }] });
+    expect(alsoHereLines({ scanned: false, managers: [] }, "darwin")).toEqual([alsoTitle("darwin"), `  ${NOT_SCANNED}`]);
+    expect(alsoHereLines({ scanned: true, managers: [] }, "darwin")).toEqual([alsoTitle("darwin"), "  none"]);
+    // On a computer that is not a Mac the heading says so, and nothing else about the section changes.
+    expect(alsoHereLines({ scanned: true, managers: [] }, "linux")).toEqual(["Also on this computer", "  none"]);
+    const lines = alsoHereLines({ scanned: true, managers: [{ manager: "brew", rows: [{ id: "jj", install: "brew install jj", size: 40 * MB }] }] }, "darwin");
     expect(lines[1]).toBe("  brew");
     expect(lines[2]).toBe("    jj  brew install jj  40 MB");
   });
 
   it("prints every section in order, the do column beside each row", async () => {
-    const lines = scanPrintout(await runScan(laptop(), {}, quiet, at));
+    const lines = scanPrintout(await runScan(laptop(), {}, quiet, at), "darwin");
     expect(lines[0]).toBe("Agents");
     // The shared renderer's own line, with the one column the scan adds.
     expect(lines.find(l => l.includes("Java 21"))).toMatch(/^○ {2}Java 21\s+installed\s+installed here, never used\s+585 MB {2}off$/);
     expect(lines).toContain("Tools");
-    expect(lines).toContain(ALSO_HERE_TITLE);
+    expect(lines).toContain(alsoTitle("darwin"));
     expect(lines).toContain(`  ${NOT_SCANNED}`);
     expect(lines).toContain(COMMANDS_TITLE);
     expect(lines).toContain(SIGN_INS_TITLE);

@@ -6,8 +6,8 @@
 // never say different things about the same recipe; nothing here draws a
 // second table of catalog rows.
 import { CATALOG_AGENTS, CATALOG_TOOLS, keysIdOf, loginIdOf, loginRow, signsInByDefault, hasLogin } from "@wsp/catalog";
-import { type CommandCount, floorApplies } from "@wsp/collect";
-import { RecipeCustomRow, RecipeTick, customRows, fmtBytes, type Recipe } from "@wsp/protocol";
+import { type CommandCount, type Platform, floorApplies } from "@wsp/collect";
+import { RecipeCustomRow, RecipeTick, alsoTitle, customRows, fmtBytes, type Recipe } from "@wsp/protocol";
 import { z } from "zod";
 import { table } from "./init-layout.js";
 import { FLOOR_LINE, GROUP_ORDER, USED_GROUP, recipeTable, tableLines, totalsLine, type TableRow } from "./init-table.js";
@@ -155,8 +155,6 @@ export function recipePrintout(answer: RecipeAnswer, depth = 1): string[] {
 
 // --- the scan: every option, with what an agent should do about each ------------------------------------------
 
-/** The heading over the tools this computer has that no catalog row carries, grouped by what installed them. */
-export const ALSO_HERE_TITLE = "Also on this Mac";
 /** What that section says when nothing looked, which is not the same answer as nothing being found. */
 export const NOT_SCANNED = "nothing looked for them here";
 
@@ -266,22 +264,23 @@ export function signInTableLines(rows: readonly RecipeScanSignIn[]): string[] {
 }
 
 /** What the section on tools outside the catalog says: the rows by manager, or that nothing looked for them. */
-export function alsoHereLines(also: RecipeScanAlso): string[] {
-  if (!also.scanned) return [ALSO_HERE_TITLE, `  ${NOT_SCANNED}`];
-  if (also.managers.length === 0) return [ALSO_HERE_TITLE, "  none"];
+export function alsoHereLines(also: RecipeScanAlso, platform: Platform): string[] {
+  const title = alsoTitle(platform);
+  if (!also.scanned) return [title, `  ${NOT_SCANNED}`];
+  if (also.managers.length === 0) return [title, "  none"];
   return [
-    ALSO_HERE_TITLE,
+    title,
     ...also.managers.flatMap(m => [`  ${m.manager}`, ...table(m.rows.map(r => [r.id, r.install, r.size === undefined ? "size unknown" : fmtBytes(r.size)]), ["left", "left", "right"]).map(l => `    ${l}`)]),
   ];
 }
 
 /** The whole scan on the terminal: the two tables with what to do beside each row, the tools outside the catalog,
  * the commands, the sign-ins. */
-export function scanPrintout(s: RecipeScan, depth = 1): string[] {
+export function scanPrintout(s: RecipeScan, platform: Platform, depth = 1): string[] {
   return [
     ...adviceTables(s, depth),
     "",
-    ...alsoHereLines(s.alsoHere),
+    ...alsoHereLines(s.alsoHere, platform),
     "",
     ...commandTableLines(s.commands),
     "",

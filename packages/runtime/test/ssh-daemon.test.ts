@@ -21,8 +21,8 @@ const runtime = (ssh: SshWiring, store: Store = memoryStore()): Runtime => creat
 
 /** A host that reaches machines over ssh and can put a daemon on one, with the machine answering the port file
  * with `port` and everything else with nothing. */
-function host(over: { port?: string; refuse?: string; store?: Store } = {}): { rt: Runtime; daemon: FakeSshDaemon; carried: { script: string; stdin?: Uint8Array }[] } {
-  const daemon = fakeSshDaemon(over.refuse === undefined ? {} : { refuse: over.refuse });
+function host(over: { port?: string; refuse?: string; refuseRemoval?: string; store?: Store } = {}): { rt: Runtime; daemon: FakeSshDaemon; carried: { script: string; stdin?: Uint8Array }[] } {
+  const daemon = fakeSshDaemon({ ...(over.refuse !== undefined ? { refuse: over.refuse } : {}), ...(over.refuseRemoval !== undefined ? { refuseRemoval: over.refuseRemoval } : {}) });
   const { wiring, carried } = fakeSsh(script => (script.startsWith(`cat '${AT.portFile}'`) ? { stdout: over.port ?? "42891\n" } : {}), daemon);
   return { rt: runtime(wiring, over.store ?? memoryStore()), daemon, carried };
 }
@@ -112,6 +112,18 @@ describe("the road to that daemon", () => {
     // The record names no daemon, and the sweep runs anyway: a deploy that failed partway had already landed the
     // bundle and the token, and nothing of wsp's may outlive the record that put it there.
     expect(daemon.removals).toEqual([{ machineId: "ssh://dev@box:22", home: HOME, path: "/home/dev/.local/bin:/usr/bin" }]);
+    await rt.close();
+  });
+
+  it("frees the forward even when the machine will not let go of its daemon", async () => {
+    const { rt, daemon } = host({ refuseRemoval: "the machine did not answer over ssh" });
+    const ws = await rt.workspaces.createSsh("dev@box");
+    await rt.workspaces.daemonReach(ws.id);
+    await rt.workspaces.delete(ws.id);
+    // The removal was tried and failed; the child holding the road is this host's own either way, and a port it
+    // keeps for a workspace nobody can name is a port held until the host exits.
+    expect(daemon.removals).toHaveLength(1);
+    expect(daemon.forwards[0]!.dropped).toBe(true);
     await rt.close();
   });
 

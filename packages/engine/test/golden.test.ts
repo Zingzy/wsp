@@ -52,8 +52,8 @@ function recordingBackend(
   const inline: { id: string; cmd: string; timeoutMs: number | undefined }[] = [];
   const answer = (cmd: string): ExecResult => opts.exec?.(cmd) ?? execResults[cmd] ?? (cmd === "echo ok" ? REACH_OK : { exitCode: 0, stdout: "", stderr: "" });
   const backend: MachineBackend = {
-    capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: false, templates: opts.templates === true, kept: false, sizes: [] },
-    pricing: { rateUsdPerHour: (s: { cpu: number; memMb: number }) => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: { freeGb: 10, usdPerGbMonth: 0.05, billedFrom: "2026-10-01" } },
+    capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: false, firstLifeSnapshots: true, templates: opts.templates === true, kept: false, sizes: [] },
+    pricing: { rateUsdPerHour: (s: { cpu: number; memMb: number }) => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: { freeGb: 10, usdPerGbMonth: 0.05, billedFrom: "2026-10-01" }, builderDiskGb: BUILDER_DISK_GB },
     async create(spec) {
       if (spec.template !== undefined && spec.template.startsWith("tpl_") && !templates.has(spec.template)) throw Object.assign(new Error(`no template ${spec.template}`), { kind: "missing", status: 404 });
       created.push(spec);
@@ -245,7 +245,10 @@ describe("interactive golden: prepare then seal", () => {
     // The floor goes on before the daemon: the login shell's PATH, then node, so the daemon's native module compiles against it.
     const floor = ran.filter(r => r.id === "m1").map(r => r.script);
     expect(floor.findIndex(s => s.includes("> /etc/profile.d/wsp-golden.sh"))).toBe(0);
-    expect(floor.findIndex(s => s.includes("nodejs.org/dist"))).toBe(1);
+    // The index and curl lead, since the Node install fetches its release with curl and an image need not ship one.
+    expect(floor.findIndex(s => s.includes("apt-get update -qq"))).toBe(1);
+    expect(floor.findIndex(s => s.includes("apt-get install -y -qq curl"))).toBe(2);
+    expect(floor.findIndex(s => s.includes("nodejs.org/dist"))).toBe(3);
     expect(timeline).toEqual(["create m1"]); // alive and waiting for the person
   });
 
@@ -404,6 +407,28 @@ describe("interactive golden: prepare then seal", () => {
     expect((err as NotFirstLifeError).machineId).toBe("m1");
     expect(snapshots).toEqual([]);
     expect(timeline).toEqual(["create m1"]);
+  });
+
+  it("seals a builder that was resumed on a backend whose snapshots are a copy of the disk", async () => {
+    const { backend, snapshots } = recordingBackend();
+    Object.assign(backend, { capabilities: { ...backend.capabilities, firstLifeSnapshots: false } });
+    const builder = await prepareBuilder({ backend, setup: "true" });
+    const { manifest } = await sealGolden({ ...builder, firstLife: false }, { backend, hostId: "h1", smoke: "true" });
+    expect(manifest.head).toBe(1);
+    expect(snapshots).toEqual(["wsp-h1-default-v1"]);
+  });
+
+  it("asks for no root disk on a backend whose machines take no disk request, and boots from the image it names", async () => {
+    const { backend, created } = recordingBackend();
+    Object.assign(backend, {
+      pricing: { ...backend.pricing, builderDiskGb: undefined },
+      baseTemplates: { sandbox: "ubuntu:24.04", desktop: "ubuntu:24.04" },
+    });
+    const builder = await prepareBuilder({ backend, setup: "true" });
+    await sealGolden(builder, { backend, hostId: "h1", smoke: "true" });
+    expect(created[0]!.diskGb).toBeUndefined();
+    expect(created[0]!.template).toBe("ubuntu:24.04");
+    expect(created[1]!.diskGb).toBeUndefined();
   });
 
   it("a snapshot the provider refuses with its 502 is asked for three times while the builder reads running, each attempt a stage line with the provider's answer; then the seal fails typed and the builder is left as it was", async () => {
@@ -1242,7 +1267,7 @@ describe("golden import stages", () => {
     await prepareBuilder({ backend: plain.backend, setup: "true", fetch: plain.fetch, onStage: stageRecorder().onStage, import: importOf() });
     const checks = plain.inline.filter(c => c.cmd.includes('echo "missing'));
     expect(checks).toHaveLength(1);
-    expect(checks[0]!.cmd).toContain(`for b in 'node' 'pnpm' 'uv' 'python3' 'git' 'jq' 'rg' 'curl' 'docker' 'cc' 'fd' 'sqlite3' 'wget' 'zip' 'xz' 'rsync'; do`);
+    expect(checks[0]!.cmd).toContain(`for b in 'curl' 'node' 'pnpm' 'uv' 'python3' 'git' 'jq' 'rg' 'docker' 'cc' 'fd' 'sqlite3' 'wget' 'zip' 'xz' 'rsync'; do`);
   });
 
   it("two tap roads whose go module is named otherwise land under the row's command and pass the check: the road is kept, on the fake guest end to end", async () => {

@@ -6,14 +6,14 @@
 // theirs outside one folder under their home.
 import { describe, expect, it } from "vitest";
 import { execFile } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, sshDaemonPaths } from "@wsp/protocol";
 import { putBytesScript } from "@wsp/engine";
 import type { Machine } from "@wsp/engine";
-import { CLOUD_PLACE, DAEMON_GONE_LINE, deployDaemon, PREFLIGHT_OK_LINE, preflightScript, DAEMON_UNIT, daemonUnit, deployScript, removeDaemonScript, sshDaemonPlace, stageDaemonBundle, startMjs, stopDaemonScript } from "../src/doctor.js";
+import { BOOT_SCRIPT, CLOUD_PLACE, CONTAINER_PLACE, DAEMON_GONE_LINE, daemonLogCommand, guestPlace, SYSTEMD, deployDaemon, PREFLIGHT_OK_LINE, preflightScript, DAEMON_UNIT, daemonUnit, deployScript, removeDaemonScript, sshDaemonPlace, stageDaemonBundle, startMjs, stopDaemonScript } from "../src/doctor.js";
 
 const LOGIN = { home: "/home/maya", path: "/usr/local/bin:/usr/bin:/bin" };
 
@@ -59,6 +59,41 @@ describe("the place a fork keeps its daemon", () => {
     expect(cloud).toContain("if ! command -v node >/dev/null 2>&1; then");
     // Nothing is read off the machine before the install: wsp built it and knows what is on it.
     expect(cloud).not.toContain(NO_BUILD_TOOLS_LINE.slice(0, NO_BUILD_TOOLS_LINE.indexOf(",")));
+  });
+});
+
+describe("what keeps the daemon running is a module, not a question the deploy asks", () => {
+  it("registers one module per way and one place per kind, and no line of a script names either", () => {
+    // A fork and a machine over ssh are kept up by the same service manager, told a different scope; a container
+    // whose only lasting process is its own boot gets the script that loop-restarts the daemon.
+    expect(CLOUD_PLACE.supervise).toBe(SYSTEMD);
+    expect(sshDaemonPlace(LOGIN).supervise).toBe(SYSTEMD);
+    expect(CONTAINER_PLACE.supervise).toBe(BOOT_SCRIPT);
+    expect([CLOUD_PLACE.scope, sshDaemonPlace(LOGIN).scope]).toEqual(["system", "user"]);
+
+    // The one place a supervisor id is matched to a place, which is what a machine's own answer picks.
+    expect(guestPlace("systemd")).toBe(CLOUD_PLACE);
+    expect(guestPlace("entrypoint")).toBe(CONTAINER_PLACE);
+
+    // And nothing a place writes names a supervisor or a kind: the place answers, the script does not ask.
+    for (const place of [CLOUD_PLACE, CONTAINER_PLACE, sshDaemonPlace(LOGIN)]) {
+      for (const script of [deployScript(place, "aabbcc"), removeDaemonScript(place), preflightScript(place)]) {
+        for (const word of ["entrypoint", "systemd ", "supervisor ===", '"cloud"', '"ssh"']) expect(script, word).not.toContain(word);
+      }
+    }
+  });
+
+  it("gives each way its own answer to whether the daemon came up, in words that machine can say", () => {
+    // A guest has iproute2; a container image ships neither ss nor curl, so bash's own network road answers.
+    expect(deployScript(CLOUD_PLACE, "aabbcc")).toContain("ss -ltnH 'sport = :7070'");
+    expect(deployScript(CONTAINER_PLACE, "aabbcc")).toContain("exec 3<>/dev/tcp/127.0.0.1/7070");
+    expect(deployScript(CONTAINER_PLACE, "aabbcc")).not.toContain("ss -ltn");
+    // A machine somebody owns let its daemon pick the port, so the file it wrote is what says it bound.
+    expect(deployScript(sshDaemonPlace(LOGIN), "aabbcc")).toContain("'/home/maya/.wsp/daemon.port'");
+    // And each reads the log its own supervision bounds.
+    expect(daemonLogCommand(CLOUD_PLACE, 50)).toContain("journalctl -u");
+    expect(daemonLogCommand(sshDaemonPlace(LOGIN), 50)).toContain("journalctl --user -u");
+    expect(daemonLogCommand(CONTAINER_PLACE, 50)).toContain("tail -n 50");
   });
 });
 
@@ -253,6 +288,43 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
     expect(off).not.toMatch(new RegExp(`rm -rf [^\n]*${at.wsp}(\\s|$)`));
     expect(off).not.toContain(`rm -rf ${at.binDir}`);
     expect(off).not.toMatch(/rm -[rf]+ [^\n]*\/home\/maya\/\.profile(\s|$)/);
+  });
+
+  it("leaves a login file it never wrote to byte for byte as it was, symlink and all", async () => {
+    // The sweep runs on every machine recorded over ssh now, including one whose deploy never landed, so the
+    // removal must not touch a login file wsp put no line in. Run for real: their .profile is a symlink into a
+    // dotfiles checkout on many machines, and a rewrite that replaces the file turns it into a plain one.
+    const dir = mkdtempSync(join(tmpdir(), "wsp-profile-"));
+    try {
+      const home = join(dir, "home");
+      const dotfiles = join(dir, "dotfiles");
+      mkdirSync(home, { recursive: true });
+      mkdirSync(dotfiles, { recursive: true });
+      const real = join(dotfiles, "profile");
+      const theirs = "# mine\nexport EDITOR=vim\n";
+      writeFileSync(real, theirs);
+      symlinkSync(real, join(home, ".profile"));
+      const before = statSync(real);
+
+      await promisify(execFile)("bash", ["-c", removeDaemonScript(sshDaemonPlace({ home, path: "/usr/bin" }))]);
+
+      // Byte for byte, the same inode, and still a symlink.
+      expect(readFileSync(real, "utf8")).toBe(theirs);
+      expect(statSync(real).ino).toBe(before.ino);
+      expect(lstatSync(join(home, ".profile")).isSymbolicLink()).toBe(true);
+      expect(existsSync(`${join(home, ".profile")}.wsp-out`)).toBe(false);
+
+      // And with wsp's line in it, the line goes and everything else stays, the symlink and inode with it.
+      const at = sshDaemonPaths(home);
+      writeFileSync(real, `# mine\n. ${at.profileFile}\nexport EDITOR=vim\n`);
+      const kept = statSync(real).ino;
+      await promisify(execFile)("bash", ["-c", removeDaemonScript(sshDaemonPlace({ home, path: "/usr/bin" }))]);
+      expect(readFileSync(real, "utf8")).toBe(theirs);
+      expect(statSync(real).ino).toBe(kept);
+      expect(lstatSync(join(home, ".profile")).isSymbolicLink()).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("stages a bundle whose start script and browser shim are that machine's own", async () => {

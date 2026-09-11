@@ -21,8 +21,9 @@ const OTHER = `${HOME}/other`;
 
 /** Claude Code and Java 21 on this computer; the agent's own sessions ran node, gh and go past the floor, and
  * pulumi, which the catalog does not carry. Java is installed and was never run. */
-const laptop = () =>
+const laptop = (over: { platform?: "darwin" | "linux" } = {}) =>
   fakeHost({
+    ...over,
     which: ["claude", "java"],
     files: {
       "~/.claude/settings.json": "{}",
@@ -48,6 +49,9 @@ const at = () => new Date("2026-09-06T03:00:00Z");
 /** A tap formula this Mac's Homebrew has, as the scan lists it, and the recipe row the collector files it under. */
 const DISKBLOOM: ScanRow = { id: "brew/zingzy/tap/diskbloom", name: "zingzy/tap/diskbloom", manager: "brew", group: "Homebrew formulae", install: "brew install zingzy/tap/diskbloom", check: "brew list --versions zingzy/tap/diskbloom", size: 4 * 1024 * 1024, version: "0.1.0" };
 const TAP_ROW = "tools/brew/zingzy/tap/diskbloom";
+
+/** A package apt has on a Linux computer: no row of its own, since nothing reads an apt road off one. */
+const DIRENV: ScanRow = { id: "apt/direnv", name: "direnv", manager: "apt", group: "apt packages", install: "export DEBIAN_FRONTEND=noninteractive; apt-get install -y -qq direnv", check: "dpkg -s 'direnv'", size: 9 * 1024 * 1024 };
 
 /** The scan the verb is handed, recording what it was asked so a test can say whether the managers were read. */
 const also = (rows: readonly ScanRow[] = [DISKBLOOM]) => {
@@ -252,7 +256,7 @@ describe("wsp recipe", () => {
     expect(custom()?.find(r => r.id === "ruff")?.check).toBe("ruff --version");
     // The install is the whole row: no catalog row appears for it and no sign-in is ever offered.
     expect(custom()?.every(r => !("signIn" in r))).toBe(true);
-    expect(signInItems(applyRecipe(withCatalogAgents({ entries: [] }), Recipe.parse(JSON.parse(readFileSync(out, "utf8")))), new Map()).items.map(i => i.id)).not.toContain("logins/just");
+    expect(signInItems(applyRecipe(withCatalogAgents({ entries: [] }), Recipe.parse(JSON.parse(readFileSync(out, "utf8")))), new Map(), "darwin").items.map(i => i.id)).not.toContain("logins/just");
     await expect(runRecipe(laptop(), { out, add: ["just"] }, quiet, at)).rejects.toThrow('--add takes <id>=<command>, not "just"');
   });
 
@@ -319,6 +323,20 @@ describe("wsp recipe", () => {
     await runRecipe(laptop(), { out, set: [`${TAP_ROW}=on`], alsoHere: none.alsoHere }, quiet, at);
     expect(none.asked).toEqual([]);
     expect(file().rows.find(r => r.id === TAP_ROW)?.on).toBe(true);
+  });
+
+  it("ticks a package whose manager brings no row of its own (apt) as an added row with the scan's install line, and an untick takes that row away", async () => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-apt-"));
+    const out = outPath();
+    const file = () => Recipe.parse(JSON.parse(readFileSync(out, "utf8")));
+    const scan = also([DIRENV]);
+    await runRecipe(laptop({ platform: "linux" }), { out, set: [`${DIRENV.id}=on`], alsoHere: scan.alsoHere }, quiet, at);
+    // The build reads no road off an apt row, so a row under the collector's id would install nothing: the tick
+    // writes the line the scan read instead, which is what the Also screen writes for the same package.
+    expect(file().rows.some(r => r.id === "tools/apt/direnv")).toBe(false);
+    expect(file().custom).toEqual([{ kind: "custom", id: DIRENV.id, name: "direnv", install: [DIRENV.install], check: DIRENV.check, manager: "apt", size: DIRENV.size, why: "installed on this computer by apt" }]);
+    await runRecipe(laptop({ platform: "linux" }), { out, set: [`${DIRENV.id}=off`], alsoHere: also([DIRENV]).alsoHere }, quiet, at);
+    expect(file().custom).toEqual([]);
   });
 
   it("refuses an --add for a package one of this Mac's managers already has, by the scan's id or the package's own name, and names the --set word that ticks it instead", async () => {

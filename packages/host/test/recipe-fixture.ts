@@ -2,15 +2,22 @@
 // A computer described as data for the recipe verb: files with text or a
 // size, commands on PATH, and the Claude transcripts the histories are read
 // from.
-import type { Host } from "@wsp/collect";
+import { nodeHost, type Host, type Platform } from "@wsp/collect";
+import { thisComputer } from "@wsp/protocol";
 
 export const HOME = "/Users/dev";
+/** What the computer running these tests is called, for the verbs that read it themselves rather than a fake: the
+ * gate runs on a Mac and the CI runner on Linux, and the word follows whichever it is. */
+export const HERE_PLATFORM = nodeHost().platform;
+export const HERE = thisComputer(HERE_PLATFORM);
 /** The modification time every file on this laptop has; nothing here reads a history twice. */
 const MTIME = 1_000;
 
 export interface FakeLaptop {
   files?: Record<string, string | number>;
   which?: readonly string[];
+  /** The computer this stands for; a Mac unless a test is about a Linux one. */
+  platform?: Platform;
 }
 
 /** One assistant line of a Claude transcript: the Bash calls it made, in the folder the session ran in. */
@@ -30,7 +37,7 @@ export function fakeHost(laptop: FakeLaptop = {}): Host & { reads: string[] } {
   const which = new Set(laptop.which ?? []);
   const reads: string[] = [];
   return {
-    platform: "darwin",
+    platform: laptop.platform ?? "darwin",
     home: HOME,
     reads,
     fs: {

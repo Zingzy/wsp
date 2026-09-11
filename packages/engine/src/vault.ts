@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { hasByteRoad, landBytes } from "./land-bytes.js";
 import { once } from "node:events";
 import { createWriteStream } from "node:fs";
 import { rm, stat } from "node:fs/promises";
@@ -324,28 +325,6 @@ async function putPart(doFetch: Fetch, url: string, bytes: Uint8Array<ArrayBuffe
   }
 }
 
-/** The one road bytes take onto a machine, whichever kind it is: the machine's own connection where it carries
- * one, else a signed URL PUT. Both callers that put a file on a machine import this, so a machine whose provider
- * mints no URL needs nothing said about it anywhere else. `part` and `parts` name where this piece sits in a
- * larger archive, for the words a failure carries. */
-export async function landBytes(
-  machine: Machine,
-  path: string,
-  bytes: Uint8Array<ArrayBuffer>,
-  opts: { fetch?: Fetch; timeoutMs?: number; part?: number; parts?: number } = {},
-): Promise<void> {
-  if (machine.putBytes !== undefined) {
-    await machine.putBytes(path, bytes, { timeoutMs: opts.timeoutMs ?? PUT_BYTES_MS });
-    return;
-  }
-  const url = await machine.uploadUrl(path);
-  await putPart(opts.fetch ?? globalThis.fetch, url, bytes, opts.part ?? 1, opts.parts ?? 1);
-}
-
-/** How long one part has to travel a machine's own connection. A signed URL PUT is bounded by the backend; a
- * connection that carries the bytes itself is bounded here, wide enough for a part on a slow link. */
-const PUT_BYTES_MS = 600_000;
-
 /** A file for the upload road: its path on the guest, its mode and its bytes. */
 export interface TarFile {
   path: string;
@@ -445,7 +424,11 @@ export async function importInto(machine: Machine, tar: Buffer, destDir: string,
   try {
     for (const [i, path] of partPaths.entries()) {
       const end = Math.min((i + 1) * UPLOAD_PART_BYTES, tar.length);
-      await landBytes(machine, path, new Uint8Array(tar.subarray(i * UPLOAD_PART_BYTES, end)), { fetch: doFetch, part: i + 1, parts });
+      const part = tar.subarray(i * UPLOAD_PART_BYTES, end);
+      // The backend's own road where it has one; the signed URL keeps the retries below, which are this road's own
+      // answer to a part lost between here and the provider's storage.
+      if (hasByteRoad(machine)) await landBytes(machine, path, part);
+      else await putPart(doFetch, await machine.uploadUrl(path), new Uint8Array(part), i + 1, parts);
       opts.onPart?.({ part: i + 1, parts, bytes: end, total: tar.length });
     }
   } catch (e) {

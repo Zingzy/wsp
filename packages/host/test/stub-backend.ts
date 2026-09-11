@@ -16,6 +16,8 @@ export interface StubMachine extends Machine {
   runLog: string[];
   /** What the provider's view says it was created at; tests move it to play a resume. */
   createdAt: string;
+  /** What keeps the daemon running there; a test playing a container sets it. */
+  daemonSupervisor?: Machine["daemonSupervisor"];
 }
 
 export interface StubBackend extends MachineBackend {
@@ -130,6 +132,7 @@ export function stubBackend(): StubBackend {
       containers: true,
       callbackRelay: true,
       snapshotListing: true,
+      firstLifeSnapshots: true,
       templates: false,
       kept: false,
       sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }, { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 }, { cpu: 4, memMb: 8192, rateUsdPerHour: 0.22 }],

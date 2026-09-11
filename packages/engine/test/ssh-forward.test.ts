@@ -78,6 +78,22 @@ describe("the forward to a machine's daemon", () => {
     }
   });
 
+  it("opens one child for two dials in the same tick, so no child is left with nothing holding it", async () => {
+    const { spawner, started } = fakeForwards();
+    const forwards = new SshForwards({ spawn: spawner });
+    // A forward is held, and the daemon has since come back on another port, so both dials find it stale. Both
+    // roads onto this can race: the status poll and the daemonReach verb.
+    await forwards.forward("ssh://maya@box:2222", REACH, 42891);
+    const [a, b] = await Promise.all([forwards.forward("ssh://maya@box:2222", REACH, 50001), forwards.forward("ssh://maya@box:2222", REACH, 50001)]);
+    expect(a.localPort).toBe(b.localPort);
+    // One replacement, not two: the recorded pid is the whole road, so a child nothing holds is a port held
+    // until the host exits, which close() could not free either.
+    expect(started.filter(c => !c.killed)).toHaveLength(1);
+
+    await forwards.close();
+    expect(started.filter(c => !c.killed)).toEqual([]);
+  });
+
   it("kills the pid it recorded and nothing else, when the workspace goes and when the host closes", async () => {
     const { spawner, started } = fakeForwards();
     const forwards = new SshForwards({ spawn: spawner });

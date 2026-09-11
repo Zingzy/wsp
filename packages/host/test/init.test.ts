@@ -13,7 +13,7 @@ import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { RUNGS, parseManifest, type Manifest, type ManifestEntry } from "@wsp/collect";
-import { LocalBackend, SNAPSHOT_STORAGE, type BackendPricing, type ExecResult } from "@wsp/engine";
+import { BUILDER_DISK_GB, LocalBackend, SNAPSHOT_STORAGE, type BackendPricing, type ExecResult } from "@wsp/engine";
 import { ALREADY_APPLIED, Recipe, type GoldenManifest, type ProjectImportResult, type ProjectPlan } from "@wsp/protocol";
 import { DAEMON_TOKEN_SET, LOOPBACK, createRuntime, goldenHead, localExecStream, memoryStore, type GoldenRecipe, type LocalWiring, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -23,7 +23,7 @@ import { signInItems } from "../src/init-pick.js";
 import { CARD_FRAME, card, widthOf } from "../src/init-layout.js";
 import { PROJECT_QUESTION, noFolderNote } from "../src/init-pick.js";
 import { reduceStages, runInit, stageLine, summaryNote, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
-import { ALSO_LOCAL_QUESTION, FIRST_QUESTION, FOLDER_QUESTION } from "../src/init-first.js";
+import { ALSO_LOCAL_QUESTION, FIRST_QUESTION, folderQuestion } from "../src/init-first.js";
 import type { HostHandle, WorkspaceRoads } from "../src/server.js";
 import { startCallbackRelay } from "../src/relay.js";
 import type { ConnectOptions, DaemonSocket } from "../src/doctor.js";
@@ -45,7 +45,7 @@ const KEY = { up: "\x1b[A", down: "\x1b[B", right: "\x1b[C", left: "\x1b[D", spa
 const URL_RE = /http:\/\/127\.0\.0\.1:\d+\//;
 const SEAL_Q = (v: number) => `Seal this machine as golden v${v}?`;
 const BOOT = /Boot a \d+ vCPU/;
-const PRICING: BackendPricing = { rateUsdPerHour: s => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: SNAPSHOT_STORAGE };
+const PRICING: BackendPricing = { rateUsdPerHour: s => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: SNAPSHOT_STORAGE, builderDiskGb: BUILDER_DISK_GB };
 
 /** A folder as the host would plan it: one secret-shaped file that must be cut, one the plan offers a rewrite for,
  * one agent with sessions and one without. What the wizard consents to out of this is the app's own default. */
@@ -330,7 +330,7 @@ async function firstWorkspace(f: Fake, folder: string | false, tick = true): Pro
   await f.until(ALSO_LOCAL_QUESTION);
   await f.press(tick ? KEY.enter : "n");
   if (folder === false) return;
-  await f.until(FOLDER_QUESTION);
+  await f.until(folderQuestion("darwin"));
   await f.press(...(folder === "" ? [] : [folder]), KEY.enter);
 }
 
@@ -1210,11 +1210,11 @@ describe("wsp init, the summary-first screens", () => {
     expect(saved.get("agents/mcp/claude/github")).toMatchObject({ bring: false, choice: "skip" });
     expect(saved.get("agents/mcp/claude/notes")).toMatchObject({ bring: true });
     const small = Recipe.parse(JSON.parse(readFileSync(join(dirs[0]!, "recipe.json"), "utf8")));
-    expect(small.rows.filter(r => r.on).map(r => r.id)).toEqual(["claude", "codex", "node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh", "yq", "hermes", "wrangler"]);
+    expect(small.rows.filter(r => r.on).map(r => r.id)).toEqual(["claude", "codex", "curl", "node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "docker", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh", "yq", "hermes", "wrangler"]);
     expect(small.rows.find(r => r.id === "gh")).toMatchObject({ signIn: "machine" });
     expect(small.rows.find(r => r.id === "go")).not.toHaveProperty("signIn");
     // --yes answers every row with the word its screen would have opened on: the same map signInItems hands the screen.
-    const screens = signInItems(applyRecipe(withCatalogAgents(LAPTOP), MEASURED), new Map());
+    const screens = signInItems(applyRecipe(withCatalogAgents(LAPTOP), MEASURED), new Map(), "darwin");
     for (const [id, choice] of screens.initial) {
       // The one exception is a Keychain login, which nobody is here to consent to; the run says so on the screen above.
       if (choice === "copy" && saved.get(id)?.paths.some(p => p.startsWith("Keychain:")) === true) continue;
@@ -1910,6 +1910,16 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.text()).toContain("ssh -L 4400:127.0.0.1:4400");
   });
 
+  it("over ssh a run told to bind beyond this computer prints that address and no forward, so the whole road holds the address and not only the line that prints it", async () => {
+    const f = fake({ yes: true, address: "100.64.0.3", env: { SSH_CONNECTION: "10.0.0.2 51000 10.0.0.9 22" } });
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(0);
+    expect(f.opened).toEqual([]);
+    const out = f.text();
+    expect(out).toMatch(/^◇\s+Open http:\/\/100\.64\.0\.3:4400\/#w\/ws_[0-9a-f]+$/m);
+    expect(out).not.toContain("ssh -L");
+  });
+
   it("--yes on a terminal is a person taking the defaults: the app is served after the seal and its address printed, not opened", async () => {
     const f = fake({ yes: true });
     const result = await runInit(f.opts, f.io);
@@ -2160,7 +2170,7 @@ describe("wsp init, flags and no terminal", () => {
     expect(out).toContain("A builder from an earlier wsp init is still running on the account:");
     // A record with no digest behind its hash can say no more than this.
     expect(out).toMatch(/default \(m1\), \d+ s old, about \$\d+\.\d\d so far; built from a different recipe$/m);
-    expect(out).toMatch(/Stop it, then boot a 2 vCPU, 4 GB builder on Solari and build this\? About \$0\.11\/hr while it runs\. Taken as yes \(--yes\)\./);
+    expect(out).toMatch(/Stop it, then boot a 2 vCPU, 4 GB builder and build this\? About \$0\.11\/hr while it runs\. Taken as yes \(--yes\)\./);
     expect(out).toContain("Stopped default (m1).");
     expect(out).not.toContain("Solari console");
     expect(out).not.toContain("save it");
@@ -2905,20 +2915,24 @@ describe("summaryNote", () => {
       ["yq", { name: "yq", fullName: "yq", deps: ["oniguruma"], bytes: 2 * 1024 * 1024, macosOnly: false }],
       ["oniguruma", { name: "oniguruma", fullName: "oniguruma", deps: [], bytes: 1024 * 1024, macosOnly: false }],
     ]);
-    const lines = summaryNote(FIXTURE, ticks, new Map(), 200, 300 * 1024 * 1024, brew);
+    const lines = summaryNote(FIXTURE, ticks, new Map(), 200, 300 * 1024 * 1024, brew, [], BUILDER_DISK_GB);
     // 300 MB files + 1024 toolchain + 53 tools + 663 agents + 50 assumed for tsx = 2090 MiB.
     expect(lines).toContain("Disk      2 GB of 15.2 GB on the 20 GB builder (files 300 MB, Homebrew's toolchain 1 GB, tools 53 MB, agents 663 MB; 1 unmeasured, ~50 MB)");
     const huge = new Map([["gh", { name: "gh", fullName: "gh", deps: [], bytes: 30 * 1024 * 1024 * 1024, macosOnly: false }]]);
-    const over = summaryNote(FIXTURE, new Set(["tools/brew/gh"]), new Map(), 200, 0, huge).find(l => l.startsWith("Disk"));
+    const over = summaryNote(FIXTURE, new Set(["tools/brew/gh"]), new Map(), 200, 0, huge, [], BUILDER_DISK_GB).find(l => l.startsWith("Disk"));
     expect(over).toBe("Disk      31 GB, 15.8 GB over the 15.2 GB the 20 GB builder leaves (Homebrew's toolchain 1 GB, tools 30 GB)");
+    // A provider that gives a builder no disk figure has no cap to be over: the line says the total and nothing else.
+    expect(summaryNote(FIXTURE, new Set(["tools/brew/gh"]), new Map(), 200, 0, huge).find(l => l.startsWith("Disk"))).toBe("Disk      31 GB on the machine (Homebrew's toolchain 1 GB, tools 30 GB)");
     // With colour on, the Disk line takes its tier's colour, every wrapped line of it; a total under 50 percent stays plain.
     const was = process.env["FORCE_COLOR"];
     process.env["FORCE_COLOR"] = "3";
     try {
-      const wrapped = summaryNote(FIXTURE, new Set(["tools/brew/gh"]), new Map(), 90, 0, huge).filter(l => stripVTControlCharacters(l).startsWith("Disk") || stripVTControlCharacters(l).startsWith("          "));
+      const wrapped = summaryNote(FIXTURE, new Set(["tools/brew/gh"]), new Map(), 90, 0, huge, [], BUILDER_DISK_GB).filter(l => stripVTControlCharacters(l).startsWith("Disk") || stripVTControlCharacters(l).startsWith("          "));
       expect(wrapped.length).toBeGreaterThan(1);
       for (const l of wrapped) expect(l).toMatch(/^\x1b\[31m.*\x1b\[39m$/);
-      expect(summaryNote(FIXTURE, ticks, new Map(), 200, 300 * 1024 * 1024, brew).find(l => l.startsWith("Disk"))).not.toContain("\x1b[");
+      expect(summaryNote(FIXTURE, ticks, new Map(), 200, 300 * 1024 * 1024, brew, [], BUILDER_DISK_GB).find(l => l.startsWith("Disk"))).not.toContain("\x1b[");
+      // No cap, no colour: nothing is over a room that does not exist.
+      expect(summaryNote(FIXTURE, new Set(["tools/brew/gh"]), new Map(), 90, 0, huge).find(l => stripVTControlCharacters(l).startsWith("Disk"))).not.toContain("\x1b[");
     } finally {
       if (was === undefined) delete process.env["FORCE_COLOR"];
       else process.env["FORCE_COLOR"] = was;
@@ -3952,6 +3966,29 @@ describe("wsp init --recipe", () => {
     expect(f.backends.flatMap(b => b.machines)).toHaveLength(0);
   });
 
+  it("a provider that caps no disk boots the same recipe: there is no room to be over", async () => {
+    const f = fake({ yes: true });
+    const path = join(dirname(f.opts.statePath), "given.json");
+    writeFileSync(path, JSON.stringify({
+      version: 1,
+      at: "2026-09-06T03:00:00.000Z",
+      histories: [],
+      rows: [],
+      custom: [{ kind: "custom", id: "brew/llvm", name: "llvm", install: ["brew install llvm"], check: "brew list llvm", manager: "brew", size: 30 * 1024 * 1024 * 1024, why: "installed on this Mac by brew" }],
+    }));
+    f.opts.recipeFile = path;
+    // The same 30 GB recipe the case above refuses, on a provider whose machines take the box's disk: nothing is
+    // over a cap that does not exist, so the run goes on and the build boots.
+    f.opts.pricing = { ...f.opts.pricing, builderDiskGb: undefined };
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    const out = f.text();
+    expect(out).not.toContain("This recipe needs about");
+    expect(out).not.toContain("Untick about");
+    // The Disk line still says the total, with no cap named and no weight on it.
+    expect(out).toContain("on the machine");
+    expect(f.backends.flatMap(b => b.machines).length).toBeGreaterThan(0);
+  });
+
   it("the wsp tools rows follow the agents on this Mac, not the recipe's recorded source; a ticked row writes here, and a file with comments says they are gone", async () => {
     const f = fake();
     // The file says Codex is installed where it was written; this Mac has Claude Code and Gemini CLI.
@@ -4148,7 +4185,7 @@ describe("wsp init, the first workspace and its project", () => {
     await f.press(KEY.enter);
     await f.until(ALSO_LOCAL_QUESTION);
     await f.press(KEY.enter);
-    await f.until(FOLDER_QUESTION);
+    await f.until(folderQuestion("darwin"));
     await f.press(KEY.esc);
     expect((await run).code).toBe(0);
     const workspaces = await f.runtimes.at(-1)!.workspaces.list();

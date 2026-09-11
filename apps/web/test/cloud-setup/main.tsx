@@ -262,7 +262,7 @@ const api: Api = {
   upgrade: async () => {
     throw new Error("none");
   },
-  capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, snapshotListing: true, templates: true, kept: false, sizes: [] }),
+  capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: true, kept: false, sizes: [] }),
   daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
   portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
   startSession: async () => ({ id: "s1", workspaceId: "ws", harness: "claude", status: "running" }),

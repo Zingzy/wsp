@@ -6,11 +6,12 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { isIP } from "node:net";
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, CURL_NET, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
-import { CREATED_AT_LABEL, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_USER_ENV, OWNER_LABEL, TOOLS_PATH, WSP_LABEL, GUEST_TMP, isMissing, isReserved, landBytes, RUN_DIR, whoseMachine, type Machine, type MachineBackend } from "@wsp/engine";
+import { CREATED_AT_LABEL, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_SUPERVISOR_PATH, GUEST_TMP, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
 import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, DAEMON_ROOTS_PATH, LOOPBACK, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, type SnapshotStorage, type WorkspaceKind } from "@wsp/protocol";
 import { DAEMON_TOKEN_PATH, goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
@@ -52,9 +53,11 @@ export interface DaemonPlace {
    * choose, and isPlainPath admits a space in one, so every path there is quoted in each language the deploy
    * writes: the shell for its scripts and systemd's own for the unit. */
   quotePaths: boolean;
-  /** How this host's daemon token reaches the machine. A fork is root's alone, so the deploy writes it in the
-   * script; a machine somebody else may hold an account on would have it in a world readable /proc/<pid>/cmdline
-   * for the length of that exec, so there it travels the machine's own byte road and the script never names it. */
+  /** Whether the deploy's own script may carry this host's daemon token. A fork and a container are root's alone,
+   * so it is written in the script; a machine somebody else may hold an account on would have it in a world
+   * readable /proc/<pid>/cmdline for the length of that exec, so there the deploy lands it over the byte road and
+   * the script never names it. Only the deploy reads this: a rotation later takes whichever road the machine
+   * carries bytes on, which is the machine's own question and answered by hasByteRoad. */
   tokenRoad: "script" | "bytes";
   /** What must hold on the machine before anything is installed on it; empty where wsp built the machine and
    * already knows. Each line ends the deploy itself when it refuses, since the exit status of a guard behind ||
@@ -79,7 +82,11 @@ export interface DaemonPlace {
    * needs none; .profile rather than .bashrc on a machine that is somebody's, since bash reads .bashrc only for an
    * interactive shell that is not a login, and every road onto the machine that reads a dotfile at all is a login. */
   profileSource?: string;
-  /** Whose systemd runs the unit: the machine's, or the login's own. */
+  /** What keeps the daemon running here: the lines that start it, wait for it and read its log. Every line of the
+   * deploy that used to ask which supervisor this was reads this instead. The module itself, and no id beside it:
+   * an id would be the second copy of the fact, and the next reader would branch on it. */
+  supervise: DaemonSupervision;
+  /** Whose systemd runs the unit: the machine's, or the login's own. Read by the systemd module alone. */
   scope: "system" | "user";
   unitPath: string;
   /** The PATH the daemon and every pty under it get, stated on the unit rather than inherited. */
@@ -94,8 +101,8 @@ export interface DaemonPlace {
   port: number;
   /** Where the daemon writes the port it bound, for a place that gave it none to bind. */
   portFile?: string;
-  /** The options start.mjs hands startDaemon, as the source text they are written as rather than as values: a
-   * guest's socket path is the bundle's own export, which is a name and not a string. */
+  /** The options start.mjs hands startDaemon beyond its kind, as the source text they are written as rather than
+   * as values: a guest's socket path is the bundle's own export, which is a name and not a string. */
   daemonArgs: readonly string[];
   /** Quarter seconds the deploy waits for the daemon to answer before it reads the log instead. */
   upTries: number;
@@ -103,6 +110,125 @@ export interface DaemonPlace {
 
 /** The supervisor's name for the daemon, the one string the unit file, the stop, the start and the log read. */
 export const DAEMON_UNIT = "wsp-daemon.service";
+
+/** Where a machine with no service manager keeps the daemon's output, and the size the supervisor truncates it at.
+ * A container has no journal, and nothing else on it would bound a file. The path is the image's rather than the
+ * place's, as GUEST_SUPERVISOR_PATH is: the image's own first process runs that script and writes this file, so
+ * neither moves with a place. */
+export const DAEMON_LOG_PATH = "/var/log/wsp-daemon.log";
+export const DAEMON_LOG_MAX_BYTES = 4 * 1024 * 1024;
+/** Where a supervisor records its own pid, so a deploy knows whether one is already watching the daemon, and where
+ * it records the daemon's, which is how a deploy stops the daemon on a machine with no socket tools. Both sit in
+ * the place's own folder, so a second place on this module keeps its pids where it keeps everything else. */
+export const supervisorPidPath = (place: DaemonPlace): string => `${place.dir}/supervise.pid`;
+export const daemonPidPath = (place: DaemonPlace): string => `${place.dir}/daemon.pid`;
+
+/** The script that keeps the daemon running on a guest with no service manager: the machine's own boot runs it, so
+ * a fork of a sealed image starts its daemon with nobody dialling in, and a daemon the kernel's memory killer took
+ * comes back a second later. It states its environment rather than inheriting one, the way the unit does: a boot
+ * hands it nothing. It never execs the daemon, so the loop keeps control of the restart; the container's PID 1
+ * reaps what the daemon leaves behind. */
+export function daemonSupervisorScript(place: DaemonPlace = CONTAINER_PLACE, previewHostSuffix?: string): string {
+  return [
+    "#!/bin/sh",
+    `echo $$ > ${supervisorPidPath(place)}`,
+    `export PATH=${place.toolsPath}`,
+    ...Object.entries(place.unitEnv).map(([name, value]) => `export ${name}=${value}`),
+    ...(previewHostSuffix !== undefined ? [`export ${VITE_ALLOWED_HOSTS_ENV}='${previewHostSuffix}'`] : []),
+    `cd ${place.dir}`,
+    "while :; do",
+    `  [ -f ${DAEMON_LOG_PATH} ] && [ "$(wc -c < ${DAEMON_LOG_PATH})" -gt ${DAEMON_LOG_MAX_BYTES} ] && : > ${DAEMON_LOG_PATH}`,
+    `  node ${place.dir}/start.mjs >> ${DAEMON_LOG_PATH} 2>&1 &`,
+    // The daemon's own pid, written here because a container ships no socket tools: it is how a deploy stops the
+    // daemon it is replacing, and the supervisor puts the new one up a second later.
+    `  echo $! > ${daemonPidPath(place)}`,
+    `  wait $!`,
+    "  sleep 1",
+    "done",
+    "",
+  ].join("\n");
+}
+
+/** What keeps the daemon running on a machine and how the deploy learns it came up: one module per way, so no line
+ * of the deploy asks which way it is. A machine with a service manager registers a unit with it; a machine whose
+ * only lasting process is its own boot gets a script that loop-restarts the daemon. Each reads the place it is
+ * given, so the same module serves a fork's root unit and the unit under somebody's own login. */
+export interface DaemonSupervision {
+  /** What the machine must be able to do, asked with the rest of the place's preflight. */
+  requires: readonly string[];
+  /** The lines that leave the daemon running, the old one stopped first. */
+  start: (place: DaemonPlace, previewHostSuffix?: string) => string[];
+  /** The lines that wait for it and answer DAEMON_UP or DAEMON_DOWN. */
+  up: (place: DaemonPlace) => string[];
+  /** What the daemon has printed lately, for a deploy that has to say why the port never came up. */
+  log: (place: DaemonPlace, lines: number) => string;
+}
+
+/** The daemon under the machine's own service manager, a fork's and a login's alike. The journal is the one store
+ * on such a machine that bounds itself against a cap it states at boot (395 MB on a 20 GB guest, measured
+ * 2026-09-08): the redirect this replaced truncated the file on every deploy, and an appended one under
+ * Restart=always with no start limit has no end. */
+export const SYSTEMD: DaemonSupervision = {
+  // An unsupervised daemon is what this deploy exists to stop shipping, so a machine with no service manager says
+  // so here rather than starting one nothing would restart.
+  requires: ["command -v systemctl >/dev/null || { echo NO_SYSTEMD; false; }"],
+  start: (place, previewHostSuffix) => [
+    stopDaemonScript(place),
+    `cat > ${sh(place, place.unitPath)} <<'WSP_UNIT'\n${daemonUnit(place, previewHostSuffix)}WSP_UNIT`,
+    `${systemctlIn(place)} daemon-reload`,
+    // Enabled as well as started: a machine that reboots or comes back from a snapshot brings the daemon with it.
+    `${systemctlIn(place)} enable ${DAEMON_UNIT}`,
+    `${systemctlIn(place)} restart ${DAEMON_UNIT}`,
+  ],
+  up: place =>
+    place.portFile === undefined
+      ? [
+          `for _ in $(seq ${place.upTries}); do ss -ltnH 'sport = :${place.port}' | grep -q . && break; sleep 0.25; done`,
+          `ss -ltn | grep -q ${place.port} && echo DAEMON_UP || { ${SYSTEMD.log(place, 50)}; echo DAEMON_DOWN; }`,
+        ]
+      : [
+          // A place that let the machine pick the port reads the port it wrote down, which is also the proof it
+          // bound, and asks its supervisor whether it is still up: iproute2 is not on every machine somebody owns.
+          `for _ in $(seq ${place.upTries}); do [ -s ${sh(place, place.portFile)} ] && break; sleep 0.25; done`,
+          `p="$(cat ${sh(place, place.portFile)} 2>/dev/null)"`,
+          `[ -n "$p" ] && ${systemctlIn(place)} is-active --quiet ${DAEMON_UNIT} && echo "${DAEMON_PORT_LINE} $p" && echo DAEMON_UP || { ${SYSTEMD.log(place, 50)}; echo DAEMON_DOWN; }`,
+        ],
+  log: (place, lines) => `journalctl ${place.scope === "user" ? "--user " : ""}-u ${DAEMON_UNIT} -n ${lines} --no-pager`,
+};
+
+/** The daemon under a script the machine's own boot runs, for a machine whose only process that outlives an exec
+ * is its PID 1. Nothing here asks a service manager anything, and nothing reads a socket table: a container image
+ * ships neither ss nor curl. */
+export const BOOT_SCRIPT: DaemonSupervision = {
+  requires: [],
+  start: (place, previewHostSuffix) => [
+    `cat > ${GUEST_SUPERVISOR_PATH} <<'WSP_SUPERVISOR'\n${daemonSupervisorScript(place, previewHostSuffix)}WSP_SUPERVISOR`,
+    `chmod 0755 ${GUEST_SUPERVISOR_PATH}`,
+    // The daemon being replaced is stopped by the pid the supervisor recorded: a container image ships no socket
+    // tools, so nothing here can read the port's holder the way the unit road does.
+    // `|| true` on both reads: the script runs under set -e, where an assignment whose command substitution fails
+    // ends it, and a machine that never had a daemon has neither file (a live deploy died here, 2026-09-11).
+    `old="$(cat ${daemonPidPath(place)} 2>/dev/null || true)"`,
+    'if [ -n "$old" ] && kill -0 "$old" 2>/dev/null; then kill "$old" 2>/dev/null || true; echo "DAEMON_STOPPED $old"; fi',
+    `sup="$(cat ${supervisorPidPath(place)} 2>/dev/null || true)"`,
+    'if [ -n "$sup" ] && kill -0 "$sup" 2>/dev/null; then',
+    '  echo "DAEMON_SUPERVISED $sup"',
+    "else",
+    `  setsid nohup ${GUEST_SUPERVISOR_PATH} >> ${DAEMON_LOG_PATH} 2>&1 &`,
+    "fi",
+  ],
+  up: place => [
+    // A service manager restarts the daemon at once; a supervisor that was already watching sleeps a second first,
+    // so this road waits longer for the port than a unit's does, which is the place's own upTries.
+    `for _ in $(seq ${place.upTries}); do ${BOOT_PORT_CHECK} && break; sleep 0.25; done`,
+    `${BOOT_PORT_CHECK} && echo DAEMON_UP || { ${BOOT_SCRIPT.log(place, 50)}; echo DAEMON_DOWN; }`,
+  ],
+  log: (_place, lines) => `tail -n ${lines} ${DAEMON_LOG_PATH}`,
+};
+
+/** Whether the daemon is serving, in the words a container image can answer in: bash's own network road, since it
+ * ships neither ss nor curl. */
+const BOOT_PORT_CHECK = `(exec 3<>/dev/tcp/${LOOPBACK}/${DAEMON_PORT}) 2>/dev/null`;
 
 const GUEST_DIR = "/root/wsp-daemon";
 const GUEST_BIN = "/usr/local/bin";
@@ -130,6 +256,7 @@ export const CLOUD_PLACE: DaemonPlace = {
   openShim: `${GUEST_BIN}/wsp-open`,
   openSocket: "/root/.wsp/open.sock",
   profileFile: "/etc/profile.d/wsp-open.sh",
+  supervise: SYSTEMD,
   scope: "system",
   unitPath: `/etc/systemd/system/${DAEMON_UNIT}`,
   toolsPath: TOOLS_PATH,
@@ -140,6 +267,18 @@ export const CLOUD_PLACE: DaemonPlace = {
   daemonArgs: ['host: "0.0.0.0"', "openSocketPath: OPEN_SOCKET_PATH"],
   upTries: 20,
 };
+
+/** The same place under the other supervision, for a machine whose only process that outlives an exec is its own
+ * PID 1: a container on a Docker daemon. Every path is a fork's, since it is the same image; what differs is what
+ * keeps the daemon up, and that a supervisor already watching sleeps a second before it restarts, so the wait for
+ * the port is longer. */
+export const CONTAINER_PLACE: DaemonPlace = { ...CLOUD_PLACE, supervise: BOOT_SCRIPT, upTries: 40 };
+
+/** The place a guest wsp made keeps its daemon, by what that machine answered keeps a process running on it. The
+ * one place a supervisor id is matched to a place, so adding a way to supervise is a module and a row here. */
+export function guestPlace(supervisor: DaemonSupervisor): DaemonPlace {
+  return supervisor === "entrypoint" ? CONTAINER_PLACE : CLOUD_PLACE;
+}
 
 /** The place a machine reached over ssh keeps its daemon: under the login's own home, behind that login's systemd,
  * bound on loopback and on whatever port the machine had free, which it writes down for the host to forward to.
@@ -179,6 +318,8 @@ export function sshDaemonPlace(login: { home: string; path: string }): DaemonPla
     openSocket: at.openSocket,
     profileFile: at.profileFile,
     profileSource: `${login.home.replace(/\/+$/, "")}/.profile`,
+    // Their own login's systemd, which is the same module a fork's root unit reads, told a different scope.
+    supervise: SYSTEMD,
     scope: "user",
     unitPath: `${at.unitDir}/${DAEMON_UNIT}`,
     toolsPath: [nodeBin, at.binDir, login.path].join(":"),
@@ -192,7 +333,6 @@ export function sshDaemonPlace(login: { home: string; path: string }): DaemonPla
     daemonArgs: [
       `host: ${JSON.stringify(LOOPBACK)}`,
       "port: 0",
-      `kind: ${JSON.stringify("ssh")}`,
       `root: ${JSON.stringify(login.home)}`,
       `rootsPath: ${JSON.stringify(at.rootsPath)}`,
       `tokenPath: ${JSON.stringify(at.tokenPath)}`,
@@ -242,10 +382,19 @@ try {
   console.error(\`priority not set: \${e.message}\`);
 }
 const { OPEN_SOCKET_PATH, startDaemon } = await import("./dist/index.js");
-const d = await startDaemon({ ${place.daemonArgs.join(", ")} });
+const d = await startDaemon({ ${[...place.daemonArgs, ...daemonKindArg(place)].join(", ")} });
 ${place.portFile === undefined ? "" : `writeFileSync(${JSON.stringify(place.portFile)}, String(d.port));\n`}console.log(\`wsp-daemon listening on ${place.bind}:\${d.port}\`);
 `;
 }
+
+/** The kind the daemon is told it serves, which picks the two modules its Live rows and Processes tab read. A
+ * place whose kind is the daemon's own default says nothing, so a guest's start script is what it has always been. */
+function daemonKindArg(place: DaemonPlace): string[] {
+  return place.kind === DAEMON_DEFAULT_KIND ? [] : [`kind: ${JSON.stringify(place.kind)}`];
+}
+
+/** What @wsp/daemon serves when its start script names no kind: a machine wsp forked. */
+const DAEMON_DEFAULT_KIND: WorkspaceKind = "cloud";
 
 /** Mirror @wsp/daemon's relay constants: importing the package here would pull
  * node-pty into the host and the desktop bundle. The shim posts to the socket
@@ -313,12 +462,8 @@ function nodeBootstrap(place: DaemonPlace): string {
  * dev server answers 403 through the preview edge. Next.js and webpack-dev-server have no env equivalent. */
 export const VITE_ALLOWED_HOSTS_ENV = "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS";
 
-/** What the daemon has printed lately, for a deploy that has to say why the port never came up. The journal
- * rather than a file because journald rotates itself against a cap it states at boot (395 MB on a 20 GB guest,
- * measured 2026-09-08) and nothing else on the machine would bound one: the redirect this replaced truncated the
- * file on every deploy, and an appended one under Restart=always with no start limit has no end. */
-export const daemonLogCommand = (place: DaemonPlace = CLOUD_PLACE, lines = 50): string =>
-  `journalctl ${place.scope === "user" ? "--user " : ""}-u ${DAEMON_UNIT} -n ${lines} --no-pager`;
+/** What the daemon has printed lately on this machine, through whatever supervises it. */
+export const daemonLogCommand = (place: DaemonPlace = CLOUD_PLACE, lines = 50): string => place.supervise.log(place, lines);
 
 /** The unit the daemon runs under. Until 2026-09-08 it was started with setsid over the provider's exec and had no
  * supervisor at all: the kernel's memory killer took one and the machine sat with no daemon for five hours while
@@ -385,37 +530,20 @@ export function stopDaemonScript(place: DaemonPlace = CLOUD_PLACE): string {
   ].join("\n");
 }
 
-/** How the deploy learns the daemon answered. A place on a known port reads the socket table, which is what a
- * guest has. A place that let the machine pick reads the port the daemon wrote down, which is also the proof it
- * bound, and asks its supervisor whether it is still up: iproute2 is not on every machine somebody owns. */
-function upCheck(place: DaemonPlace): string[] {
-  if (place.portFile === undefined) {
-    return [
-      `for _ in $(seq ${place.upTries}); do ss -ltnH 'sport = :${place.port}' | grep -q . && break; sleep 0.25; done`,
-      `ss -ltn | grep -q ${place.port} && echo DAEMON_UP || { ${daemonLogCommand(place)}; echo DAEMON_DOWN; }`,
-    ];
-  }
-  return [
-    `for _ in $(seq ${place.upTries}); do [ -s ${sh(place, place.portFile)} ] && break; sleep 0.25; done`,
-    `p="$(cat ${sh(place, place.portFile)} 2>/dev/null)"`,
-    `[ -n "$p" ] && ${systemctlIn(place)} is-active --quiet ${DAEMON_UNIT} && echo "${DAEMON_PORT_LINE} $p" && echo DAEMON_UP || { ${daemonLogCommand(place)}; echo DAEMON_DOWN; }`,
-  ];
-}
-
 /** What the deploy prints the bound port under, for a place that let the machine pick one. */
 export const DAEMON_PORT_LINE = "DAEMON_PORT";
 
 /** The install and start sequence on the machine. `previewHostSuffix` (".preview.example.com") is what dev servers
- * must accept to answer through the edge; absent on a backend without preview URLs. The daemon is left running
- * under its unit, so nothing here has to outlive the exec. */
+ * must accept to answer through the edge; absent on a backend with no route to a machine's port. The daemon is
+ * left running under whatever supervises it, so nothing here has to outlive the exec. */
 export function deployScript(place: DaemonPlace, token: string, previewHostSuffix?: string): string {
   const profileDir = posix.dirname(place.profileFile);
   return [
     "set -e",
     `export PATH="${place.pathPrefix.join(":")}:$PATH"`,
-    // Nothing else supervises a process on these machines, and an unsupervised daemon is what this deploy exists
-    // to stop shipping; a machine without systemd says so here rather than starting one nothing would restart.
-    "command -v systemctl >/dev/null || { echo NO_SYSTEMD; false; }",
+    // An unsupervised daemon is what this deploy exists to stop shipping, and what a machine must be able to do to
+    // avoid being one is its supervision's to ask.
+    ...place.supervise.requires,
     // A guest exec carries PATH and nothing else (measured 2026-09-05), and npm and the bundle's build read the
     // machine's home. What the daemon itself hands to every pty comes from its unit, not from here.
     ...place.exportEnv,
@@ -447,13 +575,8 @@ export function deployScript(place: DaemonPlace, token: string, previewHostSuffi
     // A fork is root's alone, so its token is written here; a machine somebody else may hold an account on gets
     // it over the byte road before this runs, since a command sits in a world readable /proc/<pid>/cmdline.
     ...(place.tokenRoad === "script" ? [writeDaemonTokenScript(token, place.tokenPath)] : []),
-    stopDaemonScript(place),
-    `cat > ${sh(place, place.unitPath)} <<'WSP_UNIT'\n${daemonUnit(place, previewHostSuffix)}WSP_UNIT`,
-    `${systemctlIn(place)} daemon-reload`,
-    // Enabled as well as started: a machine that reboots or comes back from a snapshot brings the daemon with it.
-    `${systemctlIn(place)} enable ${DAEMON_UNIT}`,
-    `${systemctlIn(place)} restart ${DAEMON_UNIT}`,
-    ...upCheck(place),
+    ...place.supervise.start(place, previewHostSuffix),
+    ...place.supervise.up(place)
   ].join("\n");
 }
 
@@ -474,9 +597,14 @@ export function removeDaemonScript(place: DaemonPlace): string {
     ...(place.profileSource === undefined
       ? []
       : [
-          // Their own login file, so the rewrite lands only when the read of it worked, and the working copy goes
-          // either way: a grep that could not read the file would otherwise leave them an empty one.
-          `if [ -f ${sh(place, place.profileSource)} ]; then grep -vF ${shellQuote(`. ${place.profileFile}`)} ${sh(place, place.profileSource)} > ${sh(place, `${place.profileSource}.wsp-out`)} && mv -f ${sh(place, `${place.profileSource}.wsp-out`)} ${sh(place, place.profileSource)}; rm -f ${sh(place, `${place.profileSource}.wsp-out`)}; fi`,
+          // Their own login file, so it is opened only when wsp's own line is in it: this sweep runs on every
+          // machine recorded over ssh, and a machine whose deploy never landed has a login file wsp never wrote
+          // to. The line is taken out by writing back through the same path rather than moving a copy over it, so
+          // the file keeps its inode and a .profile symlinked into a dotfiles checkout stays a symlink (measured
+          // 2026-09-11: a move turned one into a plain file). The working copy goes either way, and the write only
+          // follows a read that worked, so a grep that could not read the file leaves them neither an empty one
+          // nor a file of wsp's beside their own.
+          `if [ -f ${sh(place, place.profileSource)} ] && grep -qF ${shellQuote(`. ${place.profileFile}`)} ${sh(place, place.profileSource)}; then grep -vF ${shellQuote(`. ${place.profileFile}`)} ${sh(place, place.profileSource)} > ${sh(place, `${place.profileSource}.wsp-out`)} && cat ${sh(place, `${place.profileSource}.wsp-out`)} > ${sh(place, place.profileSource)}; rm -f ${sh(place, `${place.profileSource}.wsp-out`)}; fi`,
         ]),
     `echo ${DAEMON_GONE_LINE}`,
   ].join("\n");
@@ -534,10 +662,13 @@ export async function preflight(machine: Machine, place: DaemonPlace): Promise<v
 
 /** The preview host with its machine-and-port label cut off ("<id>-7070.preview.example.com" gives
  * ".preview.example.com"): the suffix every port on this machine is served under, read off the backend
- * rather than assumed. Undefined on a backend without preview URLs or a host with no dot to cut at. */
+ * rather than assumed. Undefined on a backend with no route to a guest port, on a host with no dot to cut at, and
+ * on a route to an address rather than a name, which is what a machine reached at a published port answers with:
+ * an allowlist entry is for the name a browser would ask for. */
 export async function previewHostSuffix(machine: Machine): Promise<string | undefined> {
   if (machine.previewUrl === undefined) return undefined;
   const { hostname } = new URL((await machine.previewUrl(DAEMON_PORT)).url);
+  if (isIP(hostname) !== 0) return undefined;
   const dot = hostname.indexOf(".");
   return dot > 0 ? hostname.slice(dot) : undefined;
 }
@@ -571,7 +702,7 @@ export async function deployDaemon(
   machine: Machine,
   opts: { token?: string; daemonDir?: string; place?: DaemonPlace } = {},
 ): Promise<{ token: string; node: string; port?: number }> {
-  const place = opts.place ?? CLOUD_PLACE;
+  const place = opts.place ?? guestPlace(machine.daemonSupervisor ?? "systemd");
   const token = opts.token ?? randomBytes(24).toString("hex");
   const stage = mkdtempSync(join(tmpdir(), "wsp-daemon-bundle-"));
   const tgz = `${stage}.tgz`;

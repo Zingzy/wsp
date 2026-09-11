@@ -158,6 +158,7 @@ import {
 import type { CliIO } from "./cli.js";
 import { gitRootOf } from "./repo-root.js";
 import { dialAddress, hostTokenPath, servingHost } from "./host-lock.js";
+import { addressNotPairedLine, aimName, aimedHost, deviceRefusedLine, noAnswerLine, stateIgnoredLine, wsUrlOf, type HostAim, type HostPick } from "./hosts.js";
 import { colourDepth, isTTY, wrap } from "./init-layout.js";
 import { RecipeAnswer, RecipeScan, recipePrintout, scanPrintout } from "./recipe-answer.js";
 import { isRecipeTick, runRecipe, runScan, type ScanInput } from "./recipe-command.js";
@@ -176,6 +177,8 @@ export interface HostClient {
   /** Why the socket is gone, in the words the person reads: a host that let it go as it stopped says the turn goes
    * on, since the run is the machine's; anything else is a host that went. */
   closeWords(): string;
+  /** The device this socket bought with a pairing code, on the one dial that redeems one; absent on every other. */
+  readonly paired?: { deviceId: string; deviceToken: string };
   close(): void;
 }
 
@@ -185,9 +188,24 @@ const UNAUTHORIZED_CLOSE = 4401;
 /** How long a refused auth waits for the close that follows its frame before the frame's own class stands. */
 const CLOSE_GRACE_MS = 500;
 
-/** Where the host serving this state file listens and the token it wrote, or a plain refusal when none serves it.
- * The address is the lock's, not loopback: a host started with --listen on one address answers only there. */
-export function hostAddress(statePath: string): { host: string; wsPort: number; token: string } {
+/** What a dial takes beside the state file: which host, how long to wait, and on the one dial that pairs, the code
+ * to spend instead of a token this computer does not have yet. */
+export interface DialOpts extends HostPick {
+  deadlineMs?: number;
+  /** Resolved already by a caller that had to read it anyway, so the hosts file is read once per line. */
+  aim?: HostAim;
+  /** Spends a pairing code as the first frame and holds the device token the host answers with. */
+  redeem?: { code: string; name: string };
+}
+
+/** Where a line dials and what it presents there: a host on this computer is the address its lock records (one
+ * bound to a single address answers only there) and the token it wrote beside its state file, a host somewhere
+ * else is its own address on the runtime's path and the device token this computer was paired with, and an address
+ * typed on the line carries no token, which only a redeem can make up for. */
+export function hostAddress(statePath: string, pick: HostPick & { aim?: HostAim } = {}): { url: string; token: string } {
+  const aim = pick.aim ?? aimedHost(statePath, pick);
+  if (aim.kind === "url") return { url: wsUrlOf(aim.url), token: "" };
+  if (aim.kind === "alias") return { url: wsUrlOf(aim.record.url), token: aim.record.deviceToken };
   const lock = servingHost(statePath);
   if (lock === undefined) throw new Error(`no wsp host is serving ${statePath}; run wsp up first`);
   const tokenPath = hostTokenPath(statePath);
@@ -197,14 +215,19 @@ export function hostAddress(statePath: string): { host: string; wsPort: number; 
   } catch {
     throw authRefusal(`the host's token file is missing: ${tokenPath}`);
   }
-  return { host: dialAddress(lock), wsPort: lock.wsPort, token };
+  return { url: `ws://${authority(dialAddress(lock), lock.wsPort)}`, token };
 }
 
 /** One socket to the host: the token rides in the first frame, never in the URL; then request and reply by id.
  * Open and auth share one deadline, so a port that accepts and never answers fails in one line. */
-export async function dialHost(statePath: string, deadlineMs = DIAL_MS): Promise<HostClient> {
-  const { host, wsPort, token } = hostAddress(statePath);
-  const ws = new WebSocket(`ws://${authority(host, wsPort)}`);
+export async function dialHost(statePath: string, opts: DialOpts = {}): Promise<HostClient> {
+  const deadlineMs = opts.deadlineMs ?? DIAL_MS;
+  const aim = opts.aim ?? aimedHost(statePath, opts);
+  // An address is the road wsp connect takes and no other: every other line needs the token a redeem bought, and
+  // this computer holds one only under a name.
+  if (aim.kind === "url" && opts.redeem === undefined) throw usageRefusal(addressNotPairedLine(aim.url));
+  const { url, token } = hostAddress(statePath, { aim });
+  const ws = new WebSocket(url);
   const opened = new Promise<void>((done, fail) => {
     ws.once("open", () => done());
     ws.once("error", fail);
@@ -245,17 +268,35 @@ export async function dialHost(statePath: string, deadlineMs = DIAL_MS): Promise
     return frame as T;
   };
   let timer: NodeJS.Timeout | undefined;
+  // What the person reads as the host's address: the authority a host on this computer answers on, and the address
+  // as they gave it for one anywhere else, never the ws url the dial builds out of it.
+  const where = aim.kind === "here" ? new URL(url).host : aim.kind === "alias" ? aim.record.url : aim.url;
   const deadline = new Promise<never>((_, fail) => {
-    timer = setTimeout(() => fail(new Error(`the host at ${authority(host, wsPort)} did not answer within ${deadlineMs} ms`)), deadlineMs);
+    timer = setTimeout(() => fail(new Error(noAnswerLine(where, `nothing came back within ${deadlineMs} ms`))), deadlineMs);
   });
+  let paired: { deviceId: string; deviceToken: string } | undefined;
   // A refusal whose frame carries no kind is classed by the close code that follows it, so a host of an older version
-  // that sends the code alone still reads as auth; a frame with a kind is the source when there is one.
+  // that sends the code alone still reads as auth; a frame with a kind is the source when there is one. A host
+  // somewhere else says so with its alias and the line that pairs again, since its token is this computer's to renew.
   const authed = opened
-    .then(() => request("auth", { token }))
+    .catch((e: unknown) => {
+      throw new Error(noAnswerLine(where, e instanceof Error ? e.message : String(e)));
+    })
+    .then(async () => {
+      if (opts.redeem === undefined) return void (await request("auth", { token }));
+      const reply = await request<{ deviceId: string; deviceToken: string }>("pair.redeem", opts.redeem);
+      paired = { deviceId: reply.deviceId, deviceToken: reply.deviceToken };
+    })
     .catch(async (e: unknown) => {
-      if ((e as { kind?: unknown }).kind !== undefined) throw e;
-      await Promise.race([closed, new Promise(r => setTimeout(r, CLOSE_GRACE_MS))]);
-      throw closeCode === UNAUTHORIZED_CLOSE ? authRefusal(e instanceof Error ? e.message : String(e)) : e;
+      const kind = (e as { kind?: unknown }).kind;
+      if (kind === undefined) {
+        await Promise.race([closed, new Promise(r => setTimeout(r, CLOSE_GRACE_MS))]);
+        if (closeCode !== UNAUTHORIZED_CLOSE) throw e;
+      } else if (kind !== "auth") throw e;
+      // A host that refused an alias's token has revoked this computer, whatever words it used: the line names the
+      // alias and the connect that pairs again, which is the only way back in.
+      if (aim.kind !== "alias" || opts.redeem !== undefined) throw authRefusal(e instanceof Error ? e.message : String(e));
+      throw authRefusal(deviceRefusedLine(aim.alias, aim.record.url));
     });
   try {
     await Promise.race([authed, deadline]);
@@ -275,6 +316,7 @@ export async function dialHost(statePath: string, deadlineMs = DIAL_MS): Promise
     },
     closed,
     closeWords,
+    ...(paired !== undefined ? { paired } : {}),
     close: () => ws.close(),
   };
 }
@@ -383,7 +425,15 @@ interface VerbContext extends VerbDeps {
   flags: Flags;
   io: CliIO;
   out: Out;
+  /** Which host this line runs against, read once by the command line; the verbs that can work without one read it
+   * to tell a state file nothing serves from a host somewhere else, which is served and is not this computer's. */
+  aim: HostAim;
 }
+
+/** The runtime to build in this process because the line has nowhere to dial, or nothing when it has a host: only
+ * a line against this computer can be without one, and only while nothing serves its state file. */
+const runtimeHere = (ctx: VerbContext): VerbDeps["runtime"] | undefined =>
+  ctx.aim.kind === "here" && servingHost(ctx.statePath) === undefined ? ctx.runtime : undefined;
 
 /** The verb as an MCP tool: what it does in the agent's words, the zod shape of what it takes and of what it
  * answers, and the call. The shapes are what tools/list serves and what the parity test holds the skill to. */
@@ -435,6 +485,7 @@ export function toolName(words: string): string {
 
 /** The flags every verb takes beside its own. */
 export const COMMON: NonNullable<ParseArgsConfig["options"]> = {
+  host: { type: "string" },
   state: { type: "string" },
   json: { type: "boolean" },
   help: { type: "boolean", short: "h" },
@@ -1732,8 +1783,9 @@ export const VERBS: readonly Verb[] = [
     options: { project: { type: "string", multiple: true } },
     run: async ctx => {
       if (ctx.args.length !== 0) throw usageRefusal("wsp recipe scan takes no positional arguments");
-      const scan = await runScan(nodeHost(), { ...projectsFlag(ctx.flags), cache: historyCache(ctx.statePath), ...(ctx.alsoHere !== undefined ? { alsoHere: ctx.alsoHere } : {}) }, progress(ctx.io));
-      printTable(ctx, scan, depth => scanPrintout(scan, depth), `Nothing was written. Take the do column with wsp recipe --set <id>=on and --signin <id>=machine, then run wsp init --recipe ${resolve(smallRecipePath(ctx.statePath))}.`);
+      const host = nodeHost();
+      const scan = await runScan(host, { ...projectsFlag(ctx.flags), cache: historyCache(ctx.statePath), ...(ctx.alsoHere !== undefined ? { alsoHere: ctx.alsoHere } : {}) }, progress(ctx.io));
+      printTable(ctx, scan, depth => scanPrintout(scan, host.platform, depth), `Nothing was written. Take the do column with wsp recipe --set <id>=on and --signin <id>=machine, then run wsp init --recipe ${resolve(smallRecipePath(ctx.statePath))}.`);
       return 0;
     },
     tool: tool({
@@ -1742,12 +1794,13 @@ export const VERBS: readonly Verb[] = [
       input: { project: PROJECT_FOLDERS },
       output: RecipeScan.shape,
       call: async ({ project }, deps) => {
-        const scan = await runScan(nodeHost(), {
+        const host = nodeHost();
+        const scan = await runScan(host, {
           cache: historyCache(deps.statePath),
           ...(project !== undefined ? { projects: projectFolders(project) } : {}),
           ...(deps.alsoHere !== undefined ? { alsoHere: deps.alsoHere } : {}),
         });
-        return asText(scanPrintout(scan).join("\n"), scan);
+        return asText(scanPrintout(scan, host.platform).join("\n"), scan);
       },
     }),
   },
@@ -1755,7 +1808,7 @@ export const VERBS: readonly Verb[] = [
     name: "recipe",
     usage: `wsp recipe [--tick ${RECIPE_TICKS.join("|")}] [--set <id>=on|off] [--signin <id>=${LOGIN_CHOICES.join("|")}] [--add <id>=<command>] [--add-check <id>=<command>] [--project <folder>] [--out <path>]`,
     about:
-      "write the recipe and print it as a table: every catalog agent and tool with its tick, why it has it and what it costs on the machine, then the commands your agents ran that no catalog row carries. --tick used|installed|default names the rule that decides every tick (used, the default, ticks what your agents actually ran here); --set <id>=on|off flips a row by its catalog id, or a package this Mac's own package managers have by the id wsp recipe scan gives it, which the build installs by that package's own road; --signin <id>=copy|machine|key|skip answers a sign-in by catalog id, key bringing the key files beside a login and nothing else of it; --add <id>=<command> carries a tool neither the catalog nor this Mac has, installed by that command on the machine, with --add-check <id>=<command> saying it is there; --project reads a folder's own manifests for what it takes to build and weighs the histories by it, --out says where the file goes and --json prints the table as one object. Naming --tick or --project decides every tick again; without either, what the file says stands and the flags flip rows on top of it. A sign-in answer stands either way: no rule decides one. All of them repeat. Review it, then wsp init --recipe",
+      "write the recipe and print it as a table: every catalog agent and tool with its tick, why it has it and what it costs on the machine, then the commands your agents ran that no catalog row carries. --tick used|installed|default names the rule that decides every tick (used, the default, ticks what your agents actually ran here); --set <id>=on|off flips a row by its catalog id, or a package this computer's own package managers have by the id wsp recipe scan gives it, which the build installs by that package's own road; --signin <id>=copy|machine|key|skip answers a sign-in by catalog id, key bringing the key files beside a login and nothing else of it; --add <id>=<command> carries a tool neither the catalog nor this computer has, installed by that command on the machine, with --add-check <id>=<command> saying it is there; --project reads a folder's own manifests for what it takes to build and weighs the histories by it, --out says where the file goes and --json prints the table as one object. Naming --tick or --project decides every tick again; without either, what the file says stands and the flags flip rows on top of it. A sign-in answer stands either way: no rule decides one. All of them repeat. Review it, then wsp init --recipe",
     options: {
       out: { type: "string" },
       tick: { type: "string" },
@@ -1837,14 +1890,16 @@ export const VERBS: readonly Verb[] = [
         if (address !== undefined) throw usageRefusal("wsp new takes --local or --ssh, not both");
         forksNothing("wsp new --local");
         // With no host serving the record is written straight into the state file: the way into an empty state.
-        if (ctx.runtime !== undefined && servingHost(ctx.statePath) === undefined) await createLocalWorkspaceHere(await ctx.runtime(ctx.statePath), ctx.out, name);
+        const here = runtimeHere(ctx);
+        if (here !== undefined) await createLocalWorkspaceHere(await here(ctx.statePath), ctx.out, name);
         else await createLocalWorkspace(await ctx.client(), ctx.out, name);
         return 0;
       }
       if (address !== undefined) {
         forksNothing("wsp new --ssh");
         const asked = sshAsked(name, flag(ctx.flags, "ssh-port"), flag(ctx.flags, "ssh-key"));
-        if (ctx.runtime !== undefined && servingHost(ctx.statePath) === undefined) await createSshWorkspaceHere(await ctx.runtime(ctx.statePath), ctx.out, address, asked);
+        const here = runtimeHere(ctx);
+        if (here !== undefined) await createSshWorkspaceHere(await here(ctx.statePath), ctx.out, address, asked);
         else await createSshWorkspace(await ctx.client(), ctx.out, address, asked);
         return 0;
       }
@@ -2609,10 +2664,22 @@ export async function runVerb(verb: CliVerb, argv: ReadonlyArray<string>, io: Cl
     return failed(io, jsonAsked(argv), usageRefusal(`${parseRefusal(verb, e)}\n\nusage: ${verb.usage}`));
   }
   if (flags["help"] === true) {
-    io.log(`usage: ${verb.usage}\n${aboutLines(verb, "  ").join("\n")}\n\n  --json         print the raw protocol values, one JSON line each\n  --state PATH   the state file the host serves`);
+    io.log(`usage: ${verb.usage}\n${aboutLines(verb, "  ").join("\n")}\n\n  --json         print the raw protocol values, one JSON line each\n  --state PATH   the state file the host serves\n  --host NAME    a host on another computer, by the name wsp connect gave it`);
     return 0;
   }
   const statePath = statePathOf(flag(flags, "state"));
+  // Which host this line runs against is read once: the dial takes the same reading, so a hosts file that changed
+  // mid-line cannot send the note one way and the socket another.
+  let aim: HostAim;
+  try {
+    aim = aimedHost(statePath, { ...(flag(flags, "host") !== undefined ? { host: flag(flags, "host")! } : {}), env: deps.env });
+  } catch (e) {
+    return failed(io, flags["json"] === true, e, `wsp ${verb.name}: `);
+  }
+  // The note rides with the dial, not with the line: the recipe verbs write beside the state file whatever host
+  // the line names, so saying it is not read before they run would be untrue.
+  const stateNote = aim.kind !== "here" && flag(flags, "state") !== undefined ? stateIgnoredLine(aimName(aim)) : undefined;
+  let noted = false;
   let client: HostClient | undefined;
   const ctx: VerbContext = {
     args,
@@ -2620,11 +2687,18 @@ export async function runVerb(verb: CliVerb, argv: ReadonlyArray<string>, io: Cl
     io,
     out: formatter(io, flags["json"] === true),
     statePath,
+    aim,
     env: deps.env,
     ...(deps.alsoHere !== undefined ? { alsoHere: deps.alsoHere } : {}),
     ...(deps.cwd !== undefined ? { cwd: deps.cwd } : {}),
     ...(deps.runtime !== undefined ? { runtime: deps.runtime } : {}),
-    client: async () => (client ??= await dialHost(statePath)),
+    client: async () => {
+      if (stateNote !== undefined && !noted) {
+        noted = true;
+        io.error(stateNote);
+      }
+      return (client ??= await dialHost(statePath, { aim }));
+    },
   };
   try {
     return await verb.run(ctx);

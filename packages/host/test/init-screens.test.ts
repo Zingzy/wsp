@@ -8,14 +8,14 @@ import { CATALOG_TOOLS } from "@wsp/catalog";
 import { BUILDER_DISK_GB, DISK_ROOM_BYTES } from "@wsp/engine";
 import { CLOUD_SETUP_WORDS, InitScreen, type Recipe } from "@wsp/protocol";
 import { ALWAYS_GROUP, USAGE_GROUP, answerScreen, diskOf, keyNameFor, screensOf, type ScreenAnswers } from "../src/init-screens.js";
-import { AGENTS_TITLE, AGENTS_TOP, SIGN_INS_TITLE, SIGN_INS_TOP, TOOLS_TITLE, TOOLS_TOP, WSP_TITLE, WSP_TOP } from "../src/init-pick.js";
-import { ALSO_TITLE, ALSO_TOP } from "../src/init-also.js";
+import { AGENTS_TITLE, AGENTS_TOP, SIGN_INS_TITLE, SIGN_INS_TOP, TOOLS_TITLE, TOOLS_TOP, WSP_TOP, wspTitle } from "../src/init-pick.js";
+import { alsoTitle, alsoTop } from "../src/init-also.js";
 import type { Reading } from "../src/init.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
 
 const HOME = "/Users/dev";
 const MIB = 1024 * 1024;
-const reading = (over: Partial<Reading> = {}): Reading => ({ manifest: FIXTURE, catalogRecipe: RECIPE, brew: new Map(), scanned: [], notes: [], source: "found on this computer", ...over });
+const reading = (over: Partial<Reading> = {}): Reading => ({ manifest: FIXTURE, platform: "darwin", catalogRecipe: RECIPE, brew: new Map(), scanned: [], notes: [], source: "found on this computer", ...over });
 const fresh = (recipe: Recipe = RECIPE): ScreenAnswers => ({ recipe, logins: new Map(), wspTicks: undefined });
 /** One formula a manager here could put on the image, so the Also screen has a row and is shown. */
 const SCANNED = { id: "brew/jq", name: "jq", manager: "brew", group: "Homebrew formulae", install: "brew install jq", check: "command -v jq", size: 2 * MIB } as const;
@@ -27,12 +27,12 @@ describe("the screens as data", () => {
     expect(screens.map(s => [s.id, s.title])).toEqual([
       ["agents", AGENTS_TITLE],
       ["tools", TOOLS_TITLE],
-      ["also", ALSO_TITLE],
+      ["also", alsoTitle("darwin")],
       ["logins", SIGN_INS_TITLE],
-      ["wsp", WSP_TITLE],
+      ["wsp", wspTitle("darwin")],
     ]);
     for (const s of screens) expect(InitScreen.parse(s)).toEqual(s);
-    for (const top of [AGENTS_TOP, TOOLS_TOP, ALSO_TOP, SIGN_INS_TOP, WSP_TOP]) expect(top).not.toMatch(/\.$/);
+    for (const top of [AGENTS_TOP, TOOLS_TOP, alsoTop("darwin"), SIGN_INS_TOP, WSP_TOP]) expect(top).not.toMatch(/\.$/);
     expect(SIGN_INS_TOP).toBe("How sign-ins reach the machine");
     // No formula found here: the Also screen is not shown, and the screens after it move up.
     expect(screensOf(reading(), fresh(), at()).map(s => s.id)).toEqual(["agents", "tools", "logins", "wsp"]);
@@ -90,9 +90,11 @@ describe("the screens as data", () => {
   it("answering the agents screen moves the recipe as the terminal's screen would, and the disk the ring draws grows with the ticks", () => {
     const answers = answerScreen(reading(), fresh(), "agents", { ticks: ["claude", "codex"] });
     expect(answers.recipe.rows.filter(r => r.kind === "agent" && r.on).map(r => r.id).sort()).toEqual(["claude", "codex"]);
-    const before = diskOf(reading(), RECIPE, "/tmp/state.json");
-    const after = diskOf(reading(), answers.recipe, "/tmp/state.json");
+    const before = diskOf(reading(), RECIPE, "/tmp/state.json", BUILDER_DISK_GB)!;
+    const after = diskOf(reading(), answers.recipe, "/tmp/state.json", BUILDER_DISK_GB)!;
     expect(before.total).toBe(BUILDER_DISK_GB * 1024 * MIB);
+    // A provider that gives a builder no disk figure draws no ring: a container's disk is the box's.
+    expect(diskOf(reading(), RECIPE, "/tmp/state.json")).toBeUndefined();
     // The fixed part is the base the room leaves out of the disk plus the files that travel; a ticked agent's config
     // joins the files, and the rows' own sizes are the app's to add from its ticks.
     expect(before.fixed).toBeGreaterThanOrEqual(before.total - DISK_ROOM_BYTES);
@@ -101,6 +103,36 @@ describe("the screens as data", () => {
     // The tools screen keeps the floor rows locked on, as the terminal does.
     const floor = CATALOG_TOOLS.filter(e => e.floor).map(e => e.id);
     expect(screensOf(reading(), answers, at())[1]!.items.filter(i => floor.includes(i.id)).every(i => i.lock === "on")).toBe(true);
+  });
+
+  it("names the computer it is reading: a Mac by name on a Mac, the plain word on a Linux laptop, on every title and every row that says where a thing is", () => {
+    const words = (platform: "darwin" | "linux") => {
+      const screens = screensOf(reading({ platform, scanned: [SCANNED] }), fresh(), at());
+      const agents = screens.find(s => s.id === "agents")!;
+      const logins = screens.find(s => s.id === "logins")!;
+      return {
+        titles: screens.map(s => s.title),
+        tops: screens.flatMap(s => s.top),
+        // The agents screen's first detail line says whether the agent is here, and the sign-ins screen's copy
+        // answer says where the files would be copied from.
+        agent: agents.items.find(i => i.id === "claude")!.detail[0],
+        copy: logins.items.find(i => i.id === "logins/gh")!.choices!.find(c => c.value === "copy")!.label,
+      };
+    };
+    const mac = words("darwin");
+    expect(mac.titles).toContain("Also on this Mac");
+    expect(mac.titles).toContain("wsp for your agents on this Mac");
+    expect(mac.tops).toContain("What else this Mac brings");
+    expect(mac.agent).toContain("on this Mac");
+    expect(mac.copy).toBe("copy from this Mac");
+    const linux = words("linux");
+    expect(linux.titles).toContain("Also on this computer");
+    expect(linux.titles).toContain("wsp for your agents on this computer");
+    expect(linux.tops).toContain("What else this computer brings");
+    expect(linux.agent).toContain("on this computer");
+    expect(linux.copy).toBe("copy from this computer");
+    // Nothing a person reads on a Linux laptop calls their computer a Mac.
+    expect(JSON.stringify(screensOf(reading({ platform: "linux", scanned: [SCANNED] }), fresh(), at()))).not.toContain("Mac");
   });
 
   it("the sign-ins screen carries each row's choices and its starting answer; an answer moves it and nothing else", () => {

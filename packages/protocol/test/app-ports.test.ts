@@ -109,11 +109,17 @@ describe("who holds a port, and the lines about it", () => {
   });
 });
 
-describe("one copy of the pair", () => {
+describe("one home for the pair and for the loopback address", () => {
   const HOME = join("packages", "protocol", "src", "app-ports.ts");
+  const HOST = join("packages", "host", "src");
 
   it("no other source file spells out a default port: the app and the desktop read them from here", () => {
     const copies = sourceFiles().filter(rel => rel !== HOME && /\b(4400|4410)\b/.test(readFileSync(join(ROOT, rel), "utf8")));
+    expect(copies).toEqual([]);
+  });
+
+  it("no source file of the host spells the loopback address: every line about where the host is reads it from here", () => {
+    const copies = sourceFiles().filter(rel => rel.startsWith(HOST) && readFileSync(join(ROOT, rel), "utf8").includes(LOOPBACK));
     expect(copies).toEqual([]);
   });
 });

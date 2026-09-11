@@ -99,7 +99,8 @@ export async function runLocalInit(opts: LocalInitOptions, io: InitIO): Promise<
     await closeRuntime();
     return { code: 0 };
   }
-  await openApp(appUrl({ port: handle.port, address: opts.address }, workspace?.id), handle, io, interactive);
+  const at = { port: handle.port, address: opts.address };
+  await openApp(appUrl(at, workspace?.id), at, io, interactive);
   outro("wsp keeps serving the app from this terminal; Ctrl-C stops it.", out);
   return { code: 0, handle };
 }

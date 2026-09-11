@@ -26,7 +26,7 @@ const sample: SysSample = { type: "sys.sample", cpu: 33.3, load1: 0.42, mem: { u
 const listeners = new Set<(e: EventUnion) => void>();
 const api: Api = {
   upgrade: async () => mac,
-  capabilities: async () => ({ liveCloneForks: false, ramPreservingPause: false, resize: false, previewUrls: false, signedUrls: false, containers: false, callbackRelay: false, snapshotListing: false, templates: false, kept: false, sizes: [] }),
+  capabilities: async () => ({ liveCloneForks: false, ramPreservingPause: false, resize: false, previewUrls: false, signedUrls: false, containers: false, callbackRelay: false, snapshotListing: false, firstLifeSnapshots: true, templates: false, kept: false, sizes: [] }),
   portReach: async () => ({ url: "https://example.invalid", expiresAt: 0 }),
   daemonReach: async () => ({ url: "http://127.0.0.1:1", expiresAt: Number.MAX_SAFE_INTEGER }),
   startSession: async o => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" }),

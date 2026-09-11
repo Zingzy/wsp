@@ -80,6 +80,7 @@ export function fakeSsh(answer: (script: string, reach: SshReach) => Partial<Exe
             },
             removeDaemon: async (machine, login) => {
               deployed.removals.push({ machineId: machine.id, ...login });
+              if (deployed.refuseRemoval !== undefined) throw new Error(deployed.refuseRemoval);
             },
             dropForward: async machine => {
               for (const f of deployed.forwards) if (f.machineId === machine.id) f.dropped = true;
@@ -104,6 +105,8 @@ export interface FakeSshDaemon {
   closed: boolean;
   /** Set to make the deploy refuse, the way a machine with no compiler does. */
   refuse?: string;
+  /** Set to make the removal refuse, the way a machine that will not answer the dial does. */
+  refuseRemoval?: string;
 }
 
 export const fakeSshDaemon = (over: Partial<FakeSshDaemon> = {}): FakeSshDaemon => ({ deploys: [], removals: [], forwards: [], closed: false, ...over });

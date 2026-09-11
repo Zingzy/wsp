@@ -79,10 +79,11 @@ function mcpServerCommand(run: RunningWsp): McpServerSpec {
 }
 
 /** The server every agent's config gets: the command that runs this same wsp, then `--state <path>`, so the
- * agent's own cwd never picks another state file. */
-export function mcpServerSpec(statePath: string, run: RunningWsp = runningWsp()): McpServerSpec {
+ * agent's own cwd never picks another state file. Against a host on another computer it is `--host <alias>`
+ * instead: that host serves its own state, and a path on this computer would name a file the line never reads. */
+export function mcpServerSpec(statePath: string, run: RunningWsp = runningWsp(), opts: { host?: string } = {}): McpServerSpec {
   const wsp = mcpServerCommand(run);
-  return { command: wsp.command, args: [...wsp.args, "--state", statePath] };
+  return { command: wsp.command, args: [...wsp.args, ...(opts.host !== undefined ? ["--host", opts.host] : ["--state", statePath])] };
 }
 
 export interface Installed {

@@ -432,7 +432,7 @@ describe("wsp verbs over the host", () => {
   it("wsp --help names the screens of wsp init in order, as the wizard draws them, with no count since a screen with nothing to pick is not shown", () => {
     expect(HELP).not.toMatch(/(three|five|six) screens/);
     const init = HELP.slice(HELP.indexOf("  wsp init "), HELP.indexOf("  wsp doctor ")).replace(/\s+/g, " ");
-    expect(init).toContain("one screen at a time: Agents, Tools, Also on this Mac, Sign-ins, wsp for your agents on this Mac, each shown when it has a row to pick, then Build");
+    expect(init).toContain("one screen at a time: Agents, Tools, Also on this computer, Sign-ins, wsp for your agents on this computer, each shown when it has a row to pick, then Build");
   });
 
   it("every line of wsp --help fits 100 columns", () => {
@@ -1910,7 +1910,7 @@ describe("wsp verbs over the host", () => {
       for (const server of [silent, mute]) {
         const wsPort = (server.address() as AddressInfo).port;
         writeFileSync(lockPathFor(statePath), JSON.stringify({ pid: process.pid, port: wsPort, wsPort, startedAt: new Date().toISOString() }));
-        await expect(dialHost(statePath, 200)).rejects.toThrow(`the host at 127.0.0.1:${wsPort} did not answer within 200 ms`);
+        await expect(dialHost(statePath, { deadlineMs: 200 })).rejects.toThrow(`the host at 127.0.0.1:${wsPort} did not answer: nothing came back within 200 ms`);
       }
     } finally {
       for (const client of mute.clients) client.terminate();

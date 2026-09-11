@@ -4,6 +4,8 @@ export * from "./key-check.js";
 export * from "./exec-detached.js";
 export * from "./preview.js";
 export * from "./solari-backend.js";
+export * from "./docker-backend.js";
+export * from "./land-bytes.js";
 export * from "./local-backend.js";
 export * from "./ssh-backend.js";
 export * from "./ssh-forward.js";

@@ -4,6 +4,7 @@ import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
 import type { BackendPricing, ExecResult, Machine, MachineBackend, MachineKind, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
 import { previewTokenExpiry } from "./preview.js";
+import { BUILDER_DISK_GB } from "./tool-sizes.js";
 
 type Fetch = typeof globalThis.fetch;
 
@@ -71,6 +72,7 @@ export const SOLARI_PRICING: BackendPricing = {
   rateUsdPerHour,
   defaultSize: SIZES[0]!,
   snapshotStorage: SNAPSHOT_STORAGE,
+  builderDiskGb: BUILDER_DISK_GB,
 };
 
 function fail(e: WspError): never {
@@ -96,6 +98,7 @@ export class SolariBackend implements MachineBackend {
     callbackRelay: true, // the daemon link rides previewUrls
     snapshotListing: true,
     templates: true,
+    firstLifeSnapshots: true, // a snapshot taken after a resume is refused with 502, and same-host or cross-host is invisible from outside (measured)
     kept: false, // a fork wsp made and can rebuild in a minute: a turn that wrecks its disk costs nothing else
     sizes: SIZES.map(size => ({ ...size, rateUsdPerHour: rateUsdPerHour(size) })),
   };

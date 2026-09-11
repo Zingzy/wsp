@@ -5,7 +5,7 @@
 // so a token leaked from an earlier run dies with that run. Which road the
 // bytes take is the machine's to say, since on a machine somebody else may
 // hold an account the command itself must never name the token.
-import { landBytes, type Machine } from "@wsp/engine";
+import { hasByteRoad, landBytes, type Machine } from "@wsp/engine";
 import { shellQuote } from "@wsp/protocol";
 
 /** Mirrors @wsp/daemon's DEFAULT_TOKEN_PATH; the runtime cannot import the daemon package (it only runs inside guests).
@@ -45,7 +45,7 @@ export function rotateDaemonTokenScript(token: string, path: string = DAEMON_TOK
  * own byte road and the command names only the path it is looking for. */
 export async function rotateDaemonToken(machine: Machine, token: string, path: string = DAEMON_TOKEN_PATH): Promise<boolean> {
   assertTokenShape(token);
-  if (machine.putBytes === undefined) {
+  if (!hasByteRoad(machine)) {
     const rotated = await machine.exec(rotateDaemonTokenScript(token, path));
     return rotated.exitCode === 0 && rotated.stdout.includes(DAEMON_TOKEN_SET);
   }

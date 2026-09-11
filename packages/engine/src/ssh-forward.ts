@@ -140,21 +140,31 @@ export class SshForwards {
    * with the one already open after that. */
   async forward(machineId: string, reach: SshReach, remotePort: number): Promise<{ localPort: number }> {
     if (this.closing) throw new Error("this host is closing; it holds open no road to a machine over ssh");
-    const standing = this.held.get(machineId);
-    if (standing !== undefined) {
-      const found = await standing.catch(() => undefined);
-      if (found !== undefined && !found.gone && found.remotePort === remotePort) return { localPort: found.localPort };
-      await this.drop(machineId);
-    }
-    const making = this.open(reach, remotePort);
-    this.held.set(machineId, making);
+    // The chain goes into the map before anything is awaited, so reading what is held, replacing it and opening
+    // the replacement are one chain per machine and a second dial in the same tick waits on this one. Two dials
+    // that each opened a child would leave the first with nothing holding it: the map keeps one, and the recorded
+    // pid is the whole road, so nothing could kill the other, not even close().
+    const next = this.kept(this.held.get(machineId), reach, remotePort);
+    this.held.set(machineId, next);
     try {
-      const { localPort } = await making;
+      const { localPort } = await next;
       return { localPort };
     } catch (e) {
-      if (this.held.get(machineId) === making) this.held.delete(machineId);
+      if (this.held.get(machineId) === next) this.held.delete(machineId);
       throw e;
     }
+  }
+
+  /** The child that will carry to `remotePort`: the one already held where it still carries there, else a fresh
+   * one with the old one killed first. Never touches the map, which its caller has already set to this chain. */
+  private async kept(standing: Promise<Held> | undefined, reach: SshReach, remotePort: number): Promise<Held> {
+    const found = standing === undefined ? undefined : await standing.catch(() => undefined);
+    if (found !== undefined && !found.gone && found.remotePort === remotePort) return found;
+    if (found !== undefined) {
+      found.child.kill();
+      await found.child.ended;
+    }
+    return this.open(reach, remotePort);
   }
 
   private async open(reach: SshReach, remotePort: number): Promise<Held> {
