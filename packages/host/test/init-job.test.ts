@@ -1229,7 +1229,7 @@ describe("the init job, terminal road", () => {
   it("keeps the sign-in answers the terminal's own screens wrote into the recipe, and a run taken as yes signs nothing in", async () => {
     const f = fake();
     const path = smallRecipePath(f.statePath);
-    // What wsp init --recipe --signin claude=skip leaves beside the state: an answer no screen here will be asked again.
+    // What wsp recipe --signin claude=skip wrote and wsp init --recipe read: an answer no screen here asks again.
     saveSmallRecipe(path, { ...RECIPE, rows: RECIPE.rows.map(r => (r.id === "claude" ? { ...r, signIn: "skip" as const } : r)) });
     await f.jobs.start({ road: "terminal" });
     await f.settled();

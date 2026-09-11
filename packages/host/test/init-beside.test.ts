@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
-import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, SIGN_IN_OPEN_STATE, type InitJob, type InitJobEvent, type InitRow, type InitSetup } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, SIGN_IN_OPEN_STATE, type InitJob, type InitJobEvent, type InitRow, type InitSetup } from "@wsp/protocol";
 import { createRuntime, memoryStore, type InitDoor } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildBesideHost } from "../src/init-beside.js";
@@ -160,7 +160,11 @@ describe("the build wsp init hands to the host serving the state", () => {
       phase: "done",
       golden: { version: 1 },
       workspace: { id: "ws_1", name: "beside" },
-      rows: [stage("stage/creating", "Machine created", INIT_ROW_STATES.done, { detail: "sandbox from ubuntu:24.04", ms: 332 }), { id: "workspace/beside", kind: "workspace", label: "beside", state: INIT_ROW_STATES.forked }],
+      rows: [
+        stage("stage/creating", "Machine created", INIT_ROW_STATES.done, { detail: "sandbox from ubuntu:24.04", ms: 332 }),
+        stage("stage/installing-tools", "Tools installed", INIT_ROW_STATES.skipped),
+        { id: "workspace/beside", kind: "workspace", label: "beside", state: INIT_ROW_STATES.forked },
+      ],
     });
     expect(await run).toBe(0);
     const out = f.text();
@@ -170,6 +174,8 @@ describe("the build wsp init hands to the host serving the state", () => {
     // Twice: once when the account had no room for it, once when it landed. A wait nobody says reads as a hang.
     expect(out).toContain(`Machine created: ${INIT_ROW_STATES.slot}`);
     expect(out.match(/Machine created/g)).toHaveLength(2);
+    // A row that ended with nothing run says so rather than wearing the same glyph as work that happened.
+    expect(out).toContain(`Tools installed  ${INIT_ROW_STATES.skipped}`);
     expect(out).toContain("Golden v1 sealed on the host serving this state.");
     expect(out).toContain("Workspace beside (ws_1) forked from it.");
     expect(out).toContain("The app is already running at http://127.0.0.1:4400.");
@@ -191,6 +197,25 @@ describe("the build wsp init hands to the host serving the state", () => {
     expect(f.door.calls.map(c => c.op)).not.toContain("signInCode");
     expect(f.text()).not.toContain(CLOUD_SETUP_WORDS.build.codeAsk);
     expect(f.text()).toContain("The build stopped: the machine went away");
+    client.close();
+  });
+
+  it("ends the code prompt with the row it belongs to, so a build that sealed without one leaves no prompt holding the terminal", async () => {
+    const f = await serving();
+    const client = await dialHost(f.statePath);
+    const run = buildBesideHost({ client, io: f.io });
+    await until(() => f.door.calls.some(c => c.op === "start"));
+    f.door.push({ phase: "answering" });
+    await until(() => f.door.calls.some(c => c.op === "build"));
+    f.door.push({ phase: "signing-in", rows: [{ id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "GitHub CLI login", state: SIGN_IN_OPEN_STATE, page: "https://github.com/login/device", finish: "code" }] });
+    await until(() => f.text().includes(CLOUD_SETUP_WORDS.build.codeAsk));
+    // Nobody types it: the sign-in runs out, the build seals, and the run has to end rather than sit on that prompt.
+    f.door.push({ phase: "done", golden: { version: 1 }, rows: [{ id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "GitHub CLI login", state: INIT_SIGN_IN_WORDS["not-signed-in"] }] });
+    expect(await run).toBe(0);
+    expect(f.door.calls.map(c => c.op)).not.toContain("signInCode");
+    expect(f.text()).toContain("Golden v1 sealed on the host serving this state.");
+    // Nothing of that prompt is left on stdin: a live one holds the terminal in raw mode and this process with it.
+    expect((f.io.input as PassThrough).listenerCount("keypress")).toBe(0);
     client.close();
   });
 

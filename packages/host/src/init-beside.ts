@@ -7,7 +7,7 @@
 // Nothing here reads a key or the provider: the host owns both.
 import { log } from "@clack/prompts";
 import { styleText } from "node:util";
-import { CLOUD_SETUP_WORDS, InitJob, SIGN_IN_OPEN_STATE, fmtDuration, initJobOver, initRowOver, INIT_ROW_STATES, type InitRow } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, InitJob, SIGN_IN_OPEN_STATE, fmtDuration, initJobOver, initRowOver, initRowUnrun, INIT_ROW_STATES, type InitRow } from "@wsp/protocol";
 import { textPrompt } from "./init-layout.js";
 import type { InitIO } from "./init.js";
 
@@ -42,9 +42,6 @@ function rowLine(row: InitRow): string {
   return `${row.label}${detail}${took}`;
 }
 
-/** The states a row ends in that are nobody's failure but are not the work done either. */
-const HELD_BACK = new Set<string>([INIT_ROW_STATES.skipped, INIT_ROW_STATES.notMade, INIT_ROW_STATES.stopped]);
-
 /** The states a row sits in while it waits on something this run cannot hurry. */
 const WAITING_ON = new Set<string>([INIT_ROW_STATES.slot, INIT_ROW_STATES.retrying]);
 
@@ -53,8 +50,10 @@ const WAITING_ON = new Set<string>([INIT_ROW_STATES.slot, INIT_ROW_STATES.retryi
 export async function buildBesideHost(o: BesideOptions): Promise<number> {
   const out = { output: o.io.output };
   const seen = new Map<string, string>();
-  /** Every sign-in whose code was asked for once: the page hands one code and the row stays open until it lands. */
-  const asked = new Set<string>();
+  /** The code prompt open for each sign-in, with the stop that ends it. A prompt holds the terminal in raw mode and
+   * this process's loop with it, so every one is ended when its row moves on and when the run is over: a person who
+   * never typed the code is not left at a live prompt under a sealed golden. */
+  const asking = new Map<string, { stop: AbortController; done: Promise<void> }>();
   let view: InitJob | undefined;
   const waiting = new Set<() => void>();
 
@@ -63,14 +62,17 @@ export async function buildBesideHost(o: BesideOptions): Promise<number> {
       if (row.kind === "fact") continue;
       if (seen.get(row.id) === row.state) continue;
       seen.set(row.id, row.state);
+      // The prompt belongs to the row's own wait: the page hands one code, and once that row moves on there is
+      // nothing left to type into.
+      if (row.state !== SIGN_IN_OPEN_STATE) asking.get(row.id)?.stop.abort();
       if (row.page !== undefined && row.state === SIGN_IN_OPEN_STATE) {
         log.warn(`${row.label}: open ${row.page}`, out);
         void o.io.open(row.page);
         // Only where someone can type it: off a terminal the prompt would sit on a stdin nobody is at, and the page
         // line above is the whole of what an agent driving this run can act on.
-        if (row.finish === "code" && o.io.isTTY && !asked.has(row.id)) {
-          asked.add(row.id);
-          void askCode(o, row);
+        if (row.finish === "code" && o.io.isTTY && !asking.has(row.id)) {
+          const stop = new AbortController();
+          asking.set(row.id, { stop, done: askCode(o, row, stop.signal).finally(() => asking.delete(row.id)) });
         }
         continue;
       }
@@ -82,7 +84,7 @@ export async function buildBesideHost(o: BesideOptions): Promise<number> {
       }
       if (!initRowOver(row.state)) continue;
       if (row.state === INIT_ROW_STATES.failed) log.error(rowLine(row), out);
-      else if (HELD_BACK.has(row.state)) log.warn(`${rowLine(row)}  ${dim(row.state)}`, out);
+      else if (initRowUnrun(row.state)) log.warn(`${rowLine(row)}  ${dim(row.state)}`, out);
       else log.step(rowLine(row), out);
     }
   };
@@ -111,7 +113,9 @@ export async function buildBesideHost(o: BesideOptions): Promise<number> {
       check();
     });
 
-  const stop = (): void => void o.client.request("init.cancel").catch(() => {});
+  // A cancel the job refuses has words of its own (the seal cannot be stopped); swallowing them reads as a Ctrl-C
+  // nothing heard.
+  const stop = (): void => void o.client.request("init.cancel").catch((e: unknown) => log.warn(e instanceof Error ? e.message : String(e), out));
   o.io.signals.on("SIGINT", stop);
   try {
     await o.client.events();
@@ -133,12 +137,18 @@ export async function buildBesideHost(o: BesideOptions): Promise<number> {
   } finally {
     o.io.signals.off("SIGINT", stop);
     off();
+    // The run ends when its prompts do: an aborted one hands the terminal back and settles, and until it has, this
+    // process has a readline on stdin and would not exit.
+    const open = [...asking.values()];
+    for (const ask of open) ask.stop.abort();
+    await Promise.allSettled(open.map(ask => ask.done));
   }
 }
 
-/** The code a sign-in's page handed back, typed here and sent to the tool waiting for it on the machine. */
-async function askCode(o: BesideOptions, row: InitRow): Promise<void> {
-  const typed = await textPrompt({ message: `${row.label}: ${CLOUD_SETUP_WORDS.build.codeAsk}`, input: o.io.input, output: o.io.output });
+/** The code a sign-in's page handed back, typed here and sent to the tool waiting for it on the machine; the signal
+ * ends the prompt where the row it belongs to did not wait for one. */
+async function askCode(o: BesideOptions, row: InitRow, signal: AbortSignal): Promise<void> {
+  const typed = await textPrompt({ message: `${row.label}: ${CLOUD_SETUP_WORDS.build.codeAsk}`, input: o.io.input, output: o.io.output, signal });
   const code = typeof typed === "string" ? typed.trim() : "";
   if (code === "") return;
   await o.client.request("init.signInCode", { tool: row.tool ?? row.id, code }).catch((e: unknown) => {
