@@ -234,8 +234,10 @@ options:
                      the only workspace there is
   --provider NAME    up, init: which machine provider this computer forks on.
                      docker forks containers on a Docker daemon, yours or one
-                     on a box; without this a saved Solari key takes the cloud
-                     and no key leaves this computer as the only workspace
+                     on a box; box forks Box by ASCII machines with BOX_API_KEY
+                     in the environment; without this a saved Solari key takes
+                     the cloud and no key leaves this computer as the only
+                     workspace
   --docker-host URL  up, init: the Docker daemon to dial, as DOCKER_HOST words
                      it (unix:///var/run/docker.sock, ssh://you@box); this
                      computer's own socket without it
