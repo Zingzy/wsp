@@ -41,6 +41,22 @@ export function isUrl(word: string): boolean {
   return /^(https?|wss?):\/\//i.test(word);
 }
 
+/** The name of the computer in an address a host is served at, or nothing when the word is not one. isUrl takes
+ * every address a socket is reached at, the ws and wss ones the runtime's own socket is dialed at included; this is
+ * the narrower reading of an address a person is pointed at, and it hands back the name it found, so the check that
+ * refuses a malformed address and the alias folded out of a good one are one parse rather than two. */
+export function servedHostname(word: string): string | undefined {
+  if (!isUrl(word)) return undefined;
+  let parsed: URL;
+  try {
+    parsed = new URL(word);
+  } catch {
+    return undefined;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return undefined;
+  return parsed.hostname === "" ? undefined : parsed.hostname;
+}
+
 /** An address and a port as the authority of a URL: an IPv6 literal needs brackets and everything else is itself.
  * The one rule, so the address wsp pair prints and the one every local tool dials are spelled the same way. */
 export function authority(address: string, port: number): string {

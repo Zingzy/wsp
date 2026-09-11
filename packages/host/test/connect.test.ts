@@ -144,6 +144,24 @@ describe("wsp connect", () => {
     await expect(connectCommand(io(), { statePath: STATE, home }, { code: "ABCD1234" }, ["box"])).rejects.toThrow(/http/);
   });
 
+  it("answers every address it cannot dial with the one sentence, and dials none of them", async () => {
+    const home = tempDir("connect-home");
+    const never = {
+      dial: () => Promise.reject(new Error("no address this refuses is dialled")),
+      now: Date.now,
+      deviceName: () => "a test",
+      relayUrl: () => Promise.reject(new Error("this line names an address, so no relay is asked")),
+    };
+    // ws and wss are addresses a socket is dialled at, not ones a host is served at, and an http:// with no
+    // computer after it reached the URL parser and threw a TypeError nobody could act on.
+    for (const word of ["http://", "https://", "ws://x", "wss://x:4410", "http:/box", "box", "box:4400"]) {
+      await expect(connectCommand(io(), { statePath: STATE, home }, { code: "ABCD1234" }, [word], never)).rejects.toThrow(
+        `wsp connect takes the address the host is served at, starting http:// or https:// and naming the computer it runs on, got ${JSON.stringify(word)}`,
+      );
+    }
+    expect(readHost(home, "x")).toBeUndefined();
+  });
+
   it("refuses a name that could never be a host record before it spends the code", async () => {
     const box = await boxAndHome();
     let dialled = false;
