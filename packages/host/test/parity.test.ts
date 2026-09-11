@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_AGENT } from "@wsp/catalog";
 import { COORDINATOR_HANDOFF, EXIT_CODES, EXIT_WORDS, ExitClass, NOTIFY_CALLER, NOTIFY_WORDS, RuntimeRequest, SessionStartOutcome, TURN_END_WORDS, effortsFor, markedDefault, stillWorkingLine, type WorkspaceView } from "@wsp/protocol";
 import { harnessCatalog } from "@wsp/runtime";
-import { COMMAND_LINES, HELP, JSON_COMMANDS, PROSE_COMMANDS, SERVE_FLAGS, type CommandLine } from "../src/cli.js";
+import { cli, COMMAND_LINES, HELP, HOST_COMMANDS, JSON_COMMANDS, PROSE_COMMANDS, SERVE_FLAGS, type CliIO, type CommandLine } from "../src/cli.js";
 import { mcpServer } from "../src/mcp.js";
 import { INSTRUCTIONS, RULES_HEADING, SHELL_HEADING, VERBS_HEADING, WSP_SKILL } from "../src/skill.js";
 import { CLI_VERBS, COMMON, VERBS, flagList, openingOf, toolName, type Flags } from "../src/verbs.js";
@@ -340,6 +340,25 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       const deeper = COMMAND_LINES.filter(c => c.words.startsWith(`${line.words} `)).map(c => c.words.split(" ").at(-1)!);
       const rest = argv.slice(1 + line.words.split(" ").length).filter(w => !w.startsWith("-"));
       expect(rest.filter(w => deeper.includes(w)), `${argv.join(" ")} puts a flag before the subcommand`).toEqual([]);
+    }
+  });
+
+  it("a line of two words or more advertises the flags its first word reads, so the usage table refuses what a terminal refuses", async () => {
+    // --host is one key in the shared parse, and the command line refuses it on a word that runs here. A line whose
+    // flags were written out beside it advertised the flag anyway, and this table is what every skill example is
+    // held to, so the example would pass the gate and fail at a terminal.
+    const refused = usageError(["wsp", "devices", "revoke", "d_1", "--host", "box"], COMMAND_LINES) ?? "the usage table takes --host on wsp devices revoke";
+    expect(refused).toContain("Unknown option '--host'");
+    const errors: string[] = [];
+    const io: CliIO = { log: () => {}, error: line => errors.push(line), ask: () => Promise.reject(new Error("no prompt")), askSecret: () => Promise.reject(new Error("no prompt")) };
+    expect(await cli(["devices", "revoke", "d_1", "--host", "box"], io)).toBe(EXIT_CODES.usage);
+    expect(errors[0]).toContain("Unknown option '--host' for wsp devices");
+    // Every line the shared parse serves, one word or several, advertises exactly what its command answers.
+    for (const line of COMMAND_LINES) {
+      const word = line.words.split(" ")[0]!;
+      if (!("cliOnly" in line) || word === "mcp") continue;
+      expect(Object.hasOwn(line.options, "host"), `wsp ${line.words} advertises --host`).toBe(HOST_COMMANDS.includes(word));
+      expect(Object.hasOwn(line.options, "json"), `wsp ${line.words} advertises --json`).toBe(JSON_COMMANDS.includes(word));
     }
   });
 

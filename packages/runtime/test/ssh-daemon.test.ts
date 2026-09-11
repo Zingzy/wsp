@@ -3,10 +3,14 @@
 // deploy that goes on when the machine is recorded, the road through the
 // forward that every pane dials, and the folders and tokens that sit under
 // that machine's own login rather than under root.
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, expect, it, vi } from "vitest";
+import { SSH_FACTS_SCRIPT } from "@wsp/engine";
 import { DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, kindWords, NO_BUILD_TOOLS_LINE, noSshDaemonLine, rootsPathIn, sshDaemonPaths, type WorkspaceStatus } from "@wsp/protocol";
 import type { Clock } from "../src/clock.js";
 import { createRuntime, DAEMON_LACKS_AGAIN_MS, type ProjectImportOptions, type Runtime, type SshWiring } from "../src/runtime.js";
+import { POLL_INTERVAL_MS } from "../src/status.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
 import { fakeSsh, fakeSshDaemon, type FakeSshDaemon } from "./fake-ssh.js";
@@ -394,5 +398,54 @@ describe("putting a daemon on a machine already recorded", () => {
     expect((await second.rt.workspaces.daemonReach(ws.id)).url).toBe("http://127.0.0.1:40000");
     await second.rt.close();
     expect(DAEMON_VERSION).toBeGreaterThan(0);
+  });
+});
+
+describe("what the poll asks that machine about itself", () => {
+  it("asks a machine the poll can reach what it is on every tick, and stops asking one it cannot", async () => {
+    const fc = fakeClock();
+    const daemon = fakeSshDaemon();
+    // The daemon's own road, answered in this process: a plain GET to a WebSocket server is 426, which the probe
+    // reads as the daemon being up. The forward is seeded onto that port, since the fake hands back a held one.
+    const server = createServer((_req, res) => {
+      res.writeHead(426);
+      res.end();
+    });
+    await new Promise<void>(done => server.listen(0, "127.0.0.1", done));
+    daemon.forwards.push({ machineId: "ssh://dev@box:22", remotePort: 42891, localPort: (server.address() as AddressInfo).port, dropped: false });
+    const { wiring, carried } = fakeSsh(script => (script.startsWith(`cat '${AT.portFile}'`) ? { stdout: "42891\n" } : {}), daemon);
+    const rt = runtime(wiring, memoryStore(), fc.clock);
+    await rt.workspaces.createSsh("dev@box");
+    const reaches: string[] = [];
+    rt.events.on("workspace.status", e => reaches.push((e as { status: WorkspaceStatus }).status.reach.state));
+    const asked = (): number => carried.filter(c => c.script === SSH_FACTS_SCRIPT).length;
+    const ticks = (): number => carried.filter(c => c.script.startsWith(`cat '${AT.portFile}'`)).length;
+    const stop = rt.status.watch();
+    try {
+      await vi.waitFor(() => expect(reaches).toContain("reachable"));
+      const answered = asked();
+      expect(answered).toBeGreaterThanOrEqual(1);
+      fc.advance(POLL_INTERVAL_MS);
+      await vi.waitFor(() => expect(asked()).toBeGreaterThan(answered));
+
+      // The machine goes: the read costs a dial of its own, so once the row's word has turned nothing asks again.
+      // Two silences in a row turn it, so two ticks pass before the word does.
+      await new Promise<void>(done => server.close(() => done()));
+      for (let i = 0; i < 2 && !reaches.includes("unreachable"); i++) {
+        const seen = ticks();
+        fc.advance(POLL_INTERVAL_MS);
+        await vi.waitFor(() => expect(ticks()).toBeGreaterThan(seen));
+      }
+      await vi.waitFor(() => expect(reaches).toContain("unreachable"));
+      const settled = asked();
+      const polled = ticks();
+      fc.advance(POLL_INTERVAL_MS);
+      await vi.waitFor(() => expect(ticks()).toBeGreaterThan(polled));
+      expect(asked()).toBe(settled);
+    } finally {
+      stop();
+      await rt.close();
+      server.close();
+    }
   });
 });

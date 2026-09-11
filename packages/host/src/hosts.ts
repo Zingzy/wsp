@@ -10,7 +10,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { WS_PATH, hostFromEnv, isLoopback, isUrl, servedHostname, usageRefusal, type HostRoad } from "@wsp/protocol";
 import { servingHost } from "./host-lock.js";
-import { defaultHomeIn } from "./serving-home.js";
+import { defaultHomeIn, homeNamed } from "./serving-home.js";
 
 /** The address predicate has one home in the protocol; the command line's callers read it from here. */
 export { isUrl };
@@ -51,9 +51,10 @@ export interface HostEntry {
 export const DEFAULT_HOME = defaultHomeIn(homedir());
 
 /** The folder wsp keeps its state, its keys and its hosts in. One reading, since the command line, the verbs and the
- * tool server all have to name the same folder. */
+ * tool server all have to name the same folder, and the variable itself is read where every other road reads it,
+ * so `WSP_HOME=` with nothing after it is a home nobody named rather than the folder the run happens to sit in. */
 export function wspHome(env: Readonly<Record<string, string | undefined>> = process.env): string {
-  return env["WSP_HOME"] ?? DEFAULT_HOME;
+  return homeNamed(env["WSP_HOME"]) ?? DEFAULT_HOME;
 }
 
 export function hostsDir(home: string): string {
@@ -184,6 +185,10 @@ export function wsUrlOf(url: string): string {
  * typed on the line, which carries no token and is only a road for wsp connect. */
 export type HostAim = { kind: "here" } | { kind: "alias"; alias: string; record: HostRecord } | { kind: "url"; url: string; token?: string };
 
+/** An aim at a host on another computer: what a reading that takes the name a line gave hands back, since only the
+ * fallbacks under that name can land on this one. */
+export type AimElsewhere = Exclude<HostAim, { kind: "here" }>;
+
 /** What a caller names when it asks where to dial: the word a --host flag carried, the environment the caller runs
  * in, and the wsp home holding the hosts folder, which that environment names when the caller does not. */
 export interface HostPick {
@@ -242,7 +247,7 @@ export function dialWindowMs(aim: HostAim): number {
   if (aim.kind === "here") return NEAR_WINDOW_MS;
   // A record a hand edited holds any word at all, and the window a dial gets is no place to throw over one: a word
   // the protocol's own reading of an address cannot read is not loopback either, so it takes the longer window.
-  const where = servedHostname(aim.kind === "alias" ? aim.record.url : aim.url);
+  const where = servedHostname(aimAddress(aim));
   return where !== undefined && isLoopback(where) ? NEAR_WINDOW_MS : FAR_WINDOW_MS;
 }
 
@@ -252,14 +257,23 @@ export function stateIgnoredLine(where: string): string {
   return `--state names a file on this computer and this line runs against ${where}, which serves its own, so it is not read.`;
 }
 
-/** The one reading of which host a line runs against: the flag, then WSP_HOST, then the pair a turn's launch left
+/** The host a line names outright: the --host word, then WSP_HOST, and nothing when neither names one. Read apart
+ * from the fallbacks below it because a line that answers about this computer (wsp status) moves only when a
+ * person named a host, while a verb, which has a host to speak to either way, follows the fallbacks too. */
+export function namedHost(pick: HostPick = {}): AimElsewhere | undefined {
+  const env = pick.env ?? process.env;
+  const named = [pick.host, env["WSP_HOST"]].map(w => w?.trim()).find(w => w !== undefined && w !== "");
+  return named === undefined ? undefined : aimAt(named, pick.home ?? wspHome(env), env);
+}
+
+/** The one reading of which host a line runs against: the name it was given, then the pair a turn's launch left
  * in the environment, then the host on this computer serving the state file, then the default alias. The command
  * line and the tool server both come here, so a verb and a tool started the same way go to the same host. */
 export function aimedHost(statePath: string, pick: HostPick = {}): HostAim {
   const env = pick.env ?? process.env;
   const home = pick.home ?? wspHome(env);
-  const named = [pick.host, env["WSP_HOST"]].map(w => w?.trim()).find(w => w !== undefined && w !== "");
-  if (named !== undefined) return aimAt(named, home, env);
+  const named = namedHost(pick);
+  if (named !== undefined) return named;
   // The pair is the identity the launch handed this turn, and it goes ahead of anything this computer holds: a
   // guest's default state file is a path nothing serves, and a turn on this computer under a host that does serve
   // it was still given its own token and not the host's. What a person types on the line still wins above.
@@ -270,7 +284,7 @@ export function aimedHost(statePath: string, pick: HostPick = {}): HostAim {
   return fallback === undefined ? { kind: "here" } : aimAt(fallback, home, env);
 }
 
-function aimAt(named: string, home: string, env: Readonly<Record<string, string | undefined>>): HostAim {
+function aimAt(named: string, home: string, env: Readonly<Record<string, string | undefined>>): AimElsewhere {
   // An address with a token beside it in this environment is a host this line may drive; one without is only the
   // road wsp connect takes, since nothing else on this computer holds a token for it.
   if (isUrl(named)) {
@@ -285,4 +299,10 @@ function aimAt(named: string, home: string, env: Readonly<Record<string, string 
 /** How a host is named in a line the person reads: the alias where there is one, the address otherwise. */
 export function aimName(aim: HostAim): string {
   return aim.kind === "alias" ? aim.alias : aim.kind === "url" ? aim.url : "this computer";
+}
+
+/** Where a host on another computer answers, for the lines that print the address beside the name. The aim for
+ * this computer carries none: its address is the one its own lock records, which those lines read there. */
+export function aimAddress(aim: AimElsewhere): string {
+  return aim.kind === "alias" ? aim.record.url : aim.url;
 }
