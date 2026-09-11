@@ -1932,7 +1932,7 @@ describe("a turn the host comes back to", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const h = machineRuns();
-    const agents = { url: "http://10.0.0.2:4700" };
+    const agents = { reach: { url: "http://10.0.0.2:4700" } };
     const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter }, agents });
     const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a", agents: { spawn: true, maxMachines: 3, maxDepth: 1 } });
     await rt1.sessions.start(ws.id, { prompt: "coordinate the builders" });

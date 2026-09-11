@@ -64,6 +64,13 @@ export function authority(address: string, port: number): string {
   return `${bracketed}:${port}`;
 }
 
+/** Where a host a relay carries answers, written from the name the relay gave it: the one home for that spelling,
+ * so a line that prints the address and a turn that dials it name the same one. A tunnel is TLS from end to end,
+ * which is what makes the scheme a rule rather than a choice. */
+export function relayUrlOf(hostname: string): string {
+  return `https://${hostname}`;
+}
+
 /** The one line a host binding beyond this computer prints as it starts, so nobody learns from a stranger that the
  * page was reachable. */
 export function listenBeyondLoopbackLine(address: string): string {

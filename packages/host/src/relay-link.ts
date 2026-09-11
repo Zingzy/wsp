@@ -9,7 +9,7 @@
 import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname as thisComputer } from "node:os";
 import { dirname, join } from "node:path";
-import { fmtDuration, usageRefusal } from "@wsp/protocol";
+import { fmtDuration, relayUrlOf, usageRefusal } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
 import { CLOUDFLARED, connectorRunning, ensureCloudflared, startConnector, stopRecordedConnector, type Connector } from "./connector.js";
 import { publicAddressLine } from "./host-lock.js";
@@ -217,7 +217,7 @@ export async function relayHostUrl(home: string, name: string, deps: RelayDeps =
   if (found.hostname === null || found.hostname === "") {
     throw usageRefusal(`the relay has no address for ${name} yet; start it there with wsp up, which asks the relay for a tunnel and says where it landed`);
   }
-  return `https://${found.hostname}`;
+  return relayUrlOf(found.hostname);
 }
 
 /** The rows wsp relay hosts prints; never the token, which a listing has no use for. */
@@ -225,7 +225,7 @@ export function relayHostLines(hosts: readonly RelayHostView[]): string[] {
   if (hosts.length === 0) return ["Your relay account holds no box yet. Run wsp relay link <url> on the computer you want to reach."];
   return table([
     ["HOST", "ADDRESS", "CONNECTOR", "LAST SEEN"],
-    ...hosts.map(h => [h.name, h.hostname === null || h.hostname === "" ? "not up yet" : `https://${h.hostname}`, h.connectorVersion ?? "", h.lastSeen ?? ""]),
+    ...hosts.map(h => [h.name, h.hostname === null || h.hostname === "" ? "not up yet" : relayUrlOf(h.hostname), h.connectorVersion ?? "", h.lastSeen ?? ""]),
   ]);
 }
 
