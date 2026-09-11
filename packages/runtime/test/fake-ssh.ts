@@ -3,16 +3,20 @@
 // that records or drives a machine over ssh is proved against the real
 // SshBackend and the real address rules with nothing on the network. One home
 // for it, read by the runtime's own tests and by the host's keyless roads.
-import { SSH_BYTES_OK, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SshBackend, parseSshAddress, sshIdentity, sshMachineName, type ExecResult, type SshReach, type SshTransport } from "@wsp/engine";
+import { SSH_BYTES_OK, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SshBackend, parseSshAddress, sshControlPath, sshIdentity, sshMachineName, type ExecResult, type SshHostKeyReader, type SshReach, type SshTransport } from "@wsp/engine";
 import { machineLacking, machineUnanswered, sshDaemonPaths } from "@wsp/protocol";
 import type { SshWiring } from "../src/runtime.js";
+
+/** The key the box in this fake holds, which is what the client on this computer knows it by: two addresses for
+ * that one machine answer with this one key, and a case reads it here rather than spelling it again. */
+export const FAKE_BOX_KEY = "ssh-ed25519 SHA256:boxboxboxboxboxboxboxboxboxboxboxboxbox";
 
 /** Two machines a person could reach over ssh, each with a home and a PATH of its own, so a road that reads one
  * machine's facts for another is a failure rather than a coincidence. */
 const MACHINES: Record<string, { home: string; user: string; path: string; cpu: number; memkb: number; key: string; store?: string }> = {
-  box: { home: "/home/dev", user: "dev", path: "/home/dev/.local/bin:/usr/bin", cpu: 8, memkb: 16_384_000, key: "ssh-ed25519 SHA256:boxboxboxboxboxboxboxboxboxboxboxboxbox" },
+  box: { home: "/home/dev", user: "dev", path: "/home/dev/.local/bin:/usr/bin", cpu: 8, memkb: 16_384_000, key: FAKE_BOX_KEY },
   // The same machine as box, under the address a person might use for it instead: one machine, one host key.
-  "10.0.0.9": { home: "/home/dev", user: "dev", path: "/home/dev/.local/bin:/usr/bin", cpu: 8, memkb: 16_384_000, key: "ssh-ed25519 SHA256:boxboxboxboxboxboxboxboxboxboxboxboxbox" },
+  "10.0.0.9": { home: "/home/dev", user: "dev", path: "/home/dev/.local/bin:/usr/bin", cpu: 8, memkb: 16_384_000, key: FAKE_BOX_KEY },
   "10.0.0.7": { home: "/root", user: "root", path: "/root/.bun/bin:/usr/bin", cpu: 2, memkb: 4_096_000, key: "ssh-ed25519 SHA256:sevensevensevensevensevensevenseven" },
   // A machine whose person points their harness at another folder, which is where their sign-in is.
   moved: { home: "/root", user: "root", path: "/usr/bin", cpu: 1, memkb: 1_024_000, key: "ssh-ed25519 SHA256:movedmovedmovedmovedmovedmoved", store: "/root/.claude-cfg" },
@@ -29,19 +33,28 @@ export const FAKE_UPTIME_S = 90_061;
 
 /** An ssh client that never leaves this computer: each machine answers the read with its own facts, every script it
  * was asked to carry is recorded, and a case scripts the answers. */
-export function fakeSsh(answer: (script: string, reach: SshReach) => Partial<ExecResult> = () => ({}), deployed?: FakeSshDaemon): { wiring: SshWiring; carried: { reach: SshReach; script: string; stdin?: Uint8Array }[] } {
+export function fakeSsh(answer: (script: string, reach: SshReach) => Partial<ExecResult> = () => ({}), deployed?: FakeSshDaemon): { wiring: SshWiring; carried: { reach: SshReach; script: string; stdin?: Uint8Array }[]; masters: Set<string> } {
   const carried: { reach: SshReach; script: string; stdin?: Uint8Array }[] = [];
   /** What is on the machine, as the writes this fake saw left it. */
   const files = new Set<string>();
+  /** The master connections this fake holds open, by the socket the real client names for the dial, and the key the
+   * accept-new policy wrote for a machine as it was first dialled. A dial to a login, host and port one is already
+   * open for rides it and exchanges no key, so nothing about that dial says which machine answered: what says it is
+   * the entry the first dial left behind, which is what the reader below reads. */
+  const masters = new Set<string>();
+  const known = new Map<string, string>();
   const transport: SshTransport = async (reach, script, opts) => {
     carried.push({ reach, script, ...(opts.stdin !== undefined ? { stdin: opts.stdin } : {}) });
     const machine = MACHINES[reach.host];
     if (machine === undefined) return { exitCode: 255, stdout: "", stderr: `ssh: Could not resolve hostname ${reach.host}\n` };
+    const socket = sshControlPath(reach, "/fake-masters");
+    if (!masters.has(socket)) {
+      masters.add(socket);
+      known.set(`[${reach.host}]:${reach.port}`, machine.key);
+    }
     if (script === SSH_READ_SCRIPT) {
-      // The client logs what the connection saw on stderr when the read asks it to; that is where the host key is read.
-      const log = opts.hostKey === true ? `debug1: Server host key: ${machine.key}\ndebug1: Authenticating to ${reach.host}\n` : "";
       const store = machine.store === undefined ? "" : `store:CLAUDE_CONFIG_DIR ${machine.store}\n`;
-      return { exitCode: 0, stdout: `home ${machine.home}\nuser ${machine.user}\npath ${machine.path}\n${store}cpu ${machine.cpu}\nmemkb ${machine.memkb}\n`, stderr: log };
+      return { exitCode: 0, stdout: `home ${machine.home}\nuser ${machine.user}\npath ${machine.path}\n${store}cpu ${machine.cpu}\nmemkb ${machine.memkb}\n`, stderr: "" };
     }
     // What every one of these machines says it is when a status asks: a Linux, up for a day, and its own home,
     // so a row built for one machine that showed another's folder would be a failure rather than a coincidence.
@@ -61,7 +74,11 @@ export function fakeSsh(answer: (script: string, reach: SshReach) => Partial<Exe
     if (asked !== null) return { exitCode: 0, stdout: `${files.has(asked[1]!) ? asked[2]! : asked[3]!}\n`, stderr: "", ...answer(script, reach) };
     return { exitCode: 0, stdout: "", stderr: "", ...answer(script, reach) };
   };
-  const backend = new SshBackend({ transport });
+  /** What the client on this computer knows about a machine's key, which is the entry its first dial wrote: the
+   * answer is the same whether this dial exchanged a key or rode a master, and a port is its own entry the way
+   * OpenSSH writes one. */
+  const knownKey: SshHostKeyReader = async reach => known.get(`[${reach.host}]:${reach.port}`);
+  const backend = new SshBackend({ transport, hostKey: knownKey });
   return {
     wiring: {
       backend,
@@ -106,6 +123,7 @@ export function fakeSsh(answer: (script: string, reach: SshReach) => Partial<Exe
           }),
     },
     carried,
+    masters,
   };
 }
 
