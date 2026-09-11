@@ -23,8 +23,9 @@ import { loadPagePreviews, useWorkspacePreviews } from "../src/shell/workspacePr
 import { recentThreads, useThreadHistory } from "../src/shell/threadHistory.js";
 import { releasesSwitchHold, stepSwitcherAt, SWITCHER_PAINT_DELAY_MS, useWorkspaceSwitcher } from "../src/shell/workspaceSwitcher.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
+import { caps } from "./caps.js";
 
-const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: false, kept: false, sizes: [] };
+const CAPS = caps();
 
 const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running", createdAt = "2026-09-01T00:00:00Z"): WorkspaceView => ({
   id,

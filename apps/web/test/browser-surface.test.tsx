@@ -12,6 +12,7 @@ import { REACH_REASK_FLOOR_MS, REACH_REFRESH_WITH_MS_LEFT } from "../src/browser
 import { resetBrowserTabs, useBrowserTabs } from "../src/browser/tabs.js";
 import { RightPanel } from "../src/shell/RightPanel.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
+import { caps } from "./caps.js";
 
 const WS = "ws_browser01";
 const OTHER = "ws_other0002";
@@ -41,7 +42,7 @@ function fakeApi(workspaces: WorkspaceView[], portReach: Api["portReach"] = mint
     nap: async id => workspaces.find(w => w.id === id)!,
     wake: async id => workspaces.find(w => w.id === id)!,
     upgrade: async id => workspaces.find(w => w.id === id)!,
-    capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: false, kept: false, sizes: [] }),
+    capabilities: async () => (caps()),
     portReach,
     daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
     startSession: async o => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" }),

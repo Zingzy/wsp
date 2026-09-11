@@ -54,7 +54,7 @@ describe.runIf(LIVE)("solari platform-bug canaries", () => {
       let outcome: "snapshotted" | "snapshotUnavailable";
       let snapId: string | undefined;
       try {
-        snapId = await m.snapshot("quirk-canary");
+        snapId = await m.snapshot("quirk-canary", { firstLife: true });
         outcome = "snapshotted";
       } catch (e) {
         const err = e as WspError;

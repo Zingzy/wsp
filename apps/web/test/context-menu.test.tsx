@@ -42,6 +42,7 @@ import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../src/terminal/link.js";
 import { fakeWire, LEVELS, resetSurfaces, WS } from "./surface-harness.js";
 import { statusOf } from "./workspace-status.js";
+import { caps } from "./caps.js";
 
 const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running"): WorkspaceView => ({
   id,
@@ -51,7 +52,7 @@ const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running
   golden: "snap_g",
   createdAt: "2026-09-01T00:00:00Z",
 });
-const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: false, kept: false, sizes: [] };
+const CAPS = caps();
 
 type FakeApi = Api & {
   nap: ReturnType<typeof vi.fn>;

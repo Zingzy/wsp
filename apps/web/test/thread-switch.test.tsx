@@ -11,6 +11,7 @@ import type { Api, ProtocolEvent, StartSessionOptions } from "../src/protocol/cl
 import { useStore } from "../src/protocol/store.js";
 import { press, typeInto } from "./composer-harness.js";
 import { installFakeLayout } from "./fake-layout.js";
+import { caps } from "./caps.js";
 
 const WS = "ws_switch";
 // An hour before the run, not a fixed date: these rows must stay on the idle shelf, and a fixed date walks past the
@@ -53,7 +54,7 @@ function fixtureApi(transcript: SessionEvent[] = [...SETTLED_A, ...RUNNING_B], r
     nap: async () => workspace,
     wake: async () => workspace,
     upgrade: async () => workspace,
-    capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: false, kept: false, sizes: [] }),
+    capabilities: async () => (caps()),
     startSession: async o => {
       started.push(o);
       return { id: "s_x", workspaceId: o.workspaceId, harness: "claude", status: "running" };
