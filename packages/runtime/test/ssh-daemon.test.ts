@@ -27,15 +27,20 @@ const runtime = (ssh: SshWiring, store: Store = memoryStore(), clock?: Clock): R
   createRuntime({ backend: stubBackend(), store, adapters: {}, ssh, daemonToken: TOKEN, ...(clock !== undefined ? { clock } : {}) });
 
 /** A host that reaches machines over ssh and can put a daemon on one, with the machine answering the port file
- * with `port` and everything else with nothing. */
-function host(over: { port?: string; refuse?: string; lacks?: boolean; unanswered?: boolean; refuseRemoval?: string; store?: Store; clock?: Clock } = {}): { rt: Runtime; daemon: FakeSshDaemon; carried: { script: string; stdin?: Uint8Array }[] } {
+ * with `port` and everything else with nothing. `dark` is flipped by a test to switch the box off between two
+ * ticks: the read the poll makes of what the machine is gets the ssh client's words and nothing of the machine's. */
+function host(over: { port?: string; refuse?: string; lacks?: boolean; unanswered?: boolean; refuseRemoval?: string; store?: Store; clock?: Clock; dark?: { on: boolean } } = {}): { rt: Runtime; daemon: FakeSshDaemon; carried: { script: string; stdin?: Uint8Array }[] } {
   const daemon = fakeSshDaemon({
     ...(over.refuse !== undefined ? { refuse: over.refuse } : {}),
     ...(over.lacks !== undefined ? { lacks: over.lacks } : {}),
     ...(over.unanswered !== undefined ? { unanswered: over.unanswered } : {}),
     ...(over.refuseRemoval !== undefined ? { refuseRemoval: over.refuseRemoval } : {}),
   });
-  const { wiring, carried } = fakeSsh(script => (script.startsWith(`cat '${AT.portFile}'`) ? { stdout: over.port ?? "42891\n" } : {}), daemon);
+  const { wiring, carried } = fakeSsh(script => {
+    if (script.startsWith(`cat '${AT.portFile}'`)) return { stdout: over.port ?? "42891\n" };
+    if (script === SSH_FACTS_SCRIPT && over.dark?.on === true) return { exitCode: 255, stdout: "", stderr: "ssh: connect to host box port 22: Connection refused\n" };
+    return {};
+  }, daemon);
   return { rt: runtime(wiring, over.store ?? memoryStore(), over.clock), daemon, carried };
 }
 
@@ -400,6 +405,132 @@ describe("putting a daemon on a machine already recorded", () => {
     expect(DAEMON_VERSION).toBeGreaterThan(0);
   });
 });
+
+describe("offering a refusing machine the daemon again with the host still up", () => {
+  /** The rig for all four: a machine that refuses the daemon for want of a compiler, a host that stays up across
+   * the hour, and a poll ticking the whole time, which is what a person with the app open in front of the row has. */
+  const refusing = (dark?: { on: boolean }): ReturnType<typeof host> & { fc: ReturnType<typeof fakeClock>; polls: () => number } => {
+    const fc = fakeClock();
+    const made = host({ clock: fc.clock, refuse: NO_BUILD_TOOLS_LINE, lacks: true, ...(dark !== undefined ? { dark } : {}) });
+    return { ...made, fc, polls: () => made.carried.filter(c => c.script === SSH_FACTS_SCRIPT).length };
+  };
+
+  /** Moves the clock on and settles once the poll that fell due has been round the machine. */
+  const tick = async (over: { fc: ReturnType<typeof fakeClock>; polls: () => number }, ms = POLL_INTERVAL_MS): Promise<void> => {
+    const seen = over.polls();
+    over.fc.advance(ms);
+    await vi.waitFor(() => expect(over.polls()).toBeGreaterThan(seen));
+  };
+
+  it("says nothing to a machine whose window still holds, however many ticks go by", async () => {
+    const it_ = refusing();
+    const { rt, daemon, carried, fc } = it_;
+    const ws = await rt.workspaces.createSsh("dev@box");
+    expect(daemon.deploys).toHaveLength(1);
+    // A folder on that machine, so the sync has a roots file to write: what the window saves is every round trip
+    // below it, and a machine with nothing to browse would prove only that no deploy went out.
+    const tar = Buffer.from("a folder, packed");
+    await rt.projects.import({
+      workspaceId: ws.id,
+      source: "/Users/dev/spoo",
+      dest: "/home/dev/spoo",
+      bundler: {
+        plan: async () => ({ source: "/Users/dev/spoo", repo: false, files: 1, bytes: tar.length, secrets: [], excluded: [], skipped: [], agents: [] }),
+        pack: async () => ({ tar, files: 1, bytes: tar.length, cut: [], rewritten: [] }),
+      } as unknown as ProjectImportOptions["bundler"],
+    });
+    const wrote = (): number => carried.filter(c => c.script.includes(rootsPathIn(HOME))).length;
+    const stop = rt.status.watch();
+    try {
+      const settled = wrote();
+      for (let i = 0; i < 3; i++) await tick(it_);
+      expect(daemon.deploys).toHaveLength(1);
+      // Inside the hour the tick costs that machine nothing at all beyond the poll's own read of what it is.
+      expect(wrote()).toBe(settled);
+      expect((await rt.workspaces.get(ws.id)).daemonRefusedAt?.why).toBe(NO_BUILD_TOOLS_LINE);
+    } finally {
+      stop();
+      fc.advance(0);
+      await rt.close();
+    }
+  });
+
+  it("offers it again on the first tick past the window, and asks once an hour rather than once a tick", async () => {
+    const it_ = refusing();
+    const { rt, daemon, fc } = it_;
+    const ws = await rt.workspaces.createSsh("dev@box");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const stop = rt.status.watch();
+    try {
+      // The hour is out with this host never restarted: the tick that already runs for the machine offers again.
+      await tick(it_, DAEMON_LACKS_AGAIN_MS);
+      await vi.waitFor(() => expect(daemon.deploys).toHaveLength(2));
+      // It still has no compiler, so its answer starts the hour over: the ticks after it offer nothing.
+      await vi.waitFor(async () => expect(Date.parse((await rt.workspaces.get(ws.id)).daemonRefusedAt!.at)).toBe(fc.clock.now()));
+      for (let i = 0; i < 3; i++) await tick(it_);
+      expect(daemon.deploys).toHaveLength(2);
+    } finally {
+      stop();
+      fc.advance(0);
+      warn.mockRestore();
+      await rt.close();
+    }
+  });
+
+  it("takes the refusal off the row when that offer lands, with no host restart in it", async () => {
+    const it_ = refusing();
+    const { rt, daemon, fc } = it_;
+    const ws = await rt.workspaces.createSsh("dev@box");
+    expect((await rt.workspaces.get(ws.id)).daemonRefusedAt?.why).toBe(NO_BUILD_TOOLS_LINE);
+    // The person installs what their machine asked for. Nothing on it tells this host so; the hour running out is.
+    daemon.refuse = undefined;
+    const stop = rt.status.watch();
+    try {
+      await tick(it_, DAEMON_LACKS_AGAIN_MS);
+      await vi.waitFor(() => expect(daemon.deploys).toHaveLength(2));
+      await vi.waitFor(async () => expect((await rt.workspaces.get(ws.id)).daemonRefusedAt).toBeUndefined());
+      // And the panes have their road, which is the whole of what the refusal was costing this person.
+      expect((await rt.workspaces.daemonReach(ws.id)).url).toBe("http://127.0.0.1:40000");
+    } finally {
+      stop();
+      fc.advance(0);
+      await rt.close();
+    }
+  });
+
+  it("offers nothing to a machine the poll just found dark, rather than spending a dial on the same silence", async () => {
+    const dark = { on: true };
+    const it_ = refusing(dark);
+    const { rt, daemon, fc } = it_;
+    const ws = await rt.workspaces.createSsh("dev@box");
+    expect(daemon.deploys).toHaveLength(1);
+    daemon.refuse = undefined;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const stop = rt.status.watch();
+    try {
+      // The box is off by the time its hour is out. The poll's read already found that out and paid for it, so
+      // the offer rides its answer rather than making a dial of its own to be told the same thing.
+      await tick(it_, DAEMON_LACKS_AGAIN_MS);
+      // The offer runs detached from the tick, so the nothing here is given far longer than the deploy at the end
+      // of this test takes to show up.
+      await new Promise(resolve => setTimeout(resolve, 100));
+      expect(daemon.deploys).toHaveLength(1);
+      expect((await rt.workspaces.get(ws.id)).daemonRefusedAt?.why).toBe(NO_BUILD_TOOLS_LINE);
+
+      // It comes back on, and the tick that hears from it again is the one that offers.
+      dark.on = false;
+      await tick(it_);
+      await vi.waitFor(() => expect(daemon.deploys).toHaveLength(2));
+      await vi.waitFor(async () => expect((await rt.workspaces.get(ws.id)).daemonRefusedAt).toBeUndefined());
+    } finally {
+      stop();
+      fc.advance(0);
+      warn.mockRestore();
+      await rt.close();
+    }
+  });
+});
+
 
 describe("what the poll asks that machine about itself", () => {
   it("asks a machine the poll can reach what it is on every tick, and stops asking one it cannot", async () => {

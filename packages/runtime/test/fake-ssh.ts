@@ -46,7 +46,7 @@ export function fakeSsh(answer: (script: string, reach: SshReach) => Partial<Exe
     // What every one of these machines says it is when a status asks: a Linux, up for a day, and its own home,
     // so a row built for one machine that showed another's folder would be a failure rather than a coincidence.
     if (script === SSH_FACTS_SCRIPT) {
-      return { exitCode: 0, stdout: `pretty ${FAKE_OS}\nmac \nkernel Linux 6.8.0-79-generic\nuptime ${FAKE_UPTIME_S}\nboot \nhome ${machine.home}\n`, stderr: "" };
+      return { exitCode: 0, stdout: `pretty ${FAKE_OS}\nmac \nkernel Linux 6.8.0-79-generic\nuptime ${FAKE_UPTIME_S}\nboot \nhome ${machine.home}\n`, stderr: "", ...answer(script, reach) };
     }
     // The machine's own byte road: the script the ssh machine writes a file with answers the way that machine's
     // shell would, so a road that lands bytes over the connection is proved with nothing on the network. What

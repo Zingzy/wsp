@@ -2555,17 +2555,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const held = daemonSyncs.get(key);
     if (held !== undefined) return held;
     const work = (async () => {
-      await writeDaemonRoots(entry);
       const module = moduleOf(entry.record.kind);
-      const version = await module.daemonVersion(entry);
-      if (version === null || version >= DAEMON_VERSION) return;
-      if (!canDeployDaemon(entry)) return;
       // A machine with none yet is being given its first daemon, not having one replaced, and the two are told
       // apart here because everything below reads differently for them: a machine that already answered with what
-      // it lacks is left alone until its window is out, and the words say installing rather than updating.
+      // it lacks is left alone until its window is out, and the words say installing rather than updating. Both
+      // are read off the record, above every round trip below, so a tick that finds the window still holding
+      // costs that machine nothing.
       const placing = !module.hasDaemon(entry);
       const said = await lacksSaid(entry);
       if (placing && said !== undefined && clock.now() - Date.parse(said.at) < DAEMON_LACKS_AGAIN_MS) return;
+      await writeDaemonRoots(entry);
+      const version = await module.daemonVersion(entry);
+      if (version === null || version >= DAEMON_VERSION) return;
+      if (!canDeployDaemon(entry)) return;
       await whenNoTurnRuns(entry.record.id);
       if (entry.record.phase !== "running") return;
       await noteDaemon(entry, placing ? DAEMON_INSTALLING : DAEMON_UPDATING);
@@ -2637,6 +2639,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     void work.catch(() => {}).then(() => {
       if (daemonRevivals.get(key) === work) daemonRevivals.delete(key);
     });
+  };
+
+  /** A machine that answered with what it lacks is offered the daemon again on the first poll after its hour is
+   * out, with this host never restarted. For a machine over ssh the sync runs at hydrate and at a machine swap and
+   * nowhere else, so a person who installed the compiler their machine asked for would read the refusal on their
+   * row until they restarted the host. The hour itself stays where it is decided, in the sync; this says only
+   * which machines are worth asking it about, and asks about none the poll did not just hear from: a status
+   * carries the machine's own facts only when it answered a dial this tick, so a box that is off is left alone
+   * rather than dialled a second time for the same silence. The window restarts on each refusal, so a machine
+   * still lacking what it named is asked once an hour and not once a tick. */
+  const offerDaemonAgain = (entry: LiveWorkspace, polled: WorkspaceStatus): void => {
+    if (entry.record.daemonRefusedAt === undefined || polled.facts === undefined) return;
+    void syncDaemon(entry);
   };
 
   /** Size is always explicit: a create that names none gets the provider's own
@@ -6071,6 +6086,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (s.phase === "running") polledReach.set(s.id, { machineId: s.machineId, reach: s.reach.state });
         else polledReach.delete(s.id);
         reviveDaemon(entry, s.reach.state);
+        offerDaemonAgain(entry, s);
       }
     },
     ...(opts.status !== undefined ? { defaults: opts.status } : {}),
