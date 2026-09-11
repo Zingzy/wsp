@@ -23,6 +23,7 @@ describe("local backend", () => {
       signedUrls: false,
       containers: false,
       callbackRelay: false,
+      diskSnapshots: false,
       snapshotListing: false,
       templates: false,
       // This computer is the person's own: its files and sign-ins outlive every turn, so a thread on it starts at
