@@ -133,6 +133,7 @@ export function stubBackend(): StubBackend {
       signedUrls: true,
       containers: true,
       callbackRelay: true,
+      diskSnapshots: true,
       snapshotListing: true,
       templates: false,
       kept: false,

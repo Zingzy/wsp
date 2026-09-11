@@ -54,7 +54,7 @@ function recordingBackend(
   const inline: { id: string; cmd: string; timeoutMs: number | undefined }[] = [];
   const answer = (cmd: string): ExecResult => opts.exec?.(cmd) ?? execResults[cmd] ?? (cmd === "echo ok" ? REACH_OK : { exitCode: 0, stdout: "", stderr: "" });
   const backend: MachineBackend = {
-    capabilities: { liveCloneForks: true, pauseMode: "memory", resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: false, templates: opts.templates === true, kept: false, sizes: [] },
+    capabilities: { liveCloneForks: true, pauseMode: "memory", resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, diskSnapshots: true, snapshotListing: false, templates: opts.templates === true, kept: false, sizes: [] },
     pricing: { rateUsdPerHour: (s: { cpu: number; memMb: number }) => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: { freeGb: 10, usdPerGbMonth: 0.05, billedFrom: "2026-10-01" }, builderDiskGb: BUILDER_DISK_GB },
     async create(spec) {
       if (spec.template !== undefined && spec.template.startsWith("tpl_") && !templates.has(spec.template)) throw Object.assign(new Error(`no template ${spec.template}`), { kind: "missing", status: 404 });
