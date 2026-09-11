@@ -435,7 +435,7 @@ export type WorkspaceOut = z.infer<typeof WorkspaceOut>;
 /** A workspace as the command line and the MCP tool list it: the same fields with what the rail reads live beside
  * them, and the reach without the route it carries, since a table needs the state word and nothing that opens a
  * machine. Parsing a status through it is what drops the routes; the app's own socket still gets both. */
-export const WorkspaceListing = WorkspaceStatus.pick({ ...WORKSPACE_OUT, machineState: true, size: true, rateUsdPerHour: true, reason: true, idleAt: true }).extend({ reach: ReachView });
+export const WorkspaceListing = WorkspaceStatus.pick({ ...WORKSPACE_OUT, machineState: true, size: true, rateUsdPerHour: true, reason: true, idleAt: true, facts: true }).extend({ reach: ReachView });
 export type WorkspaceListing = z.infer<typeof WorkspaceListing>;
 
 /** What moving a workspace onto a newer image came to: the workspace as it now stands, whether a machine was

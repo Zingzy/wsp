@@ -72,6 +72,7 @@ import {
   ExecEvent,
   foldThreads,
   NOTIFY_ME,
+  WorkspaceListing,
   WorkspaceStatus,
   WorkspaceView,
 } from "../src/index.js";
@@ -134,6 +135,33 @@ describe("protocol views", () => {
 
     const status = { ...view, machineState: "running", reach: { state: "unsupported" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 };
     expect(WorkspaceStatus.parse(status)).toEqual(status);
+  });
+
+  it("the listing every command line and tool reads carries what the machine said it is, and still no route to it", () => {
+    const facts = { os: "Ubuntu 24.04.3 LTS", uptimeMs: 90_061_000, folder: "/home/dev" };
+    const status = {
+      id: "ws_1",
+      name: "box",
+      machineId: "ssh://dev@box:22",
+      phase: "running",
+      golden: "",
+      createdAt: "2026-09-11T00:00:00.000Z",
+      kind: "ssh",
+      machineState: "running",
+      reach: { state: "reachable", url: "http://127.0.0.1:40000", expiresAt: 1789041249000 },
+      size: { cpu: 8, memMb: 16384 },
+      rateUsdPerHour: 0,
+      facts,
+    };
+    const listed = WorkspaceListing.parse(status);
+    // The three the Machine pane draws, so a person at a terminal or an agent through the tools reads the same ones.
+    expect(listed.facts).toEqual(facts);
+    // What the pick is for: the reach's state without the route the app dials, and nothing minted riding out.
+    expect(listed.reach).toEqual({ state: "reachable" });
+    // A machine that has not said what it is leaves the field off rather than carrying an empty one.
+    const { facts: said, ...quiet } = status;
+    void said;
+    expect(WorkspaceListing.parse(quiet).facts).toBeUndefined();
   });
 });
 
