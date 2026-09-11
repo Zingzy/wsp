@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .env
+.dev.vars
+.wrangler/
 docs/plans/
 artifacts/
 .wsp/

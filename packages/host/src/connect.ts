@@ -8,9 +8,10 @@ import { hostname } from "node:os";
 import { usageRefusal } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
 import { aliasFrom, checkedAlias, defaultHost, isUrl, listHosts, noSuchHostLine, readHost, removeHost, setDefaultHost, writeHost, type HostRecord } from "./hosts.js";
+import { relayHostUrl } from "./relay-link.js";
 import { dialHost, table, type DialOpts, type HostClient } from "./verbs.js";
 
-const CONNECT_USAGE = "usage: wsp connect <url> --code <code> [--name <alias>]";
+const CONNECT_USAGE = "usage: wsp connect <url> --code <code> [--name <alias>]\n       wsp connect --relay <host> --code <code> [--name <alias>]";
 const HOSTS_USAGE = "usage: wsp hosts\n       wsp hosts default <alias>";
 const DISCONNECT_USAGE = "usage: wsp disconnect <alias>";
 
@@ -26,9 +27,11 @@ interface ConnectDeps {
   now(): number;
   /** What the host calls this computer in its own listing; the person at that terminal reads it to know who paired. */
   deviceName(): string;
+  /** Where a host on the person's relay answers, for the one road that names a host rather than an address. */
+  relayUrl(home: string, name: string): Promise<string>;
 }
 
-const systemDeps: ConnectDeps = { dial: dialHost, now: Date.now, deviceName: hostname };
+const systemDeps: ConnectDeps = { dial: dialHost, now: Date.now, deviceName: hostname, relayUrl: (home, name) => relayHostUrl(home, name) };
 
 /** The name a host takes when nobody gives it one: what its address calls it, held to the same rule as a name a
  * person types, which the hosts file owns. */
@@ -52,15 +55,19 @@ export function hostLines(hosts: ReturnType<typeof listHosts>): string[] {
   return table([["ALIAS", "URL", "DEVICE", ""], ...hosts.map(h => [h.alias, h.url, h.deviceId, h.default ? "default" : ""])]);
 }
 
-export async function connectCommand(io: CliIO, opts: ConnectOpts, values: { code?: string; name?: string }, args: readonly string[], deps: ConnectDeps = systemDeps): Promise<number> {
-  const url = args[0];
-  if (url === undefined || args.length !== 1) throw usageRefusal(CONNECT_USAGE);
-  if (!isUrl(url)) throw usageRefusal(`wsp connect takes the address the host is served at, starting http:// or https://, got ${JSON.stringify(url)}`);
+export async function connectCommand(io: CliIO, opts: ConnectOpts, values: { code?: string; name?: string; relay?: string }, args: readonly string[], deps: ConnectDeps = systemDeps): Promise<number> {
+  const named = values.relay;
+  if (named !== undefined && args.length !== 0) throw usageRefusal(`wsp connect --relay names a host on your relay, so there is no address to give beside it\n\n${CONNECT_USAGE}`);
+  if (named === undefined && (args[0] === undefined || args.length !== 1)) throw usageRefusal(CONNECT_USAGE);
   const code = values.code;
   if (code === undefined || code.trim() === "") throw usageRefusal(`wsp connect needs the code wsp pair printed on that computer: --code <code>\n\n${CONNECT_USAGE}`);
+  // The relay says where a host answers and nothing more: the code still comes from wsp pair on the box itself,
+  // and the road from here is the ordinary one against the address it named.
+  const url = named !== undefined ? await deps.relayUrl(opts.home, named) : args[0]!;
+  if (!isUrl(url)) throw usageRefusal(`wsp connect takes the address the host is served at, starting http:// or https://, got ${JSON.stringify(url)}`);
   // Checked before the dial, never after it: a code is spent the moment it is redeemed, and a name refused on the
   // way back would leave the host holding a device whose only token went nowhere.
-  const alias = checkedAlias(values.name ?? aliasFor(url));
+  const alias = checkedAlias(values.name ?? (named !== undefined ? aliasFrom(named) : aliasFor(url)));
   if (readHost(opts.home, alias) !== undefined) {
     throw usageRefusal(`a host named ${alias} is already connected; wsp disconnect ${alias} first, or give this one another name with --name.`);
   }

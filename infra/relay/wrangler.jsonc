@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "wsp-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "send_metrics": false,
+  "observability": { "enabled": true },
+  // RELAY_ZONE and RELAY_ZONE_ID are empty until the account has a DNS capable
+  // token: with no zone the relay hands out no hostname and every host runs a
+  // quick tunnel and reports the hostname it got.
+  "vars": {
+    "CLOUDFLARE_ACCOUNT_ID": "",
+    "RELAY_ZONE": "",
+    "RELAY_ZONE_ID": ""
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "wsp-relay",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

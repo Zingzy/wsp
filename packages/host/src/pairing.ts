@@ -8,6 +8,7 @@ import { networkInterfaces } from "node:os";
 import { authority, fmtDuration, isLoopback, isWildcard, LOOPBACK, usageRefusal, type DeviceView } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
+import { publicHostname } from "./relay-link.js";
 import { dialHost, table, type HostClient } from "./verbs.js";
 
 /** An address that only reaches the link it sits on: IPv6 fe80::/10, which no browser opens without a scope id,
@@ -29,11 +30,13 @@ export function reachAddresses(bound: string, interfaces = networkInterfaces()):
   return found.length === 0 ? [LOOPBACK] : [...new Set(found)];
 }
 
-/** What wsp pair prints: the code, how long it stands, and the addresses to hand the person at the other computer. */
-export function pairLines(code: string, expiresAt: number, now: number, addresses: readonly string[], port: number): string[] {
+/** What wsp pair prints: the code, how long it stands, and the addresses to hand the person at the other computer.
+ * A host behind a relay leads with the address that works from anywhere, since that is the one to hand over. */
+export function pairLines(code: string, expiresAt: number, now: number, addresses: readonly string[], port: number, publicAt?: string): string[] {
   return [
     `code        ${code}`,
     `expires     in ${fmtDuration(Math.max(0, expiresAt - now))}, at ${new Date(expiresAt).toISOString()}`,
+    ...(publicAt !== undefined ? [`open        https://${publicAt}`] : []),
     ...addresses.map(at => `open        http://${authority(at, port)}`),
     "The code is spent by the first client that redeems it; wsp devices lists what took one.",
   ];
@@ -65,8 +68,10 @@ export async function pairCommand(io: CliIO, opts: { statePath: string }, args: 
   const client = await deps.dial(opts.statePath);
   try {
     const { code, expiresAt } = await client.request<{ code: string; expiresAt: number }>("pair.issue");
-    if (isLoopback(address)) io.error(pairOnLoopbackLine(address));
-    for (const line of pairLines(code, expiresAt, deps.now(), reachAddresses(address), lock?.port ?? 0)) io.log(line);
+    // A relay is a road in of its own, so a host on loopback alone behind one is reachable and the warning would be wrong.
+    const publicAt = publicHostname(opts.statePath);
+    if (isLoopback(address) && publicAt === undefined) io.error(pairOnLoopbackLine(address));
+    for (const line of pairLines(code, expiresAt, deps.now(), reachAddresses(address), lock?.port ?? 0, publicAt)) io.log(line);
     return 0;
   } finally {
     client.close();

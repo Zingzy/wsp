@@ -303,6 +303,10 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "mcp",
       "mcp install",
       "pair",
+      "relay",
+      "relay hosts",
+      "relay link",
+      "relay unlink",
       "status",
       "up",
     ]);

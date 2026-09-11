@@ -154,6 +154,7 @@ describe("wsp connect", () => {
       },
       now: Date.now,
       deviceName: () => "a test",
+      relayUrl: () => Promise.reject(new Error("this line names an address, so no relay is asked")),
     };
     await expect(connectCommand(io(), { statePath: STATE, home: box.home }, { code: await box.code(), name: "../evil" }, [box.url], watched)).rejects.toThrow(/not a host alias/);
     // The host is untouched: a code spent for a name nothing can hold would leave a device over there whose only

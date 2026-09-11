@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { API_UNAUTHORIZED, listenBeyondLoopbackLine, LOOPBACK, WS_PATH, type BootPayload } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { serve, type CliIO } from "../src/cli.js";
+import { writeRelayRecord } from "../src/relay-link.js";
 import { addressLines } from "../src/host-lock.js";
 import { httpProbe } from "../src/service.js";
 import { hostAddress } from "../src/verbs.js";
@@ -232,5 +233,30 @@ describe("the lock the host writes", () => {
     const lock = JSON.parse(readFileSync(join(dir, "host.lock"), "utf8")) as { address?: string; port: number; wsPort: number };
     expect(lock.address).toBe("0.0.0.0");
     expect(addressLines(statePath, lock)[0]).toBe(`app         http://0.0.0.0:${lock.port}`);
+  });
+});
+
+describe("a host on loopback that a relay carries traffic to", () => {
+  it("is not a host on this computer alone: no token in the page, and the JSON routes ask for a paired device's", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-listen-relay-"));
+    dirs.push(dir);
+    const statePath = join(dir, "state.json");
+    // A relay that is off: what matters is that this host can be reached from beyond this computer at all.
+    writeRelayRecord(statePath, { relayUrl: "http://127.0.0.1:1", hostId: "h1", token: "relay-token", name: "box", linkedAt: new Date().toISOString() });
+    const lines: string[] = [];
+    handle = await serve(quietIO(lines), { port: 0, wsPort: 0, statePath, webDir: fakeWebDir(), runtime: testRuntime() });
+
+    const boot = await bootOf(handle.port);
+    expect(boot.token).toBeUndefined();
+    expect(boot.paired).toBe(false);
+    expect((await fetch(`http://127.0.0.1:${handle.port}/api/workspaces`)).status).toBe(401);
+    expect(lines.join("\n")).toContain("pairing is the gate");
+
+    // The one road in still works: a code from the host's own terminal buys a device token.
+    const code = await pairCode(handle.wsPort, handle.authToken);
+    const redeemed = await redeem(handle.port, code);
+    expect(redeemed.deviceToken).toMatch(/\S/);
+    const authed = await fetch(`http://127.0.0.1:${handle.port}/api/workspaces`, { headers: { authorization: `Bearer ${redeemed.deviceToken!}` } });
+    expect(authed.status).toBe(200);
   });
 });
