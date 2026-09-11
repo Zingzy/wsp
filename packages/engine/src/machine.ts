@@ -155,9 +155,29 @@ export interface BackendPricing {
   builderDiskGb?: number;
 }
 
+export interface LifecycleBudgets {
+  /** How many times a wake may resume the machine and check it before a fresh fork replaces it. Each attempt after
+   * the first is a pause and a resume; a provider that bills starts declares 1. */
+  wakeAttempts: number;
+  /** How long the guest's daemon gets to answer through its route once the machine reads running, after a fork and
+   * after a resume alike, before the runtime says it did not. */
+  daemonAnswersMs: number;
+  /** How the host keeps asking after a resume the provider did not take (a ResumeUnansweredError): once every
+   * everyMs of wall time from the first ask, for forMs. Absent, the host asks once and stops. */
+  resumeAsks?: { everyMs: number; forMs: number };
+}
+
+/** What the runtime reads to drive a machine through naps and wakes on this provider. Present exactly when the
+ * capabilities carry a pauseMode; a registry test holds the two together. */
+export interface Lifecycle {
+  budgets: LifecycleBudgets;
+}
+
 export interface MachineBackend {
   readonly capabilities: Capabilities;
   readonly pricing: BackendPricing;
+  /** Present on every backend whose capabilities carry a pauseMode. */
+  readonly lifecycle?: Lifecycle;
   /** Optional: what a machine of each kind boots from on this provider when nothing names a template. Absent leaves
    * the built-in names the engine knows. */
   readonly baseTemplates?: Readonly<Record<MachineKind, string>>;

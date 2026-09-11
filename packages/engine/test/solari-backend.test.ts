@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { RESUME_CAP_MS } from "@wsp/protocol";
 import { isCapped, isMissing, NotFirstLifeError } from "../src/errors.js";
-import { PREVIEW_TTL_MS, previewTokenExpiry, REQUEST_ID_HEADER, SOLARI_PRICING, SolariBackend } from "../src/solari-backend.js";
+import { IDLE_TIMEOUT_MAX_MS, PREVIEW_TTL_MS, previewTokenExpiry, REQUEST_ID_HEADER, RESUME_CAP_MS, SOLARI_LIFECYCLE, SOLARI_PRICING, SolariBackend } from "../src/solari-backend.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { EXEC_ENV } from "../src/golden-import.js";
 
@@ -40,6 +39,24 @@ describe("SolariBackend", () => {
     // pricing rather than off a constant of its own, and the reason the estimate has a room to be over at all.
     expect(b.pricing.builderDiskGb).toBe(20);
     expect(SOLARI_PRICING.builderDiskGb).toBe(BUILDER_DISK_GB);
+  });
+
+  it("declares its lifecycle: two wake attempts, half a minute for the daemon, half an hour of asking once a minute, and a resume cap of half a minute", () => {
+    const b = new SolariBackend({ apiKey: "k", fetch: fakeFetch({}) });
+    expect(b.lifecycle).toBe(SOLARI_LIFECYCLE);
+    expect(SOLARI_LIFECYCLE.budgets).toEqual({ wakeAttempts: 2, daemonAnswersMs: 30_000, resumeAsks: { everyMs: 60_000, forMs: 30 * 60_000 } });
+    expect(RESUME_CAP_MS).toBe(30_000);
+    expect(b.capabilities.pauseMode).toBe("memory");
+  });
+
+  it("idleTimeoutMs above six hours is sent as six hours, the longest the create API has taken", async () => {
+    const f = fakeFetch({ "POST /sandboxes": { status: 201, body: { sandboxId: "s1", kind: "sandbox" } } });
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    await b.create({ kind: "sandbox", onIdle: "pause", idleTimeoutMs: 12 * 60 * 60_000 });
+    expect(JSON.parse(String(f.mock.calls[0]![1]!.body))).toMatchObject({ timeoutMs: IDLE_TIMEOUT_MAX_MS });
+    await b.create({ kind: "sandbox", onIdle: "pause", idleTimeoutMs: 40 * 60_000 });
+    expect(JSON.parse(String(f.mock.calls[1]![1]!.body))).toMatchObject({ timeoutMs: 40 * 60_000 });
+    expect(IDLE_TIMEOUT_MAX_MS).toBe(6 * 60 * 60_000);
   });
 
   it("lists every snapshot on the account with the size the provider bills and the name wsp's owner mark rides on", async () => {

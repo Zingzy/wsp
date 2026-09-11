@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DOCKER_BOOT_CMD, DOCKER_PRICING, DockerBackend, HOSTNAME_MAX, parseDockerHost } from "../src/docker-backend.js";
+import { DOCKER_BOOT_CMD, DOCKER_LIFECYCLE, DOCKER_PRICING, DockerBackend, HOSTNAME_MAX, parseDockerHost } from "../src/docker-backend.js";
 import { OWNER_LABEL, WSP_LABEL } from "../src/labels.js";
 
 interface Seen {
@@ -151,6 +151,10 @@ describe("DockerBackend against a fake Engine API", () => {
     ]);
     expect(backend.pricing.rateUsdPerHour({ cpu: 4, memMb: 8192 })).toBe(0);
     expect(DOCKER_PRICING.snapshotStorage).toEqual({ freeGb: 0, usdPerGbMonth: 0, billedFrom: "" });
+    // One wake attempt: unpause is synchronous, so a failed check goes to the rebuild; no asking again, since the
+    // daemon never leaves an unpause unanswered.
+    expect(backend.lifecycle).toBe(DOCKER_LIFECYCLE);
+    expect(DOCKER_LIFECYCLE.budgets).toEqual({ wakeAttempts: 1, daemonAnswersMs: 30_000 });
     expect(backend.pricing.builderDiskGb).toBeUndefined();
   });
 

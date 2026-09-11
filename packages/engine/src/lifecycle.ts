@@ -4,6 +4,9 @@ import { DAEMON_PORT, refreshPreviewToken } from "./preview.js";
 
 export interface WorkspaceHooks {
   goldenSnapshot: string;
+  /** How many times a wake may resume and check the machine before a fresh fork replaces it: the backend's number,
+   * read off its lifecycle by whoever builds the hooks. */
+  wakeAttempts: number;
   /** Fresh fork from the golden image; used when a paused machine vanished or on upgrade. */
   resurrect?: (spec?: Partial<MachineSpec>) => Promise<Machine>;
   /** Export durable state (vault) off a machine before it is replaced; `drop` names guest paths the archive leaves
@@ -32,9 +35,6 @@ export interface WakeResult {
   /** Present when the wake did not go straight through: every fault met on the way, in order. */
   reason?: string;
 }
-
-/** Resume, check, and one more resume+check before a machine is given up on. */
-const WAKE_ATTEMPTS = 2;
 
 export class Workspace {
   private machine: Machine;
@@ -128,7 +128,7 @@ export class Workspace {
     this.phase = "waking";
     try {
       const faults: string[] = [];
-      for (let attempt = 1; attempt <= WAKE_ATTEMPTS; attempt++) {
+      for (let attempt = 1; attempt <= this.hooks.wakeAttempts; attempt++) {
         // A resume that landed without its call is a resume: the check below still runs and first life still ends,
         // since what a backend's snapshot rule turns on is the machine having been resumed, not who heard about it.
         if (attempt > 1 || o.landed !== true) {
@@ -151,7 +151,7 @@ export class Workspace {
           return faults.length === 0 ? { resurrected: false } : { resurrected: false, reason: faults.join("; ") };
         }
         faults.push(`attempt ${attempt}: ${fault}`);
-        if (attempt < WAKE_ATTEMPTS) {
+        if (attempt < this.hooks.wakeAttempts) {
           await this.move("pause").catch((e: unknown) => {
             faults.push(`re-pause failed: ${e instanceof Error ? e.message : String(e)}`);
           });

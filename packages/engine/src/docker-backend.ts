@@ -20,7 +20,7 @@ import { classify, isMissing, type WspError } from "./errors.js";
 import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
 import { WSP_LABEL } from "./labels.js";
-import type { BackendPricing, DaemonSupervisor, ExecResult, Machine, MachineBackend, MachineKind, MachineLife, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
+import type { BackendPricing, DaemonSupervisor, ExecResult, Lifecycle, Machine, MachineBackend, MachineKind, MachineLife, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
 import { DAEMON_PORT } from "./preview.js";
 import { makeSshControlDir, SSH_CONTROL_PERSIST_S, sshControlPath } from "./ssh-backend.js";
 
@@ -379,8 +379,17 @@ export interface DockerBackendOptions {
   transport?: DockerTransport;
 }
 
+export const DOCKER_LIFECYCLE: Lifecycle = {
+  budgets: {
+    // Unpause is synchronous, and a second freeze fixes nothing a first did not: a failed check goes straight to the rebuild.
+    wakeAttempts: 1,
+    daemonAnswersMs: 30_000,
+  },
+};
+
 export class DockerBackend implements MachineBackend {
   readonly capabilities: Capabilities;
+  readonly lifecycle = DOCKER_LIFECYCLE;
   readonly pricing = DOCKER_PRICING;
   /** A container boots from an image, and the same one serves both kinds: there is no desktop on this backend, and
    * a desktop machine's own stream has no meaning here. */

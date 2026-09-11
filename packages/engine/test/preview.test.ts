@@ -60,7 +60,7 @@ const machineWithPreview = (id: string, expiresInMs: number) => {
 describe("Workspace.daemonReach", () => {
   it("mints once and reuses across calls on the same running machine", async () => {
     const { machine, previewUrl } = machineWithPreview("m1", FRESH_MS);
-    const ws = new Workspace(machine, { goldenSnapshot: "snap_g" });
+    const ws = new Workspace(machine, { goldenSnapshot: "snap_g", wakeAttempts: 2 });
     const first = await ws.daemonReach();
     expect(await ws.daemonReach()).toBe(first);
     expect(previewUrl).toHaveBeenCalledTimes(1);
@@ -68,7 +68,7 @@ describe("Workspace.daemonReach", () => {
 
   it("a wake drops the cached routes: the first daemonReach after it mints again on the same machine", async () => {
     const { machine, previewUrl } = machineWithPreview("m1", FRESH_MS);
-    const ws = new Workspace(machine, { goldenSnapshot: "snap_g" });
+    const ws = new Workspace(machine, { goldenSnapshot: "snap_g", wakeAttempts: 2 });
     const first = await ws.daemonReach();
     await ws.nap();
     await ws.wake();
@@ -81,7 +81,7 @@ describe("Workspace.daemonReach", () => {
 
   it("remints once the cached reach goes stale", async () => {
     const { machine, previewUrl } = machineWithPreview("m1", 5 * 60_000);
-    const ws = new Workspace(machine, { goldenSnapshot: "snap_g" });
+    const ws = new Workspace(machine, { goldenSnapshot: "snap_g", wakeAttempts: 2 });
     await ws.daemonReach();
     await ws.daemonReach();
     expect(previewUrl).toHaveBeenCalledTimes(2);
@@ -92,6 +92,7 @@ describe("Workspace.daemonReach", () => {
     const b = machineWithPreview("m2", FRESH_MS);
     const ws = new Workspace(a.machine, {
       goldenSnapshot: "snap_g",
+      wakeAttempts: 2,
       resurrect: async () => b.machine,
     });
     const first = await ws.daemonReach();
@@ -106,7 +107,7 @@ describe("Workspace.daemonReach", () => {
 describe("Workspace.portReach", () => {
   it("caches per port: two ports mint twice, asking again reuses each, and 7070 is the daemon's own route", async () => {
     const { machine, previewUrl } = machineWithPreview("m1", FRESH_MS);
-    const ws = new Workspace(machine, { goldenSnapshot: "snap_g" });
+    const ws = new Workspace(machine, { goldenSnapshot: "snap_g", wakeAttempts: 2 });
     const a = await ws.portReach(3000);
     const b = await ws.portReach(5173);
     expect(a.url).toContain("m1-3000");
@@ -122,7 +123,7 @@ describe("Workspace.portReach", () => {
   it("a replaced machine voids every port's route", async () => {
     const a = machineWithPreview("m1", FRESH_MS);
     const b = machineWithPreview("m2", FRESH_MS);
-    const ws = new Workspace(a.machine, { goldenSnapshot: "snap_g", resurrect: async () => b.machine });
+    const ws = new Workspace(a.machine, { goldenSnapshot: "snap_g", wakeAttempts: 2, resurrect: async () => b.machine });
     expect((await ws.portReach(3000)).url).toContain("m1-3000");
     await ws.upgrade();
     expect((await ws.portReach(3000)).url).toContain("m2-3000");
@@ -131,7 +132,7 @@ describe("Workspace.portReach", () => {
 
   it("remintPortReach drops one port's fresh route and mints it again; the other ports keep theirs", async () => {
     const { machine, previewUrl } = machineWithPreview("m1", FRESH_MS);
-    const ws = new Workspace(machine, { goldenSnapshot: "snap_g" });
+    const ws = new Workspace(machine, { goldenSnapshot: "snap_g", wakeAttempts: 2 });
     const a = await ws.portReach(3000);
     const b = await ws.portReach(5173);
     const fresh = await ws.remintPortReach(3000);

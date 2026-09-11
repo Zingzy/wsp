@@ -1,8 +1,8 @@
-import { providerRoadRetryLine, RESUME_CAP_MS, type Capabilities } from "@wsp/protocol";
+import { providerRoadRetryLine, type Capabilities } from "@wsp/protocol";
 import { NotFirstLifeError, ROAD_TRIES, backoffMs, classify, isMissing, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
 import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
-import type { BackendPricing, ExecResult, Machine, MachineBackend, MachineKind, MachineLife, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
+import type { BackendPricing, ExecResult, Lifecycle, Machine, MachineBackend, MachineKind, MachineLife, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
 import { BUILDER_DISK_GB } from "./tool-sizes.js";
 
 type Fetch = typeof globalThis.fetch;
@@ -74,6 +74,27 @@ export const SOLARI_PRICING: BackendPricing = {
   builderDiskGb: BUILDER_DISK_GB,
 };
 
+/** How long one resume the provider has not taken is waited on. Measured 2026-09-10 on this account: every read of
+ * a paused machine answered in 0.4 s while POST resume answered nothing for the 30 s a curl gave it, so a wake that
+ * sits on the call tells the person nothing for as long as it sits; nothing else holds a wake's clock. */
+export const RESUME_CAP_MS = 30_000;
+
+/** The longest idleTimeoutMs the create API has taken from us: six hours, the golden builder's. */
+export const IDLE_TIMEOUT_MAX_MS = 6 * 60 * 60_000;
+
+export const SOLARI_LIFECYCLE: Lifecycle = {
+  budgets: {
+    // A resume can land a zombie on a fresh host at default size; one re-pause and resume clears it, a second never has.
+    wakeAttempts: 2,
+    // The daemon answers about a second after a wake and after a fork.
+    daemonAnswersMs: 30_000,
+    // Thirty minutes of asking, once a minute, so a provider that comes back inside its own outage wakes the machine
+    // with nobody watching. Both are wall time from the first ask: a resume that sits on its cap spends half of its
+    // own minute, and counting the cadence after the cap made thirty asks span 45 minutes (seen live 2026-09-10).
+    resumeAsks: { everyMs: 60_000, forMs: 30 * 60_000 },
+  },
+};
+
 /** Measured: the pt_token exp claim is 60 minutes from mint. */
 export const PREVIEW_TTL_MS = 60 * 60_000;
 
@@ -117,6 +138,8 @@ export class SolariBackend implements MachineBackend {
   };
 
   readonly pricing = SOLARI_PRICING;
+
+  readonly lifecycle = SOLARI_LIFECYCLE;
 
   private readonly apiKey: string;
   private readonly baseUrl: string;
@@ -199,7 +222,7 @@ export class SolariBackend implements MachineBackend {
         ...(spec.envs ? { envs: spec.envs } : {}),
         ...(spec.labels ? { metadata: spec.labels } : {}),
         ...(spec.onIdle ? { lifecycle: { onTimeout: spec.onIdle } } : {}),
-        ...(spec.idleTimeoutMs ? { timeoutMs: spec.idleTimeoutMs } : {}),
+        ...(spec.idleTimeoutMs ? { timeoutMs: Math.min(spec.idleTimeoutMs, IDLE_TIMEOUT_MAX_MS) } : {}),
       },
       { "Idempotency-Key": spec.idempotencyKey ?? crypto.randomUUID() },
     );

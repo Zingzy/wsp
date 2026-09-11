@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { gzipSync } from "node:zlib";
 import { NotFirstLifeError, SNAPSHOT_STORAGE } from "@wsp/engine";
-import type { ExecResult, Machine, MachineBackend, MachineLife, MachineShape, MachineSpec, MachineState, RunOptions, SnapshotRow, TemplateRow } from "@wsp/engine";
+import type { ExecResult, Lifecycle, Machine, MachineBackend, MachineLife, MachineShape, MachineSpec, MachineState, RunOptions, SnapshotRow, TemplateRow } from "@wsp/engine";
 
 export interface StubMachine extends Machine {
   spec: MachineSpec;
@@ -32,6 +32,8 @@ export const cappedCall = (what: string): Error => Object.assign(new Error(`${wh
 export const abortedCall = (what: string): Error => Object.assign(new Error(`${what} was aborted`), { name: "AbortError" });
 
 export interface StubBackend extends MachineBackend {
+  /** The cloud provider's own numbers, mutable so a test shrinks or removes one. */
+  lifecycle: Lifecycle;
   machines: StubMachine[];
   /** Every body PUT to an upload URL the stub minted, with the machine and guest path it was for. */
   puts: { machine: string; path: string; body: Buffer }[];
@@ -116,6 +118,7 @@ export function stubBackend(): StubBackend {
       sizes: [{ cpu: 2, memMb: 2048, rateUsdPerHour: 0.09 }, { cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }, { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 }, { cpu: 4, memMb: 8192, rateUsdPerHour: 0.22 }],
     },
     pricing: { rateUsdPerHour: (s: { cpu: number; memMb: number }) => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: SNAPSHOT_STORAGE },
+    lifecycle: { budgets: { wakeAttempts: 2, daemonAnswersMs: 30_000, resumeAsks: { everyMs: 60_000, forMs: 30 * 60_000 } } },
     machines,
     puts,
     snapshots,

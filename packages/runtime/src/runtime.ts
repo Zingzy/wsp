@@ -75,6 +75,7 @@ import {
   type GoldenVersion,
   type KillConfirm,
   type ListedMachine,
+  type Lifecycle,
   type Machine,
   type MachineBackend,
   type MachineKind,
@@ -186,7 +187,7 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { GUEST_WSP_BIN, agentsFrom, agentsKindRefusal, agentsMayDrive, MCP_SERVER_NAME, threadWord, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, type SpawnAct } from "@wsp/protocol";
-import { mcpServersBlocked, actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineWord, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_ASK_EVERY_MS, WAKE_ASKS_FOR_MS, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState } from "@wsp/protocol";
+import { mcpServersBlocked, actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineWord, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
@@ -790,22 +791,15 @@ export interface RuntimeOptions {
 }
 
 export interface WakeOptions {
-  /** How long a resumed guest's daemon gets to answer through the edge before the wake counts as failed. */
-  pingTimeoutMs?: number;
   /** How long a wake gets in all, across its resume, re-pause and second resume, before the row says it did not
    * complete (tests shrink it). */
   deadlineMs?: number;
   /** How long after a wake gave up the provider is read once more for a resume that landed late (tests shrink it). */
   lateReadMs?: number;
-  /** How long after an ask began the host asks the provider again, and how long from the first ask it keeps asking
-   * (tests shrink both). Both are wall time, so a call that sits on its cap spends the cadence it is in. */
-  askEveryMs?: number;
-  asksForMs?: number;
   /** A nap-time vault archive over this is not stored (a warning names the size). */
   vaultCapBytes?: number;
 }
 
-const WAKE_PING_TIMEOUT_MS = 30_000;
 /** How long a pause and a wake get in all, each provider call inside them sharing the budget: a pause takes about
  * 75 s live and a resume under a minute, and each verb sends its call twice at most. */
 const PAUSE_DEADLINE_MS = 4 * 60_000;
@@ -1810,6 +1804,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return found;
   };
   const backendFor = (kind: WorkspaceKind): MachineBackend => moduleOf(kind).backend;
+  /** The budgets a kind's backend declares for its naps and wakes. Every reader sits behind the pause refusal or
+   * behind a machine's preview route, so a kind without one here is a wiring fault, never a person's road. */
+  const lifecycleOf = (entry: LiveWorkspace): Lifecycle => {
+    const lifecycle = backendFor(entry.record.kind).lifecycle;
+    if (lifecycle === undefined) throw new Error(`${entry.record.kind} machines declare no lifecycle`);
+    return lifecycle;
+  };
   const execFactoryFor = (entry: LiveWorkspace, o?: MachineExecOptions): ExecStreamFactory => moduleOf(entry.record.kind).execStream(entry, o);
   /** The folder a turn or a command starts in, the one rule every road reads: the folder the caller named, else the
    * project named, else the project a thread last landed in on this workspace, else its only project, else the
@@ -1962,15 +1963,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * itself answered where its kind can ask, else the id, which is the machine on every other kind. */
   const identityOf = (record: WorkspaceRecord): string => record.machineIdentity ?? record.machineId;
   const bus = eventBus();
-  const pingTimeoutMs = opts.wake?.pingTimeoutMs ?? WAKE_PING_TIMEOUT_MS;
   const pauseDeadlineMs = opts.nap?.pauseDeadlineMs ?? PAUSE_DEADLINE_MS;
   const wakeDeadlineMs = opts.wake?.deadlineMs ?? WAKE_DEADLINE_MS;
   const providerReadMs = opts.providerReadMs ?? PROVIDER_READ_MS;
   const goneConfirmMs = opts.goneConfirmMs ?? GONE_CONFIRM_MS;
   const lateReadMs = opts.wake?.lateReadMs ?? WAKE_LATE_READ_MS;
-  const wakeAskEveryMs = opts.wake?.askEveryMs ?? WAKE_ASK_EVERY_MS;
-  const wakeAsksForMs = opts.wake?.asksForMs ?? WAKE_ASKS_FOR_MS;
-  const wakeAsks = wakeAsksIn(wakeAsksForMs, wakeAskEveryMs);
   const clock = opts.clock ?? realClock;
   const permissionWaitMs = opts.permissionWaitMs ?? PERMISSION_WAIT_MS;
   /** Each provider move the guest has to cooperate with: the state it leaves the machine in, and the state a
@@ -2426,10 +2423,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const pingDaemon = async (entry: LiveWorkspace): Promise<string | undefined> => {
     const machine = entry.machine;
     if (!machine.previewUrl) return undefined;
-    const deadline = Date.now() + pingTimeoutMs;
+    const answersMs = lifecycleOf(entry).budgets.daemonAnswersMs;
+    const deadline = Date.now() + answersMs;
     let link: DaemonReach | null = null;
     try {
-      link = await dialDaemon(entry, deadline, { heartbeatMs: pingTimeoutMs });
+      link = await dialDaemon(entry, deadline, { heartbeatMs: answersMs });
       if (link === null) {
         // No daemon to ask; an exec that returns is the guest's own answer.
         await until(machine.exec("true"), deadline, "guest exec");
@@ -2439,7 +2437,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await until(link.request("ping"), deadline, "daemon ping");
       return undefined;
     } catch (e) {
-      return `daemon on ${machine.id} did not answer within ${pingTimeoutMs} ms (${e instanceof Error ? e.message : String(e)})`;
+      return `daemon on ${machine.id} did not answer within ${answersMs} ms (${e instanceof Error ? e.message : String(e)})`;
     } finally {
       link?.close();
     }
@@ -2789,6 +2787,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       machine,
       {
         goldenSnapshot: record.golden,
+        // A kind that declares no lifecycle has its nap and wake refused before the engine is asked, so it never wakes.
+        wakeAttempts: backendFor(record.kind).lifecycle?.budgets.wakeAttempts ?? 0,
         resurrect: (override?: Partial<MachineSpec>) =>
           fork(record, m => {
             entry.machine = m;
@@ -3384,7 +3384,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // keeps asking and names a zombie. The route minted here is the one the ping and the first client reuse.
       let fault: string | undefined;
       try {
-        await until(entry.ws.daemonReach(), Date.now() + pingTimeoutMs, "preview route");
+        await until(entry.ws.daemonReach(), Date.now() + lifecycleOf(entry).budgets.daemonAnswersMs, "preview route");
         report("preview-route", "Preview route to the daemon minted.");
         fault = await pingDaemon(entry);
       } catch (e) {
@@ -3637,6 +3637,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             ? Promise.resolve("stopped" as const)
             : Promise.race([p, new Promise<"stopped">(resolve => stop.signal.addEventListener("abort", () => resolve("stopped"), { once: true }))]);
         const began = clock.now();
+        // How the backend has the host ask again after a resume its provider did not take; none means once.
+        const asks = lifecycleOf(entry).budgets.resumeAsks;
+        const wakeAsks = asks === undefined ? 1 : wakeAsksIn(asks.forMs, asks.everyMs);
         try {
           entry.record.phase = "waking";
           await persist(entry.record);
@@ -3667,7 +3670,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
                 // The cadence is wall time from the wake's start, so the half hour of asking is half an hour: a
                 // resume that sat on its cap for half the minute leaves half a minute to wait, and one that ran
                 // longer than the cadence is asked again at once.
-                if ((await orStopped(sleeps(Math.max(0, began + ask * wakeAskEveryMs - clock.now())))) !== "stopped") {
+                if ((await orStopped(sleeps(Math.max(0, began + ask * asks!.everyMs - clock.now())))) !== "stopped") {
                   // The retry reads the machine before it asks: a call that hung at the provider can land in the
                   // minute since, and a resume is worth sending only while the machine still reads paused.
                   landed = tookTheResume(await readsState(entry.machine));
