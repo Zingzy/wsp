@@ -4,7 +4,7 @@
 // them, and what is typed goes out once and is left nowhere.
 import { cleanup, fireEvent, render, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CLOUD_SETUP_WORDS, INIT_SIGN_IN_WORDS, SIGN_IN_OPEN_STATE, type InitJob, type InitRow } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, initSignInOutcome, SIGN_IN_OPEN_STATE, type InitJob, type InitRow } from "@wsp/protocol";
 import { SetupBuild } from "../src/sidebar/cloud-setup/SetupBuild.js";
 
 const PAGE = "https://accounts.google.com/o/oauth2/auth";
@@ -59,7 +59,7 @@ describe("the code field under a sign-in row", () => {
   });
 
   it("is nowhere else: not on the callback road, not on a row with no road, not once the row is over", () => {
-    for (const over of [{ finish: "callback" as const }, {}, { finish: "code" as const, state: INIT_SIGN_IN_WORDS["signed-in"] }]) {
+    for (const over of [{ finish: "callback" as const }, {}, { finish: "code" as const, ...initSignInOutcome("signed-in", "darwin") }]) {
       const { build } = screenWith(row(over));
       expect(build.querySelector("[data-k=code-line]")).toBeNull();
       cleanup();

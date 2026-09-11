@@ -14,8 +14,9 @@ import { homedir } from "node:os";
 import { join, posix } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { shellQuote } from "@wsp/protocol";
-import type { Capabilities } from "@wsp/protocol";
+import type { Capabilities, MachineFacts } from "@wsp/protocol";
 import { runChild } from "./child-exec.js";
+import { HOME_READ, OS_READ, UPTIME_READ, osNameOf, readValues, uptimeMsOf } from "./machine-facts.js";
 import type { BackendPricing, ExecResult, Machine, MachineBackend, MachineShape, MachineState, RunOptions, SnapshotStoragePricing } from "./machine.js";
 
 /** How the ssh client is dialled: who to log in as, where, on which port, and the person's own key when they named
@@ -215,21 +216,17 @@ const LOGIN_READ = ["printf \"path %s\\n\" \"$PATH\"", ...SSH_STORE_VARS.map(nam
  * tools a turn runs and the folder their harness reads are where their own shell finds them, not where a golden put
  * them. Linux answers the first branch of each size pair, macOS the second. */
 export const SSH_READ_SCRIPT = [
-  'printf "home %s\\n" "$HOME"',
+  HOME_READ,
   'printf "user %s\\n" "$(id -un)"',
   `bash -lc ${shellQuote(LOGIN_READ)} 2>/dev/null`,
   'printf "cpu %s\\n" "$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 0)"',
   'printf "memkb %s\\n" "$(awk \'/MemTotal/{print $2}\' /proc/meminfo 2>/dev/null || echo $(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1024 )))"',
 ].join("\n");
 
-function readValues(stdout: string): Record<string, string> {
-  const values: Record<string, string> = {};
-  for (const line of stdout.split("\n")) {
-    const space = line.indexOf(" ");
-    if (space > 0) values[line.slice(0, space)] = line.slice(space + 1).trim();
-  }
-  return values;
-}
+/** What the machine answers about itself every time a status is built: the system it runs, how long it has been up
+ * and the folder a command starts in, which on a machine somebody owns is the home their login lands in. One script
+ * for the three, since the round trip is the cost and the uptime is why it is asked again. */
+export const SSH_FACTS_SCRIPT = [...OS_READ, ...UPTIME_READ, HOME_READ].join("\n");
 
 /** One dial that both proves the machine answers and records what wsp needs of it. A dial that fails carries the
  * client's own words back, since they are what tells the person whether it was the key, the host or the network. */
@@ -328,6 +325,9 @@ export class SshMachine implements Machine {
   readonly id: string;
   readonly kind = "sandbox" as const;
   readonly streamUrl = undefined;
+  /** The last thing said about this machine failing to say what it is; held so a read that fails every tick is one
+   * line in the log rather than four an hour, and a read that fails for a new reason is heard. */
+  private quiet: string | undefined;
 
   constructor(
     readonly reach: SshReach,
@@ -365,6 +365,27 @@ export class SshMachine implements Machine {
 
   async describe(): Promise<MachineShape> {
     return (await readSshMachine(this.reach, this.transport)).shape;
+  }
+
+  /** What this machine says it is, read over the connection on every status: nothing here is remembered, since a
+   * machine somebody owns is rebooted and upgraded under wsp rather than by it. A machine that answers with none of
+   * it leaves the rows waiting rather than showing this computer's own answers for it. */
+  async facts(): Promise<MachineFacts> {
+    const res = await this.transport(this.reach, SSH_FACTS_SCRIPT, { timeoutMs: 10_000 });
+    const values = res.exitCode === 0 ? readValues(res.stdout) : {};
+    const os = osNameOf(values);
+    const uptimeMs = uptimeMsOf(values, Date.now());
+    const folder = values["home"];
+    if (os === undefined || uptimeMs === undefined || folder === undefined || folder === "") {
+      // The caller shows pending and swallows this, so the reason lands in the host's own log instead: once for
+      // this machine, and again only when what it says changes, since the read runs on every status tick.
+      const why = `${this.reach.user}@${this.reach.host} did not say what it is over ssh (exit ${res.exitCode}): ${(clientWords(res.stderr) || res.stdout.trim()).slice(-300)}`;
+      if (this.quiet !== why) console.warn(why);
+      this.quiet = why;
+      throw new Error(why);
+    }
+    this.quiet = undefined;
+    return { os, uptimeMs, folder };
   }
 
   async downloadUrl(): Promise<string> {

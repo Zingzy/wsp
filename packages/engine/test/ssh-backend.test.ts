@@ -2,9 +2,10 @@
 import { chmodSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { OS_READ, UPTIME_READ } from "../src/machine-facts.js";
 import type { ExecResult, Machine } from "../src/machine.js";
-import { SSH_CONTROL_PERSIST_S, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, makeSshControlDir, sshControlDir, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyOf, plainPath, DEFAULT_REMOTE_PATH, sshArgs, sshIdentity, sshMachineId, sshMachineName, sshReachOf, type SshReach, type SshTransport } from "../src/ssh-backend.js";
+import { SSH_CONTROL_PERSIST_S, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, makeSshControlDir, sshControlDir, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyOf, plainPath, DEFAULT_REMOTE_PATH, sshArgs, sshIdentity, sshMachineId, sshMachineName, sshReachOf, type SshReach, type SshTransport } from "../src/ssh-backend.js";
 
 /** An ssh client that never leaves this computer: it answers the read every adopt makes, records every script it was
  * asked to carry, and lets a case script the answer for anything else. */
@@ -227,5 +228,77 @@ describe("ssh backend", () => {
     await expect(machine.kill()).resolves.toBeUndefined();
     expect(await machine.state()).toBe("running");
     expect(await backend.list()).toEqual([]);
+  });
+});
+
+describe("what a machine over ssh says it is", () => {
+  /** What an Ubuntu box prints for the facts script, as its own shell would. */
+  const UBUNTU = "pretty Ubuntu 24.04.3 LTS\nmac \nkernel Linux 6.8.0-79-generic\nuptime 96521.42\nboot \nhome /home/dev\n";
+
+  /** The machine handle as the runtime holds it, through the seam every kind answers on. */
+  async function machineOf(answer: (script: string) => Partial<ExecResult>): Promise<{ machine: Machine; carried: { script: string }[] }> {
+    const { transport, carried } = fakeSsh(answer);
+    const { machine } = await new SshBackend({ transport }).adopt(REACH);
+    return { machine, carried };
+  }
+
+  it("the three the pane waits on are read off the machine itself, in one script over the connection", async () => {
+    const { machine, carried } = await machineOf(script => (script === SSH_FACTS_SCRIPT ? { stdout: UBUNTU } : {}));
+    expect(machine.facts).toBeDefined();
+    expect(await machine.facts!()).toEqual({ os: "Ubuntu 24.04.3 LTS", uptimeMs: 96_521_420, folder: "/home/dev" });
+    // One round trip per read, and the same lines this computer's own machine is read with: one reader, two callers.
+    expect(carried.map(c => c.script).slice(1)).toEqual([SSH_FACTS_SCRIPT]);
+    expect(SSH_FACTS_SCRIPT).toContain(OS_READ.join("\n"));
+    expect(SSH_FACTS_SCRIPT).toContain(UPTIME_READ.join("\n"));
+    // Nothing is held: a machine somebody owns is rebooted and upgraded under wsp rather than by it.
+    await machine.facts!();
+    expect(carried.map(c => c.script).slice(1)).toEqual([SSH_FACTS_SCRIPT, SSH_FACTS_SCRIPT]);
+  });
+
+  it("a Mac over ssh says when it booted rather than how long it has been up, and the row gets a length either way", async () => {
+    const bootSec = Math.floor(Date.now() / 1000) - 7_200;
+    const mac = `pretty \nmac 15.6.1\nkernel Darwin 24.6.0\nuptime \nboot { sec = ${bootSec}, usec = 12 } Thu Sep 10 17:24:09 2026\nhome /Users/maya\n`;
+    const { machine } = await machineOf(script => (script === SSH_FACTS_SCRIPT ? { stdout: mac } : {}));
+    const facts = await machine.facts!();
+    expect(facts.os).toBe("macOS 15.6.1");
+    expect(facts.folder).toBe("/Users/maya");
+    expect(facts.uptimeMs).toBeGreaterThanOrEqual(7_200_000);
+    expect(facts.uptimeMs).toBeLessThan(7_205_000);
+  });
+
+  it("says why the rows sit at pending once for a machine, and again only when the machine says something else", async () => {
+    let stderr = "ssh: connect to host 10.0.0.5 port 2222: Connection refused\n";
+    const { machine } = await machineOf(script => (script === SSH_FACTS_SCRIPT ? { exitCode: 255, stderr } : {}));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      // The caller shows pending and swallows the refusal, so a read that fails every 15 seconds would otherwise
+      // say nothing anywhere; it says it here, and not four times an hour.
+      for (let i = 0; i < 3; i++) await machine.facts!().catch(() => {});
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]![0]).toContain("Connection refused");
+      stderr = "ssh: Permission denied (publickey).\n";
+      await machine.facts!().catch(() => {});
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(warn.mock.calls[1]![0]).toContain("Permission denied");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a machine that did not answer leaves the rows waiting rather than showing this computer's own answers for it", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { machine } = await machineOf(script =>
+        script === SSH_FACTS_SCRIPT ? { exitCode: 255, stderr: "debug1: Connecting to 10.0.0.5\nssh: connect to host 10.0.0.5 port 2222: Connection refused\n" } : {},
+      );
+      const refused = await machine.facts!().then(() => "", (e: unknown) => (e as Error).message);
+      expect(refused).toContain("Connection refused");
+      expect(refused).not.toContain("debug1:");
+      // A machine that answered the dial but not the lines is the same: no name of this computer's stands in for it.
+      const { machine: quiet } = await machineOf(() => ({ stdout: "\n" }));
+      await expect(quiet.facts!()).rejects.toThrow("did not say what it is over ssh");
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

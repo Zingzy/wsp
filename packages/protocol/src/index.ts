@@ -11,7 +11,7 @@ import { z } from "zod";
 import { HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
 import { openingTitle, threadWord, titleLine } from "./format.js";
-import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, SIGN_IN_CODE_MAX } from "./init-job.js";
+import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
 import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
 import { WorkspaceGlyph, WorkspaceLook, WorkspaceTheme } from "./workspace-look.js";
@@ -447,7 +447,7 @@ export type WorkspaceOut = z.infer<typeof WorkspaceOut>;
 /** A workspace as the command line and the MCP tool list it: the same fields with what the rail reads live beside
  * them, and the reach without the route it carries, since a table needs the state word and nothing that opens a
  * machine. Parsing a status through it is what drops the routes; the app's own socket still gets both. */
-export const WorkspaceListing = WorkspaceStatus.pick({ ...WORKSPACE_OUT, machineState: true, size: true, rateUsdPerHour: true, reason: true, idleAt: true }).extend({ reach: ReachView });
+export const WorkspaceListing = WorkspaceStatus.pick({ ...WORKSPACE_OUT, machineState: true, size: true, rateUsdPerHour: true, reason: true, idleAt: true, facts: true }).extend({ reach: ReachView });
 export type WorkspaceListing = z.infer<typeof WorkspaceListing>;
 
 /** What moving a workspace onto a newer image came to: the workspace as it now stands, whether a machine was
@@ -1599,11 +1599,6 @@ export interface DesktopBridge {
 export const MachineKind = z.enum(["sandbox", "desktop"]);
 export type MachineKind = z.infer<typeof MachineKind>;
 
-/** What each login came to by the time the golden sealed: a sign-in on the machine, or a copy from this computer
- * checked there with the tool's status command. `copied` is a copy nothing checked: an update re-imported it, or the
- * tool has no status command or is not on the machine. */
-export const LoginState = z.enum(["signed-in", "not-signed-in", "not-verified", "skipped", "copied"]);
-export type LoginState = z.infer<typeof LoginState>;
 export const GoldenLogin = z.object({ name: z.string(), state: LoginState });
 export type GoldenLogin = z.infer<typeof GoldenLogin>;
 /** A tool the builder's import did not put on the image: set aside at plan or install time, or failed to install,
@@ -2225,6 +2220,7 @@ const DAEMON_CONTENTS = [
   "da0d618fd27965a77c8c15e389fea39c8f3ae691326af0212a8f1c62b9c8499f",
   "cbfe733de05765b706c3ff4d08aa62ee188258771dd3b02011633716fad62a48",
   "12eac7cd2f4b90f9064279a1ea3b3169d24e34c30279f5c19d046252e2d5ec66",
+  "877eda4200afad3842bedad0e49d6efc942ef1ef3ea7181af22f9e726d72b669",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -2244,7 +2240,10 @@ const DAEMON_CONTENTS = [
  * find there. Version 11 serves a machine reached over ssh, which reads the load and the processes of the machine
  * it runs on the way a fork does; the same daemon under the person's own login there, with every path it keeps
  * under their home. Version 12 asks the prefix it would compile against for the headers themselves, so a machine
- * where an installer symlinked a foreign node into that prefix builds node-pty instead of failing on it. */
+ * where an installer symlinked a foreign node into that prefix builds node-pty instead of failing on it. Version
+ * 13 asks those headers which major they are and compiles against them only when the node that will load the
+ * result agrees, so an older Node's headers left in the prefix send node-gyp after the right ones instead of
+ * building against the API another Node declared. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the daemon's sources, the dependency
@@ -2921,7 +2920,7 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
-export { actionRefusal, agentsKindRefusal, agentsMayDrive, computerOffline, goneRefusal, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, type SendBlock, sendRefusal, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
+export { actionRefusal, agentsKindRefusal, agentsMayDrive, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, type MachineOnDelete, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, type SendBlock, sendRefusal, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";
