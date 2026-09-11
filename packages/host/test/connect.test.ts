@@ -7,29 +7,57 @@ import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { PAIR_CODE_REFUSAL } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
-import { connectCommand, disconnectCommand, hostsCommand } from "../src/connect.js";
+import { connectCommand, disconnectCommand, hostsCommand, type ConnectDeps } from "../src/connect.js";
 import { cli, type CliIO } from "../src/cli.js";
 import { runningWsp } from "../src/mcp-install.js";
-import { defaultHost, hostsDir, readHost } from "../src/hosts.js";
+import { defaultHost, dialWindowMs, hostsDir, readHost, writeHost } from "../src/hosts.js";
 import { dialer } from "../src/mcp.js";
-import { CLI_VERBS, dialHost, runVerb } from "../src/verbs.js";
+import { CLI_VERBS, dialHost, runVerb, type DialOpts, type HostClient } from "../src/verbs.js";
 import { startHost, type HostHandle } from "../src/server.js";
 import { SEALED_GOLDEN as GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
+import { startTcpProxy, type TcpProxy } from "../../runtime/test/tcp-proxy.js";
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
 const io = (log: string[] = [], err: string[] = []): CliIO => ({ log: l => log.push(l), error: l => err.push(l), ask: noPrompt, askSecret: noPrompt });
 
 let dirs: string[] = [];
 let handle: HostHandle | undefined;
+let roads: TcpProxy[] = [];
 afterEach(async () => {
+  for (const road of roads) await road.close();
+  roads = [];
   await handle?.close();
   handle = undefined;
   for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
   dirs = [];
+});
+
+/** A road between this computer and the host, which can be made to carry nothing the way an edge whose tunnel is
+ * not answering does. The host is reached at this road's own address, so the record a connect writes holds it. */
+async function roadTo(port: number): Promise<TcpProxy> {
+  const road = await startTcpProxy(port);
+  roads.push(road);
+  return road;
+}
+
+/** Waits for the road to hold nothing, which is what a line free to go looks like from outside it. */
+async function roadEmpty(road: TcpProxy, withinMs = 1_000): Promise<number> {
+  const until = Date.now() + withinMs;
+  while (road.live() !== 0 && Date.now() < until) await new Promise(done => setTimeout(done, 20));
+  return road.live();
+}
+
+/** What the hand back is handed beside the dial; the window is the test's own, since a road's is seconds long. */
+const handBackDeps = (dial: ConnectDeps["dial"], windowMs = 300): ConnectDeps => ({
+  dial,
+  now: Date.now,
+  deviceName: () => "a test",
+  relayUrl: () => Promise.reject(new Error("this line names an alias, so no relay is asked")),
+  window: () => windowMs,
 });
 
 function tempDir(tag: string): string {
@@ -151,6 +179,7 @@ describe("wsp connect", () => {
       now: Date.now,
       deviceName: () => "a test",
       relayUrl: () => Promise.reject(new Error("this line names an address, so no relay is asked")),
+      window: dialWindowMs,
     };
     // ws and wss are addresses a socket is dialled at, not ones a host is served at, and an http:// with no
     // computer after it reached the URL parser and threw a TypeError nobody could act on.
@@ -173,6 +202,7 @@ describe("wsp connect", () => {
       now: Date.now,
       deviceName: () => "a test",
       relayUrl: () => Promise.reject(new Error("this line names an address, so no relay is asked")),
+      window: dialWindowMs,
     };
     await expect(connectCommand(io(), { statePath: STATE, home: box.home }, { code: await box.code(), name: "../evil" }, [box.url], watched)).rejects.toThrow(/not a host alias/);
     // The host is untouched: a code spent for a name nothing can hold would leave a device over there whose only
@@ -293,6 +323,26 @@ describe("a verb against a connected host", () => {
     expect((refused as { kind?: string }).kind).toBe("auth");
   });
 
+  it("waits the window the road gets, and says how long it waited in the one sentence", async () => {
+    const box = await boxAndHome();
+    const road = await roadTo(handle!.port);
+    const at = `http://127.0.0.1:${road.port}`;
+    await connectCommand(io(), { statePath: STATE, home: box.home }, { code: await box.code(), name: "box" }, [at]);
+    // A road that carries nothing: the socket is accepted here and the upgrade never reaches the host, so the dial
+    // has only its window to end on. This one is loopback, which is the window a host on this computer answers in.
+    road.stall();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const refused = dialHost(STATE, { host: "box", home: box.home, env: {} }).catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(5_000);
+      const e = (await refused) as Error & { kind?: string };
+      expect(e.message).toBe(`the host at ${at} did not answer: nothing came back within 5000 ms`);
+      expect(e.kind).toBe("unreachable");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("says in one sentence that the host did not answer, naming its address and not its token", async () => {
     const box = await boxAndHome();
     await connectCommand(io(), { statePath: STATE, home: box.home }, { code: await box.code(), name: "box" }, [box.url]);
@@ -363,6 +413,9 @@ describe("wsp disconnect", () => {
     expect(await disconnectCommand(io(log, err), { statePath: STATE, home: box.home }, ["box"])).toBe(0);
     expect(readHost(box.home, "box")).toBeUndefined();
     expect(err.join("\n")).toContain(`wsp devices revoke ${kept.deviceId}`);
+    // A host that is off refuses the connection at once, so the second try costs nothing and the person is told
+    // there was one rather than reading one refusal for two.
+    expect(err.join("\n")).toContain(`still asking the host at ${box.url}`);
   });
 
   it("says the token was already taken away when the host refuses it, rather than leaving a job that is done", async () => {
@@ -374,10 +427,110 @@ describe("wsp disconnect", () => {
     revoker.close();
     const log: string[] = [];
     const err: string[] = [];
-    expect(await disconnectCommand(io(log, err), { statePath: STATE, home: box.home }, ["box"])).toBe(0);
+    let dials = 0;
+    const counted = handBackDeps((statePath, opts) => {
+      dials += 1;
+      return dialHost(statePath, opts);
+    });
+    expect(await disconnectCommand(io(log, err), { statePath: STATE, home: box.home }, ["box"], counted)).toBe(0);
     expect(log.join("\n")).toContain("already");
     expect(err).toEqual([]);
     expect(readHost(box.home, "box")).toBeUndefined();
+    // What the host itself said stands on the first answer: only a road that carried nothing is asked twice.
+    expect(dials).toBe(1);
+  });
+
+  it("asks again when the road carried nothing, rather than leaving the device standing over there", async () => {
+    const box = await boxAndHome();
+    const road = await roadTo(handle!.port);
+    const at = `http://127.0.0.1:${road.port}`;
+    await connectCommand(io(), { statePath: STATE, home: box.home }, { code: await box.code(), name: "box" }, [at]);
+    expect(await box.devices()).toHaveLength(1);
+
+    // Nothing crosses the road on the first try, which is an edge holding a request while its tunnel comes up, and
+    // the second try finds the road carrying again.
+    road.stall();
+    let dials = 0;
+    const flaky = handBackDeps((statePath, opts) => {
+      dials += 1;
+      if (dials === 2) road.resume();
+      return dialHost(statePath, opts);
+    });
+    const log: string[] = [];
+    const err: string[] = [];
+    expect(await disconnectCommand(io(log, err), { statePath: STATE, home: box.home }, ["box"], flaky)).toBe(0);
+    expect(dials).toBe(2);
+    expect(await box.devices()).toEqual([]);
+    expect(readHost(box.home, "box")).toBeUndefined();
+    // A second try nobody was told about is a wait with no words on it; this is the only thing on stderr.
+    expect(err).toEqual([`still asking the host at ${at}; this try waits up to 300 ms`]);
+  });
+
+  it("says the host did not answer when the socket opened and the reply never came, and still lets the record go", async () => {
+    const box = await boxAndHome();
+    const road = await roadTo(handle!.port);
+    const at = `http://127.0.0.1:${road.port}`;
+    await connectCommand(io(), { statePath: STATE, home: box.home }, { code: await box.code(), name: "box" }, [at]);
+    const kept = readHost(box.home, "box")!;
+
+    // The dial and its auth are answered and then the road goes quiet, which is the half dead link nothing closes:
+    // a reply nobody has a window for is a line that says nothing at all.
+    const quiet = handBackDeps(async (statePath, opts) => {
+      road.resume();
+      const client = await dialHost(statePath, opts);
+      road.stall();
+      return client;
+    });
+    const log: string[] = [];
+    const err: string[] = [];
+    expect(await disconnectCommand(io(log, err), { statePath: STATE, home: box.home }, ["box"], quiet)).toBe(0);
+    expect(readHost(box.home, "box")).toBeUndefined();
+    expect(err.join("\n")).toContain(`the host at ${at} did not answer: nothing came back within 300 ms`);
+    expect(err.join("\n")).toContain(`wsp devices revoke ${kept.deviceId}`);
+    // Honest about what is left over there: the revoke never reached the host, so the device is still standing.
+    expect(await box.devices()).toEqual([kept.deviceId]);
+    // And the road is not held past the window: a graceful close waits on an answer a dead road never carries, and
+    // the socket behind it keeps the line alive for as long as the operating system holds the connection.
+    expect(await roadEmpty(road)).toBe(0);
+  });
+
+  it("lets the record go when the record's own address is no address, rather than throwing over it", async () => {
+    const box = await boxAndHome();
+    await connectCommand(io(), { statePath: STATE, home: box.home }, { code: await box.code(), name: "box" }, [box.url]);
+    // The hosts folder is a folder of files, and a hand that edited one is the reason the record goes whatever
+    // comes back: a word no dial can read must still leave this computer holding no token.
+    const kept = readHost(box.home, "box")!;
+    writeHost(box.home, "box", { ...kept, url: "not-an-address" });
+    const log: string[] = [];
+    const err: string[] = [];
+    expect(await disconnectCommand(io(log, err), { statePath: STATE, home: box.home }, ["box"])).toBe(0);
+    expect(readHost(box.home, "box")).toBeUndefined();
+    expect(err.join("\n")).toContain(`wsp devices revoke ${kept.deviceId}`);
+    // The words are the ones this file already holds every address to, never the URL parser's, which names nothing
+    // the person can act on.
+    expect(err.join("\n")).toContain(`"not-an-address" is not an address this computer can dial`);
+    expect(err.join("\n")).not.toContain("Invalid URL");
+  });
+
+  it("stands while a reply the window gave up on arrives after the socket goes", async () => {
+    const box = await boxAndHome();
+    const road = await roadTo(handle!.port);
+    const at = `http://127.0.0.1:${road.port}`;
+    await connectCommand(io(), { statePath: STATE, home: box.home }, { code: await box.code(), name: "box" }, [at]);
+    const quiet = handBackDeps(async (statePath, opts) => {
+      road.resume();
+      const client = await dialHost(statePath, opts);
+      road.stall();
+      return client;
+    });
+    const err: string[] = [];
+    expect(await disconnectCommand(io([], err), { statePath: STATE, home: box.home }, ["box"], quiet)).toBe(0);
+    // The close this line sent sat on the stalled road; the road carrying again lets the host answer it, which
+    // fails the reply nobody is waiting for any more. The race the window is built on is what keeps that failure
+    // handled, and this is the guard on it: unhandled, it would end the whole run.
+    road.resume();
+    await new Promise(done => setTimeout(done, 200));
+    expect(err.join("\n")).toContain("did not answer");
   });
 
   it("refuses an alias nothing is stored for, and a line with no alias", async () => {

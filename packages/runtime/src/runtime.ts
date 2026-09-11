@@ -475,7 +475,7 @@ export interface InitDoor {
   /** Keeps a step's unsent ticks, picks and typed text on the job, so a sheet shut mid-step reopens on them. */
   draft(o: { at: string; ticks?: string[]; answers?: Record<string, string> }): Promise<InitJob>;
   retry(o: { tool: string }): Promise<InitJob>;
-  build(o: { firstWorkspace?: string; importFolder?: string }): Promise<InitJob>;
+  build(o: { firstWorkspace?: string; importFolder?: string; yes?: boolean }): Promise<InitJob>;
   /** Types the code a sign-in's page handed back into the tool waiting for it on the machine; refused when none is. */
   signInCode(o: { tool: string; code: string }): Promise<InitJob>;
   cancel(): Promise<InitJob>;

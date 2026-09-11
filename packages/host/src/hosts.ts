@@ -8,7 +8,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { WS_PATH, hostFromEnv, isUrl, usageRefusal, type HostRoad } from "@wsp/protocol";
+import { WS_PATH, hostFromEnv, isLoopback, isUrl, servedHostname, usageRefusal, type HostRoad } from "@wsp/protocol";
 import { servingHost } from "./host-lock.js";
 import { defaultHomeIn } from "./serving-home.js";
 
@@ -210,9 +210,40 @@ export function deviceRefusedLine(alias: string, url: string): string {
   return `the host ${alias} refused this computer's token, which it has taken away; run wsp pair on ${url} and wsp connect ${url} --code <code> --name ${alias} to pair again.`;
 }
 
-/** What the person reads when a host did not answer at all. */
-export function noAnswerLine(where: string, why: string): string {
+/** What the person reads when a host did not answer at all. Private on purpose: the stamped refusal below is the
+ * only way to build this sentence, so no road can raise it as an error a caller cannot tell from a host's own. */
+function noAnswerLine(where: string, why: string): string {
   return `the host at ${where} did not answer: ${why}`;
+}
+
+/** A host that did not answer at all: the road or the host, never the token this computer holds. A caller whose act
+ * cannot be redone once it has moved on tries again on this kind and on no other. */
+export function noAnswerRefusal(where: string, why: string): Error {
+  return Object.assign(new Error(noAnswerLine(where, why)), { kind: "unreachable" });
+}
+
+/** A road that carried nothing before its window was out. The dial waits on one and the hand back's reply waits on
+ * another, so the words for that wait are written here once rather than at each of them. */
+export function noAnswerWithin(where: string, windowMs: number): Error {
+  return noAnswerRefusal(where, `nothing came back within ${windowMs} ms`);
+}
+
+/** The window for a host that answers over loopback, where an answer that is late is a host that is gone. */
+const NEAR_WINDOW_MS = 5_000;
+/** The window for a host at an address off this computer, which is reached through whatever sits between: for a box
+ * behind a relay that is DNS, a content delivery edge and the tunnel's connector. Measured on that road, a warm
+ * tunnel opens the socket and answers the first frame in 0.3 s, while an edge whose tunnel has just come up holds a
+ * request for 5.8 s before it answers anything at all, and a busy box answers later still. */
+const FAR_WINDOW_MS = 15_000;
+
+/** How long a dial waits for its socket and for the answer to its first frame, by the road the host is on. Read
+ * here by every dial, since a loopback's window on a relayed road calls a host that is answering dead. */
+export function dialWindowMs(aim: HostAim): number {
+  if (aim.kind === "here") return NEAR_WINDOW_MS;
+  // A record a hand edited holds any word at all, and the window a dial gets is no place to throw over one: a word
+  // the protocol's own reading of an address cannot read is not loopback either, so it takes the longer window.
+  const where = servedHostname(aim.kind === "alias" ? aim.record.url : aim.url);
+  return where !== undefined && isLoopback(where) ? NEAR_WINDOW_MS : FAR_WINDOW_MS;
 }
 
 /** The note a line naming both --state and a host somewhere else gets: the state file is this computer's, and a

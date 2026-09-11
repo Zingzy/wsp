@@ -636,7 +636,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, job: await init().retry({ tool: msg.tool }) });
               return;
             case "init.build":
-              send({ id: msg.id, ok: true, job: await init().build({ ...(msg.firstWorkspace !== undefined ? { firstWorkspace: msg.firstWorkspace } : {}), ...(msg.importFolder !== undefined ? { importFolder: msg.importFolder } : {}) }) });
+              send({ id: msg.id, ok: true, job: await init().build({ ...(msg.firstWorkspace !== undefined ? { firstWorkspace: msg.firstWorkspace } : {}), ...(msg.importFolder !== undefined ? { importFolder: msg.importFolder } : {}), ...(msg.yes !== undefined ? { yes: msg.yes } : {}) }) });
               return;
             case "init.signInCode":
               send({ id: msg.id, ok: true, job: await init().signInCode({ tool: msg.tool, code: msg.code }) });

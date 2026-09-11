@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CliIO } from "../src/cli.js";
 import { connectCommand } from "../src/connect.js";
-import { readHost } from "../src/hosts.js";
+import { dialWindowMs, readHost } from "../src/hosts.js";
 import { startConnector, type Connector } from "../src/connector.js";
 import { publicHostname, readRelayClient, readRelayRecord, relayCommand, relayHostUrl, relayRecordPath, startRelay, type RelayDeps } from "../src/relay-link.js";
 import { CLOUDFLARED } from "../src/connector.js";
@@ -538,6 +538,7 @@ describe("wsp connect --relay", () => {
     closeWords: () => "",
     paired: { deviceId: "d_1", deviceToken: "device-token" },
     close: () => {},
+    terminate: () => {},
   };
 
   it("pairs with a host on the relay by the name it has there, over the address the relay named", async () => {
@@ -556,6 +557,7 @@ describe("wsp connect --relay", () => {
       now: () => Date.parse("2026-09-11T12:00:00.000Z"),
       deviceName: () => "the Mac",
       relayUrl: (at, name) => relayHostUrl(at, name, deps(dir)),
+      window: dialWindowMs,
     });
 
     expect(code).toBe(0);
@@ -574,6 +576,7 @@ describe("wsp connect --relay", () => {
         now: () => 0,
         deviceName: () => "the Mac",
         relayUrl: async () => "https://never.example",
+        window: dialWindowMs,
       }),
     ).rejects.toThrow(/--relay/);
   });

@@ -3,10 +3,12 @@
 // the app's modal and an agent over MCP all read. The manual road reads this
 // computer once and hands the screens over as data; the agent road opens
 // a thread on this computer that writes the recipe with the recipe tools and
-// then shows the same screens prefilled; the build is wsp init's own
-// non-interactive run, on the host's one runtime with the answered recipe
-// carried per call, its sign-ins handed over as rows the person finishes in
-// their browser. Every change is one view on the events channel.
+// then shows the same screens prefilled; the terminal road takes the recipe
+// wsp init wrote beside the state from its own screens, since one state file
+// has one writer and beside a serving host that writer is the host. The build
+// is wsp init's own non-interactive run, on the host's one runtime with the
+// answered recipe carried per call, its sign-ins handed over as rows the
+// person finishes in their browser. Every change is one view on the channel.
 import { EventEmitter } from "node:events";
 import { basename } from "node:path";
 import { PassThrough, Writable } from "node:stream";
@@ -14,7 +16,7 @@ import { stripVTControlCharacters } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
 import { keyCheckLine, type BackendPricing, type KeyCheck } from "@wsp/engine";
 import { RUNGS } from "@wsp/collect";
-import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, KEY_REFUSED, KEY_UNCHECKED, NEVER_REACHED, NO_FIRST_WORKSPACE, STOP_LEFT_MACHINE_LINE, shellQuote, SIGN_IN_NEVER_REACHED, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobOver, MACHINE_ROW_LABEL, initNeedWhat, initRowOver, initStageCount, initStoppedAt, initStoppedLine, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type LoginState, type McpServerSpec, type TurnResult } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, KEY_REFUSED, KEY_UNCHECKED, forksNoMachines, NEVER_REACHED, NO_FIRST_WORKSPACE, STOP_LEFT_MACHINE_LINE, shellQuote, SIGN_IN_NEVER_REACHED, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobOver, MACHINE_ROW_LABEL, initNeedWhat, initRowOver, initStageCount, initStoppedAt, initStoppedLine, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type LoginState, type McpServerSpec, type TurnResult } from "@wsp/protocol";
 import { harnessCatalog, smallestModel, type GoldenRecipe, type InitDoor, type Runtime, type SessionHandle } from "@wsp/runtime";
 import type { AgentHere } from "./agents-here.js";
 import { SOLARI_KEY, agentKeysIn, keysOf, type Keys } from "./env-keys.js";
@@ -86,6 +88,11 @@ const SEAL_STAGES = new Set<string>(SEAL_STEPS.map(w => w.stage));
 
 /** The build rows' state words are the protocol's; the stage rows read the terminal's own start, end and fail words. */
 const STATE = INIT_ROW_STATES;
+
+/** Whether a road's answers arrive on the recipe beside the state rather than from screens a client answers. Read
+ * once, here: on such a road that file is the whole answer, so the build keeps its sign-ins as they were written
+ * and writes no wsp tools the run has not already written itself. */
+const answeredByFile = (road: InitRoad): boolean => road === "terminal";
 
 interface State {
   id: string;
@@ -249,9 +256,17 @@ export class InitJobs implements InitDoor {
       keys: this.held(),
       home: this.deps.home,
       agents,
-      pricing: { size: pricing.defaultSize, rateUsdPerHour: pricing.rateUsdPerHour(pricing.defaultSize) },
+      // Nothing to price where this host forks nothing: the client reads the same one reading the build is gated on
+      // rather than a nought-core machine at nought an hour.
+      pricing: this.forksNothing() ? null : { size: pricing.defaultSize, rateUsdPerHour: pricing.rateUsdPerHour(pricing.defaultSize), ...(pricing.builderDiskGb !== undefined ? { builderDiskGb: pricing.builderDiskGb } : {}) },
       job: this.view(),
     };
+  }
+
+  /** Whether this host's provider forks a machine at all, read off the runtime's own backend so a provider swapped
+   * in by a saved key counts at once; the one reading the price and the build's refusal both take. */
+  private forksNothing(): boolean {
+    return forksNoMachines(this.deps.rt.backend.capabilities);
   }
 
   /** Saves the provider key, and an agent's API key by the sign-in row that took it, under the variable the agent's
@@ -316,6 +331,17 @@ export class InitJobs implements InitDoor {
         if (state.cancelled) return;
         await this.read(state, path);
       });
+      return this.view()!;
+    }
+    if (o.road === "terminal") {
+      // wsp init asked its own screens at a terminal and wrote what they answered into the recipe beside the state;
+      // this road reads this computer against that file and builds it here, on the host's runtime. The file is the
+      // whole of the answer, so a road with none behind it is refused rather than building this computer's defaults.
+      const path = smallRecipePath(this.deps.statePath);
+      if (recipeStamp(path) === undefined) throw new Error(`the terminal road builds the recipe wsp init writes beside the state, and there is none at ${path}`);
+      this.state = state;
+      this.emit();
+      this.run(state, () => this.read(state, path));
       return this.view()!;
     }
     this.state = state;
@@ -391,16 +417,19 @@ export class InitJobs implements InitDoor {
     return this.view()!;
   }
 
-  async build(o: { firstWorkspace?: string; importFolder?: string }): Promise<InitJob> {
+  async build(o: { firstWorkspace?: string; importFolder?: string; yes?: boolean }): Promise<InitJob> {
     const s = this.answering();
     const saved = this.deps.saved();
-    const keys = keysOf(saved);
-    if (keys.solari === undefined) throw new Error("no Solari API key is saved; the key screen takes one before the build");
+    // The provider this host wired is what builds, not the key a road once named: a host forking containers on this
+    // box has no key and builds, and a host with no provider at all is refused before anything reads this computer.
+    if (this.forksNothing()) throw new Error("this host forks no machines, so there is no golden to build here: save a provider key on the key screen, or start the host again on a computer set up for a provider");
     const reading = s.reading!;
     const answers = s.answers!;
     const path = smallRecipePath(this.deps.statePath);
-    // The recipe as the screens answered it, written where wsp init --recipe reads it: the build is that run.
-    const recipe = recipeWithAnswers(answers.recipe, answers.logins);
+    // The recipe as the screens answered it, written where wsp init --recipe reads it: the build is that run. A road
+    // answered by its file carries those answers already, and its screen map is empty, so rewriting from that map
+    // would drop every sign-in answer the person made at their own screens.
+    const recipe = answeredByFile(s.road) ? answers.recipe : recipeWithAnswers(answers.recipe, answers.logins);
     saveSmallRecipe(path, recipe);
     const wspTicks = answers.wspTicks ?? wspToolsItems(recipe, this.deps.home).initial;
     const agents = new Set([...wspTicks].flatMap(id => wspToolsAgent(id) ?? []));
@@ -420,7 +449,9 @@ export class InitJobs implements InitDoor {
     const offs: (() => void)[] = [];
     const io = this.io(s);
     const opts: InitOptions = {
-      yes: false,
+      // The sign-ins are the one thing a yes skips: nobody is at the machine's terminal either way, but a caller
+      // that said it wants no waiting gets none. The app never says it; its person is there to finish them.
+      yes: o.yes === true,
       nonInteractive: true,
       recipeFile: path,
       reading: { ...reading, catalogRecipe: recipe },
@@ -704,7 +735,9 @@ export class InitJobs implements InitDoor {
     if ("code" in reading) throw new Error(s.log.at(-1) ?? "this computer could not be read");
     if (s.cancelled) return;
     s.reading = reading;
-    s.answers = { recipe: reading.catalogRecipe, logins: new Map(), wspTicks: undefined };
+    // A run answered by its file has already written the wsp tools into the agents its own screen asked about, so
+    // this build writes none: an empty set is an answer of its own, where nothing at all takes the screen's defaults.
+    s.answers = { recipe: reading.catalogRecipe, logins: new Map(), wspTicks: answeredByFile(s.road) ? new Set() : undefined };
     s.screens = screensOf(reading, s.answers, this.deps);
     s.disk = diskOf(reading, s.answers.recipe, this.deps.statePath, this.deps.pricing().builderDiskGb);
     s.step = 0;
