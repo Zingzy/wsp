@@ -194,3 +194,17 @@ describe("a hosts folder somebody hand-edited", () => {
     expect(readFileSync(join(hostsDir(home), "default"), "utf8").trim()).toBe("box");
   });
 });
+
+describe("what the desktop adds to a record", () => {
+  it("round trips the label, the road and the ssh login, and the listing carries the label and the road", () => {
+    const home = tempDir("hosts-home");
+    const ssh: HostRecord = { ...record("http://127.0.0.1:52001", "d_3"), label: "maya@box", road: "ssh", ssh: { address: "maya@box", port: 2222 } };
+    writeHost(home, "maya-box", ssh);
+    writeHost(home, "attic", record("https://attic.example", "d_2"));
+    expect(readHost(home, "maya-box")).toEqual(ssh);
+    expect(listHosts(home)).toEqual([
+      { alias: "attic", url: "https://attic.example", deviceId: "d_2", default: false },
+      { alias: "maya-box", url: "http://127.0.0.1:52001", deviceId: "d_3", default: false, label: "maya@box", road: "ssh" },
+    ]);
+  });
+});

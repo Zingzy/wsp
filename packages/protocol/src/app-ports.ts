@@ -35,6 +35,12 @@ export function isWildcard(address: string): boolean {
   return address === "0.0.0.0" || address === "::";
 }
 
+/** Whether a word is an address rather than a name: a host is reached at an http, https, ws or wss address, and a
+ * word with any of those schemes is one, wherever it is typed (a --host flag, wsp connect, the app's connect sheet). */
+export function isUrl(word: string): boolean {
+  return /^(https?|wss?):\/\//i.test(word);
+}
+
 /** An address and a port as the authority of a URL: an IPv6 literal needs brackets and everything else is itself.
  * The one rule, so the address wsp pair prints and the one every local tool dials are spelled the same way. */
 export function authority(address: string, port: number): string {

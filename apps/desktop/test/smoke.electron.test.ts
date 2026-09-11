@@ -4,11 +4,12 @@
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LAUNCHD_PATH, serve, shimPath, startHost, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
-import { CLOUD_SETUP_WORDS, GET_THE_APP_WORD, fmtSize, kindWords } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, GET_THE_APP_WORD, HOST_WORDS, WS_PATH, fmtSize, hereWord, kindWords } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -177,6 +178,18 @@ async function hostOfVersion(upstream: HostHandle, version: string): Promise<{ p
       res.end(bytes);
     })().catch(() => res.writeHead(502).end());
   });
+  // The page dials the runtime on its own origin's /ws, so the stand-in carries the upgrade through to the real host
+  // byte for byte; without it the window is a page with a toast and no runtime behind it.
+  server.on("upgrade", (req, socket, head) => {
+    const through = connect(upstream.port, "127.0.0.1", () => {
+      const line = [`${req.method} ${req.url} HTTP/${req.httpVersion}`, ...req.rawHeaders.map((h, i) => (i % 2 === 0 ? `${h}: ${req.rawHeaders[i + 1]}` : undefined)).filter(h => h !== undefined), "", ""].join("\r\n");
+      through.write(line);
+      if (head.length > 0) through.write(head);
+      socket.pipe(through).pipe(socket);
+    });
+    through.on("error", () => socket.destroy());
+    socket.on("error", () => through.destroy());
+  });
   return { port: await listenOn(server), server };
 }
 
@@ -280,6 +293,49 @@ async function refused(url: string): Promise<boolean> {
   } catch {
     return true;
   }
+}
+
+/** A pairing code off a host, the way wsp pair gets one: one socket with the host's own token, one pair.issue. */
+async function pairingCodeOf(host: HostHandle): Promise<string> {
+  const ws = new WebSocket(`ws://127.0.0.1:${host.port}${WS_PATH}`);
+  await new Promise<void>((done, fail) => {
+    ws.addEventListener("open", () => done());
+    ws.addEventListener("error", () => fail(new Error("the fixture host refused the socket")));
+  });
+  const ask = (frame: Record<string, unknown>): Promise<Record<string, unknown>> =>
+    new Promise(done => {
+      ws.addEventListener("message", e => done(JSON.parse(String((e as MessageEvent).data)) as Record<string, unknown>), { once: true });
+      ws.send(JSON.stringify(frame));
+    });
+  await ask({ id: 1, op: "auth", token: host.authToken });
+  const issued = await ask({ id: 2, op: "pair.issue" });
+  ws.close();
+  return issued["code"] as string;
+}
+
+interface MenuRow {
+  label: string;
+  checked: boolean;
+  enabled: boolean;
+}
+
+/** The rows of the menu bar's Hosts menu as the shell built them. */
+function hostsMenuRows(app: ElectronApplication): Promise<MenuRow[]> {
+  return app.evaluate(({ Menu }, word) => {
+    const hosts = Menu.getApplicationMenu()?.items.find(item => item.label === word)?.submenu;
+    if (hosts === undefined) throw new Error(`no ${word} menu`);
+    return hosts.items.filter(item => item.type !== "separator").map(item => ({ label: item.label, checked: item.checked, enabled: item.enabled }));
+  }, HOST_WORDS.hosts);
+}
+
+/** Clicks one row of the Hosts menu, as a person would from the menu bar. */
+function hostsMenu(app: ElectronApplication, label: string): Promise<void> {
+  return app.evaluate(({ Menu }, [word, row]) => {
+    const hosts = Menu.getApplicationMenu()?.items.find(item => item.label === word)?.submenu;
+    const item = hosts?.items.find(i => i.label === row);
+    if (item === undefined) throw new Error(`no row ${row} in the ${word} menu`);
+    item.click();
+  }, [HOST_WORDS.hosts, label] as const);
 }
 
 // Each launch boots Electron and a host; the default 5s test timeout is too tight.
@@ -688,6 +744,45 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(rows.find(r => r.label === WORKSPACE_WORDS.openTerminal)).toMatchObject({ enabled: true, accelerator: "CommandOrControl+J" });
     // The shell's page got the native menu, not the in-app one.
     expect(await win.locator("[data-context-menu]").count()).toBe(0);
+  });
+
+  it("connects to a second host by its address and a code, the Hosts menu lists both with the current one marked, and This Mac takes the window back", async () => {
+    existing = await fixtureHost();
+    launched = await launch({ SOLARI_API_KEY: FAKE_SOLARI }, seedGolden);
+    const win = await windowAt(launched.app, APP_URL);
+    const home = win.url();
+    await win.waitForSelector("[data-host-foot]");
+    const here = hereWord(process.platform === "darwin");
+    expect(await win.locator("[data-host-label]").textContent()).toBe(here);
+    // The code as wsp pair mints it, over the second host's own socket with its own token.
+    const code = await pairingCodeOf(existing);
+    // The menu bar's Hosts menu opens the sheet, the road a person takes.
+    await hostsMenu(launched.app, HOST_WORDS.connectMenu);
+    const dialog = win.getByRole("dialog");
+    await dialog.waitFor();
+    await dialog.locator("#connect-url").fill(`http://127.0.0.1:${existing.port}`);
+    await dialog.locator("#connect-code").fill(code.toLowerCase());
+    expect(await dialog.locator("#connect-code").inputValue()).toBe(code);
+    await dialog.locator("[data-k=primary]").click();
+    await win.waitForURL(`http://127.0.0.1:${existing.port}/`);
+    const away = await hostsMenuRows(launched.app);
+    expect(away).toEqual([
+      { label: here, checked: false, enabled: true },
+      { label: `127.0.0.1:${existing.port}`, checked: true, enabled: true },
+      { label: HOST_WORDS.connectMenu, checked: false, enabled: true },
+      { label: HOST_WORDS.disconnect(`127.0.0.1:${existing.port}`), checked: false, enabled: true },
+    ]);
+    // The record is the one wsp connect writes, under the launch's own wsp home, with what the desktop adds.
+    const record = JSON.parse(readFileSync(join(launched.home, "hosts", "127.0.0.1.json"), "utf8")) as Record<string, unknown>;
+    expect(record).toMatchObject({ url: `http://127.0.0.1:${existing.port}`, label: `127.0.0.1:${existing.port}`, road: "direct" });
+    expect(typeof record["deviceToken"]).toBe("string");
+    await hostsMenu(launched.app, here);
+    await win.waitForURL(home);
+    expect((await hostsMenuRows(launched.app)).map(r => r.checked)).toEqual([true, false, false, false]);
+    expect(await win.locator("[data-host-label]").textContent()).toBe(here);
+    // The app's own host was never stopped by the move.
+    await launched.app.close();
+    expect(await refused(home)).toBe(true);
   });
 
   it("a pointer whose host is gone is not followed: the first launch runs on ~/.wsp", async () => {

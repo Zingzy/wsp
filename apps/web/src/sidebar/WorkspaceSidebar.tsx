@@ -47,6 +47,7 @@ import { SearchRow } from "./SearchRow.js";
 import { SectionRow } from "./SectionRow.js";
 import { foldArchivedThreads, resolveAdjacentThreadId, resolveSettledTimestamp, splitSidebarThreads } from "./Sidebar.logic.js";
 import { CloudSetupRow } from "./CloudSetupRow.js";
+import { HostFoot } from "../hosts/HostFoot.js";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
 import { useSidebarMode, useSpaceWorkspaceId } from "./sidebarMode.js";
 import { SpaceBar } from "./SpaceBar.js";
@@ -617,6 +618,7 @@ export function WorkspaceSidebar() {
             />
           ) : null}
           <CloudSetupRow />
+          <HostFoot />
         </SidebarChromeFooter>
       </div>
       {dialog ? (

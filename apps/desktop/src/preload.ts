@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { AgentHere, AgentSessions, InstallReport } from "@wsp/host";
-import type { ContextMenuItem, DesktopBridge, InitNeedsYou, LocalFontFace, ShellChord, ThemePreference } from "@wsp/protocol";
+import type { ContextMenuItem, DesktopBridge, HostConnectAsk, HostOutcome, HostsView, InitNeedsYou, LocalFontFace, ShellChord, ThemePreference } from "@wsp/protocol";
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { shellArgFrom } from "./shell-args.js";
 
@@ -14,6 +14,8 @@ export interface OnboardingBridge {
   install(ids: string[]): Promise<InstallReport>;
   /** Records this computer as the workspace and opens the app on it; the page's window closes once the app's is up. */
   finish(): Promise<void>;
+  /** The same, with the app opened on the connect sheet, for a person whose work is on a box. */
+  connect(): Promise<void>;
 }
 
 const bridge: DesktopBridge & OnboardingBridge = {
@@ -22,6 +24,17 @@ const bridge: DesktopBridge & OnboardingBridge = {
   history: (ids: string[]): Promise<AgentSessions[]> => ipcRenderer.invoke("onboarding:history", ids),
   install: (ids: string[]): Promise<InstallReport> => ipcRenderer.invoke("onboarding:install", ids),
   finish: () => ipcRenderer.invoke("onboarding:finish"),
+  connect: () => ipcRenderer.invoke("onboarding:connect"),
+  hostToken: (): Promise<string | undefined> => ipcRenderer.invoke("hosts:token"),
+  hosts: (): Promise<HostsView> => ipcRenderer.invoke("hosts:list"),
+  switchHost: (alias: string | null): Promise<HostOutcome> => ipcRenderer.invoke("hosts:switch", alias),
+  connectHost: (ask: HostConnectAsk): Promise<HostOutcome> => ipcRenderer.invoke("hosts:connect", ask),
+  disconnectHost: (alias: string): Promise<HostOutcome> => ipcRenderer.invoke("hosts:disconnect", alias),
+  onConnectHostOpen: (handler: () => void): (() => void) => {
+    const listen = (): void => handler();
+    ipcRenderer.on("hosts:connect-open", listen);
+    return () => ipcRenderer.off("hosts:connect-open", listen);
+  },
   localFonts: (family: string): Promise<LocalFontFace[]> => ipcRenderer.invoke("fonts:local", family),
   pickFolder: (): Promise<string | undefined> => ipcRenderer.invoke("folder:pick"),
   droppedPath: (file: File): string => webUtils.getPathForFile(file),

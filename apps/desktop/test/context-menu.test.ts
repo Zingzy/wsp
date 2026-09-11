@@ -128,3 +128,18 @@ describe("the workspace menu the smoke expects", () => {
     expect(shape).toEqual([...before, SEPARATOR, "Invented"]);
   });
 });
+
+describe("a checked row", () => {
+  it("is a checkbox row with its mark, and an unchecked one carries no type at all", () => {
+    const items = parseContextMenuItems([
+      { id: "switch:", label: "This Mac", group: "hosts", enabled: true, checked: false },
+      { id: "switch:box", label: "box", group: "hosts", enabled: true, checked: true },
+      { id: "connect", label: "Connect to a host…", group: "add", enabled: true },
+    ]);
+    const template = contextMenuTemplate(items, () => {});
+    expect(template[0]).toMatchObject({ type: "checkbox", checked: false });
+    expect(template[1]).toMatchObject({ type: "checkbox", checked: true });
+    expect(template[3]).not.toHaveProperty("type");
+    expect(() => parseContextMenuItems([{ id: "x", label: "x", group: "g", enabled: true, checked: "yes" }])).toThrow(/not a list of items/);
+  });
+});
