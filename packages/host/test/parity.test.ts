@@ -359,8 +359,21 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     for (const line of COMMAND_LINES) {
       const word = line.words.split(" ")[0]!;
       if (!("cliOnly" in line) || word === "mcp") continue;
-      expect(Object.hasOwn(line.options, "host"), `wsp ${line.words} advertises --host`).toBe(HOST_FLAG[word] !== "refused");
+      expect(Object.hasOwn(line.options, "host"), `wsp ${line.words} advertises --host`).toBe((HOST_FLAG[word] ?? "refused") !== "refused");
       expect(Object.hasOwn(line.options, "json"), `wsp ${line.words} advertises --json`).toBe(JSON_COMMANDS.includes(word));
+    }
+  });
+
+  it("the help's --host rule names the two words that take the flag to say where to run, and no word that refuses it", () => {
+    // The block is prose deciding what the declaration decides, which is how it came to promise a refusal to eight
+    // words while calling four of them lines that start or stop something. Its last sentence is held to the table
+    // word by word, so a word that changes what it does with the flag cannot leave the help saying the old thing.
+    const block = HELP.slice(HELP.indexOf("  --host ALIAS"), HELP.indexOf("  --code CODE"));
+    const opener = "lines that read this computer's own files refuse it";
+    expect(block, "the --host block states the rule in the declaration's own words").toContain(opener);
+    const rule = block.slice(block.indexOf(opener)).replace(/\s+/g, " ");
+    for (const [word, flag] of Object.entries(HOST_FLAG)) {
+      expect(rule.includes(`wsp ${word}`), `wsp ${word} named in the --host rule`).toBe(flag === "hostSide");
     }
   });
 

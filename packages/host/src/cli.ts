@@ -189,7 +189,7 @@ options:
                      thing that moves that line: with neither word it answers
                      for this computer whatever alias wsp hosts marks, since it
                      is the question whether the host here is serving. The
-                     lines that start or stop something here refuse it, and
+                     lines that read this computer's own files refuse it, and
                      wsp pair and wsp devices take it only to answer that they
                      run at that host's own terminal
   --code CODE        connect: the code wsp pair printed on the other computer
