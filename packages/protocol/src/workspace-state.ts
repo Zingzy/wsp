@@ -3,7 +3,7 @@
 // provider's word and the daemon reach only change it where they contradict
 // it. Every client renders these words, and the runtime refuses a send with
 // the same sentence the composer shows, so one screen never says two things.
-import { OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
+import { MACHINE_WSP_FORKS, OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
 import type { HarnessCatalog, MachineState, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
 
 export type WorkspaceState = "running" | "pausing" | "paused" | "waking" | "unreachable" | "gone";
@@ -20,9 +20,14 @@ export const isLocalWorkspace = (view: Pick<WorkspaceView, "kind">): boolean => 
 
 /** What a workspace's kind changes about the words a client shows for it. */
 export interface WorkspaceKindWords {
-  /** What the machine is, on the sidebar row's second line and the Spaces header, for a kind whose status carries no
-   * size worth reading; null for a kind whose rows read its size there, in its own word for a cpu. */
-  machine: string | null;
+  /** What a sentence calls a machine of this kind, read through machineWord: every refusal that names the machine,
+   * the line a recorded machine is announced with and the notice a second record on one is refused with. Every kind
+   * has its own, so no sentence about one kind's machine borrows another kind's words. */
+  machine: string;
+  /** Whether the slot a row gives to what the machine is reads a fact off that machine: the size its status carries
+   * in this kind's own word for a cpu on the sidebar row and the Spaces header, the provider's id in the command
+   * line's table. False for a kind wsp holds no such fact about, whose rows print the word above there instead. */
+  rowReadsMachine: boolean;
   /** What this kind calls one of its cpus in that size line: a provider's are virtual, a machine that exists has cores. */
   cpu: CpuWord;
   /** Whether wsp forks this machine, pauses it, wakes it, resizes it and pays for it by the hour, or it is a machine
@@ -62,9 +67,9 @@ export type KindReading = "metrics" | "processes";
 /** The words per kind, the one table every client reads instead of comparing a kind itself. Adding a kind (an ssh
  * machine) is a row here. */
 export const WORKSPACE_KIND_WORDS: Record<WorkspaceKind, WorkspaceKindWords> = {
-  cloud: { machine: null, cpu: "vCPU", driven: true, daemon: true, metrics: true, processes: true, imports: "copies", importsAt: "same path", agents: true },
-  local: { machine: null, cpu: "cores", driven: false, daemon: true, metrics: true, processes: true, imports: "registers", importsAt: "same path", agents: false },
-  ssh: { machine: OVER_SSH, cpu: "cores", driven: false, daemon: true, metrics: true, processes: true, imports: "copies", importsAt: "under home", agents: false },
+  cloud: { machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", driven: true, daemon: true, metrics: true, processes: true, imports: "copies", importsAt: "same path", agents: true },
+  local: { machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", driven: false, daemon: true, metrics: true, processes: true, imports: "registers", importsAt: "same path", agents: false },
+  ssh: { machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", driven: false, daemon: true, metrics: true, processes: true, imports: "copies", importsAt: "under home", agents: false },
 };
 
 export function kindWords(kind: WorkspaceKind): WorkspaceKindWords {
@@ -78,9 +83,6 @@ export function servesReading(kind: WorkspaceKind, reading: KindReading): boolea
   return WORKSPACE_KIND_WORDS[kind][reading];
 }
 
-/** What a refusal calls this workspace's machine. Only a kind wsp does not drive reaches one, since the capability
- * behind every driven move is what refuses on the others, so a kind with no words of its own falls back to this
- * computer's rather than carrying a second phrase no sentence prints. */
 /** Whether the spawn switch means anything on a workspace of this kind, the one reading both doors that set it
  * take: the create that names it on a new workspace and the verb that turns it on for one that exists. */
 export function agentsMayDrive(kind: WorkspaceKind): boolean {
@@ -92,8 +94,10 @@ export function agentsKindRefusal(kind: WorkspaceKind): string {
   return `agents on ${machineWord(kind)} cannot drive this host, so the spawn switch would hand out a token that opens nothing; it is for the machines wsp forks`;
 }
 
+/** What a sentence calls this workspace's machine. Every kind answers for itself: a refusal on a machine wsp forks
+ * says so, and this computer's words are this computer's alone. */
 export function machineWord(kind: WorkspaceKind): string {
-  return WORKSPACE_KIND_WORDS[kind].machine ?? THIS_COMPUTER;
+  return WORKSPACE_KIND_WORDS[kind].machine;
 }
 
 export interface WorkspaceStateInput {

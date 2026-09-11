@@ -129,6 +129,7 @@ export class LocalBackend implements MachineBackend {
   readonly capabilities: Capabilities = {
     liveCloneForks: false,
     resize: false,
+    replacesMachine: false, // there is one of this computer and nothing forks another
     previewUrls: false,
     signedUrls: false,
     containers: false,

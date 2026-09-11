@@ -514,8 +514,8 @@ describe("daemon wire types (one home for the ops from @wsp/daemon)", () => {
 });
 
 describe("backend capabilities", () => {
-  it("requires every flag, containers, callbackRelay, templates, diskSnapshots, kept and the sizes list included, so no backend can leave one unstated", () => {
-    const full = { liveCloneForks: true, pauseMode: "memory", resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, diskSnapshots: true, snapshotListing: true, templates: true, kept: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
+  it("requires every flag, containers, callbackRelay, templates, diskSnapshots, replacesMachine, kept and the sizes list included, so no backend can leave one unstated", () => {
+    const full = { liveCloneForks: true, pauseMode: "memory", resize: false, replacesMachine: true, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, diskSnapshots: true, snapshotListing: true, templates: true, kept: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
     expect(Capabilities.parse(full)).toEqual(full);
     const { containers: _c, ...missing } = full;
     expect(() => Capabilities.parse(missing)).toThrow();
@@ -526,6 +526,9 @@ describe("backend capabilities", () => {
     // A backend that never says whether its machine's disk can be copied would have the snapshot verb guessing.
     const { diskSnapshots: _d, ...noDiskSnapshots } = full;
     expect(() => Capabilities.parse(noDiskSnapshots)).toThrow();
+    // And one that never says whether a fresh machine may stand in for another leaves the rebuild and the image move guessing.
+    const { replacesMachine: _m, ...noReplace } = full;
+    expect(() => Capabilities.parse(noReplace)).toThrow();
     // A backend that never says whether its machine is the person's own would have every turn's access decided for it.
     const { kept: _k, ...noKept } = full;
     expect(() => Capabilities.parse(noKept)).toThrow();
@@ -535,7 +538,7 @@ describe("backend capabilities", () => {
   });
 
   it("pauseMode is optional and one of memory or disk; a boolean is refused", () => {
-    const full = { liveCloneForks: true, resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, diskSnapshots: true, snapshotListing: true, templates: true, kept: false, sizes: [] };
+    const full = { liveCloneForks: true, resize: false, replacesMachine: true, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, diskSnapshots: true, snapshotListing: true, templates: true, kept: false, sizes: [] };
     // Absent is a machine that cannot be paused: this computer, a machine reached over ssh.
     expect(Capabilities.parse(full)).toEqual(full);
     expect(Capabilities.parse({ ...full, pauseMode: "memory" })).toMatchObject({ pauseMode: "memory" });

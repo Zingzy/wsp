@@ -154,11 +154,23 @@ export type PauseMode = z.infer<typeof PauseMode>;
 
 /** Honest per-backend feature flags; the UI degrades based on these, never on probing. */
 export const Capabilities = z.object({
+  /** What a fork of an image comes up as: on a provider whose images hold memory the processes are still running,
+   * and on one whose images hold only a disk it boots cold and wsp starts the agents on it again. The provider
+   * table publishes it; no verb reads it, since each verb reads the one road its own move needs. */
   liveCloneForks: z.boolean(),
   /** Absent: the machine cannot be paused, and the runtime refuses a nap and a wake. The app reads the value for its
    * words; the runtime reads only whether it is there. */
   pauseMode: PauseMode.optional(),
+  /** The provider gives a machine that already exists a size it was not made at, which is what the resize verb and
+   * the app's Upgrade button both ride. False on a provider that clamps every machine to one size, whatever else it
+   * can do to one. */
   resize: z.boolean(),
+  /** The provider replaces a machine with a fresh fork of the image behind it and the workspace goes on, its
+   * vaulted files carried over: the one road a rebuild and an image move both take, since both throw a machine away
+   * and hand its workspace another. False where nothing forks: this computer, a machine reached over ssh, a host with
+   * no provider. Whether the replacement comes up with the processes still running is liveCloneForks, which says
+   * nothing about whether one may stand in at all. */
+  replacesMachine: z.boolean(),
   previewUrls: z.boolean(),
   signedUrls: z.boolean(),
   /** Guests can run containers; false means services get installed natively. */

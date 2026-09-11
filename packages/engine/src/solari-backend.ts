@@ -143,6 +143,7 @@ export class SolariBackend implements MachineBackend {
     liveCloneForks: true,
     pauseMode: "memory",
     resize: false, // Starter plan clamps every sandbox to 2 vCPU
+    replacesMachine: true, // a fork of the golden snapshot comes up as the machine it replaces, processes and all
     previewUrls: true,
     signedUrls: true,
     containers: false, // guest kernel 6.6.30 lacks overlayfs and netfilter: dockerd falls back to vfs with no bridge and runc fails (measured)

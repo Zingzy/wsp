@@ -31,6 +31,7 @@ describe("ssh backend", () => {
     expect(backend.capabilities).toEqual({
       liveCloneForks: false,
       resize: false,
+      replacesMachine: false,
       previewUrls: false,
       signedUrls: false,
       containers: false,

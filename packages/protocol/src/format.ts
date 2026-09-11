@@ -1593,6 +1593,11 @@ export const thisComputerLine = (name: string, id: string): string => `Workspace
  * that wsp reaches and never runs. */
 export const OVER_SSH = "a machine over ssh";
 
+/** What a cloud workspace's machine is in a sentence that names it: a machine wsp forked at a provider and pays for,
+ * whether the provider runs virtual machines or containers. A refusal on one says this rather than borrowing this
+ * computer's words, since what it cannot do is the provider's limit and not the machine being the person's own. */
+export const MACHINE_WSP_FORKS = "a machine wsp forks";
+
 /** What the computer wsp is reading is called on the screens that read it: a Mac by the name its owner uses for it,
  * any other computer the plain word. The one place that word is decided, so no screen tells a Linux reader the tool
  * was built for somebody else. */
@@ -1851,6 +1856,14 @@ export function alreadyRecorded(machine: string, name: string): string {
  * person typed it. The capability behind each is false, so the road that reads the capability says this. */
 export function undrivenRefusal(name: string, machine: string, action: string): string {
   return `${name} is ${machine}, not a machine wsp runs; it cannot ${action}`;
+}
+
+/** The one sentence a workspace on a machine wsp does run refuses a verb with when the provider under it has no
+ * road for that verb: the machine is wsp's to move, so the refusal names the provider's limit rather than telling a
+ * person their fork is their own computer. Each verb reads its own capability, so what is missing is that verb's
+ * road and nothing else about the machine. */
+export function providerCannotRefusal(name: string, machine: string, action: string): string {
+  return `${name} is ${machine}, and the provider it runs on cannot ${action}`;
 }
 
 /** The row's line when a pause or a wake ran its deadline out, once and once more after the retry: which move, how

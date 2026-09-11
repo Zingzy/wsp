@@ -37,7 +37,7 @@ describe("provider modules", () => {
     expect(PROVIDER_MODULES.at(-1)!.selects(pick())).toBe(true);
   });
 
-  it("every registered backend, and the two kinds outside the registry, declares a pause mode and a lifecycle together or neither, and says on its own whether it copies a disk", () => {
+  it("every registered backend, and the two kinds outside the registry, declares a pause mode and a lifecycle together or neither, and says on its own whether it copies a disk, replaces a machine and resizes one", () => {
     // Built the way the host builds them, with fake picks: a key that looks fake, a daemon nothing dials.
     const built = PROVIDER_MODULES.map(m => [m.id, m.build(pick({ solari: "sk-ant-x" }, { DOCKER_HOST: "unix:///nonexistent/docker.sock" }))] as const);
     const all: readonly (readonly [string, MachineBackend])[] = [...built, ["local", new LocalBackend({ root: "/tmp/wsp-providers" })], ["ssh", new SshBackend()]];
@@ -49,6 +49,11 @@ describe("provider modules", () => {
     // Which providers copy a machine's disk into an image, the one fact the snapshot verb reads: a fork that boots
     // cold is still snapshotted, so this row is its own and never liveCloneForks.
     expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.diskSnapshots]))).toEqual({ docker: true, solari: true, none: false, local: false, ssh: false });
+    // Which providers stand a fresh machine in for one a workspace is on, the fact the rebuild and the image move
+    // read, and which give a machine a new size, the fact the resize reads. Each verb has its own row here, so a
+    // provider added tomorrow answers for every road rather than being read off a neighbour's flag.
+    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.replacesMachine]))).toEqual({ docker: true, solari: true, none: false, local: false, ssh: false });
+    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.resize]))).toEqual({ docker: false, solari: false, none: false, local: false, ssh: false });
     for (const [, b] of all) if (b.lifecycle !== undefined) {
       expect(b.lifecycle.budgets.wakeAttempts).toBeGreaterThanOrEqual(1);
       expect(b.lifecycle.budgets.daemonAnswersMs).toBeGreaterThan(0);
@@ -67,8 +72,9 @@ describe("provider modules", () => {
     try {
       const held = providerSlotOf(rt)!.current();
       // Containers: a nap that keeps RAM, no public port routes, a commit that copies the disk though a fork of it
-      // boots cold, and sizes to offer, so the fork roads are open.
-      expect(held.capabilities).toMatchObject({ previewUrls: false, pauseMode: "memory", liveCloneForks: false, diskSnapshots: true });
+      // boots cold, a fresh container that stands in for one a workspace is on, no new size for a container that
+      // exists, and sizes to offer, so the fork roads are open.
+      expect(held.capabilities).toMatchObject({ previewUrls: false, pauseMode: "memory", liveCloneForks: false, diskSnapshots: true, replacesMachine: true, resize: false });
       expect(held.capabilities.sizes.length).toBeGreaterThan(0);
       swapProvider(rt, { solari: "slr_live_fake" });
       expect(providerSlotOf(rt)!.current().capabilities.previewUrls).toBe(false);

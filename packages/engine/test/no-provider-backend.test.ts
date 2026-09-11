@@ -10,6 +10,7 @@ describe("no provider backend", () => {
     expect(new NoProviderBackend().capabilities).toEqual({
       liveCloneForks: false,
       resize: false,
+      replacesMachine: false,
       previewUrls: false,
       signedUrls: false,
       containers: false,
