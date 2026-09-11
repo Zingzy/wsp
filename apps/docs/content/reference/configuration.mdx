@@ -18,7 +18,7 @@ Everything sits beside the state file. The default home is `~/.wsp`; `WSP_HOME` 
 | `~/.wsp/host.log` | the service run's output |
 | `~/.wsp/init.log` | the last five init runs, secrets redacted |
 | `~/.wsp/history-cache.json` | counts per agent session file, so the next scan is fast |
-| `~/.wsp/current-home` | which home the running host serves, for the desktop app |
+| `~/.wsp/current-home` | which home the running host serves, so a line naming none and the app both find it |
 
 Keys are read from the environment first, then `./.env`, then `~/.wsp/.env`.
 

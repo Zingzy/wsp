@@ -12,6 +12,7 @@ import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { AppShell } from "../src/shell/AppShell.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
+import { caps } from "./caps.js";
 
 vi.mock("../src/components/ui/tooltip.js", () => ({
   TooltipProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -21,7 +22,7 @@ vi.mock("../src/components/ui/tooltip.js", () => ({
 }));
 
 const view: WorkspaceView = { id: "ws_a", name: "api", machineId: "m_a", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
-const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: false, kept: false, sizes: [] };
+const CAPS = caps();
 
 function fakeApi(): Api {
   return {

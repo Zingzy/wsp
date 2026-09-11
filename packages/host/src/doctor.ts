@@ -15,7 +15,7 @@ import { CREATED_AT_LABEL, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_SUPERVISOR
 import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, DAEMON_ROOTS_PATH, GUEST_DAEMON_DIR, LOOPBACK, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, type SnapshotStorage, type WorkspaceKind } from "@wsp/protocol";
 import { DAEMON_TOKEN_PATH, goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
-import { assetDir, assetName, assetProof } from "./assets.js";
+import { assetDir, assetName, assetProof, copyAsset } from "./assets.js";
 import { describeDeleted, describeOrphanOffer, describeOrphans, describeStorage } from "./storage.js";
 import type { CliIO } from "./cli.js";
 
@@ -427,7 +427,8 @@ export async function stageDaemonBundle(stageDir: string, place: DaemonPlace, da
   cpSync(join(daemonDir, "dist"), join(stageDir, "dist"), { recursive: true });
   // The wsp command rides with the daemon so every machine that has one has wsp under the place's own folder, with
   // no install of its own and nothing on the image: it is what a turn's own agent runs to reach back into this host.
-  cpSync(cliDir, join(stageDir, "wsp"), { recursive: true });
+  // Copied by the asset's own rule, so what a fork gets is what the packed command carries and nothing more.
+  copyAsset("cli", cliDir, join(stageDir, "wsp"));
   writeFileSync(join(stageDir, "start.mjs"), startMjs(place));
   writeFileSync(join(stageDir, "wsp-open"), openShimScript(place), { mode: 0o755 });
   writeFileSync(
@@ -464,8 +465,10 @@ function nodeBootstrap(place: DaemonPlace): string {
     `  tar -xzf "${place.scratch}/$pkg" -C ${sh(place, place.nodeDir)} --strip-components=1`,
     `  rm -f "${place.scratch}/$pkg"`,
     "fi",
-    // A Node under the place's own prefix carries its headers, so node-pty compiles against them instead of downloading a set.
-    `case "$(command -v node)" in ${sh(place, `${place.nodeDir}/bin/node`)}) export npm_config_nodedir=${sh(place, place.nodeDir)} ;; esac`,
+    // What node-gyp is pointed at is a set of headers, so the headers are what is asked for and not the path: an
+    // installer that only symlinked a foreign node into this prefix left none, and a nodedir without them dies on
+    // `gyp: <prefix>/common.gypi not found` (measured on Ubuntu 24.04, 2026-09-11).
+    `if [ "$(command -v node)" = ${sh(place, `${place.nodeDir}/bin/node`)} ] && [ -f ${sh(place, `${place.nodeDir}/include/node/node_version.h`)} ]; then export npm_config_nodedir=${sh(place, place.nodeDir)}; fi`,
   ].join("\n");
 }
 

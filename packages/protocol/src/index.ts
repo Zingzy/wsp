@@ -147,10 +147,17 @@ export type InitSetup = z.infer<typeof InitSetup>;
 export const MachineSizeOffer = WorkspaceSize.extend({ rateUsdPerHour: z.number() });
 export type MachineSizeOffer = z.infer<typeof MachineSizeOffer>;
 
+/** How a provider pauses a machine. memory: a pause keeps the processes and every byte they hold. disk: a pause is a
+ * stop and a snapshot, and the wake is a boot that starts nothing the machine was running. */
+export const PauseMode = z.enum(["memory", "disk"]);
+export type PauseMode = z.infer<typeof PauseMode>;
+
 /** Honest per-backend feature flags; the UI degrades based on these, never on probing. */
 export const Capabilities = z.object({
   liveCloneForks: z.boolean(),
-  ramPreservingPause: z.boolean(),
+  /** Absent: the machine cannot be paused, and the runtime refuses a nap and a wake. The app reads the value for its
+   * words; the runtime reads only whether it is there. */
+  pauseMode: PauseMode.optional(),
   resize: z.boolean(),
   previewUrls: z.boolean(),
   signedUrls: z.boolean(),
@@ -167,10 +174,6 @@ export const Capabilities = z.object({
   /** Every size a create may ask for; a create that names another is refused with this list. A create that names
    * none takes the golden's size, which need not be on it. */
   sizes: z.array(MachineSizeOffer),
-  /** Only a machine that was never resumed may be snapshotted: the provider refuses one taken after a resume
-   * (Solari answers 502 deterministically, and same-host and cross-host are invisible from outside). False where a
-   * snapshot is a copy of the disk whatever the machine has done since it booted. */
-  firstLifeSnapshots: z.boolean(),
   /** The machine is the person's own, kept: its files, its sign-ins and its git checkouts outlive every turn, and
    * wsp neither made it nor throws it away. False on a fork wsp made, where a turn that wrecks the disk costs a
    * rebuild and nothing else. What a turn's access starts at reads this, not the workspace's kind. */
@@ -926,8 +929,8 @@ export const NOTIFY_ME = "me";
 
 /** The host a turn on a machine drives, off its own environment: the address the launch put there and the token
  * beside it. Nothing unless both are there, since an address with no token opens nothing and a token with no
- * address names no host. The pair is the lowest precedence road a wsp line takes, under every host on this
- * computer's own hosts file. */
+ * address names no host. The pair goes ahead of every host a computer holds on its own, under only what a line
+ * names: it is the identity the launch handed the turn, and the machine's own state file is a path nothing serves. */
 export function hostFromEnv(env: Readonly<Record<string, string | undefined>>): { url: string; token: string } | undefined {
   const url = env[HOST_URL_ENV]?.trim();
   const token = env[HOST_TOKEN_ENV]?.trim();
@@ -942,7 +945,10 @@ export const GUEST_DAEMON_DIR = "/root/wsp-daemon";
 /** The name the wsp MCP server has in every agent's config and in every launch that carries it, so an agent's
  * config on this computer and the launch a turn on a machine gets name one server and not two. */
 export const MCP_SERVER_NAME = "wsp";
-export const GUEST_WSP_BIN = `${GUEST_DAEMON_DIR}/wsp/bin.js`;
+/** The command sits in the bundle as npm lays the published package out, its package.json beside a dist folder,
+ * because the bin reads its own version through that file (`../package.json` from the bin) and announces it in
+ * every MCP handshake; a client refuses a server that names none. */
+export const GUEST_WSP_BIN = `${GUEST_DAEMON_DIR}/wsp/dist/bin.js`;
 
 /** The token a client puts on its requests, off its own environment; nothing when it is not running inside a turn. */
 export function turnTokenOf(env: Readonly<Record<string, string | undefined>>): string | undefined {
@@ -2184,6 +2190,7 @@ const DAEMON_CONTENTS = [
   "9ebea6a49390fd5b1af911f413e77c3e46db091812b55b41515e881e93433292",
   "da0d618fd27965a77c8c15e389fea39c8f3ae691326af0212a8f1c62b9c8499f",
   "cbfe733de05765b706c3ff4d08aa62ee188258771dd3b02011633716fad62a48",
+  "12eac7cd2f4b90f9064279a1ea3b3169d24e34c30279f5c19d046252e2d5ec66",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -2202,7 +2209,8 @@ const DAEMON_CONTENTS = [
  * caller names on a pty it opens, so a sign-in whose page must return to the machine can be handed a browser to
  * find there. Version 11 serves a machine reached over ssh, which reads the load and the processes of the machine
  * it runs on the way a fork does; the same daemon under the person's own login there, with every path it keeps
- * under their home. */
+ * under their home. Version 12 asks the prefix it would compile against for the headers themselves, so a machine
+ * where an installer symlinked a foreign node into that prefix builds node-pty instead of failing on it. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the daemon's sources, the dependency
@@ -2662,15 +2670,21 @@ export const RUNTIME_OPS: readonly string[] = RuntimeOp.options.map(o => o.shape
  * the openings, so an op added later reaches no thread until somebody puts it here on purpose. A thread opens
  * threads and forks machines under its own root and reads the tree it is in; every reach into a workspace is
  * refused again by the tree rule, and every act by the guard, so this list is the outer door and not the only one.
- * What is deliberately not here: the golden and its snapshots, the person's keys and their init, their preferences,
- * their folders, the provider's own capabilities, importing and exporting a folder, every road that hands out or
- * takes away access to this host, and the two roads that move a running turn's access mode or answer a permission
+ * What is deliberately not here: sealing the golden and rolling its snapshots, the project goldens, the person's
+ * keys and their init, their preferences, their folders, importing and exporting a folder, every road that hands out
+ * or takes away access to this host, and the two roads that move a running turn's access mode or answer a permission
  * prompt, which are the person's guard on an agent and not an agent's to lift. */
 export const THREAD_OPS: readonly string[] = [
   "auth",
   "events.subscribe",
   "status.list",
   "status.subscribe",
+  // A fork is asked for by snapshot id, and the head of the golden is where wsp new reads it: a thread that may fork
+  // has to be able to say from what. The manifest describes the image its own machine runs, nothing the person holds.
+  "golden.get",
+  // Read ahead of every fork for whether this host forks at all and at which sizes, so the refusal for a host that
+  // mints nothing comes in one sentence before any stage is streamed; the wsp command asks it under any token.
+  "capabilities.get",
   "workspaces.create",
   "workspaces.list",
   "workspaces.get",

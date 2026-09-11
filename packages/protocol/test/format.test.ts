@@ -67,9 +67,6 @@ import {
   mcpServerCommandLine,
   moveTimedOutLine,
   RESUME_UNANSWERED,
-  RESUME_CAP_MS,
-  WAKE_ASK_EVERY_MS,
-  WAKE_ASKS_FOR_MS,
   wakeAsksIn,
   WAKE_STOPPED,
   wakeAskingAgainLine,
@@ -970,18 +967,12 @@ describe("a resume the provider does not take", () => {
   });
 
   it("counts the host's own asks on the row, of the number it will make", () => {
-    expect(wakeAskingAgainLine(3, wakeAsksIn(WAKE_ASKS_FOR_MS, WAKE_ASK_EVERY_MS))).toBe("waking, asking again (3 of 30)");
+    expect(wakeAskingAgainLine(3, wakeAsksIn(30 * 60_000, 60_000))).toBe("waking, asking again (3 of 30)");
     expect(wakeAskingAgainLine(1, 2)).toBe("waking, asking again (1 of 2)");
   });
 
-  it("asks for half an hour, once a minute, and caps one call at half a minute", () => {
-    expect(RESUME_CAP_MS).toBe(30_000);
-    expect(WAKE_ASK_EVERY_MS).toBe(60_000);
-    expect(WAKE_ASKS_FOR_MS).toBe(30 * 60_000);
-  });
-
-  it("fits as many asks in the asking as the cadence leaves room for, since the half hour is wall time", () => {
-    expect(wakeAsksIn(WAKE_ASKS_FOR_MS, WAKE_ASK_EVERY_MS)).toBe(30);
+  it("fits as many asks in the asking as the cadence leaves room for, since the window is wall time", () => {
+    expect(wakeAsksIn(30 * 60_000, 60_000)).toBe(30);
     // The last ask starts inside the window, so a window of one cadence holds one ask and half a cadence more holds two.
     expect(wakeAsksIn(60_000, 60_000)).toBe(1);
     expect(wakeAsksIn(90_000, 60_000)).toBe(2);

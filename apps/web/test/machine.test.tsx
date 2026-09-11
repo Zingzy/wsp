@@ -24,6 +24,7 @@ import { provideDaemonHello } from "../src/files/wire.js";
 import { getLive, resetLive } from "../src/machine/live.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
+import { caps } from "./caps.js";
 import { statusOf } from "./workspace-status.js";
 
 // Base UI's tooltip opens on pointer hover, which jsdom cannot stage; the popup renders inline instead.
@@ -54,18 +55,7 @@ const costEvent = (workspaceId: string, rate: number, awakeMs: number, at: strin
   at,
 });
 
-const CAPS: Capabilities = {
-  liveCloneForks: true,
-  ramPreservingPause: true,
-  resize: true,
-  previewUrls: true,
-  signedUrls: true,
-  containers: true,
-  callbackRelay: true,
-  snapshotListing: true,
-  firstLifeSnapshots: true,
-  templates: false,
-  kept: false,
+const CAPS = caps({
   sizes: [
     { cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 },
     { cpu: 4, memMb: 8192, rateUsdPerHour: 0.22 },
@@ -73,7 +63,8 @@ const CAPS: Capabilities = {
     { cpu: 8, memMb: 16384, rateUsdPerHour: 0.44 },
     { cpu: 16, memMb: 32768, rateUsdPerHour: 0.88 },
   ],
-};
+});
+
 const EMPTY_LINEAGE: SnapshotLineage = { name: "default", head: null, versions: [] };
 
 // The surface's cost series listens through api.subscribe like the store does,

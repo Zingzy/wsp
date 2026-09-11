@@ -15,6 +15,7 @@ import { SEND_LABEL, WAKE_AND_SEND_LABEL } from "../src/components/chat/Composer
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { requestComposerFocus, requestNewThread } from "../src/shell/shellRequests.js";
 import { CHAT_HARNESS, CHAT_STREAM, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
+import { caps } from "./caps.js";
 
 let restoreLayout: () => void = () => {};
 beforeAll(() => { restoreLayout = installFakeLayout(); });
@@ -63,7 +64,7 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
     nap: async id => workspaces.find(w => w.id === id)!,
     wake: async id => workspaces.find(w => w.id === id)!,
     upgrade: async id => workspaces.find(w => w.id === id)!,
-    capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: false, kept: false, sizes: [] }),
+    capabilities: async () => (caps()),
     listSessions: async () => [],
     listHarnesses: async () => [CLAUDE_CATALOG],
     watchStatuses: async () => statuses,

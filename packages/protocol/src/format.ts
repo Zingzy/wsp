@@ -1004,10 +1004,6 @@ export function nameDeletingRefusal(name: string): string {
 /** The refusal a fork or a rename gets for a blank name: a person and an agent both address a workspace by its name. */
 export const BLANK_NAME_REFUSAL = "a workspace name cannot be blank";
 
-/** The one line wsp up refuses an empty state with: nothing to serve and the two ways in. A state with a sealed golden
- * or any workspace record, this computer's included, serves; an empty one has nothing for the app to show. */
-export const NOTHING_TO_SERVE_LINE = "nothing to serve yet; wsp new --local makes this computer a workspace, or wsp init seals a golden";
-
 /** The one sentence every machine road answers with on a computer set up with no machine provider key: wsp init took
  * the local road, so this computer is a workspace and there is nothing to fork, pause or seal until a key is here.
  * The provider module a keyless host wires says it, and so does the command line before it asks for anything. */
@@ -1583,6 +1579,10 @@ export function initAgentNoRecipeLine(recipePath: string, reason?: string): stri
  * sidebar row's second line and the Machine tab's lineage all read this one phrase. */
 export const THIS_COMPUTER = "this computer";
 
+/** The one sentence for the local workspace a run just recorded: wsp init's last tick and a host asked to serve a
+ * state with nothing in it both say it, so this computer is named the same way whichever road wrote the record. */
+export const thisComputerLine = (name: string, id: string): string => `Workspace ${name} (${id}) is ${THIS_COMPUTER}; its threads run here, under your own sign-ins.`;
+
 /** What an ssh workspace's machine is, in every sentence and every row that names it: a machine of the person's own
  * that wsp reaches and never runs. */
 export const OVER_SSH = "a machine over ssh";
@@ -1811,22 +1811,9 @@ export function moveTimedOutLine(move: "pause" | "wake", elapsedMs: number, read
   return `${move} did not complete in ${fmtDuration(elapsedMs)}; the provider did not answer and ${provider}; try again`;
 }
 
-/** How long one resume the provider has not taken is waited on, and how the host keeps asking after that. Measured
- * 2026-09-10 on this account: every read of a paused machine answered in 0.4 s while POST resume answered nothing
- * for the 30 s a curl gave it, so a wake that sits on the call tells the person nothing for as long as it sits.
- * The engine's request takes RESUME_CAP_MS as the cap on its own call and the runtime stops waiting on the same
- * number; nothing else holds a wake's clock. */
-export const RESUME_CAP_MS = 30_000;
-/** How often the host asks again after a resume the provider did not take, and how long it keeps asking: thirty
- * minutes of asking, so a provider that comes back inside its own outage wakes the machine with nobody watching.
- * Both are wall time from the first ask, not time added up after each call: a resume that sits on its 30 s cap
- * spends half of its own minute, and counting the cadence after the cap instead made thirty asks span 45 minutes
- * (seen live 2026-09-10, 25 asks in 38 minutes). */
-export const WAKE_ASK_EVERY_MS = 60_000;
-export const WAKE_ASKS_FOR_MS = 30 * 60_000;
-
 /** How many asks a window of asking holds at a cadence, which is the count the row counts against and the last ask
- * a wake makes. An ask starting exactly as the window runs out is not made, so a window of one cadence holds one. */
+ * a wake makes. An ask starting exactly as the window runs out is not made, so a window of one cadence holds one.
+ * The window and the cadence are the backend's to declare. */
 export const wakeAsksIn = (forMs: number, everyMs: number): number => Math.ceil(forMs / everyMs);
 
 /** The row's line the moment a resume runs its cap out with nothing back. Not a refusal and not a failed resume: the

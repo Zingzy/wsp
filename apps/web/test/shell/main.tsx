@@ -73,6 +73,7 @@ import { requestProjectTrip } from "../../src/shell/shellRequests";
 import { GhosttyTerminalSurface } from "../../src/terminal/ghostty/surface";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../../src/terminal/link";
 import "../../src/index.css";
+import { caps } from "../caps.js";
 
 const params = new URLSearchParams(window.location.search);
 const theme = params.get("theme") === "light" ? "light" : "dark";
@@ -327,7 +328,7 @@ const api: Api = {
   nap: async id => workspaces.find(w => w.id === id)!,
   wake: async id => workspaces.find(w => w.id === id)!,
   upgrade: async id => workspaces.find(w => w.id === id)!,
-  capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: false, kept: false, sizes: [] }),
+  capabilities: async () => (caps()),
   startSession: async o => ({ id: "s2", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
   portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
   daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),

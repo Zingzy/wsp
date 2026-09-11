@@ -86,6 +86,7 @@ import { selectRoot, useRootStore } from "../src/files/root.js";
 import { provideDaemonHello, provideDaemonWire } from "../src/files/wire.js";
 import { DAEMON_HELLO, DAEMON_ROOT, fakeWire, imported, LISTING, PROJECT_DEST, resetSurfaces } from "./surface-harness.js";
 import { CHAT_STREAM, CHAT_WS } from "./fixtures/chat-stream.js";
+import { caps } from "./caps.js";
 
 let restoreLayout: () => void = () => {};
 beforeAll(() => { restoreLayout = installFakeLayout(); });
@@ -126,7 +127,7 @@ function fixtureApi(history: SessionEvent[] = [], rows: SessionView[] = [], ws: 
     nap: async () => ws,
     wake: async () => ws,
     upgrade: async () => ws,
-    capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: false, kept: false, sizes: [] }),
+    capabilities: async () => (caps()),
     listSessions: async () => rows,
     watchStatuses: async () => [],
     createFromGoldenHead: async () => ws,

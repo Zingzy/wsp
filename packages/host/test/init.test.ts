@@ -1474,7 +1474,8 @@ describe("wsp init, the sign-in stage", () => {
     const store = memoryStore();
     await store.put("goldens", "default", { head: 1, versions: [{ version: 1, snapshotId: "snap_g", baseTemplate: "base", setupSha: "x", createdAt: "t", smoke: { cmd: "true", exitCode: 0 } }] });
     // Nothing answers on guest.test, so the create's daemon ping is kept short.
-    const rt = createRuntime({ backend, store, adapters: {}, wake: { pingTimeoutMs: 100 } , hostId: "box:h1" });
+    backend.lifecycle.budgets.daemonAnswersMs = 100;
+    const rt = createRuntime({ backend, store, adapters: {}, hostId: "box:h1" });
     await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
     const lines: string[] = [];
     let emit: ((e: Record<string, unknown>) => void) | undefined;

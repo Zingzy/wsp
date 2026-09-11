@@ -3391,10 +3391,11 @@ describe("runtime create stages", () => {
     });
   });
 
-  it("a fork whose daemon never answers still becomes a workspace: the stage says so, with the fault as its notice", async () => {
+  it("a fork whose daemon never answers still becomes a workspace: the stage says so, with the backend's daemon budget in the fault", async () => {
     const port = await deadPort();
     const backend = edgeBackend(port);
-    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, wake: { pingTimeoutMs: 300 }, daemonToken: TOKEN });
+    backend.lifecycle.budgets.daemonAnswersMs = 300;
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
@@ -3476,7 +3477,8 @@ describe("runtime verified wake", () => {
     const port = await deadPort();
     try {
       const store = memoryStore();
-      const rt = createRuntime({ backend, store, adapters: {}, wake: { pingTimeoutMs: 300 } });
+      backend.lifecycle.budgets.daemonAnswersMs = 300;
+      const rt = createRuntime({ backend, store, adapters: {} });
       const events: EventUnion[] = [];
       rt.events.on("*", e => events.push(e));
       const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
@@ -3501,6 +3503,39 @@ describe("runtime verified wake", () => {
       expect(last.status.phase).toBe("running");
       expect(last.status.machineId).toBe("m2");
       expect(last.status.reason).toMatch(/attempt 1: daemon on m1 did not answer within 300 ms.*created as \{"cpu":2,"memMb":4096.*attempt 2:/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("a backend declaring one wake attempt: resume, the check fails, no re-pause, and the fork replaces the machine", async () => {
+    const { backend, untars } = guestBackend();
+    const port = await deadPort();
+    try {
+      backend.lifecycle.budgets.daemonAnswersMs = 300;
+      backend.lifecycle.budgets.wakeAttempts = 1;
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+      const events: EventUnion[] = [];
+      rt.events.on("*", e => events.push(e));
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+      const m1 = backend.machines[0]!;
+      m1.previewUrl = async () => ({ url: `ws://127.0.0.1:${port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
+      let pauses = 0;
+      const pause = m1.pause.bind(m1);
+      m1.pause = async () => { pauses++; await pause(); };
+      await rt.workspaces.nap(ws.id);
+      expect(pauses).toBe(1);
+      const woken = await rt.workspaces.wake(ws.id);
+      // One resume and no re-pause after the nap's own: a provider that bills every start is not asked for a second.
+      expect(m1.resumes).toBe(1);
+      expect(pauses).toBe(1);
+      expect(m1.killed).toBe(true);
+      expect(woken.machineId).toBe("m2");
+      expect(untars).toEqual(["m2"]);
+      const last = events.filter(e => e.type === "workspace.status").at(-1) as { status: { reason?: string } };
+      // The fault names the backend's own daemon budget, on a wake as on a fork.
+      expect(last.status.reason).toMatch(/^attempt 1: daemon on m1 did not answer within 300 ms/);
+      expect(last.status.reason).not.toContain("attempt 2");
     } finally {
       vi.unstubAllGlobals();
     }

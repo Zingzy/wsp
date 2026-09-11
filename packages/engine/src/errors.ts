@@ -22,6 +22,29 @@ export function classify(status: number, body: { code?: string; error?: string }
   return { kind: "unknown", ...rest };
 }
 
+/** What a backend's pause ends with when the provider never answered the move (a missed budget, a call the network
+ * dropped) and the machine did not land where the move leaves it, carrying the last such failure as its cause; a
+ * refusal the provider answered with is thrown as itself. */
+export class MoveUnansweredError extends Error {}
+
+/** What a backend's resume ends with when the provider never took the call inside its cap and the machine still
+ * reads paused: the one failure the host answers by asking again on its own rather than by handing the row back to
+ * the person. */
+export class ResumeUnansweredError extends MoveUnansweredError {}
+
+/** Thrown by a backend that refuses a snapshot of a machine that has been resumed. Typed so callers (the wizard) can
+ * tell "start over" from an ordinary failure. */
+export class NotFirstLifeError extends Error {
+  readonly kind = "notFirstLife" as const;
+  constructor(
+    readonly machineId: string,
+    action: string,
+  ) {
+    super(`${action} refused: machine ${machineId} is not first-life (it was resumed); snapshots only come from fresh machines`);
+    this.name = "NotFirstLifeError";
+  }
+}
+
 /** The provider answered 404 for the machine: it no longer knows it. */
 export function isMissing(e: unknown): boolean {
   return (e as WspError | undefined)?.kind === "missing";
