@@ -7,6 +7,8 @@ export interface TcpProxy {
   cutAll(): void;
   /** Keep every socket open but forward nothing: a half-dead link only heartbeats can detect. */
   stall(): void;
+  /** How many connections this road is holding, which is what a line still waiting on one looks like from outside. */
+  live(): number;
   resume(): void;
   close(): Promise<void>;
 }
@@ -42,6 +44,9 @@ export async function startTcpProxy(targetPort: number, listenPort = 0): Promise
   const port = typeof addr === "object" && addr !== null ? addr.port : 0;
   return {
     port,
+    live() {
+      return pairs.size;
+    },
     stall() {
       stalled = true;
     },

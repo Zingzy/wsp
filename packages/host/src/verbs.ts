@@ -165,7 +165,7 @@ import {
 import type { CliIO } from "./cli.js";
 import { gitRootOf } from "./repo-root.js";
 import { dialAddress, hostTokenPath, servingHost } from "./host-lock.js";
-import { addressNotPairedLine, aimName, aimedHost, deviceRefusedLine, noAnswerLine, stateIgnoredLine, wsUrlOf, type HostAim, type HostPick } from "./hosts.js";
+import { addressNotPairedLine, aimName, aimedHost, deviceRefusedLine, dialWindowMs, noAnswerRefusal, noAnswerWithin, stateIgnoredLine, wsUrlOf, type HostAim, type HostPick } from "./hosts.js";
 import { colourDepth, isTTY, wrap } from "./init-layout.js";
 import { RecipeAnswer, RecipeScan, recipePrintout, scanPrintout } from "./recipe-answer.js";
 import { isRecipeTick, runRecipe, runScan, type ScanInput } from "./recipe-command.js";
@@ -187,9 +187,13 @@ export interface HostClient {
   /** The device this socket bought with a pairing code, on the one dial that redeems one; absent on every other. */
   readonly paired?: { deviceId: string; deviceToken: string };
   close(): void;
+  /** Drops the socket without waiting for the host to answer the close. A graceful close on a road that is carrying
+   * nothing waits on an answer that is not coming, and the operating system holds the connection long after the
+   * line has said its last word: measured on a stalled road, a close held the process 30.6 s where this took
+   * 0.6 s. A caller that has given up on the road takes this rather than close. */
+  terminate(): void;
 }
 
-const DIAL_MS = 5_000;
 /** The close code the runtime sends with every token refusal, the one fact an older host still carries. */
 const UNAUTHORIZED_CLOSE = 4401;
 /** How long a refused auth waits for the close that follows its frame before the frame's own class stands. */
@@ -198,6 +202,7 @@ const CLOSE_GRACE_MS = 500;
 /** What a dial takes beside the state file: which host, how long to wait, and on the one dial that pairs, the code
  * to spend instead of a token this computer does not have yet. */
 export interface DialOpts extends HostPick {
+  /** How long the socket and the first frame's answer may take; the road's own window when no caller names one. */
   deadlineMs?: number;
   /** Resolved already by a caller that had to read it anyway, so the hosts file is read once per line. */
   aim?: HostAim;
@@ -226,14 +231,15 @@ export function hostAddress(statePath: string, pick: HostPick & { aim?: HostAim 
 }
 
 /** One socket to the host: the token rides in the first frame, never in the URL; then request and reply by id.
- * Open and auth share one deadline, so a port that accepts and never answers fails in one line. */
+ * Open and auth share one deadline, so a port that accepts and never answers fails in one line, and that deadline
+ * is the window the road gets rather than one number for every road. */
 export async function dialHost(statePath: string, opts: DialOpts = {}): Promise<HostClient> {
-  const deadlineMs = opts.deadlineMs ?? DIAL_MS;
   const aim = opts.aim ?? aimedHost(statePath, opts);
   // An address is the road wsp connect takes and no other: every other line needs the token a redeem bought, and
   // this computer holds one only under a name.
   if (aim.kind === "url" && aim.token === undefined && opts.redeem === undefined) throw usageRefusal(addressNotPairedLine(aim.url));
   const { url, token } = hostAddress(statePath, { aim });
+  const deadlineMs = opts.deadlineMs ?? dialWindowMs(aim);
   const ws = new WebSocket(url);
   const opened = new Promise<void>((done, fail) => {
     ws.once("open", () => done());
@@ -279,7 +285,7 @@ export async function dialHost(statePath: string, opts: DialOpts = {}): Promise<
   // as they gave it for one anywhere else, never the ws url the dial builds out of it.
   const where = aim.kind === "here" ? new URL(url).host : aim.kind === "alias" ? aim.record.url : aim.url;
   const deadline = new Promise<never>((_, fail) => {
-    timer = setTimeout(() => fail(new Error(noAnswerLine(where, `nothing came back within ${deadlineMs} ms`))), deadlineMs);
+    timer = setTimeout(() => fail(noAnswerWithin(where, deadlineMs)), deadlineMs);
   });
   let paired: { deviceId: string; deviceToken: string } | undefined;
   // A refusal whose frame carries no kind is classed by the close code that follows it, so a host of an older version
@@ -287,7 +293,7 @@ export async function dialHost(statePath: string, opts: DialOpts = {}): Promise<
   // somewhere else says so with its alias and the line that pairs again, since its token is this computer's to renew.
   const authed = opened
     .catch((e: unknown) => {
-      throw new Error(noAnswerLine(where, e instanceof Error ? e.message : String(e)));
+      throw noAnswerRefusal(where, e instanceof Error ? e.message : String(e));
     })
     .then(async () => {
       if (opts.redeem === undefined) return void (await request("auth", { token }));
@@ -325,6 +331,7 @@ export async function dialHost(statePath: string, opts: DialOpts = {}): Promise<
     closeWords,
     ...(paired !== undefined ? { paired } : {}),
     close: () => ws.close(),
+    terminate: () => ws.terminate(),
   };
 }
 
