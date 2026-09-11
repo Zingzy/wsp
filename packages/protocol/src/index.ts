@@ -166,6 +166,11 @@ export const Capabilities = z.object({
   /** A daemon link exists, so sign-in URLs a guest tool opens land in the laptop's browser and the
    * callback port is forwarded back; false means the person finishes sign-ins by copy and paste. */
   callbackRelay: z.boolean(),
+  /** The provider copies a running machine's disk into an image the account holds, which is what a version and a
+   * project golden are sealed as and what a fork boots from. False where the disk is the person's own and nothing
+   * copies it (this computer, a machine reached over ssh). Whether a fork of that image comes up with the processes
+   * still running is liveCloneForks and says nothing about whether one can be taken. */
+  diskSnapshots: z.boolean(),
   /** The provider lists every snapshot on the account with its size, so storage can be counted and priced. */
   snapshotListing: z.boolean(),
   /** The provider promotes a snapshot to a template that survives its own restarts, so a sealed version is recorded

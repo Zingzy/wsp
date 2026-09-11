@@ -112,6 +112,23 @@ describe("a project golden", () => {
     expect(backend.snapshots.map(s => s.id)).toEqual([golden.snapshotId]);
   });
 
+  it("a provider whose forks boot cold still snapshots: the gate reads whether the provider copies a machine's disk, not how a fork of that image comes up", async () => {
+    const { rt, advance, backend } = await setup();
+    // A container provider's shape: a commit of the filesystem from any life, and a fork that boots cold with the
+    // agents started again.
+    backend.capabilities.liveCloneForks = false;
+    backend.snapshotsAnyLife = true;
+    const ws = await loaded(rt, advance);
+    await rt.workspaces.nap(ws.id);
+    await rt.workspaces.wake(ws.id);
+    advance(5 * 60_000);
+    const golden = await rt.workspaces.snapshot(ws.id);
+    expect(golden).toMatchObject({ workspaceId: ws.id, workspaceName: "task", projects: [PROJECT] });
+    expect(backend.snapshots.map(s => s.id)).toEqual([golden.snapshotId]);
+    const fork = await rt.workspaces.create({ golden: golden.snapshotId, name: "task-a" });
+    expect(fork).toMatchObject({ golden: golden.snapshotId, projects: [PROJECT] });
+  });
+
   it("a workspace without a project, a napping one and one that was ever resumed are refused in one sentence, and no snapshot is taken", async () => {
     const { rt, advance, backend } = await setup();
     const bare = await rt.workspaces.create({ golden: "snap_golden-v12", name: "bare" });

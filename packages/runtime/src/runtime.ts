@@ -1851,7 +1851,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (Object.keys(patch).length > 0) await preferences.set(patch);
   };
   /** The capability a verb reads before it runs: a machine whose capability is false refuses the verb with the one
-   * sentence, which reads for the local computer, the only machine short of these capabilities today. */
+   * sentence. Each verb names the capability its own move needs and never a neighbour's: a provider that copies a
+   * machine's disk but whose forks boot cold takes a snapshot all the same. */
   const refuseCannot = (entry: LiveWorkspace, can: keyof Omit<Capabilities, "sizes" | "pauseMode">, action: string): void => {
     if (backendFor(entry.record.kind).capabilities[can] !== true) throw new Error(undrivenRefusal(entry.record.name, machineWord(entry.record.kind), action));
   };
@@ -3779,7 +3780,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async snapshot(id, origin) {
       const entry = await entryOf(id, origin);
-      refuseCannot(entry, "liveCloneForks", "be snapshotted");
+      refuseCannot(entry, "diskSnapshots", "be snapshotted");
       const { name } = entry.record;
       // The snapshot is the whole disk and carries every project on it; it is named after the one the rule would
       // start a thread in, else the newest import.

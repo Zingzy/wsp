@@ -147,6 +147,7 @@ export class SolariBackend implements MachineBackend {
     signedUrls: true,
     containers: false, // guest kernel 6.6.30 lacks overlayfs and netfilter: dockerd falls back to vfs with no bridge and runc fails (measured)
     callbackRelay: true, // the daemon link rides previewUrls
+    diskSnapshots: true, // of a machine that was never resumed: the provider answers 502 on one that was
     snapshotListing: true,
     templates: true,
     kept: false, // a fork wsp made and can rebuild in a minute: a turn that wrecks its disk costs nothing else

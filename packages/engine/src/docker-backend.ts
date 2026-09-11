@@ -429,6 +429,7 @@ export class DockerBackend implements MachineBackend {
       // The daemon's port is published on the box's loopback, which this host dials when the box is this computer,
       // so a sign-in a guest opens reaches the person's browser. A daemon on another box needs a forward first.
       callbackRelay: this.onThisComputer,
+      diskSnapshots: true, // a commit of the container's filesystem, whatever the container has done since it booted
       snapshotListing: true,
       templates: true,
       kept: false, // a fork wsp made and can rebuild: a turn that wrecks its disk costs nothing else
