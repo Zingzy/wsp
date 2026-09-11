@@ -427,6 +427,8 @@ describe("DockerBackend against a fake Engine API", () => {
       engine.json("GET", /^\/containers\/c1\/json$/, RUNNING("c1"));
       const machine = await remote.get("c1");
       expect(machine.previewUrl).toBeUndefined();
+      // The guest is still askable: no route is no reason for the status to call such a machine unsupported.
+      expect(typeof machine.daemonAnswers).toBe("function");
       // The same reading tells the sign-in relay it has no road home.
       expect(remote.capabilities.callbackRelay).toBe(false);
     }
@@ -456,6 +458,32 @@ describe("DockerBackend against a fake Engine API", () => {
     const machine = await backend.get("c1");
     await machine.putBytes!("/root/x.bin", new Uint8Array([4, 5, 6]));
     expect(engine.took("PUT", "/containers/c1/archive")!.raw.subarray(512, 515)).toEqual(Buffer.from([4, 5, 6]));
+  });
+
+  it("asks the guest itself whether the daemon is listening, on the road every other call to it takes", async () => {
+    engine.json("GET", /^\/containers\/c1\/json$/, RUNNING("c1"));
+    engine.json("POST", /^\/containers\/c1\/exec$/, { Id: "e1" }, 201);
+    engine.on("POST", /^\/exec\/e1\/start$/, (_seen, res) => res.writeHead(200).end());
+    let exit = 0;
+    engine.on("GET", /^\/exec\/e1\/json$/, (_seen, res) => res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ ExitCode: exit, Running: false })));
+
+    const machine = await backend.get("c1");
+    expect(await machine.daemonAnswers!()).toBe(true);
+    // The guest's own loopback, never the published port: the published one is the Docker daemon's computer's.
+    expect((engine.took("POST", "/containers/c1/exec")!.body as { Cmd: string[] }).Cmd[2]).toContain("(exec 3<>/dev/tcp/127.0.0.1/7070)");
+    exit = 1;
+    expect(await machine.daemonAnswers!()).toBe(false);
+  });
+
+  it("asks under the caller's own bound, and cuts the ask off at it", async () => {
+    engine.json("GET", /^\/containers\/c1\/json$/, RUNNING("c1"));
+    engine.on("POST", /^\/containers\/c1\/exec$/, (_seen, res) => {
+      setTimeout(() => res.writeHead(201, { "Content-Type": "application/json" }).end(JSON.stringify({ Id: "e1" })), 1_000).unref();
+    });
+    const machine = await backend.get("c1");
+    const started = Date.now();
+    await expect(machine.daemonAnswers!({ timeoutMs: 100 })).rejects.toThrow(/did not answer POST \/containers\/c1\/exec in 100ms/);
+    expect(Date.now() - started).toBeLessThan(900);
   });
 
   it("says a container's daemon is the container's own boot, not a service manager", async () => {

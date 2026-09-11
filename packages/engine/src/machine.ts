@@ -96,6 +96,13 @@ export interface Machine {
   uploadUrl(path: string): Promise<string>;
   /** Optional: the backends that have a route to a guest port at all. */
   previewUrl?(port: number): Promise<PreviewReach>;
+  /** Optional: whether the daemon inside the guest is listening, asked over the road this machine's own calls take
+   * rather than by dialling a route from here. Present where a route this computer dials is not the truth about
+   * the guest: a container's published port lands on the loopback of the computer its Docker daemon runs on, which
+   * is not always the one asking, and a host that is not that computer reads silence off a live daemon. Absent
+   * leaves the reach to previewUrl, which on a backend with a public edge is the same road a client takes. The
+   * caller's bound is the whole call's, as it is on exec and putBytes. */
+  daemonAnswers?(opts?: { timeoutMs?: number }): Promise<boolean>;
   /** Optional: bytes onto the machine on a backend that mints no signed upload URL. `landBytes` is what reads it,
    * so no caller picks between the two roads itself. */
   putBytes?(path: string, bytes: Uint8Array, opts?: { timeoutMs?: number }): Promise<void>;
@@ -159,8 +166,10 @@ export interface LifecycleBudgets {
   /** How many times a wake may resume the machine and check it before a fresh fork replaces it. Each attempt after
    * the first is a pause and a resume; a provider that bills starts declares 1. */
   wakeAttempts: number;
-  /** How long the guest's daemon gets to answer through its route once the machine reads running, after a fork and
-   * after a resume alike, before the runtime says it did not. */
+  /** How long the guest's daemon gets to answer once the machine reads running, after a fork and after a resume
+   * alike, before the runtime says it did not. It bounds whichever road the check took, the route dialled from
+   * here or the machine's own `daemonAnswers`; it is not the status poll's probe bound, which the caller of the
+   * read sets. */
   daemonAnswersMs: number;
   /** How the host keeps asking after a resume the provider did not take (a ResumeUnansweredError): once every
    * everyMs of wall time from the first ask, for forMs. Absent, the host asks once and stops. */

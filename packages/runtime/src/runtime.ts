@@ -2300,7 +2300,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const reachOf = (entry: LiveWorkspace): ReachState => {
     const seen = polledReach.get(entry.record.id);
     if (seen !== undefined && seen.machineId === entry.machine.id) return seen.reach;
-    return moduleOf(entry.record.kind).hasDaemon(entry) ? "reachable" : "unsupported";
+    // The same reading the status poll makes: a machine wsp can ask at all, by a route or by its own answer.
+    return moduleOf(entry.record.kind).hasDaemon(entry) || entry.machine.daemonAnswers !== undefined ? "reachable" : "unsupported";
   };
   const emitStatus = async (entry: LiveWorkspace, reach: ReachState, reason?: string): Promise<void> => {
     const size = entry.record.size;
@@ -2337,14 +2338,25 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return connectDaemon({ previewUrl: reach.url, token, onEvent: o.onEvent ?? (() => {}), ...(o.heartbeatMs !== undefined ? { heartbeatMs: o.heartbeatMs } : {}) });
   };
 
-  /** The daemon answering through the edge is what proves a resumed guest
-   * serves; resume() returning does not (a zombie reports running for 10+
-   * minutes while exec and the edge 502). Backends without preview routes
-   * have no edge to ask, so the check falls back to the shape comparison. */
+  /** The daemon answering is what proves a resumed guest serves; resume() returning does not (a zombie reports
+   * running for 10+ minutes while exec and the edge 502). Asked over the machine's own road where it has one and
+   * through the edge where the route is the only way in, since the two readings of one machine's reach would
+   * otherwise disagree: a container's published port is on the loopback of the computer its Docker daemon runs on,
+   * and a host that is not that computer would fail this check on a live guest, which on a backend whose wake
+   * takes one attempt throws the container away and forks the golden again. A machine with neither road has
+   * nothing to ask, so the check falls back to the shape comparison. */
   const pingDaemon = async (entry: LiveWorkspace): Promise<string | undefined> => {
     const machine = entry.machine;
-    if (!machine.previewUrl) return undefined;
     const answersMs = lifecycleOf(entry).budgets.daemonAnswersMs;
+    if (machine.daemonAnswers !== undefined) {
+      try {
+        const up = await until(machine.daemonAnswers({ timeoutMs: answersMs }), Date.now() + answersMs, "daemon answer");
+        return up ? undefined : `nothing listens on the daemon's port inside ${machine.id}`;
+      } catch (e) {
+        return `daemon on ${machine.id} did not answer within ${answersMs} ms (${e instanceof Error ? e.message : String(e)})`;
+      }
+    }
+    if (!machine.previewUrl) return undefined;
     const deadline = Date.now() + answersMs;
     let link: DaemonReach | null = null;
     try {
@@ -3324,7 +3336,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       } catch (e) {
         fault = `preview route for ${entry.machine.id} not minted (${e instanceof Error ? e.message : String(e)})`;
       }
-      report("daemon-answering", fault === undefined ? "Daemon answered through the edge." : "Daemon did not answer through the edge.", fault);
+      // The road is not in the words: the check asks the machine itself where it can answer, and the fault carries
+      // which road went quiet for the one that could not.
+      report("daemon-answering", fault === undefined ? "Daemon answered." : "Daemon did not answer.", fault);
       void syncDaemon(entry);
     }
     await persist(record);
@@ -5924,6 +5938,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(e.wakeAsk !== undefined ? { wakeAsk: e.wakeAsk } : {}),
         ...(e.record.phase === "running" && idle.idleAt(e.record.id) !== undefined ? { idleAt: idle.idleAt(e.record.id)! } : {}),
         ...(moduleOf(e.record.kind).hasDaemon(e) ? { daemonReach: () => moduleOf(e.record.kind).daemonRoad(e) } : {}),
+        ...(e.machine.daemonAnswers !== undefined ? { daemonAnswers: e.machine.daemonAnswers.bind(e.machine) } : {}),
         providerState: () => e.machine.state(),
         ...(e.machine.metrics !== undefined ? { metrics: e.machine.metrics.bind(e.machine) } : {}),
         ...(e.machine.facts !== undefined ? { facts: e.machine.facts.bind(e.machine) } : {}),

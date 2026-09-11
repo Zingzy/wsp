@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, CURL_NET, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
-import { CREATED_AT_LABEL, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_SUPERVISOR_PATH, GUEST_TMP, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
+import { CREATED_AT_LABEL, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_SUPERVISOR_PATH, GUEST_TMP, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
 import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, DAEMON_ROOTS_PATH, GUEST_DAEMON_DIR, LOOPBACK, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, type SnapshotStorage, type WorkspaceKind } from "@wsp/protocol";
 import { DAEMON_TOKEN_PATH, goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
@@ -220,15 +220,11 @@ export const BOOT_SCRIPT: DaemonSupervision = {
   up: place => [
     // A service manager restarts the daemon at once; a supervisor that was already watching sleeps a second first,
     // so this road waits longer for the port than a unit's does, which is the place's own upTries.
-    `for _ in $(seq ${place.upTries}); do ${BOOT_PORT_CHECK} && break; sleep 0.25; done`,
-    `${BOOT_PORT_CHECK} && echo DAEMON_UP || { ${BOOT_SCRIPT.log(place, 50)}; echo DAEMON_DOWN; }`,
+    `for _ in $(seq ${place.upTries}); do ${DAEMON_LISTENING_CHECK} && break; sleep 0.25; done`,
+    `${DAEMON_LISTENING_CHECK} && echo DAEMON_UP || { ${BOOT_SCRIPT.log(place, 50)}; echo DAEMON_DOWN; }`,
   ],
   log: (_place, lines) => `tail -n ${lines} ${DAEMON_LOG_PATH}`,
 };
-
-/** Whether the daemon is serving, in the words a container image can answer in: bash's own network road, since it
- * ships neither ss nor curl. */
-const BOOT_PORT_CHECK = `(exec 3<>/dev/tcp/${LOOPBACK}/${DAEMON_PORT}) 2>/dev/null`;
 
 /** The protocol's own reading of the folder, since the wsp command the runtime hands every fork sits under it:
  * two spellings of one path would have those two agreeing by luck. */
