@@ -18,6 +18,7 @@ import {
   portTakenLine,
   portsAsked,
   portsPickedLine,
+  servedHostname,
   stateFileLine,
 } from "../src/index.js";
 import { ROOT, sourceFiles } from "./source-files.js";
@@ -26,6 +27,16 @@ describe("an address where an alias could go", () => {
   it("is a word with an http, https, ws or wss scheme, and nothing else", () => {
     for (const word of ["http://box:4400", "https://box.example/wsp", "ws://box:4410", "WSS://box"]) expect(isUrl(word)).toBe(true);
     for (const word of ["box", "box:4400", "127.0.0.1:14400", "ftp://box", "http:/box", ""]) expect(isUrl(word)).toBe(false);
+  });
+
+  it("the name of the computer comes back only for an address a host is served at", () => {
+    expect(servedHostname("http://box:4400")).toBe("box");
+    expect(servedHostname("https://box.example/wsp")).toBe("box.example");
+    expect(servedHostname("HTTP://Box.Example")).toBe("box.example");
+    expect(servedHostname("http://[2001:db8::5]:4400")).toBe("[2001:db8::5]");
+    // A ws or wss address is where a socket is dialled, not where a host is served, and every spelling that would
+    // throw out of the URL parser reads as no address rather than as a stack.
+    for (const word of ["ws://box:4410", "WSS://box", "http://", "https://", "box", "ftp://box", ""]) expect(servedHostname(word)).toBeUndefined();
   });
 });
 
