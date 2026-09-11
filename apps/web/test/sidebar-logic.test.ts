@@ -3,7 +3,7 @@
 // pill rollup over wsp thread snapshots, plus our row labels and the
 // new-workspace helpers.
 import { describe, expect, it } from "vitest";
-import { FREE_WORD, OVER_SSH, THREAD_ARCHIVE_MS, kindWords, wakeAskingAgainLine, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, OVER_SSH, THREAD_ARCHIVE_MS, kindWords, machineLacksShort, wakeAskingAgainLine, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { RequestError } from "../src/protocol/client.js";
 import { explainCreateRefusal } from "../src/protocol/store.js";
 import {
@@ -312,6 +312,21 @@ describe("workspace row labels", () => {
     expect(workspaceMetaLine({ project: project({ reach: { state: "unsupported" }, daemonNote: "updating the helper" }, { kind: "ssh" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
     // This computer reads the same rule: its host wires a daemon, so one missing is a fact worth the line.
     expect(workspaceMetaLine({ project: project({ reach: { state: "unsupported" } }, { kind: "local" }), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toBe("no daemon on this machine");
+  });
+
+  it("a machine that told the host what it lacks says that on its row, in the first clause of what it said", () => {
+    const said = (why: string) =>
+      workspaceMetaLine({ project: project({ reach: { state: "unsupported" }, daemonRefusedAt: { machineId: "ssh://dev@box:22", at: "2026-09-11T14:04:50.380Z", why } }, { kind: "ssh" }), cost: tick(0.29), outOfMemory: undefined, nowMs: now });
+    // Why, rather than the bare fact that none is there: the row cuts from the right, so it takes the head of the
+    // sentence, which is what the machine has not got. Both refusals are written to fit it.
+    expect(said(NO_BUILD_TOOLS_LINE)).toBe("this machine has no C compiler");
+    expect(said(NO_LINGER_LINE)).toBe("this login does not linger");
+    // The whole sentence carries the command to type, which is at the end of it and no row would show; the
+    // Machine tab is where it goes, and that is proved where that surface is rendered.
+    expect(NO_LINGER_LINE).toContain("loginctl enable-linger");
+    expect(machineLacksShort(NO_LINGER_LINE)).not.toContain("loginctl");
+    // Nothing said, nothing new: the row keeps the fact it always had.
+    expect(daemonGoneLine("unsupported", kindWords("ssh"))).toBe("no daemon on this machine");
   });
 
   it("thread pills key on the session status, wear the adapter's word, and use tokens: only the running dot is the success colour", () => {

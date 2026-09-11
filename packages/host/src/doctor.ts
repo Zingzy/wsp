@@ -12,7 +12,7 @@ import { join, posix } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, CURL_NET, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_SUPERVISOR_PATH, GUEST_TMP, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
-import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, DAEMON_ROOTS_PATH, GUEST_DAEMON_DIR, LOOPBACK, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, type SnapshotStorage, type WorkspaceKind } from "@wsp/protocol";
+import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, DAEMON_ROOTS_PATH, GUEST_DAEMON_DIR, LOOPBACK, machineLacking, machineUnanswered, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, type SnapshotStorage, type WorkspaceKind } from "@wsp/protocol";
 import { DAEMON_TOKEN_PATH, goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import { assetDir, assetName, assetProof, copyAsset } from "./assets.js";
@@ -665,13 +665,18 @@ export function preflightScript(place: DaemonPlace): string {
 /** What that check answers with when the machine can take a daemon. */
 export const PREFLIGHT_OK_LINE = "PREFLIGHT_OK";
 
-/** Runs it and throws with the machine's own words, which are the sentence the refusing line printed. */
+/** Runs it and throws, marked with which of the two ways it ended. A refusing line echoes its sentence and exits
+ * 1, so a last line on stdout under that code is the machine's own words about what it has not got and is marked
+ * as such; anything else is a check that never ran there, where the words are the ssh client's own (a machine that
+ * is off answers nothing on stdout and 255) and say nothing about that machine. Telling them apart here is what
+ * keeps a box someone switched off out of the row that says what a machine lacks. */
 export async function preflight(machine: Machine, place: DaemonPlace): Promise<void> {
   if (place.preflight.length === 0) return;
   const res = await machine.run(preflightScript(place), { deadlineMs: 60_000 });
-  if (res.exitCode !== 0 || !res.stdout.includes(PREFLIGHT_OK_LINE)) {
-    throw new Error(`${res.stdout.split("\n").filter(line => line !== "").at(-1) ?? res.stderr.slice(-200)}`.trim());
-  }
+  if (res.exitCode === 0 && res.stdout.includes(PREFLIGHT_OK_LINE)) return;
+  const said = res.stdout.split("\n").filter(line => line.trim() !== "").at(-1)?.trim();
+  if (res.exitCode === 1 && said !== undefined) throw machineLacking(said);
+  throw machineUnanswered(`the machine did not answer what a daemon needs: ${(said ?? res.stderr.slice(-200)).trim()}`);
 }
 
 /** The preview host with its machine-and-port label cut off ("<id>-7070.preview.example.com" gives
