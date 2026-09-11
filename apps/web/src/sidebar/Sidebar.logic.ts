@@ -260,11 +260,17 @@ export function nestSpawnedThreads<T extends { readonly id: string; readonly par
   if (spawned.size === 0) return [...threads];
   const under = new Set([...spawned.values()].flat().map(t => t.id));
   const out: T[] = [];
+  const drawn = new Set<string>();
   const push = (thread: T): void => {
+    if (drawn.has(thread.id)) return;
+    drawn.add(thread.id);
     out.push(thread);
-    for (const child of spawned.get(thread.id) ?? []) if (!out.includes(child)) push(child);
+    for (const child of spawned.get(thread.id) ?? []) push(child);
   };
   for (const thread of threads) if (!under.has(thread.id)) push(thread);
+  // Rows whose parents lead round in a circle are under no top row: they keep their own order at the end rather
+  // than falling out of the list, since a thread the sidebar does not draw is a thread nobody can reach.
+  for (const thread of threads) push(thread);
   return out;
 }
 

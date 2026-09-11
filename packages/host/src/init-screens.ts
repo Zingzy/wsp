@@ -12,7 +12,7 @@
 import { basename } from "node:path";
 import { CATALOG_AGENTS, CATALOG_TOOLS, agentName as catalogName, catalogEntry, hasLogin } from "@wsp/catalog";
 import { floorApplies, type LoginChoice, type Manifest, type Platform } from "@wsp/collect";
-import { BUILDER_DISK_GB, isMcpRow } from "@wsp/engine";
+import { isMcpRow } from "@wsp/engine";
 import { CLOUD_SETUP_WORDS, fmtCalls, initShownScreens, type InitScreen, type InitScreenId, type InitScreenItem, type Recipe } from "@wsp/protocol";
 import { alsoItems, alsoTitle, alsoTop, buildLine, scannedTicks, withScanned } from "./init-also.js";
 import { AGENTS_TITLE, AGENTS_TOP, SIGN_INS_TITLE, SIGN_INS_TOP, TOOLS_TITLE, TOOLS_TOP, WSP_TOP, mcpAgents, pickEstimate, signInItems, tableItems, withAgents, withTools, wspTitle, wspToolsItems } from "./init-pick.js";
@@ -131,10 +131,13 @@ function loginItems(items: readonly SelectItem[], manifest: Manifest, saved: Rea
 }
 
 /** What the image's disk holds before any tick, and the disk the build asks the provider for: the base the room
- * leaves out of the builder's disk, plus the files that travel. The ring the app draws grows from here. */
-export function diskOf(reading: Reading, recipe: Recipe, statePath: string): { fixed: number; total: number } {
+ * leaves out of the builder's disk, plus the files that travel. The ring the app draws grows from here. Nothing at
+ * all on a provider that gives a builder no disk figure, where a container takes the box's disk and there is no
+ * ring to draw. */
+export function diskOf(reading: Reading, recipe: Recipe, statePath: string, diskGb?: number): { fixed: number; total: number } | undefined {
+  if (diskGb === undefined) return undefined;
   const est = pickEstimate(manifestFor(reading, recipe, statePath), recipe, reading.brew);
-  const total = BUILDER_DISK_GB * GIB;
+  const total = diskGb * GIB;
   return { fixed: total - est.room + est.files, total };
 }
 

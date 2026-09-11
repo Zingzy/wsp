@@ -20,10 +20,13 @@ import {
   PAIR_ISSUE_REFUSAL,
   RELAY_TICKET_REFUSAL,
   RuntimeRequest,
+  THREAD_OPS,
   TICKET_ORIGIN,
   WS_PATH,
   WorkspaceListing,
   WorkspaceOut,
+  threadOpRefusal,
+  workspaceIdOf,
   type DeviceView,
   type ExecEvent,
   type ForwardEvent,
@@ -247,6 +250,15 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
           if (!authed) ws.close(4401, "unauthorized");
           return;
         }
+        // The door for a socket holding a thread's own token, read off the op's name before its own shape is: shut,
+        // with the ops a thread may send as the openings. A deny list would let every op added later through by
+        // having been forgotten, which is how the golden, the keys and the person's own init were reachable from a
+        // machine. Ahead of the schema so an op that is not a thread's is refused by name whatever it carries.
+        const asked = (parsed as { op?: unknown }).op;
+        if (by !== undefined && (typeof asked !== "string" || !THREAD_OPS.includes(asked))) {
+          send({ id: (parsed as { id?: string | number }).id ?? null, ok: false, error: threadOpRefusal(typeof asked === "string" ? asked : "that frame", by.threadId) });
+          return;
+        }
         const req2 = RuntimeRequest.safeParse(parsed);
         if (!req2.success) {
           send({ id: (parsed as { id?: string | number }).id ?? null, ok: false, error: req2.error.message });
@@ -359,9 +371,12 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               // An event about a workspace this caller may not drive never reaches it, replayed or live: a socket
               // that may not read a workspace's rows may not read its turns going by either. Read through the
               // runtime's one rule, so what a listing hides and what the stream hides cannot come apart.
+              // A caller that sees only its own tree is sent only what is about that tree: an event about a
+              // workspace it may not drive, and an event about no workspace at all, which is about this host.
               const mine = (e: unknown): boolean => {
-                const workspaceId = (e as { workspaceId?: unknown }).workspaceId;
-                return typeof workspaceId !== "string" || rt.workspaces.drivenBy(workspaceId, origin);
+                if (by === undefined) return true;
+                const workspaceId = workspaceIdOf(e);
+                return workspaceId !== undefined && rt.workspaces.drivenBy(workspaceId, origin);
               };
               const pass = (e: unknown): void => {
                 if (mine(e)) send(e as Record<string, unknown>);

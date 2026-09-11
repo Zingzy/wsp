@@ -10,7 +10,7 @@
 import { z } from "zod";
 import { HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
-import { openingTitle, titleLine } from "./format.js";
+import { openingTitle, threadWord, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, SIGN_IN_CODE_MAX } from "./init-job.js";
 import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
@@ -165,6 +165,10 @@ export const Capabilities = z.object({
   /** Every size a create may ask for; a create that names another is refused with this list. A create that names
    * none takes the golden's size, which need not be on it. */
   sizes: z.array(MachineSizeOffer),
+  /** Only a machine that was never resumed may be snapshotted: the provider refuses one taken after a resume
+   * (Solari answers 502 deterministically, and same-host and cross-host are invisible from outside). False where a
+   * snapshot is a copy of the disk whatever the machine has done since it booted. */
+  firstLifeSnapshots: z.boolean(),
   /** The machine is the person's own, kept: its files, its sign-ins and its git checkouts outlive every turn, and
    * wsp neither made it nor throws it away. False on a fork wsp made, where a turn that wrecks the disk costs a
    * rebuild and nothing else. What a turn's access starts at reads this, not the workspace's kind. */
@@ -2596,6 +2600,55 @@ const RuntimeOp = z.discriminatedUnion("op", [
  * a machine. It rides the envelope beside the id rather than each op, so a verb added later carries it without
  * saying so. Absent reads here, and today every client on this computer is here in practice. */
 export const RuntimeRequest = z.intersection(RuntimeOp, z.object({ origin: WorkspaceOrigin.optional() }));
+
+/** Every op this host answers, read off the table itself rather than written out beside it, so an op added later
+ * cannot be missing from the reading that decides which of them a thread may send. */
+export const RUNTIME_OPS: readonly string[] = RuntimeOp.options.map(o => o.shape.op.value);
+
+/** The ops a socket holding a thread's own token may send, and the whole of them: the door is shut and these are
+ * the openings, so an op added later reaches no thread until somebody puts it here on purpose. A thread opens
+ * threads and forks machines under its own root and reads the tree it is in; every reach into a workspace is
+ * refused again by the tree rule, and every act by the guard, so this list is the outer door and not the only one.
+ * What is deliberately not here: the golden and its snapshots, the person's keys and their init, their preferences,
+ * their folders, the provider's own capabilities, importing and exporting a folder, and every road that hands out
+ * or takes away access to this host. */
+export const THREAD_OPS: readonly string[] = [
+  "auth",
+  "events.subscribe",
+  "status.list",
+  "status.subscribe",
+  "workspaces.create",
+  "workspaces.list",
+  "workspaces.get",
+  "workspaces.touch",
+  "workspaces.wake",
+  "workspaces.daemonReach",
+  "workspaces.exec",
+  "harnesses.list",
+  "sessions.start",
+  "sessions.list",
+  "sessions.history",
+  "sessions.interrupt",
+  "sessions.steer",
+  "sessions.answer",
+  "sessions.access",
+  "sessions.rename",
+];
+
+/** The one sentence a thread's own token is refused an op with. It names the op rather than guessing why a caller
+ * wanted it: the reasons are on the acts, and this is the door saying the op is not a thread's at all. */
+export function threadOpRefusal(op: string, threadId: string): string {
+  return `${op} is not a thread's to ask for; the token this request came in on is thread ${threadWord(threadId)} on a machine, which opens threads and forks machines under its own root and reads that tree`;
+}
+
+/** The workspace an event is about, for the one reading every door that hides a workspace from a caller shares: the
+ * id on the event itself, else the id of the record or the status it carries. An event that names none is about
+ * this host rather than about any workspace, which is why a caller that may see only its own tree is sent none. */
+export function workspaceIdOf(event: unknown): string | undefined {
+  const e = event as { workspaceId?: unknown; workspace?: { id?: unknown }; status?: { id?: unknown }; forward?: { workspaceId?: unknown } };
+  for (const found of [e.workspaceId, e.workspace?.id, e.status?.id, e.forward?.workspaceId]) if (typeof found === "string") return found;
+  return undefined;
+}
 export type RuntimeRequest = z.infer<typeof RuntimeRequest>;
 
 /** What a workspaces.exec pushes to the socket that asked. exitCode is null when the command was ended without

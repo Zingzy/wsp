@@ -90,9 +90,11 @@ describe("the screens as data", () => {
   it("answering the agents screen moves the recipe as the terminal's screen would, and the disk the ring draws grows with the ticks", () => {
     const answers = answerScreen(reading(), fresh(), "agents", { ticks: ["claude", "codex"] });
     expect(answers.recipe.rows.filter(r => r.kind === "agent" && r.on).map(r => r.id).sort()).toEqual(["claude", "codex"]);
-    const before = diskOf(reading(), RECIPE, "/tmp/state.json");
-    const after = diskOf(reading(), answers.recipe, "/tmp/state.json");
+    const before = diskOf(reading(), RECIPE, "/tmp/state.json", BUILDER_DISK_GB)!;
+    const after = diskOf(reading(), answers.recipe, "/tmp/state.json", BUILDER_DISK_GB)!;
     expect(before.total).toBe(BUILDER_DISK_GB * 1024 * MIB);
+    // A provider that gives a builder no disk figure draws no ring: a container's disk is the box's.
+    expect(diskOf(reading(), RECIPE, "/tmp/state.json")).toBeUndefined();
     // The fixed part is the base the room leaves out of the disk plus the files that travel; a ticked agent's config
     // joins the files, and the rows' own sizes are the app's to add from its ticks.
     expect(before.fixed).toBeGreaterThanOrEqual(before.total - DISK_ROOM_BYTES);

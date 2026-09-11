@@ -15,7 +15,7 @@ import { WebSocketServer } from "ws";
 import { HELP, cli, localWiring, localWorkFolder, serve } from "../src/cli.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
-import { PLAN_ONLY, deleteQuestion, deletedLine, dialHost, firstEnded, messageTo, threadRows, threadsOf } from "../src/verbs.js";
+import { PLAN_ONLY, deleteQuestion, deletedLine, dialHost, firstEnded, messageTo, threadRows, threadTree, threadsOf } from "../src/verbs.js";
 import { withRefused } from "../../runtime/test/fs-refusal.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { guestAnswer, stubBackend, type StubBackend } from "./stub-backend.js";
@@ -2361,6 +2361,27 @@ describe("wsp verbs over the host", () => {
       expect((await rt.workspaces.list())[0]!.agents).toBeUndefined();
     });
 
+    it("--max-depth 0 is a usage sentence, not a shape the wire refuses", async () => {
+      await run("new", "alpha");
+      const zero = await run("workspaces", "agents", "alpha", "--spawn", "on", "--max-depth", "0");
+      expect(zero.code).toBe(EXIT_CODES.usage);
+      expect(zero.io.errors[0]).toBe("wsp workspaces agents: --max-depth takes a whole number of one or more, not \"0\"");
+      // Zero machines is a switch that is on and forks nothing, which is a thing a person may mean.
+      const none = await run("workspaces", "agents", "alpha", "--spawn", "on", "--max-machines", "0");
+      expect(none.code).toBe(0);
+      expect((await rt.workspaces.list())[0]!.agents).toEqual({ spawn: true, maxMachines: 0, maxDepth: 1 });
+    });
+
+    it("a workspace that forks nothing refuses the switch rather than dropping it", async () => {
+      const local = await run("new", "--local", "mine", "--spawn", "on");
+      expect(local.code).toBe(EXIT_CODES.usage);
+      expect(local.io.errors[0]).toContain("runs no agents that could drive this host, so it takes no --spawn");
+      expect(await rt.workspaces.list()).toEqual([]);
+      const ssh = await run("new", "--ssh", "maya@box", "--spawn", "on");
+      expect(ssh.code).toBe(EXIT_CODES.usage);
+      expect(ssh.io.errors[0]).toContain("takes no --spawn");
+    });
+
     it("wsp new --spawn on turns the switch on at the create", async () => {
       const made = await run("new", "alpha", "--spawn", "on", "--max-machines", "1");
       expect(made.code).toBe(0);
@@ -2382,6 +2403,11 @@ describe("wsp verbs over the host", () => {
       const drawn = rows((await run("threads", "--tree")).io);
       const at = drawn.findIndex(r => r.trim().startsWith(leadThread));
       expect(drawn[at + 1]).toMatch(new RegExp(`^ {2}${childThread}`));
+      // Two rows naming each other are under no top row; the listing prints every row it was given all the same.
+      expect(threadTree([
+        { id: "a", parentThreadId: "b" },
+        { id: "b", parentThreadId: "a" },
+      ] as unknown as Parameters<typeof threadTree>[0]).map(t => t.row.id).sort()).toEqual(["a", "b"]);
       const stopped = await run("stop", leadThread);
       expect(stopped.io.lines[0]).toBe(`thread ${leadThread} stopped, and with it 1 thread its agents spawned: ${childThread.slice(0, 8)}`);
       expect((await rt.sessions.list(alpha.id)).every(v => v.status !== "running")).toBe(true);

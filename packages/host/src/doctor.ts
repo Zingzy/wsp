@@ -5,16 +5,17 @@
 
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { isIP } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, CURL_NET, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
-import { CREATED_AT_LABEL, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_USER_ENV, OWNER_LABEL, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, whoseMachine, type Machine, type MachineBackend } from "@wsp/engine";
-import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, GUEST_DAEMON_DIR, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, templateRecordedLine, templateSkippedLine, type SnapshotStorage } from "@wsp/protocol";
+import { CREATED_AT_LABEL, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_SUPERVISOR_PATH, GUEST_USER_ENV, OWNER_LABEL, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
+import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, GUEST_DAEMON_DIR, LOOPBACK, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, templateRecordedLine, templateSkippedLine, type SnapshotStorage } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
-import { assetDir } from "./assets.js";
+import { assetDir, assetName, assetProof } from "./assets.js";
 import { describeDeleted, describeOrphanOffer, describeOrphans, describeStorage } from "./storage.js";
 import type { CliIO } from "./cli.js";
 
@@ -65,6 +66,12 @@ export async function stageDaemonBundle(stageDir: string, daemonDir = assetDir("
   const daemonPkg = JSON.parse(readFileSync(join(daemonDir, "package.json"), "utf8")) as {
     dependencies: Record<string, string>;
   };
+  // Read before anything is copied: an asset folder that was never built is named here, in the words the asset
+  // table gives it, rather than as a raw copy failure halfway through a bundle.
+  for (const [kind, from] of [["daemon", daemonDir] as const, ["cli", cliDir] as const]) {
+    const proof = join(from, assetProof(kind));
+    if (!existsSync(proof)) throw new Error(`${assetName(kind)} missing: ${proof}`);
+  }
   mkdirSync(stageDir, { recursive: true });
   cpSync(join(daemonDir, "dist"), join(stageDir, "dist"), { recursive: true });
   // The wsp command rides with the daemon so every machine that has one has wsp at GUEST_WSP_BIN, with no install
@@ -115,11 +122,47 @@ export const VITE_ALLOWED_HOSTS_ENV = "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS";
 export const DAEMON_UNIT = "wsp-daemon.service";
 export const DAEMON_UNIT_PATH = `/etc/systemd/system/${DAEMON_UNIT}`;
 
-/** What the daemon has printed lately, for a deploy that has to say why the port never came up. The journal
- * rather than a file because journald rotates itself against a cap it states at boot (395 MB on a 20 GB guest,
- * measured 2026-09-08) and nothing else on the guest would bound one: the redirect this replaced truncated the
- * file on every deploy, and an appended one under Restart=always with no start limit has no end. */
-export const daemonLogCommand = (lines = 50): string => `journalctl -u ${DAEMON_UNIT} -n ${lines} --no-pager`;
+/** Where a guest with no service manager keeps the daemon's output, and the size the supervisor truncates it at.
+ * A container has no journal, and nothing else on it would bound a file. */
+export const DAEMON_LOG_PATH = "/var/log/wsp-daemon.log";
+export const DAEMON_LOG_MAX_BYTES = 4 * 1024 * 1024;
+/** Where a supervisor records its own pid, so a deploy knows whether one is already watching the daemon, and where
+ * it records the daemon's, which is how a deploy stops the daemon on a guest with no socket tools. */
+export const DAEMON_SUPERVISOR_PID_PATH = "/root/wsp-daemon/supervise.pid";
+export const DAEMON_PID_PATH = "/root/wsp-daemon/daemon.pid";
+
+/** What the daemon has printed lately, for a deploy that has to say why the port never came up. Under a service
+ * manager it is the journal, which rotates itself against a cap it states at boot (395 MB on a 20 GB guest,
+ * measured 2026-09-08); the redirect this replaced truncated the file on every deploy, and an appended one under
+ * Restart=always with no start limit has no end. A guest with no journal reads the file its supervisor bounds. */
+export const daemonLogCommand = (lines = 50, supervisor: DaemonSupervisor = "systemd"): string =>
+  supervisor === "entrypoint" ? `tail -n ${lines} ${DAEMON_LOG_PATH}` : `journalctl -u ${DAEMON_UNIT} -n ${lines} --no-pager`;
+
+/** The script that keeps the daemon running on a guest with no service manager: the machine's own boot runs it, so
+ * a fork of a sealed image starts its daemon with nobody dialling in, and a daemon the kernel's memory killer took
+ * comes back a second later. It states its environment rather than inheriting one, the way the unit does: a boot
+ * hands it nothing. It never execs the daemon, so the loop keeps control of the restart; the container's PID 1
+ * reaps what the daemon leaves behind. */
+export function daemonSupervisorScript(previewHostSuffix?: string): string {
+  return [
+    "#!/bin/sh",
+    `echo $$ > ${DAEMON_SUPERVISOR_PID_PATH}`,
+    `export PATH=${TOOLS_PATH}`,
+    ...Object.entries(GUEST_USER_ENV).map(([name, value]) => `export ${name}=${value}`),
+    ...(previewHostSuffix !== undefined ? [`export ${VITE_ALLOWED_HOSTS_ENV}='${previewHostSuffix}'`] : []),
+    "cd /root/wsp-daemon",
+    "while :; do",
+    `  [ -f ${DAEMON_LOG_PATH} ] && [ "$(wc -c < ${DAEMON_LOG_PATH})" -gt ${DAEMON_LOG_MAX_BYTES} ] && : > ${DAEMON_LOG_PATH}`,
+    `  node /root/wsp-daemon/start.mjs >> ${DAEMON_LOG_PATH} 2>&1 &`,
+    // The daemon's own pid, written here because a container ships no socket tools: it is how a deploy stops the
+    // daemon it is replacing, and the supervisor puts the new one up a second later.
+    `  echo $! > ${DAEMON_PID_PATH}`,
+    `  wait $!`,
+    "  sleep 1",
+    "done",
+    "",
+  ].join("\n");
+}
 
 /** The unit the daemon runs under. Until 2026-09-08 it was started with setsid over the provider's exec and had no
  * supervisor at all: the kernel's memory killer took one and the machine sat with no daemon for five hours while
@@ -179,16 +222,52 @@ export function stopDaemonScript(): string {
   ].join("\n");
 }
 
+/** What the daemon is left running under on this guest: its service manager, or the machine's own boot on a guest
+ * that has none. The two roads share every line but the last few, so a bundle, a token and a shim land the same way
+ * whichever supervises. */
+const unitRoad = (previewHostSuffix: string | undefined): string[] => [
+  `cat > ${DAEMON_UNIT_PATH} <<'WSP_UNIT'\n${daemonUnit(previewHostSuffix)}WSP_UNIT`,
+  "systemctl daemon-reload",
+  // Enabled as well as started: a machine that reboots or comes back from a snapshot brings the daemon with it.
+  `systemctl enable ${DAEMON_UNIT}`,
+  `systemctl restart ${DAEMON_UNIT}`,
+];
+
+/** The supervisor road: the script the machine's boot runs goes on disk, and the daemon is started here only when
+ * nothing is already watching it. On a machine booted from a sealed image the supervisor is the machine's own first
+ * process; killing the daemon it watches is what puts the new bundle in, and starting a second one would fight it. */
+const supervisorRoad = (previewHostSuffix: string | undefined): string[] => [
+  `cat > ${GUEST_SUPERVISOR_PATH} <<'WSP_SUPERVISOR'\n${daemonSupervisorScript(previewHostSuffix)}WSP_SUPERVISOR`,
+  `chmod 0755 ${GUEST_SUPERVISOR_PATH}`,
+  // The daemon being replaced is stopped by the pid the supervisor recorded: a container image ships no socket
+  // tools, so nothing here can read the port's holder the way the unit road does.
+  // `|| true` on both reads: the script runs under set -e, where an assignment whose command substitution fails
+  // ends it, and a machine that never had a daemon has neither file (a live deploy died here, 2026-09-11).
+  `old="$(cat ${DAEMON_PID_PATH} 2>/dev/null || true)"`,
+  'if [ -n "$old" ] && kill -0 "$old" 2>/dev/null; then kill "$old" 2>/dev/null || true; echo "DAEMON_STOPPED $old"; fi',
+  `sup="$(cat ${DAEMON_SUPERVISOR_PID_PATH} 2>/dev/null || true)"`,
+  'if [ -n "$sup" ] && kill -0 "$sup" 2>/dev/null; then',
+  '  echo "DAEMON_SUPERVISED $sup"',
+  "else",
+  `  setsid nohup ${GUEST_SUPERVISOR_PATH} >> ${DAEMON_LOG_PATH} 2>&1 &`,
+  "fi",
+];
+
+/** Whether the daemon is serving, in the words the guest can answer in: the socket table where the guest has one,
+ * and bash's own network road on a container image, which ships neither ss nor curl. */
+const portCheck = (supervisor: DaemonSupervisor): string =>
+  supervisor === "entrypoint" ? `(exec 3<>/dev/tcp/${LOOPBACK}/${DAEMON_PORT}) 2>/dev/null` : `ss -ltnH 'sport = :${DAEMON_PORT}' | grep -q .`;
+
 /** The in-guest install+start sequence. `previewHostSuffix` (".preview.example.com") is what dev servers must
  * accept to answer through the edge; absent on a backend without preview URLs. The daemon is left running under
- * its unit, so nothing here has to outlive the exec. */
-export function deployScript(token: string, previewHostSuffix?: string): string {
+ * whatever supervises it, so nothing here has to outlive the exec. */
+export function deployScript(token: string, previewHostSuffix?: string, supervisor: DaemonSupervisor = "systemd"): string {
   return [
     "set -e",
     'export PATH="/usr/local/bin:$PATH"',
-    // Nothing else supervises a process on these machines, and an unsupervised daemon is what this deploy exists
-    // to stop shipping; a guest without systemd says so here rather than starting one nothing would restart.
-    "command -v systemctl >/dev/null || { echo NO_SYSTEMD; false; }",
+    // An unsupervised daemon is what this deploy exists to stop shipping: a guest with a service manager registers a
+    // unit with it, one without gets the supervisor its own boot runs, and a guest that can do neither says so.
+    ...(supervisor === "systemd" ? ["command -v systemctl >/dev/null || { echo NO_SYSTEMD; false; }"] : []),
     // The exec running this carries PATH and nothing else (measured 2026-09-05), and npm and the bundle's build
     // read the guest's home. What the daemon itself hands to every pty comes from its unit, not from here.
     EXEC_ENV,
@@ -213,23 +292,25 @@ export function deployScript(token: string, previewHostSuffix?: string): string 
         ]
       : []),
     writeDaemonTokenScript(token),
-    stopDaemonScript(),
-    `cat > ${DAEMON_UNIT_PATH} <<'WSP_UNIT'\n${daemonUnit(previewHostSuffix)}WSP_UNIT`,
-    "systemctl daemon-reload",
-    // Enabled as well as started: a machine that reboots or comes back from a snapshot brings the daemon with it.
-    `systemctl enable ${DAEMON_UNIT}`,
-    `systemctl restart ${DAEMON_UNIT}`,
-    `for _ in $(seq 20); do ss -ltnH 'sport = :${DAEMON_PORT}' | grep -q . && break; sleep 0.25; done`,
-    `ss -ltn | grep -q ${DAEMON_PORT} && echo DAEMON_UP || { ${daemonLogCommand()}; echo DAEMON_DOWN; }`,
+    ...(supervisor === "systemd" ? [stopDaemonScript(), ...unitRoad(previewHostSuffix)] : supervisorRoad(previewHostSuffix)),
+    // A service manager restarts the daemon at once; a supervisor that was already watching sleeps a second first,
+    // so that road waits longer for the port than a unit's does.
+    `for _ in $(seq ${supervisor === "entrypoint" ? 40 : 20}); do ${portCheck(supervisor)} && break; sleep 0.25; done`,
+    supervisor === "entrypoint"
+      ? `${portCheck(supervisor)} && echo DAEMON_UP || { ${daemonLogCommand(50, supervisor)}; echo DAEMON_DOWN; }`
+      : `ss -ltn | grep -q ${DAEMON_PORT} && echo DAEMON_UP || { ${daemonLogCommand()}; echo DAEMON_DOWN; }`,
   ].join("\n");
 }
 
 /** The preview host with its machine-and-port label cut off ("<id>-7070.preview.example.com" gives
  * ".preview.example.com"): the suffix every port on this machine is served under, read off the backend
- * rather than assumed. Undefined on a backend without preview URLs or a host with no dot to cut at. */
+ * rather than assumed. Undefined on a backend with no route to a guest port, on a host with no dot to cut at, and
+ * on a route to an address rather than a name, which is what a machine reached at a published port answers with:
+ * an allowlist entry is for the name a browser would ask for. */
 export async function previewHostSuffix(machine: Machine): Promise<string | undefined> {
   if (machine.previewUrl === undefined) return undefined;
   const { hostname } = new URL((await machine.previewUrl(DAEMON_PORT)).url);
+  if (isIP(hostname) !== 0) return undefined;
   const dot = hostname.indexOf(".");
   return dot > 0 ? hostname.slice(dot) : undefined;
 }
@@ -259,20 +340,18 @@ export async function packBundle(stage: string, tgz: string): Promise<void> {
  * with (the runtime replaces it the first time a client reaches the daemon) and the Node version the daemon runs on. */
 export async function deployDaemon(
   machine: Machine,
-  opts: { token?: string; daemonDir?: string } = {},
+  opts: { token?: string; daemonDir?: string; cliDir?: string } = {},
 ): Promise<{ token: string; node: string }> {
   const token = opts.token ?? randomBytes(24).toString("hex");
   const stage = mkdtempSync(join(tmpdir(), "wsp-daemon-bundle-"));
   const tgz = `${stage}.tgz`;
   try {
-    await stageDaemonBundle(stage, opts.daemonDir);
+    await stageDaemonBundle(stage, opts.daemonDir, opts.cliDir);
     await packBundle(stage, tgz);
-    const putUrl = await machine.uploadUrl(`${GUEST_DAEMON_DIR}.tgz`);
-    const put = await fetch(putUrl, { method: "PUT", body: readFileSync(tgz) });
-    if (!put.ok) throw new Error(`bundle upload failed: HTTP ${put.status}`);
+    await landBytes(machine, `${GUEST_DAEMON_DIR}.tgz`, readFileSync(tgz));
 
     const suffix = await previewHostSuffix(machine);
-    const res = await machine.run(deployScript(token, suffix), { deadlineMs: 180_000 });
+    const res = await machine.run(deployScript(token, suffix, machine.daemonSupervisor ?? "systemd"), { deadlineMs: 180_000 });
     if (res.exitCode !== 0 || !res.stdout.includes("DAEMON_UP")) {
       throw new Error(`daemon deploy failed: ${res.stdout.slice(-300)} ${res.stderr.slice(-200)}`);
     }

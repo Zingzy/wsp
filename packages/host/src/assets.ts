@@ -63,6 +63,11 @@ const ASSETS: Record<AssetKind, Asset> = {
   },
 };
 
+/** What a message about an asset calls it, so a folder that was never built is named the same wherever it is read. */
+export function assetName(kind: AssetKind): string {
+  return ASSETS[kind].name;
+}
+
 /** The file inside an asset that proves it was built and fully copied. */
 export function assetProof(kind: AssetKind): string {
   return ASSETS[kind].proof;

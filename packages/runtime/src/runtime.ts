@@ -96,6 +96,7 @@ import {
   snapshotStorage,
   applyMachineContext,
   GUEST_USER_ENV,
+  landsBytes,
   LOCAL_MACHINE_ID,
   TOOLS_PATH,
 } from "@wsp/engine";
@@ -1068,7 +1069,8 @@ export interface Runtime {
     originRefusal(id: string, origin?: Caller): Promise<string | undefined>;
     /** The same rule read without asking anything, for the one road that cannot await: the event fan-out, where a
      * per event promise would sit in the path every delta of every turn takes. A workspace this host does not hold
-     * answers true, as the sentence answers nothing for one. */
+     * is nobody's to refuse for, as the sentence has it, unless the caller is a thread: a thread sees its own tree,
+     * and an id no record answers for is not in it, which is what a fork still landing under somebody else is. */
     drivenBy(id: string, origin?: Caller): boolean;
   };
   readonly projects: {
@@ -1329,7 +1331,7 @@ interface SessionIndexRecord {
    * run is where that turn is on its machine, so a host that comes back re-opens it rather than failing it, and
    * turnToken is what that surviving process still has in its environment, so the host that re-opens it can answer
    * for it. All three are written for a running row alone. */
-  sessions: (SessionView & { turnId: string; notify?: readonly string[]; reply?: TurnStatus; run?: string; turnToken?: string })[];
+  sessions: (SessionView & { turnId: string; notify?: readonly string[]; reply?: TurnStatus; run?: string; turnToken?: string; scopeDeviceId?: string })[];
 }
 
 /** Builders live apart from workspaces: never in the rail, and a record left
@@ -1491,6 +1493,21 @@ async function readBodyUpTo(res: Response, cap: number): Promise<string> {
     await reader.cancel().catch(() => {});
   }
   return Buffer.concat(chunks, Math.min(size, cap)).toString("utf8");
+}
+
+/** The calls a backend carries only when its provider has them. One list, so a handle built out of a backend
+ * forwards every one of them rather than naming the few a road happened to need. */
+const OPTIONAL_BACKEND_CALLS = ["checkKey", "listSnapshots", "promoteSnapshot", "getTemplate", "listTemplates", "deleteTemplate"] as const;
+
+/** Those calls bound to the backend, for a handle that stands in front of it. A backend is a module with its
+ * methods on its prototype, so a spread of it carries none of them; each one is taken by name here. */
+function forwardedCalls(backend: MachineBackend): Partial<MachineBackend> {
+  const out: Record<string, unknown> = {};
+  for (const name of OPTIONAL_BACKEND_CALLS) {
+    const call = backend[name];
+    if (typeof call === "function") out[name] = call.bind(backend);
+  }
+  return out as Partial<MachineBackend>;
 }
 
 export function createRuntime(opts: RuntimeOptions): Runtime {
@@ -1782,22 +1799,36 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * runs on, then the acts a thread may ask for at all, then how deep it already is, then how many machines its
    * root already holds. A caller that is not a thread passes straight through; nothing here is a second copy of a
    * rule any verb also keeps. */
-  const spawnGuard = (act: SpawnAct, caller: Caller | undefined): void => {
+  const spawnGuard = (act: SpawnAct, caller: Caller | undefined): (() => void) => {
+    const free = (): void => {};
     const scope = scopeOf(caller);
-    if (scope === undefined) return;
+    if (scope === undefined) return free;
     const own = live.get(scope.workspaceId)?.record;
     const policy = own?.agents;
     // Read at the act and not at the mint: a person who turns the switch off while a turn runs has turned it off.
     if (policy?.spawn !== true) throw new Error(agentsOffRefusal(own?.name ?? scope.workspaceId, act));
     if (!SPAWN_ACTS_ALLOWED.includes(act)) throw new Error(spawnActRefusal(scope.threadId, act));
-    if (act === "send") return;
+    if (act === "send") return free;
     const depth = depthUnderRoot(scope.threadId);
     if (depth >= policy.maxDepth) throw new Error(spawnDepthRefusal(scope.threadId, depth, policy.maxDepth));
-    if (act !== "fork") return;
-    // Counted off the records rather than kept as a number: a machine deleted, forgotten or gone frees its place
-    // without anything having to remember to give it back.
+    if (act !== "fork") return free;
+    // Counted off the records rather than kept as a number, so a machine deleted, forgotten or gone frees its place
+    // without anything having to remember to give it back, plus the places forks still landing hold. A record
+    // enters the live map only after the provider has answered, so two forks asked for in one tick would both read
+    // the same count and both pass; the place is taken here, in the same step the count is read, and handed back by
+    // the caller's own finally, the way the name a fork is landing under already is.
     const standing = [...live.values()].filter(e => e.record.rootThreadId === scope.rootThreadId && workspaceState({ phase: e.record.phase }) !== "gone").length;
-    if (standing >= policy.maxMachines) throw new Error(spawnCapRefusal(scope.rootThreadId, standing, policy.maxMachines));
+    const held = places.get(scope.rootThreadId) ?? 0;
+    if (standing + held >= policy.maxMachines) throw new Error(spawnCapRefusal(scope.rootThreadId, standing + held, policy.maxMachines));
+    places.set(scope.rootThreadId, held + 1);
+    let freed = false;
+    return () => {
+      if (freed) return;
+      freed = true;
+      const now = (places.get(scope.rootThreadId) ?? 1) - 1;
+      if (now <= 0) places.delete(scope.rootThreadId);
+      else places.set(scope.rootThreadId, now);
+    };
   };
   /** What a record says its machine is, for the one rule that one workspace stands on one machine: what the machine
    * itself answered where its kind can ask, else the id, which is the machine on every other kind. */
@@ -1918,6 +1949,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   // workspace is launched with come out of the same table, so a scoped token is listed, matched and revoked by the
   // rules a paired computer's token already lives under.
   const deviceDoor = makeDevices(store);
+  /** The machines a root thread's forks are landing but have no record for yet, by root: a place is taken before
+   * the first await of a fork and handed back when it lands or fails, so the cap counts what is on its way too. */
+  const places = new Map<string, number>();
   const live = new Map<string, LiveWorkspace>();
   const builders = new Map<string, LiveBuilder>();
   /** The prepare in flight per golden name; a second call for the same recipe joins it instead of running the stages twice on one machine. */
@@ -1926,7 +1960,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** `launch` is carried only by a row the start road wrote before its turn reached the machine, and settles when the
    * turn's harness holds the row or the start gave it up: a send behind such a row waits on it, and the file never
    * takes the row, since a restart could re-open nothing from it. */
-  const sessions = new Map<string, { view: SessionView; turnId: string; notify?: readonly string[]; turnToken?: string; handle?: SessionHandle; end?: (reason: string) => void; turnLive?: TurnLive; run?: string; launch?: Promise<void> }>();
+  const sessions = new Map<string, { view: SessionView; turnId: string; notify?: readonly string[]; turnToken?: string; scopeDeviceId?: string; handle?: SessionHandle; end?: (reason: string) => void; turnLive?: TurnLive; run?: string; launch?: Promise<void> }>();
   /** Every exec stream still running, so the machine going away ends it the way it ends a session. */
   const execs = new Set<{ workspaceId: string; end: (reason: string) => void }>();
   const indexFlushes = new Map<string, Promise<void>>();
@@ -1991,6 +2025,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(s.view.status === "running" && s.turnLive?.reply !== undefined ? { reply: s.turnLive.reply } : {}),
         ...(s.view.status === "running" && s.run !== undefined ? { run: s.run } : {}),
         ...(s.view.status === "running" && s.turnToken !== undefined ? { turnToken: s.turnToken } : {}),
+        // Beside the turn token and for the same reason: the process out there still holds this device, so a host
+        // that re-opens the turn has to know which one to take away when it ends.
+        ...(s.view.status === "running" && s.scopeDeviceId !== undefined ? { scopeDeviceId: s.scopeDeviceId } : {}),
       }));
     const snapshot: SessionIndexRecord = { workspaceId, sessions: rows };
     const queued = (indexFlushes.get(workspaceId) ?? Promise.resolve())
@@ -2354,10 +2391,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
 
   /** Whether this runtime has a road to put a daemon on a machine: the host must have wired the bundle, and the
-   * deploy uploads it, so a backend that mints no upload URL has none. Both roads into updateDaemon read this, so
-   * neither offers to deploy where the other would not. */
-  const canDeployDaemon = (record: WorkspaceRecord): boolean =>
-    opts.goldenRecipe?.deployDaemon !== undefined && backendFor(record.kind).capabilities.signedUrls === true;
+   * deploy lands the bundle on the machine, so a backend with no road for bytes has none. Both roads into
+   * updateDaemon read this, so neither offers to deploy where the other would not. */
+  const canDeployDaemon = (entry: LiveWorkspace): boolean =>
+    opts.goldenRecipe?.deployDaemon !== undefined && landsBytes(backendFor(entry.record.kind).capabilities, entry.machine);
 
   /** Everything the runtime settles with a machine's daemon the moment it can reach it, and the only place that
    * does: the folders the record says it may browse, then a daemon older than this wsp replaced with this one's,
@@ -2374,7 +2411,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await writeDaemonRoots(entry);
       const version = await helloVersion(entry);
       if (version === null || version >= DAEMON_VERSION) return;
-      if (!canDeployDaemon(entry.record)) return;
+      if (!canDeployDaemon(entry)) return;
       await whenNoTurnRuns(entry.record.id);
       if (entry.record.phase !== "running") return;
       await noteDaemon(entry, DAEMON_UPDATING);
@@ -2418,7 +2455,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * no ptys to lose. One run per machine at a time. */
   const reviveDaemon = (entry: LiveWorkspace, reach: ReachState): void => {
     if (reach !== "no-daemon" || entry.record.phase !== "running") return;
-    if (!canDeployDaemon(entry.record)) return;
+    if (!canDeployDaemon(entry)) return;
     const key = entry.machine.id;
     if (daemonRevivals.has(key)) return;
     const last = revivedAt.get(entry.record.id);
@@ -2505,14 +2542,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const b: MachineBackend = {
       capabilities: backend.capabilities,
       pricing: backend.pricing,
+      // The golden's builder is created through this handle, so the image the provider boots from rides along.
+      ...(backend.baseTemplates !== undefined ? { baseTemplates: backend.baseTemplates } : {}),
       get: id => backend.get(id),
       list: labels => backend.list(labels),
       deleteSnapshot: id => backend.deleteSnapshot(id),
-      // The seal promotes through this handle, so the template calls ride along when the provider has them.
-      ...(backend.promoteSnapshot !== undefined ? { promoteSnapshot: backend.promoteSnapshot.bind(backend) } : {}),
-      ...(backend.getTemplate !== undefined ? { getTemplate: backend.getTemplate.bind(backend) } : {}),
-      ...(backend.listTemplates !== undefined ? { listTemplates: backend.listTemplates.bind(backend) } : {}),
-      ...(backend.deleteTemplate !== undefined ? { deleteTemplate: backend.deleteTemplate.bind(backend) } : {}),
+      // Every call a backend may or may not carry, in one place: a module keeps its methods on its prototype, so
+      // this handle cannot be a spread of the backend, and a call left out is one the roads inside here lose.
+      ...forwardedCalls(backend),
       create: async spec => {
         const m = await keyedCreate(purpose, spec);
         inflight.add(m.id);
@@ -3048,7 +3085,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const t = raw as TranscriptRecord;
         transcripts.set(t.workspaceId, t.events);
       }
-      const left: { view: SessionView; turnId: string; notify?: readonly string[]; turnLive?: TurnLive; run?: string; turnToken?: string }[] = [];
+      const left: { view: SessionView; turnId: string; notify?: readonly string[]; turnLive?: TurnLive; run?: string; turnToken?: string; scopeDeviceId?: string }[] = [];
       for (const raw of await store.list(SESSIONS)) {
         const index = raw as SessionIndexRecord;
         if (!live.has(index.workspaceId)) continue;
@@ -3056,7 +3093,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           console.warn(`sessions document for ${index.workspaceId} has no rows array, read as empty`);
           continue;
         }
-        for (const { turnId, notify, reply, run, turnToken, ...view } of index.sessions) {
+        for (const { turnId, notify, reply, run, turnToken, scopeDeviceId, ...view } of index.sessions) {
           const row: {
             view: SessionView;
             turnId: string;
@@ -3064,6 +3101,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             turnLive?: TurnLive;
             run?: string;
             turnToken?: string;
+            scopeDeviceId?: string;
             end?: (reason: string) => void;
           } = {
             view,
@@ -3074,6 +3112,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             ...(reply !== undefined ? { turnLive: { reply } } : {}),
             ...(run !== undefined ? { run } : {}),
             ...(turnToken !== undefined ? { turnToken } : {}),
+            ...(scopeDeviceId !== undefined ? { scopeDeviceId } : {}),
           };
           // A row left running because nothing answered about its run has no harness of its own to end, and the poll
           // that finds its machine gone must still be able to settle it.
@@ -3147,9 +3186,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // Written before the machine is asked for: the cap counts machines under a root off these two fields, so a
       // fork that is still landing already holds its place and two forks at once cannot both pass the count.
       ...(spawned !== undefined ? { parentThreadId: spawned.threadId, rootThreadId: spawned.rootThreadId } : {}),
-      // A fork a thread asked for carries the forking workspace's switch unless the caller named its own, so a tree
-      // of machines runs under one rule rather than needing it set again on every one.
-      ...(o.agents !== undefined || spawned !== undefined ? { agents: agentsFrom(spawned === undefined ? undefined : live.get(spawned.workspaceId)?.record.agents, o.agents ?? {}) } : {}),
+      // A fork a thread asked for carries the forking workspace's switch, whole, so a tree of machines runs under
+      // one rule rather than needing it set again on every one and without any road to widen it on the way.
+      ...(spawned !== undefined ? { agents: live.get(spawned.workspaceId)?.record.agents } : o.agents !== undefined ? { agents: agentsFrom(undefined, o.agents) } : {}),
     };
     // Only an asked size is checked: the golden's own is what it was built at, whatever the provider offers today.
     if ((o.cpu !== undefined || o.memMb !== undefined) && !offeredSize(backend.capabilities.sizes, record.size)) {
@@ -3281,10 +3320,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const o = { ...opts, name: nameGiven(opts.name) };
       // A fork is a cloud machine, so the origin rule is read on the kind this create would make.
       refuseRelayed({ kind: "cloud", name: o.name }, origin);
-      spawnGuard("fork", origin);
+      // The place under the root is taken here, with no await between the count and the taking, and handed back in
+      // the finally below however this create ends: the record it becomes is what holds it from then on.
+      const freePlace = spawnGuard("fork", origin);
       const spawned = scopeOf(origin);
+      // A thread's fork carries the switch of the workspace it was asked from, and nothing the caller says: the
+      // caps are the person's, and a fork naming its own would be the agents act by another road.
+      if (spawned !== undefined && o.agents !== undefined) {
+        freePlace();
+        throw new Error(spawnActRefusal(spawned.threadId, "agents"));
+      }
       const refusal = nameRefusal(o.name);
-      if (refusal !== undefined) throw Object.assign(new Error(refusal), { kind: "conflict" });
+      if (refusal !== undefined) {
+        freePlace();
+        throw Object.assign(new Error(refusal), { kind: "conflict" });
+      }
       forking.add(o.name);
       const id = `ws_${randomBytes(4).toString("hex")}`;
       const began = clock.now();
@@ -3315,6 +3365,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         throw e;
       } finally {
         forking.delete(o.name);
+        freePlace();
       }
     },
 
@@ -3708,7 +3759,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     drivenBy(id, origin) {
-      return refusalFor(live.get(id)?.record, origin) === undefined;
+      const record = live.get(id)?.record;
+      if (record === undefined) return scopeOf(origin) === undefined;
+      return refusalFor(record, origin) === undefined;
     },
   };
 
@@ -4386,7 +4439,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     };
     // One row per turn, never two: the key the start road held this turn under goes as the harness's own takes over.
     if (turnId !== rowId) sessions.delete(turnId);
-    sessions.set(rowId, { view, turnId, ...(notify !== undefined ? { notify } : {}), ...(turnToken !== undefined ? { turnToken } : {}), handle, end, turnLive, ...(started.run !== undefined ? { run: started.run } : {}) });
+    sessions.set(rowId, { view, turnId, ...(notify !== undefined ? { notify } : {}), ...(turnToken !== undefined ? { turnToken } : {}), ...(scopeDeviceId !== undefined ? { scopeDeviceId } : {}), handle, end, turnLive, ...(started.run !== undefined ? { run: started.run } : {}) });
     void persistSessions(workspaceId);
     /** The turn's process is over: its status settles, its token stops naming anything, and the harness's own title
      * for the session is read again, since it writes one as the turn settles. */
@@ -4444,7 +4497,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * `cannot` covers a row with no run recorded (a host from before this road, or a harness whose runs die with it),
    * no workspace or no machine running under it, no adapter for its harness in this process, and a handle that is
    * not one this host could have launched. */
-  const reattach = async (s: { view: SessionView; turnId: string; notify?: readonly string[]; turnLive?: TurnLive; run?: string; turnToken?: string }): Promise<Reopened> => {
+  const reattach = async (s: { view: SessionView; turnId: string; notify?: readonly string[]; turnLive?: TurnLive; run?: string; turnToken?: string; scopeDeviceId?: string }): Promise<Reopened> => {
     const { view, run } = s;
     const threadId = view.threadId;
     const entry = live.get(view.workspaceId);
@@ -4491,6 +4544,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // The token this turn was launched with is still in the process this attach reached, so the row that answers
         // for it takes it back; a token this host had never minted would be one nobody can answer for.
         ...(s.turnToken !== undefined ? { turnToken: s.turnToken } : {}),
+        // The device that turn was launched with is still in the process this attach reached, so the row that
+        // answers for it takes it back and its exit is what hands it over.
+        ...(s.scopeDeviceId !== undefined ? { scopeDeviceId: s.scopeDeviceId } : {}),
         ...(s.turnLive !== undefined ? { turnLive: s.turnLive } : {}),
         outcome: "started",
         opening: { prompt: view.prompt ?? "" },

@@ -10,10 +10,11 @@ import {
   GUEST_WSP_BIN,
   HOST_TOKEN_ENV,
   HOST_URL_ENV,
-  DEVICES_TICKET_REFUSAL,
   MCP_SERVER_NAME,
-  PAIR_ISSUE_REFUSAL,
-  RELAY_TICKET_REFUSAL,
+  RUNTIME_OPS,
+  THREAD_OPS,
+  threadOpRefusal,
+  workspaceIdOf,
   agentsOffRefusal,
   noMcpServersLine,
   spawnActRefusal,
@@ -281,7 +282,8 @@ describe("agents spawning agents", () => {
       expect(((await client.request("workspaces.list"))["workspaces"] as { name: string }[]).map(w => w.name)).toEqual(["lead"]);
       expect((await client.request("workspaces.rename", { workspaceId: local.id, name: "mini" }))["ok"]).toBe(false);
       // Who may reach this host is never a machine's to hand out.
-      expect((await client.request("pair.issue"))["error"]).toBe(PAIR_ISSUE_REFUSAL);
+      // Refused at the door by name, before pair.issue's own refusal is reached: both say no, and this one first.
+      expect((await client.request("pair.issue"))["error"]).toBe(threadOpRefusal("pair.issue", threadId));
       const forked = (await client.request("workspaces.create", { golden: "snap_g", name: "builder" }))["workspace"] as { rootThreadId?: string };
       expect(forked.rootThreadId).toBe(threadId);
       client.close();
@@ -317,9 +319,10 @@ describe("agents spawning agents", () => {
     const srv = await serveRuntime(rt, { port: 0, authToken: "secret", devices: rt.devices });
     try {
       const client = await WsClient.connect(srv.port, { token });
-      expect((await client.request("devices.list"))["error"]).toBe(DEVICES_TICKET_REFUSAL);
-      expect((await client.request("devices.revoke", { deviceId: mine.id }))["error"]).toBe(DEVICES_TICKET_REFUSAL);
-      expect((await client.request("ticket.issue", { purpose: "connect" }))["error"]).toBe(RELAY_TICKET_REFUSAL);
+      const thread = (await rt.devices.list())[0]!.scope!.threadId;
+      expect((await client.request("devices.list"))["error"]).toBe(threadOpRefusal("devices.list", thread));
+      expect((await client.request("devices.revoke", { deviceId: mine.id }))["error"]).toBe(threadOpRefusal("devices.revoke", thread));
+      expect((await client.request("ticket.issue", { purpose: "connect" }))["error"]).toBe(threadOpRefusal("ticket.issue", thread));
       expect(await rt.devices.list()).toHaveLength(1);
       client.close();
     } finally {
@@ -343,9 +346,15 @@ describe("agents spawning agents", () => {
       await client.request("events.subscribe", {});
       await rt.workspaces.rename(theirs.id, "renamed");
       await rt.workspaces.rename(mine.id, "lead");
+      // The person makes a workspace of their own: its create stages and the record itself name the workspace on
+      // the event rather than beside it, which is why the reading is one function and not one field.
+      const made = await rt.workspaces.create({ golden: "snap_g", name: "hers" });
+      await rt.preferences.set({ theme: "dark" });
       await new Promise(r => setTimeout(r, 50));
-      const named = client.events.filter(e => e.type === "workspace.renamed").map(e => e["workspaceId"]);
-      expect(named).toEqual([mine.id]);
+      const about = new Set(client.events.map(e => workspaceIdOf(e)));
+      expect([...about].sort()).toEqual([mine.id]);
+      expect(client.events.map(e => e.type)).not.toContain("preferences.changed");
+      expect(client.events.some(e => e["workspaceId"] === made.id || e["workspace"] !== undefined && (e["workspace"] as { id: string }).id === made.id)).toBe(false);
       client.close();
     } finally {
       await srv.close();
@@ -353,6 +362,91 @@ describe("agents spawning agents", () => {
       await handle.finished;
       await rt.close();
     }
+  });
+
+  it("every op this host answers is either one a thread may send or one its socket is refused", async () => {
+    const held = heldAdapter();
+    const rt = runtimeWith({ claude: held.factory }, { url: "http://10.0.0.2:4700" });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "lead", agents: AGENTS_ON });
+    const handle = await rt.sessions.start(ws.id, { prompt: "hi" });
+    const token = held.launches[0]!.env[HOST_TOKEN_ENV]!;
+    const threadId = handle.view().threadId!;
+    const srv = await serveRuntime(rt, { port: 0, authToken: "secret", devices: rt.devices });
+    try {
+      const client = await WsClient.connect(srv.port, { token });
+      // Walked off the op table itself, so an op added later lands in one of these two buckets on purpose.
+      const refused: string[] = [];
+      const reached: string[] = [];
+      for (const op of RUNTIME_OPS) {
+        if (op === "auth" || op === "pair.redeem") continue;
+        const reply = await client.request(op, {});
+        (reply["error"] === threadOpRefusal(op, threadId) ? refused : reached).push(op);
+      }
+      // The door is shut and these are the openings: everything else answered the one sentence, whether or not the
+      // op would have gone on to refuse it for a reason of its own.
+      expect(reached.sort()).toEqual([...THREAD_OPS].filter(op => op !== "auth").sort());
+      expect(refused).toContain("golden.get");
+      expect(refused).toContain("golden.prepare");
+      expect(refused).toContain("snapshots.list");
+      expect(refused).toContain("snapshots.rollback");
+      expect(refused).toContain("preferences.get");
+      expect(refused).toContain("preferences.set");
+      expect(refused).toContain("capabilities.get");
+      expect(refused).toContain("init.keys");
+      expect(refused).toContain("host.folders");
+      expect(refused).toContain("project.import");
+      expect(refused).toContain("workspaces.createLocal");
+      expect(refused).toContain("workspaces.delete");
+      expect(refused).toContain("workspaces.agents");
+      // A client of the person's own reaches every one of them, so the gate is the token's and not the op's.
+      const mine = await WsClient.connect(srv.port, { token: "secret" });
+      expect((await mine.request("preferences.get", {}))["ok"]).toBe(true);
+      expect(String((await mine.request("snapshots.list", {}))["error"])).not.toContain("not a thread's");
+      mine.close();
+      client.close();
+    } finally {
+      await srv.close();
+      held.end(0);
+      await handle.finished;
+      await rt.close();
+    }
+  });
+
+  it("two forks asked for in one tick cannot both take the last place under the root", async () => {
+    const rt = runtimeWith({ claude: heldAdapter().factory });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 1, maxDepth: 1 } });
+    const scope: ThreadScope = { kind: "thread", threadId: "t_root", workspaceId: ws.id, rootThreadId: "t_root" };
+    // The record enters the live map only after the provider has answered, so a count read at the guard and nothing
+    // held would let every fork in one tick past the same reading.
+    const raced = await Promise.allSettled([
+      rt.workspaces.create({ golden: "snap_g", name: "b1" }, asThread(scope)),
+      rt.workspaces.create({ golden: "snap_g", name: "b2" }, asThread(scope)),
+      rt.workspaces.create({ golden: "snap_g", name: "b3" }, asThread(scope)),
+    ]);
+    expect(raced.filter(r => r.status === "fulfilled")).toHaveLength(1);
+    for (const r of raced.filter(r => r.status === "rejected")) expect(String((r as PromiseRejectedResult).reason)).toContain(spawnCapRefusal("t_root", 1, 1));
+    expect((await rt.workspaces.list()).filter(w => w.rootThreadId === "t_root")).toHaveLength(1);
+    // A place a fork held is handed back when it lands, so the next one is refused by the record rather than by it.
+    await expect(rt.workspaces.create({ golden: "snap_g", name: "b4" }, asThread(scope))).rejects.toThrow(spawnCapRefusal("t_root", 1, 1));
+    await rt.close();
+  });
+
+  it("a thread cannot widen its own caps through the fork it asks for", async () => {
+    const held = heldAdapter();
+    const rt = runtimeWith({ claude: held.factory }, { url: "http://10.0.0.2:4700" });
+    const tight = { spawn: true, maxMachines: 2, maxDepth: 1 };
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "lead", agents: tight });
+    const scope: ThreadScope = { kind: "thread", threadId: "t_root", workspaceId: ws.id, rootThreadId: "t_root" };
+    await expect(rt.workspaces.create({ golden: "snap_g", name: "wide", agents: { maxMachines: 50, maxDepth: 9 } }, asThread(scope))).rejects.toThrow(spawnActRefusal("t_root", "agents"));
+    // The refused fork took no place with it, and the fork that lands carries the switch it was asked from.
+    const forked = await rt.workspaces.create({ golden: "snap_g", name: "builder" }, asThread(scope));
+    expect(forked.agents).toEqual(tight);
+    // So a thread on that machine is still one level deep and forks nothing.
+    const child = await rt.sessions.start(forked.id, { prompt: "builder" }, asThread(scope));
+    const childScope: ThreadScope = { kind: "thread", threadId: child.view().threadId!, workspaceId: forked.id, rootThreadId: "t_root" };
+    await expect(rt.workspaces.create({ golden: "snap_g", name: "deeper" }, asThread(childScope))).rejects.toThrow(spawnDepthRefusal(childScope.threadId, 1, 1));
+    held.end(0);
+    await rt.close();
   });
 
   it("stopping a root ends every thread its agents spawned under it", async () => {

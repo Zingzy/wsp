@@ -390,8 +390,11 @@ describe("what a space walks", () => {
     expect(sidebarThreadOrder(threads).map(t => t.id)).toEqual(["other", "lead", "builder-a", "deeper", "builder-b"]);
     // A parent that is not in this list leaves the row where the sort put it rather than dropping it.
     expect(nestSpawnedThreads([spawned("orphan", "2026-09-01T00:01:00Z", "gone")]).map(t => t.id)).toEqual(["orphan"]);
-    // A row naming itself as its own parent is drawn once, not forever.
+    // A row naming itself as its own parent is drawn once, not forever, and two rows naming each other are both
+    // drawn: a thread the sidebar leaves out is a thread nobody can reach.
     expect(nestSpawnedThreads([spawned("loop", "2026-09-01T00:01:00Z", "loop")]).map(t => t.id)).toEqual(["loop"]);
+    const pair = [spawned("a", "2026-09-01T00:01:00Z", "b"), spawned("b", "2026-09-01T00:02:00Z", "a")];
+    expect(nestSpawnedThreads(pair).map(t => t.id).sort()).toEqual(["a", "b"]);
   });
 
   it("shows the selected workspace, and the first in the sidebar's order while what is selected is not one", () => {
