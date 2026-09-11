@@ -4,7 +4,8 @@
 import type { Host } from "@wsp/collect";
 import { describe, expect, it } from "vitest";
 import { asLinuxbrew } from "@wsp/catalog";
-import { customFromScan, scanTools } from "../src/scan.js";
+import { customFromScan } from "../src/recipe-custom.js";
+import { scanTools } from "../src/scan.js";
 
 const BREWFILE = [
   'tap "homebrew/bundle"',
@@ -18,11 +19,24 @@ const BREWFILE = [
 
 const NPM_GLOBALS = JSON.stringify({ dependencies: { npm: { version: "11.0.0" }, "@openai/codex": { version: "0.153.0" }, turbo: { version: "2.5.0" } } });
 
+/** dpkg's own answers on an Ubuntu laptop: what apt-mark calls a choice, each package's priority and size, and
+ * dpkg's file list for each, which says whether the package left a command on PATH. */
+const APT_MANUAL = "direnv\nfish\ntmux\n";
+const APT_PRIORITY = "direnv optional\nfish optional\ntmux optional\n";
+const APT_SIZES = "direnv 9000\nfish 20000\ntmux 1100\n";
+const APT_LISTS: Record<string, string> = {
+  "/var/lib/dpkg/info/direnv:amd64.list": "/usr/bin/direnv\n",
+  "/var/lib/dpkg/info/fish.list": "/usr/bin/fish\n",
+  "/var/lib/dpkg/info/tmux.list": "/usr/bin/tmux\n",
+};
+
 interface Fake {
   brew?: boolean;
   npm?: boolean;
   cargo?: boolean;
   pipx?: boolean;
+  /** apt-mark and dpkg-query on PATH, as they are on any Debian or Ubuntu computer. */
+  apt?: boolean;
   /** Names under each directory the scan lists. */
   dirs?: Record<string, string[]>;
   /** The npm globals listing, when a test wants its own. */
@@ -38,17 +52,20 @@ function laptop(over: Fake = {}): Host & { calls: string[] } {
     "/opt/homebrew/lib/node_modules": ["turbo", "@openai"],
     "/opt/homebrew/lib/node_modules/@openai": ["codex"],
   };
-  const here = new Set([...(over.brew === false ? [] : ["brew"]), ...(over.npm === false ? [] : ["npm"]), ...(over.cargo === true ? ["cargo", "uv"] : []), ...(over.pipx === true ? ["uv", "pipx"] : []), "du"]);
+  const here = new Set([...(over.brew === false ? [] : ["brew"]), ...(over.npm === false ? [] : ["npm"]), ...(over.cargo === true ? ["cargo", "uv"] : []), ...(over.pipx === true ? ["uv", "pipx"] : []), ...(over.apt === true ? ["apt-mark", "dpkg-query"] : []), "du"]);
   return {
     calls,
     platform: "darwin",
     home: "/Users/dev",
     fs: {
       stat: async () => undefined,
-      list: async dir => dirs[dir] ?? [],
+      list: async dir => dirs[dir] ?? (dir === "/var/lib/dpkg/info" ? Object.keys(APT_LISTS).map(k => k.slice(dir.length + 1)) : []),
       readText: async () => undefined,
       walk: async () => [],
-      async *lines() {},
+      async *lines(path) {
+        calls.push(`lines ${path}`);
+        for (const line of (APT_LISTS[path] ?? "").split("\n")) yield line;
+      },
     },
     exec: {
       which: async bin => here.has(bin),
@@ -61,6 +78,8 @@ function laptop(over: Fake = {}): Host & { calls: string[] } {
         if (cmd === "cargo") return "bacon v3.1.0:\n    bacon\n";
         if (cmd === "uv") return "httpie v0.14.0\n- httpie\n";
         if (cmd === "pipx") return JSON.stringify({ venvs: { httpie: { metadata: { main_package: { package_version: "0.13.0" } } } } });
+        if (cmd === "apt-mark") return APT_MANUAL;
+        if (cmd === "dpkg-query") return args[1]?.includes("Priority") === true ? APT_PRIORITY : APT_SIZES;
         if (cmd === "du") {
           if (over.du === null) return undefined;
           const kb = over.du ?? { just: 2048, blueutil: 100, turbo: 1024, codex: 512 };
@@ -147,10 +166,38 @@ describe("scanTools", () => {
     expect((await scanTools(laptop(), own)).map(r => r.id)).toEqual(["brew/just", "npm/turbo"]);
   });
 
+  it("what apt has is its own group, installed on the image by the catalog's apt road, checked with dpkg, and sized from dpkg's record rather than du", async () => {
+    const host = laptop({ brew: false, npm: false, apt: true });
+    const rows = await scanTools(host);
+    expect(rows).toEqual([
+      { id: "apt/direnv", name: "direnv", manager: "apt", group: "apt packages", install: "export DEBIAN_FRONTEND=noninteractive; apt-get install -y -qq direnv", check: "dpkg -s 'direnv'", size: 9000 * 1024 },
+      { id: "apt/fish", name: "fish", manager: "apt", group: "apt packages", install: "export DEBIAN_FRONTEND=noninteractive; apt-get install -y -qq fish", check: "dpkg -s 'fish'", size: 20000 * 1024 },
+    ]);
+    // apt's packages are spread over the filesystem, so no du reads them.
+    expect(host.calls.filter(c => c.startsWith("du "))).toEqual([]);
+  });
+
+  it("a computer without apt is asked nothing about it", async () => {
+    const host = laptop({ brew: false });
+    expect((await scanTools(host)).map(r => r.manager)).toEqual(["npm"]);
+    expect(host.calls.filter(c => c.startsWith("apt-mark") || c.startsWith("dpkg-query"))).toEqual([]);
+  });
+
+  it("drops a package the catalog carries whichever manager has it: its own row on the Tools screen installs it", async () => {
+    const rows = await scanTools(laptop({ brew: false, npm: false, apt: true }));
+    // The catalog installs tmux by apt itself, so an apt row for it would install it twice.
+    expect(rows.map(r => r.name)).not.toContain("tmux");
+  });
+
+  it("leaves an apt row off when the recipe already installs that tool by another hand", async () => {
+    const byHand = [{ kind: "custom" as const, id: "direnv", name: "direnv", install: ["apt-get install -y direnv"], check: "command -v direnv", why: "added by the agent" }];
+    expect((await scanTools(laptop({ brew: false, npm: false, apt: true }), byHand)).map(r => r.id)).toEqual(["apt/fish"]);
+  });
+
   it("turns a scanned row into a recipe row the machine can install, under the tool's own name", () => {
     const row = { id: "brew/just", name: "just", manager: "brew" as const, group: "Homebrew formulae", install: "brew install just", check: "brew list just", size: 2048 };
     // The row names its manager, so the build brings Homebrew before the line runs.
-    expect(customFromScan(row)).toEqual({ kind: "custom", id: "brew/just", name: "just", install: ["brew install just"], check: "brew list just", manager: "brew", size: 2048, why: "installed on this Mac by brew" });
+    expect(customFromScan(row, "darwin")).toEqual({ kind: "custom", id: "brew/just", name: "just", install: ["brew install just"], check: "brew list just", manager: "brew", size: 2048, why: "installed on this Mac by brew" });
   });
 
   it("keeps one name from two managers apart: two rows, two recipe ids, each with its own manager's line", async () => {
@@ -160,7 +207,7 @@ describe("scanTools", () => {
     // Each manager answers for its own, so no row leans on the package's name being the command it leaves.
     expect(rows.map(r => r.check)).toEqual(["uv tool list | grep -q '^httpie '", "pipx list --short | grep -q '^httpie '"]);
     // Two rows under one recipe id would be two installs, two digest ticks and one check answering for both.
-    expect(new Set(rows.map(r => customFromScan(r).id)).size).toBe(2);
-    expect(rows.map(r => customFromScan(r).name)).toEqual(["httpie", "httpie"]);
+    expect(new Set(rows.map(r => customFromScan(r, "darwin").id)).size).toBe(2);
+    expect(rows.map(r => customFromScan(r, "darwin").name)).toEqual(["httpie", "httpie"]);
   });
 });

@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The rows a recipe carries that the catalog does not: how `wsp recipe --add`
-// and the MCP recipe tool read them and how they join a recipe; the table
-// draws them under their own group. The install line runs as given, so nothing
-// here rewrites one; a row outside the catalog is never offered a sign-in.
-import { ADDED_BY_AGENT, commandCheck, customRows, usageRefusal, type Recipe, type RecipeCustomRow } from "@wsp/protocol";
+// and the MCP recipe tool read them and how they join a recipe, and how a
+// package the scan found becomes one; the table draws them under their own
+// group. The install line runs as given, so nothing here rewrites one; a row
+// outside the catalog is never offered a sign-in. Nothing here reaches the
+// engine: the MCP server reads these rules and may not.
+import type { Platform } from "@wsp/collect";
+import { ADDED_BY_AGENT, commandCheck, customRows, thisComputer, usageRefusal, type Recipe, type RecipeCustomRow } from "@wsp/protocol";
+import type { ScanRow } from "./scan.js";
 
 /** `<id>=<value>`, split at the first equals; both sides have to be there. */
 export function parsePair(flag: string, spec: string): { id: string; value: string } {
@@ -52,4 +56,20 @@ export function withCustom(recipe: Recipe, rows: readonly RecipeCustomRow[]): Re
  * plan resolves. */
 export function withoutCustom(recipe: Recipe, ids: ReadonlySet<string>): Recipe {
   return { ...recipe, custom: customRows(recipe).filter(r => !ids.has(r.id)) };
+}
+
+/** A scan row as a recipe row. The id is the scan row's own, the manager and the package: two managers can carry
+ * one name (uv and pipx both list ruff), and two rows under one id would be two installs, two digest ticks and one
+ * check for both. The name is the package alone, which is what the screen and the table read. */
+export function customFromScan(row: ScanRow, platform: Platform): RecipeCustomRow {
+  return {
+    kind: "custom",
+    id: row.id,
+    name: row.name,
+    install: [row.install],
+    check: row.check,
+    manager: row.manager,
+    ...(row.size !== undefined ? { size: row.size } : {}),
+    why: `installed on ${thisComputer(platform)} by ${row.manager}`,
+  };
 }

@@ -70,8 +70,8 @@ export const outsideRowsOf = (recipe: Pick<Recipe, "rows"> | undefined): RecipeR
  * verb, make it here, so a row's shape does not depend on which of them wrote it. */
 export const outsideRow = (id: string, paths: readonly string[] = []): RecipeRow => ({ id, kind: "tool", on: false, source: { kind: "installed", paths: [...paths], bin: true } });
 
-/** The row id a package a manager on this Mac lists has in a recipe: the collector's id for that manager and
- * package. The one rule the Also on this Mac screen and the recipe verb both tick such a package by. */
+/** The row id a package a manager here lists has in a recipe: the collector's id for that manager and
+ * package. The one rule the Also screen and the recipe verb both tick such a package by. */
 export const ownRowIdOf = (pkg: { manager: string; name: string }): string => toolRowId(pkg.manager, pkg.name);
 
 /** The recipe's own row for such a package, when it carries one. */

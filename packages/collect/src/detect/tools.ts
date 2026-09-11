@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { catalogToolFor, readsRowRoad } from "@wsp/catalog";
 import { toolRowId } from "@wsp/protocol";
 import { linuxSupport } from "../brew-bottles.js";
+import { aptPackages } from "./apt.js";
 import type { Host } from "../host.js";
 import type { ManifestEntry } from "../manifest.js";
 import { exists, firstLine, found, entry, item, present } from "./common.js";
@@ -125,18 +127,19 @@ export function parseGoVersionM(text: string): GoModule | undefined {
   return path !== undefined && version !== undefined ? { path, version } : undefined;
 }
 
-const versioned = (p: Pkg, sep: string) => (p.version === undefined ? p.name : `${p.name}${sep}${p.version}`);
+const versioned = (p: Pkg, sep: string | undefined) => (p.version === undefined || sep === undefined ? p.name : `${p.name}${sep}${p.version}`);
 
-interface GlobalManager {
+/** How a manager says what it has: one listing this reader parses, or a reader of its own where one listing is not
+ * the whole story (npm's other prefixes, apt's rule over what a person chose). */
+type Listing = { args: readonly string[]; parse: (out: string) => Pkg[] } | { list: (host: Host) => Promise<Pkg[]> };
+
+type GlobalManager = {
   id: string;
   bin: string;
   group: string;
-  /** The packages, when one listing is not the whole story; args and parse otherwise. */
-  list?: (host: Host) => Promise<Pkg[]>;
-  args: string[];
-  parse: (out: string) => Pkg[];
-  sep: string;
-}
+  /** Between a package and its version in the row's label; a manager whose packages carry no version needs none. */
+  sep?: string;
+} & Listing;
 
 const NPM_LS = ["ls", "-g", "--depth=0", "--json"];
 /** Where another node once kept its globals; a laptop that moved to a new node still runs them from PATH. */
@@ -158,12 +161,14 @@ async function npmGlobals(host: Host): Promise<Pkg[]> {
 }
 
 const GLOBALS: readonly GlobalManager[] = [
-  { id: "npm", bin: "npm", group: "npm globals", list: npmGlobals, args: NPM_LS, parse: parseNpmGlobals, sep: "@" },
+  { id: "npm", bin: "npm", group: "npm globals", list: npmGlobals, sep: "@" },
   { id: "pnpm", bin: "pnpm", group: "pnpm globals", args: ["ls", "-g", "--depth=0", "--json"], parse: parsePnpmGlobals, sep: "@" },
   { id: "bun", bin: "bun", group: "bun globals", args: ["pm", "ls", "-g"], parse: parseBunGlobals, sep: "@" },
   { id: "pipx", bin: "pipx", group: "pipx", args: ["list", "--json"], parse: parsePipxList, sep: " " },
   { id: "uv", bin: "uv", group: "uv tools", args: ["tool", "list"], parse: parseUvToolList, sep: " " },
   { id: "cargo", bin: "cargo", group: "cargo installs", args: ["install", "--list"], parse: parseCargoInstalls, sep: " " },
+  // apt-mark is what says which packages a person asked for; dpkg alone cannot tell those from the base image's own.
+  { id: "apt", bin: "apt-mark", group: "apt packages", list: aptPackages },
 ];
 
 // A formula the laptop already runs on Linux needs no snapshot to vouch for it. A formula nothing vouches
@@ -202,10 +207,13 @@ export async function detectTools(host: Host): Promise<ManifestEntry[]> {
     rows.push(entry({ rung: "tools", id: "tools/nix-home-manager", label: "Nix home-manager config", linux: "yes", ...(await found(host, ["~/.config/home-manager", "~/.config/nixpkgs/home.nix"])) }));
   }
 
-  // Language package managers run on Linux and fetch each package's own Linux build.
+  // Each row installs on the image: a language manager fetches that package's own Linux build, and apt is the
+  // image's own package manager. A manager whose rows the build reads no road off (apt) files none for a tool the
+  // catalog carries: that row would stand in for the catalog's, whose own road is what installs it there.
   for (const g of GLOBALS) {
     if (!(await host.exec.which(g.bin))) continue;
-    const pkgs = g.list !== undefined ? await g.list(host) : g.parse((await host.exec.run(g.bin, g.args)) ?? "");
+    const all = "list" in g ? await g.list(host) : g.parse((await host.exec.run(g.bin, g.args)) ?? "");
+    const pkgs = readsRowRoad(g.id) ? all : all.filter(p => catalogToolFor(p.name) === undefined);
     for (const p of pkgs) {
       rows.push(item({ rung: "tools", id: toolRowId(g.id, p.name), label: versioned(p, g.sep), group: g.group, linux: "yes", ...(p.version !== undefined ? { version: p.version } : {}) }));
     }

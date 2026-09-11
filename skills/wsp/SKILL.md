@@ -42,7 +42,7 @@ Asked to set a person up, read this section before running a single verb: a verb
    nohup wsp init --recipe ~/.wsp/recipe.json --non-interactive --json > /tmp/wsp-init.jsonl 2> /tmp/wsp-init.log &
    ```
 
-   It boots one builder machine, installs what is ticked, and at each sign-in the recipe answered `machine` it prints one JSON object on stdout and waits: `{"event":"sign-in","tool":"gh","label":"GitHub CLI login","browserUrl":"https://github.com/login/device","code":"8F4A-C21B","nextCommand":"open 'https://github.com/login/device'","waitSeconds":960}`. Hand that line to the person as it comes: the page to open on their computer, the code when there is one, and the command that opens the page. No thread and no tool can sign in for them; the run asks the tool's own status on the machine and moves on when it says signed in, or when `waitSeconds` pass. Read `/tmp/wsp-init.jsonl` as it grows rather than waiting on the process, which keeps serving the app after the seal. Say what it costs before starting it: about $0.11 an hour while the builder runs, and it holds one of the account's two machine slots. When the person would rather drive the wizard themselves, `wsp init --recipe ~/.wsp/recipe.json` in their own terminal draws six screens, Agents, Tools, Also on this Mac, Sign-ins, wsp for your agents on this Mac, and Build, of which the recipe has answered the first three, so their run opens on Sign-ins and ends on Build.
+   It boots one builder machine, installs what is ticked, and at each sign-in the recipe answered `machine` it prints one JSON object on stdout and waits: `{"event":"sign-in","tool":"gh","label":"GitHub CLI login","browserUrl":"https://github.com/login/device","code":"8F4A-C21B","nextCommand":"open 'https://github.com/login/device'","waitSeconds":960}`. Hand that line to the person as it comes: the page to open on their computer, the code when there is one, and the command that opens the page. No thread and no tool can sign in for them; the run asks the tool's own status on the machine and moves on when it says signed in, or when `waitSeconds` pass. Read `/tmp/wsp-init.jsonl` as it grows rather than waiting on the process, which keeps serving the app after the seal. Say what it costs before starting it: about $0.11 an hour while the builder runs, and it holds one of the account's two machine slots. When the person would rather drive the wizard themselves, `wsp init --recipe ~/.wsp/recipe.json` in their own terminal draws six screens, Agents, Tools, Also on this computer, Sign-ins, wsp for your agents on this computer, and Build, of which the recipe has answered the first three, so their run opens on Sign-ins and ends on Build.
 
    Expect: one `{"event":"sign-in-result","tool":"gh","label":"GitHub CLI login","state":"signed-in"}` line per hand-off (`"state":"not-signed-in"` with a `note` saying why when the person did not finish in time; the run seals either way), then `Golden v<n> sealed.` in the log, which is the seal, `Workspace first (<id>) forked from golden v<n>.` on the first seal, and `Open http://127.0.0.1:4400/`. A JSON line from `wsp threads` is not that proof: init serves a host for the whole wizard, before the sign-ins and the seal, so step 8 is what tells a sealed golden from an init still running.
 
@@ -282,13 +282,13 @@ wsp recipe --add ruff="uv tool install ruff"
 
 ## Packages this computer already has
 
-Everything `wsp recipe scan` lists under Also on this Mac (`alsoHere` in the JSON) is a package one of their own managers installed, and each row's id there is the id to tick:
+Everything `wsp recipe scan` lists under Also on this computer (`alsoHere` in the JSON) is a package one of their own managers installed, and each row's id there is the id to tick:
 
 ```
 wsp recipe --set brew/zingzy/tap/diskbloom=on --set npm/turbo=off
 ```
 
-Such a package is a row of its own, so the build installs it by the road the plan resolves for it: a formula with a Linux bottle by Homebrew, a tap formula with none from its GitHub release, pinned to the checksum its first install recorded, an npm or uv global by its manager. That is the same row and the same road the Also on this Mac screen ticks when the person drives the wizard, so an agent-written recipe and a hand-driven one build the same image. `--set <id>=off` unticks one again.
+Such a package is a row of its own, so the build installs it by the road the plan resolves for it: a formula with a Linux bottle by Homebrew, a tap formula with none from its GitHub release, pinned to the checksum its first install recorded, an npm or uv global by its manager. That is the same row and the same road the Also screen ticks when the person drives the wizard, so an agent-written recipe and a hand-driven one build the same image. `--set <id>=off` unticks one again.
 
 ## Rules learned the hard way
 

@@ -700,7 +700,7 @@ export class InitJobs implements InitDoor {
           }
         : {}),
     };
-    const reading = await readThisComputer({ ...wrapped, statePath: this.deps.statePath, home: this.deps.home, ...(recipeFile !== undefined ? { recipeFile } : {}) }, io, true);
+    const reading = await readThisComputer({ ...wrapped, statePath: this.deps.statePath, home: this.deps.home, platform: this.deps.platform, ...(recipeFile !== undefined ? { recipeFile } : {}) }, io, true);
     if ("code" in reading) throw new Error(s.log.at(-1) ?? "this computer could not be read");
     if (s.cancelled) return;
     s.reading = reading;

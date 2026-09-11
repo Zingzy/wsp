@@ -91,10 +91,11 @@ import {
   sealFailedBuilderUnreadLine,
   INSTALLER_MOVED_LINE,
   NO_ROAD_WORDS,
-  installedOnMacLine,
+  installedHereLine,
   installsByLine,
   leftOutLine,
   notHereLine,
+  thisComputer,
   SUM_SHOWN,
   pinMismatchLine,
   pinMovedLine,
@@ -1144,13 +1145,22 @@ describe("a pinned release that moved", () => {
   });
 });
 
+describe("the computer being read", () => {
+  it("is a Mac by name on a Mac and the plain word anywhere else", () => {
+    expect(thisComputer("darwin")).toBe("this Mac");
+    expect(thisComputer("linux")).toBe("this computer");
+  });
+});
+
 describe("a tools row outside the catalog", () => {
-  it("says it is on this Mac, what the build does with it, and when a file's tick has no row on this Mac", () => {
-    expect(installedOnMacLine(undefined)).toBe("installed on this Mac");
-    expect(installedOnMacLine("0.1.0")).toBe("installed on this Mac, 0.1.0");
+  it("says it is on this computer, what the build does with it, and when a file's tick has no row here", () => {
+    expect(installedHereLine("darwin", undefined)).toBe("installed on this Mac");
+    expect(installedHereLine("darwin", "0.1.0")).toBe("installed on this Mac, 0.1.0");
+    expect(installedHereLine("linux", "0.1.0")).toBe("installed on this computer, 0.1.0");
     expect(installsByLine("from its release", "the v0.1.0 release of github.com/Zingzy/diskbloom")).toBe("installs from its release: the v0.1.0 release of github.com/Zingzy/diskbloom");
     expect(leftOutLine("no Linux bottle known")).toBe("left out of the build: no Linux bottle known");
-    expect(notHereLine("zingzy/tap/diskbloom", "/tmp/given.json")).toBe("zingzy/tap/diskbloom is ticked in /tmp/given.json, but this Mac has no row that installs it; it is left out.");
+    expect(notHereLine("darwin", "zingzy/tap/diskbloom", "/tmp/given.json")).toBe("zingzy/tap/diskbloom is ticked in /tmp/given.json, but this Mac has no row that installs it; it is left out.");
+    expect(notHereLine("linux", "direnv", "/tmp/given.json")).toBe("direnv is ticked in /tmp/given.json, but this computer has no row that installs it; it is left out.");
   });
 });
 

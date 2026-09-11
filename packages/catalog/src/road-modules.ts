@@ -6,7 +6,7 @@
 // and the wizard ask a module through roadModule(); nothing outside this file
 // decides by a road's name. Every line is text: nothing here runs a command.
 import { shellQuote } from "@wsp/protocol";
-import { APT_ENV, type InstallRoad, type PackageRoad, type RoadName, pinCheckLine, standingPin } from "./roads.js";
+import { APT_ENV, ROADS, type InstallRoad, type PackageRoad, type RoadName, pinCheckLine, standingPin } from "./roads.js";
 
 type Road<K extends RoadName> = Extract<InstallRoad, { road: K }>;
 
@@ -303,6 +303,13 @@ export const ROAD_MODULES: { readonly [K in RoadName]: RoadModule<Road<K>> } = {
   apt,
   script,
 };
+
+/** Whether the build can read a package's install road off a tools row a manager filed under its own id, the same
+ * question `rowRoad` answers with the reader itself. Every language manager can. apt cannot: it is on every
+ * machine and brings no row of its own, so a row it filed can neither install the package nor stand in for the
+ * catalog row of a tool the catalog carries, whose own road installs that one. The collector and the recipe verb
+ * read this before filing or ticking such a row. */
+export const readsRowRoad = (manager: string): boolean => (ROADS as readonly string[]).includes(manager) && ROAD_MODULES[manager as RoadName].fromRow !== undefined;
 
 /** What a road's step gets from the guard that runs it. */
 export interface RoadStep {

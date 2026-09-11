@@ -432,7 +432,7 @@ describe("wsp verbs over the host", () => {
   it("wsp --help names the screens of wsp init in order, as the wizard draws them, with no count since a screen with nothing to pick is not shown", () => {
     expect(HELP).not.toMatch(/(three|five|six) screens/);
     const init = HELP.slice(HELP.indexOf("  wsp init "), HELP.indexOf("  wsp doctor ")).replace(/\s+/g, " ");
-    expect(init).toContain("one screen at a time: Agents, Tools, Also on this Mac, Sign-ins, wsp for your agents on this Mac, each shown when it has a row to pick, then Build");
+    expect(init).toContain("one screen at a time: Agents, Tools, Also on this computer, Sign-ins, wsp for your agents on this computer, each shown when it has a row to pick, then Build");
   });
 
   it("every line of wsp --help fits 100 columns", () => {

@@ -1712,8 +1712,9 @@ export const VERBS: readonly Verb[] = [
     options: { project: { type: "string", multiple: true } },
     run: async ctx => {
       if (ctx.args.length !== 0) throw usageRefusal("wsp recipe scan takes no positional arguments");
-      const scan = await runScan(nodeHost(), { ...projectsFlag(ctx.flags), cache: historyCache(ctx.statePath), ...(ctx.alsoHere !== undefined ? { alsoHere: ctx.alsoHere } : {}) }, progress(ctx.io));
-      printTable(ctx, scan, depth => scanPrintout(scan, depth), `Nothing was written. Take the do column with wsp recipe --set <id>=on and --signin <id>=machine, then run wsp init --recipe ${resolve(smallRecipePath(ctx.statePath))}.`);
+      const host = nodeHost();
+      const scan = await runScan(host, { ...projectsFlag(ctx.flags), cache: historyCache(ctx.statePath), ...(ctx.alsoHere !== undefined ? { alsoHere: ctx.alsoHere } : {}) }, progress(ctx.io));
+      printTable(ctx, scan, depth => scanPrintout(scan, host.platform, depth), `Nothing was written. Take the do column with wsp recipe --set <id>=on and --signin <id>=machine, then run wsp init --recipe ${resolve(smallRecipePath(ctx.statePath))}.`);
       return 0;
     },
     tool: tool({
@@ -1722,12 +1723,13 @@ export const VERBS: readonly Verb[] = [
       input: { project: PROJECT_FOLDERS },
       output: RecipeScan.shape,
       call: async ({ project }, deps) => {
-        const scan = await runScan(nodeHost(), {
+        const host = nodeHost();
+        const scan = await runScan(host, {
           cache: historyCache(deps.statePath),
           ...(project !== undefined ? { projects: projectFolders(project) } : {}),
           ...(deps.alsoHere !== undefined ? { alsoHere: deps.alsoHere } : {}),
         });
-        return asText(scanPrintout(scan).join("\n"), scan);
+        return asText(scanPrintout(scan, host.platform).join("\n"), scan);
       },
     }),
   },
@@ -1735,7 +1737,7 @@ export const VERBS: readonly Verb[] = [
     name: "recipe",
     usage: `wsp recipe [--tick ${RECIPE_TICKS.join("|")}] [--set <id>=on|off] [--signin <id>=${LOGIN_CHOICES.join("|")}] [--add <id>=<command>] [--add-check <id>=<command>] [--project <folder>] [--out <path>]`,
     about:
-      "write the recipe and print it as a table: every catalog agent and tool with its tick, why it has it and what it costs on the machine, then the commands your agents ran that no catalog row carries. --tick used|installed|default names the rule that decides every tick (used, the default, ticks what your agents actually ran here); --set <id>=on|off flips a row by its catalog id, or a package this Mac's own package managers have by the id wsp recipe scan gives it, which the build installs by that package's own road; --signin <id>=copy|machine|key|skip answers a sign-in by catalog id, key bringing the key files beside a login and nothing else of it; --add <id>=<command> carries a tool neither the catalog nor this Mac has, installed by that command on the machine, with --add-check <id>=<command> saying it is there; --project reads a folder's own manifests for what it takes to build and weighs the histories by it, --out says where the file goes and --json prints the table as one object. Naming --tick or --project decides every tick again; without either, what the file says stands and the flags flip rows on top of it. A sign-in answer stands either way: no rule decides one. All of them repeat. Review it, then wsp init --recipe",
+      "write the recipe and print it as a table: every catalog agent and tool with its tick, why it has it and what it costs on the machine, then the commands your agents ran that no catalog row carries. --tick used|installed|default names the rule that decides every tick (used, the default, ticks what your agents actually ran here); --set <id>=on|off flips a row by its catalog id, or a package this computer's own package managers have by the id wsp recipe scan gives it, which the build installs by that package's own road; --signin <id>=copy|machine|key|skip answers a sign-in by catalog id, key bringing the key files beside a login and nothing else of it; --add <id>=<command> carries a tool neither the catalog nor this computer has, installed by that command on the machine, with --add-check <id>=<command> saying it is there; --project reads a folder's own manifests for what it takes to build and weighs the histories by it, --out says where the file goes and --json prints the table as one object. Naming --tick or --project decides every tick again; without either, what the file says stands and the flags flip rows on top of it. A sign-in answer stands either way: no rule decides one. All of them repeat. Review it, then wsp init --recipe",
     options: {
       out: { type: "string" },
       tick: { type: "string" },
