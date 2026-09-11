@@ -19,7 +19,7 @@ A backend gives wsp `create`, `get`, `list`, `deleteSnapshot`, a `capabilities` 
 | `signedUrls` | files travel by signed download and upload URLs; without it there is no import or export road | yes |
 | `containers` | the guest runs containers; without it services install natively | no, the guest kernel has no overlayfs or netfilter, so Docker does not run |
 | `callbackRelay` | sign-in pages open on your computer and the callback port tunnels back; without it you finish sign-ins by copy and paste | yes |
-| `diskSnapshots` | a running machine's disk is copied into an image the account holds, which is what a version and a project golden are sealed as; without it a workspace cannot be snapshotted | yes, of a machine that was never resumed |
+| `diskSnapshots` | a running machine's disk is copied into an image the provider keeps, which is what a version and a project golden are sealed as; without it a workspace cannot be snapshotted | yes, of a machine that was never resumed |
 | `snapshotListing` | snapshots can be listed with sizes, so storage is counted and priced | yes |
 | `templates` | a snapshot can be promoted to a template that survives the provider's restarts; without it every version stays on its snapshot, which the provider may lose | yes |
 | `sizes` | every size a create may ask for, each with its awake rate | 2 vCPU with 4 GB at $0.11 an hour, 2 vCPU with 8 GB at $0.15 |
