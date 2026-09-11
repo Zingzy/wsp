@@ -1,8 +1,8 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { gzipSync } from "node:zlib";
-import { SNAPSHOT_STORAGE } from "@wsp/engine";
-import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec, MachineState, RunOptions, SnapshotRow, TemplateRow } from "@wsp/engine";
+import { NotFirstLifeError, SNAPSHOT_STORAGE } from "@wsp/engine";
+import type { ExecResult, Lifecycle, Machine, MachineBackend, MachineLife, MachineShape, MachineSpec, MachineState, RunOptions, SnapshotRow, TemplateRow } from "@wsp/engine";
 
 export interface StubMachine extends Machine {
   spec: MachineSpec;
@@ -19,17 +19,18 @@ export interface StubMachine extends Machine {
   resumes: number;
   /** What describe() reports; tests mutate it to play a resume that rebuilt the VM. */
   shape: MachineShape;
+  /** The life every snapshot was handed, in order. */
+  snapshotLives: MachineLife[];
   metrics(): Promise<void>;
 }
 
-/** The failure the engine's cap on the resume raises, so a fake provider ends a call the way the real one does. */
-export const cappedCall = (what: string): Error => Object.assign(new Error(`${what} was aborted due to timeout`), { name: "TimeoutError" });
-
-/** The failure a call the caller's own signal cut off raises; the runtime reads it as neither a cap nor a network
- * fault, which is what makes a stopped wake end as stopped rather than as a provider that did not answer. */
+/** The failure a call the caller's own signal cut off raises; the runtime reads it as neither of the two typed move
+ * failures, which is what makes a stopped wake end as stopped rather than as a provider that did not answer. */
 export const abortedCall = (what: string): Error => Object.assign(new Error(`${what} was aborted`), { name: "AbortError" });
 
 export interface StubBackend extends MachineBackend {
+  /** The cloud provider's own numbers, mutable so a test shrinks or removes one. */
+  lifecycle: Lifecycle;
   machines: StubMachine[];
   /** Every body PUT to an upload URL the stub minted, with the machine and guest path it was for. */
   puts: { machine: string; path: string; body: Buffer }[];
@@ -38,6 +39,9 @@ export interface StubBackend extends MachineBackend {
   execImpl: (m: StubMachine, cmd: string) => Promise<ExecResult> | ExecResult;
   /** Runs before each snapshot is taken, with which attempt on that machine this is; one that throws is the provider refusing. */
   beforeSnapshot?: (m: StubMachine, nth: number) => void;
+  /** The stub refuses a snapshot of a resumed machine as the provider it stands in for does; a test whose provider
+   * copies the disk from any life turns this on. */
+  snapshotsAnyLife: boolean;
   /** Every snapshot taken and not deleted, as the provider would list it. */
   snapshots: SnapshotRow[];
   /** What the next snapshot is listed at; a golden measured 7.8 to 8.5 GB live. */
@@ -99,7 +103,7 @@ export function stubBackend(): StubBackend {
   const backend: StubBackend = {
     capabilities: {
       liveCloneForks: true,
-      ramPreservingPause: true,
+      pauseMode: "memory",
       resize: true,
       previewUrls: true,
       signedUrls: true,
@@ -107,15 +111,16 @@ export function stubBackend(): StubBackend {
       callbackRelay: true,
       snapshotListing: true,
       templates: false,
-      firstLifeSnapshots: true,
       kept: false,
       sizes: [{ cpu: 2, memMb: 2048, rateUsdPerHour: 0.09 }, { cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }, { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 }, { cpu: 4, memMb: 8192, rateUsdPerHour: 0.22 }],
     },
     pricing: { rateUsdPerHour: (s: { cpu: number; memMb: number }) => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: SNAPSHOT_STORAGE },
+    lifecycle: { budgets: { wakeAttempts: 2, daemonAnswersMs: 30_000, resumeAsks: { everyMs: 60_000, forMs: 30 * 60_000 } } },
     machines,
     puts,
     snapshots,
     snapshotBytes: 8_000_000_000,
+    snapshotsAnyLife: false,
     templates,
     promoted,
     // The machine context probe answers with its markers and nothing found, as a bare guest would.
@@ -138,6 +143,7 @@ export function stubBackend(): StubBackend {
         runOptions: [],
         resumes: 0,
         shape: { cpu: spec.cpu ?? 2, memMb: spec.memMb ?? 4096, createdAt: new Date().toISOString() },
+        snapshotLives: [],
         async exec(cmd: string): Promise<ExecResult> {
           if (m.killed) throw Object.assign(new Error("gone"), { kind: "missing", status: 404 });
           m.execLog.push(cmd);
@@ -150,7 +156,9 @@ export function stubBackend(): StubBackend {
           m.runOptions.push(opts);
           return backend.execImpl(m, script);
         },
-        async snapshot(name: string): Promise<string> {
+        async snapshot(name: string, life: MachineLife): Promise<string> {
+          m.snapshotLives.push(life);
+          if (!life.firstLife && !backend.snapshotsAnyLife) throw new NotFirstLifeError(m.id, `snapshot ${name}`);
           snapshotAsks.set(m.id, (snapshotAsks.get(m.id) ?? 0) + 1);
           backend.beforeSnapshot?.(m, snapshotAsks.get(m.id)!);
           // The provider mints an id per call; a repeated name (two in one millisecond) must not fold into one row.

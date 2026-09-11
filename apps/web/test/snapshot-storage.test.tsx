@@ -6,9 +6,10 @@ import { MachineSurface } from "../src/components/machine/MachineSurface.js";
 import { SnapshotStorageLine, storageLine } from "../src/components/machine/SnapshotStorageLine.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
+import { caps } from "./caps.js";
 
 const GB = 1e9;
-const CAPS: Capabilities = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: false, kept: false, sizes: [] };
+const CAPS: Capabilities = caps();
 const PRICING = { freeGb: 10, usdPerGbMonth: 0.05, billedFrom: "2026-10-01" };
 /** Who made each snapshot rides on the wire beside the sum; this line reads the sum, and wsp up and the doctor read the split. */
 const owners = (count: number, bytes: number) => ({ kept: { count, bytes }, orphans: { count: 0, bytes: 0 }, others: { count: 0, bytes: 0 } });

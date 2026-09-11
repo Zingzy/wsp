@@ -7,7 +7,7 @@ import { BUILDER_IDLE_MS, MachineAliveError, SnapshotFailedError, applyDelta, ap
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { CURL_NET, GOLDEN_SETUP, MCP_SERVERS_JSON, NODE_RELEASES, ROAD_STEPS, nodeInstallScript } from "@wsp/catalog";
 import { shellQuote, type RecipeDigest } from "@wsp/protocol";
-import { NotFirstLifeError } from "../src/lifecycle.js";
+import { NotFirstLifeError } from "../src/errors.js";
 import { AGENT_INSTALLERS, HOMEBREW, NODE_PATH_LINE, type ToolInstall } from "../src/golden-import.js";
 import { INLINE_EXEC_MS } from "../src/exec-detached.js";
 import { USED_KB_CMD } from "../src/golden-tools.js";
@@ -25,6 +25,8 @@ function recordingBackend(
     built?: (spec: MachineSpec) => MachineShape;
     exec?: (cmd: string) => ExecResult;
     stream?: boolean;
+    /** The provider copies the disk from any life, as a container's commit does; without it a resumed machine is refused as Solari refuses one. */
+    snapshotsAnyLife?: boolean;
     snapshot?: (id: string, nth: number) => void;
     state?: (id: string) => void;
     /** The backend promotes snapshots to templates; what each read of a template answers, by how many reads it has had. */
@@ -52,7 +54,7 @@ function recordingBackend(
   const inline: { id: string; cmd: string; timeoutMs: number | undefined }[] = [];
   const answer = (cmd: string): ExecResult => opts.exec?.(cmd) ?? execResults[cmd] ?? (cmd === "echo ok" ? REACH_OK : { exitCode: 0, stdout: "", stderr: "" });
   const backend: MachineBackend = {
-    capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: false, firstLifeSnapshots: true, templates: opts.templates === true, kept: false, sizes: [] },
+    capabilities: { liveCloneForks: true, pauseMode: "memory", resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: false, templates: opts.templates === true, kept: false, sizes: [] },
     pricing: { rateUsdPerHour: (s: { cpu: number; memMb: number }) => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: { freeGb: 10, usdPerGbMonth: 0.05, billedFrom: "2026-10-01" }, builderDiskGb: BUILDER_DISK_GB },
     async create(spec) {
       if (spec.template !== undefined && spec.template.startsWith("tpl_") && !templates.has(spec.template)) throw Object.assign(new Error(`no template ${spec.template}`), { kind: "missing", status: 404 });
@@ -71,7 +73,8 @@ function recordingBackend(
           if (opts.stream) for (const line of res.stdout.split("\n")) if (line !== "") o.onLine?.(line);
           return res;
         },
-        snapshot: async (name) => {
+        snapshot: async (name, life) => {
+          if (!life.firstLife && opts.snapshotsAnyLife !== true) throw new NotFirstLifeError(id, `snapshot ${name}`);
           timeline.push(`snapshot ${id}`);
           opts.snapshot?.(id, timeline.filter(t => t === `snapshot ${id}`).length);
           snapshots.push(name);
@@ -398,7 +401,7 @@ describe("interactive golden: prepare then seal", () => {
     expect(stages.at(-1)).toMatch(/^sealed:v1; machine m2 is still running after two kills/);
   });
 
-  it("seal refuses a builder that is not first-life with a typed error and touches nothing", async () => {
+  it("a backend that refuses the seal's snapshot as notFirstLife ends it with that error, and the builder is left as it was", async () => {
     const { backend, timeline, snapshots } = recordingBackend();
     const builder = await prepareBuilder({ backend, setup: "true" });
     const err = await sealGolden({ ...builder, firstLife: false }, { backend, hostId: "h1", smoke: "true" }).catch(e => e as unknown);
@@ -410,8 +413,7 @@ describe("interactive golden: prepare then seal", () => {
   });
 
   it("seals a builder that was resumed on a backend whose snapshots are a copy of the disk", async () => {
-    const { backend, snapshots } = recordingBackend();
-    Object.assign(backend, { capabilities: { ...backend.capabilities, firstLifeSnapshots: false } });
+    const { backend, snapshots } = recordingBackend({}, { snapshotsAnyLife: true });
     const builder = await prepareBuilder({ backend, setup: "true" });
     const { manifest } = await sealGolden({ ...builder, firstLife: false }, { backend, hostId: "h1", smoke: "true" });
     expect(manifest.head).toBe(1);

@@ -8,9 +8,10 @@ import { DEFAULT_PREFERENCES, applyPreferencesPatch, type Preferences, type Pref
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DisconnectedError, RequestError, type Api, type ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
+import { caps } from "./caps.js";
 
 const view = (id: string): WorkspaceView => ({ id, name: id, machineId: `m_${id}`, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" });
-const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: false, kept: false, sizes: [] };
+const CAPS = caps();
 
 function fakeApi(record: Preferences, refuse?: () => Error) {
   const listeners = new Set<(e: ProtocolEvent) => void>();

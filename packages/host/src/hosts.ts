@@ -80,14 +80,18 @@ export function checkedAlias(alias: string): string {
   return alias;
 }
 
-/** The alias a name becomes when nobody typed one: what the rule above will not take folded to a dash, the
- * characters it cannot open with dropped, cut to the length it allows. */
+/** The alias a name becomes when nobody typed one: what the rule above will not take folded to a dash, a run of
+ * dots collapsed to one, the characters it cannot open with dropped, cut to the length it allows. Dots are in the
+ * alias class while the checker refuses a dot-dot, so the collapse is what keeps the one contract this fold has:
+ * whatever goes in, the name that comes out is one the checker takes, and the last line holds that even for an
+ * input the rules above have not thought of. */
 export function aliasFrom(name: string): string {
   const folded = name
     .replace(new RegExp(`[^${ALIAS_CHARS}]`, "g"), "-")
+    .replace(/\.{2,}/g, ".")
     .replace(new RegExp(`^[^${ALIAS_FIRST}]+`), "")
     .slice(0, ALIAS_MAX);
-  return folded === "" ? "host" : folded;
+  return aliasOk(folded) ? folded : "host";
 }
 
 const isRecord = (v: unknown): v is HostRecord =>

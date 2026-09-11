@@ -1,39 +1,44 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// A wake the provider never takes: the resume is cut off at its cap and the row
-// says so there, the host asks again on its own once a cadence, the person can
-// stop it from the row, and a resume the provider finally takes ends the wake
-// with the machine running. The provider here is a backend whose resume answers
-// nothing at all, which is what Solari's did for every paused machine on the
-// account on 2026-09-10.
+// A wake the provider never takes: the backend gives its resume up as unanswered
+// and the row says so, the host asks again on its own once a cadence, the person
+// can stop it from the row, and a resume the provider finally takes ends the
+// wake with the machine running. The provider here is a backend whose resume
+// ends unanswered every time, which is what Solari's did for every paused
+// machine on the account on 2026-09-10.
 import { describe, expect, it, vi } from "vitest";
-import { needsRebuild, RESUME_CAP_MS, RESUME_UNANSWERED, WAKE_ASKS_FOR_MS, WAKE_ASK_EVERY_MS, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, type EventUnion, type WorkspaceStatus } from "@wsp/protocol";
+import { RESUME_CAP_MS, ResumeUnansweredError, SOLARI_LIFECYCLE } from "@wsp/engine";
+import { needsRebuild, RESUME_UNANSWERED, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, type EventUnion, type WorkspaceStatus } from "@wsp/protocol";
 import { createRuntime, type RuntimeOptions } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
-import { abortedCall, cappedCall, stubBackend, type StubMachine } from "./stub-backend.js";
+import { abortedCall, stubBackend, type StubMachine } from "./stub-backend.js";
 import { until } from "./until.js";
 
-/** The cadence between asks, shaped like the shipped one and short enough to count in whole ticks. The cap is the
- * engine's own and no longer the runtime's, so the fake provider is the one that fires it, when the test says so. */
+/** The cadence between asks, shaped like the shipped one and short enough to count in whole ticks. The cap and the
+ * read after it are the backend's own, so the fake provider is the one that ends a call, when the test says so. */
 const EVERY = 60;
 /** The head of the line a run that gave up ends with; the test steps the clock in whole cadences, so the span it
  * names is not exact. */
 const GAVE_UP = /^the provider answered none of \d+ resume requests over /;
 
-function rig(wake: RuntimeOptions["wake"]) {
+/** A runtime over a stub whose backend asks again at the cadence given, for as long as given; `asks: null` declares
+ * no asking at all, so the host asks once and stops. Absent, the stub keeps the cloud provider's numbers. */
+function rig(asks?: { everyMs?: number; forMs: number } | null) {
   const backend = stubBackend();
+  if (asks === null) delete backend.lifecycle.budgets.resumeAsks;
+  else if (asks !== undefined) backend.lifecycle.budgets.resumeAsks = { everyMs: asks.everyMs ?? EVERY, forMs: asks.forMs };
   const store = memoryStore();
   const fc = fakeClock();
-  const rt = createRuntime({ backend, store, adapters: {}, clock: fc.clock, wake: { askEveryMs: EVERY, ...wake } });
+  const rt = createRuntime({ backend, store, adapters: {}, clock: fc.clock });
   const events: EventUnion[] = [];
   rt.events.on("*", e => events.push(e));
   const rows = (): WorkspaceStatus[] => events.filter(e => e.type === "workspace.status").map(e => (e.type === "workspace.status" ? e.status : null)!);
   return { backend, store, fc, rt, events, rows };
 }
 
-/** The provider as the probe found it: the resume is taken and never answered, until the engine's cap cuts it off or
- * the caller's own stop does. `cap()` fires the cap on whatever call is in flight, which is what the engine's
- * AbortSignal.timeout does on the real road; `takes` lets a later call land at once. */
+/** The provider as the probe found it: the resume is taken and never answered, until the backend's cap cuts it off
+ * and its read still finds the machine paused, or the caller's own stop ends it. `cap()` ends whatever call is in
+ * flight the way the backend ends one it gave up on, with the typed error; `takes` lets a later call land at once. */
 function deafResume(machine: StubMachine) {
   const state = { calls: 0, takes: false, cap: () => {} };
   machine.resume = async (signal?: AbortSignal) => {
@@ -43,7 +48,7 @@ function deafResume(machine: StubMachine) {
       return;
     }
     return new Promise<never>((_resolve, reject) => {
-      state.cap = () => reject(cappedCall(`resume of ${machine.id}`));
+      state.cap = () => reject(new ResumeUnansweredError(RESUME_UNANSWERED));
       signal?.addEventListener("abort", () => reject(abortedCall(`resume of ${machine.id}`)), { once: true });
     });
   };
@@ -84,8 +89,8 @@ function watch(waking: Promise<unknown>): { outcome: Promise<string>; ended: () 
 }
 
 describe("a wake the provider does not answer", () => {
-  it("says the provider has not answered and that the machine is being read, as soon as the resume runs its cap out", async () => {
-    const { backend, fc, rt, rows } = rig({ deadlineMs: 6 * 60_000, asksForMs: 2 * EVERY });
+  it("says the provider has not answered and that the machine is being read, as soon as the backend gives the resume up", async () => {
+    const { backend, fc, rt, rows } = rig({ forMs: 2 * EVERY });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
     await rt.workspaces.nap(ws.id);
     const deaf = deafResume(backend.machines[0]!);
@@ -94,8 +99,8 @@ describe("a wake the provider does not answer", () => {
       const began = fc.clock.now();
       const watched = watch(rt.workspaces.wake(ws.id));
       await until(() => deaf.calls === 1);
-      // The engine's cap is the only timer on the call, so the provider's own is what fires here and the runtime's
-      // clock has not moved: the row speaks on the call, never on the wake's six-minute deadline.
+      // The runtime holds no timer on the call: the backend's own end of it is what fires here, and the runtime's
+      // clock has not moved, so the row speaks the moment the backend gives up and on nothing of the runtime's.
       deaf.cap();
       await until(() => rows().some(r => r.reason === RESUME_UNANSWERED));
       expect(fc.clock.now()).toBe(began);
@@ -109,7 +114,7 @@ describe("a wake the provider does not answer", () => {
   });
 
   it("asks again on its own once a cadence, counting the asks on the row, and stops when the asking is spent", async () => {
-    const { backend, fc, rt, rows } = rig({ asksForMs: 4 * EVERY });
+    const { backend, fc, rt, rows } = rig({ forMs: 4 * EVERY });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
     await rt.workspaces.nap(ws.id);
     const deaf = deafResume(backend.machines[0]!);
@@ -134,7 +139,7 @@ describe("a wake the provider does not answer", () => {
   });
 
   it("counts the cadence from when the ask began, so a cap that eats half of it does not push the next ask out", async () => {
-    const { backend, fc, rt, rows } = rig({ asksForMs: 3 * EVERY });
+    const { backend, fc, rt, rows } = rig({ forMs: 3 * EVERY });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
     await rt.workspaces.nap(ws.id);
     const deaf = deafResume(backend.machines[0]!);
@@ -164,7 +169,9 @@ describe("a wake the provider does not answer", () => {
   });
 
   it("gives up half an hour after the first ask, having asked once a minute, with a cap that always fires", async () => {
-    const { backend, fc, rt } = rig({ askEveryMs: WAKE_ASK_EVERY_MS, asksForMs: WAKE_ASKS_FOR_MS });
+    // The cloud provider's own asking, read off its declaration and not off a number of the runtime's.
+    const { everyMs, forMs } = SOLARI_LIFECYCLE.budgets.resumeAsks!;
+    const { backend, fc, rt } = rig({ everyMs, forMs });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
     await rt.workspaces.nap(ws.id);
     const deaf = deafResume(backend.machines[0]!);
@@ -176,12 +183,12 @@ describe("a wake the provider does not answer", () => {
       const watched = watch(rt.workspaces.wake(ws.id));
       // One minute of wall time a turn, spent as the live road spends it: the provider takes the resume, answers
       // nothing for the half minute the engine's cap gives it, and the host has the rest of the minute to itself.
-      for (let ask = 1; !watched.ended() && ask <= 2 * (WAKE_ASKS_FOR_MS / WAKE_ASK_EVERY_MS); ask++) {
+      for (let ask = 1; !watched.ended() && ask <= 2 * (forMs / everyMs); ask++) {
         await until(() => deaf.calls === ask);
         fc.advance(RESUME_CAP_MS);
         deaf.cap();
-        await until(() => fc.dueFor(began + ask * WAKE_ASK_EVERY_MS) || watched.ended());
-        fc.advance(WAKE_ASK_EVERY_MS - RESUME_CAP_MS);
+        await until(() => fc.dueFor(began + ask * everyMs) || watched.ended());
+        fc.advance(everyMs - RESUME_CAP_MS);
       }
       ended = await watched.outcome;
     } finally {
@@ -189,16 +196,16 @@ describe("a wake the provider does not answer", () => {
     }
     // Half an hour of asking at one ask a minute is thirty asks, the last of them starting a minute inside the half
     // hour; the old count of thirty asks each waiting out its own cap spanned three quarters of an hour.
-    expect(deaf.calls).toBe(wakeAsksIn(WAKE_ASKS_FOR_MS, WAKE_ASK_EVERY_MS));
+    expect(deaf.calls).toBe(wakeAsksIn(forMs, everyMs));
     expect(deaf.calls).toBe(30);
-    expect(at.map(t => (t - at[0]!) / WAKE_ASK_EVERY_MS)).toEqual([...Array(30).keys()]);
-    expect(at.at(-1)! - at[0]!).toBeLessThan(WAKE_ASKS_FOR_MS);
+    expect(at.map(t => (t - at[0]!) / everyMs)).toEqual([...Array(30).keys()]);
+    expect(at.at(-1)! - at[0]!).toBeLessThan(forMs);
     // The line counts the asks made and the wall time they took, which is the last cap firing inside the half hour.
     expect(ended).toContain("none of 30 resume requests over 29m 30s");
   });
 
   it("reads before it asks again, sends no second resume at one that came up, and still checks the guest and ends first life", async () => {
-    const { backend, fc, rt, store, rows } = rig({ asksForMs: 30 * EVERY });
+    const { backend, fc, rt, store, rows } = rig({ forMs: 30 * EVERY });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
     expect(await store.get("workspaces", ws.id)).toMatchObject({ firstLife: true });
     await rt.workspaces.nap(ws.id);
@@ -236,7 +243,7 @@ describe("a wake the provider does not answer", () => {
   });
 
   it("leaves the rebuild road on the record when the asking runs out, and a wake that lands takes it away", async () => {
-    const { backend, fc, rt, store, rows } = rig({ asksForMs: 3 * EVERY });
+    const { backend, fc, rt, store, rows } = rig({ forMs: 3 * EVERY });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
     await rt.workspaces.nap(ws.id);
     const m = backend.machines[0]!;
@@ -271,7 +278,7 @@ describe("a wake the provider does not answer", () => {
   });
 
   it("stops when the person stops it from the row, while the host waits to ask again", async () => {
-    const { backend, fc, rt, store, rows } = rig({ asksForMs: 30 * EVERY });
+    const { backend, fc, rt, store, rows } = rig({ forMs: 30 * EVERY });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
     await rt.workspaces.nap(ws.id);
     const deaf = deafResume(backend.machines[0]!);
@@ -297,7 +304,7 @@ describe("a wake the provider does not answer", () => {
   });
 
   it("stops while the host is on a call by ending it, and a cap that fires after says nothing on the paused row", async () => {
-    const { backend, fc, rt, rows } = rig({ asksForMs: 30 * EVERY });
+    const { backend, fc, rt, rows } = rig({ forMs: 30 * EVERY });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
     await rt.workspaces.nap(ws.id);
     const deaf = deafResume(backend.machines[0]!);
@@ -321,7 +328,7 @@ describe("a wake the provider does not answer", () => {
   });
 
   it("a resume the provider finally takes ends the wake with the machine running, however many asks it took", async () => {
-    const { backend, fc, rt, events } = rig({ asksForMs: 30 * EVERY });
+    const { backend, fc, rt, events } = rig({ forMs: 30 * EVERY });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
     await rt.workspaces.nap(ws.id);
     const deaf = deafResume(backend.machines[0]!);
@@ -342,7 +349,7 @@ describe("a wake the provider does not answer", () => {
   });
 
   it("keeps the line on every status the poll builds, so the row does not fall silent between two asks", async () => {
-    const { backend, fc, rt } = rig({ asksForMs: 30 * EVERY });
+    const { backend, fc, rt } = rig({ forMs: 30 * EVERY });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
     await rt.workspaces.nap(ws.id);
     const deaf = deafResume(backend.machines[0]!);
@@ -364,15 +371,30 @@ describe("a wake the provider does not answer", () => {
   });
 
   it("a stop asked of a workspace with no wake in flight answers with the record as it stands", async () => {
-    const { rt } = rig({});
+    const { rt } = rig();
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
     expect((await rt.workspaces.stopWake(ws.id)).phase).toBe("running");
   });
 
-  it("ships a cap of half a minute and half an hour of asking", () => {
-    expect(RESUME_CAP_MS).toBe(30_000);
-    expect(WAKE_ASK_EVERY_MS).toBe(60_000);
-    expect(WAKE_ASKS_FOR_MS).toBe(30 * 60_000);
-    expect(wakeGaveUpLine(30, WAKE_ASKS_FOR_MS)).toContain("none of 30 resume requests over 30m");
+  it("a backend that declares no asking is asked once: no second resume, and the gave-up line counts one", async () => {
+    const { backend, fc, rt, rows } = rig(null);
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    await rt.workspaces.nap(ws.id);
+    const deaf = deafResume(backend.machines[0]!);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const watched = watch(rt.workspaces.wake(ws.id));
+      await until(() => deaf.calls === 1);
+      deaf.cap();
+      expect(await watched.outcome).toMatch(/^the provider answered none of 1 resume request over /);
+    } finally {
+      warn.mockRestore();
+    }
+    // Every ask that reaches a provider that bills starts is a start: a backend that says so is never asked twice.
+    fc.advance(EVERY * 5);
+    await new Promise(r => setTimeout(r, 20));
+    expect(deaf.calls).toBe(1);
+    expect(rows().some(r => r.wakeAsk !== undefined)).toBe(false);
+    expect((await rt.workspaces.get(ws.id)).phase).toBe("napping");
   });
 });

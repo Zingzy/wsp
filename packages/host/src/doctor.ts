@@ -464,8 +464,10 @@ function nodeBootstrap(place: DaemonPlace): string {
     `  tar -xzf "${place.scratch}/$pkg" -C ${sh(place, place.nodeDir)} --strip-components=1`,
     `  rm -f "${place.scratch}/$pkg"`,
     "fi",
-    // A Node under the place's own prefix carries its headers, so node-pty compiles against them instead of downloading a set.
-    `case "$(command -v node)" in ${sh(place, `${place.nodeDir}/bin/node`)}) export npm_config_nodedir=${sh(place, place.nodeDir)} ;; esac`,
+    // What node-gyp is pointed at is a set of headers, so the headers are what is asked for and not the path: an
+    // installer that only symlinked a foreign node into this prefix left none, and a nodedir without them dies on
+    // `gyp: <prefix>/common.gypi not found` (measured on Ubuntu 24.04, 2026-09-11).
+    `if [ "$(command -v node)" = ${sh(place, `${place.nodeDir}/bin/node`)} ] && [ -f ${sh(place, `${place.nodeDir}/include/node/node_version.h`)} ]; then export npm_config_nodedir=${sh(place, place.nodeDir)}; fi`,
   ].join("\n");
 }
 

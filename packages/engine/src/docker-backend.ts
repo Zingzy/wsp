@@ -20,7 +20,7 @@ import { classify, isMissing, type WspError } from "./errors.js";
 import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
 import { WSP_LABEL } from "./labels.js";
-import type { BackendPricing, DaemonSupervisor, ExecResult, Machine, MachineBackend, MachineKind, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
+import type { BackendPricing, DaemonSupervisor, ExecResult, Lifecycle, Machine, MachineBackend, MachineKind, MachineLife, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
 import { DAEMON_PORT } from "./preview.js";
 import { makeSshControlDir, SSH_CONTROL_PERSIST_S, sshControlPath } from "./ssh-backend.js";
 
@@ -379,8 +379,18 @@ export interface DockerBackendOptions {
   transport?: DockerTransport;
 }
 
+// Frozen: one shared object every DockerBackend hands out, so nothing shrinks a budget for everyone by accident.
+export const DOCKER_LIFECYCLE: Lifecycle = Object.freeze({
+  budgets: Object.freeze({
+    // Unpause is synchronous, and a second freeze fixes nothing a first did not: a failed check goes straight to the rebuild.
+    wakeAttempts: 1,
+    daemonAnswersMs: 30_000,
+  }),
+});
+
 export class DockerBackend implements MachineBackend {
   readonly capabilities: Capabilities;
+  readonly lifecycle = DOCKER_LIFECYCLE;
   readonly pricing = DOCKER_PRICING;
   /** A container boots from an image, and the same one serves both kinds: there is no desktop on this backend, and
    * a desktop machine's own stream has no meaning here. */
@@ -405,7 +415,7 @@ export class DockerBackend implements MachineBackend {
     this.baseTemplates = { sandbox: image, desktop: image };
     this.capabilities = {
       liveCloneForks: false, // a commit holds no memory, so a fork boots cold and wsp starts the agents again
-      ramPreservingPause: true, // the freezer cgroup keeps the processes and every byte they hold: a nap saves CPU, never memory
+      pauseMode: "memory", // the freezer cgroup keeps the processes and every byte they hold: a nap saves CPU, never memory
       resize: false,
       previewUrls: false, // a published port is bare TCP with no token and no expiry, so nothing public is minted
       signedUrls: false, // bytes go through the archive API instead
@@ -415,8 +425,6 @@ export class DockerBackend implements MachineBackend {
       callbackRelay: this.onThisComputer,
       snapshotListing: true,
       templates: true,
-      // A commit is a copy of the disk whatever the container has done since it booted, so a nap disqualifies nothing.
-      firstLifeSnapshots: false,
       kept: false, // a fork wsp made and can rebuild: a turn that wrecks its disk costs nothing else
       sizes: SIZES.map(size => ({ ...size, rateUsdPerHour: 0 })),
     };
@@ -663,8 +671,9 @@ export class DockerMachine implements Machine {
   }
 
   /** A commit: the container's filesystem as an image, the container held still while it is taken. It holds no
-   * memory, so whatever the agents had in theirs is gone and a fork of it starts them again. */
-  async snapshot(name: string): Promise<string> {
+   * memory, so whatever the agents had in theirs is gone and a fork of it starts them again. The disk is the same
+   * copy whatever the container has done since it booted, so the life it is handed changes nothing. */
+  async snapshot(name: string, _life: MachineLife): Promise<string> {
     const res = await this.backend.request<{ Id: string }>("POST", "/commit", {
       query: { container: this.id, repo: DOCKER_REPO, tag: imageTag(name), pause: "true" },
       body: { Labels: { [WSP_LABEL]: "1", [SNAPSHOT_LABEL]: name } },

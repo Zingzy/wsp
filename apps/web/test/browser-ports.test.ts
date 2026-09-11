@@ -14,6 +14,7 @@ import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { getTerminals } from "../src/terminal/link.js";
 import { wireTerminals } from "../src/terminal/wiring.js";
+import { caps } from "./caps.js";
 
 const TOKEN = "ports-token";
 
@@ -47,7 +48,7 @@ function fakeApi(workspaces: WorkspaceView[], daemonPort: (workspaceId: string) 
     nap: async id => workspaces.find(w => w.id === id)!,
     wake: async id => workspaces.find(w => w.id === id)!,
     upgrade: async id => workspaces.find(w => w.id === id)!,
-    capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: false, kept: false, sizes: [] }),
+    capabilities: async () => (caps()),
     startSession: async o => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     listSessions: async () => [],
     sessionHistory: async () => [],

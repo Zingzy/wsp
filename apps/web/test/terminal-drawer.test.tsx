@@ -18,6 +18,7 @@ import { RightPanel } from "../src/shell/RightPanel.js";
 import { openPanelTerminal } from "../src/shell/shellCommands.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../src/terminal/link.js";
+import { caps } from "./caps.js";
 
 // The toolbar buttons are Base UI popover triggers (tooltip on hover). Under
 // jsdom a click on one opens the popup, whose positioning against zero-size
@@ -521,7 +522,7 @@ describe("panes on a workspace that is not running", () => {
     const { wt } = fakeLink();
     resetLive();
     setPane("running", {});
-    useStore.setState({ capabilities: { liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: false, kept: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }, { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 }] } });
+    useStore.setState({ capabilities: caps({ resize: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }, { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 }] }) });
     useTerminalDrawerStore.getState().setOpen(WS, true);
     render(<WorkspaceTerminalDrawer workspaceId={WS} />);
     await waitFor(() => expect(inputs("drawer")).toHaveLength(1), { timeout: 15_000 });

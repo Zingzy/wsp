@@ -9,14 +9,12 @@ describe("no provider backend", () => {
   it("every capability is false and it offers no sizes, so every road that reads one refuses before it reaches here", () => {
     expect(new NoProviderBackend().capabilities).toEqual({
       liveCloneForks: false,
-      ramPreservingPause: false,
       resize: false,
       previewUrls: false,
       signedUrls: false,
       containers: false,
       callbackRelay: false,
       snapshotListing: false,
-      firstLifeSnapshots: false,
       templates: false,
       sizes: [],
       // Nothing here is a machine of the person's; there is no machine at all.

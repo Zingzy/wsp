@@ -3,8 +3,8 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { gzipSync } from "node:zlib";
 import { NODE_RELEASES } from "@wsp/catalog";
-import { SNAPSHOT_STORAGE } from "@wsp/engine";
-import type { ExecResult, Machine, MachineBackend, MachineSpec, MachineState, RunOptions, SnapshotRow, TemplateRow } from "@wsp/engine";
+import { NotFirstLifeError, SNAPSHOT_STORAGE } from "@wsp/engine";
+import type { ExecResult, Lifecycle, Machine, MachineBackend, MachineLife, MachineSpec, MachineState, RunOptions, SnapshotRow, TemplateRow } from "@wsp/engine";
 
 export interface StubMachine extends Machine {
   spec: MachineSpec;
@@ -21,6 +21,8 @@ export interface StubMachine extends Machine {
 }
 
 export interface StubBackend extends MachineBackend {
+  /** The cloud provider's own numbers, mutable so a test shrinks one. */
+  lifecycle: Lifecycle;
   machines: StubMachine[];
   execImpl: (m: StubMachine, cmd: string) => Promise<ExecResult> | ExecResult;
   /** Runs before each snapshot is taken, with which attempt on that machine this is; one that throws is the provider refusing. */
@@ -125,19 +127,19 @@ export function stubBackend(): StubBackend {
   const backend: StubBackend = {
     capabilities: {
       liveCloneForks: true,
-      ramPreservingPause: true,
+      pauseMode: "memory",
       resize: true,
       previewUrls: true,
       signedUrls: true,
       containers: true,
       callbackRelay: true,
       snapshotListing: true,
-      firstLifeSnapshots: true,
       templates: false,
       kept: false,
       sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }, { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 }, { cpu: 4, memMb: 8192, rateUsdPerHour: 0.22 }],
     },
     pricing: { rateUsdPerHour: (s: { cpu: number; memMb: number }) => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: SNAPSHOT_STORAGE },
+    lifecycle: { budgets: { wakeAttempts: 2, daemonAnswersMs: 30_000, resumeAsks: { everyMs: 60_000, forMs: 30 * 60_000 } } },
     machines,
     snapshots,
     snapshotBytes: 8_000_000_000,
@@ -177,7 +179,9 @@ export function stubBackend(): StubBackend {
           m.runLog.push(script);
           return backend.execImpl(m, script);
         },
-        async snapshot(name: string): Promise<string> {
+        async snapshot(name: string, life: MachineLife): Promise<string> {
+          // Refuses a resumed machine as the provider it stands in for does.
+          if (!life.firstLife) throw new NotFirstLifeError(m.id, `snapshot ${name}`);
           snapshotAsks.set(m.id, (snapshotAsks.get(m.id) ?? 0) + 1);
           backend.beforeSnapshot?.(m, snapshotAsks.get(m.id)!);
           // The provider mints an id per call; a repeated name (two in one millisecond) must not fold into one row.
