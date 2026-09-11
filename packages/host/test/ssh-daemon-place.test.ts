@@ -10,7 +10,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, st
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, sshDaemonPaths } from "@wsp/protocol";
+import { machineLacksShort, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, sshDaemonPaths } from "@wsp/protocol";
 import { putBytesScript } from "@wsp/engine";
 import type { Machine } from "@wsp/engine";
 import { BOOT_SCRIPT, CLOUD_PLACE, CONTAINER_PLACE, DAEMON_GONE_LINE, daemonLogCommand, guestPlace, SYSTEMD, deployDaemon, PREFLIGHT_OK_LINE, preflightScript, DAEMON_UNIT, daemonUnit, deployScript, removeDaemonScript, sshDaemonPlace, stageDaemonBundle, startMjs, stopDaemonScript } from "../src/doctor.js";
@@ -257,7 +257,7 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
     const line = s.split("\n").find(l => l.includes("Linger"));
     expect(line).toContain("loginctl show-user");
     expect(line).toContain("exit 1");
-    expect(line).toContain("this machine stops your login");
+    expect(line).toContain(machineLacksShort(NO_LINGER_LINE));
     expect(NO_LINGER_LINE).toContain("loginctl enable-linger");
     // Asked only where the machine can answer: a machine with no loginctl is not refused for lacking one.
     expect(line).toContain("command -v loginctl");

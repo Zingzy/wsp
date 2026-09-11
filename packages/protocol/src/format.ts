@@ -1719,7 +1719,7 @@ export const NO_BUILD_TOOLS_LINE =
  * and takes the daemon with it, so a daemon deployed there is gone the moment the host's connection closes; the
  * person turns linger on once and it holds for every login after. */
 export const NO_LINGER_LINE =
-  "this machine stops your login's services when you log out, so the daemon would not outlive the connection; run loginctl enable-linger on it and deploy the daemon again";
+  "this login does not linger, so its services stop when you log out and the daemon would not outlive the connection; run loginctl enable-linger on it and deploy the daemon again";
 
 /** The mark a refusal above carries, put on where the check throws rather than matched against a list of the
  * sentences: a check added to a place's preflight is then one shell line and one sentence here, and nothing keeps
@@ -1734,6 +1734,15 @@ export function machineLacking(said: string): Error {
 /** The sentence a machine refused with, or undefined for every other failure. */
 export function machineLacksLine(e: unknown): string | undefined {
   return e instanceof Error && (e as unknown as Record<string, unknown>)[MACHINE_LACKS] === true ? e.message : undefined;
+}
+
+/** A refusal cut to its first clause, which is what the machine has not got. Every sentence above is written in
+ * that order, what is wrong, then why it matters, then what to do, and its head is short enough for a row about
+ * thirty characters wide; the whole sentence goes where there is room, since the instruction is at the end of it
+ * and a row that cut from the right would take the instruction off. A refusal added later is written to the same
+ * shape rather than carrying a second, shorter copy of itself. */
+export function machineLacksShort(said: string): string {
+  return said.split(",")[0]!.trim();
 }
 
 /** The one sentence a socket a machine's requests arrive on is refused a ticket with. A ticket authenticates the

@@ -562,10 +562,6 @@ interface WorkspaceRecord extends WorkspaceView {
    * it: a fork's daemon comes with the golden and its preview route says whether one answers, while a machine the
    * person owns had none until a deploy landed, and nothing may dial one to find out. */
   daemon?: { deployedAt: string; version: number };
-  /** That the machine itself refused a daemon, which machine said so and when. Persisted beside the daemon it
-   * never took: what the machine lacks is a person's to put on it, so a host that forgot this at exit would
-   * deploy, be told the same sentence and flash it again at every start. Cleared by the deploy that lands. */
-  daemonRefusedAt?: { machineId: string; at: string };
 }
 
 interface LiveWorkspace {
@@ -2211,6 +2207,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     ...(r.theme !== undefined ? { theme: r.theme } : {}),
     ...(r.glyph !== undefined ? { glyph: r.glyph } : {}),
     ...(daemonNotes.has(r.id) ? { daemonNote: daemonNotes.get(r.id)! } : {}),
+    ...(r.daemonRefusedAt !== undefined ? { daemonRefusedAt: r.daemonRefusedAt } : {}),
     ...(r.vaultedAt !== undefined ? { vaultedAt: r.vaultedAt } : {}),
     ...(r.vaultRefused !== undefined ? { vaultRefused: r.vaultRefused } : {}),
     ...(r.wakeRefused !== undefined ? { wakeRefused: r.wakeRefused } : {}),
@@ -2459,32 +2456,42 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     moduleOf(entry.record.kind).deployDaemon !== undefined && landsBytes(backendFor(entry.record.kind).capabilities, entry.machine);
 
   /** Every road that puts a daemon on a machine runs the kind's deploy through here, and this is the one place
-   * that writes down how it went: a machine that answered with what it lacks is marked on the record, and the
-   * deploy that lands takes the mark off. The record rather than a map in this process, because the whole point
-   * of remembering is the next host start. */
+   * that writes down how it went: a machine that answered with what it lacks keeps its own sentence and the
+   * moment it said it, and every other ending takes them off. The record rather than a map in this process,
+   * because the whole point of remembering is the next host start. */
   const deployDaemonOn = async (entry: LiveWorkspace, deploy: (e: LiveWorkspace) => Promise<void | string>): Promise<void | string> => {
+    const forget = async (): Promise<void> => {
+      if (entry.record.daemonRefusedAt === undefined) return;
+      delete entry.record.daemonRefusedAt;
+      await persist(entry.record);
+    };
     try {
       const detail = await deploy(entry);
-      if (entry.record.daemonRefusedAt !== undefined) {
-        delete entry.record.daemonRefusedAt;
-        await persist(entry.record);
-      }
+      await forget();
       return detail;
     } catch (e) {
-      if (machineLacksLine(e) !== undefined) {
-        entry.record.daemonRefusedAt = { machineId: entry.machine.id, at: new Date(clock.now()).toISOString() };
+      const lacks = machineLacksLine(e);
+      // A deploy that got past the machine's own checks and fell over later proves the machine no longer lacks
+      // what it named, whatever else went wrong, so the record stops saying that it does.
+      if (lacks === undefined) await forget();
+      else {
+        entry.record.daemonRefusedAt = { machineId: entry.machine.id, at: new Date(clock.now()).toISOString(), why: lacks };
         await persist(entry.record);
       }
       throw e;
     }
   };
 
-  /** Whether this machine said what it lacks recently enough that offering it a daemon again would only be told
-   * the same sentence. The revive window's shape, read off the record instead of a map: the machine is checked
-   * too, so a machine swapped under the record is a fresh question. */
-  const lacksSaidRecently = (entry: LiveWorkspace): boolean => {
+  /** What the machine under this record last said it lacks, and nothing another machine said: a machine replaced
+   * under the record answers for itself, so the old one's sentence comes off rather than sitting on the record
+   * for good and being shown on a row for a machine that is gone. */
+  const lacksSaid = async (entry: LiveWorkspace): Promise<{ at: string; why: string } | undefined> => {
     const refused = entry.record.daemonRefusedAt;
-    return refused !== undefined && refused.machineId === entry.machine.id && clock.now() - Date.parse(refused.at) < DAEMON_LACKS_AGAIN_MS;
+    if (refused === undefined) return undefined;
+    if (refused.machineId === entry.machine.id) return refused;
+    delete entry.record.daemonRefusedAt;
+    await persist(entry.record);
+    return undefined;
   };
 
   /** Everything the runtime settles with a machine's daemon the moment it can reach it, and the only place that
@@ -2508,7 +2515,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // apart here because everything below reads differently for them: a machine that already answered with what
       // it lacks is left alone until its window is out, and the words say installing rather than updating.
       const placing = !module.hasDaemon(entry);
-      if (placing && lacksSaidRecently(entry)) return;
+      const said = await lacksSaid(entry);
+      if (placing && said !== undefined && clock.now() - Date.parse(said.at) < DAEMON_LACKS_AGAIN_MS) return;
       await whenNoTurnRuns(entry.record.id);
       if (entry.record.phase !== "running") return;
       await noteDaemon(entry, placing ? DAEMON_INSTALLING : DAEMON_UPDATING);

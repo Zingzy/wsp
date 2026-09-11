@@ -10,6 +10,7 @@ import {
   DAEMON_ROOTS_PATH,
   machineLacking,
   machineLacksLine,
+  machineLacksShort,
   NO_BUILD_TOOLS_LINE,
   NO_LINGER_LINE,
   noImportRoadLine,
@@ -931,6 +932,14 @@ describe("daemon files and diff ops", () => {
     expect(machineLacksLine(machineLacking(NO_BUILD_TOOLS_LINE))).toBe(NO_BUILD_TOOLS_LINE);
     expect(machineLacksLine(new Error(NO_BUILD_TOOLS_LINE))).toBeUndefined();
     expect(machineLacksLine("daemon deploy failed: NPM_FAIL")).toBeUndefined();
+    // Every refusal is written as what is wrong, then why, then what to do, so its first clause is the row's half
+    // and fits the row, and the whole sentence keeps the command a person types.
+    expect(machineLacksShort(NO_BUILD_TOOLS_LINE)).toBe("this machine has no C compiler");
+    expect(machineLacksShort(NO_LINGER_LINE)).toBe("this login does not linger");
+    for (const line of [NO_BUILD_TOOLS_LINE, NO_LINGER_LINE]) {
+      expect(machineLacksShort(line).length).toBeLessThanOrEqual(30);
+      expect(line.length).toBeGreaterThan(machineLacksShort(line).length);
+    }
     expect(noImportRoadLine("box", OVER_SSH)).toBe("box is a machine over ssh, which lands no folder yet; import to a fork, or register the folder on this computer");
   });
 });

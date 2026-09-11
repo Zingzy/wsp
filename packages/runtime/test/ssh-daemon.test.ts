@@ -246,6 +246,50 @@ describe("putting a daemon on a machine already recorded", () => {
     await later.rt.close();
   });
 
+  it("stops saying a machine lacks something once a deploy gets past its checks, however that deploy ends", async () => {
+    const store = memoryStore();
+    const fc = fakeClock();
+    const first = host({ store, clock: fc.clock, refuse: NO_BUILD_TOOLS_LINE, lacks: true });
+    const ws = await first.rt.workspaces.createSsh("dev@box");
+    expect(((await store.get("workspaces", ws.id)) as { daemonRefusedAt?: unknown }).daemonRefusedAt).toBeDefined();
+    await first.rt.close();
+
+    // The compiler is on it now and the deploy fails further in, on npm. Whatever else is wrong, the machine no
+    // longer lacks what it named, so the record stops saying it does and the next start is free to try again.
+    fc.advance(DAEMON_LACKS_AGAIN_MS);
+    const second = host({ store, clock: fc.clock, refuse: "daemon deploy failed: NPM_FAIL" });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await second.rt.workspaces.list();
+      await vi.waitFor(async () => expect(((await store.get("workspaces", ws.id)) as { daemonRefusedAt?: unknown }).daemonRefusedAt).toBeUndefined());
+    } finally {
+      warn.mockRestore();
+    }
+    await second.rt.close();
+  });
+
+  it("drops a refusal another machine gave, so a machine swapped under the record answers for itself", async () => {
+    const store = memoryStore();
+    const fc = fakeClock();
+    const refusing = { store, clock: fc.clock, refuse: NO_BUILD_TOOLS_LINE, lacks: true };
+    const first = host(refusing);
+    const ws = await first.rt.workspaces.createSsh("dev@box");
+    await first.rt.close();
+
+    // The record now stands on a different machine, with the last one's sentence still on it. Inside the window,
+    // so what is proved is the machine check and not the clock.
+    const stored = (await store.get("workspaces", ws.id)) as { daemonRefusedAt: { machineId: string } };
+    stored.daemonRefusedAt.machineId = "ssh://dev@other:22";
+    await store.put("workspaces", ws.id, stored);
+
+    const next = host(refusing);
+    await next.rt.workspaces.list();
+    await vi.waitFor(() => expect(next.daemon.deploys).toHaveLength(1));
+    // The old machine's sentence is off the record; this machine's own went on in its place.
+    await vi.waitFor(async () => expect(((await store.get("workspaces", ws.id)) as { daemonRefusedAt: { machineId: string } }).daemonRefusedAt.machineId).toBe("ssh://dev@box:22"));
+    await next.rt.close();
+  });
+
   it("says what the machine lacks, rather than that a helper it never had is being updated", async () => {
     const store = memoryStore();
     const fc = fakeClock();
