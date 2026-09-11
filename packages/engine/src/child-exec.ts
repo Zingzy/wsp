@@ -15,6 +15,9 @@ export interface ChildOptions {
   timeoutMs?: number;
   /** Each complete line the child writes on stdout, as it is read; the last partial line follows at the end. */
   onLine?: (line: string) => void;
+  /** Bytes written to the child's stdin, which is then closed. Absent leaves stdin as the caller found it, which for
+   * the ssh client is /dev/null: it is given -n on every road but the one that carries a file's bytes. */
+  stdin?: Uint8Array;
 }
 
 /** The child's own exit code, or 127 when it could not be started at all, the code a shell answers a missing
@@ -28,6 +31,12 @@ export function runChild(file: string, args: readonly string[], opts: ChildOptio
       ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
       ...(opts.env !== undefined ? { env: opts.env as NodeJS.ProcessEnv } : {}),
     });
+    if (opts.stdin !== undefined) {
+      // A child that closes its stdin early (a refused ssh dial) breaks the pipe under the write, which is the
+      // dial's own failure to report, not this one's.
+      child.stdin.on("error", () => {});
+      child.stdin.end(opts.stdin);
+    }
     let stdout = "";
     let stderr = "";
     let pending = "";

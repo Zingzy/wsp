@@ -11,7 +11,7 @@
 // that. A consent is for the plan the person read: editing the path drops
 // the plan and its ticks until the folder is read again.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fmtBytes, importIntoLine, importRequest, repoLine, secretSignalsLine, secretsNote, SESSIONS_NOTE, type ProjectAgent, type ProjectImportEvent, type ProjectImportResult, type ProjectPlan, type ProjectSecret, type WorkspaceView } from "@wsp/protocol";
+import { fmtBytes, importDest, importIntoLine, importRequest, repoLine, secretSignalsLine, secretsNote, SESSIONS_NOTE, type ProjectAgent, type ProjectImportEvent, type ProjectImportResult, type ProjectPlan, type ProjectSecret, type WorkspaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
 import { desktopBridge } from "../lib/desktopShell.js";
@@ -111,7 +111,7 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
     setEvents([]);
     setRefusal(null);
     try {
-      const landed = await api.importProject({ workspaceId: workspace.id, ...importRequest(plan, source, ticked, tickedAgents, replace) });
+      const landed = await api.importProject({ workspaceId: workspace.id, ...importRequest(plan, source, ticked, tickedAgents, replace, workspace) });
       setResult(landed);
       setPhase("done");
       remember(source.trim());
@@ -165,7 +165,7 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
               )}
             </TripSection>
             <TripSection k="summary" label="What travels">
-              <Summary plan={plan} />
+              <Summary plan={plan} workspace={workspace} />
             </TripSection>
             {plan !== null && plan.agents.length > 0 ? (
               <TripSection k="agents" label="Sessions">
@@ -201,7 +201,7 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
   );
 }
 
-function Summary({ plan }: { plan: ProjectPlan | null }) {
+function Summary({ plan, workspace }: { plan: ProjectPlan | null; workspace: WorkspaceView }) {
   const skippedTitle = plan?.skipped.map(s => `${s.path}: ${s.note}`).join("\n");
   return (
     <div className="flex flex-col">
@@ -216,7 +216,7 @@ function Summary({ plan }: { plan: ProjectPlan | null }) {
         {plan === null ? "" : plan.skipped.length === 0 ? "none" : count(plan.skipped.length, "path")}
       </FactRow>
       <FactRow label="Lands at" k="dest">
-        {plan === null ? "" : plan.source}
+        {plan === null ? "" : importDest(plan.source, workspace)}
       </FactRow>
     </div>
   );

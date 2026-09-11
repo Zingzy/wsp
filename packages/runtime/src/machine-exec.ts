@@ -34,7 +34,7 @@
 // every claim on the machine that the caller did not name.
 
 import { randomBytes } from "node:crypto";
-import { INLINE_EXEC_MS, MachineUnreached, execFits, putFiles, realRetryClock, untilReached, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
+import { INLINE_EXEC_MS, MachineUnreached, RUN_DIR, execFits, putFiles, realRetryClock, untilReached, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
 import { EXEC_CHUNK_BYTES, RUN_STOP_MS, TURN_IDLE_MS, TURN_WALL_MS, TURN_WORK_TICKS_PER_S, shellQuote, turnCutLine, workScoreLine } from "@wsp/protocol";
 import type { ExecStream, ExecStreamFactory, TurnCutRule } from "@wsp/protocol";
 
@@ -142,7 +142,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
   const idleMs = opts.idleMs ?? TURN_IDLE_MS;
   const deadlineMs = opts.deadlineMs ?? TURN_WALL_MS;
   const execTimeoutMs = opts.execTimeoutMs ?? INLINE_EXEC_MS;
-  const runDir = opts.runDir ?? "/tmp/wsp-run";
+  const runDir = opts.runDir ?? RUN_DIR;
   const now = opts.now ?? Date.now;
   const sleep = opts.sleep ?? realRetryClock.sleep;
 

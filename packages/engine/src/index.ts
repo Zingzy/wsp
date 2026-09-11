@@ -8,6 +8,7 @@ export * from "./docker-backend.js";
 export * from "./land-bytes.js";
 export * from "./local-backend.js";
 export * from "./ssh-backend.js";
+export * from "./ssh-forward.js";
 export * from "./child-exec.js";
 export * from "./no-provider-backend.js";
 export * from "./lifecycle.js";

@@ -10,7 +10,7 @@ import { BROWSER_SHIM_PATH, type GoldenManifest, type Machine } from "@wsp/engin
 import type { ForwardEvent } from "@wsp/protocol";
 import { DAEMON_TOKEN_SET, createRuntime, memoryStore, type Clock, type GoldenRecipe, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
-import { DAEMON_CONNECT_TIMEOUT_MS, OPEN_SHIM_PATH, OPEN_SHIM_SCRIPT, connectDaemonSocket, type ConnectOptions, type DaemonSocket } from "../src/doctor.js";
+import { CLOUD_PLACE, DAEMON_CONNECT_TIMEOUT_MS, OPEN_SHIM_PATH, connectDaemonSocket, openShimScript, type ConnectOptions, type DaemonSocket } from "../src/doctor.js";
 import { CALLBACK_HOLD_MAX_BYTES, CALLBACK_HOLD_MAX_CONNS, CALLBACK_HOLD_MS, FORWARD_IDLE_MS, FORWARD_MAX_PER_TARGET, REDIAL_CEILING_MS, RELAY_CAP_MS, RELAY_MIN_PORT, RELAY_WINDOW_MS, startCallbackRelay, type CallbackRelay } from "../src/relay.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 
@@ -192,7 +192,7 @@ function refused(port: number, host = "127.0.0.1"): Promise<boolean> {
 
 describe("the shim the host ships is the daemon's", () => {
   it("script and BROWSER path match the daemon package byte for byte, and the engine's seal probe reads the same path", () => {
-    expect(OPEN_SHIM_SCRIPT).toBe(DAEMON_SHIM_SCRIPT);
+    expect(openShimScript(CLOUD_PLACE)).toBe(DAEMON_SHIM_SCRIPT);
     expect(OPEN_SHIM_PATH).toBe(DAEMON_SHIM_PATH);
     expect(BROWSER_SHIM_PATH).toBe(DAEMON_SHIM_PATH);
   });
@@ -947,7 +947,7 @@ describe("callback relay end to end through a real daemon", () => {
       listenHosts: ["::1"],
     });
     const script = join(dir, "wsp-open");
-    writeFileSync(script, OPEN_SHIM_SCRIPT.replace("/root/.wsp/open.sock", sockPath));
+    writeFileSync(script, openShimScript(CLOUD_PLACE).replace("/root/.wsp/open.sock", sockPath));
     chmodSync(script, 0o755);
     const url = AUTH(port);
     // The link dials in the background; a post before it is up reaches no socket, so post until one lands.
