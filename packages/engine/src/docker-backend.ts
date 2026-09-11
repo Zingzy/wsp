@@ -21,7 +21,7 @@ import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
 import { WSP_LABEL } from "./labels.js";
 import type { BackendPricing, DaemonSupervisor, ExecResult, Lifecycle, Machine, MachineBackend, MachineKind, MachineLife, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
-import { DAEMON_PORT } from "./preview.js";
+import { DAEMON_LISTENING_CHECK, DAEMON_PORT } from "./preview.js";
 import { makeSshControlDir, SSH_CONTROL_PERSIST_S, sshControlPath } from "./ssh-backend.js";
 
 /** How long a fetch of an image may take before the call is cut off: a base image is a few hundred megabytes over
@@ -743,6 +743,15 @@ export class DockerMachine implements Machine {
     }
     const host = bound.HostIp === undefined || bound.HostIp === "" || bound.HostIp === "0.0.0.0" ? "127.0.0.1" : bound.HostIp;
     return { url: `http://${host}:${bound.HostPort}`, token: "", expiresAt: Number.MAX_SAFE_INTEGER };
+  }
+
+  /** Whether the guest's daemon is listening, asked from inside the container over the road every call to this
+   * machine takes. The published port is on the loopback of the computer the Docker daemon runs on, so a host
+   * dialling it from anywhere else reads silence off a live daemon and the row calls the machine unreachable
+   * while its turns run (a box dialling the Mac's socket read both its forks unreachable, 2026-09-11). */
+  async daemonAnswers(opts: { timeoutMs?: number } = {}): Promise<boolean> {
+    const res = await this.exec(DAEMON_LISTENING_CHECK, opts);
+    return res.exitCode === 0;
   }
 
   /** Bytes onto the container through the archive road: one file in a tar, extracted where it belongs. */
