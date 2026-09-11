@@ -248,10 +248,9 @@ export async function readSshMachine(reach: SshReach, transport: SshTransport = 
   }
   const cpu = Number(values["cpu"] ?? 0);
   const memMb = Math.round(Number(values["memkb"] ?? 0) / 1024);
-  const path = values["path"];
   const hostKey = hostKeyOf(res.stderr);
   return {
-    login: { ...stores, HOME: home, USER: values["user"] ?? reach.user, PATH: path === undefined || path === "" ? DEFAULT_REMOTE_PATH : path },
+    login: { ...stores, HOME: home, USER: values["user"] ?? reach.user, PATH: plainPath(values["path"]) },
     shape: { cpu, memMb },
     ...(hostKey !== undefined ? { hostKey } : {}),
   };
@@ -289,15 +288,30 @@ export function sshDialsThisComputer(reach: SshReach, names: readonly string[]):
  * anyway, so a harness the person installed elsewhere is missing rather than every command being. */
 export const DEFAULT_REMOTE_PATH = "/usr/local/bin:/usr/bin:/bin";
 
+/** The machine's own login PATH, each folder in it held to the rule the home is held to. It is the last thing the
+ * machine answers with that ends up written rather than run: a turn exports it, and the daemon's unit states it,
+ * where systemd splits an Environment= line on whitespace and reads a quote as quoting. A folder carrying a quote
+ * or a space is dropped rather than escaped at each of those, and a PATH with nothing left in it falls back, so a
+ * machine that answers with something unusable leaves a harness missing rather than every command. */
+export function plainPath(path: string | undefined): string {
+  const kept = (path ?? "").split(":").filter(folder => folder !== "" && isPlainPath(folder) && !/\s/.test(folder));
+  return kept.length === 0 ? DEFAULT_REMOTE_PATH : kept.join(":");
+}
+
 /** What the write answers with once the bytes are on disk under their own name. */
 export const SSH_BYTES_OK = "WSP_BYTES_OK";
 
 /** The script that takes a file's bytes off the connection's stdin. The bytes land beside the target under a name
  * of their own and are moved into place only once the byte count matches, so a connection cut halfway leaves the
- * target as it was rather than a file that looks whole. `wc` pads its count on some systems, so the spaces go. */
+ * target as it was rather than a file that looks whole. `wc` pads its count on some systems, so the spaces go.
+ * Nothing of the file's content is named in the command, which is the point of this road for a secret: a command
+ * sits in /proc/<pid>/cmdline for its own length, and every account on the machine can read it there. */
 export function putBytesScript(path: string, size: number, tmp: string): string {
   return [
     "set -e",
+    // The file is the writer's alone until something widens it: a machine somebody owns may carry other accounts,
+    // and what travels this road is a daemon token as often as it is an archive.
+    "umask 077",
     `mkdir -p ${shellQuote(posix.dirname(path))}`,
     `cat > ${shellQuote(tmp)}`,
     `[ "$(wc -c < ${shellQuote(tmp)} | tr -d ' ')" = ${size} ] || { rm -f ${shellQuote(tmp)}; echo WSP_BYTES_SHORT; exit 1; }`,

@@ -8,6 +8,7 @@ import {
   GoldenVersion,
   DAEMON_ROOTS_PATH,
   NO_BUILD_TOOLS_LINE,
+  NO_LINGER_LINE,
   noImportRoadLine,
   noSshDaemonLine,
   OVER_SSH,
@@ -897,10 +898,14 @@ describe("daemon files and diff ops", () => {
     expect(Object.values(at).filter(path => !path.startsWith("/home/maya/"))).toEqual([]);
   });
 
-  it("says a machine over ssh carries no daemon yet, and names both ways to put one on it", () => {
-    // Recorded but not deployed is what the sentence is for now, so it names the verb that finishes the job as
-    // well as the one the person just ran.
-    expect(noSshDaemonLine("box")).toBe("box carries no daemon yet, so its terminal, files and ports are not served; run wsp new --ssh again, or wsp workspaces daemon update box");
+  it("says a machine over ssh carries no daemon yet, and names no verb, since nobody can type one", () => {
+    // Recorded but not deployed is what the sentence is for. Nothing a person types puts a daemon on a machine
+    // already recorded, so the line says what the host does on its own rather than naming a verb that is not there.
+    expect(noSshDaemonLine("box")).toBe("box carries no daemon yet, so its terminal, files and ports are not served; this host tries again each time it starts");
+    expect(noSshDaemonLine("box")).not.toContain("daemon update");
+    // A login whose services stop with it would lose the daemon the moment the connection closed, so it is
+    // refused with the one command that turns that off.
+    expect(NO_LINGER_LINE).toContain("loginctl enable-linger");
     // node-pty ships prebuilt binaries for macOS and Windows only, so the terminal is compiled where it runs.
     expect(NO_BUILD_TOOLS_LINE).toContain("no C compiler");
     expect(NO_BUILD_TOOLS_LINE).toContain("build-essential");

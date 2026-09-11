@@ -67,7 +67,10 @@ describe.runIf(LIVE && ADDRESS !== "")("a machine reached over ssh, end to end (
       rt = createRuntime({ backend: new SshBackend(), store: memoryStore(), adapters: {}, ssh: sshWiring() });
       const ws = await rt.workspaces.createSsh(ADDRESS, ASKED);
       expect(ws.kind).toBe("ssh");
-      expect(ws.notice ?? "").not.toContain("wsp workspaces daemon update");
+      expect(ws.notice ?? "").not.toContain("carries no daemon yet");
+      // The token never rode a command on the machine, and the file it landed in is the login's alone.
+      const mode = await machine.exec(`stat -c %a ${sshDaemonPaths(home).tokenPath}`, { timeoutMs: 30_000 });
+      expect(mode.stdout.trim()).toBe("600");
 
       // Nothing on the machine listens past its own loopback: the daemon's port is bound on 127.0.0.1 there.
       const at = sshDaemonPaths(home);

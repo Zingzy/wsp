@@ -1620,11 +1620,12 @@ export function noMachineHomeLine(name: string): string {
 }
 
 /** What the roads that need a daemon are refused with on a machine reached over ssh before one is on it: the
- * record was made but the deploy has not landed, so the panes that ride a daemon have nothing to dial yet. Both
- * ways out are named, since the first is what a person who just ran the verb would repeat and the second is what
- * gets a daemon onto a machine already recorded. */
+ * record was made but the deploy has not landed, so the panes that ride a daemon have nothing to dial yet. The
+ * host tries again on its own at every start, so the line says that rather than naming a verb: nothing a person
+ * types puts a daemon on a machine already recorded, and the one thing they can do is fix what the deploy said
+ * it needed. */
 export function noSshDaemonLine(name: string): string {
-  return `${name} carries no daemon yet, so its terminal, files and ports are not served; run wsp new --ssh again, or wsp workspaces daemon update ${name}`;
+  return `${name} carries no daemon yet, so its terminal, files and ports are not served; this host tries again each time it starts`;
 }
 
 /** What import is refused with on a kind no road lands a folder on, said before the folder is read. Every kind
@@ -1640,6 +1641,12 @@ export function noImportRoadLine(name: string, machine: string): string {
  * after, since a daemon that installed half of itself restarts forever under its unit. */
 export const NO_BUILD_TOOLS_LINE =
   "this machine has no C compiler, so the daemon's terminal cannot be built on it; install a build toolchain (on Debian or Ubuntu: sudo apt-get install build-essential) and deploy the daemon again";
+
+/** What a machine whose login does not linger is refused with. Its own systemd stops when its last session ends
+ * and takes the daemon with it, so a daemon deployed there is gone the moment the host's connection closes; the
+ * person turns linger on once and it holds for every login after. */
+export const NO_LINGER_LINE =
+  "this machine stops your login's services when you log out, so the daemon would not outlive the connection; run loginctl enable-linger on it and deploy the daemon again";
 
 /** The one sentence a socket a machine's requests arrive on is refused a ticket with. A ticket authenticates the
  * next socket, and a socket this host minted no relay ticket for is one of the person's own, so a machine that

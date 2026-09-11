@@ -8,10 +8,8 @@
 
 import { spawn } from "node:child_process";
 import { createServer, connect, type Socket } from "node:net";
+import { LOOPBACK } from "@wsp/protocol";
 import { sshDialArgs, type SshReach } from "./ssh-backend.js";
-
-/** The loopback both ends of a forward sit on: this computer's, and the machine's own from its own side. */
-export const FORWARD_LOOPBACK = "127.0.0.1";
 
 /** How long a forward has to start answering on its local port before it is given up and killed. */
 export const FORWARD_READY_MS = 20_000;
@@ -37,7 +35,7 @@ export function sshForwardArgs(reach: SshReach, localPort: number, remotePort: n
     "-o",
     "ServerAliveCountMax=3",
     "-L",
-    `${FORWARD_LOOPBACK}:${localPort}:${FORWARD_LOOPBACK}:${remotePort}`,
+    `${LOOPBACK}:${localPort}:${LOOPBACK}:${remotePort}`,
     ...sshDialArgs(reach),
     `${reach.user}@${reach.host}`,
   ];
@@ -81,7 +79,7 @@ export function freeLoopbackPort(): Promise<number> {
   return new Promise((done, fail) => {
     const server = createServer();
     server.once("error", fail);
-    server.listen(0, FORWARD_LOOPBACK, () => {
+    server.listen(0, LOOPBACK, () => {
       const found = server.address();
       const port = typeof found === "object" && found !== null ? found.port : 0;
       server.close(() => (port > 0 ? done(port) : fail(new Error("this computer offered no free port for an ssh forward"))));
@@ -97,7 +95,7 @@ function reaches(port: number): Promise<boolean> {
       socket?.destroy();
       done(ok);
     };
-    socket = connect({ port, host: FORWARD_LOOPBACK }, () => settle(true));
+    socket = connect({ port, host: LOOPBACK }, () => settle(true));
     socket.once("error", () => settle(false));
   });
 }

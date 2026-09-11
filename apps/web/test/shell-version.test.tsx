@@ -28,7 +28,7 @@ function Reader() {
 
 beforeEach(() => {
   useStore.setState({ toast: null, toastAction: null });
-  served({ wsPort: 1, token: "t", version: "0.1.5" });
+  served({ wsPort: 1, token: "t", wsPath: "/ws", paired: true, version: "0.1.5" });
 });
 afterEach(() => {
   vi.unstubAllGlobals();

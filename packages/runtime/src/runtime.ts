@@ -177,15 +177,16 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
-import { mcpServersBlocked, actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, machineCapRefusal, machineWord, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_ASK_EVERY_MS, WAKE_ASKS_FOR_MS, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState } from "@wsp/protocol";
+import { mcpServersBlocked, actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineWord, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_ASK_EVERY_MS, WAKE_ASKS_FOR_MS, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
-import { DAEMON_TOKEN_PATH, DAEMON_TOKEN_SET, assertTokenShape, rotateDaemonTokenScript } from "./daemon-token.js";
+import { DAEMON_TOKEN_PATH, assertTokenShape, rotateDaemonToken } from "./daemon-token.js";
 import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy, idleReason } from "./idle.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import { POLL_INTERVAL_MS, createStatusTracker, machineStateOf, phaseLeavingGone, providerSaid, type StatusApi, type StatusListOptions, type StatusWatchOptions } from "./status.js";
+import { makeDevices, type DeviceDoor } from "./devices.js";
 import type { Store } from "./store.js";
 import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, smallestModel } from "./harness-catalog.js";
 
@@ -1214,6 +1215,9 @@ export interface Runtime {
   /** Enriched status (machine state, daemon reach, size, rate) + cost ticker; its list leaves out the workspaces the
    * caller's origin may not drive, as workspaces.list does. */
   readonly status: OriginStatusApi;
+  /** The computers paired with this host and the one time codes that pair them, one collection each on this state
+   * file, so a restart neither locks a paired computer out nor keeps a revoked one in. */
+  readonly devices: DeviceDoor;
   /** The person's view preferences, one record on this state file, so the desktop app and a browser tab agree. */
   readonly preferences: {
     get(): Promise<Preferences>;
@@ -1550,7 +1554,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
      * computer runs its daemon in this process, a host that wired no bundle has none, and a backend that neither
      * mints a signed URL nor carries bytes itself has no road for one. Every road that offers to deploy reads
      * whether this is here, so none offers where another would refuse. */
-    deployDaemon?: (entry: LiveWorkspace) => Promise<void>;
+    deployDaemon?: (entry: LiveWorkspace) => Promise<void | string>;
   }
   type ImportReport = (stage: ProjectImportStage, message: string, progress?: { bytes: number; total: number }) => void;
   interface ImportLanded {
@@ -1634,7 +1638,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const home = sshHomeDir(entry);
     const { localPort } = await ssh.forward(entry.machine, await sshDaemonPort(entry, home));
     const token = await daemonTokenOf(entry.machine, sshDaemonPaths(home).tokenPath);
-    return { url: `http://127.0.0.1:${localPort}`, expiresAt: NEVER, ...(token !== undefined ? { daemonToken: token } : {}) };
+    return { url: `http://${LOOPBACK}:${localPort}`, expiresAt: NEVER, ...(token !== undefined ? { daemonToken: token } : {}) };
   };
   /** Puts this runtime's daemon on a fork and hands it this runtime's token: the deploy writes one of its own,
    * so the guest's file is replaced the moment the deploy is done rather than at the next dial. */
@@ -1646,15 +1650,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** Puts this runtime's daemon under the login the machine answered with. The record keeps that it happened, so
    * a later host process knows the machine has one without dialling it, and the panes refuse with the sentence
    * that names the verb rather than waiting on a port nothing binds. */
-  const sshDeploy = async (entry: LiveWorkspace): Promise<void> => {
+  const sshDeploy = async (entry: LiveWorkspace): Promise<void | string> => {
     if (ssh?.deployDaemon === undefined) throw new Error(noKindLine("ssh"));
     const login = loginOf(entry.record);
     const home = sshHomeDir(entry);
-    await ssh.deployDaemon(entry.machine, { home, path: login["PATH"] ?? "" });
+    const detail = await ssh.deployDaemon(entry.machine, { home, path: login["PATH"] ?? "" });
     daemonTokens.delete(entry.machine.id);
     await daemonTokenOf(entry.machine, sshDaemonPaths(home).tokenPath);
     entry.record.daemon = { deployedAt: new Date(clock.now()).toISOString(), version: DAEMON_VERSION };
     await persist(entry.record);
+    return detail;
   };
   const modules: Record<WorkspaceKind, KindModule | undefined> = {
     cloud: {
@@ -1731,15 +1736,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             daemonRoad: sshRoad,
             scratch: entry => sshDaemonPaths(sshHomeDir(entry)).wsp,
             // The record says which daemon this host put there. Reading it off the machine would be a dial
-            // through the forward for a fact this host wrote down when it deployed.
-            daemonVersion: async entry => entry.record.daemon?.version ?? null,
+            // through the forward for a fact this host wrote down when it deployed. A record naming none is
+            // behind every version rather than unknown, which is what makes the sync put one on a machine whose
+            // first deploy failed: nothing a person types does that, so the host has to.
+            daemonVersion: async entry => entry.record.daemon?.version ?? 0,
             // The daemon comes off before the road to it does: taking it off rides the connection that carries
-            // every command, not the forward, and the forward is this host's own to close either way.
+            // every command, not the forward, and the forward is this host's own to close either way. Whether the
+            // record says a daemon landed decides nothing here: a deploy that failed partway left the bundle and
+            // the token there and wrote no record, and the promise is that what wsp put on somebody's machine
+            // goes with the record that put it there. The removal is every path named and nothing else, so on a
+            // machine that took nothing it removes nothing.
             dropped: async entry => {
-              if (ssh.removeDaemon !== undefined && entry.record.daemon !== undefined) {
-                const login = loginOf(entry.record);
-                await ssh.removeDaemon(entry.machine, { home: sshHomeDir(entry), path: login["PATH"] ?? "" });
-              }
+              const login = loginOf(entry.record);
+              await ssh.removeDaemon?.(entry.machine, { home: sshHomeDir(entry), path: login["PATH"] ?? "" });
               await ssh.dropForward?.(entry.machine);
             },
             ...(ssh.deployDaemon === undefined ? {} : { deployDaemon: sshDeploy }),
@@ -1959,8 +1968,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const daemonTokenOf = async (machine: Machine, path?: string): Promise<string | undefined> => {
     const cached = daemonTokens.get(machine.id);
     if (cached && (cached.hasDaemon || Date.now() - cached.at < DAEMON_TOKEN_MISS_TTL_MS)) return cached.hasDaemon ? daemonToken : undefined;
-    const res = await machine.exec(rotateDaemonTokenScript(daemonToken, path));
-    const hasDaemon = res.exitCode === 0 && res.stdout.includes(DAEMON_TOKEN_SET);
+    const hasDaemon = await rotateDaemonToken(machine, daemonToken, path);
     daemonTokens.set(machine.id, { hasDaemon, at: Date.now() });
     return hasDaemon ? daemonToken : undefined;
   };
@@ -3300,13 +3308,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     };
     report("daemon-answering", `Putting the daemon on ${workspace.name} under its own login.`);
     try {
-      await module.deployDaemon(entry);
-      report("ready", `Daemon answering on ${workspace.name}.`);
+      const detail = await module.deployDaemon(entry);
+      report("ready", `Daemon answering on ${workspace.name}${typeof detail === "string" && detail !== "" ? ` (${detail})` : ""}.`);
       return undefined;
     } catch (e) {
       const reason = e instanceof Error ? e.message : String(e);
       report("ready", `The daemon did not go on ${workspace.name}.`);
-      return `${reason}\nits terminal, files and ports wait on a daemon; run wsp workspaces daemon update ${workspace.name} once the machine can take one`;
+      return `${reason}\nits terminal, files and ports wait on a daemon; this host tries again each time it starts, so put right what the machine asked for and nothing else is needed`;
     }
   };
 
@@ -5792,6 +5800,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     workspaces,
     projects,
     sessions: sessionsApi,
+    devices: makeDevices(store),
     preferences,
     status: {
       ...status,

@@ -3,11 +3,14 @@
 // ports it bound, so a second host refuses and other local tools find it.
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { authority, isWildcard, LOOPBACK } from "@wsp/protocol";
 
 export interface HostLock {
   pid: number;
   port: number;
   wsPort: number;
+  /** The address the host bound, absent on a lock a host of an earlier build wrote, which bound this computer alone. */
+  address?: string;
   startedAt: string;
 }
 
@@ -72,13 +75,23 @@ export function hostLogPath(statePath: string): string {
 }
 
 /** Where the host serving this state file is, as it prints them when it starts and as wsp status prints them while
- * it runs: one rule for the three lines, so both readings name the same ports and the same token file. */
-export function addressLines(statePath: string, ports: { port: number; wsPort: number }): string[] {
+ * it runs: one rule for the three lines, so both readings name the same ports, the same address and the same token
+ * file. A reading with no address is a host that bound this computer alone. */
+export function addressLines(statePath: string, ports: { port: number; wsPort: number; address?: string }): string[] {
+  const at = ports.address ?? LOOPBACK;
   return [
-    `app         http://127.0.0.1:${ports.port}`,
-    `runtime ws  ws://127.0.0.1:${ports.wsPort} (token: ${hostTokenPath(statePath)})`,
+    `app         http://${authority(at, ports.port)}`,
+    `runtime ws  ws://${authority(at, ports.wsPort)} (token: ${hostTokenPath(statePath)})`,
     `state       ${statePath}`,
   ];
+}
+
+/** Where a tool on this computer dials the host serving this state file: the address the host bound, and loopback
+ * only for the wildcard, which is the one address that is not itself a place to dial. Every other spelling is
+ * passed through as it was given, since a host on ::1 or on 127.0.0.2 answers there and nowhere else. */
+export function dialAddress(lock: { address?: string }): string {
+  const at = lock.address ?? LOOPBACK;
+  return isWildcard(at) ? LOOPBACK : at;
 }
 
 /** The host whose lock names this state file, when that process is still alive. */
@@ -96,7 +109,7 @@ function refuseIfServed(lockPath: string, statePath: string): void {
 
 /** Seeded with the requested ports so a refusal during startup can name them;
  * rewritten with the bound ports once the host is up. */
-export function takeLock(lockPath: string, statePath: string, ports: { port: number; wsPort: number }): HostLock {
+export function takeLock(lockPath: string, statePath: string, ports: { port: number; wsPort: number; address?: string }): HostLock {
   refuseIfServed(lockPath, statePath);
   const lock: HostLock = { pid: process.pid, ...ports, startedAt: new Date().toISOString() };
   mkdirSync(dirname(lockPath), { recursive: true });

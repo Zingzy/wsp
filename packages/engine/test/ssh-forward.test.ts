@@ -4,7 +4,8 @@
 // thing ever killed is the pid recorded when it was started.
 import { describe, expect, it } from "vitest";
 import { createServer, type Server } from "node:net";
-import { FORWARD_LOOPBACK, SshForwards, sshForwardArgs, type ForwardChild, type ForwardSpawner, type SshReach } from "../src/index.js";
+import { LOOPBACK } from "@wsp/protocol";
+import { SshForwards, sshForwardArgs, type ForwardChild, type ForwardSpawner, type SshReach } from "../src/index.js";
 
 const REACH: SshReach = { user: "maya", host: "box", port: 2222, keyPath: "/tmp/k" };
 
@@ -17,7 +18,7 @@ function fakeForwards(): { spawner: ForwardSpawner; started: { pid: number; loca
     const row = { pid: ++next, localPort, remotePort, killed: false };
     started.push(row);
     const server: Server = createServer(socket => socket.destroy());
-    server.listen(localPort, FORWARD_LOOPBACK);
+    server.listen(localPort, LOOPBACK);
     const ended = new Promise<string>(done => server.once("close", () => done("")));
     const child: ForwardChild = {
       pid: row.pid,

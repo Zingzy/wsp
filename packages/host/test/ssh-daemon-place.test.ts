@@ -10,10 +10,39 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { NO_BUILD_TOOLS_LINE, sshDaemonPaths } from "@wsp/protocol";
-import { CLOUD_PLACE, DAEMON_GONE_LINE, DAEMON_UNIT, daemonUnit, deployScript, removeDaemonScript, sshDaemonPlace, stageDaemonBundle, startMjs, stopDaemonScript } from "../src/doctor.js";
+import { NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, sshDaemonPaths } from "@wsp/protocol";
+import { putBytesScript } from "@wsp/engine";
+import type { Machine } from "@wsp/engine";
+import { CLOUD_PLACE, DAEMON_GONE_LINE, deployDaemon, PREFLIGHT_OK_LINE, preflightScript, DAEMON_UNIT, daemonUnit, deployScript, removeDaemonScript, sshDaemonPlace, stageDaemonBundle, startMjs, stopDaemonScript } from "../src/doctor.js";
 
 const LOGIN = { home: "/home/maya", path: "/usr/local/bin:/usr/bin:/bin" };
+
+/** A machine that writes nothing and remembers what it was asked to write and run, so a deploy that must put
+ * nothing on a machine can be held to it. */
+function fakeMachine(over: { preflight?: { exitCode: number; stdout: string } } = {}): { machine: Machine; wrote: string[]; ran: string[] } {
+  const wrote: string[] = [];
+  const ran: string[] = [];
+  const machine = {
+    id: "ssh://maya@box:2222",
+    kind: "sandbox" as const,
+    putBytes: async (path: string) => void wrote.push(path),
+    run: async (script: string) => {
+      ran.push(script);
+      if (script.includes(PREFLIGHT_OK_LINE) && over.preflight !== undefined) return { ...over.preflight, stderr: "" };
+      return { exitCode: 0, stdout: script.includes(PREFLIGHT_OK_LINE) ? `${PREFLIGHT_OK_LINE}\n` : "", stderr: "" };
+    },
+    exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+  } as unknown as Machine;
+  return { machine, wrote, ran };
+}
+
+/** A daemon folder with just enough in it to stage a bundle from. */
+function emptyBundle(): string {
+  const dir = mkdtempSync(join(tmpdir(), "wsp-bundle-"));
+  mkdirSync(join(dir, "dist"), { recursive: true });
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ dependencies: {} }));
+  return dir;
+}
 const script = (): string => deployScript(sshDaemonPlace(LOGIN), "aabbcc");
 
 describe("the place a fork keeps its daemon", () => {
@@ -37,10 +66,11 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
   it("puts every path under the login's own home and nothing under /root", () => {
     const at = sshDaemonPaths(LOGIN.home);
     const s = script();
-    expect(s).toContain(`mkdir -p ${at.dir} ${at.inbox} ${at.binDir} ${at.nodeDir} ${at.unitDir}`);
-    expect(s).toContain(`tar -xzf ${at.bundle} -C ${at.dir}`);
-    expect(s).toContain(`mv -f ${at.tokenPath}.next ${at.tokenPath}`);
-    expect(s).toContain(`install -m 0755 ${at.dir}/wsp-open ${at.binDir}/wsp-open`);
+    expect(s).toContain(`mkdir -p '${at.dir}' '${at.inbox}' '${at.binDir}' '${at.nodeDir}' '${at.unitDir}'`);
+    expect(s).toContain(`tar -xzf '${at.bundle}' -C '${at.dir}'`);
+    // The token is not in this script at all now: it lands over the byte road, which the case below pins.
+    expect(s).not.toContain(at.tokenPath);
+    expect(s).toContain(`install -m 0755 '${at.dir}/wsp-open' '${at.binDir}/wsp-open'`);
     // The one rule for where these sit is the protocol's, so the deploy that writes them and the runtime that
     // reads the token and the port back cannot spell one path two ways.
     expect(at.tokenPath).toBe("/home/maya/.wsp/daemon-token");
@@ -61,11 +91,11 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
 
   it("runs under the login's own systemd, enabled so a reboot brings it back", () => {
     const s = script();
-    expect(s).toContain(`cat > /home/maya/.config/systemd/user/${DAEMON_UNIT} <<'WSP_UNIT'`);
+    expect(s).toContain(`cat > '/home/maya/.config/systemd/user/${DAEMON_UNIT}' <<'WSP_UNIT'`);
     for (const verb of ["daemon-reload", `enable ${DAEMON_UNIT}`, `restart ${DAEMON_UNIT}`]) expect(s).toContain(`systemctl --user ${verb}`);
     expect(s).toContain(`journalctl --user -u ${DAEMON_UNIT}`);
     expect(daemonUnit(sshDaemonPlace(LOGIN))).toContain("WantedBy=default.target");
-    expect(daemonUnit(sshDaemonPlace(LOGIN))).toContain("Environment=HOME=/home/maya");
+    expect(daemonUnit(sshDaemonPlace(LOGIN))).toContain('Environment="HOME=/home/maya"');
     // A login that arrives with no session bus cannot reach its own systemd at all, so the address is settled
     // before the first systemctl rather than every line failing at the bus.
     const lines = s.split("\n");
@@ -81,8 +111,8 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
     expect(start).not.toContain("0.0.0.0");
     const s = script();
     // The old port file goes before the restart, so the wait cannot read the port of the daemon just replaced.
-    expect(s.indexOf("rm -f /home/maya/.wsp/daemon.port")).toBeLessThan(s.indexOf(`systemctl --user restart ${DAEMON_UNIT}`));
-    expect(s).toContain("for _ in $(seq 80); do [ -s /home/maya/.wsp/daemon.port ] && break; sleep 0.25; done");
+    expect(s.indexOf("rm -f '/home/maya/.wsp/daemon.port'")).toBeLessThan(s.indexOf(`systemctl --user restart ${DAEMON_UNIT}`));
+    expect(s).toContain("for _ in $(seq 80); do [ -s '/home/maya/.wsp/daemon.port' ] && break; sleep 0.25; done");
     // iproute2 is on a guest wsp built and on nothing else in particular, so the port file and the supervisor
     // are what say the daemon is up.
     expect(stopDaemonScript(sshDaemonPlace(LOGIN))).not.toContain("ss -");
@@ -90,7 +120,7 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
   });
 
   it("refuses a machine with no compiler before it installs anything, since node-pty ships no Linux prebuild", () => {
-    const s = script();
+    const s = preflightScript(sshDaemonPlace(LOGIN));
     // The sentence rides the script quoted, so what is looked for is the clause a shell quote leaves alone.
     const said = NO_BUILD_TOOLS_LINE.slice(0, NO_BUILD_TOOLS_LINE.indexOf(","));
     const lines = s.split("\n");
@@ -99,40 +129,122 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
     // It ends the deploy itself. A guard written as `|| { ...; false; }` does not: bash ignores set -e inside a
     // compound command that is part of an || list, so the script runs on (measured 2026-09-11 on bash 5.2).
     expect(refusal).toContain("exit 1");
-    expect(lines.findIndex(l => l.includes(said))).toBeLessThan(lines.findIndex(l => l.startsWith("mkdir -p")));
+    // Nothing of the install is in this script at all: it is asked on its own, before anything is packed or sent.
+    expect(s).not.toContain("mkdir -p");
+    expect(s).not.toContain("npm install");
   });
 
   it("takes the machine's own node when it is new enough and installs one under the home when it is not", () => {
     const s = script();
     expect(s).toContain(`|| [ "$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -lt 22 ]`);
-    expect(s).toContain("-C /home/maya/.wsp/node --strip-components=1");
-    expect(s).toContain('case "$(command -v node)" in /home/maya/.wsp/node/bin/node) export npm_config_nodedir=/home/maya/.wsp/node ;; esac');
+    expect(s).toContain("-C '/home/maya/.wsp/node' --strip-components=1");
+    expect(s).toContain(`case "$(command -v node)" in '/home/maya/.wsp/node/bin/node') export npm_config_nodedir='/home/maya/.wsp/node' ;; esac`);
     // Its bin goes first on the deploy's PATH and on the unit's, so the node installed is the node that runs.
     expect(s).toContain('export PATH="/home/maya/.wsp/node/bin:/home/maya/.local/bin:$PATH"');
-    expect(daemonUnit(sshDaemonPlace(LOGIN))).toContain("Environment=PATH=/home/maya/.wsp/node/bin:/home/maya/.local/bin:/usr/local/bin:/usr/bin:/bin");
+    expect(daemonUnit(sshDaemonPlace(LOGIN))).toContain('Environment="PATH=/home/maya/.wsp/node/bin:/home/maya/.local/bin:/usr/local/bin:/usr/bin:/bin"');
   });
 
   it("adds its BROWSER line to the person's own login file once, behind its own name", () => {
     const s = script();
-    expect(s).toContain("printf 'export BROWSER=%s\\nunset DISPLAY\\n' /home/maya/.local/bin/wsp-open > /home/maya/.wsp/profile.sh");
+    expect(s).toContain("printf 'export BROWSER=%s\\nunset DISPLAY\\n' '/home/maya/.local/bin/wsp-open' > '/home/maya/.wsp/profile.sh'");
     // Their .profile is theirs: the line is added only when it is not there, so a second deploy adds nothing.
-    expect(s).toContain("grep -q '/home/maya/.wsp/profile.sh' /home/maya/.profile 2>/dev/null || printf '. %s\\n' /home/maya/.wsp/profile.sh >> /home/maya/.profile");
+    expect(s).toContain("grep -q '/home/maya/.wsp/profile.sh' '/home/maya/.profile' 2>/dev/null || printf '. %s\\n' '/home/maya/.wsp/profile.sh' >> '/home/maya/.profile'");
+  });
+
+  it("never writes the token into a command, since every account on the machine can read a running one", () => {
+    const s = script();
+    // /proc/<pid>/cmdline is world readable, and a machine somebody owns may carry other accounts: the token
+    // lands over the byte road before this script runs, so the script names the file and never its content.
+    expect(s).not.toContain("aabbcc");
+    expect(s).not.toContain("WSP_DAEMON_TOKEN");
+    // A fork is root's alone and keeps the write in its script, which is what the golden's sha pins.
+    expect(deployScript(CLOUD_PLACE, "aabbcc")).toContain("WSP_DAEMON_TOKEN='aabbcc'");
+    expect(sshDaemonPlace(LOGIN).tokenRoad).toBe("bytes");
+    expect(CLOUD_PLACE.tokenRoad).toBe("script");
+    // What that road writes is the writer's alone from the moment it exists.
+    expect(putBytesScript("/home/maya/.wsp/daemon-token", 24, "/home/maya/.wsp/t")).toContain("umask 077");
+  });
+
+  it("quotes every path it writes, since the home came from the machine and may hold a space", () => {
+    const spaced = sshDaemonPlace({ home: "/home/Jane Doe", path: "/usr/bin" });
+    const off = removeDaemonScript(spaced);
+    // Unquoted, this line is `rm -rf /home/Jane Doe/.wsp/daemon`, which is /home/Jane and a relative path.
+    expect(off).toContain("rm -rf '/home/Jane Doe/.wsp/daemon'");
+    expect(off).not.toMatch(/rm -[rf]+ [^'\n]*\/home\/Jane Doe/);
+    const on = deployScript(spaced, "aabbcc");
+    for (const line of [...on.split("\n"), ...off.split("\n")]) {
+      // Every naked mention of the home is inside single quotes; the two exceptions are the PATH exports, which
+      // are double quoted already, and the unit heredoc, which is systemd's language and quoted below.
+      if (!line.includes("/home/Jane Doe")) continue;
+      if (line.startsWith("export PATH=") || line.startsWith("WorkingDirectory=")) continue;
+      expect(line, line).toMatch(/['"][^'"]*\/home\/Jane Doe/);
+    }
+    // The unit is systemd's own quoting, and each setting wants its own. WorkingDirectory takes the rest of the
+    // line, so a quote there is read as part of the path (measured on systemd 255: "path is not absolute");
+    // Environment is split on whitespace, so a value with a space in it is quoted.
+    const unit = daemonUnit(spaced);
+    expect(unit).toContain("WorkingDirectory=/home/Jane Doe/.wsp/daemon");
+    expect(unit).not.toContain('WorkingDirectory="');
+    expect(unit).toContain('Environment="HOME=/home/Jane Doe"');
+    expect(unit).toContain(`ExecStart=/bin/sh -c 'exec node "/home/Jane Doe/.wsp/daemon/start.mjs"'`);
+    // A fork chose its own paths and its script is pinned byte for byte, so nothing there is quoted.
+    expect(CLOUD_PLACE.quotePaths).toBe(false);
+    expect(daemonUnit(CLOUD_PLACE)).toContain("WorkingDirectory=/root/wsp-daemon");
+  });
+
+  it("asks the machine before a byte of wsp's lands on it, so one that refuses keeps nothing", async () => {
+    const place = sshDaemonPlace(LOGIN);
+    // The checks are their own command now, not lines inside the deploy: nothing is packed, uploaded or written
+    // until the machine has passed them, so a machine that refuses is left exactly as it was found.
+    const ask = preflightScript(place);
+    expect(ask).toContain("for t in cc make python3");
+    expect(ask).toContain("Linger");
+    expect(ask.trim().endsWith(PREFLIGHT_OK_LINE)).toBe(true);
+    const s = deployScript(place, "aabbcc");
+    expect(s).not.toContain("for t in cc make python3");
+    expect(s).not.toContain("Linger");
+
+    // A machine that refuses is told what it needs, and had nothing put on it: no write, no run but the ask.
+    const refused = fakeMachine({ preflight: { exitCode: 1, stdout: `${NO_BUILD_TOOLS_LINE}\n` } });
+    await expect(deployDaemon(refused.machine, { place, daemonDir: emptyBundle() })).rejects.toThrow(NO_BUILD_TOOLS_LINE);
+    expect(refused.wrote).toEqual([]);
+    expect(refused.ran).toEqual([ask]);
+
+    // A place with nothing to ask does not spend a round trip on it, which is every fork.
+    expect(CLOUD_PLACE.preflight).toEqual([]);
+    const guest = fakeMachine();
+    await deployDaemon(guest.machine, { place: CLOUD_PLACE, daemonDir: emptyBundle() }).catch(() => {});
+    expect(guest.ran.some(r => r.includes(PREFLIGHT_OK_LINE))).toBe(false);
+  });
+
+  it("refuses a login whose services stop with it, naming the one command that turns that off", () => {
+    const s = preflightScript(sshDaemonPlace(LOGIN));
+    const line = s.split("\n").find(l => l.includes("Linger"));
+    expect(line).toContain("loginctl show-user");
+    expect(line).toContain("exit 1");
+    expect(line).toContain("this machine stops your login");
+    expect(NO_LINGER_LINE).toContain("loginctl enable-linger");
+    // Asked only where the machine can answer: a machine with no loginctl is not refused for lacking one.
+    expect(line).toContain("command -v loginctl");
+    // A fork's own systemd is the machine's, so nothing there asks about a login, and its place asks nothing at all.
+    expect(preflightScript(CLOUD_PLACE)).not.toContain("Linger");
+    expect(deployScript(CLOUD_PLACE, "aabbcc")).not.toContain("Linger");
   });
 
   it("takes everything it put on the machine off again, so nothing of wsp's outlives the record", () => {
     const at = sshDaemonPaths(LOGIN.home);
     const off = removeDaemonScript(sshDaemonPlace(LOGIN));
     expect(off).toContain(`systemctl --user disable --now ${DAEMON_UNIT}`);
-    expect(off).toContain(`rm -f ${at.unitDir}/${DAEMON_UNIT}`);
+    expect(off).toContain(`rm -f '${at.unitDir}/${DAEMON_UNIT}'`);
     for (const path of [at.dir, at.bundle, at.inbox, at.tokenPath, at.rootsPath, at.nodeDir, at.profileFile, at.openSocket, at.portFile, at.runDir, `${at.binDir}/wsp-open`, `${at.binDir}/xdg-open`]) {
-      expect(off, path).toContain(path);
+      expect(off, path).toContain(`'${path}'`);
     }
     // The one line wsp added to their own login file goes too: left behind it would print an error at every
     // login for a file that is no longer there.
-    expect(off).toContain(`grep -vF '. ${at.profileFile}' /home/maya/.profile`);
+    expect(off).toContain(`grep -vF '. ${at.profileFile}' '/home/maya/.profile'`);
     // The working copy goes whether the rewrite landed or not: a read that failed must not leave them an empty
     // login file, and must not leave a file of wsp's beside their own either.
-    expect(off).toContain("rm -f /home/maya/.profile.wsp-out");
+    expect(off).toContain("rm -f '/home/maya/.profile.wsp-out'");
     expect(off).toContain(`echo ${DAEMON_GONE_LINE}`);
     // Only what wsp put there, each path named. Their home, their bin folder and their login file stay, and so
     // does wsp's own folder itself: another road of wsp keeps things beside the daemon in it, and a machine on
@@ -158,7 +270,7 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
       mkdirSync(at.wsp, { recursive: true });
       const stage = join(dir, "stage");
       await stageDaemonBundle(stage, sshDaemonPlace({ home, path: LOGIN.path }), daemonDir);
-      expect(readFileSync(join(stage, "wsp-open"), "utf8")).toContain(`--unix-socket ${at.openSocket}`);
+      expect(readFileSync(join(stage, "wsp-open"), "utf8")).toContain(`--unix-socket '${at.openSocket}'`);
       const { stdout } = await promisify(execFile)(process.execPath, [join(stage, "start.mjs")], { env: { PATH: process.env["PATH"] ?? "", HOME: home } });
       expect(JSON.parse(stdout.split("\n")[0]!)).toEqual({
         host: "127.0.0.1",

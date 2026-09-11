@@ -14,11 +14,11 @@ import { platform } from "node:os";
 import { join } from "node:path";
 import { portSourceFor, startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { connectDaemon, type DaemonReach } from "@wsp/runtime";
-import { rootsPathIn, type DaemonEvent, type DaemonReachView } from "@wsp/protocol";
+import { LOOPBACK, rootsPathIn, type DaemonEvent, type DaemonReachView } from "@wsp/protocol";
 
-/** Loopback only: a firewall prompt on macOS or Windows is a wall a local workspace must never hit, and nothing off
- * this computer has any business on its daemon. */
-const LOOPBACK = "127.0.0.1";
+// Loopback only: a firewall prompt on macOS or Windows is a wall a local workspace must never hit, and nothing
+// off this computer has any business on its daemon. The address is the protocol's, the one every road that binds
+// or dials this computer reads.
 
 /** The loopback token is minted when the daemon starts and lives as long as the process holding it, so the road to
  * it never expires; the view's expiry is a number, so it carries the furthest one. */
