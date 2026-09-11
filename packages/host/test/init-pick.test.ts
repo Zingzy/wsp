@@ -49,7 +49,7 @@ const text = (i: { text: string } | string | undefined): string => (typeof i ===
 describe("the agents screen", () => {
   it("one flat row per agent: what this computer did with it, its size, and the note when wsp cannot drive it", () => {
     const histories = [{ agent: "claude", state: "read" as const, sessions: 151, calls: 4000 }];
-    const items = tableItems(recipeTable({ ...RECIPE, histories }, CATALOG_AGENTS), RECIPE, FIXTURE, 4, false);
+    const items = tableItems(recipeTable({ ...RECIPE, histories }, CATALOG_AGENTS), RECIPE, FIXTURE, 4, false, "darwin");
     expect(items.map(i => [i.label, text(i.why), text(i.hint)])).toEqual([
       ["Claude Code", "used       used here, 151 sessions", "208 MB"],
       ["Codex", "catalog    not installed here", "455 MB"],
@@ -93,7 +93,7 @@ describe("the tools screen", () => {
 
   it("the base as bullets under the title, the rest grouped by why it is here, the why column and the size beside each", () => {
     const recipe = { ...RECIPE, rows: [...RECIPE.rows, row({ id: "wrangler", source: { kind: "used", sessions: 3, calls: 40 } }), row({ id: "go", on: false, source: { kind: "used", sessions: 1, calls: 2 } })] };
-    const items = tableItems(recipeTable(recipe, CATALOG_TOOLS), recipe, FIXTURE, 4, true);
+    const items = tableItems(recipeTable(recipe, CATALOG_TOOLS), recipe, FIXTURE, 4, true, "darwin");
     expect(items.filter(i => i.lock === "on").map(i => i.label)).toEqual(["Docker engine and compose", "C toolchain with cmake and ninja", "Node 22 with npm", "pnpm", "uv", "Python 3.12", "git", "jq", "ripgrep", "curl", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync"]);
     expect([...new Set(items.map(i => i.group))]).toEqual([undefined, USED_GROUP, HERE_GROUP, CATALOG_GROUP]);
     expect(items.filter(i => i.group === HERE_GROUP).map(i => i.label)).toEqual(["GitHub CLI", "yq"]);
@@ -111,14 +111,14 @@ describe("the tools screen", () => {
 
   it("a row the project asked for says so in its detail pane too, not only in its group and its why column", () => {
     const recipe = { ...RECIPE, rows: [...RECIPE.rows, row({ id: "go", source: { kind: "project", why: "go.mod needs Go" } })] };
-    const items = tableItems(recipeTable(recipe, CATALOG_TOOLS), recipe, FIXTURE, 4, true);
+    const items = tableItems(recipeTable(recipe, CATALOG_TOOLS), recipe, FIXTURE, 4, true, "darwin");
     const go = items.find(i => i.id === "go")!;
     expect(go.group).toBe(PROJECT_GROUP);
     expect(text(go.why)).toBe("project    go.mod needs Go");
     expect(go.detail).toEqual(["go.mod needs Go", "about 239 MB installed on the machine (measured 2026-09-07); no row here; installed by its brew road"]);
     // A floor row the project also named says so under the cursor, even though the base is what puts it on the machine.
     const based = { ...RECIPE, rows: [...RECIPE.rows.filter(r => r.id !== "pnpm"), row({ id: "pnpm", source: { kind: "project", why: "pnpm-lock.yaml needs pnpm" } })] };
-    const pnpm = tableItems(recipeTable(based, CATALOG_TOOLS), based, FIXTURE, 4, true).find(i => i.id === "pnpm")!;
+    const pnpm = tableItems(recipeTable(based, CATALOG_TOOLS), based, FIXTURE, 4, true, "darwin").find(i => i.id === "pnpm")!;
     expect(pnpm.detail[0]).toBe("pnpm-lock.yaml needs pnpm; on every machine");
   });
 
@@ -145,7 +145,7 @@ describe("the sign-ins screen", () => {
   const words = (s: { items: { id: string; choices?: readonly { value: string }[] }[] }, id: string): string[] => s.items.find(i => i.id === id)!.choices!.map(c => c.value);
 
   it("the agents first, then the developer CLIs, then the MCP servers; every row has its choice and nothing has a bare tick", () => {
-    const s = signInItems(applyRecipe(withCatalogAgents(laptop), recipe), new Map());
+    const s = signInItems(applyRecipe(withCatalogAgents(laptop), recipe), new Map(), "darwin");
     expect([...new Set(s.items.map(i => i.group))]).toEqual([AGENT_LOGINS, CLI_LOGINS]);
     expect(s.items.filter(i => i.group === AGENT_LOGINS).map(i => i.label)).toEqual(["Claude Code login", "Codex login", "Hermes Agent login", "Hermes Agent API keys"]);
     expect(s.items.filter(i => i.group === CLI_LOGINS).map(i => i.label)).toEqual(["GitHub CLI login", "kubectl config", "1Password CLI"]);
@@ -163,18 +163,18 @@ describe("the sign-ins screen", () => {
     expect([...s.initial].sort()).toEqual([
       ["logins/claude", "machine"], ["logins/codex", "machine"], ["logins/gh", "machine"], ["logins/hermes", "copy"], ["logins/hermes-keys", "copy"], ["logins/kube", "copy"], ["logins/op", "skip"],
     ]);
-    // No row on this screen is about this Mac's own config, and no sentence explains one choice against another.
+    // No row on this screen is about this computer's own config, and no sentence explains one choice against another.
     expect(s.items.some(i => i.id.startsWith("wsp-tools/"))).toBe(false);
     expect(s.items.flatMap(i => i.detail).join(" ")).not.toMatch(/API key|instead of|rather than/);
   });
 
   it("a saved answer is where the row starts, and an answer the row cannot take falls back to its first", () => {
     const saved: Recipe = { ...recipe, rows: recipe.rows.map(r => (r.id === "gh" ? { ...r, signIn: "copy" as const } : r)) };
-    const s = signInItems(applyRecipe(withCatalogAgents(laptop), saved), new Map());
+    const s = signInItems(applyRecipe(withCatalogAgents(laptop), saved), new Map(), "darwin");
     expect(s.initial.get("logins/gh")).toBe("copy");
     const key: Recipe = { ...recipe, rows: recipe.rows.map(r => (r.id === "hermes" ? { ...r, signIn: "key" as const } : r)) };
     // Hermes takes no API key, so the row opens on the first word it does take.
-    expect(signInItems(applyRecipe(withCatalogAgents(laptop), key), new Map()).initial.get("logins/hermes")).toBe("copy");
+    expect(signInItems(applyRecipe(withCatalogAgents(laptop), key), new Map(), "darwin").initial.get("logins/hermes")).toBe("copy");
   });
 
   it("an MCP server with auth is a row under its own group, named by the config it sits in, copy or skip", () => {
@@ -182,7 +182,7 @@ describe("the sign-ins screen", () => {
     const notes: ManifestEntry = { rung: "agents", id: "agents/mcp/claude/notes", label: "notes", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "bring", detail: "stdio: npx notes-mcp; carries no secret" };
     const remote: ManifestEntry = { rung: "agents", id: "agents/mcp/mcp-remote", label: "mcp-remote sign-ins", group: "MCP sign-ins", paths: ["~/.mcp-auth"], bytes: 1800, default: "bring", consent: true, detail: "browser sign-ins saved by mcp-remote for remote servers: 1 token (1 KB)" };
     const locked: ManifestEntry = { rung: "agents", id: "agents/mcp/claude/mac", label: "mac", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "skip", reason: "command is macOS-only, will not run", consent: true, detail: "stdio: /Applications/x; carries a secret: env A (4 B)" };
-    const s = signInItems(applyRecipe(withCatalogAgents({ entries: [...FIXTURE.entries, github, notes, remote, locked] }), recipe), new Map());
+    const s = signInItems(applyRecipe(withCatalogAgents({ entries: [...FIXTURE.entries, github, notes, remote, locked] }), recipe), new Map(), "darwin");
     expect(s.items.filter(i => i.group === MCP_LOGINS).map(i => [i.label, i.why])).toEqual([
       ["github", "in Claude Code's config"],
       ["mcp-remote sign-ins", "sign-ins mcp-remote saved for Claude Code"],
@@ -193,20 +193,20 @@ describe("the sign-ins screen", () => {
     // A server carrying a secret stays off the machine until the person says copy; one the catalog locked out cannot move at all.
     expect(s.initial.get(github.id)).toBe("skip");
     expect(words(s, locked.id)).toEqual(["skip"]);
-    expect(signInItems(applyRecipe(withCatalogAgents({ entries: [...FIXTURE.entries, { ...github, choice: "copy" }] }), recipe), new Map()).initial.get(github.id)).toBe("copy");
+    expect(signInItems(applyRecipe(withCatalogAgents({ entries: [...FIXTURE.entries, { ...github, choice: "copy" }] }), recipe), new Map(), "darwin").initial.get(github.id)).toBe("copy");
     const off = { ...recipe, rows: recipe.rows.map(r => (r.id === "claude" ? { ...r, on: false } : r)) };
-    expect(signInItems(applyRecipe(withCatalogAgents({ entries: [...FIXTURE.entries, github, remote] }), off), new Map()).items.map(i => i.id)).not.toContain(github.id);
+    expect(signInItems(applyRecipe(withCatalogAgents({ entries: [...FIXTURE.entries, github, remote] }), off), new Map(), "darwin").items.map(i => i.id)).not.toContain(github.id);
   });
 
   it("a login whose command is not coming is listed with the reason and skip alone", () => {
     const off = { ...recipe, rows: recipe.rows.filter(r => r.id !== "kubectl") };
-    const s = signInItems(applyRecipe(withCatalogAgents(laptop), off), new Map());
+    const s = signInItems(applyRecipe(withCatalogAgents(laptop), off), new Map(), "darwin");
     expect(s.items.find(i => i.id === "logins/kube")).toMatchObject({ why: "kubectl is not coming", detail: ["kubectl is not coming: its tool row is unticked; copy or sign in ticks it", "~/.kube/config"] });
     expect(s.initial.get("logins/kube")).toBe("skip");
   });
 
   it("a group header counts how its rows answered, in the choice order", () => {
-    const s = signInItems(applyRecipe(withCatalogAgents(laptop), recipe), new Map());
+    const s = signInItems(applyRecipe(withCatalogAgents(laptop), recipe), new Map(), "darwin");
     const agents = s.items.filter(i => i.group === AGENT_LOGINS);
     expect(signInGroupLine(agents, { ticks: new Set(), answers: new Map(s.initial) })).toBe("2 copy  2 sign in  0 API key  0 skip");
   });
@@ -283,6 +283,7 @@ describe("the agents screen drawn", () => {
       counter: "1/6",
       rows,
       recipe,
+      platform: "darwin",
       manifest: FIXTURE,
       grouped: false,
       footer: ticks => [totalsLine(recipeTable(withAgents(recipe, ticks), CATALOG_AGENTS), "agents")],
@@ -328,6 +329,7 @@ describe("the tools screen drawn", () => {
       counter: "2/6",
       rows,
       recipe,
+      platform: "darwin",
       manifest: FIXTURE,
       grouped: true,
       footer: ticks => [totalsLine(recipeTable(withTools(recipe, ticks), three), "tools"), { text: "Disk: 1.4 GB of 15.2 GB on the 20 GB builder" }],
@@ -370,7 +372,7 @@ describe("the tools screen drawn", () => {
   it("a row the agent added sits in its own group, on, and leaving it unticked takes it off the recipe", () => {
     const custom = [{ kind: "custom" as const, id: "just", name: "just", install: ["brew install just"], check: "command -v just", why: "added by the agent" }];
     const recipe = { ...RECIPE, custom };
-    const items = tableItems(recipeTable(recipe, CATALOG_TOOLS), recipe, FIXTURE, 4, true);
+    const items = tableItems(recipeTable(recipe, CATALOG_TOOLS), recipe, FIXTURE, 4, true, "darwin");
     const just = items.find(i => i.id === "just")!;
     expect(just).toMatchObject({ label: "just", group: ADDED_GROUP });
     expect(text(just.why)).toBe("added      brew install just");
@@ -379,7 +381,7 @@ describe("the tools screen drawn", () => {
     const groups = items.map(i => i.group);
     expect(groups.indexOf(ADDED_GROUP)).toBeGreaterThan(groups.lastIndexOf(HERE_GROUP));
     expect(groups.indexOf(ADDED_GROUP)).toBeLessThan(groups.indexOf(CATALOG_GROUP));
-    expect(tableItems(recipeTable(RECIPE, CATALOG_TOOLS), RECIPE, FIXTURE, 4, true).some(i => i.group === ADDED_GROUP)).toBe(false);
+    expect(tableItems(recipeTable(RECIPE, CATALOG_TOOLS), RECIPE, FIXTURE, 4, true, "darwin").some(i => i.group === ADDED_GROUP)).toBe(false);
     expect(withTools(recipe, new Set(["just"])).custom).toEqual(custom);
     expect(withTools(recipe, new Set()).custom).toEqual([]);
   });
@@ -412,7 +414,7 @@ describe("the whole flow", () => {
   const NAMED_PROJECT = "/Users/dev/proj";
   const flow = (o: ReturnType<typeof streams>, over: Partial<Parameters<typeof pickScreens>[0]> = {}) =>
     // The folder is named on the command line, so the run does not ask for one; the tests that answer the question drop it.
-    pickScreens({ manifest: withCatalogAgents(laptop), recipe: RECIPE, brew: new Map(), from: "agents", home: tmpdir(), project: NAMED_PROJECT, scanProject: async () => undefined, input: o.input, output: o.output, ...over });
+    pickScreens({ manifest: withCatalogAgents(laptop), recipe: RECIPE, brew: new Map(), from: "agents", home: tmpdir(), platform: "darwin", project: NAMED_PROJECT, scanProject: async () => undefined, input: o.input, output: o.output, ...over });
 
   it("the screens with a row to pick, each numbered against those and the build: with no manager row the Also screen is not shown and the sign-ins follow the tools", async () => {
     const o = streams(100, 30);
@@ -563,6 +565,7 @@ describe("the project the run is for", () => {
       brew: new Map(),
       from: "agents",
       home: tmpdir(),
+      platform: "darwin",
       scanProject: async folder => {
         asked.push(folder);
         return { dir: folder, rows: [{ id: "go", name: "Go", why: "go.mod needs Go" }], candidates: [{ id: "ruby", name: "Ruby", why: "Gemfile needs Ruby" }] };
@@ -593,6 +596,7 @@ describe("the project the run is for", () => {
       brew: new Map(),
       from: "agents",
       home: tmpdir(),
+      platform: "darwin",
       scanProject: async () => undefined,
       input: o.input,
       output: o.output,
@@ -617,6 +621,7 @@ describe("the project the run is for", () => {
       brew: new Map(),
       from: "agents",
       home: tmpdir(),
+      platform: "darwin",
       scanProject: async folder => {
         asked.push(folder);
         return undefined;

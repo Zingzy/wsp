@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 import * as catalog from "../src/index.js";
 import { pinMismatchLine } from "@wsp/protocol";
-import { agentName, APT_INDEX, APT_UPDATE, BASE_FLOOR, baseEntryFor, baseNote, BREW_ENV, CATALOG, CATALOG_AGENTS, catalogEntry, catalogToolFor, catalogToolForDependency, CLAUDE_CONFIG_DIR, CURL_NET, DEFAULT_AGENT, GCLOUD, guestEnv, hasLogin, HISTORY_FORMATS, HOMEBREW_STEP, installAfter, installLine, keysIdOf, keysRowOf, KUBECTL, LINUX_CASKS, LOGIN_ROWS, loginIdOf, loginRow, NET_READ_S, NET_RETRIES, pinCheckLine, PLAYWRIGHT, ROAD_MODULES, ROAD_STEPS, roadModule, ROADS, SIGN_IN_ROWS, SIZE_METHODS, sizeBytes, smokeOf, standingPin, unpinned, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
+import { agentName, APT_INDEX, APT_UPDATE, BASE_FLOOR, baseEntryFor, baseNote, BREW_ENV, CATALOG, CATALOG_AGENTS, catalogEntry, catalogToolFor, catalogToolForDependency, CLAUDE_CONFIG_DIR, CURL_NET, DEFAULT_AGENT, GCLOUD, guestEnv, hasLogin, HISTORY_FORMATS, HOMEBREW_STEP, installAfter, installLine, keysIdOf, keysRowOf, KUBECTL, LINUX_CASKS, LOGIN_ROWS, loginIdOf, loginRow, NET_READ_S, NET_RETRIES, pinCheckLine, PLAYWRIGHT, readsRowRoad, ROAD_MODULES, ROAD_STEPS, roadModule, ROADS, SIGN_IN_ROWS, SIZE_METHODS, sizeBytes, smokeOf, standingPin, unpinned, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
 
 describe("catalog", () => {
   it("the default agent is the first entry, and it is an agent with a context module", () => {
@@ -236,6 +236,15 @@ describe("catalog", () => {
     expect(installLine(catalogEntry("kubectl")!)).toBe(KUBECTL.install(undefined, undefined));
     // The floor runs before Homebrew or the release machinery exist on the machine.
     for (const e of BASE_FLOOR) expect(["brew", "release", "vendor"], e.id).not.toContain(e.installRoad.road);
+  });
+
+  it("says which managers the build reads a row's road off: every package manager a collector files rows under, and no road that carries none", () => {
+    // The collector files a tools row under a manager's name, and the plan reads that row's road off the module.
+    for (const road of ["brew", "npm", "pnpm", "bun", "uv", "pipx", "cargo", "go"]) expect(readsRowRoad(road), road).toBe(true);
+    // apt is on every machine and brings no row of its own, so a row filed under it installs nothing: the catalog
+    // row of a tool apt carries is what installs it, and the collector and the recipe verb read this to know.
+    for (const road of ["apt", "release", "vendor", "script"]) expect(readsRowRoad(road), road).toBe(false);
+    expect(readsRowRoad("snap")).toBe(false);
   });
 
   it("has one module per road with its words, and each module writes the install and its uninstall twin from a row", () => {

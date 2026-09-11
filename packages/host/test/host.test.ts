@@ -7,6 +7,7 @@ import { join } from "node:path";
 import type { AdapterEvent, TurnResult } from "@wsp/protocol";
 import { CATALOG } from "@wsp/catalog";
 import { allRows, type RecipeAnswer } from "../src/recipe-answer.js";
+import { HERE } from "./recipe-fixture.js";
 import { BUILDER_IDLE_MS, type GoldenImport } from "@wsp/engine";
 import { createRuntime, memoryStore, type HarnessAdapterFactory, type ReapResult, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -178,7 +179,7 @@ describe("wsp cli", () => {
     expect(existsSync(out)).toBe(false);
     expect(logs[0]).toBe("Agents");
     expect(logs).toContain("Tools");
-    expect(logs).toContain("Also on this Mac");
+    expect(logs).toContain(`Also on ${HERE}`);
     // The scanner runs on the command line, and the fixture PATH has no package manager on it.
     expect(logs).toContain("  none");
     expect(logs.at(-1)).toContain("Nothing was written.");

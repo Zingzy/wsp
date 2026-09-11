@@ -65,7 +65,7 @@ export const InitScreen = z.object({
 export type InitScreen = z.infer<typeof InitScreen>;
 
 /** The screens a person is shown: one with no row to pick is left out, whichever it is. The agents and tools screens
- * always have rows; Also on this Mac, the sign-ins and the wsp tools may have none on a computer with no formula, no
+ * always have rows; the Also screen, the sign-ins and the wsp tools may have none on a computer with no formula, no
  * sign-in or no agent installed. The app's screens and the terminal's run both read this one rule, and each counts
  * its steps over what it keeps. */
 export const initShownScreens = <S extends { items: readonly unknown[] }>(screens: readonly S[]): S[] => screens.filter(s => s.items.length > 0);

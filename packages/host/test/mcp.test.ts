@@ -21,6 +21,7 @@ import { RecipeAnswer, RecipeScan, allRows, recipePrintout, scanPrintout } from 
 import { WSP_SKILL, instructionsOf } from "../src/skill.js";
 import type { HostHandle } from "../src/server.js";
 import type { HostClient } from "../src/verbs.js";
+import { HERE } from "./recipe-fixture.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScripts, projectBundler, heldAgent, scriptedAgent, stuckAgent, doneOnlyAgent } from "./verbs-fixture.js";
@@ -1066,15 +1067,15 @@ describe("the MCP server over the host", () => {
     expect(allRows(flipped).find(r => r.id === "java")).toMatchObject({ on: true, size: 613280230 });
     expect(flipped.heavy.map(r => r.id)).toContain("java");
     // A word no row of any kind answers is a tool error in one line, not a rewritten file.
-    expect(await call("recipe", { out, set: ["jaava=on"] })).toMatchObject({ isError: true, text: `--set jaava=on: "jaava" is no catalog row and no row of ${out} outside the catalog, and no package a manager on this Mac has that id` });
+    expect(await call("recipe", { out, set: ["jaava=on"] })).toMatchObject({ isError: true, text: `--set jaava=on: "jaava" is no catalog row and no row of ${out} outside the catalog, and no package a manager on ${HERE} has that id` });
     expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).rows.find(r => r.id === "java")?.on).toBe(true);
 
-    // The id the scan gives a package this computer has ticks that package's own row, the road the Also on this Mac screen takes.
+    // The id the scan gives a package this computer has ticks that package's own row, the road the Also screen takes.
     const ticked = RecipeAnswer.parse((await call("recipe", { out, set: [`${diskbloom.id}=on`] })).structured);
     expect(allRows(ticked).some(r => r.id === diskbloom.id)).toBe(false);
     expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).rows.find(r => r.id === "tools/brew/zingzy/tap/diskbloom")).toMatchObject({ on: true, kind: "tool" });
     // An add for the same package is refused in one line naming the set word, since it is a row already.
-    expect(await call("recipe", { out, add: [`${diskbloom.id}=${diskbloom.install}`] })).toMatchObject({ isError: true, text: `--add ${diskbloom.id}: a package manager on this Mac already has ${diskbloom.id}, so it is a row of its own; tick it with --set ${diskbloom.id}=on, which installs it by its own road, rather than adding a second row that installs it again` });
+    expect(await call("recipe", { out, add: [`${diskbloom.id}=${diskbloom.install}`] })).toMatchObject({ isError: true, text: `--add ${diskbloom.id}: a package manager on ${HERE} already has ${diskbloom.id}, so it is a row of its own; tick it with --set ${diskbloom.id}=on, which installs it by its own road, rather than adding a second row that installs it again` });
     expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).custom ?? []).toEqual([]);
   });
 
@@ -1095,7 +1096,7 @@ describe("the MCP server over the host", () => {
     expect(scan.tools.map(r => r.id).sort()).toEqual(CATALOG.filter(e => e.kind === "tool").map(e => e.id).sort());
     expect(scan.alsoHere).toEqual({ scanned: false, managers: [] });
     for (const row of [...scan.agents, ...scan.tools]) expect(row.recommended.value, row.id).toBe(row.on ? "on" : "off");
-    expect(result.text).toBe(scanPrintout(scan).join("\n"));
+    expect(result.text).toBe(scanPrintout(scan, "darwin").join("\n"));
     expect(result.text).toContain("nothing looked for them here");
   });
 });

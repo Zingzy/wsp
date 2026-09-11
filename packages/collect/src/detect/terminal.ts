@@ -106,7 +106,8 @@ const TERMINALS: readonly Terminal[] = [
       const config = await readGhosttyConfig(host);
       return config.files.length === 0 ? undefined : (primaryFace(config.fontFamily) ?? BUILT_IN);
     },
-    installed: host => (host.platform === "darwin" ? exists(host, "/Applications/Ghostty.app") : Promise.resolve(false)),
+    // On Linux it ships as a plain binary, so PATH is what says it is here; the .app bundle is the Mac's answer.
+    installed: host => (host.platform === "darwin" ? exists(host, "/Applications/Ghostty.app") : host.exec.which("ghostty")),
   },
   {
     key: "iterm2",

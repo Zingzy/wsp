@@ -9,7 +9,7 @@ import { join, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { isCancel } from "@clack/prompts";
 import type { ProjectImportResult, ProjectPlan, WorkspaceView } from "@wsp/protocol";
-import { ALSO_LOCAL_QUESTION, FIRST_QUESTION, FOLDER_QUESTION, appUrl, askFirst, folderOf, importedLine, planLine, runLocal, type FirstAsk } from "../src/init-first.js";
+import { ALSO_LOCAL_QUESTION, FIRST_QUESTION, folderQuestion, appUrl, askFirst, folderOf, importedLine, planLine, runLocal, type FirstAsk } from "../src/init-first.js";
 
 /** The two keys the step is answered with. */
 const ENTER = "\r";
@@ -51,41 +51,41 @@ describe("the folder a person types", () => {
 describe("the flags in the question's place", () => {
   it("--import alone forks under the default name and imports that folder, asking nothing", async () => {
     const { input, output } = streams();
-    expect(await askFirst({ interactive: true, unattended: false, folder: "/Users/me/code/proj", input, output })).toEqual({ fork: { name: "first", folder: "/Users/me/code/proj" }, local: true });
+    expect(await askFirst({ platform: "darwin", interactive: true, unattended: false, folder: "/Users/me/code/proj", input, output })).toEqual({ fork: { name: "first", folder: "/Users/me/code/proj" }, local: true });
     expect(output.read()).toBeNull();
   });
 
   it("--first-workspace alone forks under that name and imports nothing", async () => {
     const { input, output } = streams();
-    expect(await askFirst({ interactive: true, unattended: false, name: "proj", input, output })).toEqual({ fork: { name: "proj" }, local: true });
+    expect(await askFirst({ platform: "darwin", interactive: true, unattended: false, name: "proj", input, output })).toEqual({ fork: { name: "proj" }, local: true });
     expect(output.read()).toBeNull();
   });
 
   it("--yes at a terminal with no flags takes the default: the workspace is forked and no project imported", async () => {
     const { input, output } = streams();
-    expect(await askFirst({ interactive: false, unattended: false, input, output })).toEqual({ fork: { name: "first" }, local: true });
+    expect(await askFirst({ platform: "darwin", interactive: false, unattended: false, input, output })).toEqual({ fork: { name: "first" }, local: true });
     expect(output.read()).toBeNull();
   });
 
   it("with nobody at a terminal only a flag forks: no flag, no fork; a name or a folder, that fork. The tick stands either way, since this computer bills nothing", async () => {
     const { input, output } = streams();
-    expect(await askFirst({ interactive: false, unattended: true, input, output })).toEqual({ local: true });
-    expect(await askFirst({ interactive: false, unattended: true, name: "proj", input, output })).toEqual({ fork: { name: "proj" }, local: true });
-    expect(await askFirst({ interactive: false, unattended: true, folder: "/Users/me/code/proj", input, output })).toEqual({ fork: { name: "first", folder: "/Users/me/code/proj" }, local: true });
+    expect(await askFirst({ platform: "darwin", interactive: false, unattended: true, input, output })).toEqual({ local: true });
+    expect(await askFirst({ platform: "darwin", interactive: false, unattended: true, name: "proj", input, output })).toEqual({ fork: { name: "proj" }, local: true });
+    expect(await askFirst({ platform: "darwin", interactive: false, unattended: true, folder: "/Users/me/code/proj", input, output })).toEqual({ fork: { name: "first", folder: "/Users/me/code/proj" }, local: true });
     expect(output.read()).toBeNull();
   });
 
   it("--no-local turns the tick off on every road", async () => {
     const { input, output } = streams();
-    expect(await askFirst({ interactive: false, unattended: true, noLocal: true, input, output })).toEqual({ local: false });
-    expect(await askFirst({ interactive: false, unattended: false, noLocal: true, input, output })).toEqual({ fork: { name: "first" }, local: false });
-    expect(await askFirst({ interactive: true, unattended: false, name: "proj", noLocal: true, input, output })).toEqual({ fork: { name: "proj" }, local: false });
+    expect(await askFirst({ platform: "darwin", interactive: false, unattended: true, noLocal: true, input, output })).toEqual({ local: false });
+    expect(await askFirst({ platform: "darwin", interactive: false, unattended: false, noLocal: true, input, output })).toEqual({ fork: { name: "first" }, local: false });
+    expect(await askFirst({ platform: "darwin", interactive: true, unattended: false, name: "proj", noLocal: true, input, output })).toEqual({ fork: { name: "proj" }, local: false });
     expect(output.read()).toBeNull();
   });
 
   it("reads a relative --import against this computer's working directory", async () => {
     const { input, output } = streams();
-    expect(await askFirst({ interactive: false, unattended: true, folder: "code/proj", input, output })).toEqual({ fork: { name: "first", folder: resolve("code/proj") }, local: true });
+    expect(await askFirst({ platform: "darwin", interactive: false, unattended: true, folder: "code/proj", input, output })).toEqual({ fork: { name: "first", folder: resolve("code/proj") }, local: true });
   });
 });
 
@@ -95,7 +95,7 @@ describe("the tick beside the fork", () => {
     const { input, output } = streams();
     const drawn: string[] = [];
     output.on("data", (c: Buffer) => drawn.push(stripVTControlCharacters(c.toString())));
-    const step = askFirst({ interactive: true, unattended: false, input, output, ...ask });
+    const step = askFirst({ platform: "darwin", interactive: true, unattended: false, input, output, ...ask });
     const press = async (key: string, until: string): Promise<void> => {
       const start = Date.now();
       while (!drawn.join("").includes(until)) {
@@ -106,7 +106,7 @@ describe("the tick beside the fork", () => {
     };
     await press(o.fork, FIRST_QUESTION);
     if (o.tick !== undefined) await press(o.tick, ALSO_LOCAL_QUESTION);
-    if (o.folder !== undefined) await press(o.folder, FOLDER_QUESTION);
+    if (o.folder !== undefined) await press(o.folder, folderQuestion("darwin"));
     return { step: await step, drawn: () => drawn.join("") };
   };
 

@@ -196,7 +196,7 @@ export function catalogIdOf(e: ManifestEntry): string | undefined {
 }
 
 /** This computer's tools rows the catalog does not carry, as rows of the small recipe under the collector's own id,
- * so the file and the Also on this Mac screen tick them like any other row and the build installs each by the road
+ * so the file and the Also screen tick them like any other row and the build installs each by the road
  * the plan resolves for it: off until one ticks it, found here as its source. A tap itself, a row locked off with a
  * reason and a row no road installs get none: nothing installs the first, nobody can tick the second, and a tick on
  * the third would do nothing. A row the recipe already carries is left as it is. */
