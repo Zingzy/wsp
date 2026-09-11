@@ -94,7 +94,7 @@ describe("the tools screen", () => {
   it("the base as bullets under the title, the rest grouped by why it is here, the why column and the size beside each", () => {
     const recipe = { ...RECIPE, rows: [...RECIPE.rows, row({ id: "wrangler", source: { kind: "used", sessions: 3, calls: 40 } }), row({ id: "go", on: false, source: { kind: "used", sessions: 1, calls: 2 } })] };
     const items = tableItems(recipeTable(recipe, CATALOG_TOOLS), recipe, FIXTURE, 4, true, "darwin");
-    expect(items.filter(i => i.lock === "on").map(i => i.label)).toEqual(["Docker engine and compose", "C toolchain with cmake and ninja", "Node 22 with npm", "pnpm", "uv", "Python 3.12", "git", "jq", "ripgrep", "curl", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync"]);
+    expect(items.filter(i => i.lock === "on").map(i => i.label)).toEqual(["Docker engine and compose", "C toolchain with cmake and ninja", "curl", "Node 22 with npm", "pnpm", "uv", "Python 3.12", "git", "jq", "ripgrep", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync"]);
     expect([...new Set(items.map(i => i.group))]).toEqual([undefined, USED_GROUP, HERE_GROUP, CATALOG_GROUP]);
     expect(items.filter(i => i.group === HERE_GROUP).map(i => i.label)).toEqual(["GitHub CLI", "yq"]);
     expect(items.filter(i => i.group === USED_GROUP).map(i => i.label)).toEqual(["Go", "Cloudflare Wrangler"]);
@@ -124,13 +124,13 @@ describe("the tools screen", () => {
 
   it("ticks go back onto the recipe: a floor row stays on however the list left it, and an entry the recipe never named gets a row on the catalog's evidence", () => {
     const tools = withTools(RECIPE, new Set(["gh", "go"]));
-    expect(tools.rows.filter(r => r.kind === "tool" && r.on).map(r => r.id)).toEqual(["node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh", "go"]);
+    expect(tools.rows.filter(r => r.kind === "tool" && r.on).map(r => r.id)).toEqual(["curl", "node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "docker", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh", "go"]);
     expect(tools.rows.find(r => r.id === "go")).toEqual({ id: "go", kind: "tool", on: true, source: { kind: "popular", sessions: 9, images: 4 }, size: 250752891 });
     expect(tools.rows.filter(r => r.kind === "agent")).toEqual(RECIPE.rows.filter(r => r.kind === "agent"));
     const agents = withAgents(RECIPE, new Set(["codex", "pi"]));
     expect(agents.rows.filter(r => r.kind === "agent").map(r => [r.id, r.on])).toEqual([["claude", false], ["codex", true], ["gemini", false], ["opencode", false], ["pi", true], ["hermes", false]]);
     const both = withPicked(RECIPE, new Set(["codex", "gh"]));
-    expect(both.rows.filter(r => r.on).map(r => r.id)).toEqual(["codex", "node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh"]);
+    expect(both.rows.filter(r => r.on).map(r => r.id)).toEqual(["codex", "curl", "node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "docker", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh"]);
   });
 });
 

@@ -25,6 +25,7 @@ describe("local backend", () => {
       containers: false,
       callbackRelay: false,
       snapshotListing: false,
+      firstLifeSnapshots: false,
       templates: false,
       // This computer is the person's own: its files and sign-ins outlive every turn, so a thread on it starts at
       // the access its harness asks for rather than at skip-everything. The one fact that road reads.

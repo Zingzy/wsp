@@ -8,10 +8,9 @@
 // finds it as they left it. A road to a host is one entry in ROADS: how it is
 // opened the first time, how a saved one is reached again, and what it holds
 // open; adding a road is its entry and nothing else here.
-import { connectCommand, disconnectCommand, isUrl, aliasFrom, listHosts, noSuchHostLine, readHost, writeHost, type CliIO, type HostRecord } from "@wsp/host";
-import { HOST_WORDS, PAIR_CODE_LENGTH, type HostConnectAsk, type HostOutcome, type HostRoad, type HostsView } from "@wsp/protocol";
+import { connectCommand, disconnectCommand, aliasFrom, listHosts, noSuchHostLine, readHost, writeHost, type CliIO, type HostRecord } from "@wsp/host";
+import { HOST_WORDS, PAIR_CODE_LENGTH, isUrl, type HostConnectAsk, type HostOutcome, type HostRoad, type HostsView } from "@wsp/protocol";
 import type { HostSession } from "./host-lifecycle.js";
-import { fromAppPage } from "./origin.js";
 import { forwardKey, type SshRoad } from "./ssh-road.js";
 
 export interface SwitcherDeps {
@@ -36,8 +35,6 @@ export interface HostSwitcher {
   view(): HostsView;
   /** The device token of the host the window is on, when it is one somewhere else. */
   token(): string | undefined;
-  /** Whether a frame is the page of the host the window is on. */
-  gate(frameUrl: string | undefined): boolean;
   to(alias: string | null): Promise<HostOutcome>;
   connect(ask: HostConnectAsk): Promise<HostOutcome>;
   disconnect(alias: string): Promise<HostOutcome>;
@@ -58,6 +55,12 @@ interface Opened {
   road: HostRoad;
   ssh?: HostRecord["ssh"];
 }
+
+/** A road that holds the ssh road, once the check said there is one. */
+const sshRoadOf = (deps: SwitcherDeps): SshRoad => {
+  if (deps.ssh === undefined) throw new Error(NO_SSH_LINE);
+  return deps.ssh;
+};
 
 /** One road to a host, by kind. */
 interface Road<A extends HostConnectAsk = HostConnectAsk> {
@@ -114,22 +117,22 @@ export function hostSwitcher(deps: SwitcherDeps): HostSwitcher {
   const ssh: Road<Extract<HostConnectAsk, { road: "ssh" }>> = {
     check: ask => (!LOGIN.test(ask.address.trim()) ? { ok: false, at: "address", error: LOGIN_LINE } : deps.ssh === undefined ? { ok: false, at: "address", error: NO_SSH_LINE } : undefined),
     open: async ask => {
+      const road = sshRoadOf(deps);
       const address = ask.address.trim();
       const login = { address, ...(ask.port !== undefined ? { port: ask.port } : {}) };
       try {
-        const opened = await deps.ssh!.open(login);
-        return { url: opened.url, code: opened.code, alias: aliasFrom(address), label: address, road: "ssh", ssh: { ...login, hostPort: opened.hostPort } };
+        const opened = await road.open(login);
+        return { url: opened.url, code: opened.code, alias: aliasFrom(address), label: address, road: "ssh", ssh: login };
       } catch (e) {
-        deps.ssh!.closeForward(forwardKey(login));
+        road.closeForward(forwardKey(login));
         throw e;
       }
     },
-    // A launch that lost the forward makes one at the port the record names when it can, and the record follows.
+    // The box's lock is read on every switch, so a service that came back on another port is found there; the
+    // forward keeps the local port the record names when it can, and the record follows when it cannot.
     reach: async (alias, record) => {
       if (record.ssh === undefined) return record.url;
-      if (deps.ssh === undefined) throw new Error(NO_SSH_LINE);
-      const { address, port, hostPort } = record.ssh;
-      const url = await deps.ssh.forward({ address, ...(port !== undefined ? { port } : {}) }, hostPort, portOf(record.url));
+      const url = await sshRoadOf(deps).reach(record.ssh, portOf(record.url));
       if (url !== record.url) writeHost(deps.home, alias, { ...record, url });
       return url;
     },
@@ -157,7 +160,6 @@ export function hostSwitcher(deps: SwitcherDeps): HostSwitcher {
       hosts: listHosts(deps.home).map(h => ({ alias: h.alias, label: h.label ?? h.alias, url: h.url, road: h.road ?? "direct" })),
     }),
     token: () => current.deviceToken,
-    gate: frameUrl => fromAppPage(frameUrl, current.url),
     async to(alias) {
       try {
         if (alias === null) {

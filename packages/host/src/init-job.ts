@@ -328,7 +328,7 @@ export class InitJobs implements InitDoor {
     const s = this.answering();
     s.answers = answerScreen(s.reading!, s.answers!, o.screen, o);
     s.screens = screensOf(s.reading!, s.answers, this.deps);
-    s.disk = diskOf(s.reading!, s.answers.recipe, this.deps.statePath);
+    s.disk = diskOf(s.reading!, s.answers.recipe, this.deps.statePath, this.deps.pricing().builderDiskGb);
     s.step = Math.min(s.screens.findIndex(x => x.id === o.screen) + 1, s.screens.length);
     // The screen's answer is what its draft was for: what stands is on the recipe now, and a stale draft would
     // come back over it on the next reopen.
@@ -706,7 +706,7 @@ export class InitJobs implements InitDoor {
     s.reading = reading;
     s.answers = { recipe: reading.catalogRecipe, logins: new Map(), wspTicks: undefined };
     s.screens = screensOf(reading, s.answers, this.deps);
-    s.disk = diskOf(reading, s.answers.recipe, this.deps.statePath);
+    s.disk = diskOf(reading, s.answers.recipe, this.deps.statePath, this.deps.pricing().builderDiskGb);
     s.step = 0;
     s.phase = "answering";
   }

@@ -6,7 +6,7 @@
 // shell for a token before it asks the person for a code.
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HOST_WORDS, WS_PATH, type BootPayload, type ContextMenuItem, type DesktopBridge, type HostsView } from "@wsp/protocol";
+import { HOST_WORDS, PAIR_CODE_LENGTH, WS_PATH, type BootPayload, type ContextMenuItem, type DesktopBridge, type HostsView } from "@wsp/protocol";
 import { BootGate } from "../src/BootGate.js";
 import { PAIR_HEADING } from "../src/PairScreen.js";
 import { ConnectHostSheet, shownCode, sentCode } from "../src/hosts/ConnectHostSheet.js";
@@ -75,6 +75,9 @@ describe("the connect sheet", () => {
     expect(shownCode("abcd-efgh")).toBe("ABCD-EFGH");
     expect(shownCode("ab cd!ef")).toBe("ABCDEF");
     expect(shownCode("abcdefghijk")).toBe("ABCDEFGH");
+    // The pairing alphabet has no I, L, O or U: a typed one is dropped rather than sent to be refused.
+    expect(shownCode("ilou-abcd")).toBe("ABCD");
+    expect(shownCode("0123456789abcdefghjkmnpqrstvwxyz").length).toBe(PAIR_CODE_LENGTH);
     expect(sentCode("ABCD-EFGH")).toBe("ABCDEFGH");
     const bridge = fakeBridge();
     const onClose = vi.fn();

@@ -274,10 +274,10 @@ describe("confirm prompt", () => {
 
   it("wraps a long question and hint at the width, the rest under the bar with the two-space indent", async () => {
     const { input, output, text } = streams(40);
-    const p = confirmPrompt({ message: "Boot a 2 vCPU, 4 GB builder on Solari and build this?", hint: "No costs nothing and keeps the recipe for wsp init --recipe.", input, output });
+    const p = confirmPrompt({ message: "Boot a 2 vCPU, 4 GB builder and build this? About $0.11/hr while it runs.", hint: "No costs nothing and keeps the recipe for wsp init --recipe.", input, output });
     await settle();
     const lines = text().split("\n");
-    expect(lines).toEqual(["◆  Boot a 2 vCPU, 4 GB builder on Solari", "┃    and build this?", "┃  No costs nothing and keeps the recipe", "┃    for wsp init --recipe.", "┃  ○ Yes / ● No", `┗  ${CONFIRM_HELP}`]);
+    expect(lines).toEqual(["◆  Boot a 2 vCPU, 4 GB builder and build", "┃    this? About $0.11/hr while it runs.", "┃  No costs nothing and keeps the recipe", "┃    for wsp init --recipe.", "┃  ○ Yes / ● No", `┗  ${CONFIRM_HELP}`]);
     // The help line is not wrapped, as on the rung screens.
     expect(lines.slice(0, -1).map(l => l.length).filter(n => n > 40)).toEqual([]);
     await press(input, KEY.enter);

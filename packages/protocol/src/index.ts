@@ -165,6 +165,10 @@ export const Capabilities = z.object({
   /** Every size a create may ask for; a create that names another is refused with this list. A create that names
    * none takes the golden's size, which need not be on it. */
   sizes: z.array(MachineSizeOffer),
+  /** Only a machine that was never resumed may be snapshotted: the provider refuses one taken after a resume
+   * (Solari answers 502 deterministically, and same-host and cross-host are invisible from outside). False where a
+   * snapshot is a copy of the disk whatever the machine has done since it booted. */
+  firstLifeSnapshots: z.boolean(),
   /** The machine is the person's own, kept: its files, its sign-ins and its git checkouts outlive every turn, and
    * wsp neither made it nor throws it away. False on a fork wsp made, where a turn that wrecks the disk costs a
    * rebuild and nothing else. What a turn's access starts at reads this, not the workspace's kind. */
@@ -1395,7 +1399,7 @@ export type HostConnectAsk = { road: "direct"; url: string; code: string } | { r
 
 /** How a host move or connect ended: done, or refused in the host's own words with the field the words are about, so
  * the sheet can put them under it. */
-export type HostOutcome = { ok: true } | { ok: false; error: string; at: "url" | "code" | "address" | "port" };
+export type HostOutcome = { ok: true } | { ok: false; error: string; at: "url" | "code" | "address" };
 
 /** The class the desktop preload puts on the html element when the window has no title bar of its own: the app's
  * header row is the window's frame, the traffic lights sit in it and the sidebar shows the window's frosted glass. */

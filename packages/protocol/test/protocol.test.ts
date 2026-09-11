@@ -504,7 +504,7 @@ describe("daemon wire types (one home for the ops from @wsp/daemon)", () => {
 
 describe("backend capabilities", () => {
   it("requires every flag, containers, callbackRelay, templates, kept and the sizes list included, so no backend can leave one unstated", () => {
-    const full = { liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, snapshotListing: true, templates: true, kept: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
+    const full = { liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: true, kept: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
     expect(Capabilities.parse(full)).toEqual(full);
     const { containers: _c, ...missing } = full;
     expect(() => Capabilities.parse(missing)).toThrow();

@@ -198,7 +198,7 @@ describe("a hosts folder somebody hand-edited", () => {
 describe("what the desktop adds to a record", () => {
   it("round trips the label, the road and the ssh login, and the listing carries the label and the road", () => {
     const home = tempDir("hosts-home");
-    const ssh: HostRecord = { ...record("http://127.0.0.1:52001", "d_3"), label: "maya@box", road: "ssh", ssh: { address: "maya@box", port: 2222, hostPort: 4400 } };
+    const ssh: HostRecord = { ...record("http://127.0.0.1:52001", "d_3"), label: "maya@box", road: "ssh", ssh: { address: "maya@box", port: 2222 } };
     writeHost(home, "maya-box", ssh);
     writeHost(home, "attic", record("https://attic.example", "d_2"));
     expect(readHost(home, "maya-box")).toEqual(ssh);

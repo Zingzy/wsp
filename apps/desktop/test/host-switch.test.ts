@@ -6,9 +6,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { listHosts, readHost, writeHost, type HostRecord } from "@wsp/host";
+import { HOST_WORDS } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HostSession } from "../src/host-lifecycle.js";
 import { hostSwitcher, parseConnectAsk, type SwitcherDeps } from "../src/host-switch.js";
+import { fromAppPage } from "../src/origin.js";
 import type { SshRoad } from "../src/ssh-road.js";
 
 let dirs: string[] = [];
@@ -72,17 +74,19 @@ describe("hostSwitcher", () => {
     const d = deps();
     writeHost(d.home, "box", record("http://127.0.0.1:14400"));
     const switcher = hostSwitcher(d);
-    expect(switcher.gate("http://127.0.0.1:41000/")).toBe(true);
+    // The gate every bridge call reads is the origin of the host the window is on, read at call time.
+    const gate = (frame: string): boolean => fromAppPage(frame, switcher.current().url);
+    expect(gate("http://127.0.0.1:41000/")).toBe(true);
     expect(await switcher.to("box")).toEqual({ ok: true });
     expect(switcher.current()).toMatchObject({ url: "http://127.0.0.1:14400", remote: true, alias: "box", label: "box", deviceToken: "tok-1" });
     expect(switcher.token()).toBe("tok-1");
-    expect(switcher.gate("http://127.0.0.1:14400/workspaces/w1")).toBe(true);
-    expect(switcher.gate("http://127.0.0.1:41000/")).toBe(false);
+    expect(gate("http://127.0.0.1:14400/workspaces/w1")).toBe(true);
+    expect(gate("http://127.0.0.1:41000/")).toBe(false);
     expect(switcher.view().current).toBe("box");
     expect(d.loaded.map(s => s.url)).toEqual(["http://127.0.0.1:14400"]);
     expect(await switcher.to(null)).toEqual({ ok: true });
     expect(switcher.current()).toBe(d.local);
-    expect(switcher.gate("http://127.0.0.1:41000/")).toBe(true);
+    expect(gate("http://127.0.0.1:41000/")).toBe(true);
     expect(d.local.closes).toBe(0);
   });
 
@@ -137,13 +141,13 @@ describe("hostSwitcher", () => {
     expect(d.loaded.map(s => s.url)).toEqual(["http://127.0.0.1:14400", "http://127.0.0.1:41000"]);
   });
 
-  it("over ssh the road opens the forward and pairs, the record keeps the login, and a switch back reopens the forward", async () => {
+  it("over ssh the road opens the forward and pairs, the record keeps the login, and a switch back reaches the host through the lock again", async () => {
     const d = deps();
-    const forwards: string[] = [];
+    const reached: string[] = [];
     const ssh: SshRoad = {
-      open: async () => ({ url: "http://127.0.0.1:52001", code: "ABCDEFGH", hostPort: 4400 }),
-      forward: async (login, hostPort, preferLocal) => {
-        forwards.push(`${login.address}:${login.port ?? 22}->${hostPort} at ${preferLocal ?? "any"}`);
+      open: async () => ({ url: "http://127.0.0.1:52001", code: "ABCDEFGH" }),
+      reach: async (login, preferLocal) => {
+        reached.push(`${login.address}:${login.port ?? 22} at ${preferLocal ?? "any"}`);
         return "http://127.0.0.1:52002";
       },
       closeForward: () => {},
@@ -157,31 +161,31 @@ describe("hostSwitcher", () => {
     const switcher = hostSwitcher({ ...d, ssh, connect });
     expect(await switcher.connect({ road: "ssh", address: "maya@box", port: 2222 })).toEqual({ ok: true });
     expect(connect.mock.calls[0]![2]).toEqual({ code: "ABCDEFGH", name: "maya-box" });
-    expect(readHost(d.home, "maya-box")).toEqual({ ...record("http://127.0.0.1:52001"), label: "maya@box", road: "ssh", ssh: { address: "maya@box", port: 2222, hostPort: 4400 } });
+    expect(readHost(d.home, "maya-box")).toEqual({ ...record("http://127.0.0.1:52001"), label: "maya@box", road: "ssh", ssh: { address: "maya@box", port: 2222 } });
     expect(switcher.current()).toMatchObject({ url: "http://127.0.0.1:52001", label: "maya@box" });
-    // A later launch holds the record and no forward: the switch makes one at the port the record names when it can.
+    // A later launch holds the record and no forward: the switch reads the box's lock again and forwards to what it
+    // names, at the local port the record names when it can, and the record follows the forward.
     const later = hostSwitcher({ ...deps({ home: d.home }), ssh });
     expect(await later.to("maya-box")).toEqual({ ok: true });
-    expect(forwards).toEqual(["maya@box:2222->4400 at 52001"]);
+    expect(reached).toEqual(["maya@box:2222 at 52001"]);
     expect(later.current().url).toBe("http://127.0.0.1:52002");
     expect(readHost(d.home, "maya-box")?.url).toBe("http://127.0.0.1:52002");
   });
 
   it("an ssh road that fails says so under the address, and nothing is written", async () => {
     const d = deps();
-    const ssh: SshRoad = {
-      open: async () => { throw new Error("wsp is not installed on maya@box: run npm i -g @zingzy/wsp there, then connect again."); },
-      forward: async () => "",
-      closeForward: () => {},
-      closeAll: () => {},
-      pids: () => [],
-    };
+    const open = vi.fn(async () => { throw new Error("wsp is not installed on maya@box: run npm i -g @zingzy/wsp there, then connect again."); });
+    const ssh: SshRoad = { open, reach: async () => "", closeForward: () => {}, closeAll: () => {}, pids: () => [] };
     const switcher = hostSwitcher({ ...d, ssh });
     expect(await switcher.connect({ road: "ssh", address: "maya@box" })).toEqual({ ok: false, at: "address", error: "wsp is not installed on maya@box: run npm i -g @zingzy/wsp there, then connect again." });
-    expect(await switcher.connect({ road: "ssh", address: "" })).toMatchObject({ ok: false, at: "address" });
-    // A word ssh could read as one of its own options never reaches it.
-    expect(await switcher.connect({ road: "ssh", address: "-oProxyCommand=touch /tmp/x" })).toMatchObject({ ok: false, at: "address" });
-    expect(await switcher.connect({ road: "ssh", address: "maya@box; rm -rf ~" })).toMatchObject({ ok: false, at: "address" });
+    expect(open).toHaveBeenCalledOnce();
+    // A word ssh could read as one of its own options, or a shell as a second command, never reaches ssh: the
+    // refusal is the login line and the road is not opened.
+    const loginLine = `the login is ${HOST_WORDS.sheet.loginPlaceholder}, as ssh takes it`;
+    for (const bad of ["", "-oProxyCommand=touch /tmp/x", "maya@box; rm -rf ~", "maya@box -p 2222", "maya@"]) {
+      expect(await switcher.connect({ road: "ssh", address: bad })).toEqual({ ok: false, at: "address", error: loginLine });
+    }
+    expect(open).toHaveBeenCalledOnce();
     expect(listHosts(d.home)).toEqual([]);
   });
 });

@@ -8,8 +8,11 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { WS_PATH, usageRefusal, type HostRoad } from "@wsp/protocol";
+import { WS_PATH, isUrl, usageRefusal, type HostRoad } from "@wsp/protocol";
 import { servingHost } from "./host-lock.js";
+
+/** The address predicate has one home in the protocol; the command line's callers read it from here. */
+export { isUrl };
 
 /** What this computer keeps about a host on another one: the address a person gave wsp connect, the device the host
  * minted for this computer and the token that names it. The token opens the host, so the file is the person's own. */
@@ -26,10 +29,11 @@ export interface HostRecord {
   ssh?: SshLogin;
 }
 
+/** Where the desktop logs in: the address as ssh takes it and the port when it is not ssh's own. The port the host
+ * answers on over there is not kept: the box's lock says it, and the road reads the lock on every connection. */
 export interface SshLogin {
   address: string;
   port?: number;
-  hostPort: number;
 }
 
 /** One connected host as wsp hosts prints it: never the token, which no listing has any use for. */
@@ -160,12 +164,6 @@ export function defaultHost(home: string): string | undefined {
 export function setDefaultHost(home: string, alias: string): void {
   mkdirSync(hostsDir(home), { recursive: true, mode: 0o700 });
   writeFileSync(defaultFile(home), `${checkedAlias(alias)}\n`, { mode: 0o600 });
-}
-
-/** Whether a word is an address rather than an alias. An address is the road wsp connect takes, before any record
- * for it exists; every other verb wants an alias, since only a record carries a token. */
-export function isUrl(word: string): boolean {
-  return /^(https?|wss?):\/\//i.test(word);
 }
 
 /** The WebSocket address of a host at this address: the same authority over ws or wss, with the runtime's path on

@@ -15,7 +15,6 @@ import { PRELUDE } from "./dotfiles-presets.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { MIB, closing, freeBytes, freeNote, guardDeadlineMs, guarded, installTools, plural, reasonOf, sweepCaches, usedBytes, withRecordedPins, type ToolResult } from "./golden-tools.js";
 import { installBase } from "./golden-base.js";
-import { BUILDER_DISK_GB } from "./tool-sizes.js";
 import { assertFirstLife } from "./lifecycle.js";
 import { applyMcp, mcpTally, type McpPlan, type McpResult } from "./golden-mcp.js";
 import { BROWSER_SHIM_PATH, applyMachineContext, type ContextResult } from "./machine-context.js";
@@ -184,8 +183,19 @@ export async function promoteVersion(templates: Templates, snapshotId: string, n
   return { templateId, ...(sharing !== undefined ? { sharing } : {}) };
 }
 
-/** Solari's built-in templates are kind-specific (TemplateKindMismatch otherwise). */
+/** The provider built-in templates a backend that names none of its own boots from; they are kind-specific
+ * (Solari answers TemplateKindMismatch otherwise). */
 const DEFAULT_TEMPLATE: Record<MachineKind, string> = { sandbox: "base", desktop: "default" };
+
+/** What a machine of this kind boots from: the caller's word, else the image the backend names, else the built-in. */
+const baseTemplateOf = (backend: MachineBackend, kind: MachineKind, named?: string): string => named ?? backend.baseTemplates?.[kind] ?? DEFAULT_TEMPLATE[kind];
+
+/** The root disk every builder and fork asks for on this provider, where it asks for one at all: a container takes
+ * no disk request, so the create carries no field rather than a figure from another provider's cap. */
+const diskAsked = (backend: MachineBackend): { diskGb?: number } => {
+  const diskGb = backend.pricing.builderDiskGb;
+  return diskGb === undefined ? {} : { diskGb };
+};
 
 /** How long a builder may sit with no API activity before it is killed. Whether
  * a live noVNC stream counts as activity is unmeasured, so this covers a person
@@ -746,7 +756,7 @@ function staged(onStage: StageListener | undefined): { stage: StageListener; cur
 export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Builder> {
   const { stage, current } = staged(opts.onStage);
   const kind = opts.kind ?? "sandbox";
-  const baseTemplate = opts.baseTemplate ?? DEFAULT_TEMPLATE[kind];
+  const baseTemplate = baseTemplateOf(opts.backend, kind, opts.baseTemplate);
 
   stage("creating", `${kind} from ${baseTemplate}`);
   // A builder that idle-pauses resumes not first-life, so its seal would 502 and
@@ -759,7 +769,7 @@ export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Build
     template: baseTemplate,
     onIdle: "kill",
     idleTimeoutMs: BUILDER_IDLE_MS,
-    diskGb: BUILDER_DISK_GB,
+    ...diskAsked(opts.backend),
     ...asked,
     ...envSpec(opts),
   });
@@ -810,7 +820,9 @@ const isCapRefusal = (e: unknown): boolean => (e as { kind?: unknown }).kind ===
 // the smoke fork boots, so the seal itself never holds more than one machine.
 export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Promise<SealResult> {
   const { stage, current } = staged(opts.onStage);
-  assertFirstLife(builder.machine.id, builder.firstLife, "seal");
+  // Only where the provider refuses a snapshot of a machine that was resumed; a commit of a container's disk is
+  // the same copy whatever the machine has done, so the rule is read off the backend rather than kept for all.
+  if (opts.backend.capabilities.firstLifeSnapshots) assertFirstLife(builder.machine.id, builder.firstLife, "seal");
   const smoke = builder.import?.smoke ?? opts.smoke;
 
   const prior = opts.manifest?.versions ?? [];
@@ -827,7 +839,7 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
   const forkSpec = () => ({
     kind: builder.kind,
     ...goldenImage({ snapshotId: snapshotId!, ...(templateId !== undefined ? { templateId } : {}) }).spec,
-    diskGb: BUILDER_DISK_GB,
+    ...diskAsked(opts.backend),
     ...sizeAsked(opts.backend, opts, builder.size),
     ...envSpec(opts),
   });
@@ -1083,7 +1095,7 @@ export async function upgradeBuilder(opts: UpgradeBuilderOptions): Promise<Build
     ...goldenImage(opts.head).spec,
     onIdle: "kill",
     idleTimeoutMs: BUILDER_IDLE_MS,
-    diskGb: BUILDER_DISK_GB,
+    ...diskAsked(opts.backend),
     ...asked,
     ...envSpec(opts),
   });
@@ -1161,7 +1173,7 @@ export async function forkGolden(
   return backend.create({
     kind: overrides.kind ?? head.kind ?? "sandbox",
     ...goldenImage(head).spec,
-    diskGb: BUILDER_DISK_GB,
+    ...diskAsked(backend),
     ...sizeAsked(backend, overrides, head.size),
     ...envSpec(overrides),
   });

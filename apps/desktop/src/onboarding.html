@@ -60,7 +60,7 @@
       @keyframes draw { from { stroke-dashoffset: 22; } }
       @keyframes light { from { flood-opacity: 0; } }
       @keyframes rise { from { opacity: 0; translate: 0 12px; } }
-      .tilde .body, .tilde .lit, #welcome h1, #welcome .sub, #welcome .primary {
+      .tilde .body, .tilde .lit, #welcome h1, #welcome .sub, #welcome .primary, #welcome .link {
         animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
         animation-fill-mode: backwards;
       }
@@ -69,8 +69,9 @@
       #welcome h1 { animation-name: rise; animation-duration: 0.34s; animation-delay: 0.26s; }
       #welcome .sub { animation-name: rise; animation-duration: 0.34s; animation-delay: 0.34s; }
       #welcome .primary { animation-name: rise; animation-duration: 0.34s; animation-delay: 0.42s; }
+      #welcome .link { animation-name: rise; animation-duration: 0.34s; animation-delay: 0.46s; }
       @media (prefers-reduced-motion: reduce) {
-        .tilde .body, .tilde .lit, #welcome h1, #welcome .sub, #welcome .primary { animation: none; }
+        .tilde .body, .tilde .lit, #welcome h1, #welcome .sub, #welcome .primary, #welcome .link { animation: none; }
       }
       h1 { margin: 0 0 12px; font: 600 34px/1.15 var(--font-sans); letter-spacing: -0.02em; }
       .sub { margin: 0 0 32px; max-width: 440px; font-size: 15px; line-height: 1.5; color: var(--muted-foreground); }
