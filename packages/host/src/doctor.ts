@@ -93,6 +93,9 @@ export interface DaemonPlace {
   toolsPath: string;
   /** The rest of the unit's environment, stated the same way. */
   unitEnv: Readonly<Record<string, string>>;
+  /** The file the unit reads the machine's environment from, for a provider that cannot hand it over at create and
+   * writes it there instead; the unit may lack the file. Absent on a place whose unit reads no such file. */
+  envFile?: string;
   /** What the unit is enabled under, which differs between a machine's systemd and a login's. */
   wantedBy: string;
   /** The address the daemon binds. */
@@ -259,6 +262,7 @@ export const CLOUD_PLACE: DaemonPlace = {
   unitPath: `/etc/systemd/system/${DAEMON_UNIT}`,
   toolsPath: TOOLS_PATH,
   unitEnv: GUEST_USER_ENV,
+  envFile: DAEMON_ENV_FILE,
   wantedBy: "multi-user.target",
   bind: "0.0.0.0",
   port: DAEMON_PORT,
@@ -497,9 +501,8 @@ export function daemonUnit(place: DaemonPlace = CLOUD_PLACE, previewHostSuffix?:
     `Environment=${unitEnvLine(place, `PATH=${place.toolsPath}`)}`,
     ...Object.entries(place.unitEnv).map(([name, value]) => `Environment=${unitEnvLine(place, `${name}=${value}`)}`),
     ...(previewHostSuffix !== undefined ? [`Environment=${VITE_ALLOWED_HOSTS_ENV}=${previewHostSuffix}`] : []),
-    // A fork's environment on a provider that cannot hand it over at create: written by that backend under /etc,
-    // read here alone, and missing everywhere else, which the dash says is fine.
-    ...(place.kind === "cloud" ? [`EnvironmentFile=-${DAEMON_ENV_FILE}`] : []),
+    // The place's own file, where it has one: missing everywhere else, which the dash says is fine.
+    ...(place.envFile !== undefined ? [`EnvironmentFile=-${place.envFile}`] : []),
     // Through sh so node is found on the unit's PATH: a machine that shipped its own node keeps it where it is.
     `ExecStart=/bin/sh -c 'exec node ${place.quotePaths ? `"${place.dir}/start.mjs"` : `${place.dir}/start.mjs`}'`,
     "Restart=always",
