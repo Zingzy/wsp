@@ -29,7 +29,6 @@ import {
   goldenHead,
   importInto,
   isMissing,
-
   landBundle,
   tarOf,
   parseMergeOutput,
@@ -81,7 +80,6 @@ import {
   type MachineSpec,
   type MachineState,
   type PreviewReach,
-
   type ReapFailure,
   type ReapResult,
   type ReapedMachine,
@@ -3557,7 +3555,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A running workspace has nothing to wake, whatever its kind; only a real resume asks the machine for one.
       if (entry.record.phase === "running") return view(entry.record);
       refusePauseless(entry, "be woken");
-
       entry.waking = (async () => {
         // The stop the person pulls from the row. It aborts the provider call the ask is on rather than walking away
         // from one that keeps running: an abandoned resume would go on to run its cap out, write its line back onto

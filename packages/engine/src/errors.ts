@@ -46,7 +46,6 @@ export class NotFirstLifeError extends Error {
 }
 
 /** The provider answered 404 for the machine: it no longer knows it. */
-
 export function isMissing(e: unknown): boolean {
   return (e as WspError | undefined)?.kind === "missing";
 }

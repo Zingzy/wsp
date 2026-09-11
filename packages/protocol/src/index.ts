@@ -157,7 +157,6 @@ export const Capabilities = z.object({
    * words; the runtime reads only whether it is there. */
   pauseMode: PauseMode.optional(),
   resize: z.boolean(),
-
   previewUrls: z.boolean(),
   signedUrls: z.boolean(),
   /** Guests can run containers; false means services get installed natively. */

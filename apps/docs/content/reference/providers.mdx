@@ -14,7 +14,6 @@ A backend gives wsp `create`, `get`, `list`, `deleteSnapshot`, a `capabilities` 
 | --- | --- | --- |
 | `liveCloneForks` | a fork boots from an existing image in seconds | yes |
 | `pauseMode` | how a pause works: `memory` keeps the processes and every byte they hold, `disk` stops the machine and boots it again on wake; absent, the machine cannot be paused | `memory` |
-
 | `resize` | a machine can change size | no, the Starter plan clamps every machine to 2 vCPU |
 | `previewUrls` | a port reaches a browser through a signed URL; without it there is no browser reach and no framed ports | yes |
 | `signedUrls` | files travel by signed download and upload URLs; without it there is no import or export road | yes |

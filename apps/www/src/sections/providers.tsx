@@ -12,7 +12,6 @@ const SIZES = [
 const FLAGS: { name: string; on: boolean; why: string }[] = [
   { name: "liveCloneForks", on: true, why: "a fork comes up in about twenty seconds" },
   { name: "pauseMode: memory", on: true, why: "a nap keeps RAM and costs nothing" },
-
   { name: "previewUrls", on: true, why: "every port reaches your browser through a signed URL" },
   { name: "callbackRelay", on: true, why: "sign-ins open on your computer and tunnel back" },
   { name: "templates", on: true, why: "a sealed version survives the provider's restarts" },

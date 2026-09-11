@@ -53,7 +53,6 @@ reuses it.
 
 Backends implement `MachineBackend` plus a `capabilities` descriptor:
 `{ liveCloneForks, pauseMode, resize, previewUrls, signedUrls, containers }`.
-
 Clients read the flags instead of assuming. A backend without preview URLs
 loses browser reach and the UI says so instead of pretending. Solari is the
 first backend, and it reports `containers: false`: its guest kernel (6.6.30)
