@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { chmodSync, mkdtempSync, rmSync, statSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { homedir, tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { OS_READ, UPTIME_READ, readValues } from "../src/machine-facts.js";
@@ -376,6 +376,16 @@ describe("the key a machine over ssh is known by", () => {
     expect(knownHostFiles(values, "/Users/dev")).toEqual(["/Users/dev/.ssh/known_hosts", "/Users/dev/.ssh/known_hosts2", "/etc/ssh/ssh_known_hosts", "/etc/ssh/ssh_known_hosts2"]);
     // A person who turned a file off named no path to read.
     expect(knownHostFiles({ userknownhostsfile: "none", globalknownhostsfile: "none" })).toEqual([]);
+    // A tilde is the password database entry, which is what ssh expands one from: a home pointed elsewhere for
+    // this process moves the file wsp reads nowhere, because it moves the file ssh reads nowhere.
+    const home = process.env["HOME"];
+    process.env["HOME"] = join(tmpdir(), "wsp-not-a-home");
+    try {
+      expect(knownHostFiles({ userknownhostsfile: "~/.ssh/known_hosts" })).toEqual([join(userInfo().homedir, ".ssh", "known_hosts")]);
+    } finally {
+      if (home === undefined) delete process.env["HOME"];
+      else process.env["HOME"] = home;
+    }
   });
 
   it("the key picked is the type a dial would negotiate, not whichever line was written first", () => {

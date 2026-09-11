@@ -10,7 +10,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
 import { join, posix } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { shellQuote } from "@wsp/protocol";
@@ -204,12 +204,17 @@ export function knownHostTarget(values: Record<string, string>): string | undefi
 }
 
 /** The files the client checks a host key against, in its own order, with a leading ~ made the person's home the
- * way the client makes it. `none` is a person turning a file off rather than a path to read. */
-export function knownHostFiles(values: Record<string, string>, home: string = homedir()): string[] {
+ * way the client makes it: the password database entry, which is what ssh expands a tilde from, and not `$HOME`.
+ * Measured on OpenSSH 9.6 and 10.2, which both answer `-G` with the tilde already expanded that way, so this
+ * branch fires only for an older client, where following `$HOME` instead would read another file and drop the
+ * identity in silence. `none` is a person turning a file off rather than a path to read. */
+export function knownHostFiles(values: Record<string, string>, home?: string): string[] {
   return [values["userknownhostsfile"], values["globalknownhostsfile"]]
     .flatMap(named => (named ?? "").split(/\s+/))
     .filter(file => file !== "" && file !== "none")
-    .map(file => (file.startsWith("~/") ? join(home, file.slice(2)) : file));
+    // The entry is read where a tilde is there to expand and nowhere else, since a computer whose login has no
+    // entry in that database has no home to read either and every other path here is already absolute.
+    .map(file => (file.startsWith("~/") ? join(home ?? userInfo().homedir, file.slice(2)) : file));
 }
 
 /** A key's fingerprint as every ssh tool prints it: the SHA256 of the key's own bytes, base64 with the padding
@@ -223,7 +228,10 @@ function sshFingerprint(blob: string): string {
  * known by, so that is the one the identity stands on and the answer does not turn on which line was written first.
  * A signature name is no key type (an rsa-sha2 signature is made by an ssh-rsa key). Only a line whose second word
  * is a type this client prefers is read, which is what leaves out the comment lines ssh-keygen prints and the
- * marker lines for an authority or a revoked key: neither has a key type where an entry has one. */
+ * marker lines for an authority or a revoked key: neither has a key type where an entry has one. A machine the
+ * client trusts through an authority rather than by a key of its own is therefore left with no identity at all,
+ * on a cold dial as on a warm one: the authority's key is not the machine's, and standing a record on it would
+ * make every machine that authority signed the same machine. */
 export function hostKeyFound(found: string, algorithms: string): string | undefined {
   const preferred = algorithms.split(",").map(name => name.replace(/^rsa-sha2-\d+$/, "ssh-rsa"));
   let best: { rank: number; key: string } | undefined;

@@ -3,7 +3,7 @@
 // that records or drives a machine over ssh is proved against the real
 // SshBackend and the real address rules with nothing on the network. One home
 // for it, read by the runtime's own tests and by the host's keyless roads.
-import { SSH_BYTES_OK, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SshBackend, parseSshAddress, sshControlPath, sshIdentity, sshMachineName, type ExecResult, type SshHostKeyReader, type SshReach, type SshTransport } from "@wsp/engine";
+import { SSH_BYTES_OK, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SshBackend, knownHostTarget, parseSshAddress, sshControlPath, sshIdentity, sshMachineName, type ExecResult, type SshHostKeyReader, type SshReach, type SshTransport } from "@wsp/engine";
 import { machineLacking, machineUnanswered, sshDaemonPaths } from "@wsp/protocol";
 import type { SshWiring } from "../src/runtime.js";
 
@@ -43,6 +43,9 @@ export function fakeSsh(answer: (script: string, reach: SshReach) => Partial<Exe
    * the entry the first dial left behind, which is what the reader below reads. */
   const masters = new Set<string>();
   const known = new Map<string, string>();
+  /** The name an entry is written and read under, by the engine's own rule rather than a second spelling of it:
+   * a port past ssh's own is bracketed, and ssh's own is the host on its own. */
+  const entryFor = (reach: SshReach): string => knownHostTarget({ hostname: reach.host, port: String(reach.port) })!;
   const transport: SshTransport = async (reach, script, opts) => {
     carried.push({ reach, script, ...(opts.stdin !== undefined ? { stdin: opts.stdin } : {}) });
     const machine = MACHINES[reach.host];
@@ -50,7 +53,7 @@ export function fakeSsh(answer: (script: string, reach: SshReach) => Partial<Exe
     const socket = sshControlPath(reach, "/fake-masters");
     if (!masters.has(socket)) {
       masters.add(socket);
-      known.set(`[${reach.host}]:${reach.port}`, machine.key);
+      known.set(entryFor(reach), machine.key);
     }
     if (script === SSH_READ_SCRIPT) {
       const store = machine.store === undefined ? "" : `store:CLAUDE_CONFIG_DIR ${machine.store}\n`;
@@ -75,9 +78,8 @@ export function fakeSsh(answer: (script: string, reach: SshReach) => Partial<Exe
     return { exitCode: 0, stdout: "", stderr: "", ...answer(script, reach) };
   };
   /** What the client on this computer knows about a machine's key, which is the entry its first dial wrote: the
-   * answer is the same whether this dial exchanged a key or rode a master, and a port is its own entry the way
-   * OpenSSH writes one. */
-  const knownKey: SshHostKeyReader = async reach => known.get(`[${reach.host}]:${reach.port}`);
+   * answer is the same whether this dial exchanged a key or rode a master. */
+  const knownKey: SshHostKeyReader = async reach => known.get(entryFor(reach));
   const backend = new SshBackend({ transport, hostKey: knownKey });
   return {
     wiring: {
