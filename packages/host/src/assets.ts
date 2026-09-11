@@ -43,12 +43,14 @@ const ASSETS: Record<AssetKind, Asset> = {
   cli: {
     name: "wsp command bundle",
     dir: "cli",
-    proof: "bin.js",
-    // The published command's own build, which carries every workspace package inside it: not this package's
-    // dist/bin.js, which leaves its imports outside and would need the whole tree beside it on a machine that has
-    // none. The folder travels whole because that build is split across chunk files bin.js imports by name.
-    workspace: () => join(here(), "..", "..", "wspx", "dist"),
-    stage: (from, to) => cpSync(from, to, { recursive: true }),
+    proof: "dist/bin.js",
+    // The published command's own package, which carries every workspace package inside its build: not this
+    // package's dist/bin.js, which leaves its imports outside and would need the whole tree beside it on a machine
+    // that has none. It travels as npm lays it out, package.json beside dist, since the bin reads its version through
+    // that file and announces it in every MCP handshake; dist travels whole because the build is split across chunk
+    // files bin.js imports by name.
+    workspace: () => join(here(), "..", "..", "wspx"),
+    stage: packaged,
   },
   daemon: {
     name: "daemon package",
@@ -56,12 +58,16 @@ const ASSETS: Record<AssetKind, Asset> = {
     proof: "dist/index.js",
     workspace: () => dirname(resolveHere("@wsp/daemon/package.json")),
     // Its folder in a checkout also holds sources and a node_modules; only what a guest runs travels.
-    stage: (from, to) => {
-      mkdirSync(to, { recursive: true });
-      for (const part of ["package.json", "dist"]) cpSync(join(from, part), join(to, part), { recursive: true });
-    },
+    stage: packaged,
   },
 };
+
+/** A package as npm installs it and nothing else: its package.json and its dist, out of a folder that in a checkout
+ * also holds sources, tests and a node_modules. */
+function packaged(from: string, to: string): void {
+  mkdirSync(to, { recursive: true });
+  for (const part of ["package.json", "dist"]) cpSync(join(from, part), join(to, part), { recursive: true });
+}
 
 /** What a message about an asset calls it, so a folder that was never built is named the same wherever it is read. */
 export function assetName(kind: AssetKind): string {
@@ -80,12 +86,18 @@ export function stagedAsset(packageRoot: string, kind: AssetKind): string {
 
 /** Copies an asset out of `from` into the packed layout, refusing a source that was never built. Returns where it went. */
 export function stageAsset(from: string, packageRoot: string, kind: AssetKind): string {
+  const to = stagedAsset(packageRoot, kind);
+  copyAsset(kind, from, to);
+  return to;
+}
+
+/** Copies an asset the way its own entry says, wherever it is going: the packed layout, or a bundle a machine gets.
+ * Refuses a source that was never built, named in the words the table gives the asset. */
+export function copyAsset(kind: AssetKind, from: string, to: string): void {
   const asset = ASSETS[kind];
   const proof = join(from, asset.proof);
   if (!existsSync(proof)) throw new Error(`${asset.name} missing: ${proof}`);
-  const to = stagedAsset(packageRoot, kind);
   asset.stage(from, to);
-  return to;
 }
 
 /** The staged asset for a bundle running out of `fromDir`, or nothing when this is not a packed command or the copy never finished. */
