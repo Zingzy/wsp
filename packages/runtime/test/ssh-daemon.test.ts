@@ -4,9 +4,11 @@
 // forward that every pane dials, and the folders and tokens that sit under
 // that machine's own login rather than under root.
 import { describe, expect, it, vi } from "vitest";
-import { DAEMON_VERSION, kindWords, noSshDaemonLine, rootsPathIn, sshDaemonPaths } from "@wsp/protocol";
-import { createRuntime, type ProjectImportOptions, type Runtime, type SshWiring } from "../src/runtime.js";
+import { DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, kindWords, NO_BUILD_TOOLS_LINE, noSshDaemonLine, rootsPathIn, sshDaemonPaths, type WorkspaceStatus } from "@wsp/protocol";
+import type { Clock } from "../src/clock.js";
+import { createRuntime, DAEMON_LACKS_AGAIN_MS, type ProjectImportOptions, type Runtime, type SshWiring } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
+import { fakeClock } from "./fake-clock.js";
 import { fakeSsh, fakeSshDaemon, type FakeSshDaemon } from "./fake-ssh.js";
 import { stubBackend } from "./stub-backend.js";
 
@@ -17,14 +19,20 @@ const AT = sshDaemonPaths(HOME);
  * is checked below is that no command ever carries this string. */
 const TOKEN = "d0d0cafed0d0cafed0d0cafe";
 
-const runtime = (ssh: SshWiring, store: Store = memoryStore()): Runtime => createRuntime({ backend: stubBackend(), store, adapters: {}, ssh, daemonToken: TOKEN });
+const runtime = (ssh: SshWiring, store: Store = memoryStore(), clock?: Clock): Runtime =>
+  createRuntime({ backend: stubBackend(), store, adapters: {}, ssh, daemonToken: TOKEN, ...(clock !== undefined ? { clock } : {}) });
 
 /** A host that reaches machines over ssh and can put a daemon on one, with the machine answering the port file
  * with `port` and everything else with nothing. */
-function host(over: { port?: string; refuse?: string; refuseRemoval?: string; store?: Store } = {}): { rt: Runtime; daemon: FakeSshDaemon; carried: { script: string; stdin?: Uint8Array }[] } {
-  const daemon = fakeSshDaemon({ ...(over.refuse !== undefined ? { refuse: over.refuse } : {}), ...(over.refuseRemoval !== undefined ? { refuseRemoval: over.refuseRemoval } : {}) });
+function host(over: { port?: string; refuse?: string; lacks?: boolean; unanswered?: boolean; refuseRemoval?: string; store?: Store; clock?: Clock } = {}): { rt: Runtime; daemon: FakeSshDaemon; carried: { script: string; stdin?: Uint8Array }[] } {
+  const daemon = fakeSshDaemon({
+    ...(over.refuse !== undefined ? { refuse: over.refuse } : {}),
+    ...(over.lacks !== undefined ? { lacks: over.lacks } : {}),
+    ...(over.unanswered !== undefined ? { unanswered: over.unanswered } : {}),
+    ...(over.refuseRemoval !== undefined ? { refuseRemoval: over.refuseRemoval } : {}),
+  });
   const { wiring, carried } = fakeSsh(script => (script.startsWith(`cat '${AT.portFile}'`) ? { stdout: over.port ?? "42891\n" } : {}), daemon);
-  return { rt: runtime(wiring, over.store ?? memoryStore()), daemon, carried };
+  return { rt: runtime(wiring, over.store ?? memoryStore(), over.clock), daemon, carried };
 }
 
 describe("the daemon goes on when the machine is recorded", () => {
@@ -48,7 +56,7 @@ describe("the daemon goes on when the machine is recorded", () => {
     expect(daemon.deploys).toHaveLength(1);
     // The machine is theirs and already answered the dial: what a failed deploy costs them is the panes.
     expect(ws.notice).toContain("this machine has no C compiler");
-    expect(ws.notice).toContain("this host tries again each time it starts");
+    expect(ws.notice).toContain("this host offers it again later on its own");
     // No line names a verb nobody can type: nothing puts a daemon on a machine already recorded by hand.
     expect(ws.notice).not.toContain("daemon update");
     expect(noSshDaemonLine("box")).not.toContain("daemon update");
@@ -210,6 +218,151 @@ describe("putting a daemon on a machine already recorded", () => {
     await vi.waitFor(() => expect(second.daemon.deploys).toHaveLength(1));
     await vi.waitFor(async () => expect(((await store.get("workspaces", ws.id)) as { daemon: { version: number } }).daemon.version).toBe(DAEMON_VERSION));
     await second.rt.close();
+  });
+
+  it("leaves a machine that answered with what it lacks alone at the next host start, and offers again once its window is out", async () => {
+    const store = memoryStore();
+    const fc = fakeClock();
+    const refusing = { store, clock: fc.clock, refuse: NO_BUILD_TOOLS_LINE, lacks: true };
+    const first = host(refusing);
+    const ws = await first.rt.workspaces.createSsh("dev@box");
+    expect(first.daemon.deploys).toHaveLength(1);
+    await first.rt.close();
+    // That the machine refused is on the record, so the next process knows without asking the machine again.
+    expect(((await store.get("workspaces", ws.id)) as { daemonRefusedAt?: { machineId: string } }).daemonRefusedAt?.machineId).toBe("ssh://dev@box:22");
+
+    const soon = host(refusing);
+    expect((await soon.rt.workspaces.list()).map(w => w.name)).toEqual(["box"]);
+    // The sync runs detached from hydrate, so the nothing below is given far longer than the deploy at the end of
+    // this test takes to show up.
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(soon.daemon.deploys).toEqual([]);
+    await soon.rt.close();
+
+    // Not never, though: the compiler is theirs to install and nothing on their machine tells this host they did.
+    fc.advance(DAEMON_LACKS_AGAIN_MS);
+    const later = host(refusing);
+    await later.rt.workspaces.list();
+    await vi.waitFor(() => expect(later.daemon.deploys).toHaveLength(1));
+    await later.rt.close();
+  });
+
+  it("stops saying a machine lacks something once a deploy gets past its checks, however that deploy ends", async () => {
+    const store = memoryStore();
+    const fc = fakeClock();
+    const first = host({ store, clock: fc.clock, refuse: NO_BUILD_TOOLS_LINE, lacks: true });
+    const ws = await first.rt.workspaces.createSsh("dev@box");
+    expect(((await store.get("workspaces", ws.id)) as { daemonRefusedAt?: unknown }).daemonRefusedAt).toBeDefined();
+    await first.rt.close();
+
+    // The compiler is on it now and the deploy fails further in, on npm. Whatever else is wrong, the machine no
+    // longer lacks what it named, so the record stops saying it does and the next start is free to try again.
+    fc.advance(DAEMON_LACKS_AGAIN_MS);
+    const second = host({ store, clock: fc.clock, refuse: "daemon deploy failed: NPM_FAIL" });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await second.rt.workspaces.list();
+      await vi.waitFor(async () => expect(((await store.get("workspaces", ws.id)) as { daemonRefusedAt?: unknown }).daemonRefusedAt).toBeUndefined());
+    } finally {
+      warn.mockRestore();
+    }
+    await second.rt.close();
+  });
+
+  it("drops a refusal another machine gave, so a machine swapped under the record answers for itself", async () => {
+    const store = memoryStore();
+    const fc = fakeClock();
+    const refusing = { store, clock: fc.clock, refuse: NO_BUILD_TOOLS_LINE, lacks: true };
+    const first = host(refusing);
+    const ws = await first.rt.workspaces.createSsh("dev@box");
+    await first.rt.close();
+
+    // The record now stands on a different machine, with the last one's sentence still on it. Inside the window,
+    // so what is proved is the machine check and not the clock.
+    const stored = (await store.get("workspaces", ws.id)) as { daemonRefusedAt: { machineId: string } };
+    stored.daemonRefusedAt.machineId = "ssh://dev@other:22";
+    await store.put("workspaces", ws.id, stored);
+
+    const next = host(refusing);
+    await next.rt.workspaces.list();
+    await vi.waitFor(() => expect(next.daemon.deploys).toHaveLength(1));
+    // The old machine's sentence is off the record; this machine's own went on in its place.
+    await vi.waitFor(async () => expect(((await store.get("workspaces", ws.id)) as { daemonRefusedAt: { machineId: string } }).daemonRefusedAt.machineId).toBe("ssh://dev@box:22"));
+    await next.rt.close();
+  });
+
+  it("keeps what a machine said it lacks through a dial that never reached it, and takes none of that dial's words", async () => {
+    const store = memoryStore();
+    const fc = fakeClock();
+    const first = host({ store, clock: fc.clock, refuse: NO_BUILD_TOOLS_LINE, lacks: true });
+    const ws = await first.rt.workspaces.createSsh("dev@box");
+    await first.rt.close();
+    const refusal = (): Promise<{ daemonRefusedAt?: { why: string } }> => store.get("workspaces", ws.id) as Promise<{ daemonRefusedAt?: { why: string } }>;
+    expect((await refusal()).daemonRefusedAt?.why).toBe(NO_BUILD_TOOLS_LINE);
+
+    // The box is switched off by the time the window is out. ssh answers with its own words, which say nothing
+    // about the compiler: the record keeps what the machine itself said and its hour goes on running.
+    fc.advance(DAEMON_LACKS_AGAIN_MS);
+    const off = host({ store, clock: fc.clock, refuse: "ssh: connect to host box port 22: Connection refused", unanswered: true });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await off.rt.workspaces.list();
+      await vi.waitFor(() => expect(off.daemon.deploys).toHaveLength(1));
+    } finally {
+      warn.mockRestore();
+    }
+    const kept = (await refusal()).daemonRefusedAt;
+    expect(kept?.why).toBe(NO_BUILD_TOOLS_LINE);
+    // The ssh client's words are in neither the record nor the row: a row saying a machine lacks "Connection
+    // refused" would be saying something about that machine that nobody learned.
+    expect(kept?.why).not.toContain("Connection refused");
+    expect((await off.rt.workspaces.get(ws.id)).daemonRefusedAt?.why).toBe(NO_BUILD_TOOLS_LINE);
+    await off.rt.close();
+  });
+
+  it("says what the machine lacks, rather than that a helper it never had is being updated", async () => {
+    const store = memoryStore();
+    const fc = fakeClock();
+    const refusing = { store, clock: fc.clock, refuse: NO_BUILD_TOOLS_LINE, lacks: true };
+    const first = host(refusing);
+    const ws = await first.rt.workspaces.createSsh("dev@box");
+    await first.rt.close();
+    fc.advance(DAEMON_LACKS_AGAIN_MS);
+
+    const second = host(refusing);
+    const said: (string | undefined)[] = [];
+    second.rt.events.on("workspace.status", e => said.push((e as { status: WorkspaceStatus }).status.daemonNote));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await second.rt.workspaces.list();
+      await vi.waitFor(() => expect(said).toContain(NO_BUILD_TOOLS_LINE));
+    } finally {
+      warn.mockRestore();
+    }
+    // The row names the thing the machine has not got, which is the one line a person can act on, and nothing in
+    // it calls this an update: there was no daemon on that machine to update.
+    expect(said).toContain(DAEMON_INSTALLING);
+    expect(said).not.toContain(DAEMON_UPDATING);
+    expect(said).not.toContain(DAEMON_UPDATE_FAILED);
+    // Said once. The next poll shows the machine's own facts again.
+    expect((await second.rt.workspaces.get(ws.id)).daemonNote).toBeUndefined();
+    await second.rt.close();
+
+    // A machine that took the checks and fell over later gives an npm log, which is hundreds of characters of
+    // nothing a person reading a row can act on: that one gets the fixed line and the log goes to this host's own.
+    fc.advance(DAEMON_LACKS_AGAIN_MS);
+    const third = host({ store, clock: fc.clock, refuse: "daemon deploy failed: NPM_FAIL" });
+    const later: (string | undefined)[] = [];
+    third.rt.events.on("workspace.status", e => later.push((e as { status: WorkspaceStatus }).status.daemonNote));
+    const quiet = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await third.rt.workspaces.list();
+      await vi.waitFor(() => expect(later).toContain(DAEMON_INSTALL_FAILED));
+    } finally {
+      quiet.mockRestore();
+    }
+    expect(later.every(line => line === undefined || !line.includes("NPM_FAIL"))).toBe(true);
+    await third.rt.close();
   });
 
   it("replaces a daemon older than this wsp would deploy, reading the version off the record", async () => {

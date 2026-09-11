@@ -198,6 +198,130 @@ describe("status.list", () => {
   });
 });
 
+describe("a machine that answers for its own daemon", () => {
+  it("takes the guest's own word and never dials the route: a container whose published port is on another computer's loopback reads reachable while its turns run", async () => {
+    const { rt, backend } = testRuntime();
+    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    // The route mints and the row carries it, but nothing on this computer answers it: on a box dialling another
+    // computer's Docker daemon that is the whole of what the old reading saw.
+    const edge = await httpStub(502);
+    openServers.push(edge.server);
+    const machine = backend.machines[0]!;
+    machine.previewUrl = async port => ({ url: `http://127.0.0.1:${edge.port}/?port=${port}`, token: "", expiresAt: Number.MAX_SAFE_INTEGER });
+    machine.daemonAnswers = async () => true;
+
+    const status = (await rt.status.list())[0]!;
+    expect(status.reach.state).toBe("reachable");
+    expect(workspaceWord(workspaceState({ phase: status.phase, machineState: status.machineState, reach: status.reach.state }))).toBe("Running");
+    expect(status.reach.url).toContain(`127.0.0.1:${edge.port}`);
+    expect(edge.hits()).toBe(0);
+  });
+
+  it("a guest that says the daemon's port is dead reads Unreachable, and a machine that will not answer at all reads unreachable too", async () => {
+    const { rt, backend } = testRuntime();
+    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const machine = backend.machines[0]!;
+    machine.previewUrl = async port => ({ url: `http://127.0.0.1:1/?port=${port}`, token: "", expiresAt: Number.MAX_SAFE_INTEGER });
+    machine.daemonAnswers = async () => false;
+    const dead = (await rt.status.list())[0]!;
+    expect(dead.reach.state).toBe("no-daemon");
+    expect(workspaceWord(workspaceState({ phase: dead.phase, machineState: dead.machineState, reach: dead.reach.state }))).toBe("Unreachable");
+
+    machine.daemonAnswers = async () => {
+      throw new Error("container 7d8f is not running");
+    };
+    expect((await rt.status.list())[0]!.reach.state).toBe("unreachable");
+  });
+
+  it("a route the machine has none of is no silence: the reach is still the guest's word, with no url on the row", async () => {
+    const { rt, backend } = testRuntime();
+    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const machine = backend.machines[0]!;
+    machine.previewUrl = async () => {
+      throw new Error("container 7d8f publishes no port 7070; only the daemon's own port is published");
+    };
+    machine.daemonAnswers = async () => true;
+    const calls = countProvider(backend);
+    const status = (await rt.status.list({ reconcile: "on-failure" }))[0]!;
+    expect(status.reach).toEqual({ state: "reachable" });
+    // Nothing failed, so the provider is left alone: a route the app has none of is not a reach that missed.
+    expect(calls()).toEqual({ get: 0, list: 0, state: 0 });
+  });
+
+  it("a machine with no route at all is asked all the same: only a machine with neither road reads unsupported", async () => {
+    const { rt, backend } = testRuntime();
+    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const machine = backend.machines[0]!;
+    expect(machine.previewUrl).toBeUndefined();
+    machine.daemonAnswers = async () => true;
+    expect((await rt.status.list())[0]!.reach).toEqual({ state: "reachable" });
+    machine.daemonAnswers = async () => false;
+    // The first silence after an answer keeps the answer's word, as it does on the edge road; the second turns it.
+    expect((await rt.status.list())[0]!.reach).toEqual({ state: "reachable" });
+    expect((await rt.status.list())[0]!.reach).toEqual({ state: "no-daemon" });
+    // Neither road: nothing to ask, and that alone is unsupported.
+    delete machine.daemonAnswers;
+    expect((await rt.status.list())[0]!.reach).toEqual({ state: "unsupported" });
+  });
+
+  it("a status pushed between polls makes the same claim: a machine with no route but an answer of its own is not called unsupported", async () => {
+    const { rt, backend } = testRuntime();
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const machine = backend.machines[0]!;
+    expect(machine.previewUrl).toBeUndefined();
+    machine.daemonAnswers = async () => true;
+    const pushed: WorkspaceStatus[] = [];
+    rt.events.on("*", e => {
+      if (e.type === "workspace.status") pushed.push(e.status);
+    });
+    // A pause the provider refuses pushes the row with whatever the runtime claims about its reach, and nothing
+    // has polled this machine, so the claim is all there is.
+    machine.pause = async () => {
+      throw new Error("the provider would not pause it");
+    };
+    await expect(rt.workspaces.nap(ws.id)).rejects.toThrow("would not pause");
+    expect(pushed.at(-1)).toMatchObject({ machineState: "running", reach: { state: "reachable" } });
+  });
+
+  it("a guest that takes longer than the prompt reads slow, and one inside it reads reachable", async () => {
+    const backend = stubBackend();
+    const fc = fakeClock();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock });
+    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const machine = backend.machines[0]!;
+    // The clock moves as the guest answers, so slow is what the clock says and not how fast this Mac ran.
+    let took = 0;
+    machine.daemonAnswers = async () => {
+      fc.advance(took);
+      return true;
+    };
+    const opts = { promptMs: 60, probeTimeoutMs: 5_000 };
+    took = 40;
+    expect((await rt.status.list(opts))[0]!.reach.state).toBe("reachable");
+    took = 150;
+    // Three Docker API round trips ride this road where the edge road rode one, so the slow word is reachable here.
+    expect((await rt.status.list(opts))[0]!.reach.state).toBe("slow");
+    expect((await rt.status.list(opts))[0]!.machineState).toBe("running");
+  });
+
+  it("the caller's bound is the whole ask: a machine that never answers reads unreachable rather than holding the read open", async () => {
+    const { rt, backend } = testRuntime();
+    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const machine = backend.machines[0]!;
+    machine.previewUrl = async port => ({ url: `http://127.0.0.1:1/?port=${port}`, token: "", expiresAt: Number.MAX_SAFE_INTEGER });
+    let bound: number | undefined;
+    machine.daemonAnswers = async opts => {
+      bound = opts?.timeoutMs;
+      return new Promise<boolean>(() => {});
+    };
+    const started = Date.now();
+    const status = (await rt.status.list({ probeTimeoutMs: 300 }))[0]!;
+    expect(status.reach.state).toBe("unreachable");
+    expect(bound).toBe(300);
+    expect(Date.now() - started).toBeLessThan(3_000);
+  });
+});
+
 describe("status.watch provider calls", () => {
   it("asks the provider nothing across healthy polls", async () => {
     const { rt, backend } = testRuntime({ costIntervalMs: 60_000, pollIntervalMs: 5 });

@@ -162,6 +162,9 @@ function Facts({ workspace, status, awakeMs, pendingSize, kind }: FactsProps) {
   const facts = status?.facts;
   const vault = status ?? workspace;
   const vaultStale = vaultStaleLine(vault);
+  // The whole sentence, where the row above shows its first clause: the instruction is at the end of it, and this
+  // is the surface with room for the command a person types on their own machine.
+  const daemonLacks = (status ?? workspace).daemonRefusedAt?.why;
   return (
     <Section label="Machine">
       <div className="mt-1 divide-y divide-border/40">
@@ -239,6 +242,11 @@ function Facts({ workspace, status, awakeMs, pendingSize, kind }: FactsProps) {
       {vaultStale !== null && (
         <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground" data-k="vault-refused">
           {vault.vaultRefused}
+        </p>
+      )}
+      {daemonLacks !== undefined && (
+        <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground" data-k="daemon-refused">
+          {daemonLacks}
         </p>
       )}
       {outOfMemory && (
