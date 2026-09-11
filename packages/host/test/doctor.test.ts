@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFile, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
@@ -23,6 +23,7 @@ import {
   daemonUnit,
   daemonSupervisorScript,
   DAEMON_LOG_PATH,
+  daemonNodePath,
   daemonPidPath,
   supervisorPidPath,
   deployDaemon,
@@ -760,7 +761,7 @@ describe("deployScript", () => {
     expect(DAEMON_MEMORY_MAX_PERCENT).toBe(80);
     // Enabled with an install section, so a machine that reboots or comes back from a snapshot has its daemon.
     expect(unit).toContain("WantedBy=multi-user.target");
-    expect(unit).toContain("ExecStart=/bin/sh -c 'exec node /root/wsp-daemon/start.mjs'");
+    expect(unit).toContain("ExecStart=/bin/sh -c 'exec /root/wsp-daemon/node /root/wsp-daemon/start.mjs'");
     // The journal, which rotates itself: nothing else on the guest bounds a log, and restarts here have no limit.
     expect(unit).toContain("StandardOutput=journal");
     expect(unit).toContain("StandardError=journal");
@@ -768,6 +769,59 @@ describe("deployScript", () => {
     expect(daemonLogCommand()).toBe("journalctl -u wsp-daemon.service -n 50 --no-pager");
     // A deploy that never saw the port come up reads the journal, and reads it bounded.
     expect(deployScript(CLOUD_PLACE, "aabbcc")).not.toContain("/root/daemon.log");
+  });
+
+  it("every road starts the daemon by the node the deploy pinned, and the deploy pins it before writing the unit", () => {
+    // Neither road leaves the word node for a PATH to answer: a machine restored onto another one answers it
+    // differently, and a start that resolves nothing exits 127 into a restart every second forever.
+    expect(daemonUnit()).toContain(`exec ${daemonNodePath(CLOUD_PLACE)} ${GUEST_DAEMON_DIR}/start.mjs'`);
+    expect(daemonUnit()).not.toContain("exec node ");
+    const supervisor = daemonSupervisorScript(CONTAINER_PLACE);
+    expect(supervisor).toContain(`  ${daemonNodePath(CONTAINER_PLACE)} ${CONTAINER_PLACE.dir}/start.mjs >>`);
+    expect(supervisor).not.toMatch(/^ +node /m);
+    // A login's own place quotes both paths, since a home may carry a space.
+    const login = sshDaemonPlace({ home: "/home/maya doe", path: "/usr/bin:/bin" });
+    expect(daemonUnit(login)).toContain(`ExecStart=/bin/sh -c 'exec "${daemonNodePath(login)}" "${login.dir}/start.mjs"'`);
+    // The link is made from the node the deploy resolved, before the modules are built under it and before the
+    // unit that reads it exists.
+    const lines = deployScript(CLOUD_PLACE, "aabbcc").split("\n");
+    const pin = lines.findIndex(line => line.startsWith(`ln -f "$node_pin" ${daemonNodePath(CLOUD_PLACE)} `));
+    expect(pin).toBeGreaterThan(-1);
+    expect(pin).toBeLessThan(lines.findIndex(line => line.includes("npm install")));
+    expect(pin).toBeLessThan(lines.findIndex(line => line.includes("ExecStart=")));
+  });
+
+  it("the pin holds the binary the deploy read, not the name, and the unit's command runs it once both are gone", async () => {
+    // The line is decided on the machine and not in the script's text, so it is run here: a node reached through
+    // the kind of symlink an image keeps for it, and both the link and the folder it points into taken away after
+    // the pin the way a restore took them away from a fork.
+    const home = tmp("wsp-node-pin-");
+    try {
+      const place = sshDaemonPlace({ home, path: "/usr/bin:/bin" });
+      const real = join(home, "image-node");
+      const onPath = join(home, "elsewhere");
+      mkdirSync(real, { recursive: true });
+      mkdirSync(onPath, { recursive: true });
+      writeFileSync(join(real, "node"), "#!/bin/sh\necho the node the deploy read\n", { mode: 0o755 });
+      symlinkSync(join(real, "node"), join(onPath, "node"));
+      mkdirSync(place.dir, { recursive: true });
+      const pin = deployScript(place, "aabbcc").split("\n").filter(line => line.includes("node_pin"));
+      expect(pin).toHaveLength(2);
+      const exec = /ExecStart=\/bin\/sh -c '(.*)'$/m.exec(daemonUnit(place))?.[1];
+      expect(exec).toBeDefined();
+      const { stdout } = await promisify(execFile)("/bin/bash", ["-ec", [
+        ...pin,
+        // What the machine called node, and where that name pointed, are both gone: a pin that kept either would
+        // start nothing here, and a start that resolves nothing is a unit restarting every second forever.
+        `rm -rf ${shellQuote(onPath)} ${shellQuote(real)}`,
+        "export PATH=/usr/bin:/bin",
+        `test -f ${shellQuote(join(place.dir, "node"))} && test ! -L ${shellQuote(join(place.dir, "node"))}`,
+        `${exec!.replace(`"${place.dir}/start.mjs"`, "--- ignored")}`,
+      ].join("\n")], { env: { PATH: `${onPath}:/usr/bin:/bin` } });
+      expect(stdout.trim()).toBe("the node the deploy read");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("the unit states the environment the daemon hands to every pty, since a restart inherits none of the deploy's", () => {

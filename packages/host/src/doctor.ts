@@ -125,6 +125,15 @@ export const DAEMON_LOG_MAX_BYTES = 4 * 1024 * 1024;
  * the place's own folder, so a second place on this module keeps its pids where it keeps everything else. */
 export const supervisorPidPath = (place: DaemonPlace): string => `${place.dir}/supervise.pid`;
 export const daemonPidPath = (place: DaemonPlace): string => `${place.dir}/daemon.pid`;
+/** The node every road starts the daemon with, in the place's own folder: the one the deploy resolved and
+ * compiled the native modules under, linked there rather than looked up again. What `node` names is the machine's
+ * to move, and a machine restored onto another one moves it without asking: on a fork of a Box golden the image's
+ * own /usr/local/bin/node came back pointing at a Node the restored disk does not carry, the tools PATH's first
+ * node was gone with the folder it lived in, and the daemon started on the distro's Node 20 rather than the Node
+ * 24 that built its node-pty (measured 2026-09-11). A start that resolves nothing exits 127, and under
+ * Restart=always with no start limit that is a machine restarting the daemon every second for the rest of its
+ * life: 261 restarts in five minutes on that same box, with no daemon at the end of them. */
+export const daemonNodePath = (place: DaemonPlace): string => `${place.dir}/node`;
 
 /** The script that keeps the daemon running on a guest with no service manager: the machine's own boot runs it, so
  * a fork of a sealed image starts its daemon with nobody dialling in, and a daemon the kernel's memory killer took
@@ -141,7 +150,7 @@ export function daemonSupervisorScript(place: DaemonPlace = CONTAINER_PLACE, pre
     `cd ${place.dir}`,
     "while :; do",
     `  [ -f ${DAEMON_LOG_PATH} ] && [ "$(wc -c < ${DAEMON_LOG_PATH})" -gt ${DAEMON_LOG_MAX_BYTES} ] && : > ${DAEMON_LOG_PATH}`,
-    `  node ${place.dir}/start.mjs >> ${DAEMON_LOG_PATH} 2>&1 &`,
+    `  ${daemonNodePath(place)} ${place.dir}/start.mjs >> ${DAEMON_LOG_PATH} 2>&1 &`,
     // The daemon's own pid, written here because a container ships no socket tools: it is how a deploy stops the
     // daemon it is replacing, and the supervisor puts the new one up a second later.
     `  echo $! > ${daemonPidPath(place)}`,
@@ -516,8 +525,9 @@ export function daemonUnit(place: DaemonPlace = CLOUD_PLACE, previewHostSuffix?:
     ...(previewHostSuffix !== undefined ? [`Environment=${VITE_ALLOWED_HOSTS_ENV}=${previewHostSuffix}`] : []),
     // The place's own file, where it has one: missing everywhere else, which the dash says is fine.
     ...(place.envFile !== undefined ? [`EnvironmentFile=-${place.envFile}`] : []),
-    // Through sh so node is found on the unit's PATH: a machine that shipped its own node keeps it where it is.
-    `ExecStart=/bin/sh -c 'exec node ${place.quotePaths ? `"${place.dir}/start.mjs"` : `${place.dir}/start.mjs`}'`,
+    // The node the deploy left in the place's own folder, by its path: what `node` alone would name is decided at
+    // every start by a PATH the machine owns.
+    `ExecStart=/bin/sh -c 'exec ${place.quotePaths ? `"${daemonNodePath(place)}" "${place.dir}/start.mjs"` : `${daemonNodePath(place)} ${place.dir}/start.mjs`}'`,
     "Restart=always",
     "RestartSec=1",
     `MemoryMax=${DAEMON_MEMORY_MAX_PERCENT}%`,
@@ -580,6 +590,13 @@ export function deployScript(place: DaemonPlace, token: string, previewHostSuffi
     `tar -xzf ${sh(place, place.bundle)} -C ${sh(place, place.dir)}`,
     nodeBootstrap(place),
     'echo "NODE_VERSION $(node --version)"',
+    // The node this deploy is about to compile the native modules under, put where every road that starts the
+    // daemon reads it. The binary itself and not the name that found it: what a machine calls node is a symlink
+    // chain the machine may rewrite, and a restore left one of those chains pointing at a Node the disk no longer
+    // carries. A hard link where the two paths share a filesystem, which costs the machine and its snapshots
+    // nothing and holds this binary even once the machine has moved every name for it; a copy where they do not.
+    `node_pin="$(readlink -f "$(command -v node)")"`,
+    `ln -f "$node_pin" ${sh(place, daemonNodePath(place))} 2>/dev/null || cp "$node_pin" ${sh(place, daemonNodePath(place))}`,
     `cd ${sh(place, place.dir)}`,
     `npm install --omit=dev --no-audit --no-fund > ${sh(place, `${place.scratch}/wsp-npm.log`)} 2>&1 || { tail -3 ${sh(place, `${place.scratch}/wsp-npm.log`)}; echo NPM_FAIL; false; }`,
     `rm -rf ${sh(place, `${place.dir}/node_modules/node-pty/prebuilds`)}`,

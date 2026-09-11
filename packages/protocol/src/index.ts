@@ -2210,6 +2210,7 @@ const DAEMON_CONTENTS = [
   "12eac7cd2f4b90f9064279a1ea3b3169d24e34c30279f5c19d046252e2d5ec66",
   "877eda4200afad3842bedad0e49d6efc942ef1ef3ea7181af22f9e726d72b669",
   "206d96d53b9734c3dce0e84bf11d5455e210b2419b6c9572748ebf69861afca5",
+  "9612dde5c8de7beb001438a6c7ae7840355bb16174b27f7fe7379b1657ea05b2",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -2234,7 +2235,10 @@ const DAEMON_CONTENTS = [
  * result agrees, so an older Node's headers left in the prefix send node-gyp after the right ones instead of
  * building against the API another Node declared. Version 14 reads the environment a provider could not hand a
  * fork at create off a file under /etc the unit may lack, so a backend that lands it there hands the daemon its
- * keys without touching anything else on the machine. */
+ * keys without touching anything else on the machine. Version 15 starts by the node the deploy compiled its
+ * native modules under, kept in the daemon's own folder, rather than by whatever a PATH the machine owns names at
+ * the moment of the start: a machine restored onto another one names a different node there, or none, and none is
+ * a start that fails every second for the life of the machine. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the daemon's sources, the dependency

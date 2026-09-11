@@ -221,7 +221,7 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
     expect(unit).toContain("WorkingDirectory=/home/Jane Doe/.wsp/daemon");
     expect(unit).not.toContain('WorkingDirectory="');
     expect(unit).toContain('Environment="HOME=/home/Jane Doe"');
-    expect(unit).toContain(`ExecStart=/bin/sh -c 'exec node "/home/Jane Doe/.wsp/daemon/start.mjs"'`);
+    expect(unit).toContain(`ExecStart=/bin/sh -c 'exec "/home/Jane Doe/.wsp/daemon/node" "/home/Jane Doe/.wsp/daemon/start.mjs"'`);
     // A fork chose its own paths and its script is pinned byte for byte, so nothing there is quoted.
     expect(CLOUD_PLACE.quotePaths).toBe(false);
     expect(daemonUnit(CLOUD_PLACE)).toContain("WorkingDirectory=/root/wsp-daemon");
