@@ -68,6 +68,8 @@ import {
   type ServiceRunner,
 } from "./service.js";
 import { connectCommand, disconnectCommand, hostsCommand } from "./connect.js";
+import { stopRecordedConnector } from "./connector.js";
+import { readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
 import { DEFAULT_HOME, wspHome } from "./hosts.js";
 import { advertisedUrl, devicesCommand, pairCommand } from "./pairing.js";
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
@@ -100,6 +102,14 @@ usage:
                      default marked; wsp hosts default <alias> moves it
   wsp disconnect ALIAS
                      hand that host its token back and forget it here
+  wsp relay link URL put this computer on your relay account, so it can be
+                     reached from anywhere without a port open to the world:
+                     it prints a code and a page to approve it on. wsp relay
+                     unlink takes it back off, wsp relay hosts lists the
+                     computers on your account from whichever one you are at,
+                     and wsp relay clients says which computers hold a token
+                     for that account, with wsp relay clients revoke <id> to
+                     sign one out
   wsp status         whether a host is serving this state file, on which ports,
                      and what keeps it there, with a non-zero exit code when
                      none does
@@ -161,7 +171,13 @@ options:
                      alias wsp hosts marks
   --code CODE        connect: the code wsp pair printed on the other computer
   --name ALIAS       connect: the name to call that host here (default what its
-                     address calls it)
+                     address calls it); relay link: the name the approval page
+                     shows for this computer (default what it calls itself)
+  --relay HOST       connect: reach that host through your relay by the name it
+                     has there, instead of giving an address. The code is still
+                     the one wsp pair printed on it: the relay never carries one
+  --no-relay         up: serve without the tunnel, on a computer that is linked
+                     to a relay
   --yes              init: take every default and ask nothing (required off a
                      terminal); a login with a browser or device sign-in, or one
                      held in the Keychain, defaults to sign in on the machine
@@ -926,6 +942,8 @@ export interface ServeOptions {
   webDir?: string;
   runtime?: Runtime;
   openUrl?: UrlOpener;
+  /** Whether a box linked to a relay runs its connector; false is `wsp up --no-relay`. */
+  relay?: boolean;
   /** How this process was started, which the init job's wsp tools install writes into an agent's config; the
    * desktop hands in its shim, the npm command the default reading. */
   running?: RunningWsp;
@@ -979,6 +997,8 @@ async function hostFor(
     statePath: string;
     webDir?: string;
     openUrl?: UrlOpener;
+    /** Whether a linked box runs its connector; false is `wsp up --no-relay`, which serves without a tunnel. */
+    relay?: boolean;
     /** Required here, not defaulted: the host's runtime and its init door must pick a provider out of one
      * environment, and two defaults are two places for them to drift apart. */
     providerEnv: ProviderEnv;
@@ -989,12 +1009,18 @@ async function hostFor(
   const address = opts.address ?? LOOPBACK;
   const lockPath = lockPathFor(opts.statePath);
   const lock = takeLock(lockPath, opts.statePath, { port: opts.port, wsPort: opts.wsPort, address });
+  // Read before the host serves a byte: a linked box is reachable from anywhere the moment its connector is up,
+  // so the page it serves must carry no token even though it binds this computer alone. This follows the record
+  // alone and not the flag: a connector an earlier run left behind carries the tunnel to this same port whatever
+  // this run was asked for, and --no-relay stops that one rather than serving a token past it.
+  const linked = readRelayRecord(opts.statePath) !== undefined;
   try {
     const handle = await startHost({
       runtime: rt,
       port: opts.port,
       wsPort: opts.wsPort,
       listen: address,
+      beyondThisComputer: linked,
       webDir: opts.webDir ?? assetDir("web"),
       // Read at each fork, not once at start: the init job saves a key while this host serves.
       workspaceEnvs: golden => workspaceEnvsFor(keysFound()).workspaceEnvs?.(golden) ?? {},
@@ -1015,10 +1041,16 @@ async function hostFor(
 
     for (const line of addressLines(opts.statePath, { ...handle, address })) io.log(line);
     if (!isLoopback(address)) io.log(listenBeyondLoopbackLine(address));
+    else if (linked) io.log(relayOnLoopbackLine());
     if (keys.anthropic === undefined) io.log(noClaudeKeyNote(forksNoMachines(rt.backend.capabilities)));
+    // The tunnel carries to this host's own app port, so a box on loopback alone is still reachable through the
+    // relay and nothing else about how it binds has to change.
+    const relay = linked && opts.relay !== false ? await startRelay({ statePath: opts.statePath, port: handle.port, log: line => io.log(line) }) : undefined;
+    if (linked && opts.relay === false) await stopRecordedConnector(dirname(opts.statePath));
     return {
       ...handle,
       close: async () => {
+        await relay?.close();
         await handle.close();
         rmSync(lockPath, { force: true });
         // A host that started later owns the pointer now.
@@ -1230,6 +1262,8 @@ interface SharedFlags {
   service?: boolean;
   code?: string;
   name?: string;
+  relay?: string;
+  "no-relay"?: boolean;
   provider?: string;
   "docker-host"?: string;
 }
@@ -1249,7 +1283,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     cliOnly: "starts the host on the person's computer; a tool runs against a host that is already up",
     run: async (io, opts, values) => {
       if (values.service === true) return upServiceCommand(io, opts, systemService());
-      const handle = await up(io, opts);
+      const handle = await up(io, { ...opts, ...(values["no-relay"] === true ? { relay: false } : {}) });
       if (handle === undefined) return 1;
       stopOnSignals(handle, io);
       return 0;
@@ -1279,6 +1313,11 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     json: false,
     cliOnly: "spends a pairing code and keeps the token it buys in this person's own files; where their wsp points is theirs to say",
     run: (io, opts, values, args) => connectCommand(io, opts, values, args),
+  },
+  relay: {
+    json: false,
+    cliOnly: "puts this computer on a person's relay account and runs the tunnel it sits behind, which is theirs to give away and theirs to take back",
+    run: (io, opts, values, args) => relayCommand(io, opts, args, values),
   },
   hosts: {
     json: false,
@@ -1445,6 +1484,8 @@ export const SHARED_OPTIONS: Options = {
   service: { type: "boolean" },
   code: { type: "string" },
   name: { type: "string" },
+  relay: { type: "string" },
+  "no-relay": { type: "boolean" },
   provider: { type: "string" },
   "docker-host": { type: "string" },
 };
@@ -1462,6 +1503,11 @@ export const COMMAND_LINES: readonly CommandLine[] = [
   { words: `${MCP_COMMAND} install`, options: MCP_OPTIONS, cliOnly: "writes an agent's own config and skills folder, which is done once from a shell" },
   { words: "devices revoke", options: without(SHARED_OPTIONS, ["json"]), cliOnly: "takes away a computer's token, which belongs with the terminal that handed it the code" },
   { words: "hosts default", options: without(SHARED_OPTIONS, ["json"]), cliOnly: "moves which host every line on this computer runs against, which no thread decides for the person" },
+  { words: "relay link", options: without(SHARED_OPTIONS, ["json"]), cliOnly: "shows a code a person approves in their own browser, which only somebody at this computer's terminal starts" },
+  { words: "relay unlink", options: without(SHARED_OPTIONS, ["json"]), cliOnly: "takes this computer off a person's relay account and stops the tunnel, which belongs with the terminal that put it there" },
+  { words: "relay hosts", options: without(SHARED_OPTIONS, ["json"]), cliOnly: "signs this person in to their relay and lists the boxes on their account, which no thread does for them" },
+  { words: "relay clients", options: without(SHARED_OPTIONS, ["json"]), cliOnly: "reads and takes away the computers holding a token for this person's relay account, which belongs with the person whose account it is" },
+  { words: "relay clients revoke", options: without(SHARED_OPTIONS, ["json"]), cliOnly: "signs another of this person's computers out of their relay, which no thread decides for them" },
   ...Object.entries(COMMANDS).map(([words, command]) => ({ words, options: command.json ? SHARED_OPTIONS : without(SHARED_OPTIONS, ["json"]), cliOnly: command.cliOnly })),
 ];
 

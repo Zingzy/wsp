@@ -35,7 +35,7 @@ export default [
     resolve: { alias },
     test: {
       name: "node",
-      include: ["packages/*/test/**/*.test.ts", "apps/wspx/**/*.test.ts", "apps/desktop/test/**/*.test.ts"],
+      include: ["packages/*/test/**/*.test.ts", "infra/*/test/**/*.test.ts", "apps/wspx/**/*.test.ts", "apps/desktop/test/**/*.test.ts"],
       environment: "node",
       // Anything a test writes to the OS-local config dir (the install id) lands here, never in the developer's own.
       env: { XDG_CONFIG_HOME: join(tmpdir(), "wsp-test-config"), ...TEST_ENV },
