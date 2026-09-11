@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The command line, the MCP tools and the skill are one contract: the served
 // tools are the verb table under the one naming rule, every command line has
-// a tool or says why not, every tool has a skill row, and every wsp line the
-// skill or the instructions show parses against the flag table the command
-// actually reads.
+// a tool or says why not, every tool has a skill row, every list a tool takes
+// is a flag the command line reads again, and every wsp line the skill or the
+// instructions show parses against the flag table the command actually reads.
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_AGENT } from "@wsp/catalog";
-import { COORDINATOR_HANDOFF, EXIT_CODES, EXIT_WORDS, ExitClass, NOTIFY_CALLER, NOTIFY_WORDS, SessionStartOutcome, TURN_END_WORDS, effortsFor, markedDefault, stillWorkingLine } from "@wsp/protocol";
+import { COORDINATOR_HANDOFF, EXIT_CODES, EXIT_WORDS, ExitClass, NOTIFY_CALLER, NOTIFY_WORDS, RuntimeRequest, SessionStartOutcome, TURN_END_WORDS, effortsFor, markedDefault, stillWorkingLine, type WorkspaceView } from "@wsp/protocol";
 import { harnessCatalog } from "@wsp/runtime";
 import { COMMAND_LINES, HELP, JSON_COMMANDS, PROSE_COMMANDS, type CommandLine } from "../src/cli.js";
 import { mcpServer } from "../src/mcp.js";
 import { INSTRUCTIONS, RULES_HEADING, SHELL_HEADING, VERBS_HEADING, WSP_SKILL } from "../src/skill.js";
-import { CLI_VERBS, COMMON, VERBS, toolName } from "../src/verbs.js";
+import { CLI_VERBS, COMMON, VERBS, flagList, openingOf, toolName, type Flags } from "../src/verbs.js";
 
 interface Tool {
   name: string;
@@ -25,6 +25,8 @@ interface Tool {
   /** Every line of prose the tool serves: its own description and the description on each input and output field.
    * Absent on a tool read off the skill's table, which carries no prose. */
   prose?: string[];
+  /** The inputs the served schema types as a list. Absent on a tool read off the skill's table, which carries no types. */
+  arrays?: string[];
 }
 
 async function listTools(): Promise<Tool[]> {
@@ -35,15 +37,21 @@ async function listTools(): Promise<Tool[]> {
   await client.connect(toClient);
   try {
     const { tools } = await client.listTools();
-    const fields = (schema: unknown): Record<string, { description?: string }> => (schema as { properties?: Record<string, { description?: string }> } | undefined)?.properties ?? {};
+    const fields = (schema: unknown): Record<string, { description?: string; type?: string }> => (schema as { properties?: Record<string, { description?: string; type?: string }> } | undefined)?.properties ?? {};
     const keys = (schema: unknown): string[] => Object.keys(fields(schema)).sort();
     const described = (schema: unknown): string[] => Object.values(fields(schema)).map(field => field.description ?? "");
+    const listed = (schema: unknown): string[] =>
+      Object.entries(fields(schema))
+        .filter(([, field]) => field.type === "array")
+        .map(([name]) => name)
+        .sort();
     return tools.map(t => ({
       name: t.name,
       description: t.description,
       inputs: keys(t.inputSchema),
       outputs: keys(t.outputSchema),
       prose: [t.description ?? "", ...described(t.inputSchema), ...described(t.outputSchema)],
+      arrays: listed(t.inputSchema),
     }));
   } finally {
     await client.close();
@@ -195,6 +203,29 @@ export function usageError(argv: readonly string[], lines: readonly CommandLine[
   }
 }
 
+/** Every list a tool takes, against how the command line carries the same list: the flag a person types again for
+ * each value, or why that command reads the values another way. A flag that takes one value where the wire wants a
+ * list sends a string and the start is refused before the thread opens, so a new list input belongs here the day it
+ * is added. */
+const LISTS_ON_THE_COMMAND_LINE: Record<string, string> = {
+  "threads wait threads": "the threads are the words after the verb",
+  "exec argv": "the command is the words after the verb",
+  "import agents": "the catalog ids are one comma-joined value of --agents",
+  "export agents": "the catalog ids are one comma-joined value of --agents",
+  "recipe scan project": "--project",
+  "recipe set": "--set",
+  "recipe signin": "--signin",
+  "recipe add": "--add",
+  "recipe add_check": "--add-check",
+  "recipe project": "--project",
+  "fork notify": "--notify",
+  "thread new notify": "--notify",
+  "thread new images": "--image",
+  "send images": "--image",
+  "import keep": "--keep",
+  "import cut": "--cut",
+};
+
 describe("the command line, the MCP tools and the skill are one contract", () => {
   it("the served tools are the verb table, one per entry under the naming rule, and the table's inputs are what is served", async () => {
     const tools = await listTools();
@@ -259,7 +290,22 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       expect(row, `${tool.name} is in no row of the skill's verbs table`).toBeDefined();
       expect(row!.tools.find(t => t.name === tool.name)!.inputs, `${tool.name}'s inputs in the skill`).toEqual(tool.inputs);
     }
-    expect(COMMAND_LINES.filter(c => "cliOnly" in c).map(c => c.words).sort()).toEqual(["doctor", "down", "init", "mcp", "mcp install", "status", "up"]);
+    expect(COMMAND_LINES.filter(c => "cliOnly" in c).map(c => c.words).sort()).toEqual([
+      "connect",
+      "devices",
+      "devices revoke",
+      "disconnect",
+      "doctor",
+      "down",
+      "hosts",
+      "hosts default",
+      "init",
+      "mcp",
+      "mcp install",
+      "pair",
+      "status",
+      "up",
+    ]);
     // Every tool has a command line of its own: the seam above still holds a tool that has none to a stated reason.
     expect(VERBS.filter(v => "toolOnly" in v).map(v => v.name)).toEqual([]);
   });
@@ -317,6 +363,48 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "wsp send reads --model, which its row does not show",
     ]);
     expect(flagDrift(stale.replace("| `wsp stop <thread>`", "| `wsp stop <thread> [--now]`"), COMMAND_LINES)).toContain("the row for wsp stop shows --now, which it does not read");
+  });
+
+  it("every list a tool takes is a flag the command line reads again, or a command that reads its values another way", async () => {
+    const carried = new Set<string>();
+    for (const tool of await listTools()) {
+      const line = COMMAND_LINES.find(c => "tool" in c && c.tool === tool.name);
+      if (line === undefined) continue;
+      for (const input of tool.arrays!) {
+        const key = `${line.words} ${input}`;
+        const how = LISTS_ON_THE_COMMAND_LINE[key];
+        expect(how, `${tool.name} takes ${input} as a list and nothing says how wsp ${line.words} carries it`).toMatch(/\S/);
+        carried.add(key);
+        if (!how!.startsWith("--")) continue;
+        const option = line.options[how!.slice(2)] as { multiple?: boolean } | undefined;
+        expect(option, `wsp ${line.words} does not read ${how}`).toBeDefined();
+        expect(option!.multiple, `wsp ${line.words} reads ${how} as one value where ${tool.name} takes a list`).toBe(true);
+      }
+    }
+    expect([...carried].sort()).toEqual(Object.keys(LISTS_ON_THE_COMMAND_LINE).sort());
+  });
+
+  it("a --notify typed once and a --notify typed again both reach the start as an array of targets, the one shape the protocol takes", () => {
+    // notifyOf resolves each reference and keeps the count, so what is under test here is the flag table and the
+    // reader over it: a lone value passed through as a string is refused before the thread opens.
+    const workspace = { id: "ws_notify" } as WorkspaceView;
+    const cases: ReadonlyArray<[string, string[], string[]]> = [
+      ["thread new", ["--notify", "me", "build it"], ["me"]],
+      ["thread new", ["--notify", "me", "--notify", "1a2b3c4d", "build it"], ["me", "1a2b3c4d"]],
+      ["fork", ["alpha", "--send", "build it", "--notify", "me"], ["me"]],
+      ["fork", ["alpha", "--send", "build it", "--notify", "me", "--notify", "1a2b3c4d"], ["me", "1a2b3c4d"]],
+    ];
+    for (const [words, argv, targets] of cases) {
+      const typed = `wsp ${words} ${argv.join(" ")}`;
+      const entry = CLI_VERBS.find(v => v.name === words)!;
+      const { values } = parseArgs({ args: argv, options: { ...COMMON, ...entry.options }, allowPositionals: true });
+      const notify = flagList(values as Flags, "notify");
+      expect(notify, typed).toEqual(targets);
+      const start = openingOf({}, workspace, "build it", { notify });
+      expect(start["notify"], typed).toEqual(targets);
+      const wire = RuntimeRequest.safeParse({ id: "1", op: "sessions.start", ...start });
+      expect(wire.success ? [] : wire.error.issues, typed).toEqual([]);
+    }
   });
 
   it("the --effort words the thread_new tool and the skill name are the picker's options for the default agent, and the default they say runs is the one the picker marks", () => {

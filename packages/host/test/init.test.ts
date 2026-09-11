@@ -23,7 +23,7 @@ import { signInItems } from "../src/init-pick.js";
 import { CARD_FRAME, card, widthOf } from "../src/init-layout.js";
 import { PROJECT_QUESTION, noFolderNote } from "../src/init-pick.js";
 import { reduceStages, runInit, stageLine, summaryNote, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
-import { ALSO_LOCAL_QUESTION, FIRST_QUESTION, FOLDER_QUESTION } from "../src/init-first.js";
+import { ALSO_LOCAL_QUESTION, FIRST_QUESTION, folderQuestion } from "../src/init-first.js";
 import type { HostHandle, WorkspaceRoads } from "../src/server.js";
 import { startCallbackRelay } from "../src/relay.js";
 import type { ConnectOptions, DaemonSocket } from "../src/doctor.js";
@@ -330,7 +330,7 @@ async function firstWorkspace(f: Fake, folder: string | false, tick = true): Pro
   await f.until(ALSO_LOCAL_QUESTION);
   await f.press(tick ? KEY.enter : "n");
   if (folder === false) return;
-  await f.until(FOLDER_QUESTION);
+  await f.until(folderQuestion("darwin"));
   await f.press(...(folder === "" ? [] : [folder]), KEY.enter);
 }
 
@@ -1214,7 +1214,7 @@ describe("wsp init, the summary-first screens", () => {
     expect(small.rows.find(r => r.id === "gh")).toMatchObject({ signIn: "machine" });
     expect(small.rows.find(r => r.id === "go")).not.toHaveProperty("signIn");
     // --yes answers every row with the word its screen would have opened on: the same map signInItems hands the screen.
-    const screens = signInItems(applyRecipe(withCatalogAgents(LAPTOP), MEASURED), new Map());
+    const screens = signInItems(applyRecipe(withCatalogAgents(LAPTOP), MEASURED), new Map(), "darwin");
     for (const [id, choice] of screens.initial) {
       // The one exception is a Keychain login, which nobody is here to consent to; the run says so on the screen above.
       if (choice === "copy" && saved.get(id)?.paths.some(p => p.startsWith("Keychain:")) === true) continue;
@@ -1908,6 +1908,16 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.hosts).toBe(1);
     expect(f.opened).toEqual([]);
     expect(f.text()).toContain("ssh -L 4400:127.0.0.1:4400");
+  });
+
+  it("over ssh a run told to bind beyond this computer prints that address and no forward, so the whole road holds the address and not only the line that prints it", async () => {
+    const f = fake({ yes: true, address: "100.64.0.3", env: { SSH_CONNECTION: "10.0.0.2 51000 10.0.0.9 22" } });
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(0);
+    expect(f.opened).toEqual([]);
+    const out = f.text();
+    expect(out).toMatch(/^◇\s+Open http:\/\/100\.64\.0\.3:4400\/#w\/ws_[0-9a-f]+$/m);
+    expect(out).not.toContain("ssh -L");
   });
 
   it("--yes on a terminal is a person taking the defaults: the app is served after the seal and its address printed, not opened", async () => {
@@ -4175,7 +4185,7 @@ describe("wsp init, the first workspace and its project", () => {
     await f.press(KEY.enter);
     await f.until(ALSO_LOCAL_QUESTION);
     await f.press(KEY.enter);
-    await f.until(FOLDER_QUESTION);
+    await f.until(folderQuestion("darwin"));
     await f.press(KEY.esc);
     expect((await run).code).toBe(0);
     const workspaces = await f.runtimes.at(-1)!.workspaces.list();

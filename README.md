@@ -16,7 +16,7 @@ wsp reads your computer once, builds a machine that has what it has (your agents
 - **Agents starting agents.** An agent on your computer drives wsp over MCP: it forks a workspace, opens a Claude Code thread there, starts a Codex thread beside it, reads both back. Everything it does shows in your sidebar.
 - **The machine, in the app.** A terminal that uses your Ghostty config, the ports it listens on as browser tabs, its processes, its files, its cost and state.
 - **Naps and wakes.** An idle workspace naps with its RAM intact and wakes on the next message. A machine the provider loses is rebuilt from the image with your files back.
-- **Your keys never leave your computer.** wsp runs on your computer and talks to the provider with your key. There is no hosted service in between.
+- **Your keys never leave a machine you own.** wsp runs on your own computer, or on a box you own, and talks to the provider with your key. There is no hosted service in between.
 
 ## Before you start
 
@@ -46,7 +46,7 @@ Then, in that agent: *"set up wsp for me"*. It reads what you use on this comput
 wsp init
 ```
 
-One screen at a time: the agents on this computer, their tools, what else to bring from this Mac, sign-ins, wsp for your own agents, then the build; a screen with nothing to pick is skipped. Everything is ticked from what you actually use; Enter through every screen takes the defaults. Nothing leaves your disk before the confirm.
+One screen at a time: the agents on this computer, their tools, what else to bring from this computer, sign-ins, wsp for your own agents, then the build; a screen with nothing to pick is skipped. Everything is ticked from what you actually use; Enter through every screen takes the defaults. Nothing leaves your disk before the confirm.
 
 ![wsp init: the agents screen, ticked from what this computer runs](docs/screenshots/init.png)
 

@@ -5,8 +5,14 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_PORT,
   DEFAULT_WS_PORT,
+  LOOPBACK,
   PORT_TAKEN_REFUSAL,
+  WS_PATH,
   WS_PORT_OFFSET,
+  authority,
+  isLoopback,
+  isWildcard,
+  listenBeyondLoopbackLine,
   portHolderWords,
   portTakenLine,
   portsAsked,
@@ -18,21 +24,58 @@ import { ROOT, sourceFiles } from "./source-files.js";
 describe("the pair of ports the app is served on", () => {
   it("names 4400 and 4410, one offset apart, as the pair nobody named", () => {
     expect([DEFAULT_PORT, WS_PORT_OFFSET, DEFAULT_WS_PORT]).toEqual([4400, 10, 4410]);
-    expect(portsAsked({})).toEqual({ port: 4400, wsPort: 4410, named: false });
+    expect(portsAsked({})).toEqual({ port: 4400, wsPort: 4410, named: false, address: LOOPBACK });
   });
 
   it("--port alone derives the WebSocket port at the defaults' own offset, and says a person named it", () => {
-    expect(portsAsked({ port: "4401" })).toEqual({ port: 4401, wsPort: 4411, named: true });
-    expect(portsAsked({ port: "5000" })).toEqual({ port: 5000, wsPort: 5010, named: true });
+    expect(portsAsked({ port: "4401" })).toEqual({ port: 4401, wsPort: 4411, named: true, address: LOOPBACK });
+    expect(portsAsked({ port: "5000" })).toEqual({ port: 5000, wsPort: 5010, named: true, address: LOOPBACK });
   });
 
   it("--ws-port names that port on its own, whether or not --port came with it", () => {
-    expect(portsAsked({ port: "4401", wsPort: "9000" })).toEqual({ port: 4401, wsPort: 9000, named: true });
-    expect(portsAsked({ wsPort: "9000" })).toEqual({ port: 4400, wsPort: 9000, named: true });
+    expect(portsAsked({ port: "4401", wsPort: "9000" })).toEqual({ port: 4401, wsPort: 9000, named: true, address: LOOPBACK });
+    expect(portsAsked({ wsPort: "9000" })).toEqual({ port: 4400, wsPort: 9000, named: true, address: LOOPBACK });
   });
 
   it("keeps both ports at 0, since 0 asks for any free port and the offset above it would be privileged", () => {
-    expect(portsAsked({ port: "0" })).toEqual({ port: 0, wsPort: 0, named: true });
+    expect(portsAsked({ port: "0" })).toEqual({ port: 0, wsPort: 0, named: true, address: LOOPBACK });
+  });
+});
+
+describe("the address the pair is bound on", () => {
+  it("binds this computer alone unless --listen names another, and an empty word is no word", () => {
+    expect(portsAsked({}).address).toBe("127.0.0.1");
+    expect(portsAsked({ listen: "" }).address).toBe(LOOPBACK);
+    expect(portsAsked({ listen: "0.0.0.0" }).address).toBe("0.0.0.0");
+    expect(portsAsked({ listen: "100.64.0.3" })).toEqual({ port: 4400, wsPort: 4410, named: false, address: "100.64.0.3" });
+  });
+
+  it("reads 127.x, ::1 and localhost as this computer, and the wildcard, a private address and a hostname as beyond it", () => {
+    for (const at of [LOOPBACK, "127.0.0.2", "127.1.2.3", "::1", "[::1]", "localhost"]) expect(isLoopback(at), at).toBe(true);
+    for (const at of ["0.0.0.0", "::", "192.168.1.20", "100.64.0.3", "box.example.com", "1270.0.0.1"]) expect(isLoopback(at), at).toBe(false);
+  });
+
+  it("says once, in one line with no em dash, that the page is reachable and pairing is the gate", () => {
+    const line = listenBeyondLoopbackLine("0.0.0.0");
+    expect(line).toContain("0.0.0.0");
+    expect(line).toContain("wsp pair");
+    expect(line).not.toContain("\u2014");
+  });
+
+  it("serves the runtime on one path, so a forwarded port carries the page and the protocol", () => {
+    expect(WS_PATH).toBe("/ws");
+  });
+
+  it("names the wildcard, which covers loopback, apart from an address that answers only on itself", () => {
+    for (const at of ["0.0.0.0", "::"]) expect(isWildcard(at), at).toBe(true);
+    for (const at of [LOOPBACK, "::1", "100.64.0.3", "0.0.0.1"]) expect(isWildcard(at), at).toBe(false);
+  });
+
+  it("brackets an IPv6 literal in a URL authority and leaves everything else alone", () => {
+    expect(authority("127.0.0.1", 4400)).toBe("127.0.0.1:4400");
+    expect(authority("box.example.com", 4400)).toBe("box.example.com:4400");
+    expect(authority("2001:db8::5", 4410)).toBe("[2001:db8::5]:4410");
+    expect(authority("[2001:db8::5]", 4410)).toBe("[2001:db8::5]:4410");
   });
 });
 
@@ -66,11 +109,17 @@ describe("who holds a port, and the lines about it", () => {
   });
 });
 
-describe("one copy of the pair", () => {
+describe("one home for the pair and for the loopback address", () => {
   const HOME = join("packages", "protocol", "src", "app-ports.ts");
+  const HOST = join("packages", "host", "src");
 
   it("no other source file spells out a default port: the app and the desktop read them from here", () => {
     const copies = sourceFiles().filter(rel => rel !== HOME && /\b(4400|4410)\b/.test(readFileSync(join(ROOT, rel), "utf8")));
+    expect(copies).toEqual([]);
+  });
+
+  it("no source file of the host spells the loopback address: every line about where the host is reads it from here", () => {
+    const copies = sourceFiles().filter(rel => rel.startsWith(HOST) && readFileSync(join(ROOT, rel), "utf8").includes(LOOPBACK));
     expect(copies).toEqual([]);
   });
 });

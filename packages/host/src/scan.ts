@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// What this Mac has installed by a package manager that can install the same
-// thing on the Linux image: one row per tool, with the line that installs it
+// What this computer has installed by a package manager that can install the
+// same thing on the Linux image: one row per tool, with the line that installs it
 // there, the line that says it is there, and the size measured here. One entry
 // per manager in MANAGER_SCANS and nothing else decides by a manager's name.
 // Casks and Mac App Store apps never reach a row (the Brewfile reader drops
 // them), nor does a formula with no Linux bottle, nor anything the catalog
 // already carries: a brew node or python is the base row, not a second row.
 import { ROADS, asLinuxbrew, catalogToolFor, roadModule, type InstallRoad, type RoadName } from "@wsp/catalog";
-import { firstLine, linuxSupport, parseBrewfile, parseCargoInstalls, parseNpmGlobals, parsePipxList, parseUvToolList, type Host, type Pkg } from "@wsp/collect";
+import { aptPackages, aptSizes, firstLine, linuxSupport, parseBrewfile, parseCargoInstalls, parseNpmGlobals, parsePipxList, parseUvToolList, type Host, type Pkg } from "@wsp/collect";
 import { agentOwning, parseDu } from "@wsp/engine";
 import { shellQuote, toolRowId, type RecipeCustomRow } from "@wsp/protocol";
 
-/** One tool this Mac has, as the Also on this Mac screen and `wsp recipe scan` draw it. */
+/** One tool this computer has, as the Also screen and `wsp recipe scan` draw it. */
 export interface ScanRow {
   /** `<manager>/<name>`: unique across managers, the id the screen ticks by. */
   id: string;
@@ -29,7 +29,7 @@ export interface ScanRow {
   version?: string;
 }
 
-/** The id a scanned package has on the Also on this Mac screen and in a `wsp recipe --set` word, the one spelling of it: the
+/** The id a scanned package has on the Also screen and in a `wsp recipe --set` word, the one spelling of it: the
  * manager and the package, unique across managers since two of them can carry one name (uv and pipx both list ruff). */
 export const scanRowId = (manager: string, pkg: string): string => `${manager}/${pkg}`;
 
@@ -44,7 +44,16 @@ function roadLine(road: InstallRoad, bin: string): string {
   return line;
 }
 
-interface ManagerScan {
+/** How a manager's sizes are read here: one du over the directory its packages sit under, or the manager's own
+ * answer where they sit under no one directory (apt spreads a package over the filesystem and records its size
+ * itself). Exactly one of the two, so a manager added to the table cannot forget both. */
+type SizeReader =
+  /** Where its packages sit here, so one du reads them all; a manager whose directory cannot be found gives no sizes. */
+  | { dir(host: Host): Promise<string | undefined> }
+  /** Bytes each of these packages takes here, by package; a manager that cannot say leaves them out. */
+  | { sizes(host: Host, names: readonly string[]): Promise<Map<string, number>> };
+
+type ManagerScan = {
   /** The manager's own name, which is its road's: the build brings it onto the machine by that name. */
   id: RoadName;
   /** The heading the screen and the table draw its rows under. */
@@ -57,9 +66,7 @@ interface ManagerScan {
   /** What exits 0 on the machine once the package is there. Asked of the manager, never guessed from the package's
    * name: brew install llvm leaves clang and llvm-config, and a guessed `command -v llvm` would read as a failure. */
   check(pkg: Pkg): string;
-  /** Where its packages sit on this computer, so one du reads them all; a manager whose directory cannot be found gives no sizes. */
-  dir(host: Host): Promise<string | undefined>;
-}
+} & SizeReader;
 
 /** The output of a listing command, or nothing when the command failed. */
 const listed = async (host: Host, bin: string, args: readonly string[]): Promise<string> => (await host.exec.run(bin, args)) ?? "";
@@ -119,6 +126,18 @@ export const MANAGER_SCANS: readonly ManagerScan[] = [
     check: p => inListing("cargo install --list", p.name),
     dir: async host => `${host.home}/.cargo/bin`,
   },
+  {
+    id: "apt",
+    group: "apt packages",
+    // apt-mark is what says which packages a person asked for; dpkg alone cannot tell those from the base image's own.
+    bin: "apt-mark",
+    list: aptPackages,
+    // The catalog's own apt road as one line, since a row's install is read on a screen and in one table cell; the
+    // export it opens with is what keeps apt from waiting at a prompt nobody is there to answer.
+    install: p => roadLine({ road: "apt", packages: [p.name] }, p.name).split("\n").join("; "),
+    check: p => `dpkg -s ${shellQuote(p.name)}`,
+    sizes: aptSizes,
+  },
 ];
 
 /** The names directly under a directory, a scoped npm name read one level deeper so a row is the package and not its scope. */
@@ -167,7 +186,8 @@ export async function scanTools(host: Host, recipe: readonly RecipeCustomRow[] =
   for (const m of MANAGER_SCANS) {
     if (!(await host.exec.which(m.bin))) continue;
     const pkgs = (await m.list(host)).filter(p => !carried(m.id, p.name) && !inRecipe(recipe, scanRowId(m.id, p.name), p.name));
-    const sizes = await sizesUnder(host, await m.dir(host), pkgs.map(p => p.name));
+    const names = pkgs.map(p => p.name);
+    const sizes = "sizes" in m ? await m.sizes(host, names) : await sizesUnder(host, await m.dir(host), names);
     for (const p of pkgs) {
       const size = sizes.get(p.name);
       rows.push({
@@ -183,20 +203,4 @@ export async function scanTools(host: Host, recipe: readonly RecipeCustomRow[] =
     }
   }
   return rows;
-}
-
-/** A scan row as a recipe row. The id is the scan row's own, the manager and the package: two managers can carry
- * one name (uv and pipx both list ruff), and two rows under one id would be two installs, two digest ticks and one
- * check for both. The name is the package alone, which is what the screen and the table read. */
-export function customFromScan(row: ScanRow): RecipeCustomRow {
-  return {
-    kind: "custom",
-    id: row.id,
-    name: row.name,
-    install: [row.install],
-    check: row.check,
-    manager: row.manager,
-    ...(row.size !== undefined ? { size: row.size } : {}),
-    why: `installed on this Mac by ${row.manager}`,
-  };
 }

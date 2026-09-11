@@ -12,8 +12,10 @@ import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { isCancel, log } from "@clack/prompts";
-import { canTravel, defaultAgents, defaultConsent, FIRST_WORKSPACE, fmtBytes, importRequest, plural, THIS_COMPUTER, workspaceHash, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
+import type { Platform } from "@wsp/collect";
+import { authority, canTravel, defaultAgents, defaultConsent, FIRST_WORKSPACE, fmtBytes, importRequest, plural, THIS_COMPUTER, thisComputer, workspaceHash, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
 import type { CreatedWorkspace } from "@wsp/runtime";
+import { dialAddress } from "./host-lock.js";
 import { confirmPrompt, textPrompt } from "./init-layout.js";
 import type { HostHandle, WorkspaceRoads } from "./server.js";
 
@@ -25,7 +27,7 @@ export function firstWorkspaceName(name: string | undefined): string | undefined
 }
 
 export const FIRST_QUESTION = "Make your first workspace and import a project now?";
-export const FOLDER_QUESTION = "Which folder on this Mac?";
+export const folderQuestion = (platform: Platform): string => `Which folder on ${thisComputer(platform)}?`;
 /** The tick beside the fork: this computer as a workspace of its own. It boots nothing and bills nothing, so it is
  * on by default and a No to the fork above still leaves a workspace to open the app on. */
 export const ALSO_LOCAL_QUESTION = `Also make ${THIS_COMPUTER} a workspace?`;
@@ -59,6 +61,8 @@ export interface FirstAsk {
   folder?: string;
   /** --no-local: the tick off, the one way to end an init with no local workspace. */
   noLocal?: boolean;
+  /** The computer the folder is picked on, which is what the question calls it. */
+  platform: Platform;
   input: Readable;
   output: Writable;
 }
@@ -113,7 +117,7 @@ export async function askFirst(o: FirstAsk): Promise<WorkspaceStep | symbol> {
   const local = asked === true;
   if (!go) return { local };
   const typed = await textPrompt({
-    message: FOLDER_QUESTION,
+    message: folderQuestion(o.platform),
     hint: "The folder lands on the machine at the path it has here; caches stay behind and secret-shaped files are cut. Enter with nothing imports no project.",
     input: o.input,
     output: o.output,
@@ -218,7 +222,9 @@ export async function runLocal(roads: Pick<WorkspaceRoads, "createLocalWorkspace
   }
 }
 
-/** The app's address, on the workspace just forked when there is one. */
-export const appUrl = (port: number, workspaceId?: string): string => `http://127.0.0.1:${port}/${workspaceId === undefined ? "" : workspaceHash(workspaceId)}`;
+/** The app's address, on the workspace just forked when there is one. Through the same rule every local client
+ * dials by, so an init told to bind one address opens the browser there rather than at a loopback nothing answers. */
+export const appUrl = (at: { port: number; address?: string }, workspaceId?: string): string =>
+  `http://${authority(dialAddress(at), at.port)}/${workspaceId === undefined ? "" : workspaceHash(workspaceId)}`;
 
 const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));

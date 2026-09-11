@@ -166,7 +166,7 @@ describe("the wsp skill", () => {
     expect(setup.indexOf("wsp recipe scan")).toBeLessThan(setup.indexOf("wsp recipe --tick used"));
     expect(setup.indexOf("--tick used")).toBeLessThan(setup.indexOf("nohup wsp init --recipe ~/.wsp/recipe.json --non-interactive --json"));
     // The wizard the init line opens, named as the plan names it, so the person knows what is coming.
-    for (const screen of ["Agents, Tools, Also on this Mac, Sign-ins, wsp for your agents on this Mac, and Build"]) expect(setup).toContain(screen);
+    for (const screen of ["Agents, Tools, Also on this computer, Sign-ins, wsp for your agents on this computer, and Build"]) expect(setup).toContain(screen);
     // The first wsp up of the run is the one that meets a busy port, so its branch lives with the command.
     expect(setup.slice(setup.indexOf("\n2. "), setup.indexOf("\n3. "))).toContain("wsp up --port 4401 >");
     expect(setup).toContain("The host is yours to start");

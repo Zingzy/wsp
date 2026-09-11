@@ -33,6 +33,8 @@ export interface LocalInitOptions {
   nonInteractive?: boolean;
   statePath: string;
   ports: PortsAsked & PortProbes;
+  /** The address the host this run serves binds; this computer alone when absent. */
+  address?: string;
   /** The command that starts the app again, with the flags this run was given. */
   upCommand: string;
   /** The runtime over this state file, its provider module the one that holds no machine. */
@@ -97,7 +99,8 @@ export async function runLocalInit(opts: LocalInitOptions, io: InitIO): Promise<
     await closeRuntime();
     return { code: 0 };
   }
-  await openApp(appUrl(handle.port, workspace?.id), handle, io, interactive);
+  const at = { port: handle.port, address: opts.address };
+  await openApp(appUrl(at, workspace?.id), at, io, interactive);
   outro("wsp keeps serving the app from this terminal; Ctrl-C stops it.", out);
   return { code: 0, handle };
 }

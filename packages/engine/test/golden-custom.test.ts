@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { BREW_ENV, BREW_REAL, LINUXBREW_SHIM } from "@wsp/catalog";
+import { APT_INDEX, BREW_ENV, BREW_REAL, LINUXBREW_SHIM } from "@wsp/catalog";
 import type { RecipeCustomRow } from "@wsp/protocol";
 import { CUSTOM_PREFIX, CUSTOM_PRELUDE, customInstallsFor, recipeDigest, recipeHash, toolInstallsFor, type RecipeEntry } from "../src/golden-import.js";
 import { diffRecipes } from "../src/golden-diff.js";
@@ -103,6 +103,14 @@ describe("the plan's rows outside the catalog", () => {
     expect(plan.installs.map(t => t.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", `${CUSTOM_PREFIX}brew/just`]);
     // The row waits on the last toolchain step, as a formula on the brew road does.
     expect(plan.installs.at(-1)!.after).toBe("tools/brew-toolchain/gcc");
+  });
+
+  it("wait on the apt index the machine reads once: an apt row installs after apt-get update and brings no manager, since every machine has apt", () => {
+    const aptRow: RecipeCustomRow = { kind: "custom", id: "apt/direnv", name: "direnv", install: ["export DEBIAN_FRONTEND=noninteractive; apt-get install -y -qq direnv"], check: "dpkg -s 'direnv'", manager: "apt", why: "installed on this computer by apt" };
+    const plan = toolInstallsFor([], new Map(), [aptRow]);
+    expect(plan.installs.map(t => t.id)).toEqual([`tools/${APT_INDEX}`, `${CUSTOM_PREFIX}apt/direnv`]);
+    expect(plan.installs.at(-1)!.after).toBe(`tools/${APT_INDEX}`);
+    expect(plan.installs[0]!.cmd).toContain("apt-get update");
   });
 
   it("bring a manager the base does not carry as its own step, and wait on that: a pipx row gets pipx", () => {

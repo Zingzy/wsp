@@ -26,7 +26,7 @@ import {
   type SshWiring,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, NOTHING_TO_SERVE_LINE, type PortsAsked, portsAsked, shellQuote, SOLARI_CONSOLE, THIS_COMPUTER, TURN_END_WORDS, usageRefusal, WS_PORT_OFFSET } from "@wsp/protocol";
+import { authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, NOTHING_TO_SERVE_LINE, portsAsked, shellQuote, SOLARI_CONSOLE, THIS_COMPUTER, TURN_END_WORDS, usageRefusal, WS_PORT_OFFSET } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, parseSshAddress, providerSlot, type ProviderSlot, SshBackend, sshIdentity, sshMachineName } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, type ProviderEnv } from "./providers.js";
 import { assetDir } from "./assets.js";
@@ -67,6 +67,9 @@ import {
   type ServiceManager,
   type ServiceRunner,
 } from "./service.js";
+import { connectCommand, disconnectCommand, hostsCommand } from "./connect.js";
+import { DEFAULT_HOME, wspHome } from "./hosts.js";
+import { devicesCommand, pairCommand } from "./pairing.js";
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerSpec, nextLine, registeredLine, removeEach, removeLines, runningWsp, type RunningWsp } from "./mcp-install.js";
@@ -86,15 +89,26 @@ usage:
                      instead, which starts it now and again at every login
   wsp down           stop the service and take it away, so nothing brings the
                      host back at the next login
+  wsp pair           a one time code another computer redeems for a token of
+                     its own, when the host listens beyond this computer
+  wsp devices        the computers paired with this host; wsp devices revoke
+                     <id> takes one back out
+  wsp connect URL    redeem a code from a host on another computer for a token
+                     of this one's own: --code is that code, --name the name
+                     every later line calls the host by
+  wsp hosts          the hosts on other computers this computer holds, the
+                     default marked; wsp hosts default <alias> moves it
+  wsp disconnect ALIAS
+                     hand that host its token back and forget it here
   wsp status         whether a host is serving this state file, on which ports,
                      and what keeps it there, with a non-zero exit code when
                      none does
   wsp init           set up your first golden image one screen at a time:
-                     Agents, Tools, Also on this Mac, Sign-ins, wsp for your
-                     agents on this Mac, each shown when it has a row to pick,
-                     then Build, then the browser. With no provider key it
-                     seals nothing and makes this computer your workspace
-                     instead
+                     Agents, Tools, Also on this computer, Sign-ins, wsp for
+                     your agents on this computer, each shown when it has a
+                     row to pick, then Build, then the browser. With no
+                     provider key it seals nothing and makes this computer
+                     your workspace instead
   wsp doctor         run the reach loop end to end against one live machine
                      (--yes also deletes the snapshots this host left behind);
                      --local proves the other half instead, a thread on this
@@ -129,8 +143,23 @@ options:
                      port follows ${WS_PORT_OFFSET} above it
   --ws-port N        runtime websocket port on its own (default
                      ${DEFAULT_WS_PORT}); --port alone moves both
+  --listen ADDR      up: the address to bind (default ${LOOPBACK}, this
+                     computer alone). On any other address the page is served
+                     without the host token and every client pairs for a device
+                     token of its own: wsp pair prints a code, wsp devices
+                     lists and revokes them
   --state PATH       state file (default ~/.wsp/state.json, or ./.wsp/state.json
                      when the current directory has a .env)
+  --host ALIAS       on any verb: run the line against a host on another
+                     computer, by the name wsp connect gave it. WSP_HOST names
+                     one for a whole shell. That host serves its own state, so
+                     --state is not read beside it and a line that gives both
+                     says so. With neither, a line goes to the host serving the
+                     state file here, and only when none does to the default
+                     alias wsp hosts marks
+  --code CODE        connect: the code wsp pair printed on the other computer
+  --name ALIAS       connect: the name to call that host here (default what its
+                     address calls it)
   --yes              init: take every default and ask nothing (required off a
                      terminal); a login with a browser or device sign-in, or one
                      held in the Keychain, defaults to sign in on the machine
@@ -233,11 +262,9 @@ export interface KeySources {
   checkKey?(key: string): Promise<KeyCheck>;
 }
 
-const DEFAULT_HOME = join(homedir(), ".wsp");
-
-export function wspHome(): string {
-  return process.env["WSP_HOME"] ?? DEFAULT_HOME;
-}
+// The hosts file sits under the same home, so where that home is lives beside it and is re-exported here for every
+// reader that already had it from the command line.
+export { wspHome };
 
 /** Fixed spot a launcher without WSP_HOME (Finder, a service) can read to
  * learn which home the running host serves. */
@@ -521,23 +548,29 @@ export function sshWiring(): SshWiring {
   };
 }
 
-/** What every command of the shared parse works on: the port pair the one rule reads off the flags, whether a
- * person named either port, and the state file. wsp up and wsp init take theirs from this one call. */
-export interface SharedOpts extends PortsAsked {
+/** What every command of the shared parse works on: the port pair and the address the one rule reads off the flags,
+ * whether a person named either port, the state file, and the home the hosts file sits under. wsp up and wsp init
+ * take theirs from this one call. */
+export interface SharedOpts extends ListenAsked {
   statePath: string;
-  /** The environment this run picks its machine provider out of: the host's own, with the provider words the
-   * command line was given in front of it. */
+  home: string;
+  /** The environment this run picks its machine provider out of: the one the caller runs in, with the provider
+   * words the command line was given in front of it. */
   providerEnv: ProviderEnv;
 }
 
-export function optsFor(values: Pick<SharedFlags, "port" | "ws-port" | "state" | "provider" | "docker-host">): SharedOpts {
+/** The environment the caller runs in decides the home, the same reading the verbs take, so a run with its own
+ * environment cannot send wsp connect to one folder and --host to another. It is also what the provider words
+ * stand in front of, so one run picks its folder and its provider out of the same environment. */
+export function optsFor(values: Pick<SharedFlags, "port" | "ws-port" | "listen" | "state" | "provider" | "docker-host">, env: Readonly<Record<string, string | undefined>> = process.env): SharedOpts {
   return {
-    ...portsAsked({ port: values.port, wsPort: values["ws-port"] }),
+    ...portsAsked({ port: values.port, wsPort: values["ws-port"], listen: values.listen }),
     statePath: statePathFrom(values.state),
+    home: wspHome(env),
     providerEnv: providerEnvWith({
       ...(values.provider !== undefined ? { provider: values.provider } : {}),
       ...(values["docker-host"] !== undefined ? { dockerHost: values["docker-host"] } : {}),
-    }),
+    }, env),
   };
 }
 
@@ -719,11 +752,12 @@ function initRefusal(lock: HostLock, statePath: string): string {
 /** The --state a later command needs to find what this init wrote, only when the init was given one. */
 const stateFlag = (opts: { statePath: string }, values: Pick<SharedFlags, "state">): string[] => (values.state !== undefined ? ["--state", shellQuote(opts.statePath)] : []);
 
-/** The wsp up that serves what this init records, carrying the state and port flags the init was given. */
-export function upCommandFor(opts: { port: number; wsPort: number; statePath: string }, values: Pick<SharedFlags, "state" | "port" | "ws-port">): string {
+/** The wsp up that serves what this init records, carrying the state, port and address flags the init was given. */
+export function upCommandFor(opts: { port: number; wsPort: number; address?: string; statePath: string }, values: Pick<SharedFlags, "state" | "port" | "ws-port" | "listen">): string {
   return [
     "wsp up",
     ...stateFlag(opts, values),
+    ...(values.listen !== undefined ? ["--listen", shellQuote(opts.address ?? LOOPBACK)] : []),
     ...(values.port !== undefined ? ["--port", String(opts.port)] : []),
     ...(values["ws-port"] !== undefined ? ["--ws-port", String(opts.wsPort)] : []),
   ].join(" ");
@@ -782,6 +816,7 @@ async function init(
         nonInteractive: flags.nonInteractive,
         statePath: opts.statePath,
         ports: { port: opts.port, wsPort: opts.wsPort, named: opts.named, states: statesHere(opts.statePath) },
+        address: opts.address,
         upCommand: flags.upCommand,
         runtime: () => makeRuntime(keys, opts.statePath, goldenRecipe(keys), opts.providerEnv),
         roads: rt => workspaceRoads(rt, agentHomes(homedir()), workspaceEnvsFor(keys)),
@@ -818,6 +853,7 @@ async function init(
       scan: recipe => scanTools(nodeHost(), recipe),
       runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `daemon on node ${(await deployDaemon(machine)).node}` }, opts.providerEnv),
       ports: { port: opts.port, wsPort: opts.wsPort, named: opts.named, states: statesHere(opts.statePath) },
+      address: opts.address,
       upCommand: flags.upCommand,
       forkCommand: flags.forkCommand,
       relay: async (rt, builder, hooks) =>
@@ -843,6 +879,8 @@ async function init(
 export interface ServeOptions {
   port: number;
   wsPort: number;
+  /** The address the host binds; this computer alone when absent. */
+  address?: string;
   statePath: string;
   /** What this host picks its machine provider out of; this process's own environment when the caller names none. */
   providerEnv?: ProviderEnv;
@@ -898,6 +936,7 @@ async function hostFor(
   opts: {
     port: number;
     wsPort: number;
+    address?: string;
     statePath: string;
     webDir?: string;
     openUrl?: UrlOpener;
@@ -908,13 +947,15 @@ async function hostFor(
   io: CliIO,
   run: RunningWsp = runningWsp(),
 ): Promise<HostHandle> {
+  const address = opts.address ?? LOOPBACK;
   const lockPath = lockPathFor(opts.statePath);
-  const lock = takeLock(lockPath, opts.statePath, { port: opts.port, wsPort: opts.wsPort });
+  const lock = takeLock(lockPath, opts.statePath, { port: opts.port, wsPort: opts.wsPort, address });
   try {
     const handle = await startHost({
       runtime: rt,
       port: opts.port,
       wsPort: opts.wsPort,
+      listen: address,
       webDir: opts.webDir ?? assetDir("web"),
       // Read at each fork, not once at start: the init job saves a key while this host serves.
       workspaceEnvs: golden => workspaceEnvsFor(keysFound()).workspaceEnvs?.(golden) ?? {},
@@ -924,7 +965,7 @@ async function hostFor(
       statePath: opts.statePath,
       init: hostInitDoor(rt, opts.statePath, run, opts.openUrl ?? systemOpener(), line => io.log(line), opts.providerEnv),
     });
-    writeFileSync(lockPath, JSON.stringify({ ...lock, port: handle.port, wsPort: handle.wsPort }));
+    writeFileSync(lockPath, JSON.stringify({ ...lock, port: handle.port, wsPort: handle.wsPort, address }));
     // Other local tools read the token from disk; the WS never sees it in a URL.
     const tokenPath = hostTokenPath(opts.statePath);
     writeFileSync(tokenPath, handle.authToken, { mode: 0o600 });
@@ -933,7 +974,8 @@ async function hostFor(
     mkdirSync(dirname(pointer), { recursive: true });
     writeFileSync(pointer, `${home}\n`);
 
-    for (const line of addressLines(opts.statePath, handle)) io.log(line);
+    for (const line of addressLines(opts.statePath, { ...handle, address })) io.log(line);
+    if (!isLoopback(address)) io.log(listenBeyondLoopbackLine(address));
     if (keys.anthropic === undefined) io.log(noClaudeKeyNote(forksNoMachines(rt.backend.capabilities)));
     return {
       ...handle,
@@ -980,10 +1022,10 @@ function serviceAddress(statePath: string): ServiceAddress {
 
 /** The line the service runs: this node and this wsp, serving the same state file and ports the install was given.
  * Every one is spelled out, since a service has no cwd of the person's to read a default from. */
-function serviceArgv(opts: { port: number; wsPort: number; statePath: string }): string[] {
+function serviceArgv(opts: { port: number; wsPort: number; address?: string; statePath: string }): string[] {
   const bin = process.argv[1];
   if (bin === undefined) throw new Error("wsp up --service needs the path wsp was started from, and this process has none");
-  return [process.execPath, resolve(bin), "up", "--state", opts.statePath, "--port", String(opts.port), "--ws-port", String(opts.wsPort)];
+  return [process.execPath, resolve(bin), "up", "--state", opts.statePath, "--port", String(opts.port), "--ws-port", String(opts.wsPort), "--listen", opts.address ?? LOOPBACK];
 }
 
 /** A host already holds the state file, so the service would only start a second one that refuses the lock. */
@@ -1020,7 +1062,7 @@ export function claudeKeyOnlyInThisShell(sources: KeySources = keySources()): st
   return `note: ANTHROPIC_API_KEY is only in this shell's environment, so the service starts without it and the workspaces it forks get no claude credentials. Put it in ${join(sources.home, ".env")} to carry it over.`;
 }
 
-export async function upServiceCommand(io: CliIO, opts: { port: number; wsPort: number; statePath: string; providerEnv?: ProviderEnv }, deps: ServiceDeps): Promise<number> {
+export async function upServiceCommand(io: CliIO, opts: { port: number; wsPort: number; address?: string; statePath: string; providerEnv?: ProviderEnv }, deps: ServiceDeps): Promise<number> {
   const manager = deps.manager;
   if (manager === undefined) {
     io.error(noManagerLine(deps.platform));
@@ -1070,6 +1112,7 @@ export async function upServiceCommand(io: CliIO, opts: { port: number; wsPort: 
   }
   io.log(`${manager.words} ${unit.name} is loaded; it serves again at every login`);
   for (const line of addressLines(opts.statePath, lock)) io.log(line);
+  if (!isLoopback(opts.address ?? LOOPBACK)) io.log(listenBeyondLoopbackLine(opts.address ?? LOOPBACK));
   io.log(`log         ${logPath}`);
   const after = manager.afterLoad?.(at);
   if (after !== undefined) io.log(after);
@@ -1130,6 +1173,7 @@ interface SharedFlags {
   help?: boolean;
   port?: string;
   "ws-port"?: string;
+  listen?: string;
   state?: string;
   yes?: boolean;
   "non-interactive"?: boolean;
@@ -1141,6 +1185,8 @@ interface SharedFlags {
   "no-local"?: boolean;
   local?: boolean;
   service?: boolean;
+  code?: string;
+  name?: string;
   provider?: string;
   "docker-host"?: string;
 }
@@ -1150,7 +1196,7 @@ interface Command {
   json: boolean;
   /** Why the MCP server has no tool for it. */
   cliOnly: string;
-  run(io: CliIO, opts: SharedOpts, values: SharedFlags): Promise<number>;
+  run(io: CliIO, opts: SharedOpts, values: SharedFlags, args: string[]): Promise<number>;
 }
 
 /** The commands the shared parse serves, by word; a line with no word is `up`. */
@@ -1175,6 +1221,31 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     json: false,
     cliOnly: "reads this computer's lock and service manager; a tool that answers at all is proof a host is up",
     run: (io, opts) => statusCommand(io, opts, systemService()),
+  },
+  pair: {
+    json: false,
+    cliOnly: "hands out a code that lets another computer drive this host; only a person at the host's own terminal gives that away",
+    run: (io, opts, _values, args) => pairCommand(io, opts, args),
+  },
+  devices: {
+    json: false,
+    cliOnly: "lists and takes away the computers that may drive this host, which belongs with the terminal that handed them the code",
+    run: (io, opts, _values, args) => devicesCommand(io, opts, args),
+  },
+  connect: {
+    json: false,
+    cliOnly: "spends a pairing code and keeps the token it buys in this person's own files; where their wsp points is theirs to say",
+    run: (io, opts, values, args) => connectCommand(io, opts, values, args),
+  },
+  hosts: {
+    json: false,
+    cliOnly: "reads and moves which host every line on this computer runs against, which no thread decides for the person",
+    run: (io, opts, _values, args) => hostsCommand(io, opts, args),
+  },
+  disconnect: {
+    json: false,
+    cliOnly: "hands a host back the token this computer drives it by, which belongs with the terminal that took it",
+    run: (io, opts, _values, args) => disconnectCommand(io, opts, args),
   },
   init: {
     json: true,
@@ -1238,14 +1309,15 @@ const MCP_COMMAND = "mcp";
 /** The flags `wsp mcp` and `wsp mcp install` parse. */
 export const MCP_OPTIONS: Options = {
   agent: { type: "string", multiple: true },
+  host: { type: "string" },
   json: { type: "boolean" },
   remove: { type: "boolean" },
   state: { type: "string" },
   help: { type: "boolean", short: "h" },
 };
 
-const mcpInstallUsage = (): string => `wsp ${MCP_COMMAND} install --agent <id> [--agent <id>] [--json] [--remove]   (${MCP_AGENT_IDS})`;
-const mcpUsage = (): string => `usage: wsp ${MCP_COMMAND}\n       ${mcpInstallUsage()}`;
+const mcpInstallUsage = (): string => `wsp ${MCP_COMMAND} install --agent <id> [--agent <id>] [--host <alias>] [--json] [--remove]   (${MCP_AGENT_IDS})`;
+const mcpUsage = (): string => `usage: wsp ${MCP_COMMAND} [--host <alias>]\n       ${mcpInstallUsage()}`;
 
 /** The usage of the command a line stopped short of, whether it is a verb or `mcp`; none when no command owns the
  * word. `mcp` needs its own answer here because it is not in the verb table and its flags follow the word. */
@@ -1260,7 +1332,7 @@ function commandUsage(word: string): string | undefined {
  * `--json` instead of taking it and printing prose. */
 async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => string, run: RunningWsp, env: Readonly<Record<string, string | undefined>>): Promise<number> {
   const usage = mcpUsage();
-  let values: { agent?: string[]; json?: boolean; remove?: boolean; state?: string; help?: boolean };
+  let values: { agent?: string[]; host?: string; json?: boolean; remove?: boolean; state?: string; help?: boolean };
   let words: string[];
   try {
     ({ values, positionals: words } = parseArgs({ args: argv, options: MCP_OPTIONS, allowPositionals: true }));
@@ -1274,7 +1346,7 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
   const statePath = statePathOf(values.state);
   if (words.length === 0) {
     // The agent starts the server in its own folder, which is the folder a thread opened with no workspace is placed by.
-    await serveMcp(statePath, { alsoHere, cwd: process.cwd(), env });
+    await serveMcp(statePath, { alsoHere, cwd: process.cwd(), env, ...(values.host !== undefined ? { host: values.host } : {}) });
     return 0;
   }
   const json = values.json === true;
@@ -1296,7 +1368,7 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
     }
     return gone.failures.length > 0 ? 1 : 0;
   }
-  const report = installEach(agents, mcpServerSpec(statePath, run), homedir(), project);
+  const report = installEach(agents, mcpServerSpec(statePath, run, values.host !== undefined ? { host: values.host } : {}), homedir(), project);
   if (json) io.log(JSON.stringify(report));
   else {
     for (const placed of report.installed) for (const line of installLines(placed)) io.log(line);
@@ -1315,6 +1387,7 @@ export const SHARED_OPTIONS: Options = {
   help: { type: "boolean", short: "h" },
   port: { type: "string" },
   "ws-port": { type: "string" },
+  listen: { type: "string" },
   state: { type: "string" },
   yes: { type: "boolean", short: "y" },
   "non-interactive": { type: "boolean" },
@@ -1326,6 +1399,8 @@ export const SHARED_OPTIONS: Options = {
   "no-local": { type: "boolean" },
   local: { type: "boolean" },
   service: { type: "boolean" },
+  code: { type: "string" },
+  name: { type: "string" },
   provider: { type: "string" },
   "docker-host": { type: "string" },
 };
@@ -1341,6 +1416,8 @@ export const COMMAND_LINES: readonly CommandLine[] = [
   ...CLI_VERBS.map(v => ({ words: v.name, options: { ...COMMON, ...v.options }, tool: toolName(v.name) })),
   { words: MCP_COMMAND, options: MCP_OPTIONS, cliOnly: "is the tool server itself" },
   { words: `${MCP_COMMAND} install`, options: MCP_OPTIONS, cliOnly: "writes an agent's own config and skills folder, which is done once from a shell" },
+  { words: "devices revoke", options: without(SHARED_OPTIONS, ["json"]), cliOnly: "takes away a computer's token, which belongs with the terminal that handed it the code" },
+  { words: "hosts default", options: without(SHARED_OPTIONS, ["json"]), cliOnly: "moves which host every line on this computer runs against, which no thread decides for the person" },
   ...Object.entries(COMMANDS).map(([words, command]) => ({ words, options: command.json ? SHARED_OPTIONS : without(SHARED_OPTIONS, ["json"]), cliOnly: command.cliOnly })),
 ];
 
@@ -1371,14 +1448,14 @@ export async function cli(argv: string[], io: CliIO = terminalIO(), run: Running
     io.log(HELP);
     return 0;
   }
-  const opts = optsFor(values);
+  const opts = optsFor(values, env);
   const word = positionals[0] ?? "up";
   const command = COMMANDS[word];
   const json = values.json === true;
   if (command === undefined) return failed(io, json, usageRefusal(commandUsage(word) ?? `unknown command: ${word}\n\n${HELP}`));
   if (json && !command.json) return failed(io, json, usageRefusal(`Unknown option '--json' for wsp ${word}: only ${JSON_COMMANDS.map(w => `wsp ${w}`).join(", ")} prints JSON.`));
   try {
-    return await command.run(io, opts, values);
+    return await command.run(io, opts, values, positionals.slice(1));
   } catch (e) {
     return failed(io, json, e);
   }

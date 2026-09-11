@@ -107,6 +107,13 @@ describe("terminal font row", () => {
     expect(await detectTerminalFont(fakeHost({ ...iterm, terminal: "WezTerm" }))).toEqual([row("JetBrains Mono", "terminal font: JetBrains Mono (WezTerm)")]);
   });
 
+  it("Ghostty on a Linux computer with no config draws with the same built-in font, found on PATH rather than in /Applications", async () => {
+    const jetbrains = [row("JetBrains Mono", "terminal font: JetBrains Mono (Ghostty)")];
+    expect(await detectTerminalFont(fakeHost({ platform: "linux", which: ["ghostty"], files: { "~/.zshrc": 10 } }))).toEqual(jetbrains);
+    // Nothing of Ghostty there is no row, as a Mac without it has none.
+    expect(await detectTerminalFont(fakeHost({ platform: "linux", files: { "~/.zshrc": 10 } }))).toEqual([]);
+  });
+
   it("with no running terminal known, a config that names a font beats an installed terminal's default", async () => {
     const ghosttyApp = { "/Applications/Ghostty.app/": 5000 };
     const iterm = { files: { ...ghosttyApp, "~/Library/Preferences/com.googlecode.iterm2.plist": 4000 }, exec: { "defaults export com.googlecode.iterm2 -": ITERM_PLIST } };

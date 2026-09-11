@@ -7,6 +7,7 @@ import { join } from "node:path";
 import type { AdapterEvent, TurnResult } from "@wsp/protocol";
 import { CATALOG } from "@wsp/catalog";
 import { allRows, type RecipeAnswer } from "../src/recipe-answer.js";
+import { HERE } from "./recipe-fixture.js";
 import { BUILDER_IDLE_MS, type GoldenImport } from "@wsp/engine";
 import { createRuntime, memoryStore, type HarnessAdapterFactory, type ReapResult, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -178,7 +179,7 @@ describe("wsp cli", () => {
     expect(existsSync(out)).toBe(false);
     expect(logs[0]).toBe("Agents");
     expect(logs).toContain("Tools");
-    expect(logs).toContain("Also on this Mac");
+    expect(logs).toContain(`Also on ${HERE}`);
     // The scanner runs on the command line, and the fixture PATH has no package manager on it.
     expect(logs).toContain("  none");
     expect(logs.at(-1)).toContain("Nothing was written.");
@@ -262,7 +263,7 @@ describe("host serves the app", () => {
     const html = await page.text();
     expect(html).toContain('<script type="module" crossorigin src="/assets/app.js">');
     expect(inlineScripts(html)).toEqual([
-      `window.__WSP__ = {"wsPort":${handle.wsPort},"token":"${handle.authToken}","version":"${VERSION}"};`,
+      `window.__WSP__ = {"wsPort":${handle.wsPort},"token":"${handle.authToken}","wsPath":"/ws","paired":true,"version":"${VERSION}"};`,
     ]);
     expect(html).not.toContain("window.__WSP__ ||");
   });
@@ -271,7 +272,7 @@ describe("host serves the app", () => {
     const { rt } = testRuntime();
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), statePath: "/Users/dev/.wsp/state.json" });
     const html = await (await fetch(`http://127.0.0.1:${handle.port}/`)).text();
-    expect(inlineScripts(html)).toEqual([`window.__WSP__ = {"wsPort":${handle.wsPort},"token":"${handle.authToken}","version":"${VERSION}","statePath":"/Users/dev/.wsp/state.json"};`]);
+    expect(inlineScripts(html)).toEqual([`window.__WSP__ = {"wsPort":${handle.wsPort},"token":"${handle.authToken}","wsPath":"/ws","paired":true,"version":"${VERSION}","statePath":"/Users/dev/.wsp/state.json"};`]);
   });
 
   it("the handle's createWorkspace forks the golden's head the way the app's own create does, and refuses without a golden", async () => {
@@ -300,7 +301,7 @@ describe("host serves the app", () => {
     writeFileSync(recipePath, JSON.stringify({ entries: [{ rung: "shell", id: "shell/zshrc", label: "~/.zshrc", paths: ["~/.zshrc"], bytes: 10, default: "bring", bring: true }, font(true)] }));
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), recipePath });
     const boot = async () => inlineScripts(await (await fetch(`http://127.0.0.1:${handle!.port}/`)).text())[0];
-    expect(await boot()).toBe(`window.__WSP__ = {"wsPort":${handle.wsPort},"token":"${handle.authToken}","version":"${VERSION}","terminalFont":"Hack"};`);
+    expect(await boot()).toBe(`window.__WSP__ = {"wsPort":${handle.wsPort},"token":"${handle.authToken}","wsPath":"/ws","paired":true,"version":"${VERSION}","terminalFont":"Hack"};`);
     writeFileSync(recipePath, JSON.stringify({ entries: [font(false)] }));
     expect(await boot()).not.toContain("terminalFont");
     writeFileSync(recipePath, "not json");

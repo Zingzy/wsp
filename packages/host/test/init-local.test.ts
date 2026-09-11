@@ -141,6 +141,21 @@ describe("wsp init with no provider key", () => {
     expect(f.hosts).toBe(1);
   });
 
+  it("over ssh, a run told to bind beyond this computer prints that address and no forward, and opens no browser", async () => {
+    const f = fake({ tty: true });
+    f.io.env["SSH_CONNECTION"] = "10.0.0.2 51000 10.0.0.9 22";
+    f.opts.address = "100.64.0.3";
+    const run = runLocalInit(f.opts, f.io);
+    await f.until(ALSO_LOCAL_QUESTION);
+    await f.press(ENTER);
+    expect((await run).code).toBe(0);
+    const workspaces = await f.runtime().workspaces.list();
+    expect(f.trail).toEqual(["local"]);
+    const out = f.text();
+    expect(out).toContain(`Open http://100.64.0.3:4400/#w/${workspaces[0]!.id}`);
+    expect(out).not.toContain("ssh -L");
+  });
+
   it("No at the tick leaves the state empty and says what would fill it", async () => {
     const f = fake({ tty: true });
     const run = runLocalInit(f.opts, f.io);

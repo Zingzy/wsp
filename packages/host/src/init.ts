@@ -10,7 +10,7 @@
 import type { Readable, Writable } from "node:stream";
 import { stripVTControlCharacters, styleText } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
-import { LOGIN_CHOICES, MCP_REMOTE_ID, RUNGS, type HistoryProgress, type Manifest, type ManifestEntry, type ProjectScan, type Rung } from "@wsp/collect";
+import { LOGIN_CHOICES, MCP_REMOTE_ID, RUNGS, type HistoryProgress, type Manifest, type ManifestEntry, type Platform, type ProjectScan, type Rung } from "@wsp/collect";
 import { SnapshotFailedError, checkProviderKey, describeAge, keyCheckLine, type BackendPricing } from "@wsp/engine";
 import type { GoldenStageEvent, GoldenStep, Recipe, RecipeCustomRow, RecipeHistory, ToolPin, WorkspaceView } from "@wsp/protocol";
 import { PrepareStoppedError, type GoldenBuilderView, type GoldenRecipe, type GoldenStage, type Runtime } from "@wsp/runtime";
@@ -50,7 +50,7 @@ import {
   withTicksOf,
   withoutAgentTools,
 } from "./init-recipe.js";
-import { ALSO_TITLE } from "./init-also.js";
+import { alsoTitle } from "./init-also.js";
 import { TOOLS_TITLE, pickScreens, projectNote, signInItems, wspToolsAgent, wspToolsItems } from "./init-pick.js";
 import { PROJECT_GROUP } from "./init-table.js";
 import { SIGN_IN_WORDS } from "./signin-words.js";
@@ -134,12 +134,12 @@ export interface InitOptions {
   home: string;
   /** Reads Keychain-held logins chosen as copy; the real one raises macOS's consent dialog. */
   secrets: SecretReader;
-  platform: "darwin" | "linux";
+  platform: Platform;
   /** What this computer's Homebrew knows about its installed formulae: sizes, dependencies, source repositories.
    * The real one runs brew; absent or failing, formula sizes come from the measured table alone. */
   brew?: () => Promise<BrewTable>;
-  /** What the package managers here could install on the image, minus what the recipe already installs: the Also on
-   * this Mac screen. The real one runs each manager's listing; absent or failing, that screen is not shown. */
+  /** What the package managers here could install on the image, minus what the recipe already installs: the Also
+   * screen. The real one runs each manager's listing; absent or failing, that screen is not shown. */
   scan?: (recipe: readonly RecipeCustomRow[]) => Promise<readonly ScanRow[]>;
   /** Builds the runtime around the recipe the ticks produced. */
   runtime(recipe: GoldenRecipe): Runtime;
@@ -149,6 +149,8 @@ export interface InitOptions {
    * serving the app, so it probes the pair before anything is read: a pair nobody named steps over a busy port, one
    * a person named is refused, both before a machine bills. */
   ports: PortsAsked & PortProbes;
+  /** The address the host this run serves binds; this computer alone when absent. */
+  address?: string;
   /** The command that starts the app once the golden is recorded, with the flags this run was given. */
   upCommand: string;
   /** The command that forks the first workspace from it, for a run with nobody at a terminal that asked for none. */
@@ -782,6 +784,8 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 export interface Reading {
   /** The rows as the collector left them, agent tools taken out and the refused rows locked; the catalog's bare rows join later. */
   manifest: Manifest;
+  /** The computer the collector read, which is what every screen calls it. */
+  platform: Platform;
   catalogRecipe: Recipe;
   brew: BrewTable;
   scanned: readonly ScanRow[];
@@ -799,7 +803,7 @@ export function manifestFor(reading: Reading, recipe: Recipe, statePath: string)
   return applyRecipe(withCatalogAgents(withSavedPins(reading.manifest, readSavedManifest(recipePath(statePath)))), recipe);
 }
 
-export type ReadOptions = Pick<InitOptions, "importFolder" | "recipeFile" | "collect" | "brew" | "recipe" | "statePath" | "home" | "scan">;
+export type ReadOptions = Pick<InitOptions, "importFolder" | "recipeFile" | "collect" | "brew" | "recipe" | "statePath" | "home" | "scan" | "platform">;
 
 /** Reads this computer for a run, saying each step on the output; `interactive` says a person will see the Also
  * screen, which is the one reason the package managers are read. */
@@ -826,7 +830,7 @@ export async function readThisComputer(opts: ReadOptions, io: Pick<InitIO, "outp
   spinner.stop();
   const source = given === undefined ? "found on this computer" : "found on this computer, ticked by the recipe";
   manifest = { ...manifest, entries: withoutAgentTools(manifest.entries) };
-  // The Mac's Homebrew sizes the formulae on the Tools screen and says which tap formula has a release to take; a
+  // Homebrew here sizes the formulae on the Tools screen and says which tap formula has a release to take; a
   // brew that fails leaves the measured table.
   let brew: BrewTable = new Map();
   if (opts.brew !== undefined && manifest.entries.some(e => e.id.startsWith(BREW_ID_PREFIX))) {
@@ -839,7 +843,7 @@ export async function readThisComputer(opts: ReadOptions, io: Pick<InitIO, "outp
     sizes.stop();
   }
   // This computer's own recipe is read even under a recipe file: the file's ticks and answers stand, the rows and
-  // their sources are what is here, so a row about this Mac (an agent's config to write) never follows another's.
+  // their sources are what is here, so a row about this computer (an agent's config) never follows another's.
   let catalogRecipe: Recipe;
   const histories = spin(io.output, "Reading what your agents used", io.isTTY);
   let projectScan: ProjectScan | undefined;
@@ -856,15 +860,15 @@ export async function readThisComputer(opts: ReadOptions, io: Pick<InitIO, "outp
         histories.detail(historyProgressLine(p));
       },
     );
-    // This Mac's tools rows the catalog does not carry join the recipe under their own ids, off, so a tick on one
-    // (from the file or the Also on this Mac screen) has a row to land on.
+    // This computer's tools rows the catalog does not carry join the recipe under their own ids, off, so a tick on
+    // one (from the file or the Also screen) has a row to land on.
     const here = withOutsideRows(read, manifest, brew);
     // The rows outside the catalog are the file's, not this computer's: a plain run keeps what wsp recipe --add
-    // wrote into the recipe beside the state, and the ticks on this Mac's own rows, from the same file this run ends
-    // by writing. A file's tick on such a row that this Mac has no row for is said, since nothing here installs it.
+    // wrote into the recipe beside the state, and the ticks on this computer's own rows, from the same file this run
+    // ends by writing. A file's tick on such a row this computer has no row for is said: nothing here installs it.
     const carried = carriedOver(smallRecipePath(opts.statePath), line => notes.push(line));
     const base = given === undefined ? applySets({ ...here, ...(carried.custom === undefined ? {} : { custom: carried.custom }) }, carried.ticks) : withTicksOf(here, given);
-    if (opts.recipeFile !== undefined) for (const r of outsideRowsOf(given)) if (r.on && !here.rows.some(h => h.id === r.id)) notes.push(notHereLine(packageOf(r), opts.recipeFile));
+    if (opts.recipeFile !== undefined) for (const r of outsideRowsOf(given)) if (r.on && !here.rows.some(h => h.id === r.id)) notes.push(notHereLine(opts.platform, packageOf(r), opts.recipeFile));
     // The pins this setup's builds recorded stand under the file's own: the file says what to install, the state what was installed.
     catalogRecipe = withPins(base, new Map([...carried.pins, ...pinsOf(given?.rows)]));
   } catch (e) {
@@ -881,7 +885,7 @@ export async function readThisComputer(opts: ReadOptions, io: Pick<InitIO, "outp
     const st = statOf(join(opts.home, rel));
     return st === undefined || st.kind === "dangling" ? undefined : st.kind === "dir";
   });
-  // What else this Mac could put on the image; only its own screen uses it, so nothing runs when that screen is not shown.
+  // What else this computer could put on the image; only its own screen uses it, so nothing runs when it is not shown.
   let scanned: readonly ScanRow[] = [];
   if (opts.scan !== undefined && interactive && opts.recipeFile === undefined) {
     const spinner = spin(io.output, "Reading what your package managers installed here", io.isTTY);
@@ -889,11 +893,11 @@ export async function readThisComputer(opts: ReadOptions, io: Pick<InitIO, "outp
       // The recipe's own rows go in, so a tool it already installs is not drawn off for a tick to install twice.
       scanned = await opts.scan(customRows(catalogRecipe));
     } catch (e) {
-      notes.push(`Your package managers could not be read (${e instanceof Error ? e.message : String(e)}); the ${ALSO_TITLE} screen is left out.`);
+      notes.push(`Your package managers could not be read (${e instanceof Error ? e.message : String(e)}); the ${alsoTitle(opts.platform)} screen is left out.`);
     }
     spinner.stop();
   }
-  return { manifest, catalogRecipe, brew, scanned, ...(projectScan !== undefined ? { projectScan } : {}), notes, source };
+  return { manifest, platform: opts.platform, catalogRecipe, brew, scanned, ...(projectScan !== undefined ? { projectScan } : {}), notes, source };
 }
 
 /** What the sign-in stage runs with, for a sign-in run again later: the same relay flow, link and stop. */
@@ -946,6 +950,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       brew,
       from: opts.recipeFile === undefined ? "agents" : "logins",
       home: opts.home,
+      platform: opts.platform,
       ...(opts.pricing.builderDiskGb !== undefined ? { builderDiskGb: opts.pricing.builderDiskGb } : {}),
       scan: scanned,
       ...(opts.project !== undefined ? { project: opts.project } : {}),
@@ -970,7 +975,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   } else {
     // A run that asks nothing answers every screen with the word it would have opened on, read from the screens' own defaults.
     answers = defaultAnswers(manifest, brew);
-    for (const [id, choice] of signInItems(manifest, brew).initial) {
+    for (const [id, choice] of signInItems(manifest, brew, opts.platform).initial) {
       answers.choices.set(id, choice);
       if (choice === "copy") answers.ticks.add(id);
       else answers.ticks.delete(id);
@@ -1057,7 +1062,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   if (builderDiskGb !== undefined && disk.over > 0) {
     log.error(`This recipe needs about ${fmtBytes(disk.total)} on the machine; the ${builderDiskGb} GB disk leaves ${fmtBytes(disk.room)} after the base image and ${fmtBytes(TOOLS_DISK_FLOOR)} of headroom.`, out);
     // Where the person can take rows off: the screens whose ticks moved the number, or the file that answered them.
-    const screens = customRows(catalogRecipe).length > 0 ? `${TOOLS_TITLE} or ${ALSO_TITLE}` : TOOLS_TITLE;
+    const screens = customRows(catalogRecipe).length > 0 ? `${TOOLS_TITLE} or ${alsoTitle(opts.platform)}` : TOOLS_TITLE;
     const where = opts.recipeFile !== undefined ? `in ${opts.recipeFile}` : `under ${screens}`;
     cancel(`Nothing was booted. Untick about ${fmtBytes(disk.over)} of tools or agents ${where} and run wsp init again; the recipe is kept.`, out);
     return { code: 1 };
@@ -1516,6 +1521,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       ...(named !== undefined ? { name: named } : {}),
       ...(opts.importFolder !== undefined ? { folder: opts.importFolder } : {}),
       ...(opts.noLocal === true ? { noLocal: true } : {}),
+      platform: opts.platform,
       input: io.input,
       output: io.output,
     });
@@ -1544,9 +1550,10 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     await closeRuntime();
     return result;
   }
-  const url = appUrl(handle.port, opened?.id);
+  const at = { port: handle.port, address: opts.address };
+  const url = appUrl(at, opened?.id);
   runLog.note(`app ${url}`);
-  await openApp(url, handle, io, interactive, logLine());
+  await openApp(url, at, io, interactive, logLine());
   outro("wsp keeps serving the app from this terminal; Ctrl-C stops it.", out);
   await closeRelay();
   return { ...result, handle };

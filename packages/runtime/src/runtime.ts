@@ -186,6 +186,7 @@ import { DAEMON_TOKEN_SET, assertTokenShape, rotateDaemonTokenScript } from "./d
 import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy, idleReason } from "./idle.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import { POLL_INTERVAL_MS, createStatusTracker, machineStateOf, phaseLeavingGone, providerSaid, type StatusApi, type StatusListOptions, type StatusWatchOptions } from "./status.js";
+import { makeDevices, type DeviceDoor } from "./devices.js";
 import type { Store } from "./store.js";
 import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, smallestModel } from "./harness-catalog.js";
 
@@ -1194,6 +1195,9 @@ export interface Runtime {
   /** Enriched status (machine state, daemon reach, size, rate) + cost ticker; its list leaves out the workspaces the
    * caller's origin may not drive, as workspaces.list does. */
   readonly status: OriginStatusApi;
+  /** The computers paired with this host and the one time codes that pair them, one collection each on this state
+   * file, so a restart neither locks a paired computer out nor keeps a revoked one in. */
+  readonly devices: DeviceDoor;
   /** The person's view preferences, one record on this state file, so the desktop app and a browser tab agree. */
   readonly preferences: {
     get(): Promise<Preferences>;
@@ -5664,6 +5668,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     workspaces,
     projects,
     sessions: sessionsApi,
+    devices: makeDevices(store),
     preferences,
     status: {
       ...status,

@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, CURL_NET, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_SUPERVISOR_PATH, GUEST_USER_ENV, OWNER_LABEL, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
-import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, templateRecordedLine, templateSkippedLine, type SnapshotStorage } from "@wsp/protocol";
+import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, LOOPBACK, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, templateRecordedLine, templateSkippedLine, type SnapshotStorage } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import { assetDir } from "./assets.js";
@@ -247,7 +247,7 @@ const supervisorRoad = (previewHostSuffix: string | undefined): string[] => [
 /** Whether the daemon is serving, in the words the guest can answer in: the socket table where the guest has one,
  * and bash's own network road on a container image, which ships neither ss nor curl. */
 const portCheck = (supervisor: DaemonSupervisor): string =>
-  supervisor === "entrypoint" ? `(exec 3<>/dev/tcp/127.0.0.1/${DAEMON_PORT}) 2>/dev/null` : `ss -ltnH 'sport = :${DAEMON_PORT}' | grep -q .`;
+  supervisor === "entrypoint" ? `(exec 3<>/dev/tcp/${LOOPBACK}/${DAEMON_PORT}) 2>/dev/null` : `ss -ltnH 'sport = :${DAEMON_PORT}' | grep -q .`;
 
 /** The in-guest install+start sequence. `previewHostSuffix` (".preview.example.com") is what dev servers must
  * accept to answer through the edge; absent on a backend without preview URLs. The daemon is left running under

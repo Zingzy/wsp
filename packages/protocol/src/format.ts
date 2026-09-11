@@ -1586,6 +1586,14 @@ export const THIS_COMPUTER = "this computer";
  * that wsp reaches and never runs. */
 export const OVER_SSH = "a machine over ssh";
 
+/** What the computer wsp is reading is called on the screens that read it: a Mac by the name its owner uses for it,
+ * any other computer the plain word. The one place that word is decided, so no screen tells a Linux reader the tool
+ * was built for somebody else. */
+export const thisComputer = (platform: "darwin" | "linux"): string => (platform === "darwin" ? "this Mac" : THIS_COMPUTER);
+
+/** The heading over the tools a package manager here has that no catalog row carries: the wizard's own screen and
+ * the `wsp recipe scan` section are one section, so they carry one name. */
+export const alsoTitle = (platform: "darwin" | "linux"): string => `Also on ${thisComputer(platform)}`;
 
 /** The one sentence a local workspace refuses a request relayed from a machine with. A local workspace is this
  * computer; it answers only its own person, so a request that reached the host from a machine wsp runs cannot drive
@@ -1825,10 +1833,11 @@ export function pinMovedLine(from: ToolPin | undefined, to: ToolPin | undefined)
 /** Why a tool installs differently now when its road and pin stand: the lines the road runs are not the golden's. */
 export const INSTALLER_MOVED_LINE = "its install lines changed";
 
-/** The detail of a tools row the catalog does not carry: it is on this Mac, at the version this Mac runs when the
- * collector read one. */
-export function installedOnMacLine(version: string | undefined): string {
-  return version === undefined ? "installed on this Mac" : `installed on this Mac, ${version}`;
+/** The detail of a tools row the catalog does not carry: it is on this computer, at the version this computer runs
+ * when the collector read one. */
+export function installedHereLine(platform: "darwin" | "linux", version: string | undefined): string {
+  const here = `installed on ${thisComputer(platform)}`;
+  return version === undefined ? here : `${here}, ${version}`;
 }
 
 /** What the build does with a tools row it installs: the road in its own words, then the line the step runs. */
@@ -1841,17 +1850,17 @@ export function leftOutLine(note: string): string {
   return `left out of the build: ${note}`;
 }
 
-/** Why `wsp recipe --add` refuses a package a manager on this Mac already has: that package is a row of its own,
+/** Why `wsp recipe --add` refuses a package a manager on this computer already has: that package is a row of its own,
  * which the build installs by the road the plan resolves for it (a tap formula from its GitHub release, pinned),
  * and a second row would install it twice by a line the image can refuse. The word that ticks the row instead. */
-export function addAlreadyHereLine(id: string, scanId: string): string {
-  return `--add ${id}: a package manager on this Mac already has ${id}, so it is a row of its own; tick it with --set ${scanId}=on, which installs it by its own road, rather than adding a second row that installs it again`;
+export function addAlreadyHereLine(platform: "darwin" | "linux", id: string, scanId: string): string {
+  return `--add ${id}: a package manager on ${thisComputer(platform)} already has ${id}, so it is a row of its own; tick it with --set ${scanId}=on, which installs it by its own road, rather than adding a second row that installs it again`;
 }
 
-/** A recipe file's tick on a tool outside the catalog that this Mac has no row for: nothing here says how to install
+/** A recipe file's tick on a tool outside the catalog that this computer has no row for: nothing here says how to install
  * it, so the tick is said and left out rather than dropped in silence. */
-export function notHereLine(name: string, file: string): string {
-  return `${name} is ticked in ${file}, but this Mac has no row that installs it; it is left out.`;
+export function notHereLine(platform: "darwin" | "linux", name: string, file: string): string {
+  return `${name} is ticked in ${file}, but ${thisComputer(platform)} has no row that installs it; it is left out.`;
 }
 
 /** The app's line for a workspace still forked from an older golden version, offered the way the helper update is:
