@@ -10,6 +10,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { WS_PATH, hostFromEnv, isLoopback, isUrl, servedHostname, usageRefusal, type HostRoad } from "@wsp/protocol";
 import { servingHost } from "./host-lock.js";
+import { defaultHomeIn } from "./serving-home.js";
 
 /** The address predicate has one home in the protocol; the command line's callers read it from here. */
 export { isUrl };
@@ -47,7 +48,7 @@ export interface HostEntry {
 }
 
 /** The home wsp keeps everything of a person's in when nobody names another. */
-export const DEFAULT_HOME = join(homedir(), ".wsp");
+export const DEFAULT_HOME = defaultHomeIn(homedir());
 
 /** The folder wsp keeps its state, its keys and its hosts in. One reading, since the command line, the verbs and the
  * tool server all have to name the same folder. */
@@ -251,21 +252,22 @@ export function stateIgnoredLine(where: string): string {
   return `--state names a file on this computer and this line runs against ${where}, which serves its own, so it is not read.`;
 }
 
-/** The one reading of which host a line runs against: the flag, then WSP_HOST, then the default alias when no host
- * on this computer serves the state file, then that host. The command line and the tool server both come here, so
- * a verb and a tool started the same way go to the same host. */
+/** The one reading of which host a line runs against: the flag, then WSP_HOST, then the pair a turn's launch left
+ * in the environment, then the host on this computer serving the state file, then the default alias. The command
+ * line and the tool server both come here, so a verb and a tool started the same way go to the same host. */
 export function aimedHost(statePath: string, pick: HostPick = {}): HostAim {
   const env = pick.env ?? process.env;
   const home = pick.home ?? wspHome(env);
   const named = [pick.host, env["WSP_HOST"]].map(w => w?.trim()).find(w => w !== undefined && w !== "");
   if (named !== undefined) return aimAt(named, home, env);
+  // The pair is the identity the launch handed this turn, and it goes ahead of anything this computer holds: a
+  // guest's default state file is a path nothing serves, and a turn on this computer under a host that does serve
+  // it was still given its own token and not the host's. What a person types on the line still wins above.
+  const carried = hostFromEnv(env);
+  if (carried !== undefined) return { kind: "url", url: carried.url, token: carried.token };
   if (servingHost(statePath) !== undefined) return { kind: "here" };
   const fallback = defaultHost(home);
-  if (fallback !== undefined) return aimAt(fallback, home, env);
-  // Last of all, the pair a turn's launch left in this environment: a machine has no hosts folder and no host of
-  // its own, so this is the only road it has, and on a computer that has either of the others it never wins.
-  const carried = hostFromEnv(env);
-  return carried === undefined ? { kind: "here" } : { kind: "url", url: carried.url, token: carried.token };
+  return fallback === undefined ? { kind: "here" } : aimAt(fallback, home, env);
 }
 
 function aimAt(named: string, home: string, env: Readonly<Record<string, string | undefined>>): HostAim {

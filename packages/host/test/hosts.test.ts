@@ -166,19 +166,25 @@ describe("which host a line runs against", () => {
     expect(aimedHost("/nowhere/state.json", { env: { WSP_HOST: "https://attic.example" }, home })).toEqual({ kind: "url", url: "https://attic.example" });
   });
 
-  it("takes the pair a turn's launch left in the environment last of all, under every host on this computer", () => {
+  it("takes the pair a turn's launch left in the environment over any state file or alias on this computer, under the flag and WSP_HOST", () => {
     const home = tempDir("hosts-home");
     const carried = { WSP_HOST_URL: "http://10.0.0.2:4700", WSP_HOST_TOKEN: "scoped-token" };
+    const aimed = { kind: "url", url: "http://10.0.0.2:4700", token: "scoped-token" };
     const gone = join(tempDir("hosts-empty"), "state.json");
     // On a machine there is no hosts folder and no host of its own, so the pair is the only road there is.
-    expect(aimedHost(gone, { env: carried, home })).toEqual({ kind: "url", url: "http://10.0.0.2:4700", token: "scoped-token" });
-    // A host on this computer and a default alias both beat it.
-    expect(aimedHost(servedState(4600), { env: carried, home })).toEqual({ kind: "here" });
+    expect(aimedHost(gone, { env: carried, home })).toEqual(aimed);
+    // The pair is the identity the launch handed this turn: a host serving the state file the line names and a
+    // default alias are both this computer's roads, and neither is what the turn was given.
+    expect(aimedHost(servedState(4600), { env: carried, home })).toEqual(aimed);
     writeHost(home, "attic", record("https://attic.example", "d_attic"));
     setDefaultHost(home, "attic");
-    expect(aimedHost(gone, { env: carried, home })).toMatchObject({ kind: "alias", alias: "attic" });
+    expect(aimedHost(gone, { env: carried, home })).toEqual(aimed);
+    // What a person names on the line, or with WSP_HOST, still wins: those are typed, the pair is inherited.
+    expect(aimedHost(gone, { host: "attic", env: carried, home })).toMatchObject({ kind: "alias", alias: "attic" });
+    expect(aimedHost(gone, { env: { ...carried, WSP_HOST: "attic" }, home })).toMatchObject({ kind: "alias", alias: "attic" });
     // An address with no token beside it opens nothing, so the pair reads as absent.
     expect(aimedHost(gone, { env: { WSP_HOST_URL: "http://10.0.0.2:4700" }, home: tempDir("hosts-none") })).toEqual({ kind: "here" });
+    expect(aimedHost(servedState(4600), { env: { WSP_HOST_URL: "http://10.0.0.2:4700" }, home })).toEqual({ kind: "here" });
   });
 
   it("gives a --host address the token the environment carries for that same address, and nothing for another", () => {

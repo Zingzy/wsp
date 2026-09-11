@@ -12,7 +12,7 @@ const made: string[] = [];
 function sources(): { pkg: string; repo: string; from: Record<string, string> } {
   const root = mkdtempSync(join(tmpdir(), "wsp-stage-"));
   made.push(root);
-  const paths = { pkg: join(root, "pkg"), repo: join(root, "repo"), from: { web: join(root, "web", "dist"), daemon: join(root, "daemon"), cli: join(root, "cli", "dist") } };
+  const paths = { pkg: join(root, "pkg"), repo: join(root, "repo"), from: { web: join(root, "web", "dist"), daemon: join(root, "daemon"), cli: join(root, "cli") } };
   mkdirSync(join(paths.pkg, "dist"), { recursive: true });
   writeFileSync(join(paths.pkg, "dist", "bin.js"), "#!/usr/bin/env node\n", { mode: 0o644 });
   for (const kind of ASSET_KINDS) {
@@ -24,8 +24,11 @@ function sources(): { pkg: string; repo: string; from: Record<string, string> } 
   writeFileSync(join(paths.from["web"]!, "assets", "app.js"), "export {};");
   writeFileSync(join(paths.from["daemon"]!, "package.json"), '{"name":"@wsp/daemon"}');
   writeFileSync(join(paths.from["daemon"]!, "src.ts"), "// never travels");
-  // The published command is split across chunk files its bin imports by name, so the whole folder travels.
-  writeFileSync(join(paths.from["cli"]!, "chunk-1.js"), "export const y = 2;");
+  // The published command is split across chunk files its bin imports by name, so its dist travels whole, and its
+  // package.json with it, since the bin reads its version through that file.
+  writeFileSync(join(paths.from["cli"]!, "dist", "chunk-1.js"), "export const y = 2;");
+  writeFileSync(join(paths.from["cli"]!, "package.json"), '{"name":"@zingzy/wsp","version":"9.9.9"}');
+  writeFileSync(join(paths.from["cli"]!, "tsup.config.ts"), "// never travels");
   mkdirSync(paths.repo, { recursive: true });
   writeFileSync(join(paths.repo, "LICENSE"), "AGPL-3.0-only");
   writeFileSync(join(paths.repo, "README.md"), "# wsp");
@@ -47,14 +50,17 @@ describe("staging the published package", () => {
     }
     expect(existsSync(join(stagedAsset(paths.pkg, "web"), "assets", "app.js"))).toBe(true);
     expect(existsSync(join(stagedAsset(paths.pkg, "daemon"), "package.json"))).toBe(true);
-    // The wsp command rides in the package too, whole: it is what a machine's daemon bundle carries to the guest.
-    expect(existsSync(join(stagedAsset(paths.pkg, "cli"), "chunk-1.js"))).toBe(true);
+    // The wsp command rides in the package too, as npm lays it out: it is what a machine's daemon bundle carries to
+    // the guest, and the bin reads its version through the package.json beside its dist.
+    expect(existsSync(join(stagedAsset(paths.pkg, "cli"), "dist", "chunk-1.js"))).toBe(true);
+    expect(JSON.parse(readFileSync(join(stagedAsset(paths.pkg, "cli"), "package.json"), "utf8"))).toMatchObject({ version: "9.9.9" });
   });
 
-  it("takes only what a guest runs out of the daemon's folder", () => {
+  it("takes only what a guest runs out of the daemon's folder and the command's", () => {
     const paths = sources();
     stageAssets(paths);
     expect(existsSync(join(stagedAsset(paths.pkg, "daemon"), "src.ts"))).toBe(false);
+    expect(existsSync(join(stagedAsset(paths.pkg, "cli"), "tsup.config.ts"))).toBe(false);
   });
 
   it("copies the licence and the readme in, because npm publishes only the package's own", () => {
