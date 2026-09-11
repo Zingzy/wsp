@@ -84,7 +84,7 @@ import { VERSION } from "./version.js";
 
 /** The computer every screen and every reader here is told it is on; the one reading, so a run, its hand-off and
  * the init job a host serves never disagree about which of the two this is. */
-const hostPlatform = (): Platform => (platform() === "darwin" ? "darwin" : "linux");
+export const hostPlatform = (): Platform => (platform() === "darwin" ? "darwin" : "linux");
 
 /** One line per exit class, the code first, wrapped to the help's width. */
 const exitCodeHelp = (): string => ExitClass.options.map(cls => wrap(`  ${EXIT_CODES[cls]} ${cls.padEnd(8)}  ${EXIT_WORDS[cls]}`, 80, " ".repeat(14)).join("\n")).join("\n");
