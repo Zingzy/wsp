@@ -100,15 +100,27 @@ describe("a project golden", () => {
     expect((await rt.golden.projects()).map(p => p.snapshotId)).toEqual([expected.snapshotId, second.snapshotId]);
   });
 
+  it("a woken workspace on a provider whose snapshots copy the disk from any life is snapshotted: the backend saw firstLife false and nothing in the runtime refused", async () => {
+    const { rt, advance, backend } = await setup();
+    backend.snapshotsAnyLife = true;
+    const ws = await loaded(rt, advance);
+    await rt.workspaces.nap(ws.id);
+    await rt.workspaces.wake(ws.id);
+    const golden = await rt.workspaces.snapshot(ws.id);
+    expect(golden).toMatchObject({ workspaceId: ws.id, projects: [PROJECT] });
+    expect(backend.machines[0]!.snapshotLives).toEqual([{ firstLife: false }]);
+    expect(backend.snapshots.map(s => s.id)).toEqual([golden.snapshotId]);
+  });
+
   it("a workspace without a project, a napping one and one that was ever resumed are refused in one sentence, and no snapshot is taken", async () => {
     const { rt, advance, backend } = await setup();
     const bare = await rt.workspaces.create({ golden: "snap_golden-v12", name: "bare" });
     await expect(rt.workspaces.snapshot(bare.id)).rejects.toThrow("bare has no project loaded; import one before snapshotting it");
     const ws = await loaded(rt, advance);
     await rt.workspaces.nap(ws.id);
-    await expect(rt.workspaces.snapshot(ws.id)).rejects.toThrow("task is napping; only a running first-life machine can be snapshotted");
+    await expect(rt.workspaces.snapshot(ws.id)).rejects.toThrow("task is napping; only a running machine can be snapshotted");
     await rt.workspaces.wake(ws.id);
-    await expect(rt.workspaces.snapshot(ws.id)).rejects.toMatchObject({ kind: "notFirstLife", message: expect.stringContaining("snapshot of task refused") });
+    await expect(rt.workspaces.snapshot(ws.id)).rejects.toMatchObject({ kind: "notFirstLife", message: expect.stringMatching(/^snapshot \S+ refused: machine m\d+ is not first-life/) });
     await expect(rt.workspaces.snapshot("ws_nope")).rejects.toThrow("no such workspace");
     expect(backend.snapshots).toEqual([]);
     expect(await rt.golden.projects()).toEqual([]);

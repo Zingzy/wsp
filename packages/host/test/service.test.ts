@@ -4,10 +4,11 @@
 // unit files they write and the commands they hand over.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { parseArgs } from "node:util";
 import { dirname, join } from "node:path";
-import { NOTHING_TO_SERVE_LINE } from "@wsp/protocol";
+import { LOOPBACK } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { claudeKeyOnlyInThisShell, downCommand, keyOnlyInThisShell, statusCommand, upServiceCommand, type CliIO, type ServiceDeps } from "../src/cli.js";
+import { SERVE_FLAGS, SHARED_OPTIONS, claudeKeyOnlyInThisShell, downCommand, keyOnlyInThisShell, optsFor, statusCommand, upServiceCommand, type CliIO, type ServeAsked, type ServiceDeps } from "../src/cli.js";
 import {
   SERVICE_MANAGERS,
   installService,
@@ -115,10 +116,18 @@ describe("one module per service manager", () => {
     expect(SERVICE_MANAGERS.launchd.unit(other).name).not.toBe(SERVICE_MANAGERS.launchd.unit(at).name);
   });
 
-  it("a service starts with the PATH the install had and WSP_HOME when it moved the state folder, and never a key", () => {
+  it("a service starts with the PATH the install had, WSP_HOME when it moved the state folder, the provider the shell named, and never a key", () => {
     expect(serviceEnv({ PATH: "/opt/homebrew/bin:/usr/bin", SOLARI_API_KEY: KEY })).toEqual({ PATH: "/opt/homebrew/bin:/usr/bin" });
     expect(serviceEnv({ PATH: "/usr/bin", WSP_HOME: "/Users/z/dev/.wsp" })).toEqual({ PATH: "/usr/bin", WSP_HOME: "/Users/z/dev/.wsp" });
     expect(serviceEnv({}).PATH).toContain("/usr/bin");
+    // Every variable a provider is named in travels: the shell that installed the service is gone by the time it runs.
+    expect(serviceEnv({ PATH: "/usr/bin", WSP_PROVIDER: "docker", WSP_DOCKER: "1", DOCKER_HOST: "tcp://10.0.0.4:2375" })).toEqual({
+      PATH: "/usr/bin",
+      WSP_PROVIDER: "docker",
+      WSP_DOCKER: "1",
+      DOCKER_HOST: "tcp://10.0.0.4:2375",
+    });
+    expect(serviceEnv({ PATH: "/usr/bin", WSP_PROVIDER: "" })).toEqual({ PATH: "/usr/bin" });
   });
 
   it("each manager reads its own holds answer: what it says for a service it does not have, and what it says when it could not answer at all", () => {
@@ -343,13 +352,13 @@ describe("installing, stopping and reading a service", () => {
 describe("wsp up --service, wsp down and wsp status", () => {
   let home: string;
   let statePath: string;
-  let opts: { port: number; wsPort: number; statePath: string };
+  let opts: ServeAsked;
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), "wsp-service-cli-"));
     mkdirSync(join(home, ".wsp"), { recursive: true });
     statePath = join(home, ".wsp", "state.json");
-    opts = { port: 4400, wsPort: 4410, statePath };
+    opts = { port: 4400, wsPort: 4410, named: true, address: LOOPBACK, statePath };
     writeFileSync(statePath, JSON.stringify({ goldens: { default: SEALED_GOLDEN } }));
     vi.stubEnv("HOME", home);
     vi.stubEnv("WSP_HOME", join(home, ".wsp"));
@@ -418,7 +427,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(keyOnlyInThisShell({ env: {}, cwd: home, home: join(home, ".wsp") })).toBeUndefined();
   });
 
-  it("refuses a computer with no service manager, a state file a host already holds, and a state file with no golden", async () => {
+  it("refuses a computer with no service manager and a state file a host already holds", async () => {
     keyInFile();
     const none: string[] = [];
     expect(await upServiceCommand(quietIO([], none), opts, { ...svc().deps, manager: undefined })).toBe(1);
@@ -430,14 +439,51 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(await upServiceCommand(quietIO([], busy), opts, held.deps)).toBe(1);
     expect(busy[0]).toContain(`a wsp host (pid ${process.pid}) is already serving ${statePath}`);
     expect(held.ran).toEqual([]);
-    rmSync(join(home, ".wsp", "host.lock"));
+  });
 
+  it("installs on a computer with nothing in its state: the host it starts records this computer rather than being sent to another command first", async () => {
+    // The box story: the host is installed on a machine nobody has run anything else on, and the person pairs with
+    // it afterwards. Nothing in the state is a state the host fills in, not a refusal before the unit is written.
     writeFileSync(statePath, JSON.stringify({}));
-    const bare: string[] = [];
-    const empty = svc();
-    expect(await upServiceCommand(quietIO([], bare), opts, empty.deps)).toBe(1);
-    expect(bare).toEqual([NOTHING_TO_SERVE_LINE]);
-    expect(empty.ran).toEqual([]);
+    const fake = svc();
+    const lines: string[] = [];
+    const errors: string[] = [];
+    expect(await upServiceCommand(quietIO(lines, errors), opts, fake.deps)).toBe(0);
+    expect(errors).toEqual([]);
+    expect(fake.ran.map(argv => argv[1])).toEqual(["load"]);
+    expect(fake.plans[0]!.argv.slice(2)).toEqual(["up", "--state", statePath, "--port", "4400", "--ws-port", "4410", "--listen", "127.0.0.1"]);
+  });
+
+  it("the unit runs the wsp up the person typed: every flag that shapes a serving host is in ExecStart, read back by the same parse", async () => {
+    keyInFile();
+    const typed = ["up", "--service", "--state", statePath, "--listen", "0.0.0.0", "--port", "4407", "--ws-port", "4433", "--provider", "docker", "--docker-host", "tcp://10.0.0.4:2375", "--advertise", "http://10.0.0.9:4407", "--no-relay"];
+    // Every flag of the table is in that line, so a row added to it and forgotten here fails rather than passing quietly.
+    for (const flag of SERVE_FLAGS) expect(typed, `--${flag.name} is in the line this case types`).toContain(`--${flag.name}`);
+    const asked = optsFor(parseArgs({ args: typed, options: SHARED_OPTIONS, allowPositionals: true }).values, process.env);
+    const fake = svc();
+    const errors: string[] = [];
+    expect(await upServiceCommand(quietIO([], errors), asked, fake.deps)).toBe(0);
+    expect(errors).toEqual([]);
+    const argv = fake.plans[0]!.argv;
+    expect(argv.slice(2)).toEqual([
+      "up",
+      "--state", statePath,
+      "--port", "4407",
+      "--ws-port", "4433",
+      "--listen", "0.0.0.0",
+      "--advertise", "http://10.0.0.9:4407",
+      "--provider", "docker",
+      "--docker-host", "tcp://10.0.0.4:2375",
+      "--no-relay",
+    ]);
+    // The words as the manager reads them, not only as argv: systemd takes one line, and each word is quoted there.
+    expect(SERVICE_MANAGERS.systemd.text(fake.plans[0]!)).toContain(
+      `ExecStart='${process.execPath}' '${argv[1]!}' 'up' '--state' '${statePath}' '--port' '4407' '--ws-port' '4433' '--listen' '0.0.0.0' '--advertise' 'http://10.0.0.9:4407' '--provider' 'docker' '--docker-host' 'tcp://10.0.0.4:2375' '--no-relay'`,
+    );
+    // The line in the unit is a line wsp reads: parsed again, it asks for exactly what the person asked for.
+    const again = optsFor(parseArgs({ args: argv.slice(2), options: SHARED_OPTIONS, allowPositionals: true }).values, process.env);
+    const serving = (o: ServeAsked): unknown => [o.statePath, o.port, o.wsPort, o.address, o.advertise, o.provider, o.dockerHost, o.relay];
+    expect(serving(again)).toEqual(serving(asked));
   });
 
   it("a service that loads and never serves points at its log and leaves the service there to look at", async () => {

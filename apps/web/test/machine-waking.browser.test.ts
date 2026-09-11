@@ -12,12 +12,15 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { RESUME_CAP_MS, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, WAKE_ASKS_FOR_MS, WAKE_ASK_EVERY_MS } from "@wsp/protocol";
+import { wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine } from "@wsp/protocol";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
 import { startVite, type ViteChild } from "./vite-child";
 
-/** The asks the shipped half hour holds, which is what the fixture's row counts against. */
-const ASKS = wakeAsksIn(WAKE_ASKS_FOR_MS, WAKE_ASK_EVERY_MS);
+/** The cloud provider's asking as the fixture plays it: half an hour once a minute, each call capped at half a minute. */
+const ASKING_MS = 30 * 60_000;
+const RESUME_CAP_MS = 30_000;
+/** The asks that half hour holds, which is what the fixture's row counts against. */
+const ASKS = wakeAsksIn(ASKING_MS, 60_000);
 
 const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SHOTS = join(WEB_DIR, "artifacts", "render");
@@ -69,7 +72,7 @@ describe.skipIf(renderSkipped !== undefined)("the machine tab of a wake the prov
     await page!.goto(`${base}?gave-up&theme=${theme}`);
     await page!.waitForSelector("[data-k=reason]");
     expect(await page!.locator("[data-k=state]").textContent()).toBe("Paused");
-    const words = wakeGaveUpLine(ASKS, WAKE_ASKS_FOR_MS - RESUME_CAP_MS);
+    const words = wakeGaveUpLine(ASKS, ASKING_MS - RESUME_CAP_MS);
     expect(await page!.locator("[data-k=reason]").textContent()).toBe(words);
     // Both roads stand: the rebuild the sentence names, and the wake, since the fault is the provider's and may pass.
     const rebuild = page!.locator("button", { hasText: "Rebuild" });

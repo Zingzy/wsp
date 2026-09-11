@@ -102,7 +102,7 @@ describe.runIf(LIVE)("workspace create canary, live", () => {
 
   it("workspace fork: the body workspaces.create posts is accepted, and delete leaves it gone", { timeout: 300_000 }, async () => {
     const source = await backend.create({ kind: "sandbox", template: "base", cpu: 1, memMb: 2048, labels: { ...SOURCE_LABELS, createdAt: new Date().toISOString() } });
-    snapshotId = await source.snapshot("create-canary-source");
+    snapshotId = await source.snapshot("create-canary-source", { firstLife: true });
     await killUntilGone(backend, source);
 
     rt = createRuntime({ backend, store: memoryStore(), adapters: {} });

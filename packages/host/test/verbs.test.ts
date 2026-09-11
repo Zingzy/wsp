@@ -1944,7 +1944,7 @@ describe("wsp verbs over the host", () => {
     const resumed = await run("snapshot", "alpha");
     expect(resumed.code).toBe(1);
     expect(resumed.io.errors).toHaveLength(1);
-    expect(resumed.io.errors[0]).toMatch(/^wsp snapshot: snapshot of alpha refused: machine m\d+ is not first-life/);
+    expect(resumed.io.errors[0]).toMatch(/^wsp snapshot: snapshot \S+ refused: machine m\d+ is not first-life/);
     expect(await rt.golden.projects()).toHaveLength(2);
   });
 

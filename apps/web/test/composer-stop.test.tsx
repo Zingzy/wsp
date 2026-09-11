@@ -17,6 +17,7 @@ import { ChatComposer } from "../src/components/chat/ChatComposer.js";
 import { ChatView } from "../src/components/chat/ChatView.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
+import { caps } from "./caps.js";
 
 let restoreLayout: () => void = () => {};
 beforeAll(() => { restoreLayout = installFakeLayout(); });
@@ -36,7 +37,7 @@ const workspace: WorkspaceView = {
 };
 /** The runtime's row for the running turn: its own id, which sessions.interrupt takes, beside the harness id the events carry. */
 const runningRow: SessionView = { id: "sess_local_1", workspaceId: WS, harness: "claude", status: "running", claudeSessionId: CLAUDE_SESSION, prompt: "go", startedAt: 0 };
-const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: false, kept: false, sizes: [] };
+const CAPS = caps();
 
 let rows: SessionView[] = [];
 let onInterrupt: (frame: Frame) => Frame | undefined = () => undefined;

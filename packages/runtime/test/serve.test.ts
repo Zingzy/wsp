@@ -802,7 +802,8 @@ describe("serveRuntime workspaces.exec", () => {
 
   it("carries the stop of a wake the provider never took, so the row's own stop reaches the runtime", async () => {
     const backend = stubBackend();
-    const runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, wake: { askEveryMs: 10 } });
+    backend.lifecycle.budgets.resumeAsks!.everyMs = 10;
+    const runtime = createRuntime({ backend, store: memoryStore(), adapters: {} });
     srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
     const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });

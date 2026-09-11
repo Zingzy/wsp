@@ -16,6 +16,7 @@ import { useStore } from "../src/protocol/store.js";
 import { CloudSetupDialog } from "../src/sidebar/CloudSetupDialog.js";
 import { CloudSetupRow } from "../src/sidebar/CloudSetupRow.js";
 import { resetAskedToNotify } from "../src/shell/needsYou.js";
+import { caps } from "./caps.js";
 
 const MIB = 1024 * 1024;
 const GIB = 1024 * MIB;
@@ -115,7 +116,7 @@ function fakeApi(over: { setup?: InitSetup; refuse?: string; key?: KeyAnswer } =
     upgrade: vi.fn(async () => {
       throw new Error("none");
     }),
-    capabilities: vi.fn(async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: false, kept: false, sizes: [] })),
+    capabilities: vi.fn(async () => (caps())),
     daemonReach: vi.fn(async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 })),
     portReach: vi.fn(async (_id: string, port: number) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 })),
     startSession: vi.fn(async () => ({ id: "s1", workspaceId: "ws", harness: "claude", status: "running" as const })),

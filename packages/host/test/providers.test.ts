@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { DockerBackend, NoProviderBackend, SolariBackend } from "@wsp/engine";
+import { DockerBackend, LocalBackend, NoProviderBackend, SolariBackend, SshBackend, type MachineBackend } from "@wsp/engine";
 import { goldenRecipe, makeRuntime, optsFor, providerSlotOf, swapProvider } from "../src/cli.js";
-import { PROVIDER_MODULES, providerBackendFor, providerEnvWith, providerModule } from "../src/providers.js";
+import { PROVIDER_MODULES, providerBackendFor, providerEnvNames, providerEnvWith, providerModule, type ProviderModule } from "../src/providers.js";
 
 const pick = (keys: Record<string, string> = {}, env: Record<string, string | undefined> = {}) => ({ keys, env });
 
@@ -37,6 +37,21 @@ describe("provider modules", () => {
     expect(PROVIDER_MODULES.at(-1)!.selects(pick())).toBe(true);
   });
 
+  it("every registered backend, and the two kinds outside the registry, declares a pause mode and a lifecycle together or neither", () => {
+    // Built the way the host builds them, with fake picks: a key that looks fake, a daemon nothing dials.
+    const built = PROVIDER_MODULES.map(m => [m.id, m.build(pick({ solari: "sk-ant-x" }, { DOCKER_HOST: "unix:///nonexistent/docker.sock" }))] as const);
+    const all: readonly (readonly [string, MachineBackend])[] = [...built, ["local", new LocalBackend({ root: "/tmp/wsp-providers" })], ["ssh", new SshBackend()]];
+    const modes = Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.pauseMode]));
+    expect(modes).toEqual({ docker: "memory", solari: "memory", none: undefined, local: undefined, ssh: undefined });
+    for (const [, b] of all) expect(b.capabilities.pauseMode === undefined || ["memory", "disk"].includes(b.capabilities.pauseMode)).toBe(true);
+    // The runtime reads the budgets only where a pause exists, so the two are declared together or not at all.
+    for (const [id, b] of all) expect([id, b.lifecycle !== undefined]).toEqual([id, b.capabilities.pauseMode !== undefined]);
+    for (const [, b] of all) if (b.lifecycle !== undefined) {
+      expect(b.lifecycle.budgets.wakeAttempts).toBeGreaterThanOrEqual(1);
+      expect(b.lifecycle.budgets.daemonAnswersMs).toBeGreaterThan(0);
+    }
+  });
+
   it("the words wsp up and wsp init take land in what the run picks its provider out of", () => {
     expect(optsFor({ state: "/tmp/wsp-providers/state.json", provider: "docker", "docker-host": "ssh://maya@127.0.0.1:2222" }).providerEnv).toMatchObject({
       WSP_PROVIDER: "docker",
@@ -49,7 +64,7 @@ describe("provider modules", () => {
     try {
       const held = providerSlotOf(rt)!.current();
       // Containers: a nap that keeps RAM, no public port routes, and sizes to offer, so the fork roads are open.
-      expect(held.capabilities).toMatchObject({ previewUrls: false, ramPreservingPause: true, liveCloneForks: false });
+      expect(held.capabilities).toMatchObject({ previewUrls: false, pauseMode: "memory", liveCloneForks: false });
       expect(held.capabilities.sizes.length).toBeGreaterThan(0);
       swapProvider(rt, { solari: "slr_live_fake" });
       expect(providerSlotOf(rt)!.current().capabilities.previewUrls).toBe(false);
@@ -62,5 +77,15 @@ describe("provider modules", () => {
     // The words a run picks a provider out of are not the words a typed key is checked under: a person typing a
     // cloud key on a computer that forks containers is asking about the key.
     expect(providerModule({ keys: { solari: "slr_live_fake" }, env: {} }).id).toBe("solari");
+  });
+
+  it("the variables a service carries are the rows' own, so a provider added brings its variable with it", () => {
+    expect(providerEnvNames()).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST"]);
+    // The row a provider is added as: the list follows it, and nothing else has to be remembered for the unit its
+    // host is installed as to be given the variable that selects it.
+    const fly: ProviderModule = { id: "fly", envNames: ["WSP_PROVIDER", "FLY_API_TOKEN"], selects: p => p.env["FLY_API_TOKEN"] !== undefined, build: () => new NoProviderBackend() };
+    expect(providerEnvNames([...PROVIDER_MODULES, fly])).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST", "FLY_API_TOKEN"]);
+    // What a row selects on is what it names: a row reading a variable it never listed would be carried by neither.
+    for (const m of PROVIDER_MODULES) for (const name of m.envNames) expect(providerEnvNames()).toContain(name);
   });
 });

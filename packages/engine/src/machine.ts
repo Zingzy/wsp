@@ -38,9 +38,9 @@ export interface RunOptions {
 }
 
 /** The route this host takes to one guest port. On a backend whose capabilities say previewUrls it is a public URL
- * with the provider's token embedded, the token standalone, and its expiry in epoch ms (60-min TTL); on one that
- * says otherwise it is a route only the computer holding the backend can take, with no token and an expiry at the
- * end of the machine's life. */
+ * with the provider's token embedded, the token standalone, and its expiry in epoch ms as the provider sets it; on
+ * one that says otherwise it is a route only the computer holding the backend can take, with no token and an expiry
+ * at the end of the machine's life. */
 export interface PreviewReach {
   url: string;
   token: string;
@@ -60,6 +60,12 @@ export interface MachineShape {
   createdAt?: string;
 }
 
+/** The history the runtime hands a snapshot: whether this machine was ever resumed. The fact is the record's; the
+ * rule about it, if the provider has one, is the backend's. */
+export interface MachineLife {
+  firstLife: boolean;
+}
+
 export interface Machine {
   readonly id: string;
   readonly kind: MachineKind;
@@ -77,7 +83,9 @@ export interface Machine {
   /** A command that may run for minutes: started detached on the guest and read until it exits or the deadline
    * kills it; the result is shaped like exec's. */
   run(script: string, opts: RunOptions): Promise<ExecResult>;
-  snapshot(name: string): Promise<string>;
+  /** Answers when the provider holds the snapshot. A backend that refuses one of a resumed machine throws
+   * NotFirstLifeError before any call; one whose snapshot copies the disk from any life ignores `life`. */
+  snapshot(name: string, life: MachineLife): Promise<string>;
   pause(): Promise<void>;
   /** `signal` ends the call where the caller has stopped waiting on it, so a resume nobody is waiting on is not left
    * running behind them; the backend's own cap on how long it waits for an answer is its business, not the caller's. */
@@ -147,9 +155,35 @@ export interface BackendPricing {
   builderDiskGb?: number;
 }
 
+export interface LifecycleBudgets {
+  /** How many times a wake may resume the machine and check it before a fresh fork replaces it. Each attempt after
+   * the first is a pause and a resume; a provider that bills starts declares 1. */
+  wakeAttempts: number;
+  /** How long the guest's daemon gets to answer through its route once the machine reads running, after a fork and
+   * after a resume alike, before the runtime says it did not. */
+  daemonAnswersMs: number;
+  /** How the host keeps asking after a resume the provider did not take (a ResumeUnansweredError): once every
+   * everyMs of wall time from the first ask, for forMs. Absent, the host asks once and stops. */
+  resumeAsks?: { everyMs: number; forMs: number };
+}
+
+/** What the runtime reads to drive a machine through naps and wakes on this provider. Present exactly when the
+ * capabilities carry a pauseMode; a registry test holds the two together. */
+export interface Lifecycle {
+  budgets: LifecycleBudgets;
+  /** Optional: the instant by which the provider may stop this running machine if this host is gone, computed by
+   * the runtime's own backstop policy and handed over whenever the idle window is armed, for a provider whose
+   * backstop is pushed rather than set once at create. Never called for a machine the runtime has napped or
+   * forgotten. Called from the policy's own arming and not awaited: a rejection is logged, and the backend decides
+   * whether a given instant is worth a call, since the window is armed on every streamed chunk. */
+  backstop?(machine: Machine, until: number): Promise<void>;
+}
+
 export interface MachineBackend {
   readonly capabilities: Capabilities;
   readonly pricing: BackendPricing;
+  /** Present on every backend whose capabilities carry a pauseMode. */
+  readonly lifecycle?: Lifecycle;
   /** Optional: what a machine of each kind boots from on this provider when nothing names a template. Absent leaves
    * the built-in names the engine knows. */
   readonly baseTemplates?: Readonly<Record<MachineKind, string>>;
