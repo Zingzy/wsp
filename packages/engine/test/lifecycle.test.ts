@@ -56,6 +56,27 @@ describe("Workspace lifecycle", () => {
 });
 
 describe("Workspace verified wake", () => {
+  it("the wake check dials a route minted after the resume, not the one cached before the nap, on both roads into the check", async () => {
+    let minted = 0;
+    const machine = stubMachine({ previewUrl: async port => ({ url: `https://m1-${port}.example`, token: `t${++minted}`, expiresAt: Date.now() + 3_600_000 }) });
+    const handed: string[] = [];
+    const ws = new Workspace(machine, {
+      goldenSnapshot: "snap_g",
+      wakeCheck: async () => { handed.push((await ws.daemonReach()).token); return undefined; },
+    });
+    const before = await ws.daemonReach();
+    await ws.nap();
+    await ws.wake();
+    expect(before.token).toBe("t1");
+    // The check's own dial minted again; the route cached before the nap was not what it went through.
+    expect(handed).toEqual(["t2"]);
+    // A resume that landed without its call takes the same road: the routes are dropped before the check.
+    await ws.nap();
+    await ws.wake({ landed: true });
+    expect(handed).toEqual(["t2", "t3"]);
+    expect(minted).toBe(3);
+  });
+
   it("holds the phase at waking until the check passes, then stays on the same machine", async () => {
     const { machine, calls } = counting();
     const seen: string[] = [];

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { RESUME_CAP_MS } from "@wsp/protocol";
 import { isCapped, isMissing, NotFirstLifeError } from "../src/errors.js";
-import { REQUEST_ID_HEADER, SOLARI_PRICING, SolariBackend } from "../src/solari-backend.js";
+import { PREVIEW_TTL_MS, previewTokenExpiry, REQUEST_ID_HEADER, SOLARI_PRICING, SolariBackend } from "../src/solari-backend.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { EXEC_ENV } from "../src/golden-import.js";
 
@@ -214,6 +214,50 @@ describe("SolariBackend", () => {
     const m = await b.create({ kind: "sandbox" });
     await expect(m.snapshot("g", { firstLife: true })).rejects.toMatchObject({ kind: "snapshotUnavailable" });
     expect(f.mock.calls.filter(c => String(c[0]).includes("/snapshots")).length).toBe(1);
+  });
+});
+
+// Token in the measured Solari shape: base64url(JSON claims) + "." + signature. Not a 3-part JWT, the sandboxId
+// claim embeds literal dots, and exp is epoch milliseconds.
+function mintToken(exp: number): string {
+  const claims = {
+    sandboxId: "desktop-pool-i-0fd9ed7dc03a79db2:vm_001130:cmthqj8lg.TIblxI9qSig",
+    port: 7070,
+    orgId: "cmthqj8lg00sso001svwbxyxb",
+    exp,
+  };
+  return Buffer.from(JSON.stringify(claims)).toString("base64url") + ".WO_khRk6fakeSignature";
+}
+
+describe("previewTokenExpiry", () => {
+  it("reads the ms exp claim from the real token shape", () => {
+    const exp = Date.now() + 60 * 60_000;
+    expect(previewTokenExpiry(mintToken(exp))).toBe(exp);
+  });
+
+  it("falls back to the measured 60-min TTL when the token is opaque", () => {
+    const now = Date.now();
+    expect(previewTokenExpiry("not-a-token-at-all", now)).toBe(now + PREVIEW_TTL_MS);
+    expect(PREVIEW_TTL_MS).toBe(60 * 60_000);
+  });
+});
+
+describe("SolariMachine.previewUrl", () => {
+  it("mints via GET /sandboxes/:id/ports/:port and derives expiresAt from the token", async () => {
+    const id = "pool:vm_1:org.SIG"; // ids contain : and . and must be encoded
+    const exp = Date.now() + 60 * 60_000;
+    const token = mintToken(exp);
+    const url = `https://3fe6a8b705a72d14c7cc-7070.preview.getsolari.com?pt_token=${token}`;
+    const f = vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/sandboxes") return new Response(JSON.stringify({ sandboxId: id, kind: "sandbox" }), { status: 201 });
+      if (path === `/sandboxes/${encodeURIComponent(id)}/ports/7070`) return new Response(JSON.stringify({ url, token }), { status: 200 });
+      return new Response(JSON.stringify({ error: `no route ${path}` }), { status: 404 });
+    });
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    const m = await b.create({ kind: "sandbox" });
+    if (!m.previewUrl) throw new Error("SolariMachine must support previewUrl");
+    expect(await m.previewUrl(7070)).toEqual({ url, token, expiresAt: exp });
   });
 });
 

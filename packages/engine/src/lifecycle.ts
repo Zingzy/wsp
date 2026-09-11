@@ -41,8 +41,8 @@ export class Workspace {
   private phase: WorkspacePhase = "running";
   // Whether this machine was ever resumed, handed to every snapshot: the backend decides whether that matters.
   private firstLife = true;
-  // Keyed by port under one machine id: pause+wake keeps a reach valid
-  // (measured), but a resurrect/upgrade replaces the machine and voids them all.
+  // Keyed by port under one machine id: a resurrect or upgrade replaces the machine and voids them all, and a wake
+  // drops them too, since no provider promises the route minted before a nap still stands after it.
   private preview: { machineId: string; byPort: Map<number, PreviewReach> } = { machineId: "", byPort: new Map() };
 
   constructor(
@@ -76,8 +76,8 @@ export class Workspace {
     return this.portReach(DAEMON_PORT);
   }
 
-  /** Public route to one guest port, reusing the cached one while it is fresh
-   * (under ~50 min old). Whether anything listens there is not checked here. */
+  /** Public route to one guest port, reusing the cached one while it is fresh. Whether anything listens there is
+   * not checked here. */
   async portReach(port: number): Promise<PreviewReach> {
     if (this.preview.machineId !== this.machine.id) this.preview = { machineId: this.machine.id, byPort: new Map() };
     const reach = await refreshPreviewToken(this.machine, port, this.preview.byPort.get(port));
@@ -141,6 +141,9 @@ export class Workspace {
             break;
           }
         }
+        // The resumed machine is asked for its routes again before anything dials it: the check below goes through
+        // daemonReach, and a route cached before the nap is nobody's promise.
+        this.preview.byPort.clear();
         this.firstLife = false;
         const fault = this.hooks.wakeCheck ? await this.hooks.wakeCheck(this.machine) : undefined;
         if (fault === undefined) {

@@ -38,9 +38,9 @@ export interface RunOptions {
 }
 
 /** The route this host takes to one guest port. On a backend whose capabilities say previewUrls it is a public URL
- * with the provider's token embedded, the token standalone, and its expiry in epoch ms (60-min TTL); on one that
- * says otherwise it is a route only the computer holding the backend can take, with no token and an expiry at the
- * end of the machine's life. */
+ * with the provider's token embedded, the token standalone, and its expiry in epoch ms as the provider sets it; on
+ * one that says otherwise it is a route only the computer holding the backend can take, with no token and an expiry
+ * at the end of the machine's life. */
 export interface PreviewReach {
   url: string;
   token: string;

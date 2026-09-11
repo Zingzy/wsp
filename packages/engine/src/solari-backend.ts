@@ -3,7 +3,6 @@ import { NotFirstLifeError, ROAD_TRIES, backoffMs, classify, isMissing, realRetr
 import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
 import type { BackendPricing, ExecResult, Machine, MachineBackend, MachineKind, MachineLife, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
-import { previewTokenExpiry } from "./preview.js";
 import { BUILDER_DISK_GB } from "./tool-sizes.js";
 
 type Fetch = typeof globalThis.fetch;
@@ -74,6 +73,21 @@ export const SOLARI_PRICING: BackendPricing = {
   snapshotStorage: SNAPSHOT_STORAGE,
   builderDiskGb: BUILDER_DISK_GB,
 };
+
+/** Measured: the pt_token exp claim is 60 minutes from mint. */
+export const PREVIEW_TTL_MS = 60 * 60_000;
+
+/** Epoch-ms expiry of a preview token. Not a 3-part JWT: base64url(JSON claims) + "." + signature, and the sandboxId
+ * claim embeds literal dots, so cut at the last dot first and fall back to decoding the whole string. */
+export function previewTokenExpiry(token: string, now = Date.now()): number {
+  for (const cut of [token.lastIndexOf("."), token.length]) {
+    if (cut <= 0) continue;
+    const decoded = Buffer.from(token.slice(0, cut), "base64url").toString("utf8");
+    const exp = /"exp":(\d+)/.exec(decoded)?.[1];
+    if (exp !== undefined) return Number(exp);
+  }
+  return now + PREVIEW_TTL_MS;
+}
 
 function fail(e: WspError): never {
   throw Object.assign(new Error(e.message || `${e.kind} (${e.status})`), e);
