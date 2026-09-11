@@ -332,7 +332,7 @@ function table(rows: ReadonlyArray<ReadonlyArray<string>>): string[] {
   return rows.map(row => row.map((cell, i) => (i === row.length - 1 ? cell : cell.padEnd(widths[i]!))).join("  ").trimEnd());
 }
 
-type Flags = Record<string, string | boolean | string[] | undefined>;
+export type Flags = Record<string, string | boolean | string[] | undefined>;
 
 /** What both doors are handed beside the line or the arguments: the state file the host serves, which the recipe
  * verbs write beside, and the scanner for tools outside the catalog when the caller has one (it reaches the engine,
@@ -439,7 +439,7 @@ const PICK_FLAGS = ["model", "effort", "access"] as const;
 const PICK_OPTIONS: NonNullable<ParseArgsConfig["options"]> = Object.fromEntries(PICK_FLAGS.map(name => [name, { type: "string" }]));
 
 const flag = (flags: Flags, name: string): string | undefined => (typeof flags[name] === "string" ? (flags[name] as string) : undefined);
-const flagList = (flags: Flags, name: string): string[] => (Array.isArray(flags[name]) ? (flags[name] as string[]) : []);
+export const flagList = (flags: Flags, name: string): string[] => (Array.isArray(flags[name]) ? (flags[name] as string[]) : []);
 
 export async function workspaces(client: HostClient): Promise<WorkspaceOut[]> {
   return (await client.request<{ workspaces: WorkspaceOut[] }>("workspaces.list")).workspaces;
