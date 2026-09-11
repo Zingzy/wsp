@@ -105,6 +105,14 @@ describe("installing the MCP server for a local agent", () => {
     expect(JSON.parse(readFileSync(join(home, ".claude.json"), "utf8"))).toEqual({ mcpServers: { wsp: { command: shim, args: ["mcp", "--state", statePath] } } });
   });
 
+  it("the command line's own --host reaches the config the agent will run", async () => {
+    const out = io();
+    expect(await cli(["mcp", "install", "--agent", "claude", "--host", "box", "--json", "--state", statePath], out, PROC)).toBe(0);
+    expect(JSON.parse(readFileSync(join(home, ".claude.json"), "utf8"))).toEqual({
+      mcpServers: { wsp: { command: "/opt/node/bin/node", args: ["--disable-warning=ExperimentalWarning", "/opt/wsp/dist/bin.js", "mcp", "--host", "box"] } },
+    });
+  });
+
   it("run any other way, the server's command is this node with the flags and script it was started with, against this state file, wherever the agent's cwd is", () => {
     const node = { command: "/opt/node/bin/node", args: ["--disable-warning=ExperimentalWarning", "/opt/wsp/dist/bin.js", "mcp", "--state", statePath] };
     expect(mcpServerSpec(statePath, PROC)).toEqual(node);
@@ -113,6 +121,15 @@ describe("installing the MCP server for a local agent", () => {
     writeFileSync(join(home, "bin", "wsp"), "#!/usr/bin/env node\n");
     expect(mcpServerSpec(statePath, { ...PROC, PATH: `${join(home, "bin")}:/usr/bin` })).toEqual(node);
     expect(mcpServerSpec(statePath, { ...PROC, PATH: undefined })).toEqual(node);
+  });
+
+  it("an install against a host on another computer writes the alias and not a state file on this one", () => {
+    expect(mcpServerSpec(statePath, PROC, { host: "box" })).toEqual({
+      command: "/opt/node/bin/node",
+      args: ["--disable-warning=ExperimentalWarning", "/opt/wsp/dist/bin.js", "mcp", "--host", "box"],
+    });
+    // The state file is what a host on this computer serves; naming both would say the line reads one it ignores.
+    expect(mcpServerSpec(statePath, PROC, {}).args).toContain("--state");
   });
 
   it("places the server in the agent's config file under the home, creating the file and its folder, and says where", () => {
@@ -202,7 +219,7 @@ describe("installing the MCP server for a local agent", () => {
   it("--agent belongs to mcp install alone, a command with no JSON to print refuses --json, and mcp --help says its own usage", async () => {
     // Which shared-parse commands print JSON is the command table's fact: init prints each sign-in hand-off as one
     // object per line and takes the flag; recipe parses its own flags and prints its table as one object.
-    expect(PROSE_COMMANDS).toEqual(["up", "down", "status", "pair", "devices", "doctor"]);
+    expect(PROSE_COMMANDS).toEqual(["up", "down", "status", "pair", "devices", "connect", "hosts", "disconnect", "doctor"]);
     expect(JSON_COMMANDS).toEqual(["init"]);
     for (const cmd of PROSE_COMMANDS) {
       const out = io();
@@ -223,7 +240,7 @@ describe("installing the MCP server for a local agent", () => {
     expect(agented.errors[0]).toContain("Unknown option '--agent'");
     const help = io();
     expect(await cli(["mcp", "--help", "--state", statePath], help)).toBe(0);
-    expect(help.lines).toEqual(["usage: wsp mcp\n       wsp mcp install --agent <id> [--agent <id>] [--json] [--remove]   (claude, codex, gemini, opencode)"]);
+    expect(help.lines).toEqual(["usage: wsp mcp [--host <alias>]\n       wsp mcp install --agent <id> [--agent <id>] [--host <alias>] [--json] [--remove]   (claude, codex, gemini, opencode)"]);
     const stray = io();
     expect(await cli(["mcp", "install", "--nope", "--state", statePath], stray)).toBe(3);
     expect(stray.errors[0]).toContain("Unknown option '--nope'");
@@ -240,7 +257,7 @@ describe("installing the MCP server for a local agent", () => {
   it("a line that puts a flag before the word gets mcp's own usage, the way a verb's line gets its verb's", async () => {
     const flagFirst = io();
     expect(await cli(["--state", statePath, "mcp"], flagFirst)).toBe(3);
-    expect(flagFirst.errors).toEqual(["usage: wsp mcp\n       wsp mcp install --agent <id> [--agent <id>] [--json] [--remove]   (claude, codex, gemini, opencode)"]);
+    expect(flagFirst.errors).toEqual(["usage: wsp mcp [--host <alias>]\n       wsp mcp install --agent <id> [--agent <id>] [--host <alias>] [--json] [--remove]   (claude, codex, gemini, opencode)"]);
     expect(flagFirst.lines).toEqual([]);
     const verbLine = io();
     expect(await cli(["--state", statePath, "threads"], verbLine)).toBe(3);
@@ -279,7 +296,7 @@ describe("installing the MCP server for a local agent", () => {
     expect(written.mcpServers.wsp.args.slice(-3)).toEqual(["mcp", "--state", statePath]);
     const bare = { ...io(), isTTY: true };
     expect(await cli(["mcp", "install", "--state", statePath], bare)).toBe(3);
-    expect(bare.errors).toEqual(["usage: wsp mcp install --agent <id> [--agent <id>] [--json] [--remove]   (claude, codex, gemini, opencode)"]);
+    expect(bare.errors).toEqual(["usage: wsp mcp install --agent <id> [--agent <id>] [--host <alias>] [--json] [--remove]   (claude, codex, gemini, opencode)"]);
     mkdirSync(join(home, ".gemini"), { recursive: true });
     writeFileSync(join(home, ".gemini", "settings.json"), '{\n  // the look\n  "theme": "dark"\n}\n');
     const commented = io();
@@ -361,7 +378,7 @@ describe("installing the MCP server for a local agent", () => {
     const none = io();
     expect(await cli(["mcp", "install", "--state", statePath], none)).toBe(3);
     expect(none.errors).toEqual([
-      "wsp mcp install: no agent of the catalog's is on this computer's PATH; name one with --agent.\nusage: wsp mcp install --agent <id> [--agent <id>] [--json] [--remove]   (claude, codex, gemini, opencode)",
+      "wsp mcp install: no agent of the catalog's is on this computer's PATH; name one with --agent.\nusage: wsp mcp install --agent <id> [--agent <id>] [--host <alias>] [--json] [--remove]   (claude, codex, gemini, opencode)",
     ]);
   });
 

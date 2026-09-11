@@ -67,6 +67,8 @@ import {
   type ServiceManager,
   type ServiceRunner,
 } from "./service.js";
+import { connectCommand, disconnectCommand, hostsCommand } from "./connect.js";
+import { DEFAULT_HOME, wspHome } from "./hosts.js";
 import { devicesCommand, pairCommand } from "./pairing.js";
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
@@ -91,6 +93,13 @@ usage:
                      its own, when the host listens beyond this computer
   wsp devices        the computers paired with this host; wsp devices revoke
                      <id> takes one back out
+  wsp connect URL    redeem a code from a host on another computer for a token
+                     of this one's own: --code is that code, --name the name
+                     every later line calls the host by
+  wsp hosts          the hosts on other computers this computer holds, the
+                     default marked; wsp hosts default <alias> moves it
+  wsp disconnect ALIAS
+                     hand that host its token back and forget it here
   wsp status         whether a host is serving this state file, on which ports,
                      and what keeps it there, with a non-zero exit code when
                      none does
@@ -141,6 +150,16 @@ options:
                      lists and revokes them
   --state PATH       state file (default ~/.wsp/state.json, or ./.wsp/state.json
                      when the current directory has a .env)
+  --host ALIAS       on any verb: run the line against a host on another
+                     computer, by the name wsp connect gave it. WSP_HOST names
+                     one for a whole shell. That host serves its own state, so
+                     --state is not read beside it and a line that gives both
+                     says so. With neither, a line goes to the host serving the
+                     state file here, and only when none does to the default
+                     alias wsp hosts marks
+  --code CODE        connect: the code wsp pair printed on the other computer
+  --name ALIAS       connect: the name to call that host here (default what its
+                     address calls it)
   --yes              init: take every default and ask nothing (required off a
                      terminal); a login with a browser or device sign-in, or one
                      held in the Keychain, defaults to sign in on the machine
@@ -236,11 +255,9 @@ export interface KeySources {
   checkKey?(key: string): Promise<KeyCheck>;
 }
 
-const DEFAULT_HOME = join(homedir(), ".wsp");
-
-export function wspHome(): string {
-  return process.env["WSP_HOME"] ?? DEFAULT_HOME;
-}
+// The hosts file sits under the same home, so where that home is lives beside it and is re-exported here for every
+// reader that already had it from the command line.
+export { wspHome };
 
 /** Fixed spot a launcher without WSP_HOME (Finder, a service) can read to
  * learn which home the running host serves. */
@@ -523,13 +540,17 @@ export function sshWiring(): SshWiring {
 }
 
 /** What every command of the shared parse works on: the port pair and the address the one rule reads off the flags,
- * whether a person named either port, and the state file. wsp up and wsp init take theirs from this one call. */
+ * whether a person named either port, the state file, and the home the hosts file sits under. wsp up and wsp init
+ * take theirs from this one call. */
 export interface SharedOpts extends ListenAsked {
   statePath: string;
+  home: string;
 }
 
-export function optsFor(values: Pick<SharedFlags, "port" | "ws-port" | "listen" | "state">): SharedOpts {
-  return { ...portsAsked({ port: values.port, wsPort: values["ws-port"], listen: values.listen }), statePath: statePathFrom(values.state) };
+/** The environment the caller runs in decides the home, the same reading the verbs take, so a run with its own
+ * environment cannot send wsp connect to one folder and --host to another. */
+export function optsFor(values: Pick<SharedFlags, "port" | "ws-port" | "listen" | "state">, env: Readonly<Record<string, string | undefined>> = process.env): SharedOpts {
+  return { ...portsAsked({ port: values.port, wsPort: values["ws-port"], listen: values.listen }), statePath: statePathFrom(values.state), home: wspHome(env) };
 }
 
 /** The state files a host on this computer could be serving: the one this run works on and this computer's default,
@@ -1133,6 +1154,8 @@ interface SharedFlags {
   "no-local"?: boolean;
   local?: boolean;
   service?: boolean;
+  code?: string;
+  name?: string;
 }
 
 interface Command {
@@ -1175,6 +1198,21 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     json: false,
     cliOnly: "lists and takes away the computers that may drive this host, which belongs with the terminal that handed them the code",
     run: (io, opts, _values, args) => devicesCommand(io, opts, args),
+  },
+  connect: {
+    json: false,
+    cliOnly: "spends a pairing code and keeps the token it buys in this person's own files; where their wsp points is theirs to say",
+    run: (io, opts, values, args) => connectCommand(io, opts, values, args),
+  },
+  hosts: {
+    json: false,
+    cliOnly: "reads and moves which host every line on this computer runs against, which no thread decides for the person",
+    run: (io, opts, _values, args) => hostsCommand(io, opts, args),
+  },
+  disconnect: {
+    json: false,
+    cliOnly: "hands a host back the token this computer drives it by, which belongs with the terminal that took it",
+    run: (io, opts, _values, args) => disconnectCommand(io, opts, args),
   },
   init: {
     json: true,
@@ -1238,14 +1276,15 @@ const MCP_COMMAND = "mcp";
 /** The flags `wsp mcp` and `wsp mcp install` parse. */
 export const MCP_OPTIONS: Options = {
   agent: { type: "string", multiple: true },
+  host: { type: "string" },
   json: { type: "boolean" },
   remove: { type: "boolean" },
   state: { type: "string" },
   help: { type: "boolean", short: "h" },
 };
 
-const mcpInstallUsage = (): string => `wsp ${MCP_COMMAND} install --agent <id> [--agent <id>] [--json] [--remove]   (${MCP_AGENT_IDS})`;
-const mcpUsage = (): string => `usage: wsp ${MCP_COMMAND}\n       ${mcpInstallUsage()}`;
+const mcpInstallUsage = (): string => `wsp ${MCP_COMMAND} install --agent <id> [--agent <id>] [--host <alias>] [--json] [--remove]   (${MCP_AGENT_IDS})`;
+const mcpUsage = (): string => `usage: wsp ${MCP_COMMAND} [--host <alias>]\n       ${mcpInstallUsage()}`;
 
 /** The usage of the command a line stopped short of, whether it is a verb or `mcp`; none when no command owns the
  * word. `mcp` needs its own answer here because it is not in the verb table and its flags follow the word. */
@@ -1260,7 +1299,7 @@ function commandUsage(word: string): string | undefined {
  * `--json` instead of taking it and printing prose. */
 async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => string, run: RunningWsp, env: Readonly<Record<string, string | undefined>>): Promise<number> {
   const usage = mcpUsage();
-  let values: { agent?: string[]; json?: boolean; remove?: boolean; state?: string; help?: boolean };
+  let values: { agent?: string[]; host?: string; json?: boolean; remove?: boolean; state?: string; help?: boolean };
   let words: string[];
   try {
     ({ values, positionals: words } = parseArgs({ args: argv, options: MCP_OPTIONS, allowPositionals: true }));
@@ -1274,7 +1313,7 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
   const statePath = statePathOf(values.state);
   if (words.length === 0) {
     // The agent starts the server in its own folder, which is the folder a thread opened with no workspace is placed by.
-    await serveMcp(statePath, { alsoHere, cwd: process.cwd(), env });
+    await serveMcp(statePath, { alsoHere, cwd: process.cwd(), env, ...(values.host !== undefined ? { host: values.host } : {}) });
     return 0;
   }
   const json = values.json === true;
@@ -1296,7 +1335,7 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
     }
     return gone.failures.length > 0 ? 1 : 0;
   }
-  const report = installEach(agents, mcpServerSpec(statePath, run), homedir(), project);
+  const report = installEach(agents, mcpServerSpec(statePath, run, values.host !== undefined ? { host: values.host } : {}), homedir(), project);
   if (json) io.log(JSON.stringify(report));
   else {
     for (const placed of report.installed) for (const line of installLines(placed)) io.log(line);
@@ -1327,6 +1366,8 @@ export const SHARED_OPTIONS: Options = {
   "no-local": { type: "boolean" },
   local: { type: "boolean" },
   service: { type: "boolean" },
+  code: { type: "string" },
+  name: { type: "string" },
 };
 
 const without = (options: Options, names: readonly string[]): Options => Object.fromEntries(Object.entries(options).filter(([name]) => !names.includes(name)));
@@ -1341,6 +1382,7 @@ export const COMMAND_LINES: readonly CommandLine[] = [
   { words: MCP_COMMAND, options: MCP_OPTIONS, cliOnly: "is the tool server itself" },
   { words: `${MCP_COMMAND} install`, options: MCP_OPTIONS, cliOnly: "writes an agent's own config and skills folder, which is done once from a shell" },
   { words: "devices revoke", options: without(SHARED_OPTIONS, ["json"]), cliOnly: "takes away a computer's token, which belongs with the terminal that handed it the code" },
+  { words: "hosts default", options: without(SHARED_OPTIONS, ["json"]), cliOnly: "moves which host every line on this computer runs against, which no thread decides for the person" },
   ...Object.entries(COMMANDS).map(([words, command]) => ({ words, options: command.json ? SHARED_OPTIONS : without(SHARED_OPTIONS, ["json"]), cliOnly: command.cliOnly })),
 ];
 
@@ -1371,7 +1413,7 @@ export async function cli(argv: string[], io: CliIO = terminalIO(), run: Running
     io.log(HELP);
     return 0;
   }
-  const opts = optsFor(values);
+  const opts = optsFor(values, env);
   const word = positionals[0] ?? "up";
   const command = COMMANDS[word];
   const json = values.json === true;
