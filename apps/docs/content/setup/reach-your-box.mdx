@@ -1,0 +1,108 @@
+import { Callout } from 'scalar-mdx-components'
+
+# Reach your box from anywhere
+
+The host runs on one computer. If that computer is a box in a cupboard, a machine at the office or a small server you rent, the app on your laptop still has to reach it. There are three roads, and they all end the same way: your laptop redeems a one time code for a device token of its own, and every line it runs after that carries that token.
+
+Whichever road you take, pairing is the gate. `wsp pair` on the box prints the code, `wsp devices` lists the computers that took one, and `wsp devices revoke <id>` takes one back out.
+
+## The direct road
+
+The box has an address your laptop can reach, on a home network or a private network you already run.
+
+```bash
+# on the box
+wsp up --listen 0.0.0.0
+wsp pair
+
+# on your laptop
+wsp connect http://192.168.1.40:4400 --code QWAXC5GT --name box
+wsp threads --host box
+```
+
+`--listen` binds an address other than the box's own loopback. The page it serves then carries no host token and every client pairs for one, so the port being open is not the same as the host being open.
+
+<Callout type="warning">
+Do not put that port on the public internet with a port forward. The pairing gate is strong, but the two roads below give you the same thing without anything of yours being reachable from the outside at all.
+</Callout>
+
+## Over a private network of your own
+
+If you already run a private network across your machines, the box has an address on it and nothing changes but the address:
+
+```bash
+# on the box
+wsp up --listen 100.84.12.9
+wsp pair
+
+# on your laptop
+wsp connect http://100.84.12.9:4400 --code QWAXC5GT --name box
+```
+
+The host follows the address it bound, so `wsp pair`, `wsp devices` and `wsp status` on the box all speak to it there rather than at loopback.
+
+## Through the relay
+
+A box behind someone else's router, a carrier network or a firewall you do not control has no address anyone can dial. The relay is for that: the box dials out through a Cloudflare tunnel, and a small directory says where your boxes answer.
+
+```bash
+# on the box, once
+wsp relay link https://relay.example
+# it prints a code and a page; open the page, sign in, approve the box
+
+# on the box, every time
+wsp up
+# app         http://127.0.0.1:4400
+# public      https://blue-sky-1234.trycloudflare.com
+
+# on your laptop
+wsp relay hosts https://relay.example
+wsp pair                     # run this one on the box, for the code
+wsp connect --relay box --code QWAXC5GT
+wsp threads --host box
+```
+
+The box stays on loopback. The tunnel carries HTTPS from the public hostname to `127.0.0.1:4400` on the box, and the runtime rides the same hostname, so nothing has to be open to the world.
+
+What the relay's own database knows is the whole of what it stores: which boxes are on your account, what you called each one, and the hostname each answers at. It holds no pairing code, no device token and no byte of anything your agents say, and its schema has no column for them.
+
+<Callout type="warning">
+This road is not as private as the two above it, and the difference is worth reading twice. A tunnel terminates TLS at Cloudflare's edge, so **Cloudflare sees your traffic in the clear**, including the device token your laptop sends on every request. The relay's operator holds the Cloudflare account the tunnel lives on: they can read the tunnel's own credential and point your hostname somewhere else. Pairing protects you from strangers on the internet, not from Cloudflare and not from whoever runs the relay. The direct road and the private network road have neither of those properties: nothing in the middle holds your traffic. If that matters for what your agents can reach, use one of them, or run the relay yourself on your own Cloudflare account, which is what the last section is for.
+</Callout>
+
+The code still comes from `wsp pair` on the box and travels to you by whatever channel you like.
+
+`wsp relay unlink` on the box takes it off your account, stops the tunnel and deletes the hostname. `wsp up --no-relay` serves without the tunnel for one run, stopping any connector an earlier run left behind first.
+
+On your own computer, `wsp relay clients` says which computers hold a token for your relay account and `wsp relay clients revoke <id>` signs one out. That token lists your boxes and can take any of them off the account, so a laptop you no longer have is worth revoking; it also runs out on its own after 30 days. It cannot open a box: that still needs a pairing code from the box itself.
+
+### The connector
+
+At every start a linked box asks the relay for a tunnel and runs Cloudflare's connector against its own loopback port. wsp downloads that connector once into the state folder, verifying it against a sha256 pinned in the repo, and refuses to run anything whose bytes do not match. Nothing is piped from a download into a shell. The child is started by the host, its pid is written to `connector.pid` beside the state file, and that pid is the only one wsp ever stops.
+
+With no zone configured on the relay, it hands out no hostname and the box runs a quick tunnel instead, reporting the name it was given. Those names change at every start, which is why the address lines print it and `wsp status` reads it back.
+
+## Hosting the relay yourself
+
+The relay is in the repo under `infra/relay` and it is a Cloudflare Worker with one D1 database. If you would rather not have a third party in the middle of knowing where your boxes are, run your own:
+
+```bash
+cd infra/relay
+wrangler d1 create wsp-relay          # put the id in wrangler.jsonc
+wrangler d1 migrations apply wsp-relay --remote
+wrangler secret put CLOUDFLARE_API_TOKEN
+wrangler secret put GITHUB_CLIENT_ID
+wrangler secret put GITHUB_CLIENT_SECRET
+wrangler secret put RELAY_SIGNING_KEY   # openssl rand -base64 32
+wrangler deploy
+```
+
+Three values go in `wrangler.jsonc` under `vars` before that deploy, and the first is not optional: `CLOUDFLARE_ACCOUNT_ID` is the account the tunnels are made on, and with it empty every tunnel call goes to `/accounts//cfd_tunnel` and your first `wsp up` gets a 502. `RELAY_ZONE` and `RELAY_ZONE_ID` name the zone managed hostnames go under; leave those two empty and every box gets a quick tunnel instead, which needs no DNS permission at all.
+
+The API token needs Cloudflare Tunnel write on that account, and DNS write on that one zone if you want managed hostnames. The GitHub OAuth app is yours: its callback is `https://<your relay>/link/callback`, and whoever signs in gets their own account with their own boxes.
+
+<Callout type="warning">
+Give it a zone nothing else depends on. The relay only ever writes and deletes `<host id>.<zone>`, but the API token you hand it can write any record in that zone, so anyone who takes over the Worker or the token takes over the whole zone and every tunnel on the account. A zone that also holds your mail or your main site is the wrong one to pick.
+</Callout>
+
+Then point your boxes at it: `wsp relay link https://<your relay>` on each one, and `wsp relay hosts https://<your relay>` on the computer you drive them from.
