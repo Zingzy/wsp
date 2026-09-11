@@ -581,8 +581,9 @@ export function sshWiring(forwards = new SshForwards()): SshWiring {
         name: sshMachineName(reach),
         login,
         shape,
-        // What the machine answered about itself, so the same machine under another address, port or key is the
-        // workspace it already is; a client that logged no key leaves the record on its address alone.
+        // What the machine is, as the key this client holds for it says, so the same machine under another address,
+        // port or key is the workspace it already is; a client holding no entry for it leaves the record on its
+        // address alone.
         ...(hostKey !== undefined ? { identity: sshIdentity(hostKey, login.USER), hostKey } : {}),
       };
     },

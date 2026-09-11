@@ -10,7 +10,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
 import { join, posix } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { shellQuote } from "@wsp/protocol";
@@ -87,10 +87,8 @@ export function sshMachineName(reach: SshReach): string {
 }
 
 /** How a script reaches the machine. The client below is the only implementation that leaves this computer; a test
- * hands its own and reads what the machine was asked to run. `hostKey` asks the client to log what the connection
- * saw, so the one dial that records a machine can quote the key it answered with; every other call leaves it off,
- * since the log would otherwise ride every command's stderr. */
-export type SshTransport = (reach: SshReach, script: string, opts: { timeoutMs?: number; onLine?: (line: string) => void; hostKey?: boolean; stdin?: Uint8Array }) => Promise<ExecResult>;
+ * hands its own and reads what the machine was asked to run. */
+export type SshTransport = (reach: SshReach, script: string, opts: { timeoutMs?: number; onLine?: (line: string) => void; stdin?: Uint8Array }) => Promise<ExecResult>;
 
 /** How long the ssh client waits for the machine to answer the dial itself, before the script's own deadline starts
  * mattering: a machine that is off must fail rather than hang a turn. */
@@ -130,7 +128,7 @@ export function sshControlPath(reach: SshReach, dir: string = sshControlDir()): 
 /** The ssh client's argv for one script. The script runs under `bash -c` as it does on a guest, never a login
  * shell, which would reset PATH. Every command rides one master connection per machine, so a turn's polls are one
  * login rather than one each. */
-export function sshArgs(reach: SshReach, script: string, opts: { hostKey?: boolean; controlDir?: string; stdin?: boolean } = {}): string[] {
+export function sshArgs(reach: SshReach, script: string, opts: { controlDir?: string; stdin?: boolean } = {}): string[] {
   return [
     // -n hands the script /dev/null for stdin; the one road that carries a file's bytes writes them there instead.
     ...(opts.stdin === true ? [] : ["-n"]),
@@ -141,7 +139,7 @@ export function sshArgs(reach: SshReach, script: string, opts: { hostKey?: boole
     `ControlPath=${sshControlPath(reach, opts.controlDir)}`,
     "-o",
     `ControlPersist=${SSH_CONTROL_PERSIST_S}`,
-    ...sshDialArgs(reach, opts),
+    ...sshDialArgs(reach),
     `${reach.user}@${reach.host}`,
     "bash",
     "-c",
@@ -151,16 +149,15 @@ export function sshArgs(reach: SshReach, script: string, opts: { hostKey?: boole
 
 /** How every ssh child this host starts is dialled, whatever it then does on the connection. BatchMode keeps a
  * machine that wants a passphrase from stopping a background host at a prompt nobody can see. Nobody can answer a
- * host key prompt there either, and a key that changed is still refused; the first dial records the key it was
- * given and the person is shown it to compare. The command road and the forward road both build on this, so how
- * wsp dials a machine is one rule and not two. */
-export function sshDialArgs(reach: SshReach, opts: { hostKey?: boolean } = {}): string[] {
+ * host key prompt there either, and a key that changed is still refused; accept-new writes the key the machine was
+ * first seen with, which is where the identity of a machine over ssh is read from afterwards. The command road and
+ * the forward road both build on this, so how wsp dials a machine is one rule and not two. */
+export function sshDialArgs(reach: SshReach): string[] {
   return [
     "-o",
     "BatchMode=yes",
     "-o",
     "StrictHostKeyChecking=accept-new",
-    ...(opts.hostKey === true ? ["-o", "LogLevel=DEBUG"] : []),
     "-o",
     `ConnectTimeout=${SSH_CONNECT_TIMEOUT_S}`,
     "-p",
@@ -172,18 +169,97 @@ export function sshDialArgs(reach: SshReach, opts: { hostKey?: boolean } = {}): 
 /** The ssh client on this computer, carrying one script to the machine. The folder its master socket lives in is
  * made here, on the way out, so no dial can be the first thing to need it. */
 export const sshClient: SshTransport = (reach, script, opts) =>
-  runChild("ssh", sshArgs(reach, script, { controlDir: makeSshControlDir(), ...(opts.hostKey !== undefined ? { hostKey: opts.hostKey } : {}), ...(opts.stdin !== undefined ? { stdin: true } : {}) }), {
+  runChild("ssh", sshArgs(reach, script, { controlDir: makeSshControlDir(), ...(opts.stdin !== undefined ? { stdin: true } : {}) }), {
     env: process.env,
     ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
     ...(opts.onLine !== undefined ? { onLine: opts.onLine } : {}),
     ...(opts.stdin !== undefined ? { stdin: opts.stdin } : {}),
   });
 
-/** The key the machine answered the connection with, as the client logged it: its type and the SHA256 fingerprint
- * every other ssh tool prints. Absent when the client logged none, which leaves the record without an identity of
- * the machine's own rather than inventing one. */
-export function hostKeyOf(clientLog: string): string | undefined {
-  return /^debug\d+: Server host key: (\S+ SHA256:\S+)/m.exec(clientLog)?.[1];
+/** How the key a machine holds is read: the one road to an identity, so every caller asks the same question the
+ * same way. It is not the dial's to answer, since a dial that rides a warm master exchanges no key and the client
+ * logs none; absent leaves the record without an identity of the machine's own rather than inventing one. */
+export type SshHostKeyReader = (reach: SshReach) => Promise<string | undefined>;
+
+/** One command on this computer, for the reads that ask the ssh client about a machine rather than asking the
+ * machine. A test hands its own and reads what was asked. */
+export type SshLocalRun = (file: string, args: readonly string[], timeoutMs: number) => Promise<ExecResult>;
+
+const localRun: SshLocalRun = (file, args, timeoutMs) => runChild(file, args, { env: process.env, timeoutMs });
+
+/** How long each of those reads is given. Neither opens a connection, so this only bounds a client sitting on a
+ * config it cannot read. */
+const SSH_LOCAL_READ_MS = 5_000;
+
+/** The name the client writes this machine's key under and looks it up by, out of its own answers for the dial: the
+ * alias where the person set one, else the host the address resolves to, with the port in brackets where it is not
+ * ssh's own, which is how OpenSSH spells an entry that carries a port. */
+export function knownHostTarget(values: Record<string, string>): string | undefined {
+  const alias = values["hostkeyalias"];
+  if (alias !== undefined && alias !== "") return alias;
+  const host = values["hostname"];
+  if (host === undefined || host === "") return undefined;
+  const port = Number(values["port"]);
+  return Number.isInteger(port) && port !== SSH_DEFAULT_PORT ? `[${host}]:${port}` : host;
+}
+
+/** The files the client checks a host key against, in its own order, with a leading ~ made the person's home the
+ * way the client makes it: the password database entry, which is what ssh expands a tilde from, and not `$HOME`.
+ * Measured on OpenSSH 9.6 and 10.2, which both answer `-G` with the tilde already expanded that way, so this
+ * branch fires only for an older client, where following `$HOME` instead would read another file and drop the
+ * identity in silence. `none` is a person turning a file off rather than a path to read. */
+export function knownHostFiles(values: Record<string, string>, home?: string): string[] {
+  return [values["userknownhostsfile"], values["globalknownhostsfile"]]
+    .flatMap(named => (named ?? "").split(/\s+/))
+    .filter(file => file !== "" && file !== "none")
+    // The entry is read where a tilde is there to expand and nowhere else, since a computer whose login has no
+    // entry in that database has no home to read either and every other path here is already absolute.
+    .map(file => (file.startsWith("~/") ? join(home ?? userInfo().homedir, file.slice(2)) : file));
+}
+
+/** A key's fingerprint as every ssh tool prints it: the SHA256 of the key's own bytes, base64 with the padding
+ * dropped. Worked out here rather than by a second ssh-keygen, since it is a hash of what the line already carries. */
+function sshFingerprint(blob: string): string {
+  return createHash("sha256").update(Buffer.from(blob, "base64")).digest("base64").replace(/=+$/, "");
+}
+
+/** The key a dial to this machine is checked against, out of every entry the client holds for it. A machine is
+ * usually known by one key per type, and the one a connection negotiates is the client's most preferred type it is
+ * known by, so that is the one the identity stands on and the answer does not turn on which line was written first.
+ * A signature name is no key type (an rsa-sha2 signature is made by an ssh-rsa key). Only a line whose second word
+ * is a type this client prefers is read, which is what leaves out the comment lines ssh-keygen prints and the
+ * marker lines for an authority or a revoked key: neither has a key type where an entry has one. A machine the
+ * client trusts through an authority rather than by a key of its own is therefore left with no identity at all,
+ * on a cold dial as on a warm one: the authority's key is not the machine's, and standing a record on it would
+ * make every machine that authority signed the same machine. */
+export function hostKeyFound(found: string, algorithms: string): string | undefined {
+  const preferred = algorithms.split(",").map(name => name.replace(/^rsa-sha2-\d+$/, "ssh-rsa"));
+  let best: { rank: number; key: string } | undefined;
+  for (const line of found.split("\n")) {
+    const fields = line.trim().split(/\s+/);
+    const rank = fields.length < 3 ? -1 : preferred.indexOf(fields[1]!);
+    if (rank === -1) continue;
+    if (best === undefined || rank < best.rank) best = { rank, key: `${fields[1]!} SHA256:${sshFingerprint(fields[2]!)}` };
+  }
+  return best?.key;
+}
+
+/** The key the client holds for this machine, read on this computer with nothing dialled: `ssh -G` answers where
+ * the client looks and what it prefers there with the person's own config applied, and `ssh-keygen -F` reads the
+ * entry out, hashed or not. This is the road that survives a warm master: the accept-new policy wrote the entry as
+ * the first dial was made, so the answer is there whether this dial exchanged a key or rode an open connection. */
+export async function knownHostKey(reach: SshReach, run: SshLocalRun = localRun): Promise<string | undefined> {
+  const config = await run("ssh", ["-G", ...sshDialArgs(reach), `${reach.user}@${reach.host}`], SSH_LOCAL_READ_MS);
+  if (config.exitCode !== 0) return undefined;
+  const values = readValues(config.stdout);
+  const target = knownHostTarget(values);
+  if (target === undefined) return undefined;
+  let found = "";
+  for (const file of knownHostFiles(values)) {
+    const read = await run("ssh-keygen", ["-F", target, "-f", file], SSH_LOCAL_READ_MS);
+    if (read.exitCode === 0) found += read.stdout;
+  }
+  return hostKeyFound(found, values["hostkeyalgorithms"] ?? "");
 }
 
 /** What a machine over ssh is, as the machine itself answers: the key it holds and the login a turn runs as. Two
@@ -230,8 +306,8 @@ export const SSH_FACTS_SCRIPT = [...OS_READ, ...UPTIME_READ, HOME_READ].join("\n
 
 /** One dial that both proves the machine answers and records what wsp needs of it. A dial that fails carries the
  * client's own words back, since they are what tells the person whether it was the key, the host or the network. */
-export async function readSshMachine(reach: SshReach, transport: SshTransport = sshClient): Promise<{ login: SshLogin; shape: MachineShape; hostKey?: string }> {
-  const res = await transport(reach, SSH_READ_SCRIPT, { timeoutMs: 30_000, hostKey: true });
+export async function readSshMachine(reach: SshReach, transport: SshTransport = sshClient): Promise<{ login: SshLogin; shape: MachineShape }> {
+  const res = await transport(reach, SSH_READ_SCRIPT, { timeoutMs: 30_000 });
   if (res.exitCode !== 0) throw new Error(`${reach.user}@${reach.host} did not answer over ssh: ${(clientWords(res.stderr) || res.stdout.trim()).slice(-300)}`);
   const values = readValues(res.stdout);
   const home = values["home"];
@@ -245,11 +321,9 @@ export async function readSshMachine(reach: SshReach, transport: SshTransport = 
   }
   const cpu = Number(values["cpu"] ?? 0);
   const memMb = Math.round(Number(values["memkb"] ?? 0) / 1024);
-  const hostKey = hostKeyOf(res.stderr);
   return {
     login: { ...stores, HOME: home, USER: values["user"] ?? reach.user, PATH: plainPath(values["path"]) },
     shape: { cpu, memMb },
-    ...(hostKey !== undefined ? { hostKey } : {}),
   };
 }
 
@@ -410,6 +484,8 @@ export class SshMachine implements Machine {
 export interface SshBackendOptions {
   /** How a script reaches a machine; the ssh client on this computer unless a test hands its own. */
   transport?: SshTransport;
+  /** How the key a machine holds is read; the client's own known_hosts entry for it unless a test hands its own. */
+  hostKey?: SshHostKeyReader;
 }
 
 /** The backend for every ssh machine a host has a record of. It holds no fleet of its own: a machine that already
@@ -440,9 +516,11 @@ export class SshBackend implements MachineBackend {
   };
 
   private readonly transport: SshTransport;
+  private readonly hostKey: SshHostKeyReader;
 
   constructor(opts: SshBackendOptions = {}) {
     this.transport = opts.transport ?? sshClient;
+    this.hostKey = opts.hostKey ?? knownHostKey;
   }
 
   async create(): Promise<Machine> {
@@ -465,9 +543,12 @@ export class SshBackend implements MachineBackend {
   }
 
   /** Reads a machine over ssh and hands back the handle its record stands on, so the one call that records a
-   * workspace is also the one that proves the dial works. */
+   * workspace is also the one that proves the dial works. The key it answers with is read after that dial and not
+   * out of it: accept-new wrote the entry as the connection was made, while a dial riding a master the last minute
+   * left open exchanges no key at all, and a record with no identity is a machine that can be recorded twice. */
   async adopt(reach: SshReach): Promise<{ machine: SshMachine; login: SshLogin; shape: MachineShape; hostKey?: string }> {
-    const { login, shape, hostKey } = await readSshMachine(reach, this.transport);
+    const { login, shape } = await readSshMachine(reach, this.transport);
+    const hostKey = await this.hostKey(reach);
     return { machine: new SshMachine(reach, this.transport), login, shape, ...(hostKey !== undefined ? { hostKey } : {}) };
   }
 }
