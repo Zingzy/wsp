@@ -3430,6 +3430,48 @@ describe("runtime create stages", () => {
     expect(asked).toBe(1);
   });
 
+  it("a fork with no route at all is still asked: the daemon-answering stage stands without a preview-route stage", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const create = backend.create.bind(backend);
+    backend.create = async spec => {
+      const m = await create(spec);
+      m.daemonAnswers = async () => true;
+      return m;
+    };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const stages = creating(events);
+    expect(backend.machines[0]!.previewUrl).toBeUndefined();
+    expect(stages.map(e => e.stage)).toEqual(["fork-requested", "machine-booting", "hostname-set", "daemon-answering", "ready"]);
+    expect(stages[3]).toMatchObject({ message: "Daemon answered." });
+    expect("notice" in stages[3]!).toBe(false);
+  });
+
+  it("a mint that fails is its own line, and the daemon is still asked over the road it has", async () => {
+    const backend = stubBackend();
+    backend.execImpl = tokenGuest;
+    const create = backend.create.bind(backend);
+    backend.create = async spec => {
+      const m = await create(spec);
+      m.previewUrl = async () => {
+        throw new Error("container publishes no port 7070; only the daemon's own port is published");
+      };
+      m.daemonAnswers = async () => true;
+      return m;
+    };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const stages = creating(events);
+    expect(stages[3]).toMatchObject({ stage: "preview-route", message: "No preview route to the daemon.", notice: expect.stringMatching(/publishes no port 7070/) });
+    expect(stages[4]).toMatchObject({ stage: "daemon-answering", message: "Daemon answered." });
+    expect("notice" in stages[4]!).toBe(false);
+  });
+
   it("a create that fails after the fork kills its machine, reports failed with the reason, and lists nothing", async () => {
     const backend = stubBackend();
     const store = memoryStore();
@@ -3608,6 +3650,28 @@ describe("runtime verified wake", () => {
       expect(woken.machineId).toBe("m2");
       const last = events.filter(e => e.type === "workspace.status").at(-1) as { status: { reason?: string } };
       expect(last.status.reason).toContain("nothing listens on the daemon's port inside m1");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("a machine that cannot be asked at all says what happened, not that a budget ran out", async () => {
+    const { backend } = guestBackend();
+    try {
+      backend.lifecycle.budgets.daemonAnswersMs = 300;
+      const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN });
+      const events: EventUnion[] = [];
+      rt.events.on("*", e => events.push(e));
+      const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+      const m1 = backend.machines[0]!;
+      m1.daemonAnswers = async () => {
+        throw new Error("container m1 is not running");
+      };
+      await rt.workspaces.nap(ws.id);
+      await rt.workspaces.wake(ws.id);
+      const last = events.filter(e => e.type === "workspace.status").at(-1) as { status: { reason?: string } };
+      expect(last.status.reason).toContain("could not be asked (container m1 is not running)");
+      expect(last.status.reason).not.toContain("did not answer within");
     } finally {
       vi.unstubAllGlobals();
     }

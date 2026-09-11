@@ -2355,7 +2355,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const up = await until(machine.daemonAnswers({ timeoutMs: answersMs }), Date.now() + answersMs, "daemon answer");
         return up ? undefined : `nothing listens on the daemon's port inside ${machine.id}`;
       } catch (e) {
-        return `daemon on ${machine.id} did not answer within ${answersMs} ms (${e instanceof Error ? e.message : String(e)})`;
+        // The error is in hand here, so it is what the row says: only the edge road, which learns nothing but that
+        // it waited, reports the budget.
+        return `the daemon on ${machine.id} could not be asked (${e instanceof Error ? e.message : String(e)})`;
       }
     }
     if (!machine.previewUrl) return undefined;
@@ -3327,19 +3329,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
     }
     const entry = live.get(id)!;
-    if (entry.machine.previewUrl) {
-      // A daemon that does not answer is reported, not fatal: the workspace exists either way, and the status check
-      // keeps asking and names a zombie. The route minted here is the one the ping and the first client reuse.
-      let fault: string | undefined;
-      try {
-        await until(entry.ws.daemonReach(), Date.now() + lifecycleOf(entry).budgets.daemonAnswersMs, "preview route");
-        report("preview-route", "Preview route to the daemon minted.");
-        fault = await pingDaemon(entry);
-      } catch (e) {
-        fault = `preview route for ${entry.machine.id} not minted (${e instanceof Error ? e.message : String(e)})`;
+    if (entry.machine.previewUrl !== undefined || entry.machine.daemonAnswers !== undefined) {
+      // The route and the daemon are two questions, and the create asks them apart: minting is what the app and
+      // the first client will dial, and a mint that fails is its own line rather than a verdict on the guest.
+      if (entry.machine.previewUrl !== undefined) {
+        try {
+          await until(entry.ws.daemonReach(), Date.now() + lifecycleOf(entry).budgets.daemonAnswersMs, "preview route");
+          report("preview-route", "Preview route to the daemon minted.");
+        } catch (e) {
+          report("preview-route", "No preview route to the daemon.", `preview route for ${entry.machine.id} not minted (${e instanceof Error ? e.message : String(e)})`);
+        }
       }
-      // The road is not in the words: the check asks the machine itself where it can answer, and the fault carries
-      // which road went quiet for the one that could not.
+      // A daemon that does not answer is reported, not fatal: the workspace exists either way, and the status check
+      // keeps asking and names a zombie. Asked the way the wake and the poll ask, so a machine reached without a
+      // route is asked here too rather than left with no word at all.
+      const fault = await pingDaemon(entry);
       report("daemon-answering", fault === undefined ? "Daemon answered." : "Daemon did not answer.", fault);
       void syncDaemon(entry);
     }

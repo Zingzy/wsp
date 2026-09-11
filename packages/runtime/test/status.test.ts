@@ -264,6 +264,25 @@ describe("a machine that answers for its own daemon", () => {
     expect((await rt.status.list())[0]!.reach).toEqual({ state: "unsupported" });
   });
 
+  it("a status pushed between polls makes the same claim: a machine with no route but an answer of its own is not called unsupported", async () => {
+    const { rt, backend } = testRuntime();
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const machine = backend.machines[0]!;
+    expect(machine.previewUrl).toBeUndefined();
+    machine.daemonAnswers = async () => true;
+    const pushed: WorkspaceStatus[] = [];
+    rt.events.on("*", e => {
+      if (e.type === "workspace.status") pushed.push(e.status);
+    });
+    // A pause the provider refuses pushes the row with whatever the runtime claims about its reach, and nothing
+    // has polled this machine, so the claim is all there is.
+    machine.pause = async () => {
+      throw new Error("the provider would not pause it");
+    };
+    await expect(rt.workspaces.nap(ws.id)).rejects.toThrow("would not pause");
+    expect(pushed.at(-1)).toMatchObject({ machineState: "running", reach: { state: "reachable" } });
+  });
+
   it("a guest that takes longer than the prompt reads slow, and one inside it reads reachable", async () => {
     const backend = stubBackend();
     const fc = fakeClock();
