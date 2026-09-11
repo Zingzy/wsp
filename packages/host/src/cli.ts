@@ -189,8 +189,9 @@ options:
                      thing that moves that line: with neither word it answers
                      for this computer whatever alias wsp hosts marks, since it
                      is the question whether the host here is serving. The
-                     lines that start, stop or hand out access to something
-                     here refuse it
+                     lines that start or stop something here refuse it, and
+                     wsp pair and wsp devices take it only to answer that they
+                     run at that host's own terminal
   --code CODE        connect: the code wsp pair printed on the other computer
   --name ALIAS       connect: the name to call that host here (default what its
                      address calls it); relay link: the name the approval page
@@ -1430,23 +1431,35 @@ interface SharedFlags {
   "docker-host"?: string;
 }
 
+/** What a word of the shared parse does with --host. `aimed`: the line runs against the host it names. `refused`:
+ * the line reads this computer's own files, so the parse refuses the flag rather than take it and aim nowhere.
+ * `hostSide`: the line runs at the host's own terminal, so it takes the flag and answers the one sentence that says
+ * so, which is the same answer WSP_HOST and the default alias already get. */
+export type HostFlag = "aimed" | "refused" | "hostSide";
+
 interface Command {
   /** Whether stdout is objects under --json; a command without it refuses the flag rather than hand prose to whoever reads them. */
   json: boolean;
-  /** Whether the line runs against the host --host names; a command that reads this computer's own files refuses
-   * the flag rather than take it and aim nowhere. One parse reads it for every word, so the refusal is what keeps
-   * the ones that have nothing to do with it from swallowing it. */
-  host: boolean;
+  /** What --host means for this word. One parse reads the flag for every word, so this is what keeps the ones that
+   * have nothing to do with it from swallowing it, and what sends the two that run over there to their own line. */
+  host: HostFlag;
   /** Why the MCP server has no tool for it. */
   cliOnly: string;
   run(io: CliIO, opts: SharedOpts, values: SharedFlags, args: string[]): Promise<number>;
+}
+
+/** What a command that reads where a line is aimed works on: the state file this run names, the home holding the
+ * hosts folder, the environment the run was made in and the word --host gave. One reading for the three commands
+ * that ask, so the flag cannot reach one of them and not another. */
+function aimPick(opts: SharedOpts, values: SharedFlags): { statePath: string } & HostPick {
+  return { statePath: opts.statePath, home: opts.home, env: opts.env, ...(values.host !== undefined ? { host: values.host } : {}) };
 }
 
 /** The commands the shared parse serves, by word; a line with no word is `up`. */
 const COMMANDS: Readonly<Record<string, Command>> = {
   up: {
     json: false,
-    host: false,
+    host: "refused",
     cliOnly: "starts the host on the person's computer; a tool runs against a host that is already up",
     run: async (io, opts, values) => {
       if (values.service === true) return upServiceCommand(io, opts, systemService());
@@ -1456,60 +1469,56 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
   down: {
     json: false,
-    host: false,
+    host: "refused",
     cliOnly: "stops the service holding the host up on the person's computer, which a tool would be cutting the ground from under",
     run: (io, opts) => downCommand(io, opts, systemService()),
   },
   status: {
     json: false,
-    host: true,
+    host: "aimed",
     cliOnly: "reads this computer's lock and service manager, or dials the host named beside it; a tool that answers at all is proof a host is up",
     run: (io, opts, values) =>
-      statusCommand(
-        io,
-        { statePath: opts.statePath, home: opts.home, env: opts.env, ...(values.host !== undefined ? { host: values.host } : {}), ...(values.state !== undefined ? { state: values.state } : {}) },
-        systemService(),
-      ),
+      statusCommand(io, { ...aimPick(opts, values), ...(values.state !== undefined ? { state: values.state } : {}) }, systemService()),
   },
   pair: {
     json: false,
-    host: false,
+    host: "hostSide",
     cliOnly: "hands out a code that lets another computer drive this host; only a person at the host's own terminal gives that away",
-    run: (io, opts, _values, args) => pairCommand(io, { statePath: opts.statePath, home: opts.home, env: opts.env }, args),
+    run: (io, opts, values, args) => pairCommand(io, aimPick(opts, values), args),
   },
   devices: {
     json: false,
-    host: false,
+    host: "hostSide",
     cliOnly: "lists and takes away the computers that may drive this host, which belongs with the terminal that handed them the code",
-    run: (io, opts, _values, args) => devicesCommand(io, { statePath: opts.statePath, home: opts.home, env: opts.env }, args),
+    run: (io, opts, values, args) => devicesCommand(io, aimPick(opts, values), args),
   },
   connect: {
     json: false,
-    host: false,
+    host: "refused",
     cliOnly: "spends a pairing code and keeps the token it buys in this person's own files; where their wsp points is theirs to say",
     run: (io, opts, values, args) => connectCommand(io, opts, values, args),
   },
   relay: {
     json: false,
-    host: false,
+    host: "refused",
     cliOnly: "puts this computer on a person's relay account and runs the tunnel it sits behind, which is theirs to give away and theirs to take back",
     run: (io, opts, values, args) => relayCommand(io, opts, args, values),
   },
   hosts: {
     json: false,
-    host: false,
+    host: "refused",
     cliOnly: "reads and moves which host every line on this computer runs against, which no thread decides for the person",
     run: (io, opts, _values, args) => hostsCommand(io, opts, args),
   },
   disconnect: {
     json: false,
-    host: false,
+    host: "refused",
     cliOnly: "hands a host back the token this computer drives it by, which belongs with the terminal that took it",
     run: (io, opts, _values, args) => disconnectCommand(io, opts, args),
   },
   init: {
     json: true,
-    host: false,
+    host: "refused",
     cliOnly: "builds the golden and serves for hours; an agent runs it from a shell and relays the sign-ins it prints",
     run: (io, opts, values) =>
       init(io, opts, {
@@ -1528,7 +1537,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
   doctor: {
     json: false,
-    host: false,
+    host: "refused",
     cliOnly: "forks a live machine and bills while it runs, or with --local runs a thread on this computer; a person decides that at a terminal",
     run: async (io, opts, values) => {
       await adoptLoginPath(line => io.log(line));
@@ -1554,8 +1563,13 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
 };
 
-/** The words of the shared parse that run against a host somewhere else, the one fact its refusal reads. */
-export const HOST_COMMANDS: readonly string[] = Object.keys(COMMANDS).filter(w => COMMANDS[w]!.host);
+/** What each word of the shared parse does with --host, the one fact the parse, its refusal and the usage table read. */
+export const HOST_FLAG: Readonly<Record<string, HostFlag>> = Object.fromEntries(Object.entries(COMMANDS).map(([word, command]) => [word, command.host]));
+
+/** The words of the shared parse that run against a host somewhere else, the one fact its refusal reads. The two
+ * that take the flag only to say they run at that host's own terminal are not among them: a person told to read
+ * this list wants the words that answer for a host over there. */
+export const HOST_COMMANDS: readonly string[] = Object.keys(HOST_FLAG).filter(w => HOST_FLAG[w] === "aimed");
 
 /** The words that take --json on the shared parse and those that refuse it, the one fact the refusal and its test read. */
 export const JSON_COMMANDS: readonly string[] = Object.keys(COMMANDS).filter(w => COMMANDS[w]!.json);
@@ -1677,7 +1691,7 @@ function optionsFor(words: string): Options {
   const word = words.split(" ")[0]!;
   const command = COMMANDS[word];
   if (command === undefined) throw new Error(`wsp ${words} is in the command lines and no command answers wsp ${word}`);
-  return without(SHARED_OPTIONS, [...(command.json ? [] : ["json"]), ...(command.host ? [] : ["host"])]);
+  return without(SHARED_OPTIONS, [...(command.json ? [] : ["json"]), ...(command.host === "refused" ? ["host"] : [])]);
 }
 
 /** A line `wsp` answers: the words after `wsp` that select it, every flag it parses (anything else is a usage error),
@@ -1739,7 +1753,7 @@ export async function cli(argv: string[], io: CliIO = terminalIO(), run: Running
   const json = values.json === true;
   if (command === undefined) return failed(io, json, usageRefusal(commandUsage(word) ?? `unknown command: ${word}\n\n${HELP}`));
   if (json && !command.json) return failed(io, json, usageRefusal(`Unknown option '--json' for wsp ${word}: only ${JSON_COMMANDS.map(w => `wsp ${w}`).join(", ")} prints JSON.`));
-  if (values.host !== undefined && !command.host) {
+  if (values.host !== undefined && command.host === "refused") {
     return failed(io, json, usageRefusal(`Unknown option '--host' for wsp ${word}: it runs on this computer. ${HOST_COMMANDS.map(w => `wsp ${w}`).join(", ")} reads it, and so does every verb.`));
   }
   try {
