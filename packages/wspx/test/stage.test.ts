@@ -12,7 +12,7 @@ const made: string[] = [];
 function sources(): { pkg: string; repo: string; from: Record<string, string> } {
   const root = mkdtempSync(join(tmpdir(), "wsp-stage-"));
   made.push(root);
-  const paths = { pkg: join(root, "pkg"), repo: join(root, "repo"), from: { web: join(root, "web", "dist"), daemon: join(root, "daemon") } };
+  const paths = { pkg: join(root, "pkg"), repo: join(root, "repo"), from: { web: join(root, "web", "dist"), daemon: join(root, "daemon"), cli: join(root, "cli", "dist") } };
   mkdirSync(join(paths.pkg, "dist"), { recursive: true });
   writeFileSync(join(paths.pkg, "dist", "bin.js"), "#!/usr/bin/env node\n", { mode: 0o644 });
   for (const kind of ASSET_KINDS) {
@@ -24,6 +24,8 @@ function sources(): { pkg: string; repo: string; from: Record<string, string> } 
   writeFileSync(join(paths.from["web"]!, "assets", "app.js"), "export {};");
   writeFileSync(join(paths.from["daemon"]!, "package.json"), '{"name":"@wsp/daemon"}');
   writeFileSync(join(paths.from["daemon"]!, "src.ts"), "// never travels");
+  // The published command is split across chunk files its bin imports by name, so the whole folder travels.
+  writeFileSync(join(paths.from["cli"]!, "chunk-1.js"), "export const y = 2;");
   mkdirSync(paths.repo, { recursive: true });
   writeFileSync(join(paths.repo, "LICENSE"), "AGPL-3.0-only");
   writeFileSync(join(paths.repo, "README.md"), "# wsp");
@@ -45,6 +47,8 @@ describe("staging the published package", () => {
     }
     expect(existsSync(join(stagedAsset(paths.pkg, "web"), "assets", "app.js"))).toBe(true);
     expect(existsSync(join(stagedAsset(paths.pkg, "daemon"), "package.json"))).toBe(true);
+    // The wsp command rides in the package too, whole: it is what a machine's daemon bundle carries to the guest.
+    expect(existsSync(join(stagedAsset(paths.pkg, "cli"), "chunk-1.js"))).toBe(true);
   });
 
   it("takes only what a guest runs out of the daemon's folder", () => {

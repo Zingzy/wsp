@@ -191,7 +191,7 @@ describe("wsp verbs over the host", () => {
     const listed = await run("workspaces");
     expect(listed.code).toBe(0);
     const [heading, ...rows] = listed.io.lines[0]!.split("\n");
-    expect(heading!.split(/ {2,}/)).toEqual(["WORKSPACE", "ID", "MACHINE", "STATE", "PROJECTS"]);
+    expect(heading!.split(/ {2,}/)).toEqual(["WORKSPACE", "ID", "MACHINE", "STATE", "PROJECTS", "AGENTS"]);
     // The fork names its provider machine and its state; this computer's machine cell is its cores and memory, the
     // one size line the app's row reads, and it has no state to name, so that cell falls off the end of the row.
     expect(rows.map(r => r.split(/ {2,}/))).toEqual([
@@ -2330,6 +2330,62 @@ describe("wsp verbs over the host", () => {
     const { code, io } = await run("threads");
     expect(code).toBe(2);
     expect(io.errors).toEqual(["wsp threads: unauthorized"]);
+  });
+
+  describe("what the agents on a workspace may do", () => {
+    it("the switch is off until a person turns it on, and the listing and the card read it off the record", async () => {
+      await run("new", "alpha");
+      const off = await run("workspaces");
+      expect(off.io.lines[0]!.split("\n")[1]).not.toContain("machines");
+      const on = await run("workspaces", "agents", "alpha", "--spawn", "on", "--max-machines", "2");
+      expect(on.code).toBe(0);
+      expect(on.io.lines).toEqual(["alpha: agents may spawn: up to 2 machines"]);
+      expect((await rt.workspaces.list())[0]!.agents).toEqual({ spawn: true, maxMachines: 2, maxDepth: 1 });
+      expect((await run("workspaces")).io.lines[0]!).toContain("2 machines");
+      const back = await run("workspaces", "agents", "alpha", "--spawn", "off");
+      expect(back.io.lines).toEqual(["alpha: agents may not spawn"]);
+      // Off keeps the numbers it was given rather than throwing them away, so turning it on again is one word.
+      expect((await rt.workspaces.list())[0]!.agents).toEqual({ spawn: false, maxMachines: 2, maxDepth: 1 });
+    });
+
+    it("a cap with no --spawn beside it is refused, and so is a word that is neither on nor off", async () => {
+      await run("new", "alpha");
+      const bare = await run("workspaces", "agents", "alpha", "--max-machines", "2");
+      expect(bare.code).toBe(EXIT_CODES.usage);
+      expect(bare.io.errors[0]).toContain("need --spawn on beside them");
+      const wrong = await run("workspaces", "agents", "alpha", "--spawn", "yes");
+      expect(wrong.code).toBe(EXIT_CODES.usage);
+      expect(wrong.io.errors[0]).toContain("--spawn takes on or off");
+      const none = await run("workspaces", "agents", "alpha");
+      expect(none.code).toBe(EXIT_CODES.usage);
+      expect((await rt.workspaces.list())[0]!.agents).toBeUndefined();
+    });
+
+    it("wsp new --spawn on turns the switch on at the create", async () => {
+      const made = await run("new", "alpha", "--spawn", "on", "--max-machines", "1");
+      expect(made.code).toBe(0);
+      expect((await rt.workspaces.list())[0]!.agents).toEqual({ spawn: true, maxMachines: 1, maxDepth: 1 });
+    });
+
+    it("--tree draws a thread an agent spawned under the thread that spawned it, and stop ends the tree as one", async () => {
+      const held = heldAgent(false);
+      await restartHost({ claude: held.adapter });
+      await run("new", "alpha", "--spawn", "on");
+      const alpha = (await rt.workspaces.list())[0]!;
+      const lead = await rt.sessions.start(alpha.id, { prompt: "lead" });
+      const leadThread = lead.view().threadId!;
+      const child = await rt.sessions.start(alpha.id, { prompt: "builder" }, { origin: "relayed", by: { kind: "thread", threadId: leadThread, workspaceId: alpha.id, rootThreadId: leadThread } });
+      const childThread = child.view().threadId!;
+      const rows = (io: Captured): string[] => io.lines[0]!.split("\n").slice(1);
+      expect(rows((await run("threads")).io).some(r => r.startsWith("  "))).toBe(false);
+      // The child sits directly under its parent, one step in, whatever the order the sort gave them.
+      const drawn = rows((await run("threads", "--tree")).io);
+      const at = drawn.findIndex(r => r.trim().startsWith(leadThread));
+      expect(drawn[at + 1]).toMatch(new RegExp(`^ {2}${childThread}`));
+      const stopped = await run("stop", leadThread);
+      expect(stopped.io.lines[0]).toBe(`thread ${leadThread} stopped, and with it 1 thread its agents spawned: ${childThread.slice(0, 8)}`);
+      expect((await rt.sessions.list(alpha.id)).every(v => v.status !== "running")).toBe(true);
+    });
   });
 
   describe("an image on a message from the command line", () => {

@@ -246,9 +246,31 @@ export function foldArchivedThreads<T extends ThreadTimestamps>(
   return { settled: shelf, archived };
 }
 
+/** The rows a thread's own agents opened, drawn under it rather than at their own place in the order: a lead and
+ * its builders read as one piece of work. One pass over the sorted list, so a thread whose parent is not in this
+ * list (another workspace's, or on the other side of the idle split) keeps the place the sort gave it. */
+export function nestSpawnedThreads<T extends { readonly id: string; readonly parentThreadId?: string | null | undefined }>(threads: readonly T[]): T[] {
+  const spawned = new Map<string, T[]>();
+  const held = new Set(threads.map(t => t.id));
+  for (const thread of threads) {
+    const parent = thread.parentThreadId ?? undefined;
+    if (parent === undefined || !held.has(parent) || parent === thread.id) continue;
+    spawned.set(parent, [...(spawned.get(parent) ?? []), thread]);
+  }
+  if (spawned.size === 0) return [...threads];
+  const under = new Set([...spawned.values()].flat().map(t => t.id));
+  const out: T[] = [];
+  const push = (thread: T): void => {
+    out.push(thread);
+    for (const child of spawned.get(thread.id) ?? []) if (!out.includes(child)) push(child);
+  };
+  for (const thread of threads) if (!under.has(thread.id)) push(thread);
+  return out;
+}
+
 /** A thread as both sidebar sorts read it. */
 type SidebarThreadRow = SidebarThreadStatusInput &
-  ThreadTimestamps & { readonly id: string; readonly unsettledAt?: string | null | undefined };
+  ThreadTimestamps & { readonly id: string; readonly unsettledAt?: string | null | undefined; readonly parentThreadId?: string | null | undefined };
 
 /** A workspace's threads as the sidebar orders them: the working ones on top, then the settled shelf. The sidebar
     draws the two as its own sections and the switcher card takes the first row of them, so both name one thread. */
@@ -256,8 +278,8 @@ export function splitSidebarThreads<T extends SidebarThreadRow>(
   threads: readonly T[],
 ): { active: T[]; settled: T[] } {
   return {
-    active: sortThreadsForSidebar(threads.filter(thread => isThreadWorking(thread))),
-    settled: sortSettledThreadsForSidebar(threads.filter(thread => !isThreadWorking(thread))),
+    active: nestSpawnedThreads(sortThreadsForSidebar(threads.filter(thread => isThreadWorking(thread)))),
+    settled: nestSpawnedThreads(sortSettledThreadsForSidebar(threads.filter(thread => !isThreadWorking(thread)))),
   };
 }
 

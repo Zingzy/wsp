@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, CURL_NET, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_USER_ENV, OWNER_LABEL, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, whoseMachine, type Machine, type MachineBackend } from "@wsp/engine";
-import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, templateRecordedLine, templateSkippedLine, type SnapshotStorage } from "@wsp/protocol";
+import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, GUEST_DAEMON_DIR, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, templateRecordedLine, templateSkippedLine, type SnapshotStorage } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import { assetDir } from "./assets.js";
@@ -22,7 +22,7 @@ const execFileAsync = promisify(execFile);
 
 // --- daemon bundle --------------------------------------------------------
 
-// Runs inside /root/wsp-daemon. Loopback binds are unreachable through the
+// Runs inside the daemon dir. Loopback binds are unreachable through the
 // preview edge (it dials eth0), so 0.0.0.0 is the whole point of this file.
 // PATH is set before the daemon loads, never inherited: a relaunch from the
 // guest's side arrives with a bare one (measured after an OOM kill, 2026-09-06).
@@ -61,12 +61,15 @@ exit 0
 /** Lay out an installable copy of the daemon: its dist build, a start script,
  * and a package.json whose dependency pins mirror the daemon's (node-pty has
  * no linux prebuilds, so the guest's npm install compiles it, ~5s). */
-export async function stageDaemonBundle(stageDir: string, daemonDir = assetDir("daemon")): Promise<void> {
+export async function stageDaemonBundle(stageDir: string, daemonDir = assetDir("daemon"), cliDir = assetDir("cli")): Promise<void> {
   const daemonPkg = JSON.parse(readFileSync(join(daemonDir, "package.json"), "utf8")) as {
     dependencies: Record<string, string>;
   };
   mkdirSync(stageDir, { recursive: true });
   cpSync(join(daemonDir, "dist"), join(stageDir, "dist"), { recursive: true });
+  // The wsp command rides with the daemon so every machine that has one has wsp at GUEST_WSP_BIN, with no install
+  // of its own and nothing on the golden: it is what a turn's own agent runs to reach back into this host.
+  cpSync(cliDir, join(stageDir, "wsp"), { recursive: true });
   writeFileSync(join(stageDir, "start.mjs"), START_MJS);
   writeFileSync(join(stageDir, "wsp-open"), OPEN_SHIM_SCRIPT, { mode: 0o755 });
   writeFileSync(
@@ -135,12 +138,12 @@ export function daemonUnit(previewHostSuffix?: string): string {
     "",
     "[Service]",
     "Type=simple",
-    "WorkingDirectory=/root/wsp-daemon",
+    `WorkingDirectory=${GUEST_DAEMON_DIR}`,
     `Environment=PATH=${TOOLS_PATH}`,
     ...Object.entries(GUEST_USER_ENV).map(([name, value]) => `Environment=${name}=${value}`),
     ...(previewHostSuffix !== undefined ? [`Environment=${VITE_ALLOWED_HOSTS_ENV}=${previewHostSuffix}`] : []),
     // Through sh so node is found on the unit's PATH: a machine that shipped its own node keeps it where it is.
-    "ExecStart=/bin/sh -c 'exec node /root/wsp-daemon/start.mjs'",
+    `ExecStart=/bin/sh -c 'exec node ${GUEST_DAEMON_DIR}/start.mjs'`,
     "Restart=always",
     "RestartSec=1",
     `MemoryMax=${DAEMON_MEMORY_MAX_PERCENT}%`,
@@ -189,17 +192,17 @@ export function deployScript(token: string, previewHostSuffix?: string): string 
     // The exec running this carries PATH and nothing else (measured 2026-09-05), and npm and the bundle's build
     // read the guest's home. What the daemon itself hands to every pty comes from its unit, not from here.
     EXEC_ENV,
-    "mkdir -p /root/wsp-daemon /root/inbox",
-    "tar -xzf /root/wsp-daemon.tgz -C /root/wsp-daemon",
+    `mkdir -p ${GUEST_DAEMON_DIR} /root/inbox`,
+    `tar -xzf ${GUEST_DAEMON_DIR}.tgz -C ${GUEST_DAEMON_DIR}`,
     nodeBootstrap(),
     'echo "NODE_VERSION $(node --version)"',
-    "cd /root/wsp-daemon",
+    `cd ${GUEST_DAEMON_DIR}`,
     "npm install --omit=dev --no-audit --no-fund > /tmp/wsp-npm.log 2>&1 || { tail -3 /tmp/wsp-npm.log; echo NPM_FAIL; false; }",
-    "rm -rf /root/wsp-daemon/node_modules/node-pty/prebuilds",
+    `rm -rf ${GUEST_DAEMON_DIR}/node_modules/node-pty/prebuilds`,
     // Both names: only some tools read BROWSER; the rest exec xdg-open by name, and /usr/local/bin is first on PATH.
     // BROWSER itself is set by the daemon for its ptys, by profile.d for login shells, and in a fork's envs only
     // when its golden was sealed with the shim (claudeEnvs), never on a machine that may lack the file.
-    `install -m 0755 /root/wsp-daemon/wsp-open ${OPEN_SHIM_PATH}`,
+    `install -m 0755 ${GUEST_DAEMON_DIR}/wsp-open ${OPEN_SHIM_PATH}`,
     `ln -sfn ${OPEN_SHIM_PATH} /usr/local/bin/xdg-open`,
     `mkdir -p /etc/profile.d && printf 'export BROWSER=%s\\nunset DISPLAY\\n' ${OPEN_SHIM_PATH} > /etc/profile.d/wsp-open.sh`,
     // Login shells read it from profile.d; the daemon's ptys inherit it from the daemon, exported before it starts.
@@ -264,7 +267,7 @@ export async function deployDaemon(
   try {
     await stageDaemonBundle(stage, opts.daemonDir);
     await packBundle(stage, tgz);
-    const putUrl = await machine.uploadUrl("/root/wsp-daemon.tgz");
+    const putUrl = await machine.uploadUrl(`${GUEST_DAEMON_DIR}.tgz`);
     const put = await fetch(putUrl, { method: "PUT", body: readFileSync(tgz) });
     if (!put.ok) throw new Error(`bundle upload failed: HTTP ${put.status}`);
 

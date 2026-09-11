@@ -69,10 +69,10 @@ import {
 } from "./service.js";
 import { connectCommand, disconnectCommand, hostsCommand } from "./connect.js";
 import { DEFAULT_HOME, wspHome } from "./hosts.js";
-import { devicesCommand, pairCommand } from "./pairing.js";
+import { advertisedUrl, devicesCommand, pairCommand } from "./pairing.js";
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
-import { agentsOnPath, installEach, installLines, mcpServerSpec, nextLine, registeredLine, removeEach, removeLines, runningWsp, type RunningWsp } from "./mcp-install.js";
+import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, registeredLine, removeEach, removeLines, runningWsp, type RunningWsp } from "./mcp-install.js";
 import { CLI_VERBS, COMMON, failed, findVerb, jsonAsked, runVerb, toolName, verbHelp, verbUsage, type VerbDeps } from "./verbs.js";
 import { VERSION } from "./version.js";
 
@@ -143,6 +143,8 @@ options:
                      port follows ${WS_PORT_OFFSET} above it
   --ws-port N        runtime websocket port on its own (default
                      ${DEFAULT_WS_PORT}); --port alone moves both
+  --advertise URL    up: the address a machine dials this host at
+                     (default the bound address; nothing on loopback)
   --listen ADDR      up: the address to bind (default ${LOOPBACK}, this
                      computer alone). On any other address the page is served
                      without the host token and every client pairs for a device
@@ -545,12 +547,17 @@ export function sshWiring(): SshWiring {
 export interface SharedOpts extends ListenAsked {
   statePath: string;
   home: string;
+  /** The address a machine dials this host at, which is what a turn on one is told; absent where the host binds
+   * this computer alone and nobody named another, so no turn is handed a token it could not use. */
+  advertise?: string;
 }
 
 /** The environment the caller runs in decides the home, the same reading the verbs take, so a run with its own
  * environment cannot send wsp connect to one folder and --host to another. */
-export function optsFor(values: Pick<SharedFlags, "port" | "ws-port" | "listen" | "state">, env: Readonly<Record<string, string | undefined>> = process.env): SharedOpts {
-  return { ...portsAsked({ port: values.port, wsPort: values["ws-port"], listen: values.listen }), statePath: statePathFrom(values.state), home: wspHome(env) };
+export function optsFor(values: Pick<SharedFlags, "port" | "ws-port" | "listen" | "advertise" | "state">, env: Readonly<Record<string, string | undefined>> = process.env): SharedOpts {
+  const asked = portsAsked({ port: values.port, wsPort: values["ws-port"], listen: values.listen });
+  const advertise = advertisedUrl(asked.address, asked.port, values.advertise);
+  return { ...asked, ...(advertise !== undefined ? { advertise } : {}), statePath: statePathFrom(values.state), home: wspHome(env) };
 }
 
 /** The state files a host on this computer could be serving: the one this run works on and this computer's default,
@@ -578,10 +585,14 @@ export function swapProvider(rt: Runtime, keys: Keys): void {
   slot.swap(providerBackend(keys));
 }
 
-export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe = goldenRecipe(keys)): Runtime {
+export function makeRuntime(keys: Keys, statePath: string, recipe: GoldenRecipe = goldenRecipe(keys), agents?: { url?: string; run?: RunningWsp }): Runtime {
   const slot = providerSlot(providerBackend(keys));
   const rt = createRuntime({
     backend: slot.backend,
+    // What a turn's own agent needs to reach back in: the address this host is reachable at from a machine, and on
+    // this computer the same command an agent's config here is given, so a thread on the local workspace and one
+    // on a fork run the same wsp against the same host.
+    ...(agents?.url !== undefined ? { agents: { url: agents.url, wspMcp: mcpServerCommand(agents.run ?? runningWsp()) } } : {}),
     local: localWiring(),
     ssh: sshWiring(),
     store: jsonFileStore(statePath),
@@ -727,11 +738,12 @@ function initRefusal(lock: HostLock, statePath: string): string {
 const stateFlag = (opts: { statePath: string }, values: Pick<SharedFlags, "state">): string[] => (values.state !== undefined ? ["--state", shellQuote(opts.statePath)] : []);
 
 /** The wsp up that serves what this init records, carrying the state, port and address flags the init was given. */
-export function upCommandFor(opts: { port: number; wsPort: number; address?: string; statePath: string }, values: Pick<SharedFlags, "state" | "port" | "ws-port" | "listen">): string {
+export function upCommandFor(opts: { port: number; wsPort: number; address?: string; advertise?: string; statePath: string }, values: Pick<SharedFlags, "state" | "port" | "ws-port" | "listen" | "advertise">): string {
   return [
     "wsp up",
     ...stateFlag(opts, values),
     ...(values.listen !== undefined ? ["--listen", shellQuote(opts.address ?? LOOPBACK)] : []),
+    ...(values.advertise !== undefined && opts.advertise !== undefined ? ["--advertise", shellQuote(opts.advertise)] : []),
     ...(values.port !== undefined ? ["--port", String(opts.port)] : []),
     ...(values["ws-port"] !== undefined ? ["--ws-port", String(opts.wsPort)] : []),
   ].join(" ");
@@ -792,7 +804,7 @@ async function init(
         ports: { port: opts.port, wsPort: opts.wsPort, named: opts.named, states: statesHere(opts.statePath) },
         address: opts.address,
         upCommand: flags.upCommand,
-        runtime: () => makeRuntime(keys, opts.statePath),
+        runtime: () => makeRuntime(keys, opts.statePath, undefined, opts.advertise !== undefined ? { url: opts.advertise } : {}),
         roads: rt => workspaceRoads(rt, agentHomes(homedir()), workspaceEnvsFor(keys)),
         host: (rt, ports) => hostFor(rt, keys, { ...opts, port: ports.port, wsPort: ports.wsPort }, say),
       },
@@ -825,7 +837,7 @@ async function init(
       platform: platform() === "darwin" ? "darwin" : "linux",
       brew: () => readBrewTable(nodeHost()),
       scan: recipe => scanTools(nodeHost(), recipe),
-      runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `daemon on node ${(await deployDaemon(machine)).node}` }),
+      runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `daemon on node ${(await deployDaemon(machine)).node}` }, opts.advertise !== undefined ? { url: opts.advertise } : {}),
       ports: { port: opts.port, wsPort: opts.wsPort, named: opts.named, states: statesHere(opts.statePath) },
       address: opts.address,
       upCommand: flags.upCommand,
@@ -855,6 +867,9 @@ export interface ServeOptions {
   wsPort: number;
   /** The address the host binds; this computer alone when absent. */
   address?: string;
+  /** The address a machine reaches this host at, which every turn on a spawn enabled workspace is told; absent
+   * leaves those turns without a token, since a machine cannot dial this computer's loopback. */
+  advertise?: string;
   statePath: string;
   webDir?: string;
   runtime?: Runtime;
@@ -870,7 +885,7 @@ export interface ServeOptions {
 export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   await adoptLoginPath(line => io.log(line));
   const keys = await loadKeys(io, undefined, { anthropic: false, noSolari: "local" });
-  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath);
+  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, undefined, { ...(opts.advertise !== undefined ? { url: opts.advertise } : {}), ...(opts.running !== undefined ? { run: opts.running } : {}) });
   return hostFor(rt, keys, opts, io, opts.running);
 }
 
@@ -886,7 +901,7 @@ export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle | un
   // A state file with nothing but this computer in it is served with no provider key: wsp init's local road is
   // what wrote it, and asking for a key to serve it would take that road away the next morning.
   const keys = await loadKeys(io, undefined, { anthropic: false, noSolari: "local" });
-  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath);
+  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, undefined, { ...(opts.advertise !== undefined ? { url: opts.advertise } : {}), ...(opts.running !== undefined ? { run: opts.running } : {}) });
   if (await servesNothing(rt)) {
     io.error(NOTHING_TO_SERVE_LINE);
     return undefined;
@@ -991,10 +1006,13 @@ function serviceAddress(statePath: string): ServiceAddress {
 
 /** The line the service runs: this node and this wsp, serving the same state file and ports the install was given.
  * Every one is spelled out, since a service has no cwd of the person's to read a default from. */
-function serviceArgv(opts: { port: number; wsPort: number; address?: string; statePath: string }): string[] {
+function serviceArgv(opts: { port: number; wsPort: number; address?: string; advertise?: string; statePath: string }): string[] {
   const bin = process.argv[1];
   if (bin === undefined) throw new Error("wsp up --service needs the path wsp was started from, and this process has none");
-  return [process.execPath, resolve(bin), "up", "--state", opts.statePath, "--port", String(opts.port), "--ws-port", String(opts.wsPort), "--listen", opts.address ?? LOOPBACK];
+  return [
+    process.execPath, resolve(bin), "up", "--state", opts.statePath, "--port", String(opts.port), "--ws-port", String(opts.wsPort), "--listen", opts.address ?? LOOPBACK,
+    ...(opts.advertise !== undefined ? ["--advertise", opts.advertise] : []),
+  ];
 }
 
 /** A host already holds the state file, so the service would only start a second one that refuses the lock. */
@@ -1143,6 +1161,7 @@ interface SharedFlags {
   port?: string;
   "ws-port"?: string;
   listen?: string;
+  advertise?: string;
   state?: string;
   yes?: boolean;
   "non-interactive"?: boolean;
@@ -1355,6 +1374,7 @@ export const SHARED_OPTIONS: Options = {
   port: { type: "string" },
   "ws-port": { type: "string" },
   listen: { type: "string" },
+  advertise: { type: "string" },
   state: { type: "string" },
   yes: { type: "boolean", short: "y" },
   "non-interactive": { type: "boolean" },

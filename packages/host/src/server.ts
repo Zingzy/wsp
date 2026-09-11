@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes } from "@wsp/engine";
-import { API_UNAUTHORIZED, DEFAULT_PORT, DEFAULT_WS_PORT, WS_PATH, isLoopback, recordRestoredLine, type BootPayload, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
+import { API_UNAUTHORIZED, DEFAULT_PORT, DEFAULT_WS_PORT, WS_PATH, isLoopback, recordRestoredLine, type BootPayload, type Caller, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
 import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { nodeHost, readGhosttyConfig } from "@wsp/collect";
 import { hostFolders } from "./host-folders.js";
@@ -55,8 +55,9 @@ export interface HostOptions {
 /** The roads to a workspace and its project that the app's routes and wsp init share, so a workspace made without a
  * host is the one the app would have made. */
 export interface WorkspaceRoads {
-  /** Forks the golden's head into a new workspace, with the envs and labels the app's own create gives it. */
-  createWorkspace(name: string): Promise<CreatedWorkspace>;
+  /** Forks the golden's head into a new workspace, with the envs and labels the app's own create gives it. The
+   * caller is who asked, so a route reached with a thread's own token is held to what that thread may do. */
+  createWorkspace(name: string, caller?: Caller): Promise<CreatedWorkspace>;
   /** Makes this computer the one local workspace, as the app's own This computer row does; it forks nothing and
    * needs no golden, so it is the one road into an empty state. */
   createLocalWorkspace(): Promise<WorkspaceView>;
@@ -221,15 +222,18 @@ export function workspaceRoads(rt: Runtime, homes: Readonly<Record<string, strin
   const bundlerFor = (source: string) => projectBundler(source, homes);
   return {
     bundlerFor,
-    createWorkspace: async name => {
+    createWorkspace: async (name, caller) => {
       const head = goldenHead(await rt.golden.get());
       if (!head) throw new NoGoldenError();
-      return rt.workspaces.create({
-        golden: head.snapshotId,
-        name,
-        ...(opts.workspaceEnvs !== undefined ? { envs: opts.workspaceEnvs(head) } : {}),
-        labels: { [WSP_LABEL]: "1", [HOST_LABEL]: "1", [CREATED_AT_LABEL]: new Date().toISOString() },
-      });
+      return rt.workspaces.create(
+        {
+          golden: head.snapshotId,
+          name,
+          ...(opts.workspaceEnvs !== undefined ? { envs: opts.workspaceEnvs(head) } : {}),
+          labels: { [WSP_LABEL]: "1", [HOST_LABEL]: "1", [CREATED_AT_LABEL]: new Date().toISOString() },
+        },
+        caller,
+      );
     },
     createLocalWorkspace: () => rt.workspaces.createLocal(),
     planProject: source => bundlerFor(source).plan(),
@@ -286,9 +290,16 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     });
   };
 
-  /** Whether a request may drive the JSON routes: on this computer anyone who reached the port may, beyond it only
-   * a paired device's token in an Authorization header. The runtime server owns the one reading of a token. */
-  const mayDrive = async (req: IncomingMessage): Promise<boolean> => onThisComputer || (await rtServer.authorize(bearerOf(req.headers.authorization))) !== undefined;
+  /** Who a request to the JSON routes is, or nothing when it is nobody: on this computer anyone who reached the port
+   * is the person, beyond it only a paired device's token in an Authorization header. The runtime server owns the one
+   * reading of a token, and a token scoped to a thread names that thread here exactly as it does on a socket, so the
+   * routes are no wider a road into this host than the protocol is. */
+  const callerOf = async (req: IncomingMessage): Promise<{ caller?: Caller } | undefined> => {
+    const who = await rtServer.authorize(bearerOf(req.headers.authorization));
+    if (who === undefined) return onThisComputer ? {} : undefined;
+    const scope = who.kind === "device" ? who.device.scope : undefined;
+    return scope === undefined ? {} : { caller: { origin: "relayed", by: scope } };
+  };
 
   const server = createServer((req, res) => {
     void (async () => {
@@ -298,14 +309,15 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
         res.end(page());
         return;
       }
-      if (path.startsWith("/api/") && !(await mayDrive(req))) {
+      const who = path.startsWith("/api/") ? await callerOf(req) : {};
+      if (who === undefined) {
         sendJson(res, 401, { error: API_UNAUTHORIZED });
         return;
       }
       if (req.method === "GET" && path === "/api/workspaces") {
         // A listing, not the app's own socket, so it joins the listing doors' run of probes and not the one a
         // sidebar row's word rides.
-        sendJson(res, 200, { workspaces: await rt.status.list({ probeTimeoutMs, reader: "table" }) });
+        sendJson(res, 200, { workspaces: await rt.status.list({ probeTimeoutMs, reader: "table" }, who.caller) });
         return;
       }
       if (req.method === "POST" && path === "/api/workspaces") {
@@ -317,7 +329,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
         }
         let created: CreatedWorkspace;
         try {
-          created = await createWorkspace(name);
+          created = await createWorkspace(name, who.caller);
         } catch (e) {
           if (!(e instanceof NoGoldenError)) throw e;
           sendJson(res, 409, { error: e.message });

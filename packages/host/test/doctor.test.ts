@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFile } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,7 +10,7 @@ import { CURL_NET } from "@wsp/catalog";
 import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { WebSocketServer } from "ws";
 import { GUEST_USER_ENV, TOOLS_PATH } from "@wsp/engine";
-import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, GUEST_DAEMON_DIR, GUEST_WSP_BIN, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { isReserved, LocalBackend, NoProviderBackend } from "@wsp/engine";
@@ -340,6 +340,28 @@ describe("stageDaemonBundle", () => {
     expect(readFileSync(join(stage, "start.mjs"), "utf8")).toContain("openSocketPath: OPEN_SOCKET_PATH");
     expect(readFileSync(join(stage, "wsp-open"), "utf8")).toBe(OPEN_SHIM_SCRIPT);
     expect(statSync(join(stage, "wsp-open")).mode & 0o111).toBe(0o111);
+  });
+
+  it("carries the wsp command beside the daemon, whole, at the path a turn's tools are launched from", async () => {
+    dir = tmp("wsp-bundle-cli-");
+    const daemonDir = join(dir, "daemon");
+    mkdirSync(join(daemonDir, "dist"), { recursive: true });
+    writeFileSync(join(daemonDir, "package.json"), JSON.stringify({ name: "@wsp/daemon", dependencies: {} }));
+    writeFileSync(join(daemonDir, "dist", "index.js"), "export const x = 1;");
+    // The published build is split across chunk files bin.js imports by name, so the folder travels whole.
+    const cliDir = join(dir, "cli");
+    mkdirSync(cliDir, { recursive: true });
+    writeFileSync(join(cliDir, "bin.js"), 'import "./chunk-1.js";\n');
+    writeFileSync(join(cliDir, "chunk-1.js"), "export const y = 2;\n");
+
+    const stage = join(dir, "stage");
+    await stageDaemonBundle(stage, daemonDir, cliDir);
+
+    expect(readFileSync(join(stage, "wsp", "bin.js"), "utf8")).toContain("./chunk-1.js");
+    expect(existsSync(join(stage, "wsp", "chunk-1.js"))).toBe(true);
+    // Where it lands in the guest is the protocol's one reading, which the runtime builds the launch from.
+    expect(GUEST_WSP_BIN).toBe(`${GUEST_DAEMON_DIR}/wsp/bin.js`);
+    expect(deployScript("aabbcc").split("\n")).toContain(`tar -xzf ${GUEST_DAEMON_DIR}.tgz -C ${GUEST_DAEMON_DIR}`);
   });
 
   it("start.mjs sets the golden's PATH before the daemon loads, so a relaunch from a bare environment runs agents with it", async () => {

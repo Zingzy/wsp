@@ -59,7 +59,9 @@ export function ThreadRow({
         data-sidebar-row
         data-row-id={threadRowId(thread.id)}
         {...(renaming ? {} : { onClick: onSelect, onContextMenu })}
-        className={cn(TWO_LINE_ROW_CLASS, "w-full")}
+        // One step in for a thread another thread's agent opened, drawn under the thread that opened it. One level
+        // whatever the depth: the tree is capped at one by default, and a deeper one still reads as under its lead.
+        className={cn(TWO_LINE_ROW_CLASS, "w-full", thread.parentThreadId !== null && "pl-5")}
       >
         <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
           <span className="flex items-center gap-2">

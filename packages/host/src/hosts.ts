@@ -8,7 +8,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { WS_PATH, usageRefusal } from "@wsp/protocol";
+import { WS_PATH, hostFromEnv, usageRefusal } from "@wsp/protocol";
 import { servingHost } from "./host-lock.js";
 
 /** What this computer keeps about a host on another one: the address a person gave wsp connect, the device the host
@@ -158,7 +158,7 @@ export function wsUrlOf(url: string): string {
 
 /** Which host a line runs against: the host on this computer, an alias this computer paired with, or an address
  * typed on the line, which carries no token and is only a road for wsp connect. */
-export type HostAim = { kind: "here" } | { kind: "alias"; alias: string; record: HostRecord } | { kind: "url"; url: string };
+export type HostAim = { kind: "here" } | { kind: "alias"; alias: string; record: HostRecord } | { kind: "url"; url: string; token?: string };
 
 /** What a caller names when it asks where to dial: the word a --host flag carried, the environment the caller runs
  * in, and the wsp home holding the hosts folder, which that environment names when the caller does not. */
@@ -204,14 +204,23 @@ export function aimedHost(statePath: string, pick: HostPick = {}): HostAim {
   const env = pick.env ?? process.env;
   const home = pick.home ?? wspHome(env);
   const named = [pick.host, env["WSP_HOST"]].map(w => w?.trim()).find(w => w !== undefined && w !== "");
-  if (named !== undefined) return aimAt(named, home);
+  if (named !== undefined) return aimAt(named, home, env);
   if (servingHost(statePath) !== undefined) return { kind: "here" };
   const fallback = defaultHost(home);
-  return fallback === undefined ? { kind: "here" } : aimAt(fallback, home);
+  if (fallback !== undefined) return aimAt(fallback, home, env);
+  // Last of all, the pair a turn's launch left in this environment: a machine has no hosts folder and no host of
+  // its own, so this is the only road it has, and on a computer that has either of the others it never wins.
+  const carried = hostFromEnv(env);
+  return carried === undefined ? { kind: "here" } : { kind: "url", url: carried.url, token: carried.token };
 }
 
-function aimAt(named: string, home: string): HostAim {
-  if (isUrl(named)) return { kind: "url", url: named };
+function aimAt(named: string, home: string, env: Readonly<Record<string, string | undefined>>): HostAim {
+  // An address with a token beside it in this environment is a host this line may drive; one without is only the
+  // road wsp connect takes, since nothing else on this computer holds a token for it.
+  if (isUrl(named)) {
+    const carried = hostFromEnv(env);
+    return { kind: "url", url: named, ...(carried?.url === named ? { token: carried.token } : {}) };
+  }
   const record = readHost(home, named);
   if (record === undefined) throw usageRefusal(noSuchHostLine(named, home));
   return { kind: "alias", alias: named, record };

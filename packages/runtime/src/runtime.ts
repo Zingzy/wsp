@@ -146,6 +146,7 @@ import type {
   SessionEvent,
   SessionAccessResult,
   SessionAnswerResult,
+  SessionInterruptOutcome,
   SessionInterruptResult,
   SessionRenameResult,
   SessionRenamer,
@@ -167,6 +168,9 @@ import type {
   UpgradeResult,
   WorkspaceCostEvent,
   WorkspaceCreateStage,
+  Caller,
+  ThreadScope,
+  WorkspaceAgents,
   WorkspaceKind,
   WorkspaceLook,
   WorkspaceOrigin,
@@ -176,6 +180,7 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
+import { GUEST_WSP_BIN, agentsFrom, MCP_SERVER_NAME, threadWord, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, type SpawnAct } from "@wsp/protocol";
 import { mcpServersBlocked, actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, machineCapRefusal, machineWord, moveTimedOutLine, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noSshImportLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_ASK_EVERY_MS, WAKE_ASKS_FOR_MS, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
@@ -381,6 +386,10 @@ export interface CreateWorkspaceOptions extends WorkspaceSpec {
   /** Snapshot id of the golden image to fork. */
   golden: string;
   name: string;
+  /** What the agents on the new workspace may ask of this host; absent is off, and on a fork a thread asked for it
+   * is the forking workspace's own switch, so a tree of machines carries one rule rather than needing it set again.
+   * A key left out takes the default. */
+  agents?: Partial<WorkspaceAgents>;
   /** Auto-nap window; undefined takes the runtime default, null turns auto-nap off. */
   idleWindowMs?: number | null;
 }
@@ -741,6 +750,10 @@ export interface RuntimeOptions {
   providerReadMs?: number;
   /** How long a gone verdict waits before it reads the machine's state once more (tests shrink it; 0 reads at once). */
   goneConfirmMs?: number;
+  /** How a turn on a machine reaches back into this host: the address the machine dials, which is never loopback
+   * since the turn runs somewhere else, and the wsp command on this computer for the local kind. Without an address
+   * no turn is given a token at all, so a host that has not been told where it is reachable spawns nothing. */
+  agents?: { url?: string; wspMcp?: McpServerSpec };
   /** The token every daemon this runtime reaches is given; minted fresh per process when absent (tests pin one). */
   daemonToken?: string;
   /** How long a daemon gets to announce itself when an update reads the version either side of its deploy; the
@@ -966,8 +979,8 @@ export interface SweepResult extends ReapResult {
 /** The status tracker as the runtime serves it: the tracker's own surface, with the caller's origin last on the two
  * reads that answer for workspaces, so the snapshot leaves out what that caller may not drive. */
 export interface OriginStatusApi extends Omit<StatusApi, "list" | "history"> {
-  list(opts?: StatusListOptions, origin?: WorkspaceOrigin): Promise<WorkspaceStatus[]>;
-  history(workspaceId: string, origin?: WorkspaceOrigin): Promise<WorkspaceCostEvent[]>;
+  list(opts?: StatusListOptions, origin?: Caller): Promise<WorkspaceStatus[]>;
+  history(workspaceId: string, origin?: Caller): Promise<WorkspaceCostEvent[]>;
 }
 
 export interface Runtime {
@@ -977,29 +990,29 @@ export interface Runtime {
    * CLI or MCP, or relayed from a machine. Absent reads here. A workspace whose kind takes no relayed request
    * refuses one with the one sentence, and the lists that serve workspaces leave it out for that caller. */
   readonly workspaces: {
-    create(opts: CreateWorkspaceOptions, origin?: WorkspaceOrigin): Promise<CreatedWorkspace>;
+    create(opts: CreateWorkspaceOptions, origin?: Caller): Promise<CreatedWorkspace>;
     /** The one local workspace: this computer. Refused when this host wired no local backend, when one already
      * exists (one per host), and for a name another workspace holds. It forks nothing; the machine already exists. */
-    createLocal(name?: string, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
+    createLocal(name?: string, origin?: Caller): Promise<WorkspaceView>;
     /** A workspace on a machine the person already has, reached over ssh at `user@host`. Refused when this host
      * wired no ssh backend, when the machine does not answer the dial, when a workspace already stands on it, and
      * for a name another workspace holds. It forks nothing; the machine already exists. */
-    createSsh(address: string, opts?: { name?: string; port?: number; keyPath?: string }, origin?: WorkspaceOrigin): Promise<CreatedWorkspace>;
-    get(id: string, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
+    createSsh(address: string, opts?: { name?: string; port?: number; keyPath?: string }, origin?: Caller): Promise<CreatedWorkspace>;
+    get(id: string, origin?: Caller): Promise<WorkspaceView>;
     /** Every workspace this host holds, less the ones the caller's origin may not drive. */
-    list(origin?: WorkspaceOrigin): Promise<WorkspaceView[]>;
-    nap(id: string, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
-    wake(id: string, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
+    list(origin?: Caller): Promise<WorkspaceView[]>;
+    nap(id: string, origin?: Caller): Promise<WorkspaceView>;
+    wake(id: string, origin?: Caller): Promise<WorkspaceView>;
     /** Stops a wake that is asking the provider again on its own, and answers with the record it leaves behind. The
      * wake itself ends with WAKE_STOPPED; a workspace with no wake in flight is answered with as it stands. */
-    stopWake(id: string, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
-    upgrade(id: string, spec?: WorkspaceSpec, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
+    stopWake(id: string, origin?: Caller): Promise<WorkspaceView>;
+    upgrade(id: string, spec?: WorkspaceSpec, origin?: Caller): Promise<WorkspaceView>;
     /** Moves the workspace onto its golden's head version, carrying its files across. Refused in one sentence when
      * the machine is not running, the image is a project golden, or no golden knows the image; a workspace past
      * those and already on the head is returned untouched. */
-    updateImage(id: string, origin?: WorkspaceOrigin): Promise<UpgradeResult>;
+    updateImage(id: string, origin?: Caller): Promise<UpgradeResult>;
     /** Fresh golden fork with the nap-time vault, old machine killed, id and name kept: the way out of a zombie. */
-    rebuild(id: string, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
+    rebuild(id: string, origin?: Caller): Promise<WorkspaceView>;
     /** Names the workspace, under the rules a fork's name takes: the space around the name is dropped, and a name
      * another workspace holds, one a fork is landing under and a blank one are refused (kind conflict) naming the
      * holder. A name the workspace already carries answers with the record untouched. The record alone changes, so
@@ -1009,53 +1022,60 @@ export interface Runtime {
      * its API offers no update; the next fork or rebuild stamps the new one, and the name is kept here beside the
      * records so a sweep that records this machine after the store lost its workspace document restores it under
      * the name a person gave rather than the fork's. */
-    rename(id: string, name: string, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
+    rename(id: string, name: string, origin?: Caller): Promise<WorkspaceView>;
     /** The theme and the glyph a person gave this workspace. A key left out keeps that fact as it is and null
      * clears it, so the colour picker and the icon picker each send their own without reading the other's. The record
      * alone changes and the machine is untouched, so this goes out as workspace.look. */
-    look(id: string, look: WorkspaceLook, origin?: WorkspaceOrigin): Promise<WorkspaceView>;
+    look(id: string, look: WorkspaceLook, origin?: Caller): Promise<WorkspaceView>;
     /** Snapshots the running machine as a project golden: the golden it stands on plus the project as it is now, so a
      * fork of the snapshot starts a task with the project in place. Refused in one sentence when the workspace is not
      * running or holds no project; a machine that was ever resumed is refused by the engine (kind notFirstLife). The
      * guest freezes for about three seconds and stays first-life. */
-    snapshot(id: string, origin?: WorkspaceOrigin): Promise<ProjectGolden>;
+    snapshot(id: string, origin?: Caller): Promise<ProjectGolden>;
     /** The recipe's daemon deploy on the running machine, replacing the daemon there, then this runtime's token
      * written again so the next reach opens it. The runtime runs it by itself when a machine's daemon is older than
      * this wsp. Throws on a workspace that is not running or a runtime without the deploy. */
-    updateDaemon(id: string, origin?: WorkspaceOrigin): Promise<void>;
-    delete(id: string, origin?: WorkspaceOrigin): Promise<void>;
+    updateDaemon(id: string, origin?: Caller): Promise<void>;
+    /** Turns the workspace's agents switch on or off and names its caps; a key left out keeps what the record holds.
+     * Never a thread's own act: what agents may do is the person's to decide. */
+    agents(id: string, patch: Partial<WorkspaceAgents>, origin?: Caller): Promise<WorkspaceView>;
+    delete(id: string, origin?: Caller): Promise<void>;
     /** Drops a workspace whose machine the provider no longer has: its record, transcripts and sessions go and nothing
      * is asked of the provider. Refused with the reason (kind conflict) while the machine still exists. */
-    forget(id: string, origin?: WorkspaceOrigin): Promise<void>;
+    forget(id: string, origin?: Caller): Promise<void>;
     /** A person acted in the workspace; its idle window starts over. */
-    touch(id: string, origin?: WorkspaceOrigin): Promise<void>;
+    touch(id: string, origin?: Caller): Promise<void>;
     /** One-shot command on the workspace's machine (plumbing for clients; sessions are the main road). */
-    exec(id: string, cmd: string, opts?: { timeoutMs?: number }, origin?: WorkspaceOrigin): Promise<ExecResult>;
+    exec(id: string, cmd: string, opts?: { timeoutMs?: number }, origin?: Caller): Promise<ExecResult>;
     /** The command, word by word, launched the way a harness turn is: detached on the machine, each word quoted for
      * its shell, exported with what the default harness's turns get, its output streamed by line, its exit code at
      * the end; in cwd when given, else the folder the workspace's kind names, as a harness turn does. The stream
      * carries that folder back as `ranIn`, so a client says where the command ran rather than restating the rule.
      * Rejects when the workspace or that harness's adapter is unknown; a launch that fails ends the stream. */
-    execStream(id: string, argv: ReadonlyArray<string>, cwd?: string, origin?: WorkspaceOrigin): Promise<RunningExec>;
+    execStream(id: string, argv: ReadonlyArray<string>, cwd?: string, origin?: Caller): Promise<RunningExec>;
     /** How a browser dials this workspace's daemon; throws on backends without preview URLs. */
-    daemonReach(id: string, origin?: WorkspaceOrigin): Promise<DaemonReachView>;
+    daemonReach(id: string, origin?: Caller): Promise<DaemonReachView>;
     /** The public route to one guest port, for a browser to frame; same caching and refusal as daemonReach. */
-    portReach(id: string, port: number, origin?: WorkspaceOrigin): Promise<PortReachView>;
+    portReach(id: string, port: number, origin?: Caller): Promise<PortReachView>;
     /** One fetch of that route from here, as the frame would see it, redirects unfollowed; rejects when nothing answers at
      * all. A 401 is the edge refusing the token, so the port's route is reminted before the reply and the next portReach
      * carries the fresh one. */
-    portProbe(id: string, port: number, origin?: WorkspaceOrigin): Promise<PortProbeView>;
+    portProbe(id: string, port: number, origin?: Caller): Promise<PortProbeView>;
     /** The same rule every verb above reads, as a sentence, for the rows and the roads the runtime does not own
      * itself: the host's port forwards, which it lists and stops by the id of their target. Answers the sentence to
      * refuse this request with, or nothing when it may drive that workspace; a target no record here names, as a
      * builder whose ports the host forwards is, is nobody's to hide or refuse for. */
-    originRefusal(id: string, origin?: WorkspaceOrigin): Promise<string | undefined>;
+    originRefusal(id: string, origin?: Caller): Promise<string | undefined>;
+    /** The same rule read without asking anything, for the one road that cannot await: the event fan-out, where a
+     * per event promise would sit in the path every delta of every turn takes. A workspace this host does not hold
+     * answers true, as the sentence answers nothing for one. */
+    drivenBy(id: string, origin?: Caller): boolean;
   };
   readonly projects: {
     /** Lands the host's bundle of a folder on the workspace's machine; progress rides project.import events. */
-    import(opts: ProjectImportOptions, origin?: WorkspaceOrigin): Promise<ProjectImportResult>;
+    import(opts: ProjectImportOptions, origin?: Caller): Promise<ProjectImportResult>;
     /** Brings a folder and the agent state keyed to it home from the workspace's machine; progress rides project.export events. */
-    export(opts: ProjectExportOptions, origin?: WorkspaceOrigin): Promise<ProjectExportResult>;
+    export(opts: ProjectExportOptions, origin?: Caller): Promise<ProjectExportResult>;
   };
   readonly sessions: {
     /** Starts a turn; never a second one on a session whose turn is running. A start on a thread whose turn runs
@@ -1104,41 +1124,41 @@ export interface Runtime {
          * over (the cloud setup's own thread, which calls the wsp recipe tools). */
         mcpServers?: Readonly<Record<string, McpServerSpec>>;
       },
-      origin?: WorkspaceOrigin,
+      origin?: Caller,
     ): Promise<SessionHandle>;
     /** Every turn this state file knows, the ones before a restart as they were last written. One that was still
      * running then reads running while its machine still holds its run, since the run is re-opened at load and goes
      * on to its reply; one whose run no machine has left reads failed. */
-    list(workspaceId?: string, origin?: WorkspaceOrigin): Promise<SessionView[]>;
+    list(workspaceId?: string, origin?: Caller): Promise<SessionView[]>;
     /** The workspace's persisted session events, oldest first; a chat replays these on mount. */
-    history(workspaceId: string, origin?: WorkspaceOrigin): Promise<SessionEvent[]>;
+    history(workspaceId: string, origin?: Caller): Promise<SessionEvent[]>;
     /** Stops the session's running turn through its harness; a turn already over or an unknown id answers, never throws. */
-    interrupt(sessionId: string, origin?: WorkspaceOrigin): Promise<SessionInterruptResult>;
+    interrupt(sessionId: string, origin?: Caller): Promise<SessionInterruptResult>;
     /** Sends a message into the session's running turn through its harness and records it as session.steer once the
      * harness took it; a turn already over, a harness without steer or an unknown id answers. Refuses like start
      * while the workspace is pausing or paused. */
-    steer(sessionId: string, opts: { prompt: string; requestId?: string }, origin?: WorkspaceOrigin): Promise<SessionSteerResult>;
+    steer(sessionId: string, opts: { prompt: string; requestId?: string }, origin?: Caller): Promise<SessionSteerResult>;
     /** Answers a permission prompt the session's running turn relayed into the chat, by the prompt's own id and one
      * of the options it carried; the tool call it blocks then runs or is refused, and a session.permission.closed
      * event records which option did it. A prompt already answered, one the harness withdrew and an unknown id
      * answer rather than throw, since two clients may reach one prompt. */
-    answer(sessionId: string, opts: { askId: string; optionId: string }, origin?: WorkspaceOrigin): Promise<SessionAnswerResult>;
+    answer(sessionId: string, opts: { askId: string; optionId: string }, origin?: Caller): Promise<SessionAnswerResult>;
     /** Puts the session's running turn into another access mode, from its next tool call on: the person picked while
      * a turn was under way, and where the harness takes such a change the turn in front of them follows it. The row
      * then carries the new mode, so the thread's next turn resumes at it. unsupported is a harness that takes none
      * mid-turn, and the pick reaches the agent with the person's next message instead. */
-    access(sessionId: string, permissionMode: string, origin?: WorkspaceOrigin): Promise<SessionAccessResult>;
+    access(sessionId: string, permissionMode: string, origin?: Caller): Promise<SessionAccessResult>;
     /** Names the session's harness session in the harness's own store, in the field the harness itself writes, and
      * keeps the name on every row of the thread; a harness that keeps no name of a person's, a store without that
      * session and an unknown id answer. Refuses while the workspace cannot be reached, as a listing's read needs it. */
-    rename(sessionId: string, title: string, origin?: WorkspaceOrigin): Promise<SessionRenameResult>;
+    rename(sessionId: string, title: string, origin?: Caller): Promise<SessionRenameResult>;
   };
   readonly harnesses: {
     /** What each harness with an adapter takes at launch; the composer's pickers render from this. With a running
      * workspace each adapter that probes is asked on its machine, at a session start too, and its answer, or the table
      * when it gives none, is kept per machine and harness for CATALOG_TTL_MS; without one, or on a workspace that is not
      * running, the table answers. */
-    list(workspaceId?: string, origin?: WorkspaceOrigin): Promise<HarnessCatalog[]>;
+    list(workspaceId?: string, origin?: Caller): Promise<HarnessCatalog[]>;
   };
   readonly golden: {
     build(opts: GoldenBuildRequest): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
@@ -1508,6 +1528,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
      * and so does a machine of another kind whose dial names this computer. The machine id is absent on the one
      * road that asks before a machine exists, a fork's create, where only the kind can answer. */
     relayed: (machineId: string | undefined) => boolean;
+    /** How wsp itself is run on this kind's machine, for the tools a turn's own agent is given: a fork runs the
+     * bundle that rides in the daemon deploy, this computer runs the command the host itself was started as, and a
+     * kind wsp puts nothing on answers none, which leaves that kind's turns without the tools. The address the
+     * host is reached at goes on the end by the one caller, so no kind carries a copy of that rule. */
+    wspMcp: (entry: LiveWorkspace) => McpServerSpec | undefined;
     /** Whether this machine's daemon can be dialled at all, asked before a road is opened so nothing mints a preview
      * route to find out: a cloud fork needs one, this computer's daemon is on it. Read as truthy, the way the reach
      * word and the status poller read it before this seam existed. */
@@ -1590,6 +1615,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       homeDir: () => GUEST_HOME,
       env: (_entry, id) => cloudEnv(id),
       relayed: () => true,
+      wspMcp: () => ({ command: "node", args: [GUEST_WSP_BIN, "mcp"] }),
       hasDaemon: entry => Boolean(entry.machine.previewUrl),
       daemonRoad: cloudRoad,
       import: (entry, o, report) => copyImport(entry, o, report),
@@ -1606,6 +1632,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             homeDir: () => local.homeDir,
             env: () => local.env(),
             relayed: () => false,
+            wspMcp: () => opts.agents?.wspMcp,
             hasDaemon: () => local.daemonRoad !== undefined,
             daemonRoad: localRoad,
             import: (_entry, o, report) => registerImport(o, report),
@@ -1638,6 +1665,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               const reach = machineId === undefined ? undefined : parseSshMachineId(machineId);
               return reach !== undefined && !sshDialsThisComputer(reach, [hostname()]);
             },
+            wspMcp: () => undefined,
             hasDaemon: () => false,
             daemonRoad: sshRoad,
             import: async entry => {
@@ -1698,22 +1726,78 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * request relayed from a machine drives and sees only the kinds whose module takes one, so this computer's own
    * workspace answers nothing relayed. Today no machine has a road into the host, so nothing relays yet; the rule
    * holds when one appears. */
-  const drives = (record: { kind: WorkspaceKind; machineId?: string }, origin: WorkspaceOrigin | undefined): boolean => origin !== "relayed" || moduleOf(record.kind).relayed(record.machineId);
+  const drives = (record: { kind: WorkspaceKind; machineId?: string }, caller: Caller | undefined): boolean => roadOf(caller) !== "relayed" || moduleOf(record.kind).relayed(record.machineId);
+  /** Which workspaces a thread's own token reaches: the one its turn runs on, and the ones its root thread forked.
+   * A thread never sees or drives a workspace outside its own tree, whatever the verb, so this sits beside the
+   * kind rule rather than in any one of them. A caller that is no thread reaches everything the kind rule allows. */
+  const inTree = (record: { id?: string; rootThreadId?: string }, scope: ThreadScope | undefined): boolean =>
+    // A record with no id is a workspace that does not exist yet, the shape a create is checked against: what a
+    // thread may make is the guard's question, not this one's.
+    scope === undefined || record.id === undefined || record.id === scope.workspaceId || record.rootThreadId === scope.rootThreadId;
   /** The rule as a sentence: what this request is refused with for that record, or nothing when it may drive it.
    * A record this host does not hold, which a port forward's target may be since the host forwards a builder's
    * ports too, is nobody's to refuse for. */
-  const refusalFor = (record: { kind: WorkspaceKind; name: string; machineId?: string } | undefined, origin: WorkspaceOrigin | undefined): string | undefined =>
-    record !== undefined && !drives(record, origin) ? relayedRefusal(record.name) : undefined;
-  const refuseRelayed = (record: { kind: WorkspaceKind; name: string; machineId?: string } | undefined, origin: WorkspaceOrigin | undefined): void => {
-    const line = refusalFor(record, origin);
+  const refusalFor = (record: { id?: string; kind: WorkspaceKind; name: string; machineId?: string; rootThreadId?: string } | undefined, caller: Caller | undefined): string | undefined => {
+    if (record === undefined) return undefined;
+    if (!drives(record, caller)) return relayedRefusal(record.name);
+    const scope = scopeOf(caller);
+    return scope !== undefined && !inTree(record, scope) ? spawnReachRefusal(scope.threadId, record.name) : undefined;
+  };
+  const refuseRelayed = (record: { id?: string; kind: WorkspaceKind; name: string; machineId?: string; rootThreadId?: string } | undefined, caller: Caller | undefined): void => {
+    const line = refusalFor(record, caller);
     if (line !== undefined) throw new Error(line);
   };
-  const drivesId = (workspaceId: string, origin: WorkspaceOrigin | undefined): boolean => refusalFor(live.get(workspaceId)?.record, origin) === undefined;
+  const drivesId = (workspaceId: string, caller: Caller | undefined): boolean => refusalFor(live.get(workspaceId)?.record, caller) === undefined;
   /** Recording a machine that already exists is this computer's own act, whatever the kind takes once it is
    * recorded: the address and the key a record stands on are the person's to name, so a request relayed from a
    * machine is refused before anything is dialled and again where the record is written. */
-  const refuseRecording = (named: string, origin: WorkspaceOrigin | undefined): void => {
-    if (origin === "relayed") throw new Error(relayedRecordRefusal(named));
+  const refuseRecording = (named: string, caller: Caller | undefined): void => {
+    if (roadOf(caller) === "relayed") throw new Error(relayedRecordRefusal(named));
+  };
+  /** The tree a thread sits in, read off the rows: its parent, then its parent's, up to the thread a person opened.
+   * The walk is bounded by the rows there are, since a chain that somehow looped would otherwise never end. */
+  const parentOf = (threadId: string): string | undefined => rowsOn(threadId).find(v => v.parentThreadId !== undefined)?.parentThreadId;
+  const depthUnderRoot = (threadId: string): number => {
+    let depth = 0;
+    let at = threadId;
+    for (let steps = sessions.size + 1; steps > 0; steps--) {
+      const parent = parentOf(at);
+      if (parent === undefined) return depth;
+      depth++;
+      at = parent;
+    }
+    return depth;
+  };
+  /** The top of the tree a thread is in: the root its own rows carry, and itself when nothing spawned it. */
+  const rootOf = (threadId: string): string => rowsOn(threadId).find(v => v.rootThreadId !== undefined)?.rootThreadId ?? threadId;
+  /** Where a turn on this workspace's machine reaches this host, and the wsp command it runs there: nothing where
+   * the host was never told an address a machine can dial it at, or where this kind of machine carries no wsp. */
+  const agentsReach = (entry: LiveWorkspace): { url: string; wsp?: McpServerSpec } | undefined => {
+    const url = opts.agents?.url;
+    if (url === undefined || url === "") return undefined;
+    const wsp = moduleOf(entry.record.kind).wspMcp(entry);
+    return { url, ...(wsp !== undefined ? { wsp } : {}) };
+  };
+  /** The one door every act a thread's own token asks for goes through: the switch on the workspace that thread
+   * runs on, then the acts a thread may ask for at all, then how deep it already is, then how many machines its
+   * root already holds. A caller that is not a thread passes straight through; nothing here is a second copy of a
+   * rule any verb also keeps. */
+  const spawnGuard = (act: SpawnAct, caller: Caller | undefined): void => {
+    const scope = scopeOf(caller);
+    if (scope === undefined) return;
+    const own = live.get(scope.workspaceId)?.record;
+    const policy = own?.agents;
+    // Read at the act and not at the mint: a person who turns the switch off while a turn runs has turned it off.
+    if (policy?.spawn !== true) throw new Error(agentsOffRefusal(own?.name ?? scope.workspaceId, act));
+    if (!SPAWN_ACTS_ALLOWED.includes(act)) throw new Error(spawnActRefusal(scope.threadId, act));
+    if (act === "send") return;
+    const depth = depthUnderRoot(scope.threadId);
+    if (depth >= policy.maxDepth) throw new Error(spawnDepthRefusal(scope.threadId, depth, policy.maxDepth));
+    if (act !== "fork") return;
+    // Counted off the records rather than kept as a number: a machine deleted, forgotten or gone frees its place
+    // without anything having to remember to give it back.
+    const standing = [...live.values()].filter(e => e.record.rootThreadId === scope.rootThreadId && workspaceState({ phase: e.record.phase }) !== "gone").length;
+    if (standing >= policy.maxMachines) throw new Error(spawnCapRefusal(scope.rootThreadId, standing, policy.maxMachines));
   };
   /** What a record says its machine is, for the one rule that one workspace stands on one machine: what the machine
    * itself answered where its kind can ask, else the id, which is the machine on every other kind. */
@@ -1830,6 +1914,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     ];
     return upgradePlan(from.owned, to.owned, await readOwnedFiles(m, read));
   };
+  // One device door for this host: the ops the protocol server answers and the token every turn on a spawn enabled
+  // workspace is launched with come out of the same table, so a scoped token is listed, matched and revoked by the
+  // rules a paired computer's token already lives under.
+  const deviceDoor = makeDevices(store);
   const live = new Map<string, LiveWorkspace>();
   const builders = new Map<string, LiveBuilder>();
   /** The prepare in flight per golden name; a second call for the same recipe joins it instead of running the stages twice on one machine. */
@@ -2032,6 +2120,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     ...(r.vaultedAt !== undefined ? { vaultedAt: r.vaultedAt } : {}),
     ...(r.vaultRefused !== undefined ? { vaultRefused: r.vaultRefused } : {}),
     ...(r.wakeRefused !== undefined ? { wakeRefused: r.wakeRefused } : {}),
+    ...(r.agents !== undefined ? { agents: r.agents } : {}),
+    ...(r.parentThreadId !== undefined ? { parentThreadId: r.parentThreadId } : {}),
+    ...(r.rootThreadId !== undefined ? { rootThreadId: r.rootThreadId } : {}),
   });
 
   /** One fact of a workspace's look: a value sets it, null clears it back to none, and undefined leaves what the
@@ -3009,13 +3100,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // Every run left over from a host that never came back to read it, now that this host knows which ones it does
       // hold: a harness whose reader is gone answers nobody and holds the machine's memory for its life.
       await Promise.all([...live.values()].map(entry => sweepRuns(entry)));
+      // A turn's token dies with the turn, and a host that went down under one never reached that exit: every scoped
+      // device whose thread is not running now is taken away here, so a restart is not how a token outlives its turn.
+      for (const device of await deviceDoor.list()) {
+        const thread = device.scope?.threadId;
+        if (thread !== undefined && !threadRuns(thread)) await deviceDoor.revoke(device.id);
+      }
       for (const raw of await store.list(BUILDERS)) await admit(raw as StoredBuilder);
     })();
     return hydrated;
   };
 
   /** Every verb that names a workspace comes through here, so the origin rule is read once for all of them. */
-  const entryOf = async (id: string, origin?: WorkspaceOrigin): Promise<LiveWorkspace> => {
+  const entryOf = async (id: string, origin?: Caller): Promise<LiveWorkspace> => {
     await ready();
     const entry = live.get(id);
     if (!entry || entry.creating) throw new Error(`no such workspace: ${id}`);
@@ -3025,7 +3122,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** The create itself, one stage report per awaited step. The hostname is set inside the fork, before the daemon
    * is asked and before the workspace is listed or reachable, so no shell can open under the guest's boot name. */
-  const createStaged = async (o: CreateWorkspaceOptions, id: string, report: StageReport): Promise<CreatedWorkspace> => {
+  const createStaged = async (o: CreateWorkspaceOptions, id: string, report: StageReport, spawned?: ThreadScope): Promise<CreatedWorkspace> => {
     const image = await imageOf(o.golden);
     const inherited = image.version?.size;
     const record: WorkspaceRecord = {
@@ -3047,6 +3144,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         memMb: o.memMb ?? inherited?.memMb ?? backend.pricing.defaultSize.memMb,
       },
       firstLife: true,
+      // Written before the machine is asked for: the cap counts machines under a root off these two fields, so a
+      // fork that is still landing already holds its place and two forks at once cannot both pass the count.
+      ...(spawned !== undefined ? { parentThreadId: spawned.threadId, rootThreadId: spawned.rootThreadId } : {}),
+      // A fork a thread asked for carries the forking workspace's switch unless the caller named its own, so a tree
+      // of machines runs under one rule rather than needing it set again on every one.
+      ...(o.agents !== undefined || spawned !== undefined ? { agents: agentsFrom(spawned === undefined ? undefined : live.get(spawned.workspaceId)?.record.agents, o.agents ?? {}) } : {}),
     };
     // Only an asked size is checked: the golden's own is what it was built at, whatever the provider offers today.
     if ((o.cpu !== undefined || o.memMb !== undefined) && !offeredSize(backend.capabilities.sizes, record.size)) {
@@ -3138,11 +3241,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const recordExisting = async (
     kind: WorkspaceKind,
     name: string,
-    origin: WorkspaceOrigin | undefined,
+    caller: Caller | undefined,
     read: () => Promise<{ machine: Machine; size: WorkspaceSize; shape?: MachineShape; login?: Readonly<Record<string, string>>; identity?: string }>,
   ): Promise<WorkspaceView> => {
     const n = nameGiven(name);
-    refuseRecording(n, origin);
+    refuseRecording(n, caller);
     const refusal = nameRefusal(n);
     if (refusal !== undefined) throw Object.assign(new Error(refusal), { kind: "conflict" });
     const { machine, size, shape, login, identity } = await read();
@@ -3178,6 +3281,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const o = { ...opts, name: nameGiven(opts.name) };
       // A fork is a cloud machine, so the origin rule is read on the kind this create would make.
       refuseRelayed({ kind: "cloud", name: o.name }, origin);
+      spawnGuard("fork", origin);
+      const spawned = scopeOf(origin);
       const refusal = nameRefusal(o.name);
       if (refusal !== undefined) throw Object.assign(new Error(refusal), { kind: "conflict" });
       forking.add(o.name);
@@ -3187,7 +3292,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         bus.emit({ type: "workspace.creating", workspaceId: id, name: o.name, stage, message, elapsedMs: clock.now() - began, ...(notice !== undefined ? { notice } : {}) });
       };
       try {
-        return await createStaged(o, id, report);
+        return await createStaged(o, id, report, spawned);
       } catch (e) {
         // A machine already forked goes with the failed create, so the retry forks a fresh one; one the provider
         // will not part with keeps its record instead, since a machine nobody records bills unseen.
@@ -3215,6 +3320,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async get(id, origin) {
       return view((await entryOf(id, origin)).record);
+    },
+
+    async agents(id, patch, origin) {
+      spawnGuard("agents", origin);
+      const entry = await entryOf(id, origin);
+      const next = agentsFrom(entry.record.agents, patch);
+      entry.record.agents = next;
+      await persist(entry.record);
+      bus.emit({ type: "workspace.agents", workspaceId: id, agents: next });
+      return view(entry.record);
     },
 
     async createLocal(name, origin) {
@@ -3247,10 +3362,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async list(origin) {
       await ready();
-      return [...live.values()].filter(e => !e.creating && drives(e.record, origin)).map(e => view(e.record));
+      return [...live.values()].filter(e => !e.creating && refusalFor(e.record, origin) === undefined).map(e => view(e.record));
     },
 
     async nap(id, origin) {
+      spawnGuard("pause", origin);
       refuseCannot(await entryOf(id, origin), "ramPreservingPause", "be paused");
       return napWith(id);
     },
@@ -3493,6 +3609,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
 
     async delete(id, origin) {
+      spawnGuard("delete", origin);
       const entry = await entryOf(id, origin);
       if (entry.deleting) return entry.deleting;
       entry.deleting = (async () => {
@@ -3588,6 +3705,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async originRefusal(id, origin) {
       await ready();
       return refusalFor(live.get(id)?.record, origin);
+    },
+
+    drivenBy(id, origin) {
+      return refusalFor(live.get(id)?.record, origin) === undefined;
     },
   };
 
@@ -3855,6 +3976,32 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     for (const s of sessions.values()) if (s.turnToken === token && s.view.status === "running" && s.view.threadId !== undefined) return s.view.threadId;
     throw new Error(NO_SUCH_TURN);
   };
+  /** Every thread the tree under this one holds, whether or not anything on it is running: read off the parent each
+   * row carries, level by level, so a thread that spawned a thread that spawned a thread is all of it. */
+  const treeUnder = (threadId: string): string[] => {
+    const found: string[] = [];
+    let front = [threadId];
+    for (let steps = sessions.size + 1; steps > 0 && front.length > 0; steps--) {
+      const next = [...new Set([...sessions.values()].map(x => x.view).filter(v => v.threadId !== undefined && v.parentThreadId !== undefined && front.includes(v.parentThreadId)).map(v => v.threadId!))].filter(id => !found.includes(id) && id !== threadId);
+      found.push(...next);
+      front = next;
+    }
+    return found;
+  };
+  /** Stops every running turn on the tree under a thread, deepest first, and answers with the threads it stopped. */
+  const stopUnder = async (threadId: string, caller: Caller | undefined): Promise<string[]> => {
+    const stopped: string[] = [];
+    for (const child of treeUnder(threadId).reverse()) {
+      const row = latestOn(child);
+      if (row === undefined || row.status !== "running") continue;
+      const outcome = await sessionsApi.interrupt(row.id, caller).catch((e: unknown) => {
+        console.warn(`thread ${threadWord(child)} was not stopped with its root: ${e instanceof Error ? e.message : String(e)}`);
+        return undefined;
+      });
+      if (outcome?.outcome === "accepted") stopped.push(child);
+    }
+    return stopped;
+  };
   /** What the thread's start registered, kept by every turn on it. */
   const notifyOf = (threadId: string): readonly string[] | undefined => {
     for (const s of sessions.values()) {
@@ -3964,6 +4111,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     /** The token this turn was launched with, kept on its row while the turn runs so a request out of it can name
      * this thread. */
     turnToken?: string;
+    /** The device this turn's launch environment carries into the machine, taken away at the exit beside the turn
+     * token: the two are one turn's identity and they end together. */
+    scopeDeviceId?: string;
     outcome: SessionStartOutcome;
     /** What this turn's own session.start row carries, for the road that still has to write it. */
     opening: { prompt: string; requestId?: string; afterCut?: boolean; title?: string; attachments?: readonly ImageRecord[] };
@@ -3977,7 +4127,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     imagesDir?: string;
     open: (onEvent: (event: AdapterEvent) => void) => HarnessSession;
   }): SessionHandle => {
-    const { entry, view, threadId, turnId, opening, outcome, notify, turnToken } = t;
+    const { entry, view, threadId, turnId, opening, outcome, notify, turnToken, scopeDeviceId } = t;
     const workspaceId = entry.record.id;
     const written = transcripts.get(workspaceId) ?? [];
     /** The last row this turn wrote of a kind: the transcript holds every workspace's rows in the order they were
@@ -4243,6 +4393,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const settled = (status: TurnStatus): void => {
       const row = sessions.get(rowId);
       if (row !== undefined && row.turnToken === turnToken) delete row.turnToken;
+      // The process is gone, so the token in its environment names nothing that can be asked for anything: it is
+      // taken away here, the one exit both the reply road and the failure road reach.
+      if (scopeDeviceId !== undefined) {
+        void deviceDoor.revoke(scopeDeviceId).catch((e: unknown) => console.warn(`the token of thread ${threadWord(threadId)} was not taken away: ${e instanceof Error ? e.message : String(e)}`));
+      }
       if (!ended) view.status = status;
       view.endedAt ??= Date.now();
       void persistSessions(workspaceId);
@@ -4361,16 +4516,53 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       refuse();
       const title = o.title === undefined ? undefined : titleLine(o.title);
       if (title === "") throw new Error(EMPTY_TITLE_LINE);
-      const turnToken = randomBytes(16).toString("hex");
-      const { harness, adapter } = adapterFor(entry, o.harness, { [TURN_TOKEN_ENV]: turnToken });
-      const records = (o.attachments ?? []).map(imageRecord);
-      const blocked = imagesBlocked(records, adapter.attachments, harness) ?? mcpServersBlocked(o.mcpServers, adapter.mcpServers, harness);
-      if (blocked !== null) throw new Error(blocked);
       const named = o.thread === undefined ? undefined : latestOn(o.thread);
       if (o.thread !== undefined && named?.workspaceId !== workspaceId) throw new Error(`no thread ${o.thread} on this workspace`);
       // Read again where the thread becomes this send's to run: the id it must resume may not exist yet.
       let resume = o.resume ?? named?.claudeSessionId;
       const threadId = named?.threadId ?? threadOf(workspaceId, resume);
+      // A message into a thread that already has turns is a send; anything else opens one, and only one of those
+      // two is what a thread's own token is capped on. Read before the machine is asked for anything.
+      const opens = rowsOn(threadId).length === 0;
+      spawnGuard(opens ? "thread_new" : "send", origin);
+      // The tree this thread sits in, written on its first row and read off it by every later turn: a thread a
+      // person opened is its own root, and one a thread opened hangs under that thread's root.
+      const spawnedBy = opens ? scopeOf(origin) : undefined;
+      const tree = opens
+        ? spawnedBy === undefined
+          ? {}
+          : { parentThreadId: spawnedBy.threadId, rootThreadId: spawnedBy.rootThreadId }
+        : { ...(parentOf(threadId) !== undefined ? { parentThreadId: parentOf(threadId)! } : {}), ...(rootOf(threadId) !== threadId ? { rootThreadId: rootOf(threadId) } : {}) };
+      const turnToken = randomBytes(16).toString("hex");
+      // The token this turn's own agent drives this host with, and the address it dials: a device of this host's,
+      // scoped to this thread and taken away when the turn's process exits, so a token read out of a machine after
+      // the turn opens nothing. Minted only where the person turned the switch on and only where this host knows an
+      // address a machine can reach it at, since a token with nowhere to go is one more secret for nothing.
+      const reach = agentsReach(entry);
+      const scoped =
+        entry.record.agents?.spawn === true && reach !== undefined
+          ? await deviceDoor.mint(`thread ${threadWord(threadId)}`, { kind: "thread", threadId, workspaceId, rootThreadId: tree.rootThreadId ?? threadId }, Date.now())
+          : undefined;
+      const dropScope = (): void => {
+        if (scoped !== undefined) void deviceDoor.revoke(scoped.deviceId).catch((e: unknown) => console.warn(`the token of thread ${threadWord(threadId)} was not taken away: ${e instanceof Error ? e.message : String(e)}`));
+      };
+      const { harness, adapter } = adapterFor(entry, o.harness, {
+        [TURN_TOKEN_ENV]: turnToken,
+        ...(scoped !== undefined && reach !== undefined ? { [HOST_URL_ENV]: reach.url, [HOST_TOKEN_ENV]: scoped.deviceToken } : {}),
+      });
+      // The wsp tools ride the launch on a workspace whose agents may spawn, for a harness that takes servers with
+      // one: the guest's own config is the golden's and says nothing about this host. A harness that takes none is
+      // refused where a caller named servers and left alone here, since the person asked for a thread, not for tools.
+      const mcpServers =
+        scoped !== undefined && reach?.wsp !== undefined && adapter.mcpServers === true
+          ? { [MCP_SERVER_NAME]: { command: reach.wsp.command, args: [...reach.wsp.args, "--host", reach.url] }, ...o.mcpServers }
+          : o.mcpServers;
+      const records = (o.attachments ?? []).map(imageRecord);
+      const blocked = imagesBlocked(records, adapter.attachments, harness) ?? mcpServersBlocked(o.mcpServers, adapter.mcpServers, harness);
+      if (blocked !== null) {
+        dropScope();
+        throw new Error(blocked);
+      }
       // me is the caller: the thread this request came out of when its token says it came out of one, and the person
       // when there is no token, which is every road that is not a turn. A target named twice is one target, since a
       // list says who is told and not how often.
@@ -4405,6 +4597,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         status: "running",
         startedBy: o.startedBy ?? "person",
         threadId,
+        ...tree,
         prompt: o.prompt,
         startedAt: Date.now(),
         ...(title !== undefined ? { harnessTitle: title, titleSource: "person" as const } : carriedTitle(threadId)),
@@ -4512,6 +4705,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...(notify !== undefined ? { notify } : {}),
           turnToken,
           outcome,
+          ...(scoped !== undefined ? { scopeDeviceId: scoped.deviceId } : {}),
           opening: { prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}), ...(afterCut ? { afterCut } : {}), ...(title !== undefined ? { title } : {}), ...(records.length > 0 ? { attachments: records } : {}) },
           ...(imagesDir !== undefined ? { imagesDir } : {}),
           ...(resume !== undefined ? { resume } : {}),
@@ -4524,7 +4718,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
               ...(title !== undefined ? { title } : {}),
               ...(images.length > 0 ? { images } : {}),
-              ...(o.mcpServers !== undefined ? { mcpServers: o.mcpServers } : {}),
+              ...(mcpServers !== undefined ? { mcpServers } : {}),
               onEvent,
             }),
         });
@@ -4538,6 +4732,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         throw e;
       } finally {
         if (!handedOver) {
+          // The turn never reached a machine, so nothing out there is holding this token: it goes now rather than
+          // standing until a host restart.
+          dropScope();
           if (held) {
             sessions.delete(turnId);
             // Whoever the row told this thread was working must not be left waiting for a turn that never opened, so
@@ -4583,11 +4780,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const s = sessions.get(sessionId);
       if (!s) return { outcome: "not-found" };
       await entryOf(s.view.workspaceId, origin);
-      if (s.view.status !== "running" || s.handle === undefined) return { outcome: "not-running" };
+      // A thread's agents spawned a tree under it, and a stop on the thread is a stop on the tree: the children go
+      // first, so nothing under a stopped lead is left working for a thread that is no longer reading. The lead
+      // itself may already be over, which is an answer and not a reason to leave its builders running.
+      const under = s.view.threadId === undefined ? [] : await stopUnder(s.view.threadId, origin);
+      const answered = (outcome: SessionInterruptOutcome): SessionInterruptResult => ({ outcome, ...(under.length > 0 ? { under } : {}) });
+      if (s.view.status !== "running" || s.handle === undefined) return answered("not-running");
       await s.handle.interrupt();
       // The harness resolves finished only after session.end, so accepted means the turn is over on the transcript too.
       await s.handle.finished.catch(() => {});
-      return { outcome: "accepted" };
+      return answered("accepted");
     },
 
     async steer(sessionId, o, origin) {
@@ -5454,6 +5656,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   const projects: Runtime["projects"] = {
     async import(o, origin) {
+      spawnGuard("import", origin);
       const entry = await entryOf(o.workspaceId, origin);
       const refusal = actionRefusal(workspaceState({ phase: entry.record.phase }), "import", entry.record.gone);
       if (refusal !== null) throw new Error(refusal);
@@ -5476,6 +5679,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
     },
     async export(o, origin) {
+      spawnGuard("export", origin);
       const entry = await entryOf(o.workspaceId, origin);
       const refusal = actionRefusal(workspaceState({ phase: entry.record.phase }), "export", entry.record.gone);
       if (refusal !== null) throw new Error(refusal);
@@ -5652,7 +5856,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     workspaces,
     projects,
     sessions: sessionsApi,
-    devices: makeDevices(store),
+    devices: deviceDoor,
     preferences,
     status: {
       ...status,

@@ -29,6 +29,16 @@ export function reachAddresses(bound: string, interfaces = networkInterfaces()):
   return found.length === 0 ? [LOOPBACK] : [...new Set(found)];
 }
 
+/** The address a machine dials this host at, the one rule for it: what the person named with --advertise, else the
+ * address the host bound turned into a url, and for a wildcard the first address this computer answers on that
+ * leaves it. Loopback is what is left when nothing else answers, which is a host no machine can reach; the runtime
+ * hands out no token to a turn when it is told none, and this is what a person overrides with --advertise. */
+export function advertisedUrl(bound: string, port: number, asked?: string, interfaces = networkInterfaces()): string | undefined {
+  if (asked !== undefined && asked.trim() !== "") return asked.trim().replace(/\/+$/, "");
+  const at = reachAddresses(bound, interfaces)[0] ?? LOOPBACK;
+  return isLoopback(at) ? undefined : `http://${authority(at, port)}`;
+}
+
 /** What wsp pair prints: the code, how long it stands, and the addresses to hand the person at the other computer. */
 export function pairLines(code: string, expiresAt: number, now: number, addresses: readonly string[], port: number): string[] {
   return [

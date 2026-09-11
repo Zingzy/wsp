@@ -117,6 +117,7 @@ function deriveThread(thread: ThreadView, workspace: Pick<WorkspaceView, "projec
     harness: thread.harness,
     startedBy: thread.startedBy,
     project: projectAt(workspaceProjects(workspace), thread.cwd)?.name ?? null,
+    parentThreadId: thread.parentThreadId ?? null,
   };
 }
 

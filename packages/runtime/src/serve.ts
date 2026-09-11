@@ -28,6 +28,8 @@ import {
   type ExecEvent,
   type ForwardEvent,
   type PortForward,
+  type Caller,
+  type ThreadScope,
   type WorkspaceOrigin,
   type WorkspaceView,
 } from "@wsp/protocol";
@@ -206,9 +208,13 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     // Who this socket is once it is let in: the host's own process, or the paired computer whose token it sent.
     // A ticket redeemed at the door is the host's own road, so a socket that came in that way counts as the host.
     let me: Authed | undefined = authed ? { kind: "host" } : undefined;
+    /** The thread this socket is, when its token was one the host minted into a turn's launch. */
+    let by: ThreadScope | undefined;
     // Whether this socket is one of the person's own rather than the road a machine's requests arrive by. Who may
-    // reach this host is never a machine's to hand out, list or take away, and it is the same rule a ticket is.
-    const ownRoad = stamped === undefined;
+    // reach this host is never a machine's to hand out, list or take away, and it is the same rule a ticket is. A
+    // function rather than a constant: a thread scoped token is read at the auth frame, after this socket was let
+    // in, and the road it names is the same road a relay ticket names.
+    const ownRoad = (): boolean => stamped === undefined;
     /** Set while an unauthed socket's first frame is being decided, so a second frame cannot race past the door. */
     let deciding = false;
 
@@ -274,6 +280,13 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
           authed = true;
           if (who.kind === "device") {
             bind(who.device);
+            // A token the host minted into a turn's launch is a machine's road into this host, whatever socket it
+            // arrives on: the road is stamped here, over anything the client's own frames say, so every rule
+            // written for a relayed request already holds for it and the scope rides beside it.
+            if (who.device.scope !== undefined) {
+              stamped = "relayed";
+              by = who.device.scope;
+            }
             // The auth frame and a redeem are the two roads that move a device's last seen; a JSON route reading
             // the same token must not, or every request beyond loopback would rewrite the whole state file.
             void opts.devices?.seen(who.device.id, now()).catch(() => undefined);
@@ -282,7 +295,11 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
           return;
         }
 
-        const origin = stamped ?? msg.origin;
+        // What every verb below is handed as where this request came from: the road the door stamped over the wire,
+        // and beside it the thread whose token opened this socket, which is the host's own reading and never the
+        // client's. A socket nothing stamped carries the word the client sent, which is what it always did.
+        const road = stamped ?? msg.origin;
+        const origin: Caller | undefined = by !== undefined && road !== undefined ? { origin: road, by } : road;
         try {
           switch (msg.op) {
             case "auth":
@@ -291,7 +308,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "pair.issue": {
               // A code lets a stranger in, so only the process that already holds this host's own token, over a
               // socket no machine's requests arrive on, may mint one.
-              if (!ownRoad || me?.kind !== "host") {
+              if (!ownRoad() || me?.kind !== "host") {
                 send({ id: msg.id, ok: false, error: PAIR_ISSUE_REFUSAL });
                 return;
               }
@@ -304,14 +321,14 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: false, error: PAIR_CODE_REFUSAL });
               return;
             case "devices.list":
-              if (!ownRoad) {
+              if (!ownRoad()) {
                 send({ id: msg.id, ok: false, error: DEVICES_TICKET_REFUSAL });
                 return;
               }
               send({ id: msg.id, ok: true, devices: await devices().list() });
               return;
             case "devices.revoke": {
-              if (!ownRoad) {
+              if (!ownRoad()) {
                 send({ id: msg.id, ok: false, error: DEVICES_TICKET_REFUSAL });
                 return;
               }
@@ -339,11 +356,21 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "events.subscribe": {
               // Replay is read and the listener attached in one synchronous step, so no event falls between them.
               const { stream, head, events, gap } = rt.events.since(msg.after, msg.stream);
-              detaches.push(rt.events.on("*", e => send(e as unknown as Record<string, unknown>)));
-              if (opts.forwards) detaches.push(opts.forwards.on(e => send(e)));
+              // An event about a workspace this caller may not drive never reaches it, replayed or live: a socket
+              // that may not read a workspace's rows may not read its turns going by either. Read through the
+              // runtime's one rule, so what a listing hides and what the stream hides cannot come apart.
+              const mine = (e: unknown): boolean => {
+                const workspaceId = (e as { workspaceId?: unknown }).workspaceId;
+                return typeof workspaceId !== "string" || rt.workspaces.drivenBy(workspaceId, origin);
+              };
+              const pass = (e: unknown): void => {
+                if (mine(e)) send(e as Record<string, unknown>);
+              };
+              detaches.push(rt.events.on("*", pass));
+              if (opts.forwards) detaches.push(opts.forwards.on(pass));
               if (opts.init) detaches.push(opts.init.on(e => send(e)));
               send({ id: msg.id, ok: true, seq: head, stream, ...(gap ? { gap: true } : {}) });
-              for (const e of events) send(e as unknown as Record<string, unknown>);
+              for (const e of events) pass(e);
               return;
             }
             case "status.subscribe":
@@ -415,6 +442,11 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "workspaces.look":
               send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.look(msg.workspaceId, { ...(msg.theme !== undefined ? { theme: msg.theme } : {}), ...(msg.glyph !== undefined ? { glyph: msg.glyph } : {}) }, origin)) });
               return;
+            case "workspaces.agents": {
+              const { id, op, workspaceId, origin: _sent, ...patch } = msg;
+              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.agents(workspaceId, patch, origin)) });
+              return;
+            }
             case "workspaces.delete":
               await rt.workspaces.delete(msg.workspaceId, origin);
               send({ id: msg.id, ok: true });

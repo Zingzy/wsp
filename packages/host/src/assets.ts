@@ -11,7 +11,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const ASSET_KINDS = ["web", "daemon"] as const;
+export const ASSET_KINDS = ["web", "daemon", "cli"] as const;
 export type AssetKind = (typeof ASSET_KINDS)[number];
 
 /** The folder a packed command stages its assets into, one level above the bundle. */
@@ -38,6 +38,16 @@ const ASSETS: Record<AssetKind, Asset> = {
     dir: "web",
     proof: "index.html",
     workspace: () => join(dirname(resolveHere("@wsp/web/package.json")), "dist"),
+    stage: (from, to) => cpSync(from, to, { recursive: true }),
+  },
+  cli: {
+    name: "wsp command bundle",
+    dir: "cli",
+    proof: "bin.js",
+    // The published command's own build, which carries every workspace package inside it: not this package's
+    // dist/bin.js, which leaves its imports outside and would need the whole tree beside it on a machine that has
+    // none. The folder travels whole because that build is split across chunk files bin.js imports by name.
+    workspace: () => join(here(), "..", "..", "wspx", "dist"),
     stage: (from, to) => cpSync(from, to, { recursive: true }),
   },
   daemon: {
