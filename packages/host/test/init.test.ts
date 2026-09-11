@@ -1910,6 +1910,16 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.text()).toContain("ssh -L 4400:127.0.0.1:4400");
   });
 
+  it("over ssh a run told to bind beyond this computer prints that address and no forward, so the whole road holds the address and not only the line that prints it", async () => {
+    const f = fake({ yes: true, address: "100.64.0.3", env: { SSH_CONNECTION: "10.0.0.2 51000 10.0.0.9 22" } });
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(0);
+    expect(f.opened).toEqual([]);
+    const out = f.text();
+    expect(out).toMatch(/^◇\s+Open http:\/\/100\.64\.0\.3:4400\/#w\/ws_[0-9a-f]+$/m);
+    expect(out).not.toContain("ssh -L");
+  });
+
   it("--yes on a terminal is a person taking the defaults: the app is served after the seal and its address printed, not opened", async () => {
     const f = fake({ yes: true });
     const result = await runInit(f.opts, f.io);

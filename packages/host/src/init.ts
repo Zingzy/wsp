@@ -1539,9 +1539,10 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     await closeRuntime();
     return result;
   }
-  const url = appUrl({ port: handle.port, address: opts.address }, opened?.id);
+  const at = { port: handle.port, address: opts.address };
+  const url = appUrl(at, opened?.id);
   runLog.note(`app ${url}`);
-  await openApp(url, handle, io, interactive, logLine());
+  await openApp(url, at, io, interactive, logLine());
   outro("wsp keeps serving the app from this terminal; Ctrl-C stops it.", out);
   await closeRelay();
   return { ...result, handle };
