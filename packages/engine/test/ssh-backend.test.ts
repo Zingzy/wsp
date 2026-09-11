@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { chmodSync, mkdtempSync, rmSync, statSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { homedir, tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { OS_READ, UPTIME_READ } from "../src/machine-facts.js";
+import { OS_READ, UPTIME_READ, readValues } from "../src/machine-facts.js";
 import type { ExecResult, Machine } from "../src/machine.js";
-import { SSH_CONTROL_PERSIST_S, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, makeSshControlDir, sshControlDir, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyOf, plainPath, DEFAULT_REMOTE_PATH, sshArgs, sshIdentity, sshMachineId, sshMachineName, sshReachOf, type SshReach, type SshTransport } from "../src/ssh-backend.js";
+import { SSH_CONTROL_PERSIST_S, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, makeSshControlDir, sshControlDir, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyFound, knownHostFiles, knownHostKey, knownHostTarget, plainPath, DEFAULT_REMOTE_PATH, sshArgs, sshDialArgs, sshIdentity, sshMachineId, sshMachineName, sshReachOf, type SshHostKeyReader, type SshLocalRun, type SshReach, type SshTransport } from "../src/ssh-backend.js";
 
 /** An ssh client that never leaves this computer: it answers the read every adopt makes, records every script it was
  * asked to carry, and lets a case script the answer for anything else. */
@@ -14,8 +14,9 @@ function fakeSsh(answer: (script: string) => Partial<ExecResult> = () => ({})): 
   const transport: SshTransport = async (reach, script, opts) => {
     carried.push({ reach, script });
     if (script === SSH_READ_SCRIPT) {
-      const log = opts.hostKey === true ? "debug1: Connecting to 10.0.0.5\ndebug1: Server host key: ssh-ed25519 SHA256:AbCd1234\n" : "";
-      return { exitCode: 0, stdout: "home /home/dev\nuser dev\npath /home/dev/.local/bin:/usr/bin\ncpu 8\nmemkb 16384000\n", stderr: log };
+      // What a dial riding a master the last minute left open has on its stderr: the client exchanged no key on it,
+      // so nothing here says which machine answered.
+      return { exitCode: 0, stdout: "home /home/dev\nuser dev\npath /home/dev/.local/bin:/usr/bin\ncpu 8\nmemkb 16384000\n", stderr: "" };
     }
     const scripted = { exitCode: 0, stdout: "", stderr: "", ...answer(script) };
     for (const line of scripted.stdout.split("\n").slice(0, -1)) opts.onLine?.(line);
@@ -25,6 +26,13 @@ function fakeSsh(answer: (script: string) => Partial<ExecResult> = () => ({})): 
 }
 
 const REACH: SshReach = { user: "dev", host: "10.0.0.5", port: 2222, keyPath: "/tmp/k/id_ed25519" };
+
+/** The key the client on this computer has for that machine, as a case hands it: one line of its known_hosts, read
+ * without dialling anything. A case that is about something else hands the reader, so none of them reaches the real
+ * client for a key. */
+const FOUND_KEY = "ssh-ed25519 SHA256:Ge9MQ9S/Faik2WzsxidRXnoEOJRIHkJKTBkOJ903vq4";
+const knownKey: SshHostKeyReader = async () => FOUND_KEY;
+const sshBackend = (transport: SshTransport, hostKey: SshHostKeyReader = knownKey): SshBackend => new SshBackend({ transport, hostKey });
 
 describe("ssh backend", () => {
   it("every capability a machine wsp forks has and one it only reaches does not is false, and it says the machine is kept", () => {
@@ -79,7 +87,7 @@ describe("ssh backend", () => {
 
   it("adopt dials once, reads the machine's own login and size, and hands back the handle the record stands on", async () => {
     const { transport, carried } = fakeSsh();
-    const backend = new SshBackend({ transport });
+    const backend = sshBackend(transport);
     const { machine, login, shape } = await backend.adopt(REACH);
     expect(carried.map(c => c.script)).toEqual([SSH_READ_SCRIPT]);
     expect(shape).toEqual({ cpu: 8, memMb: 16000 });
@@ -112,34 +120,36 @@ describe("ssh backend", () => {
       stdout: "",
       stderr: "debug1: Offering public key: /tmp/k/id_ed25519\ndebug1: No more authentication methods to try.\ndev@10.0.0.5: Permission denied (publickey).\n",
     });
-    const failed = await new SshBackend({ transport }).adopt(REACH).then(() => "", (e: unknown) => (e as Error).message);
+    const failed = await sshBackend(transport).adopt(REACH).then(() => "", (e: unknown) => (e as Error).message);
     expect(failed).toContain("Permission denied (publickey).");
     expect(failed).not.toContain("debug1:");
   });
 
-  it("the read dial asks the client what key the machine answered with, and no other call does", async () => {
+  it("a dial that exchanged no key still hands back the machine's identity, since the key is not read out of it", async () => {
     const { transport, carried } = fakeSsh();
-    const backend = new SshBackend({ transport });
-    const { machine, hostKey } = await backend.adopt(REACH);
-    expect(hostKey).toBe("ssh-ed25519 SHA256:AbCd1234");
-    // Two machines are the same machine when they answer with the same key as the same login, whatever the address.
-    expect(sshIdentity(hostKey!, "dev")).toBe("ssh-ed25519 SHA256:AbCd1234 as dev");
-    // Only the read carries the log flag: every other command would otherwise put the client's debug on its stderr.
-    expect(sshArgs(REACH, "true", { hostKey: true })).toContain("LogLevel=DEBUG");
+    const { machine, hostKey } = await sshBackend(transport).adopt(REACH);
+    // The dial rode a master the last minute left open, so the client logged no key exchange on it. What the record
+    // stands on is the entry that client already holds for the machine, which is there either way.
+    expect(hostKey).toBe(FOUND_KEY);
+    // Two machines are the same machine when they hold the same key for the same login, whatever the address.
+    expect(sshIdentity(hostKey!, "dev")).toBe(`${FOUND_KEY} as dev`);
+    // No dial asks the client for its debug log any more: a warm master has none to give, and the log rode the
+    // stderr of the one command whose failure the person reads.
     expect(sshArgs(REACH, "true")).not.toContain("LogLevel=DEBUG");
+    expect(sshDialArgs(REACH)).not.toContain("LogLevel=DEBUG");
     await machine.exec("true");
     expect(carried.map(c => c.script)).toEqual([SSH_READ_SCRIPT, "true"]);
   });
 
-  it("a client that logged no key leaves the machine without an identity of its own rather than inventing one", () => {
-    expect(hostKeyOf("debug1: Authenticating to box\n")).toBeUndefined();
-    expect(hostKeyOf("debug1: Server host key: ssh-rsa SHA256:zzz\ndebug1: next line\n")).toBe("ssh-rsa SHA256:zzz");
+  it("a machine the client holds no key for is recorded without an identity of its own rather than an invented one", async () => {
+    const { transport } = fakeSsh();
+    expect((await sshBackend(transport, async () => undefined).adopt(REACH)).hostKey).toBeUndefined();
   });
 
   it("the machine's own words for its home are held to a plain path, since every path a turn runs is built from it", async () => {
     const home = (answer: string): Promise<unknown> => {
       const transport: SshTransport = async () => ({ exitCode: 0, stdout: `home ${answer}\nuser dev\npath /usr/bin\ncpu 1\nmemkb 1024\n`, stderr: "" });
-      return new SshBackend({ transport }).adopt(REACH).then(a => a.login["HOME"], (e: unknown) => (e as Error).message);
+      return sshBackend(transport).adopt(REACH).then(a => a.login["HOME"], (e: unknown) => (e as Error).message);
     };
     // What a machine answering with shell in its home would land in the launch: refused at the one door instead.
     expect(await home("/home/dev x; touch /tmp/pwned")).toContain("is not a plain path");
@@ -155,7 +165,7 @@ describe("ssh backend", () => {
   it("the store folder each harness reads is asked of the machine's own login shell, and held to the same rule", async () => {
     const read = (line: string): Promise<Record<string, string>> => {
       const transport: SshTransport = async () => ({ exitCode: 0, stdout: `home /root\nuser root\npath /usr/bin\n${line}cpu 1\nmemkb 1024\n`, stderr: "" });
-      return new SshBackend({ transport }).adopt(REACH).then(a => ({ ...a.login }));
+      return sshBackend(transport).adopt(REACH).then(a => ({ ...a.login }));
     };
     expect(SSH_STORE_VARS).toContain("CLAUDE_CONFIG_DIR");
     // The read asks a login shell for each store variable the catalog names, in the same call that asks for PATH.
@@ -199,7 +209,7 @@ describe("ssh backend", () => {
 
   it("exec and run carry the script to the machine, and run streams each line", async () => {
     const { transport, carried } = fakeSsh(script => (script === "exit 7" ? { exitCode: 7 } : { stdout: "a\nb\n" }));
-    const backend = new SshBackend({ transport });
+    const backend = sshBackend(transport);
     const { machine } = await backend.adopt(REACH);
     expect((await machine.exec("exit 7")).exitCode).toBe(7);
     const lines: string[] = [];
@@ -212,7 +222,7 @@ describe("ssh backend", () => {
 
   it("the moves only a machine wsp forks takes are refused, and it serves no preview or signed URL", async () => {
     const { transport } = fakeSsh();
-    const backend = new SshBackend({ transport });
+    const backend = sshBackend(transport);
     // Read as the runtime holds it, through the seam, so a refusal is proven on the interface every road calls.
     const machine: Machine = (await backend.adopt(REACH)).machine;
     await expect(machine.snapshot("x", { firstLife: true })).rejects.toThrow("cannot be snapshotted");
@@ -238,7 +248,7 @@ describe("what a machine over ssh says it is", () => {
   /** The machine handle as the runtime holds it, through the seam every kind answers on. */
   async function machineOf(answer: (script: string) => Partial<ExecResult>): Promise<{ machine: Machine; carried: { script: string }[] }> {
     const { transport, carried } = fakeSsh(answer);
-    const { machine } = await new SshBackend({ transport }).adopt(REACH);
+    const { machine } = await sshBackend(transport).adopt(REACH);
     return { machine, carried };
   }
 
@@ -300,5 +310,97 @@ describe("what a machine over ssh says it is", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+describe("the key a machine over ssh is known by", () => {
+  /** What `ssh -G` answered on this computer for the dial, cut to the lines the read uses. A client that spells its
+   * own folder with a tilde is spelled that way here too, since older ones do. */
+  const CONFIG = [
+    "user dev",
+    "hostname 10.0.0.5",
+    "port 2222",
+    "userknownhostsfile /Users/dev/.ssh/known_hosts ~/.ssh/known_hosts2",
+    "globalknownhostsfile /etc/ssh/ssh_known_hosts /etc/ssh/ssh_known_hosts2",
+    "hostkeyalgorithms ssh-ed25519-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,rsa-sha2-512,rsa-sha2-256,ssh-rsa",
+  ].join("\n");
+
+  /** What `ssh-keygen -F` printed for a machine known by a key of each type: its own comment lines, the rsa entry
+   * ahead of the others in the file, and the ed25519 one hashed, which is how a Debian client writes every entry.
+   * The keys are a throwaway set made for this case; their fingerprints below are what `ssh-keygen -lf` printed. */
+  const FOUND = [
+    "# Host [10.0.0.5]:2222 found: line 3 ",
+    "[10.0.0.5]:2222 ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQDdxs0iI8J5qm7+4hxS2LKxvEImRo4YOgbsh7o/q6LcNs+/euQcFejNmlxWKGPcPx6ZAFZEvYmdwe/yDUYsoAH66WB32nACpcm8ELAXEkXxQZEjmr8daugXOpWv0qDzNu/2u5+eMJJJRNDDDupbkvmCM74T9cCAVkHDjisNybGndQ==",
+    "# Host [10.0.0.5]:2222 found: line 4 ",
+    "|1|g4CYAxJ751PqMLyUC5r0xLd/ov4=|8lv3RgXEmKyoPgL0K37Xx452RDA= ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC6sV8jQCzynkpUOM40rRIjA7tPstUSjC+A/LVMnAZhP",
+    "# Host [10.0.0.5]:2222 found: line 5 ",
+    "[10.0.0.5]:2222 ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBAK+5Ayg30RfuGD20d/q2F5UrbqEc1RarPuGTfhzyv0OHw3UiZIAlCu+Eg145j6r4sxS0Jm0uSKkMggV0oW70bY=",
+    "",
+  ].join("\n");
+
+  const ED25519 = "ssh-ed25519 SHA256:Ge9MQ9S/Faik2WzsxidRXnoEOJRIHkJKTBkOJ903vq4";
+  const RSA = "ssh-rsa SHA256:00VO3BTKQbJeAg/nTIZvht3husrdVHRx5/E4JC9fFBE";
+  const ALGORITHMS = readValues(CONFIG)["hostkeyalgorithms"]!;
+
+  it("the key is read off the client's own entry for the machine, with nothing dialled", async () => {
+    const asked: { file: string; args: readonly string[] }[] = [];
+    const run: SshLocalRun = async (file, args) => {
+      asked.push({ file, args });
+      if (file === "ssh") return { exitCode: 0, stdout: CONFIG, stderr: "" };
+      const named = args[args.indexOf("-f") + 1];
+      return named === "/Users/dev/.ssh/known_hosts"
+        ? { exitCode: 0, stdout: FOUND, stderr: "" }
+        : { exitCode: 255, stdout: "", stderr: `Cannot stat ${named}: No such file or directory\n` };
+    };
+    expect(await knownHostKey(REACH, run)).toBe(ED25519);
+    // The client is asked where it looks and what it prefers there, for the dial as it would make it, and nothing
+    // is dialled: this is why the read costs nothing on a master a turn already has open.
+    expect(asked[0]).toEqual({ file: "ssh", args: ["-G", ...sshDialArgs(REACH), "dev@10.0.0.5"] });
+    expect(asked.slice(1).map(a => [a.file, a.args[0], a.args[1]])).toEqual([
+      ["ssh-keygen", "-F", "[10.0.0.5]:2222"],
+      ["ssh-keygen", "-F", "[10.0.0.5]:2222"],
+      ["ssh-keygen", "-F", "[10.0.0.5]:2222"],
+      ["ssh-keygen", "-F", "[10.0.0.5]:2222"],
+    ]);
+    // A client that cannot say what it would do leaves the machine without an identity rather than with a guess.
+    expect(await knownHostKey(REACH, async () => ({ exitCode: 255, stdout: "", stderr: "Bad configuration\n" }))).toBeUndefined();
+    expect(await knownHostKey(REACH, async file => (file === "ssh" ? { exitCode: 0, stdout: "port 2222\n", stderr: "" } : { exitCode: 0, stdout: FOUND, stderr: "" }))).toBeUndefined();
+  });
+
+  it("the entry is looked up under the name and port the client itself writes one under, in the files it reads", () => {
+    const values = readValues(CONFIG);
+    expect(knownHostTarget(values)).toBe("[10.0.0.5]:2222");
+    // ssh's own port is written with no brackets, and an alias the person set is the whole name the client writes.
+    expect(knownHostTarget({ ...values, port: "22" })).toBe("10.0.0.5");
+    expect(knownHostTarget({ ...values, hostkeyalias: "box-behind-a-tunnel" })).toBe("box-behind-a-tunnel");
+    expect(knownHostTarget({ port: "2222" })).toBeUndefined();
+    expect(knownHostFiles(values, "/Users/dev")).toEqual(["/Users/dev/.ssh/known_hosts", "/Users/dev/.ssh/known_hosts2", "/etc/ssh/ssh_known_hosts", "/etc/ssh/ssh_known_hosts2"]);
+    // A person who turned a file off named no path to read.
+    expect(knownHostFiles({ userknownhostsfile: "none", globalknownhostsfile: "none" })).toEqual([]);
+    // A tilde is the password database entry, which is what ssh expands one from: a home pointed elsewhere for
+    // this process moves the file wsp reads nowhere, because it moves the file ssh reads nowhere.
+    const home = process.env["HOME"];
+    process.env["HOME"] = join(tmpdir(), "wsp-not-a-home");
+    try {
+      expect(knownHostFiles({ userknownhostsfile: "~/.ssh/known_hosts" })).toEqual([join(userInfo().homedir, ".ssh", "known_hosts")]);
+    } finally {
+      if (home === undefined) delete process.env["HOME"];
+      else process.env["HOME"] = home;
+    }
+  });
+
+  it("the key picked is the type a dial would negotiate, not whichever line was written first", () => {
+    // The rsa entry is first in the file and the ed25519 one is hashed, and what comes back is still the key this
+    // client prefers, so two records of one machine cannot answer with two different keys for it.
+    expect(hostKeyFound(FOUND, ALGORITHMS)).toBe(ED25519);
+    // An rsa-sha2 signature is made by an ssh-rsa key, so a client preferring those picks that entry.
+    expect(hostKeyFound(FOUND, "rsa-sha2-512,ssh-ed25519")).toBe(RSA);
+    expect(hostKeyFound(FOUND, "ecdsa-sha2-nistp256")).toBe("ecdsa-sha2-nistp256 SHA256:AgZa9U1SScxiIabgv4cA75Tb8rufTUtnU35jEB/IQWk");
+    // Nothing to pick: a machine no entry names, a client that prefers none of the types it is known by, and a line
+    // that marks an authority or a revoked key rather than naming a machine's own.
+    expect(hostKeyFound("", ALGORITHMS)).toBeUndefined();
+    expect(hostKeyFound(FOUND, "ssh-dss")).toBeUndefined();
+    const marked = FOUND.split("\n").map(line => (line.startsWith("#") ? line : `@revoked ${line}`)).join("\n");
+    expect(hostKeyFound(marked, ALGORITHMS)).toBeUndefined();
   });
 });
