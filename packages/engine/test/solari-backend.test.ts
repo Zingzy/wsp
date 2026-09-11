@@ -48,6 +48,10 @@ describe("SolariBackend", () => {
     expect(SOLARI_LIFECYCLE.budgets).toEqual({ wakeAttempts: 2, daemonAnswersMs: 30_000, resumeAsks: { everyMs: 60_000, forMs: 30 * 60_000 } });
     expect(RESUME_CAP_MS).toBe(30_000);
     expect(b.capabilities.pauseMode).toBe("memory");
+    // One object for every backend built here: a test that shrank a budget on it would shrink it for every file after.
+    expect(Object.isFrozen(SOLARI_LIFECYCLE)).toBe(true);
+    expect(Object.isFrozen(SOLARI_LIFECYCLE.budgets)).toBe(true);
+    expect(Object.isFrozen(SOLARI_LIFECYCLE.budgets.resumeAsks)).toBe(true);
   });
 
   it("idleTimeoutMs above six hours is sent as six hours, the longest the create API has taken", async () => {

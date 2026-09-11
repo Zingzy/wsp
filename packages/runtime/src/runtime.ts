@@ -2990,11 +2990,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
     retryMs: opts.status?.pollIntervalMs ?? POLL_INTERVAL_MS,
     clock,
-    // A backend whose backstop is pushed rather than set at create hears the instant on every arming; the backend
-    // decides whether one is worth a call, and a call that fails changes nothing about the window.
+    // A backend whose backstop is pushed rather than set at create hears the instant on every arming of a running
+    // machine; the backend decides whether one is worth a call, and a call that fails changes nothing about the
+    // window. A touch on a napped or gone workspace arms a window too, but its machine needs no stop timer.
     onBackstop: (id, until) => {
       const entry = live.get(id);
-      if (entry === undefined) return;
+      if (entry === undefined || entry.record.phase !== "running") return;
       void backendFor(entry.record.kind)
         .lifecycle?.backstop?.(entry.machine, until)
         .catch((e: unknown) => console.warn(`backstop of ${id} on ${entry.machine.id} not set: ${e instanceof Error ? e.message : String(e)}`));

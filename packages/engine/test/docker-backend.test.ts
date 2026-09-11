@@ -155,6 +155,8 @@ describe("DockerBackend against a fake Engine API", () => {
     // daemon never leaves an unpause unanswered.
     expect(backend.lifecycle).toBe(DOCKER_LIFECYCLE);
     expect(DOCKER_LIFECYCLE.budgets).toEqual({ wakeAttempts: 1, daemonAnswersMs: 30_000 });
+    expect(Object.isFrozen(DOCKER_LIFECYCLE)).toBe(true);
+    expect(Object.isFrozen(DOCKER_LIFECYCLE.budgets)).toBe(true);
     expect(backend.pricing.builderDiskGb).toBeUndefined();
   });
 

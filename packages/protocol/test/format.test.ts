@@ -67,7 +67,6 @@ import {
   mcpServerCommandLine,
   moveTimedOutLine,
   RESUME_UNANSWERED,
-
   wakeAsksIn,
   WAKE_STOPPED,
   wakeAskingAgainLine,

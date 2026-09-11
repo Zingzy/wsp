@@ -97,8 +97,9 @@ export const STATE_READ_MS = 30_000;
 /** The longest idleTimeoutMs the create API has taken from us: six hours, the golden builder's. */
 export const IDLE_TIMEOUT_MAX_MS = 6 * 60 * 60_000;
 
-export const SOLARI_LIFECYCLE: Lifecycle = {
-  budgets: {
+// Frozen: one shared object every SolariBackend hands out, so nothing shrinks a budget for everyone by accident.
+export const SOLARI_LIFECYCLE: Lifecycle = Object.freeze({
+  budgets: Object.freeze({
     // A resume can land a zombie on a fresh host at default size; one re-pause and resume clears it, a second never has.
     wakeAttempts: 2,
     // The daemon answers about a second after a wake and after a fork.
@@ -106,9 +107,9 @@ export const SOLARI_LIFECYCLE: Lifecycle = {
     // Thirty minutes of asking, once a minute, so a provider that comes back inside its own outage wakes the machine
     // with nobody watching. Both are wall time from the first ask: a resume that sits on its cap spends half of its
     // own minute, and counting the cadence after the cap made thirty asks span 45 minutes (seen live 2026-09-10).
-    resumeAsks: { everyMs: 60_000, forMs: 30 * 60_000 },
-  },
-};
+    resumeAsks: Object.freeze({ everyMs: 60_000, forMs: 30 * 60_000 }),
+  }),
+});
 
 /** Measured: the pt_token exp claim is 60 minutes from mint. */
 export const PREVIEW_TTL_MS = 60 * 60_000;

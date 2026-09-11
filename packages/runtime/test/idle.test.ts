@@ -492,6 +492,12 @@ describe("provider backstop on the fork spec", () => {
     expect(heard).toEqual([{ machine: "m1", until: t0 + 40 * 60_000 }, { machine: "m1", until: t0 + 5_000 + 40 * 60_000 }]);
     await rt.workspaces.nap(ws.id);
     expect(heard).toHaveLength(2);
+    // A client touching a napped workspace arms nothing at the backend: its machine is stopped, and on a provider
+    // whose backstop is a stop timer that call would land on an archived machine.
+    await rt.workspaces.touch(ws.id);
+    fc.advance(1_000);
+    await rt.workspaces.touch(ws.id);
+    expect(heard).toHaveLength(2);
     // With auto-nap off the runtime still hands over its six-hour instant, so a dead host never leaves a machine billing.
     const off = await rt.workspaces.create({ golden: "snap_g", name: "b", idleWindowMs: null });
     expect(heard.at(-1)).toEqual({ machine: "m2", until: fc.clock.now() + IDLE_OFF_BACKSTOP_MS });

@@ -379,13 +379,14 @@ export interface DockerBackendOptions {
   transport?: DockerTransport;
 }
 
-export const DOCKER_LIFECYCLE: Lifecycle = {
-  budgets: {
+// Frozen: one shared object every DockerBackend hands out, so nothing shrinks a budget for everyone by accident.
+export const DOCKER_LIFECYCLE: Lifecycle = Object.freeze({
+  budgets: Object.freeze({
     // Unpause is synchronous, and a second freeze fixes nothing a first did not: a failed check goes straight to the rebuild.
     wakeAttempts: 1,
     daemonAnswersMs: 30_000,
-  },
-};
+  }),
+});
 
 export class DockerBackend implements MachineBackend {
   readonly capabilities: Capabilities;
