@@ -618,10 +618,19 @@ describe("wsp verbs over the host", () => {
     expect(missing.io.errors).toEqual(["wsp forget: no workspace nope"]);
   });
 
-  it("a machine wsp did not fork is left as it is: the delete question and its line say so", () => {
+  it("the delete question and its line say what the delete does to this kind's machine, the ssh sweep included", () => {
     const workspace = { id: "ws_mine", name: "box", machineId: "ssh://dev@box:22", phase: "running", kind: "ssh", golden: "", createdAt: "2026-09-08T00:00:00.000Z" } as const;
-    expect(deleteQuestion({ workspace, threads: 1 })).toBe("Delete box?\nIts machine is left as it is; its record and 1 thread leave this computer.");
-    expect(deletedLine({ workspace, threads: 1 })).toBe("deleted box ws_mine: its machine is left as it is, and its record and 1 thread are gone from this computer");
+    // What wsp put on a machine somebody owns comes off with the record; the machine is theirs and stays.
+    expect(deleteQuestion({ workspace, threads: 1 })).toBe(
+      "Delete box?\nIts daemon, its unit and its login line come off the machine, which is otherwise left as it is; its record and 1 thread leave this computer.",
+    );
+    expect(deletedLine({ workspace, threads: 1 })).toBe(
+      "deleted box ws_mine: its daemon, its unit and its login line come off the machine, which is otherwise left as it is, and its record and 1 thread are gone from this computer",
+    );
+    // This computer took no daemon of wsp's and no line in a login file, so nothing comes off it.
+    const here = { ...workspace, kind: "local", machineId: "local" } as const;
+    expect(deleteQuestion({ workspace: here, threads: 1 })).toBe("Delete box?\nIts machine is left as it is; its record and 1 thread leave this computer.");
+    expect(deletedLine({ workspace: here, threads: 1 })).toBe("deleted box ws_mine: its machine is left as it is, and its record and 1 thread are gone from this computer");
     // A fork is wsp's to take away, and its line still names the machine that goes.
     const fork = { ...workspace, kind: "cloud", machineId: "m_ab12" } as const;
     expect(deletedLine({ workspace: fork, threads: 0 })).toBe("deleted box ws_mine: machine m_ab12 is gone at the provider, and its record and 0 threads are gone from this computer");

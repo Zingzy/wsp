@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WS_PATH } from "@wsp/protocol";
 import { aimedHost, aliasFrom, checkedAlias, defaultHost, dialWindowMs, hostsDir, listHosts, noSuchHostLine, readHost, removeHost, setDefaultHost, wsUrlOf, wspHome, writeHost, type HostRecord } from "../src/hosts.js";
+import { homeNamed } from "../src/serving-home.js";
 import { hostAddress } from "../src/verbs.js";
 
 let dirs: string[] = [];
@@ -108,9 +109,13 @@ describe("the hosts file", () => {
     expect(checkedAlias("box")).toBe("box");
   });
 
-  it("reads WSP_HOME for the home the hosts folder sits in", () => {
+  it("reads WSP_HOME for the home the hosts folder sits in, and an empty one names no home at all", () => {
     expect(wspHome({ WSP_HOME: "/tmp/elsewhere" })).toBe("/tmp/elsewhere");
     expect(wspHome({})).toMatch(/\.wsp$/);
+    // WSP_HOME= with nothing after it is what a launcher leaves when it carries the name and not the value; read as
+    // a home it is the folder the run happens to sit in, and the hosts, the keys and the state land beside it.
+    expect(wspHome({ WSP_HOME: "" })).toBe(wspHome({}));
+    expect(homeNamed("")).toBeUndefined();
   });
 });
 
