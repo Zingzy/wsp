@@ -16,7 +16,7 @@ import { stripVTControlCharacters } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
 import { keyCheckLine, type BackendPricing, type KeyCheck } from "@wsp/engine";
 import { RUNGS } from "@wsp/collect";
-import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, KEY_REFUSED, KEY_UNCHECKED, forksNoMachines, NEVER_REACHED, NO_FIRST_WORKSPACE, STOP_LEFT_MACHINE_LINE, shellQuote, SIGN_IN_NEVER_REACHED, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobOver, MACHINE_ROW_LABEL, initNeedWhat, initRowOver, initStageCount, initStoppedAt, initStoppedLine, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type LoginState, type McpServerSpec, type TurnResult } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, KEY_REFUSED, KEY_UNCHECKED, forksNoMachines, NEVER_REACHED, NO_FIRST_WORKSPACE, STOP_LEFT_MACHINE_LINE, shellQuote, SIGN_IN_NEVER_REACHED, LoginState, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobOver, MACHINE_ROW_LABEL, initNeedWhat, initRowOver, initSignInOutcome, initStageCount, initStoppedAt, initStoppedLine, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type McpServerSpec, type TurnResult } from "@wsp/protocol";
 import { harnessCatalog, smallestModel, type GoldenRecipe, type InitDoor, type Runtime, type SessionHandle } from "@wsp/runtime";
 import type { AgentHere } from "./agents-here.js";
 import { SOLARI_KEY, agentKeysIn, keysOf, type Keys } from "./env-keys.js";
@@ -380,12 +380,13 @@ export class InitJobs implements InitDoor {
     const s = this.state;
     if (s === undefined || !s.building || initJobOver(s.phase)) throw new Error("no build is running to sign in on");
     const row = s.rows.find(r => r.kind === "sign-in" && r.tool === o.tool);
-    if (row === undefined || !initRowOver(row.state) || row.state === INIT_SIGN_IN_WORDS["signed-in"]) throw new Error(`no failed sign-in for ${o.tool} to retry`);
+    if (row === undefined || !initRowOver(row) || row.login === "signed-in") throw new Error(`no failed sign-in for ${o.tool} to retry`);
     const entry = s.reading?.manifest.entries.find(e => e.rung === "logins" && agentName(e) === o.tool);
     if (entry === undefined) throw new Error(`no sign-in row for ${o.tool}`);
     const ctx = s.signIns;
     if (ctx === undefined) throw new Error("the machine is not up to sign in on");
     row.state = STATE.running;
+    delete row.login;
     delete row.detail;
     this.emit();
     const io = this.io(s);
@@ -401,7 +402,7 @@ export class InitJobs implements InitDoor {
       codes: this.codes,
       json: record => this.take(s, record),
     }).catch((e: unknown) => {
-      row.state = INIT_SIGN_IN_WORDS["not-signed-in"];
+      Object.assign(row, initSignInOutcome("not-signed-in", this.deps.platform));
       row.detail = e instanceof Error ? e.message : String(e);
       this.emit();
     });
@@ -494,7 +495,7 @@ export class InitJobs implements InitDoor {
         // Every row the run left unfinished, not only the ones it never started: forking and importing hang too.
         // A first workspace or its project reads not made, since skipped would read as a step the build passed on.
         for (const row of s.rows) {
-          if (initRowOver(row.state)) continue;
+          if (initRowOver(row)) continue;
           row.state = row.kind === "workspace" || row.kind === "project" ? STATE.notMade : STATE.skipped;
           row.detail = row.kind === "sign-in" ? SIGN_IN_NEVER_REACHED : NEVER_REACHED;
         }
@@ -817,7 +818,11 @@ export class InitJobs implements InitDoor {
         const next: InitRow = { id, kind: "sign-in", tool, label: text("label") ?? tool, state: page === undefined ? STATE.running : STATE.open, ...(page !== undefined ? { page } : {}), ...(text("code") !== undefined ? { code: text("code")! } : {}), ...(finish.success ? { finish: finish.data } : {}) };
         const had = row(id);
         if (had === undefined) s.rows.push(next);
-        else Object.assign(had, next);
+        else {
+          // The row is running again, so the outcome it ended on last time is no longer its own.
+          delete had.login;
+          Object.assign(had, next);
+        }
         if (s.phase === "building") s.phase = "signing-in";
         break;
       }
@@ -825,15 +830,15 @@ export class InitJobs implements InitDoor {
         if (s.phase === "building") s.phase = "signing-in";
         const tool = text("tool") ?? "";
         const id = `sign-in/${tool}`;
-        const state = text("state") as LoginState | undefined;
-        const word = state !== undefined && state in INIT_SIGN_IN_WORDS ? INIT_SIGN_IN_WORDS[state] : (state ?? STATE.done);
+        const login = LoginState.safeParse(text("state"));
         const had = row(id);
-        const next: InitRow = { id, kind: "sign-in", tool, label: text("label") ?? tool, state: word, ...(text("note") !== undefined ? { detail: text("note")! } : {}) };
+        const next: InitRow = { id, kind: "sign-in", tool, label: text("label") ?? tool, ...(login.success ? initSignInOutcome(login.data, this.deps.platform) : { state: text("state") ?? STATE.done }), ...(text("note") !== undefined ? { detail: text("note")! } : {}) };
         if (had === undefined) s.rows.push(next);
         else {
           delete had.page;
           delete had.code;
           delete had.finish;
+          delete had.login;
           Object.assign(had, next);
         }
         break;
@@ -845,7 +850,10 @@ export class InitJobs implements InitDoor {
         const next: InitRow = { id, kind: "sign-in", tool, label: text("label") ?? tool, state: STATE.keySet };
         const had = row(id);
         if (had === undefined) s.rows.push(next);
-        else Object.assign(had, next);
+        else {
+          delete had.login;
+          Object.assign(had, next);
+        }
         break;
       }
       case "first-workspace": {

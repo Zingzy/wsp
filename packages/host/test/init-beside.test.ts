@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
-import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, SIGN_IN_OPEN_STATE, type InitJob, type InitJobEvent, type InitRow, type InitSetup } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, initSignInOutcome, SIGN_IN_OPEN_STATE, type InitJob, type InitJobEvent, type InitRow, type InitSetup } from "@wsp/protocol";
 import { createRuntime, memoryStore, type InitDoor } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildBesideHost } from "../src/init-beside.js";
@@ -210,7 +210,7 @@ describe("the build wsp init hands to the host serving the state", () => {
     f.door.push({ phase: "signing-in", rows: [{ id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "GitHub CLI login", state: SIGN_IN_OPEN_STATE, page: "https://github.com/login/device", finish: "code" }] });
     await until(() => f.text().includes(CLOUD_SETUP_WORDS.build.codeAsk));
     // Nobody types it: the sign-in runs out, the build seals, and the run has to end rather than sit on that prompt.
-    f.door.push({ phase: "done", golden: { version: 1 }, rows: [{ id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "GitHub CLI login", state: INIT_SIGN_IN_WORDS["not-signed-in"] }] });
+    f.door.push({ phase: "done", golden: { version: 1 }, rows: [{ id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "GitHub CLI login", ...initSignInOutcome("not-signed-in", "darwin") }] });
     expect(await run).toBe(0);
     expect(f.door.calls.map(c => c.op)).not.toContain("signInCode");
     expect(f.text()).toContain("Golden v1 sealed on the host serving this state.");
