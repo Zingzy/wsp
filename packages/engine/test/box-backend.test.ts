@@ -5,7 +5,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { MoveUnansweredError, isMissing, type RetryClock } from "../src/errors.js";
-import { DEADLINE_EXIT, INLINE_EXEC_MS } from "../src/exec-detached.js";
+import { DAEMON_ENV_FILE, DEADLINE_EXIT, INLINE_EXEC_MS } from "../src/exec-detached.js";
 import { EXEC_ENV } from "../src/golden-import.js";
 import {
   BACKSTOP_SLACK_MS,
@@ -15,10 +15,11 @@ import {
   BOX_NAME_MAX,
   BOX_PRICING,
   BoxBackend,
+  type BoxBudgets,
   BoxMachine,
-  ENV_DROP_IN,
   FILE_PUT_MAX,
   FIREWALL_HOLD_MS,
+  FIREWALL_WATCH_MS,
   SNAPSHOT_NAME_MAX,
   TRIAL_TTL_S,
   boxClassFor,
@@ -131,10 +132,10 @@ function fakeClock(): RetryClock & { at: number } {
   return clock;
 }
 
-function backendOn(api: FakeBox, tier = "trial"): { backend: BoxBackend; clock: RetryClock & { at: number } } {
+function backendOn(api: FakeBox, tier = "trial", budgets: Partial<BoxBudgets> = {}): { backend: BoxBackend; clock: RetryClock & { at: number } } {
   api.on("GET", "/limits", LIMITS(tier));
   const clock = fakeClock();
-  const backend = new BoxBackend({ apiKey: "box_x", fetch: api.fetch, clock, budgets: { pollMs: 10, pauseMs: 100, resumeMs: 100, createMs: 100, snapshotMs: 100, restoreMs: 100 } });
+  const backend = new BoxBackend({ apiKey: "box_x", fetch: api.fetch, clock, budgets: { pollMs: 10, pauseMs: 100, resumeMs: 100, createMs: 100, snapshotMs: 100, restoreMs: 100, ...budgets } });
   return { backend, clock };
 }
 
@@ -215,13 +216,15 @@ describe("BoxBackend declarations", () => {
     expect(boxLabels("wsp")).toEqual({ [WSP_LABEL]: "1" });
   });
 
-  it("a name that would run past the API's cap drops whole pairs from the least important end, never a cut value", () => {
-    const labels = { [OWNER_LABEL]: "h_1a2b3c4d", [WORKSPACE_LABEL]: "ws_0f9e8d7c", [CREATED_AT_LABEL]: "2026-09-11T12:00:00.000Z", [BUILDER_LABEL]: "1", [NAME_LABEL]: "n".repeat(60), [GOLDEN_LABEL]: "g".repeat(40) };
+  it("a name that would run past the API's cap keeps the pairs in rank order up to the first that does not fit, and nothing after it", () => {
+    const labels = { [OWNER_LABEL]: "h_1a2b3c4d", [WORKSPACE_LABEL]: "ws_0f9e8d7c", [CREATED_AT_LABEL]: "2026-09-11T12:00:00.000Z", [BUILDER_LABEL]: "1", [GOLDEN_LABEL]: "g".repeat(70), [NAME_LABEL]: "n" };
     const name = boxName(labels);
     expect(name.length).toBeLessThanOrEqual(BOX_NAME_MAX);
     const read = boxLabels(name)!;
-    expect(read).toMatchObject({ [OWNER_LABEL]: "h_1a2b3c4d", [WORKSPACE_LABEL]: "ws_0f9e8d7c", [CREATED_AT_LABEL]: "2026-09-11T12:00:00.000Z", [BUILDER_LABEL]: "1" });
-    for (const [key, value] of Object.entries(read)) if (key !== WSP_LABEL) expect(labels[key as keyof typeof labels]).toBe(value);
+    expect(read).toEqual({ [WSP_LABEL]: "1", [OWNER_LABEL]: "h_1a2b3c4d", [WORKSPACE_LABEL]: "ws_0f9e8d7c", [CREATED_AT_LABEL]: "2026-09-11T12:00:00.000Z", [BUILDER_LABEL]: "1" });
+    // The golden did not fit, so the one-letter name after it is left off too, though it would have: a reader who
+    // finds no golden knows the name is missing as well rather than guessing which pairs went.
+    expect(read[NAME_LABEL]).toBeUndefined();
   });
 
   it("a snapshot name is lowered onto the provider's pattern and a long one ends in a hash, with the owner mark still readable", () => {
@@ -263,8 +266,8 @@ describe("BoxBackend against a fake Box API", () => {
     // The environment lands where root's services read it: the systemd drop-in and the running manager.
     const landed = api.took("POST", "/boxes/bx_tumrjngm/commands")!.body as { command: string };
     expect(landed.command).toBe(sudoCommand(envLandingScript({ IS_SANDBOX: "1", ANTHROPIC_API_KEY: "sk-ant-x" })));
-    expect(landed.command).toContain(ENV_DROP_IN);
-    expect(landed.command).toContain('DefaultEnvironment="IS_SANDBOX=1" "ANTHROPIC_API_KEY=sk-ant-x"');
+    expect(inner(landed.command)).toContain(`cat > '${DAEMON_ENV_FILE}'`);
+    expect(inner(landed.command)).toContain('ANTHROPIC_API_KEY="sk-ant-x"');
     expect(api.calls()).toEqual(["GET /limits", "POST /boxes", "GET /boxes/bx_tumrjngm", "GET /boxes/bx_tumrjngm", "POST /boxes/bx_tumrjngm/commands"]);
   });
 
@@ -276,6 +279,7 @@ describe("BoxBackend against a fake Box API", () => {
     const { backend } = backendOn(api, "standard");
     const machine = await backend.create({ kind: "sandbox", template: "wsp-mac-default-v1", cpu: 4, memMb: 8192, labels: { [OWNER_LABEL]: "h_1" } });
     expect(machine.id).toBe("bx_uwepudz7");
+    // No window named and no cap on the account: no timer, the provider's own meaning of null.
     expect(api.took("POST", "/boxes")!.body).toEqual({ type: "default", ttlSeconds: null, noEnv: true, name: "wsp;o=h_1", from: "wsp-mac-default-v1" });
     // The deployed box came back named after its snapshot, so the labels went back on with one update.
     expect(api.took("PATCH", "/boxes/bx_uwepudz7")!.body).toEqual({ name: "wsp;o=h_1" });
@@ -286,6 +290,22 @@ describe("BoxBackend against a fake Box API", () => {
     expect(api.seen.filter(s => s.method === "PATCH").at(-1)!.body).toEqual({ name: "wsp" });
     // One read of the tier serves every create.
     expect(api.calls().filter(c => c === "GET /limits")).toHaveLength(1);
+  });
+
+  it("the create carries the runtime's idle window as the stop timer: the seconds to it off the trial, the cap on it when shorter", async () => {
+    const off = new FakeBox()
+      .on("POST", "/boxes", { status: 202, body: { ok: true, status: "provisioning", box: BOX("bx_t1", "provisioning", { name: "wsp" }) } })
+      .on("GET", "/boxes/bx_t1", INFO("bx_t1", "ready", { name: "wsp" }));
+    await backendOn(off, "standard").backend.create({ kind: "sandbox", onIdle: "pause", idleTimeoutMs: 40 * 60_000 });
+    expect(off.took("POST", "/boxes")!.body).toMatchObject({ ttlSeconds: 40 * 60 });
+    const trial = new FakeBox()
+      .on("POST", "/boxes", { status: 202, body: { ok: true, status: "provisioning", box: BOX("bx_t2", "provisioning", { name: "wsp" }) } })
+      .on("GET", "/boxes/bx_t2", INFO("bx_t2", "ready", { name: "wsp" }));
+    const { backend } = backendOn(trial);
+    await backend.create({ kind: "sandbox", onIdle: "pause", idleTimeoutMs: 6 * 60 * 60_000 });
+    expect(trial.took("POST", "/boxes")!.body).toMatchObject({ ttlSeconds: TRIAL_TTL_S });
+    await backend.create({ kind: "sandbox", onIdle: "pause", idleTimeoutMs: 40 * 60_000 });
+    expect(trial.seen.filter(s => s.method === "POST" && s.path === "/boxes").at(-1)!.body).toMatchObject({ ttlSeconds: 40 * 60 });
   });
 
   it("a create answered from an earlier key reads replayed, and the envs still land", async () => {
@@ -393,12 +413,19 @@ describe("BoxBackend against a fake Box API", () => {
     await expect(machine.exec("true")).rejects.toMatchObject({ kind: "conflict", code: "machine_not_running" });
   });
 
-  it("the environment script writes the manager drop-in for later boots and sets the running manager for this one", () => {
+  it("the environment script writes the daemon's own file under /etc, one quoted line per variable, and nothing manager-wide", () => {
     const script = envLandingScript({ IS_SANDBOX: "1", PATH: "/usr/local/bin:/usr/bin", QUOTED: 'a"b\\c' });
-    expect(script).toContain(`cat > '${ENV_DROP_IN}' <<'WSP_ENV'`);
-    expect(script).toContain('DefaultEnvironment="IS_SANDBOX=1" "PATH=/usr/local/bin:/usr/bin" "QUOTED=a\\"b\\\\c"');
-    expect(script).toContain(`chmod 0600 '${ENV_DROP_IN}'`);
-    expect(script).toContain(`systemctl set-environment 'IS_SANDBOX=1' 'PATH=/usr/local/bin:/usr/bin' 'QUOTED=a"b\\c'`);
+    expect(script.split("\n")).toEqual([
+      "mkdir -p '/etc/wsp'",
+      `cat > '${DAEMON_ENV_FILE}' <<'WSP_ENV'`,
+      'IS_SANDBOX="1"',
+      'PATH="/usr/local/bin:/usr/bin"',
+      'QUOTED="a\\"b\\\\c"',
+      "WSP_ENV",
+      `chmod 0600 '${DAEMON_ENV_FILE}'`,
+    ]);
+    expect(DAEMON_ENV_FILE).toBe("/etc/wsp/daemon.env");
+    expect(script).not.toMatch(/DefaultEnvironment|system\.conf|set-environment/);
   });
 
   it("pauses with one stop and reads the box until archived; archiving is the stop under way, never a second stop, never force", async () => {
@@ -470,6 +497,29 @@ describe("BoxBackend against a fake Box API", () => {
     expect(JSON.stringify(machine)).not.toContain("116.203.245.5");
   });
 
+  it("a resume arms the timer the box last had again from now, the create's window or the last backstop, and the cap where none is on record", async () => {
+    const api = new FakeBox()
+      .on("POST", "/boxes", { status: 202, body: { ok: true, status: "provisioning", box: BOX("bx_r1", "provisioning", { name: "wsp" }) } })
+      .on("GET", "/boxes/bx_r1", INFO("bx_r1", "ready", { name: "wsp" }))
+      .on("POST", "/boxes/bx_r1/resume", { status: 202, body: { ok: true, status: "resuming", box: BOX("bx_r1", "provisioned") } })
+      .on("PATCH", "/boxes/bx_r1", INFO("bx_r1", "idle", { name: "wsp" }));
+    const { backend, clock } = backendOn(api, "standard");
+    const machine = await backend.create({ kind: "sandbox", onIdle: "pause", idleTimeoutMs: 40 * 60_000 });
+    // Hours later, with no arming since the create: the create's window, from now, not the instant that has passed.
+    clock.at += 5 * 60 * 60_000;
+    await machine.resume();
+    expect(api.took("POST", "/boxes/bx_r1/resume")!.body).toEqual({ ttlSeconds: 40 * 60 });
+    // A backstop armed since is the span a resume arms again.
+    await backend.backstop(machine, clock.at + 90 * 60_000);
+    clock.at += 3 * 60 * 60_000;
+    await machine.resume();
+    expect(api.seen.filter(s => s.path === "/boxes/bx_r1/resume").at(-1)!.body).toEqual({ ttlSeconds: 90 * 60 });
+    // A handle from get() has nothing on record: the cap, which off the trial is no timer.
+    api.on("POST", "/boxes/bx_r2/resume", { status: 202, body: { ok: true, status: "resuming", box: BOX("bx_r2", "provisioned") } }).on("GET", "/boxes/bx_r2", INFO("bx_r2", "ready"));
+    await new BoxMachine(backend, "bx_r2", "sandbox").resume();
+    expect(api.took("POST", "/boxes/bx_r2/resume")!.body).toEqual({ ttlSeconds: null });
+  });
+
   it("a resume of a box the provider lost is missing, one that reads error names it, and one the caller stopped ends at once", async () => {
     const gone = new FakeBox().on("POST", "/boxes/bx_gone/resume", { status: 404, body: ERROR(404, "not_found", "not_found") });
     const lost = await machineOn(gone, "bx_gone").machine.resume().catch((e: unknown) => e);
@@ -530,14 +580,24 @@ describe("BoxBackend against a fake Box API", () => {
       .on("POST", "/boxes/bx_tumrjngm/host", { status: 200, body: { ok: true, port: 3000, url: "https://sulu-axioms-gelant-3000.on.ascii.dev?_token=t2", isProtected: true, access: "private" } });
     const { machine, clock } = machineOn(api);
     const before = clock.at;
-    expect((await machine.previewUrl(3000)).token).toBe("t2");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect((await machine.previewUrl(3000)).token).toBe("t2");
+      // The hold was real: the loop returned because the second add stood for the whole window, not because a
+      // deadline counted from the start ran out under it.
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
     const commands = api.seen.filter(s => s.path.endsWith("/commands")).map(s => inner((s.body as { command: string }).command).split("\n").at(-1));
     expect(commands.filter(c => c === "ufw allow 3000/tcp")).toHaveLength(2);
     expect(commands[0]).toBe("ufw status | grep -q '^3000/tcp '");
     expect(commands[1]).toBe("ufw allow 3000/tcp");
     expect(commands[3]).toBe("ufw status | grep -q '^3000/tcp '");
     expect(commands[4]).toBe("ufw allow 3000/tcp");
-    expect(clock.at - before).toBeGreaterThanOrEqual(FIREWALL_HOLD_MS);
+    // Two adds five seconds of watching apart, then a full hold after the second: the loop ran past the first add's
+    // hold window by the whole of the second's.
+    expect(clock.at - before).toBeGreaterThanOrEqual(2 * FIREWALL_WATCH_MS + FIREWALL_HOLD_MS);
     expect(api.calls().at(-1)).toBe("POST /boxes/bx_tumrjngm/host");
   });
 
@@ -598,6 +658,9 @@ describe("BoxBackend against a fake Box API", () => {
     const joined = inner((api.seen.at(-1)!.body as { command: string }).command);
     expect(joined).toContain(`cat '${puts[0]!.path}' '${puts[1]!.path}' '${puts[2]!.path}' > '/tmp/big.tgz'`);
     expect(joined).toContain(`= ${2 * FILE_PUT_MAX + 7} ]`);
+    // Sent again after a 502 that may have run it once already, the join finds the target at its size and is done
+    // before it opens the target or misses the pieces.
+    expect(joined.split("\n")[2]).toBe(`[ "$(stat -c %s '/tmp/big.tgz' 2>/dev/null)" = ${2 * FILE_PUT_MAX + 7} ] && exit 0`);
     await expect(machine.putBytes("/root/x", new Uint8Array(FILE_PUT_MAX + 1))).rejects.toThrow(/\/root\/x did not land on bx_tumrjngm \(exit 1\): WSP_SHORT 5242880/);
   });
 
@@ -725,8 +788,13 @@ describe("BoxBackend against a fake Box API", () => {
     expect(machine.seen).toEqual({ state: "paused", createdAt: "2026-09-11T06:28:06.053Z" });
   });
 
-  it("lists wsp's boxes alone, archived ones included, by the labels asked for, following the cursor", async () => {
+  it("lists wsp's boxes alone off both listings, the plain one and the archived one, a box on both once, by the labels asked for, following the cursor", async () => {
+    // The plain listing as the spike read it at 20f: an archived box beside an idle one. The archived listing as it
+    // read it at 26d, with the boxes the plain one may leave out on another day.
     const api = new FakeBox().on("GET", "/boxes", seen => {
+      if (seen.query.get("state") === "archived") {
+        return { status: 200, body: { ok: true, type: "box.list", boxes: [BOX("bx_s24x3q6e", "archived", { name: "wsp;o=h_1a2b3c4d;w=ws_1" }), BOX("bx_napping", "archived", { name: "wsp;o=h_1a2b3c4d;w=ws_2" })], pageInfo: { nextCursor: null, hasMore: false, limit: 200 } } };
+      }
       const first = seen.query.get("cursor") === null;
       return {
         status: 200,
@@ -744,9 +812,10 @@ describe("BoxBackend against a fake Box API", () => {
     expect(await backend.list({ [OWNER_LABEL]: "h_1a2b3c4d" })).toEqual([
       { id: "bx_s24x3q6e", state: "paused", labels: { [WSP_LABEL]: "1", [OWNER_LABEL]: "h_1a2b3c4d", [WORKSPACE_LABEL]: "ws_1" }, size: { cpu: 2, memMb: 4096 } },
       { id: "bx_tumrjngm", state: "running", labels: { [WSP_LABEL]: "1", [OWNER_LABEL]: "h_1a2b3c4d", [BUILDER_LABEL]: "1" }, size: { cpu: 4, memMb: 8192 } },
+      { id: "bx_napping", state: "paused", labels: { [WSP_LABEL]: "1", [OWNER_LABEL]: "h_1a2b3c4d", [WORKSPACE_LABEL]: "ws_2" }, size: { cpu: 2, memMb: 4096 } },
     ]);
-    expect(api.seen.map(s => [s.query.get("limit"), s.query.get("cursor")])).toEqual([["200", null], ["200", "c2"]]);
-    expect((await backend.list()).map(r => r.id)).toEqual(["bx_s24x3q6e", "bx_tumrjngm", "bx_theirs"]);
+    expect(api.seen.map(s => [s.query.get("limit"), s.query.get("cursor"), s.query.get("state")])).toEqual([["200", null, null], ["200", "c2", null], ["200", null, "archived"]]);
+    expect((await backend.list()).map(r => r.id)).toEqual(["bx_s24x3q6e", "bx_tumrjngm", "bx_theirs", "bx_napping"]);
   });
 
   it("pushes the provider's stop timer to the runtime's backstop instant, capped by the trial, once a minute at most", async () => {

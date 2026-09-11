@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, CURL_NET, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
-import { CREATED_AT_LABEL, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_SUPERVISOR_PATH, GUEST_TMP, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
+import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_SUPERVISOR_PATH, GUEST_TMP, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
 import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, DAEMON_ROOTS_PATH, GUEST_DAEMON_DIR, LOOPBACK, machineLacking, machineUnanswered, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, type SnapshotStorage, type WorkspaceKind } from "@wsp/protocol";
 import { DAEMON_TOKEN_PATH, goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
@@ -497,6 +497,9 @@ export function daemonUnit(place: DaemonPlace = CLOUD_PLACE, previewHostSuffix?:
     `Environment=${unitEnvLine(place, `PATH=${place.toolsPath}`)}`,
     ...Object.entries(place.unitEnv).map(([name, value]) => `Environment=${unitEnvLine(place, `${name}=${value}`)}`),
     ...(previewHostSuffix !== undefined ? [`Environment=${VITE_ALLOWED_HOSTS_ENV}=${previewHostSuffix}`] : []),
+    // A fork's environment on a provider that cannot hand it over at create: written by that backend under /etc,
+    // read here alone, and missing everywhere else, which the dash says is fine.
+    ...(place.kind === "cloud" ? [`EnvironmentFile=-${DAEMON_ENV_FILE}`] : []),
     // Through sh so node is found on the unit's PATH: a machine that shipped its own node keeps it where it is.
     `ExecStart=/bin/sh -c 'exec node ${place.quotePaths ? `"${place.dir}/start.mjs"` : `${place.dir}/start.mjs`}'`,
     "Restart=always",

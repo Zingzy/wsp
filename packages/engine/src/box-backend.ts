@@ -11,7 +11,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { moveTimedOutLine, providerRoadRetryLine, shellQuote, type Capabilities } from "@wsp/protocol";
 import { MoveUnansweredError, ROAD_TRIES, backoffMs, classify, isMissing, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
-import { DEADLINE_EXIT, INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
+import { DAEMON_ENV_FILE, DEADLINE_EXIT, INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
 import { BUILDER_LABEL, CREATED_AT_LABEL, DOCTOR_LABEL, GOLDEN_LABEL, HOST_LABEL, NAME_LABEL, OWNER_LABEL, SMOKE_LABEL, WORKSPACE_LABEL, WSP_LABEL } from "./labels.js";
 import type { BackendPricing, ExecResult, Lifecycle, LifecycleBudgets, Machine, MachineBackend, MachineKind, MachineLife, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
@@ -128,9 +128,11 @@ const STATE_MAP: Record<string, MachineState> = {
  * up to this many characters and truncates past them. */
 export const BOX_NAME_MAX = 120;
 const NAME_MARK = "wsp";
-/** The label keys wsp stamps, by the letter each rides under, in the order they are kept when the name runs out of
- * room: the owner and the workspace decide whose machine it is, the stamp decides its age, and a pair that would not
- * fit whole is left off rather than cut in the middle. Keys outside this table ride under their own name. */
+/** The label keys wsp stamps, by the letter each rides under, in rank order: the owner and the workspace decide
+ * whose machine it is, the stamp decides its age. When the name runs out of room the pairs are kept in this order up
+ * to the first that would not fit whole, and nothing after it goes in, so a reader who finds the golden missing
+ * knows the name too is missing rather than guessing which pairs were dropped. Keys outside this table rank last and
+ * ride under their own name. */
 const SHORT_KEYS: readonly (readonly [key: string, short: string])[] = [
   [OWNER_LABEL, "o"],
   [WORKSPACE_LABEL, "w"],
@@ -160,7 +162,7 @@ export function boxName(labels: Record<string, string>): string {
     .map(([key, value]) => `;${SHORT_KEYS.find(([k]) => k === key)?.[1] ?? key}=${encodeValue(value)}`);
   let name = NAME_MARK;
   for (const pair of pairs) {
-    if (name.length + pair.length > BOX_NAME_MAX) continue;
+    if (name.length + pair.length > BOX_NAME_MAX) break;
     name += pair;
   }
   return name;
@@ -334,8 +336,9 @@ export class BoxBackend implements MachineBackend {
   private readonly fetch: Fetch;
   /** The longest auto-stop the account takes, in seconds, or null where none is required; read off /limits once. */
   private ttlCapRead: Promise<number | null> | undefined;
-  /** The backstop instant last sent per box, so a window armed on every chunk costs one call a minute at most. */
-  private readonly backstops = new Map<string, number>();
+  /** The stop timer last sent per box: the instant, so a window armed on every chunk costs one call a minute at
+   * most, and the span it stood for, which is what a resume arms again before the runtime's first arming. */
+  private readonly backstops = new Map<string, { until: number; spanMs: number }>();
 
   constructor(opts: BoxBackendOptions) {
     this.apiKey = opts.apiKey;
@@ -397,6 +400,21 @@ export class BoxBackend implements MachineBackend {
     return this.ttlCapRead;
   }
 
+  /** The `ttlSeconds` a create or a resume carries for a stop timer ending at `instant`: the seconds to it, under the
+   * account's cap where it has one; the cap itself with no instant, which off the trial is no timer at all. */
+  async ttlSecondsFor(instant: number | undefined): Promise<number | null> {
+    const cap = await this.ttlCap();
+    if (instant === undefined) return cap;
+    const seconds = Math.max(1, Math.ceil((instant - this.clock.now()) / 1000));
+    return cap === null ? seconds : Math.min(seconds, cap);
+  }
+
+  /** The span a timer was last set for on this box, on this backend's own record: the create's idle window or the
+   * runtime's last backstop. */
+  lastTimer(id: string): { until: number; spanMs: number } | undefined {
+    return this.backstops.get(id);
+  }
+
   /** The cheapest authenticated read: the account's limits, which boot nothing and touch no box. */
   async checkKey(): Promise<void> {
     await this.request("GET", "/limits");
@@ -441,9 +459,12 @@ export class BoxBackend implements MachineBackend {
     const cls = boxClassFor(spec);
     const named = spec.fromSnapshot ?? spec.template;
     const from = named === undefined || named === BOX_BASE_TEMPLATE ? undefined : named;
+    // The runtime's backstop instant at create, so a host that dies before its first arming leaves a box with a
+    // stop timer; the account's cap where it is shorter, and on an account with no cap and no window, none.
+    const timerUntil = spec.idleTimeoutMs === undefined ? undefined : this.clock.now() + spec.idleTimeoutMs;
     const body = {
       type: cls.type,
-      ttlSeconds: await this.ttlCap(),
+      ttlSeconds: await this.ttlSecondsFor(timerUntil),
       // None of the account's secrets, environment or credential toggles land on a machine wsp forks: sign-ins live
       // in the golden and the vault, and a box handed to a turn must not be able to act on the account.
       noEnv: true,
@@ -459,6 +480,7 @@ export class BoxBackend implements MachineBackend {
     const replayed = res.status !== undefined && res.status !== "provisioning";
     const id = res.box.id;
     const machine = new BoxMachine(this, id, spec.kind, spec.labels, undefined, replayed);
+    if (timerUntil !== undefined) this.backstops.set(id, { until: timerUntil, spanMs: spec.idleTimeoutMs! });
     try {
       // Commands sent before ready run before the box is usable, so the handle is given back once it reads ready.
       const view = await this.settle(id, v => STATE_MAP[v.state] === "running", this.budgets.createMs, "create");
@@ -477,17 +499,20 @@ export class BoxBackend implements MachineBackend {
 
   async get(id: string): Promise<Machine> {
     const view = await this.view(id);
+    // A box carries no kind of its own: every one has a desktop the person may stream, and none has a stream this
+    // backend hands the runtime while the desktop is off, so the handle reads sandbox, the kind the runtime treats
+    // a machine without a stream as. When the stream is on, the kind comes off the record that asked for it.
     return new BoxMachine(this, view.id, "sandbox", boxLabels(view.name), {
       state: STATE_MAP[view.state] ?? "gone",
       ...(view.createdAt !== undefined && view.createdAt !== null ? { createdAt: view.createdAt } : {}),
     });
   }
 
-  private async pages<T>(path: string, rows: (page: T) => unknown[] | undefined, nextCursor: (page: T) => string | null | undefined): Promise<unknown[]> {
+  private async pages<T>(path: string, rows: (page: T) => unknown[] | undefined, nextCursor: (page: T) => string | null | undefined, query: Record<string, string> = {}): Promise<unknown[]> {
     const out: unknown[] = [];
     let cursor: string | undefined;
     do {
-      const params = new URLSearchParams({ limit: "200" });
+      const params = new URLSearchParams({ ...query, limit: "200" });
       if (cursor !== undefined) params.set("cursor", cursor);
       const page = await this.request<T>("GET", `${path}?${params.toString()}`);
       out.push(...(rows(page) ?? []));
@@ -496,11 +521,18 @@ export class BoxBackend implements MachineBackend {
     return out;
   }
 
-  /** Every box wsp named, archived ones included; the other boxes on the account are not wsp's to list. */
+  /** Every box wsp named, archived ones included; the other boxes on the account are not wsp's to list. The plain
+   * listing carried an archived row beside a running one when it was read (2026-09-11), and the archived listing is
+   * read too, so a napping box is in the fleet whichever of the two the provider keeps it on; a box on both is one. */
   async list(labels?: Record<string, string>): Promise<{ id: string; state: MachineState; labels: Record<string, string>; size?: { cpu: number; memMb: number } }[]> {
-    const boxes = (await this.pages<BoxPage>("/boxes", p => p.boxes, p => p.pageInfo?.nextCursor)) as BoxView[];
+    const rows = (p: BoxPage): unknown[] | undefined => p.boxes;
+    const next = (p: BoxPage): string | null | undefined => p.pageInfo?.nextCursor;
+    const boxes = new Map<string, BoxView>();
+    for (const box of [...(await this.pages<BoxPage>("/boxes", rows, next)), ...(await this.pages<BoxPage>("/boxes", rows, next, { state: "archived" }))] as BoxView[]) {
+      if (!boxes.has(box.id)) boxes.set(box.id, box);
+    }
     const out: { id: string; state: MachineState; labels: Record<string, string>; size?: { cpu: number; memMb: number } }[] = [];
-    for (const box of boxes) {
+    for (const box of boxes.values()) {
       const carried = boxLabels(box.name);
       if (carried === undefined) continue;
       if (Object.entries(labels ?? {}).some(([k, v]) => carried[k] !== v)) continue;
@@ -572,9 +604,9 @@ export class BoxBackend implements MachineBackend {
     const now = this.clock.now();
     const instant = cap === null ? until : Math.min(until, now + cap * 1000);
     const last = this.backstops.get(machine.id);
-    if (last !== undefined && instant - last < BACKSTOP_SLACK_MS) return;
+    if (last !== undefined && instant - last.until < BACKSTOP_SLACK_MS) return;
     await this.request("PATCH", `/boxes/${encodeURIComponent(machine.id)}`, { body: { ttlSeconds: Math.max(1, Math.ceil((instant - now) / 1000)) } });
-    this.backstops.set(machine.id, instant);
+    this.backstops.set(machine.id, { until: instant, spanMs: instant - now });
   }
 
   forgetBackstop(id: string): void {
@@ -582,24 +614,21 @@ export class BoxBackend implements MachineBackend {
   }
 }
 
-/** The systemd manager drop-in a machine's environment lands in: every service, the daemon included, starts with
- * these, on this boot through set-environment and on every later boot (a resume, a fork) through the file, which
- * sits under /etc and travels with the snapshot. */
-export const ENV_DROP_IN = "/etc/systemd/system.conf.d/wsp-env.conf";
+/** One line of the daemon's environment file as systemd reads one: the value in double quotes with the backslash
+ * and the quote escaped. */
+const envLine = (name: string, value: string): string => `${name}="${value.replace(/[\\"]/g, c => `\\${c}`)}"`;
 
-/** One assignment as systemd's DefaultEnvironment= takes it: double-quoted, with the quote and the backslash escaped. */
-const unitAssignment = (name: string, value: string): string => `"${name}=${value.replace(/[\\"]/g, c => `\\${c}`)}"`;
-
+/** The script that lands a machine's environment for the daemon alone: the file the daemon's unit reads at every
+ * start, under /etc so a resume and a fork carry it, and nothing manager-wide, since the box's own agent and the
+ * desktop services run as the box user with an environment of their own. A daemon that started before the file
+ * was there reads it at its next start. */
 export function envLandingScript(envs: Record<string, string>): string {
-  const pairs = Object.entries(envs);
   return [
-    `mkdir -p ${shellQuote(ENV_DROP_IN.slice(0, ENV_DROP_IN.lastIndexOf("/")))}`,
-    `cat > ${shellQuote(ENV_DROP_IN)} <<'WSP_ENV'`,
-    "[Manager]",
-    `DefaultEnvironment=${pairs.map(([k, v]) => unitAssignment(k, v)).join(" ")}`,
+    `mkdir -p ${shellQuote(DAEMON_ENV_FILE.slice(0, DAEMON_ENV_FILE.lastIndexOf("/")))}`,
+    `cat > ${shellQuote(DAEMON_ENV_FILE)} <<'WSP_ENV'`,
+    ...Object.entries(envs).map(([k, v]) => envLine(k, v)),
     "WSP_ENV",
-    `chmod 0600 ${shellQuote(ENV_DROP_IN)}`,
-    `systemctl set-environment ${pairs.map(([k, v]) => shellQuote(`${k}=${v}`)).join(" ")}`,
+    `chmod 0600 ${shellQuote(DAEMON_ENV_FILE)}`,
   ].join("\n");
 }
 
@@ -706,7 +735,11 @@ export class BoxMachine implements Machine {
    * every time, so nothing here keeps one, and the daemon's own answer is the runtime's to wait for through the
    * hosted route. A resume of a running box is the provider's free no-op. */
   async resume(signal?: AbortSignal): Promise<void> {
-    await this.backend.request("POST", this.path("/resume"), { body: { ttlSeconds: await this.backend.ttlCap() }, signal });
+    // The timer the box last had, armed again from now, so a host that dies before the wake's first arming leaves
+    // the box a stop; with none on record, the account's cap.
+    const last = this.backend.lastTimer(this.id);
+    const ttlSeconds = await this.backend.ttlSecondsFor(last === undefined ? undefined : this.backend.clock.now() + last.spanMs);
+    await this.backend.request("POST", this.path("/resume"), { body: { ttlSeconds }, signal });
     await this.backend.settle(this.id, v => STATE_MAP[v.state] === "running", this.backend.budgets.resumeMs, "resume", signal);
   }
 
@@ -758,30 +791,35 @@ export class BoxMachine implements Machine {
 
   /** The guest firewall rule for one port, and the box's own agent that takes it away: about half a minute after
    * a life begins the agent rewrites the rules from its own list (measured 2026-09-11: a fork asked at 16:05:10 had
-   * its rules rewritten at 16:05:45), and a private route answers 502 until a rule stands. So a rule that is not
-   * there is added, then watched and added again whenever it is gone, until it has stood for FIREWALL_HOLD_MS; a
-   * rule already standing costs one read. In the first seconds of a life ufw refuses with a non-zero exit while it
-   * comes up, which is asked again at the poll pace. A rule that will not hold inside the budget is said once and
-   * the route is minted anyway. */
+   * its rules rewritten at 16:05:45), and a private route answers 502 until a rule stands. A rule already standing
+   * costs one read. Otherwise the loop adds the rule, then reads it every FIREWALL_WATCH_MS and adds it again the
+   * moment it is gone, and returns once one add has stood for FIREWALL_HOLD_MS. Adds are made for restoreMs plus
+   * one hold window from the start, and the last add always gets its whole hold window, so the loop ends at the
+   * latest one hold after the last add. In the first seconds of a life ufw refuses with a non-zero exit while it
+   * comes up, which is asked again at the poll pace. A rule that will not hold is said once and the route is minted
+   * anyway. */
   private async openPort(port: number): Promise<void> {
     const { pollMs, restoreMs } = this.backend.budgets;
     const now = this.backend.clock.now;
     const standing = async (): Promise<boolean> => (await this.exec(`ufw status | grep -q '^${port}/tcp '`).catch(() => ({ exitCode: -1 }))).exitCode === 0;
     if (await standing()) return;
     const started = now();
+    const addsUntil = started + restoreMs + FIREWALL_HOLD_MS;
     let held: number | undefined;
     let said = "";
-    while (now() - started < restoreMs + FIREWALL_HOLD_MS) {
-      if (held !== undefined && await standing()) {
-        if (now() - held >= FIREWALL_HOLD_MS) return;
-      } else {
-        const res = await this.exec(`ufw allow ${port}/tcp`).catch((e: unknown) => ({ exitCode: -1, stdout: "", stderr: e instanceof Error ? e.message : String(e) }));
-        if (res.exitCode === 0) held = now();
-        else {
-          held = undefined;
-          said = (res.stderr || res.stdout).trim().slice(-200);
+    for (;;) {
+      if (held !== undefined) {
+        if (await standing()) {
+          if (now() - held >= FIREWALL_HOLD_MS) return;
+          await this.backend.clock.sleep(FIREWALL_WATCH_MS);
+          continue;
         }
+        held = undefined;
       }
+      if (now() >= addsUntil) break;
+      const res = await this.exec(`ufw allow ${port}/tcp`).catch((e: unknown) => ({ exitCode: -1, stdout: "", stderr: e instanceof Error ? e.message : String(e) }));
+      if (res.exitCode === 0) held = now();
+      else said = (res.stderr || res.stdout).trim().slice(-200);
       await this.backend.clock.sleep(held === undefined ? pollMs : FIREWALL_WATCH_MS);
     }
     console.warn(`${this.id}: the firewall did not hold a rule for port ${port}${said === "" ? "" : ` (${said})`}; the route is minted without one`);
@@ -807,7 +845,11 @@ export class BoxMachine implements Machine {
       await put(`${base}.${i}`, bytes.subarray(i * FILE_PUT_MAX, (i + 1) * FILE_PUT_MAX));
     }
     const quoted = names.map(shellQuote).join(" ");
+    // A 502 on the commands endpoint means the command may already have run, and the request is sent again on one:
+    // a join that finds the target already at its size is done, since its pieces are gone. The other commands this
+    // file sends are reads, a rule added twice or a file written whole, and the run road claims its own launch.
     const joined = await this.exec([
+      `[ "$(stat -c %s ${shellQuote(path)} 2>/dev/null)" = ${bytes.byteLength} ] && exit 0`,
       `mkdir -p ${shellQuote(path.slice(0, path.lastIndexOf("/")) || "/")}`,
       `cat ${quoted} > ${shellQuote(path)} && chmod 0644 ${shellQuote(path)} && rm -f ${quoted}`,
       `[ "$(stat -c %s ${shellQuote(path)})" = ${bytes.byteLength} ] || { echo "WSP_SHORT $(stat -c %s ${shellQuote(path)})"; exit 1; }`,

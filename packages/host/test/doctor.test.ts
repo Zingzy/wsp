@@ -9,7 +9,7 @@ import { gunzipSync } from "node:zlib";
 import { CURL_NET } from "@wsp/catalog";
 import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { WebSocketServer } from "ws";
-import { GUEST_SUPERVISOR_PATH, GUEST_USER_ENV, TOOLS_PATH } from "@wsp/engine";
+import { GUEST_SUPERVISOR_PATH, GUEST_USER_ENV, TOOLS_PATH, DAEMON_ENV_FILE } from "@wsp/engine";
 import { assetDir, assetProof } from "../src/assets.js";
 import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, GUEST_DAEMON_DIR, GUEST_WSP_BIN, shellQuote, sshDaemonPaths, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
@@ -751,6 +751,12 @@ describe("deployScript", () => {
     expect(unit).toContain(`Environment=PATH=${TOOLS_PATH}`);
     for (const [name, value] of Object.entries(GUEST_USER_ENV)) expect(unit).toContain(`Environment=${name}=${value}`);
     expect(GUEST_USER_ENV["HOME"]).toBe("/root");
+  });
+
+  it("a fork's unit reads the environment a backend could not hand over at create off the engine's file, and may lack it; a login's unit reads no root file", () => {
+    expect(daemonUnit()).toContain(`EnvironmentFile=-${DAEMON_ENV_FILE}`);
+    expect(DAEMON_ENV_FILE).toBe("/etc/wsp/daemon.env");
+    expect(daemonUnit(sshDaemonPlace({ home: "/home/maya", path: "/usr/bin:/bin" }))).not.toContain("EnvironmentFile");
   });
 
   it("names the node version on stdout before installing, so the deploy log can carry it", () => {
