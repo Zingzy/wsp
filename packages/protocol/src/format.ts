@@ -890,6 +890,12 @@ export const DAEMON_UPDATE_FAILED = "could not update the helper";
 export const DAEMON_RESTARTING = "restarting the helper";
 export const DAEMON_RESTART_FAILED = "could not restart the helper";
 
+/** The same two lines for the first daemon a machine ever takes. A machine somebody already owned had none until
+ * wsp put one there, so nothing about it is being updated or put back, and a person watching that machine's row
+ * is told what is happening on it rather than that something they never installed is being replaced. */
+export const DAEMON_INSTALLING = "installing the helper";
+export const DAEMON_INSTALL_FAILED = "could not install the helper";
+
 /** Why a nap's vault export was refused: its size against the cap, both in the one byte rule. */
 export function vaultOverCapLine(bytes: number, capBytes: number): string {
   return `the export was ${fmtBytes(bytes)}, over the ${fmtBytes(capBytes)} cap`;
@@ -1679,11 +1685,11 @@ export function noMachineHomeLine(name: string): string {
 
 /** What the roads that need a daemon are refused with on a machine reached over ssh before one is on it: the
  * record was made but the deploy has not landed, so the panes that ride a daemon have nothing to dial yet. The
- * host tries again on its own at every start, so the line says that rather than naming a verb: nothing a person
- * types puts a daemon on a machine already recorded, and the one thing they can do is fix what the deploy said
- * it needed. */
+ * host offers one again on its own, so the line says that rather than naming a verb: nothing a person types puts
+ * a daemon on a machine already recorded, and the one thing they can do is fix what the deploy said it needed.
+ * Later, not at every start: a machine that answered with what it lacks is left alone until its window is out. */
 export function noSshDaemonLine(name: string): string {
-  return `${name} carries no daemon yet, so its terminal, files and ports are not served; this host tries again each time it starts`;
+  return `${name} carries no daemon yet, so its terminal, files and ports are not served; this host offers it again later on its own`;
 }
 
 /** What import is refused with on a kind no road lands a folder on, said before the folder is read. Every kind
@@ -1704,7 +1710,51 @@ export const NO_BUILD_TOOLS_LINE =
  * and takes the daemon with it, so a daemon deployed there is gone the moment the host's connection closes; the
  * person turns linger on once and it holds for every login after. */
 export const NO_LINGER_LINE =
-  "this machine stops your login's services when you log out, so the daemon would not outlive the connection; run loginctl enable-linger on it and deploy the daemon again";
+  "this login does not linger, so its services stop when you log out and the daemon would not outlive the connection; run loginctl enable-linger on it and deploy the daemon again";
+
+/** Every sentence a machine's own checks refuse with, in one place beside them. Read by the rule that keeps each
+ * one's first clause short enough for a row, so a refusal added later takes that rule without anyone remembering
+ * where it is checked. Nothing decides anything by searching this: which ending a throw is comes off its mark. */
+export const MACHINE_LACKS_LINES: readonly string[] = [NO_BUILD_TOOLS_LINE, NO_LINGER_LINE];
+
+/** The marks the checks a machine takes before a daemon is put on it end with, put on where the throw happens
+ * rather than matched against text: a check added to a place's preflight is then one shell line and one sentence,
+ * and nothing keeps a second copy of which sentences mean what. Two of them, because the two endings lead
+ * opposite ways. A machine that answered and refused has said what it has not got, which a row shows and which
+ * stands until a person puts that thing there. A check that never reached the machine has said nothing about it
+ * either way: those are the client's own words, they belong in no row, and whatever the record already knew about
+ * that machine still holds. Every other failure is a deploy log and carries neither mark. */
+const MACHINE_LACKS = "wspMachineLacks";
+const MACHINE_UNANSWERED = "wspMachineUnanswered";
+
+export function machineLacking(said: string): Error {
+  return Object.assign(new Error(said), { [MACHINE_LACKS]: true });
+}
+
+export function machineUnanswered(said: string): Error {
+  return Object.assign(new Error(said), { [MACHINE_UNANSWERED]: true });
+}
+
+/** The sentence a machine refused with, or undefined for every other failure. */
+export function machineLacksLine(e: unknown): string | undefined {
+  return marked(e, MACHINE_LACKS) ? e.message : undefined;
+}
+
+/** Whether the check never reached the machine, so nothing about what that machine has was learned. */
+export function machineNeverAnswered(e: unknown): boolean {
+  return marked(e, MACHINE_UNANSWERED);
+}
+
+const marked = (e: unknown, mark: string): e is Error => e instanceof Error && (e as unknown as Record<string, unknown>)[mark] === true;
+
+/** A refusal cut to its first clause, which is what the machine has not got. Every sentence above is written in
+ * that order, what is wrong, then why it matters, then what to do, and its head is short enough for a row about
+ * thirty characters wide; the whole sentence goes where there is room, since the instruction is at the end of it
+ * and a row that cut from the right would take the instruction off. A refusal added later is written to the same
+ * shape rather than carrying a second, shorter copy of itself. */
+export function machineLacksShort(said: string): string {
+  return said.split(",")[0]!.trim();
+}
 
 /** The one sentence a socket a machine's requests arrive on is refused a ticket with. A ticket authenticates the
  * next socket, and a socket this host minted no relay ticket for is one of the person's own, so a machine that

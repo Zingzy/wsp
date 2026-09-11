@@ -41,7 +41,7 @@ Each of these cost a day once. They are in the code now, and they are here so no
 - A turn ends on 10 minutes of silence, not a 15 minute wall clock, and at 6 hours in all. Long steps must print.
 - A turn's process group dies with the turn. A server that must outlive it starts with `setsid nohup ... &`.
 - `thread new` and `send` return when the reply is complete, not when the process exits minutes later. A send that meets that gap is refused in words naming the thread.
-- Snapshot only a running first-life machine with a project loaded; a woken machine is refused.
+- Snapshot only a running machine with a project loaded, on a provider that copies a disk; on the cloud provider a woken machine is refused, on a container fork it is not.
 - Export refuses an existing folder; `--replace` overwrites it on purpose.
 - A resumed thread runs in the folder its session started in, whatever folder is followed in the app.
 - A send carries its own request id, so two clients sending the same text do not adopt each other's turn.

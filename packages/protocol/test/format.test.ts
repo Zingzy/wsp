@@ -36,6 +36,8 @@ import {
   missingToolRow,
   behindGoldenLine,
   builderStaysLine,
+  DAEMON_INSTALL_FAILED,
+  DAEMON_INSTALLING,
   DAEMON_UPDATE_FAILED,
   DAEMON_UPDATING,
   RECORD_RESTORED,
@@ -882,6 +884,16 @@ describe("DAEMON_UPDATING and DAEMON_UPDATE_FAILED", () => {
     // 159px), and a deploy's own reason is an npm log hundreds wide that names the daemon in its own words.
     for (const line of [DAEMON_UPDATING, DAEMON_UPDATE_FAILED]) {
       expect(line).not.toContain("daemon");
+      expect(line.length).toBeLessThanOrEqual(30);
+    }
+  });
+
+  it("has its own pair for the first daemon a machine takes, since nothing that machine had is being replaced", () => {
+    expect(DAEMON_INSTALLING).toBe("installing the helper");
+    expect(DAEMON_INSTALL_FAILED).toBe("could not install the helper");
+    for (const line of [DAEMON_INSTALLING, DAEMON_INSTALL_FAILED]) {
+      expect(line).not.toContain("daemon");
+      expect(line).not.toContain("updat");
       expect(line.length).toBeLessThanOrEqual(30);
     }
   });

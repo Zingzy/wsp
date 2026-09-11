@@ -8,6 +8,10 @@ import {
   PauseMode,
   GoldenVersion,
   DAEMON_ROOTS_PATH,
+  MACHINE_LACKS_LINES,
+  machineLacking,
+  machineLacksLine,
+  machineLacksShort,
   NO_BUILD_TOOLS_LINE,
   NO_LINGER_LINE,
   noImportRoadLine,
@@ -510,8 +514,8 @@ describe("daemon wire types (one home for the ops from @wsp/daemon)", () => {
 });
 
 describe("backend capabilities", () => {
-  it("requires every flag, containers, callbackRelay, templates, kept and the sizes list included, so no backend can leave one unstated", () => {
-    const full = { liveCloneForks: true, pauseMode: "memory", resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, snapshotListing: true, templates: true, kept: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
+  it("requires every flag, containers, callbackRelay, templates, diskSnapshots, kept and the sizes list included, so no backend can leave one unstated", () => {
+    const full = { liveCloneForks: true, pauseMode: "memory", resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, diskSnapshots: true, snapshotListing: true, templates: true, kept: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
     expect(Capabilities.parse(full)).toEqual(full);
     const { containers: _c, ...missing } = full;
     expect(() => Capabilities.parse(missing)).toThrow();
@@ -519,6 +523,9 @@ describe("backend capabilities", () => {
     expect(() => Capabilities.parse(noTemplates)).toThrow();
     const { callbackRelay: _r, ...noRelay } = full;
     expect(() => Capabilities.parse(noRelay)).toThrow();
+    // A backend that never says whether its machine's disk can be copied would have the snapshot verb guessing.
+    const { diskSnapshots: _d, ...noDiskSnapshots } = full;
+    expect(() => Capabilities.parse(noDiskSnapshots)).toThrow();
     // A backend that never says whether its machine is the person's own would have every turn's access decided for it.
     const { kept: _k, ...noKept } = full;
     expect(() => Capabilities.parse(noKept)).toThrow();
@@ -528,7 +535,7 @@ describe("backend capabilities", () => {
   });
 
   it("pauseMode is optional and one of memory or disk; a boolean is refused", () => {
-    const full = { liveCloneForks: true, resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, snapshotListing: true, templates: true, kept: false, sizes: [] };
+    const full = { liveCloneForks: true, resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, diskSnapshots: true, snapshotListing: true, templates: true, kept: false, sizes: [] };
     // Absent is a machine that cannot be paused: this computer, a machine reached over ssh.
     expect(Capabilities.parse(full)).toEqual(full);
     expect(Capabilities.parse({ ...full, pauseMode: "memory" })).toMatchObject({ pauseMode: "memory" });
@@ -914,7 +921,9 @@ describe("daemon files and diff ops", () => {
   it("says a machine over ssh carries no daemon yet, and names no verb, since nobody can type one", () => {
     // Recorded but not deployed is what the sentence is for. Nothing a person types puts a daemon on a machine
     // already recorded, so the line says what the host does on its own rather than naming a verb that is not there.
-    expect(noSshDaemonLine("box")).toBe("box carries no daemon yet, so its terminal, files and ports are not served; this host tries again each time it starts");
+    // Later rather than at every start: a machine that answered with what it lacks is left alone until its window
+    // is out, so a line promising a try at every start would be one the host does not keep.
+    expect(noSshDaemonLine("box")).toBe("box carries no daemon yet, so its terminal, files and ports are not served; this host offers it again later on its own");
     expect(noSshDaemonLine("box")).not.toContain("daemon update");
     // A login whose services stop with it would lose the daemon the moment the connection closed, so it is
     // refused with the one command that turns that off.
@@ -922,6 +931,23 @@ describe("daemon files and diff ops", () => {
     // node-pty ships prebuilt binaries for macOS and Windows only, so the terminal is compiled where it runs.
     expect(NO_BUILD_TOOLS_LINE).toContain("no C compiler");
     expect(NO_BUILD_TOOLS_LINE).toContain("build-essential");
+    // A refusal the machine itself raised is marked where it is thrown, so a row can show those words and show a
+    // deploy that failed further in the general line instead of an npm log.
+    expect(machineLacksLine(machineLacking(NO_BUILD_TOOLS_LINE))).toBe(NO_BUILD_TOOLS_LINE);
+    expect(machineLacksLine(new Error(NO_BUILD_TOOLS_LINE))).toBeUndefined();
+    expect(machineLacksLine("daemon deploy failed: NPM_FAIL")).toBeUndefined();
+    // Every refusal is written as what is wrong, then why, then what to do, so its first clause is the row's half
+    // and fits the row, and the whole sentence keeps the command a person types.
+    expect(machineLacksShort(NO_BUILD_TOOLS_LINE)).toBe("this machine has no C compiler");
+    expect(machineLacksShort(NO_LINGER_LINE)).toBe("this login does not linger");
+    // Off the one list beside the sentences, not a copy of it here: a refusal added to a place's preflight takes
+    // this rule by being listed once, rather than by somebody remembering that this loop exists.
+    expect(MACHINE_LACKS_LINES).toContain(NO_BUILD_TOOLS_LINE);
+    expect(MACHINE_LACKS_LINES).toContain(NO_LINGER_LINE);
+    for (const line of MACHINE_LACKS_LINES) {
+      expect(machineLacksShort(line).length).toBeLessThanOrEqual(30);
+      expect(line.length).toBeGreaterThan(machineLacksShort(line).length);
+    }
     expect(noImportRoadLine("box", OVER_SSH)).toBe("box is a machine over ssh, which lands no folder yet; import to a fork, or register the folder on this computer");
   });
 });

@@ -166,6 +166,12 @@ export const Capabilities = z.object({
   /** A daemon link exists, so sign-in URLs a guest tool opens land in the laptop's browser and the
    * callback port is forwarded back; false means the person finishes sign-ins by copy and paste. */
   callbackRelay: z.boolean(),
+  /** The provider copies a running machine's disk into an image it keeps, which is what a version and a project
+   * golden are sealed as and what a fork boots from. False where the disk is the person's own and nothing copies it
+   * (this computer, a machine reached over ssh). Which life the copy may be taken from is the provider's own rule.
+   * Whether a fork of that image comes up with the processes still running is liveCloneForks and says nothing about
+   * whether one can be taken. */
+  diskSnapshots: z.boolean(),
   /** The provider lists every snapshot on the account with its size, so storage can be counted and priced. */
   snapshotListing: z.boolean(),
   /** The provider promotes a snapshot to a template that survives its own restarts, so a sealed version is recorded
@@ -366,6 +372,12 @@ export const WorkspaceView = z.object({
    * once a nap stores one. Persisted, unlike the nap's own status line: the files stay unbacked until the next nap
    * stores one, so every row keeps saying it rather than the person having to have seen the nap. */
   vaultRefused: z.string().optional(),
+  /** What this machine answered when the daemon was last offered to it and it refused: which machine said so, when
+   * it said it, and the sentence naming what it has not got. Persisted, unlike the daemon note: a compiler is a
+   * person's to install on their own machine, so the row keeps saying it rather than the person having to have
+   * been watching the one host start that tried. The stamp is what leaves such a machine alone between attempts;
+   * cleared by a deploy that gets past the machine's own checks. */
+  daemonRefusedAt: z.object({ machineId: z.string(), at: z.string(), why: z.string() }).optional(),
   /** Why the last wake gave up: the host asked the provider for half an hour and the machine never came back, in the
    * words that also name the rebuild road. Persisted, unlike the wake's own status line, since the machine stays
    * unreachable until something replaces it; cleared by a wake that lands and by the rebuild. */
@@ -410,7 +422,7 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
  * handed over by having been forgotten, which is how the display stream rode these doors until now. */
 const WORKSPACE_OUT = {
   id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, projects: true, folder: true, home: true,
-  claudeSessionId: true, gone: true, theme: true, glyph: true, daemonNote: true, vaultedAt: true, vaultRefused: true, wakeRefused: true,
+  claudeSessionId: true, gone: true, theme: true, glyph: true, daemonNote: true, daemonRefusedAt: true, vaultedAt: true, vaultRefused: true, wakeRefused: true,
   agents: true, parentThreadId: true, rootThreadId: true,
 } as const;
 
