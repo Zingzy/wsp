@@ -61,15 +61,16 @@ describe("the base floor's plan", () => {
     const plan = baseInstalls();
     expect(plan.map(t => [t.id, t.manager, t.after, t.bin])).toEqual([
       ["base/login-path", "script", undefined, undefined],
-      ["base/node", "script", undefined, "node"],
-      ["base/pnpm", "npm", "base/node", "pnpm"],
-      ["base/uv", "script", undefined, "uv"],
-      ["base/python", "script", "base/uv", "python3"],
+      // curl leads the floor: the roads below that fetch a release type it, and a container image ships none.
       ["base/apt-index", "apt", undefined, undefined],
+      ["base/curl", "apt", "base/apt-index", "curl"],
+      ["base/node", "script", "base/curl", "node"],
+      ["base/pnpm", "npm", "base/node", "pnpm"],
+      ["base/uv", "script", "base/curl", "uv"],
+      ["base/python", "script", "base/uv", "python3"],
       ["base/git", "apt", "base/apt-index", "git"],
       ["base/jq", "apt", "base/apt-index", "jq"],
       ["base/ripgrep", "apt", "base/apt-index", "rg"],
-      ["base/curl", "apt", "base/apt-index", "curl"],
       ["base/docker", "script", "base/apt-index", "docker"],
       ["base/build-essential", "apt", "base/apt-index", "cc"],
       ["base/fd", "script", "base/apt-index", "fd"],
@@ -79,7 +80,7 @@ describe("the base floor's plan", () => {
       ["base/xz", "apt", "base/apt-index", "xz"],
       ["base/rsync", "apt", "base/apt-index", "rsync"],
     ]);
-    expect(plan.map(t => t.label)).toEqual(["login shell PATH", "Node 22 with npm", "pnpm", "uv", "Python 3.12", "apt index", "git", "jq", "ripgrep", "curl", "Docker engine and compose", "C toolchain with cmake and ninja", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync"]);
+    expect(plan.map(t => t.label)).toEqual(["login shell PATH", "apt index", "curl", "Node 22 with npm", "pnpm", "uv", "Python 3.12", "git", "jq", "ripgrep", "Docker engine and compose", "C toolchain with cmake and ninja", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync"]);
     expect(BASE_FLOOR.map(e => `base/${e.id}`)).toEqual(plan.filter(t => t.bin !== undefined).map(t => t.id));
   });
 
@@ -219,21 +220,21 @@ describe("installBase", () => {
     const { stages, stage } = recorder();
     const out = await installBase(g.machine, stage);
     expect(stages[0]).toBe("deploying-daemon:login shell PATH (1/18)");
-    expect(stages).toContain("deploying-daemon:Node 22 with npm (2/18)");
+    expect(stages).toContain("deploying-daemon:Node 22 with npm (4/18)");
     expect(stages).toContain("deploying-daemon:Docker engine and compose (11/18)");
     expect(stages).toContain("deploying-daemon:rsync (18/18)");
     expect(stages.every(s => s.startsWith("deploying-daemon"))).toBe(true);
     expect(out.tools.map(t => [t.id, t.outcome, t.bytes])).toEqual([
       ["base/login-path", "installed", 0],
+      ["base/apt-index", "installed", 0],
+      ["base/curl", "installed", 0],
       ["base/node", "installed", 250 * 1024 * 1024],
       ["base/pnpm", "installed", 0],
       ["base/uv", "installed", 0],
       ["base/python", "installed", 0],
-      ["base/apt-index", "installed", 0],
       ["base/git", "installed", 0],
       ["base/jq", "installed", 0],
       ["base/ripgrep", "installed", 0],
-      ["base/curl", "installed", 0],
       ["base/docker", "installed", 400 * 1024 * 1024],
       ["base/build-essential", "installed", 0],
       ["base/fd", "installed", 0],
@@ -266,15 +267,15 @@ describe("installBase", () => {
     expect(stages[0]).toBe("deploying-daemon:1.8 GB free, under the 2 GB floor; cleaning up before skipping");
     expect(out.tools.map(t => [t.id, t.outcome, t.bytes])).toEqual([
       ["base/login-path", "installed", 0],
+      ["base/apt-index", "installed", 0],
+      ["base/curl", "installed", 0],
       ["base/node", "installed", 250 * 1024 * 1024],
       ["base/pnpm", "installed", 0],
       ["base/uv", "installed", 0],
       ["base/python", "installed", 0],
-      ["base/apt-index", "installed", 0],
       ["base/git", "installed", 0],
       ["base/jq", "installed", 0],
       ["base/ripgrep", "installed", 0],
-      ["base/curl", "installed", 0],
       ["base/docker", "installed", 0],
       ["base/build-essential", "installed", 0],
       ["base/fd", "installed", 0],
@@ -293,17 +294,19 @@ describe("installBase", () => {
     const g = guest(script => (script.includes("apt-get update -qq") ? { exitCode: 100, stdout: "", stderr: "E: Could not get lock /var/lib/apt/lists/lock" } : script.includes("VERSION node:") ? { exitCode: 0, stdout: "VERSION node: v22.23.2\nVERSION npm: 10.9.4\nVERSION pnpm: 11.9.0\nVERSION uv: uv 0.12.9\nVERSION python3: Python 3.12.13\n", stderr: "" } : undefined));
     const { stages, stage } = recorder();
     const out = await installBase(g.machine, stage);
+    // The index leads the floor now, so an index that fails takes curl with it, and the roads that fetch a release
+    // wait on curl: the cascade names each row by what it waited on.
     expect(out.tools.map(t => [t.id, t.outcome, t.note])).toEqual([
       ["base/login-path", "installed", undefined],
-      ["base/node", "installed", undefined],
-      ["base/pnpm", "installed", undefined],
-      ["base/uv", "installed", undefined],
-      ["base/python", "installed", undefined],
       ["base/apt-index", "failed", "E: Could not get lock /var/lib/apt/lists/lock"],
+      ["base/curl", "skipped", "apt index did not install"],
+      ["base/node", "skipped", "curl did not install"],
+      ["base/pnpm", "skipped", "Node 22 with npm did not install"],
+      ["base/uv", "skipped", "curl did not install"],
+      ["base/python", "skipped", "uv did not install"],
       ["base/git", "skipped", "apt index did not install"],
       ["base/jq", "skipped", "apt index did not install"],
       ["base/ripgrep", "skipped", "apt index did not install"],
-      ["base/curl", "skipped", "apt index did not install"],
       ["base/docker", "skipped", "apt index did not install"],
       ["base/build-essential", "skipped", "apt index did not install"],
       ["base/fd", "skipped", "apt index did not install"],
@@ -313,8 +316,8 @@ describe("installBase", () => {
       ["base/xz", "skipped", "apt index did not install"],
       ["base/rsync", "skipped", "apt index did not install"],
     ]);
-    expect(out.line).toBe("node 22.23.2, npm 10.9.4, pnpm 11.9.0, uv 0.12.9, python3 3.12.13; git skipped (apt index did not install); jq skipped (apt index did not install); ripgrep skipped (apt index did not install); curl skipped (apt index did not install); Docker engine and compose skipped (apt index did not install); C toolchain with cmake and ninja skipped (apt index did not install); fd skipped (apt index did not install); sqlite3 skipped (apt index did not install); wget skipped (apt index did not install); zip and unzip skipped (apt index did not install); xz skipped (apt index did not install); rsync skipped (apt index did not install)");
-    expect(stages).toContain("deploying-daemon:5 installed, 1 failed: apt index (E: Could not get lock /var/lib/apt/lists/lock), 12 skipped: git, jq, ripgrep, curl, Docker engine and compose, C toolchain with cmake and ninja, fd, sqlite3, wget, zip and unzip, xz, rsync (apt index did not install); caches swept; 2.9 GB free");
+    expect(out.line).toBe("node 22.23.2, npm 10.9.4, pnpm 11.9.0, uv 0.12.9, python3 3.12.13; curl skipped (apt index did not install); Node 22 with npm skipped (curl did not install); pnpm skipped (Node 22 with npm did not install); uv skipped (curl did not install); Python 3.12 skipped (uv did not install); git skipped (apt index did not install); jq skipped (apt index did not install); ripgrep skipped (apt index did not install); Docker engine and compose skipped (apt index did not install); C toolchain with cmake and ninja skipped (apt index did not install); fd skipped (apt index did not install); sqlite3 skipped (apt index did not install); wget skipped (apt index did not install); zip and unzip skipped (apt index did not install); xz skipped (apt index did not install); rsync skipped (apt index did not install)");
+    expect(stages).toContain("deploying-daemon:1 installed, 1 failed: apt index (E: Could not get lock /var/lib/apt/lists/lock), 16 skipped: curl, git, jq, ripgrep, Docker engine and compose, C toolchain with cmake and ninja, fd, sqlite3, wget, zip and unzip, xz, rsync (apt index did not install); Node 22 with npm, uv (curl did not install); pnpm (Node 22 with npm did not install); Python 3.12 (uv did not install); caches swept; 2.9 GB free");
   });
 
   it("a floor step that fails is recorded by the last line its installer wrote, not a generic one", async () => {

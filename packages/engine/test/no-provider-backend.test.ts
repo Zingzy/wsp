@@ -16,6 +16,7 @@ describe("no provider backend", () => {
       containers: false,
       callbackRelay: false,
       snapshotListing: false,
+      firstLifeSnapshots: false,
       templates: false,
       sizes: [],
       // Nothing here is a machine of the person's; there is no machine at all.

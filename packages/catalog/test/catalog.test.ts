@@ -423,12 +423,13 @@ describe("catalog", () => {
       expect(e.source.images, e.id).toBeGreaterThanOrEqual(0);
       expect(e.source.images, e.id).toBeLessThanOrEqual(5);
     }
-    expect(CATALOG.filter(e => e.kind === "tool" && e.defaultOn).map(e => e.id)).toEqual(["node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh", "agent-browser"]);
+    expect(CATALOG.filter(e => e.kind === "tool" && e.defaultOn).map(e => e.id)).toEqual(["curl", "node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "docker", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh", "agent-browser"]);
     expect(catalogEntry("agent-browser")?.source.note).toMatch(/one Mac/);
   });
 
   it("seeds every golden with the base floor: the entries flagged for it, in catalog order, each default-on by a pinned road", () => {
-    expect(BASE_FLOOR.map(e => e.id)).toEqual(["node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync"]);
+    // curl leads: a base image need not ship one, and every road below that fetches a release types it.
+    expect(BASE_FLOOR.map(e => e.id)).toEqual(["curl", "node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "docker", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync"]);
     expect(BASE_FLOOR).toEqual(CATALOG.filter(e => e.kind === "tool" && e.floor));
     for (const e of BASE_FLOOR) {
       expect(e.defaultOn, e.id).toBe(true);
@@ -440,7 +441,7 @@ describe("catalog", () => {
     }
     expect(CATALOG.filter(e => e.kind === "tool" && e.defaultOn && !e.floor).map(e => e.id)).toEqual(["gh", "agent-browser"]);
     // The npm road runs on the floor's node, an apt package on the index read once, a script on what its entry names.
-    expect(BASE_FLOOR.map(e => installAfter(e))).toEqual([undefined, "node", undefined, "uv", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index"]);
+    expect(BASE_FLOOR.map(e => installAfter(e))).toEqual(["apt-index", "curl", "node", "curl", "uv", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index"]);
     expect(BASE_FLOOR.find(e => e.id === "node")!.brings).toEqual([{ bin: "npm", version: "npm --version" }]);
     expect(BASE_FLOOR.find(e => e.id === "docker")!.brings).toEqual([{ bin: "docker compose", version: "docker compose version" }]);
     // Docker's engine is by apt, so its script waits on the index read like the apt rows before it.
@@ -489,7 +490,7 @@ describe("catalog", () => {
   it("says which roads no guest has run yet", () => {
     const unmeasured = CATALOG.filter(e => e.source.road === "unmeasured").map(e => e.id);
     expect(unmeasured).toEqual([
-      "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh", "agent-browser",
+      "curl", "pnpm", "uv", "python", "git", "jq", "ripgrep", "docker", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh", "agent-browser",
       "rust", "maven", "bun", "yarn", "ruff", "black", "mypy", "pyright", "pytest", "prettier", "eslint", "typescript",
       "wrangler", "cloudflared", "kubectl", "aws", "vercel", "netlify", "fly", "supabase", "railway", "doppler", "op", "ffmpeg", "yq", "git-lfs", "tmux",
       "ruby", "php", "postgresql-client", "redis-tools", "golangci-lint", "mise", "git-delta", "shellcheck", "swift", "elixir", "bazel", "llvm", "playwright",
@@ -529,7 +530,8 @@ describe("catalog", () => {
   });
 
   it("carries the tier 1 rows the lab sandboxes ship: the cheap universal ones on the floor, the rest on request", () => {
-    expect(BASE_FLOOR.map(e => e.id)).toEqual(["node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "curl", "docker", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync"]);
+    // curl leads: a base image need not ship one, and every road below that fetches a release types it.
+    expect(BASE_FLOOR.map(e => e.id)).toEqual(["curl", "node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "docker", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync"]);
     expect(installLine(catalogEntry("build-essential")!)).toBe("export DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq build-essential cmake ninja-build");
     expect((catalogEntry("build-essential") as ToolEntry).brings).toEqual([{ bin: "cmake", version: "cmake --version" }, { bin: "ninja", version: "ninja --version" }]);
     expect(catalogToolFor("make")?.id).toBe("build-essential");

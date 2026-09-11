@@ -9,7 +9,7 @@ import { gunzipSync } from "node:zlib";
 import { CURL_NET } from "@wsp/catalog";
 import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { WebSocketServer } from "ws";
-import { GUEST_USER_ENV, TOOLS_PATH } from "@wsp/engine";
+import { GUEST_SUPERVISOR_PATH, GUEST_USER_ENV, TOOLS_PATH } from "@wsp/engine";
 import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
@@ -20,6 +20,10 @@ import {
   DAEMON_UNIT_PATH,
   daemonLogCommand,
   daemonUnit,
+  daemonSupervisorScript,
+  DAEMON_LOG_PATH,
+  DAEMON_PID_PATH,
+  DAEMON_SUPERVISOR_PID_PATH,
   deployDaemon,
   deployScript,
   stopDaemonScript,
@@ -428,6 +432,9 @@ describe("guest environment", () => {
     expect(ports).toEqual([7070]);
     const flat = { ...bare, previewUrl: async () => ({ url: "https://localhost/", token: "x", expiresAt: 0 }) };
     await expect(previewHostSuffix(flat)).resolves.toBeUndefined();
+    // A machine reached at a published port answers with an address: a dev server allowlist entry is for a name.
+    const published = { ...bare, previewUrl: async () => ({ url: "http://127.0.0.1:49155", token: "", expiresAt: 0 }) };
+    await expect(previewHostSuffix(published)).resolves.toBeUndefined();
   });
 });
 
@@ -435,12 +442,22 @@ describe("deployScript", () => {
   it("is valid bash (a live run died on '&;' once; bash -n guards the shape)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-deploy-script-"));
     try {
-      const path = join(dir, "deploy.sh");
-      writeFileSync(path, deployScript("aabbcc"));
-      await promisify(execFile)("bash", ["-n", path]);
+      for (const [name, script] of [["deploy.sh", deployScript("aabbcc")], ["deploy-entrypoint.sh", deployScript("aabbcc", undefined, "entrypoint")]] as const) {
+        const path = join(dir, name);
+        writeFileSync(path, script);
+        await promisify(execFile)("bash", ["-n", path]);
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("the supervisor road's pid reads survive a machine that never had a daemon", async () => {
+    // set -e ends a script on an assignment whose substitution failed; a live deploy died on exactly this line.
+    const reads = deployScript("aabbcc", undefined, "entrypoint").split("\n").filter(line => /^(old|sup)="\$\(cat /.test(line));
+    expect(reads).toHaveLength(2);
+    const { stdout } = await promisify(execFile)("bash", ["-ec", `${reads.join("\n")}\necho SURVIVED`]);
+    expect(stdout).toContain("SURVIVED");
   });
 
   it("writes the token the way the rotation does, owner-only, in the one shape the run log redacts", () => {
@@ -529,6 +546,39 @@ describe("deployScript", () => {
     expect(check).toBeGreaterThan(-1);
     expect(check).toBeLessThan(lines.indexOf("mkdir -p /root/wsp-daemon /root/inbox"));
     expect(lines[0]).toBe("set -e");
+  });
+
+  /** The supervisor as the deploy writes it into the guest, out of the heredoc it rides in. */
+  const supervisorScriptOf = (script: string): string => script.split("WSP_SUPERVISOR")[1] ?? "";
+
+  it("a guest with no service manager gets a supervisor the machine's own boot runs", () => {
+    const script = deployScript("aabbcc", undefined, "entrypoint");
+    // Nothing refuses the guest here: the supervisor is what a machine without systemd is given instead.
+    expect(script).not.toContain("NO_SYSTEMD");
+    expect(script).not.toContain("systemctl daemon-reload");
+    expect(script).not.toContain(DAEMON_UNIT_PATH);
+    expect(script).toContain(`cat > ${GUEST_SUPERVISOR_PATH}`);
+    expect(script).toContain(`chmod 0755 ${GUEST_SUPERVISOR_PATH}`);
+    // A supervisor already watching the daemon restarts it with the new bundle; only a machine without one starts it here.
+    expect(script).toContain(`setsid nohup ${GUEST_SUPERVISOR_PATH}`);
+    // A container image ships neither ss nor curl, so the deploy asks bash itself whether the port answers.
+    expect(script).not.toContain("ss -ltn");
+    expect(script).toContain("(exec 3<>/dev/tcp/127.0.0.1/7070)");
+    expect(script).toContain("DAEMON_UP");
+    // The daemon being replaced is stopped by the pid the supervisor wrote, and the supervisor puts the new one up.
+    // set -e ends the deploy on an assignment whose substitution failed, and a fresh machine has neither pid file.
+    expect(script).toContain(`old="$(cat ${DAEMON_PID_PATH} 2>/dev/null || true)"`);
+    expect(script).toContain(`sup="$(cat ${DAEMON_SUPERVISOR_PID_PATH} 2>/dev/null || true)"`);
+    expect(supervisorScriptOf(script)).toContain(`echo $! > ${DAEMON_PID_PATH}`);
+    const supervisor = daemonSupervisorScript();
+    expect(supervisor).toContain("node /root/wsp-daemon/start.mjs");
+    // The loop is the whole point: a daemon the kernel's memory killer took comes back on its own.
+    expect(supervisor).toContain("while :; do");
+    expect(supervisor).toContain(`export PATH=${TOOLS_PATH}`);
+    for (const [name, value] of Object.entries(GUEST_USER_ENV)) expect(supervisor).toContain(`export ${name}=${value}`);
+    // The log is bounded here, since a container has no journal to rotate one.
+    expect(supervisor).toContain(DAEMON_LOG_PATH);
+    expect(daemonLogCommand(50, "entrypoint")).toBe(`tail -n 50 ${DAEMON_LOG_PATH}`);
   });
 
   it("the unit restarts the daemon forever, keeps a killed child from taking it, and caps the cgroup at a share of the machine", () => {
@@ -648,6 +698,18 @@ describe("deployDaemon", () => {
       edgedStub.previewUrl = async p => ({ url: `https://${edgedStub.id}-${p}.preview.example.com/?pt_token=x`, token: "x", expiresAt: 0 });
       await deployDaemon(edged, { token: "abc123", daemonDir });
       expect(edgedStub.execLog).toEqual([deployScript("abc123", ".preview.example.com")]);
+
+      // A backend that mints no signed URL lands the bundle on its own road, and says what supervises the daemon.
+      const boxed = await backend.create({ kind: "sandbox" });
+      const boxedStub = backend.machines[2]!;
+      const landed: { path: string; bytes: number }[] = [];
+      boxedStub.uploadUrl = async () => { throw new Error("a container serves no signed upload URL"); };
+      boxedStub.putBytes = async (path: string, bytes: Buffer) => { landed.push({ path, bytes: bytes.length }); };
+      boxedStub.daemonSupervisor = "entrypoint";
+      await deployDaemon(boxed, { token: "abc123", daemonDir });
+      expect(landed.map(l => l.path)).toEqual(["/root/wsp-daemon.tgz"]);
+      expect(landed[0]!.bytes).toBeGreaterThan(0);
+      expect(boxedStub.execLog).toEqual([deployScript("abc123", undefined, "entrypoint")]);
       expect(edgedStub.execLog[0]).toContain("export __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS='.preview.example.com'");
     } finally {
       server.close();

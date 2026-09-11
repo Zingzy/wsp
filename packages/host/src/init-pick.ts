@@ -88,10 +88,11 @@ export function pickEstimate(manifest: Manifest, recipe: Recipe, brew: BrewTable
 }
 
 /** The Disk line, loud in its weight's colour: the one loud element on the screen. The parts behind the total stay
- * off it, since every row above says its own size. */
-export function diskFooter(est: DiskEstimate): FooterLine {
-  const tone = diskTone(est.total, est.room);
-  return { text: `Disk: ${diskHead(est)}`, ...(tone !== undefined ? { tone } : {}) };
+ * off it, since every row above says its own size. A provider that gives a builder no disk figure has no room to
+ * be over, so the line carries the total and no colour. */
+export function diskFooter(est: DiskEstimate, builderDiskGb?: number): FooterLine {
+  const tone = builderDiskGb === undefined ? undefined : diskTone(est.total, est.room);
+  return { text: `Disk: ${diskHead(est, builderDiskGb)}`, ...(tone !== undefined ? { tone } : {}) };
 }
 
 /** An agent's two detail lines: whether this Mac has it and what its config brings, then what it installs there. */
@@ -344,6 +345,8 @@ export interface PickOptions {
   from: "agents" | "logins";
   /** The person's home, where an agent's config is read for the wsp tools rows. */
   home: string;
+  /** The disk the provider gives a builder, where it gives a figure; the Disk footer names no cap without one. */
+  builderDiskGb?: number;
   /** What the package managers here could put on the image: the rows of the Also on this Mac screen. With none, that
    * screen is not shown. */
   scan?: readonly ScanRow[];
@@ -461,7 +464,7 @@ export async function pickScreens(o: PickOptions): Promise<Picked | "cancel"> {
           grouped: true,
           footer: ticks => {
             const next = withTools(recipe, ticks);
-            return [totalsLine(recipeTable(next, CATALOG_TOOLS), "tools"), ...(floorApplies(recipe.tick) ? [{ text: FLOOR_LINE }] : []), diskFooter(pickEstimate(o.manifest, next, o.brew))];
+            return [totalsLine(recipeTable(next, CATALOG_TOOLS), "tools"), ...(floorApplies(recipe.tick) ? [{ text: FLOOR_LINE }] : []), diskFooter(pickEstimate(o.manifest, next, o.brew), o.builderDiskGb)];
           },
           ...streams,
         });
@@ -479,7 +482,7 @@ export async function pickScreens(o: PickOptions): Promise<Picked | "cancel"> {
           items: rows.also,
           initial: scannedTicks(recipe, scan),
           groupLine: alsoGroupLine(scan),
-          footer: a => [diskFooter(pickEstimate(o.manifest, withScanned(recipe, scan, a.ticks), o.brew))],
+          footer: a => [diskFooter(pickEstimate(o.manifest, withScanned(recipe, scan, a.ticks), o.brew), o.builderDiskGb)],
           ...streams,
         });
         if (r.kind === "cancel") return "cancel";
