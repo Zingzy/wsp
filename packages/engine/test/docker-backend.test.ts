@@ -188,6 +188,7 @@ describe("DockerBackend against a fake Engine API", () => {
         Memory: 1024 * 1024 * 1024,
         NanoCpus: 2_000_000_000,
         PortBindings: { "7070/tcp": [{ HostIp: "127.0.0.1", HostPort: "" }] },
+        ExtraHosts: ["host.docker.internal:host-gateway"],
       },
     });
     // A container's disk is the box's: no quota is asked for, since one needs xfs with pquota under the daemon.
@@ -419,6 +420,12 @@ describe("DockerBackend against a fake Engine API", () => {
     expect(reach.token).toBe("");
   });
 
+  it("answers the address a turn inside the container dials this computer at, which the daemon filled the gateway in for", async () => {
+    engine.json("GET", /^\/containers\/c1\/json$/, RUNNING("c1"));
+    const machine = await backend.get("c1");
+    expect(machine.hostUrl!(4700)).toBe("http://host.docker.internal:4700");
+  });
+
   it("carries no route at all on a daemon that is not this computer's, since its loopback is not ours", async () => {
     // A machine that answered a route this host cannot dial reads as a fork whose daemon died: the wake re-pauses,
     // resurrects and redeploys it every time. Absent is what hasDaemon reads, and absent is the truth on a box.
@@ -429,6 +436,9 @@ describe("DockerBackend against a fake Engine API", () => {
       expect(machine.previewUrl).toBeUndefined();
       // The guest is still askable: no route is no reason for the status to call such a machine unsupported.
       expect(typeof machine.daemonAnswers).toBe("function");
+      // And no address home either: the gateway that container reaches leads to the box, not to the computer this
+      // host runs on, so a turn on it is told the address the host advertises or nothing at all.
+      expect(machine.hostUrl).toBeUndefined();
       // The same reading tells the sign-in relay it has no road home.
       expect(remote.capabilities.callbackRelay).toBe(false);
     }

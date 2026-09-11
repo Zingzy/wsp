@@ -44,8 +44,10 @@ describe("the wsp command on a thread's machine", () => {
       adapters: { claude: held.adapter },
       local: localWiring(join(dir, "user")),
       agents: {
-        get url() {
-          return advertised;
+        reach: {
+          get url() {
+            return advertised;
+          },
         },
         wspMcp: { command: "node", args: ["/root/wsp-daemon/wsp/dist/bin.js", "mcp"] },
       },

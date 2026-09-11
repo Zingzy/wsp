@@ -15,7 +15,7 @@ import { connect as netConnect } from "node:net";
 import { join, posix } from "node:path";
 import { Duplex } from "node:stream";
 import { connect as tlsConnect } from "node:tls";
-import type { Capabilities } from "@wsp/protocol";
+import { authority, type Capabilities } from "@wsp/protocol";
 import { classify, isMissing, type WspError } from "./errors.js";
 import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
@@ -31,6 +31,12 @@ export const PULL_MS = 600_000;
 /** The Engine API version every call is made under. Docker 29 refuses a client below 1.44, and nothing here needs a
  * field newer than that, so the version is pinned rather than negotiated on every dial. */
 export const DOCKER_API_VERSION = "v1.44";
+
+/** The name every container this backend makes reaches the computer its daemon runs on at, written into the
+ * container's hosts file at create against the daemon's own `host-gateway`: on Linux that is the bridge gateway,
+ * on Docker Desktop the address of the computer outside the VM, and neither is a fact a container can work out for
+ * itself. It is how a turn on a fork dials a wsp host on that computer. */
+export const DOCKER_HOST_GATEWAY = "host.docker.internal";
 
 /** The daemon's socket on a computer whose DOCKER_HOST names nothing. */
 export const DOCKER_DEFAULT_SOCKET = "/var/run/docker.sock";
@@ -483,6 +489,9 @@ export class DockerBackend implements MachineBackend {
         // Bound to the loopback of the computer the daemon runs on: the token in the first frame is the only gate on
         // the daemon, and a port on the box's public address would put it where anyone can knock.
         PortBindings: { [`${DAEMON_PORT}/tcp`]: [{ HostIp: "127.0.0.1", HostPort: "" }] },
+        // The one address a process in the container can dial the computer the daemon runs on at; the daemon fills
+        // the gateway in, since the container cannot read the box's network from inside.
+        ExtraHosts: [`${DOCKER_HOST_GATEWAY}:host-gateway`],
       },
       // spec.diskGb is not asked for: a per container quota needs overlay2 on xfs mounted with pquota, and a
       // container on any other filesystem is refused at create rather than given the box's disk.
@@ -633,6 +642,10 @@ export class DockerMachine implements Machine {
    * whose daemon died, re-paused, resurrected and redeployed on every wake. Absent is what every road above reads
    * (`hasDaemon` is the presence of this) and absent is the truth on a box until a forward exists. */
   readonly previewUrl?: (port: number) => Promise<PreviewReach>;
+  /** Only on a machine whose daemon runs on this computer, for the same reason: the gateway the container was
+   * given a name for leads to the computer the daemon runs on, which is this one only then. A container on a box
+   * reaches that box there, and the wsp host asking is not on it. */
+  readonly hostUrl?: (port: number) => string;
 
   constructor(
     private readonly backend: DockerBackend,
@@ -643,7 +656,10 @@ export class DockerMachine implements Machine {
     readonly seen?: { state: MachineState; createdAt?: string },
     readonly replayed?: boolean,
   ) {
-    if (onThisComputer) this.previewUrl = port => this.publishedPort(port);
+    if (onThisComputer) {
+      this.previewUrl = port => this.publishedPort(port);
+      this.hostUrl = port => `http://${authority(DOCKER_HOST_GATEWAY, port)}`;
+    }
   }
 
   private path(suffix = ""): string {

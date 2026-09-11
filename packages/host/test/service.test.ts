@@ -484,6 +484,14 @@ describe("wsp up --service, wsp down and wsp status", () => {
     const again = optsFor(parseArgs({ args: argv.slice(2), options: SHARED_OPTIONS, allowPositionals: true }).values, process.env);
     const serving = (o: ServeAsked): unknown => [o.statePath, o.port, o.wsPort, o.address, o.advertise, o.provider, o.dockerHost, o.relay];
     expect(serving(again)).toEqual(serving(asked));
+    // Only a word the person typed is spelled back, read the one way everything reads it: spaces are no address,
+    // and a trailing slash is not part of one. Without --advertise the unit carries none, and every kind of
+    // machine answers for itself again at each start of the service.
+    const spaced = optsFor(parseArgs({ args: ["up", "--state", statePath, "--advertise", "  "], options: SHARED_OPTIONS, allowPositionals: true }).values, process.env);
+    expect(spaced.advertise).toBeUndefined();
+    const slashed = optsFor(parseArgs({ args: ["up", "--state", statePath, "--advertise", "https://box.example/wsp/"], options: SHARED_OPTIONS, allowPositionals: true }).values, process.env);
+    expect(slashed.advertise).toBe("https://box.example/wsp");
+    expect(SERVE_FLAGS.find(f => f.name === "advertise")!.words({ ...asked, advertise: undefined } as ServeAsked)).toEqual([]);
   });
 
   it("a service that loads and never serves points at its log and leaves the service there to look at", async () => {
