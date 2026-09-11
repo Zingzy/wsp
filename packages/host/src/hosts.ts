@@ -10,6 +10,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { WS_PATH, hostFromEnv, isUrl, usageRefusal, type HostRoad } from "@wsp/protocol";
 import { servingHost } from "./host-lock.js";
+import { defaultHomeIn } from "./serving-home.js";
 
 /** The address predicate has one home in the protocol; the command line's callers read it from here. */
 export { isUrl };
@@ -47,7 +48,7 @@ export interface HostEntry {
 }
 
 /** The home wsp keeps everything of a person's in when nobody names another. */
-export const DEFAULT_HOME = join(homedir(), ".wsp");
+export const DEFAULT_HOME = defaultHomeIn(homedir());
 
 /** The folder wsp keeps its state, its keys and its hosts in. One reading, since the command line, the verbs and the
  * tool server all have to name the same folder. */

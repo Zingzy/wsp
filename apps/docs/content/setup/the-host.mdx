@@ -51,7 +51,7 @@ Everything is beside the state file, `~/.wsp/` by default:
 | `init.log` | the last five init runs, secrets redacted |
 | `history-cache.json` | what each agent session file came to, so the next scan is fast |
 
-`WSP_HOME` moves the whole folder. `~/.wsp/current-home` always points at the home the running host serves, so the desktop app can find it.
+`WSP_HOME` moves the whole folder. `~/.wsp/current-home` always points at the home the running host serves, so a line that names no home of its own, and the desktop app, both work on the host that is running rather than on a state file nothing serves.
 
 ## What it does on its own
 
