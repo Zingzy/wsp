@@ -26,6 +26,17 @@ CREATE TABLE hosts (
 );
 CREATE INDEX hosts_account ON hosts (account_id);
 
+-- One row per computer a person signed in from, so a token that walked off can
+-- be taken away without rotating the key every box on the relay depends on.
+CREATE TABLE clients (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_seen TEXT
+);
+CREATE INDEX clients_account ON clients (account_id);
+
 CREATE TABLE link_codes (
   code TEXT PRIMARY KEY,
   poll_hash TEXT NOT NULL,

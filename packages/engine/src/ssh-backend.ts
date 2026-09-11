@@ -8,10 +8,10 @@
 // script over the ssh client, which is the only thing here that knows the
 // machine is not in this process.
 
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { shellQuote } from "@wsp/protocol";
 import type { Capabilities } from "@wsp/protocol";
@@ -89,7 +89,7 @@ export function sshMachineName(reach: SshReach): string {
  * hands its own and reads what the machine was asked to run. `hostKey` asks the client to log what the connection
  * saw, so the one dial that records a machine can quote the key it answered with; every other call leaves it off,
  * since the log would otherwise ride every command's stderr. */
-export type SshTransport = (reach: SshReach, script: string, opts: { timeoutMs?: number; onLine?: (line: string) => void; hostKey?: boolean }) => Promise<ExecResult>;
+export type SshTransport = (reach: SshReach, script: string, opts: { timeoutMs?: number; onLine?: (line: string) => void; hostKey?: boolean; stdin?: Uint8Array }) => Promise<ExecResult>;
 
 /** How long the ssh client waits for the machine to answer the dial itself, before the script's own deadline starts
  * mattering: a machine that is off must fail rather than hang a turn. */
@@ -126,24 +126,37 @@ export function sshControlPath(reach: SshReach, dir: string = sshControlDir()): 
   return join(dir, `wsp-ssh-${createHash("sha256").update(`${reach.user}@${reach.host}:${reach.port}`).digest("hex").slice(0, 16)}.sock`);
 }
 
-/** The ssh client's argv for one script. BatchMode keeps a machine that wants a passphrase from stopping a
- * background host at a prompt nobody can see; the script runs under `bash -c` as it does on a guest, never a login
+/** The ssh client's argv for one script. The script runs under `bash -c` as it does on a guest, never a login
  * shell, which would reset PATH. Every command rides one master connection per machine, so a turn's polls are one
  * login rather than one each. */
-export function sshArgs(reach: SshReach, script: string, opts: { hostKey?: boolean; controlDir?: string } = {}): string[] {
+export function sshArgs(reach: SshReach, script: string, opts: { hostKey?: boolean; controlDir?: string; stdin?: boolean } = {}): string[] {
   return [
-    "-n",
+    // -n hands the script /dev/null for stdin; the one road that carries a file's bytes writes them there instead.
+    ...(opts.stdin === true ? [] : ["-n"]),
     "-T",
-    "-o",
-    "BatchMode=yes",
     "-o",
     "ControlMaster=auto",
     "-o",
     `ControlPath=${sshControlPath(reach, opts.controlDir)}`,
     "-o",
     `ControlPersist=${SSH_CONTROL_PERSIST_S}`,
-    // Nobody can answer a host key prompt on a host that runs in the background, and a key that changed is still
-    // refused; the first dial records the key it was given and the person is shown it to compare.
+    ...sshDialArgs(reach, opts),
+    `${reach.user}@${reach.host}`,
+    "bash",
+    "-c",
+    shellQuote(script),
+  ];
+}
+
+/** How every ssh child this host starts is dialled, whatever it then does on the connection. BatchMode keeps a
+ * machine that wants a passphrase from stopping a background host at a prompt nobody can see. Nobody can answer a
+ * host key prompt there either, and a key that changed is still refused; the first dial records the key it was
+ * given and the person is shown it to compare. The command road and the forward road both build on this, so how
+ * wsp dials a machine is one rule and not two. */
+export function sshDialArgs(reach: SshReach, opts: { hostKey?: boolean } = {}): string[] {
+  return [
+    "-o",
+    "BatchMode=yes",
     "-o",
     "StrictHostKeyChecking=accept-new",
     ...(opts.hostKey === true ? ["-o", "LogLevel=DEBUG"] : []),
@@ -152,20 +165,17 @@ export function sshArgs(reach: SshReach, script: string, opts: { hostKey?: boole
     "-p",
     String(reach.port),
     ...(reach.keyPath !== undefined ? ["-i", reach.keyPath, "-o", "IdentitiesOnly=yes"] : []),
-    `${reach.user}@${reach.host}`,
-    "bash",
-    "-c",
-    shellQuote(script),
   ];
 }
 
 /** The ssh client on this computer, carrying one script to the machine. The folder its master socket lives in is
  * made here, on the way out, so no dial can be the first thing to need it. */
 export const sshClient: SshTransport = (reach, script, opts) =>
-  runChild("ssh", sshArgs(reach, script, { controlDir: makeSshControlDir(), ...(opts.hostKey !== undefined ? { hostKey: opts.hostKey } : {}) }), {
+  runChild("ssh", sshArgs(reach, script, { controlDir: makeSshControlDir(), ...(opts.hostKey !== undefined ? { hostKey: opts.hostKey } : {}), ...(opts.stdin !== undefined ? { stdin: true } : {}) }), {
     env: process.env,
     ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
     ...(opts.onLine !== undefined ? { onLine: opts.onLine } : {}),
+    ...(opts.stdin !== undefined ? { stdin: opts.stdin } : {}),
   });
 
 /** The key the machine answered the connection with, as the client logged it: its type and the SHA256 fingerprint
@@ -238,10 +248,9 @@ export async function readSshMachine(reach: SshReach, transport: SshTransport = 
   }
   const cpu = Number(values["cpu"] ?? 0);
   const memMb = Math.round(Number(values["memkb"] ?? 0) / 1024);
-  const path = values["path"];
   const hostKey = hostKeyOf(res.stderr);
   return {
-    login: { ...stores, HOME: home, USER: values["user"] ?? reach.user, PATH: path === undefined || path === "" ? DEFAULT_REMOTE_PATH : path },
+    login: { ...stores, HOME: home, USER: values["user"] ?? reach.user, PATH: plainPath(values["path"]) },
     shape: { cpu, memMb },
     ...(hostKey !== undefined ? { hostKey } : {}),
   };
@@ -278,6 +287,38 @@ export function sshDialsThisComputer(reach: SshReach, names: readonly string[]):
 /** What a turn's PATH falls back to when the machine's own login shell printed none: what a POSIX login gives
  * anyway, so a harness the person installed elsewhere is missing rather than every command being. */
 export const DEFAULT_REMOTE_PATH = "/usr/local/bin:/usr/bin:/bin";
+
+/** The machine's own login PATH, each folder in it held to the rule the home is held to. It is the last thing the
+ * machine answers with that ends up written rather than run: a turn exports it, and the daemon's unit states it,
+ * where systemd splits an Environment= line on whitespace and reads a quote as quoting. A folder carrying a quote
+ * or a space is dropped rather than escaped at each of those, and a PATH with nothing left in it falls back, so a
+ * machine that answers with something unusable leaves a harness missing rather than every command. */
+export function plainPath(path: string | undefined): string {
+  const kept = (path ?? "").split(":").filter(folder => folder !== "" && isPlainPath(folder) && !/\s/.test(folder));
+  return kept.length === 0 ? DEFAULT_REMOTE_PATH : kept.join(":");
+}
+
+/** What the write answers with once the bytes are on disk under their own name. */
+export const SSH_BYTES_OK = "WSP_BYTES_OK";
+
+/** The script that takes a file's bytes off the connection's stdin. The bytes land beside the target under a name
+ * of their own and are moved into place only once the byte count matches, so a connection cut halfway leaves the
+ * target as it was rather than a file that looks whole. `wc` pads its count on some systems, so the spaces go.
+ * Nothing of the file's content is named in the command, which is the point of this road for a secret: a command
+ * sits in /proc/<pid>/cmdline for its own length, and every account on the machine can read it there. */
+export function putBytesScript(path: string, size: number, tmp: string): string {
+  return [
+    "set -e",
+    // The file is the writer's alone until something widens it: a machine somebody owns may carry other accounts,
+    // and what travels this road is a daemon token as often as it is an archive.
+    "umask 077",
+    `mkdir -p ${shellQuote(posix.dirname(path))}`,
+    `cat > ${shellQuote(tmp)}`,
+    `[ "$(wc -c < ${shellQuote(tmp)} | tr -d ' ')" = ${size} ] || { rm -f ${shellQuote(tmp)}; echo WSP_BYTES_SHORT; exit 1; }`,
+    `mv -f ${shellQuote(tmp)} ${shellQuote(path)}`,
+    `echo ${SSH_BYTES_OK}`,
+  ].join("\n");
+}
 
 /** A machine reached over ssh: exec and run carry a script to it, and the moves only a machine wsp forks takes
  * throw, since the capability behind each is false and the runtime refuses them first. It carries no preview route,
@@ -333,6 +374,16 @@ export class SshMachine implements Machine {
   async uploadUrl(): Promise<string> {
     throw new Error("a machine reached over ssh serves no signed upload URL; its files are written over the connection");
   }
+
+  /** The machine's own road for bytes, which is the connection itself: the file rides stdin under a script that
+   * writes it, since nothing here mints a URL anything could PUT to. */
+  async putBytes(path: string, bytes: Uint8Array, opts: { timeoutMs?: number } = {}): Promise<void> {
+    const tmp = `${path}.wsp-in-${randomBytes(6).toString("hex")}`;
+    const res = await this.transport(this.reach, putBytesScript(path, bytes.length, tmp), { stdin: bytes, ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}) });
+    if (res.exitCode !== 0 || !res.stdout.includes(SSH_BYTES_OK)) {
+      throw new Error(`${bytes.length} bytes did not land at ${path} over ssh (exit ${res.exitCode}): ${(clientWords(res.stderr) || res.stdout.trim()).slice(-300)}`);
+    }
+  }
 }
 
 export interface SshBackendOptions {
@@ -353,6 +404,7 @@ export class SshBackend implements MachineBackend {
     callbackRelay: false,
     snapshotListing: false,
     templates: false,
+    firstLifeSnapshots: false,
     sizes: [],
     // The machine is the person's own: nothing on it was made by wsp and nothing on it is thrown away, so a turn's
     // access starts at what its harness asks for rather than at skip-everything.

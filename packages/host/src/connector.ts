@@ -7,8 +7,9 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { arch as thisArch, platform as thisPlatform } from "node:os";
+import { arch as thisArch, platform as thisPlatform, uptime } from "node:os";
 import { join } from "node:path";
+import { LOOPBACK } from "@wsp/protocol";
 import table from "../assets/cloudflared.json" with { type: "json" };
 
 /** One release for one kind of computer: where it comes from and the sha256 the bytes must have. */
@@ -31,7 +32,7 @@ export const CLOUDFLARED = table as CloudflaredTable;
 /** What a connector child is started with: a managed tunnel, whose credential rides the environment rather than
  * this line, since anybody on the box can read another user's arguments; or a quick one against the loopback port. */
 export function connectorArgs(opts: { token?: string; port: number }): string[] {
-  return opts.token !== undefined ? ["tunnel", "--no-autoupdate", "run"] : ["tunnel", "--no-autoupdate", "--url", `http://127.0.0.1:${opts.port}`];
+  return opts.token !== undefined ? ["tunnel", "--no-autoupdate", "run"] : ["tunnel", "--no-autoupdate", "--url", `http://${LOOPBACK}:${opts.port}`];
 }
 
 /** The release for this computer, or a refusal naming the computers the table does hold one for. */
@@ -99,7 +100,9 @@ export async function ensureCloudflared(dir: string, deps: CloudflaredDeps = {})
   return fetchPinned(dir, pinnedCloudflared(deps.platform ?? thisPlatform(), deps.arch ?? thisArch()), deps.fetchBytes ?? httpBytes);
 }
 
-/** The hostname a quick tunnel printed, out of one line of the connector's output. */
+/** The hostname a quick tunnel printed, out of one line of the connector's output. The relay holds the same shape
+ * a second time (isQuickTunnel in infra/relay/src/env.ts), where it is the only name a heartbeat may report; a
+ * Worker and a command line share no module, so a change to one of these is a change to both. */
 export function quickHostname(line: string): string | undefined {
   return /https:\/\/([a-z0-9-]+\.trycloudflare\.com)/i.exec(line)?.[1];
 }
@@ -160,10 +163,17 @@ export function startConnector(opts: ConnectorOptions): Connector {
     mkdirSync(opts.stateDir, { recursive: true });
     const started = spawnChild(opts.bin, args, {
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, ...(opts.token !== undefined ? { TUNNEL_TOKEN: opts.token } : {}) },
+      // Three things and no more: this process holds the person's provider and model keys, and a connector has no
+      // use for any of them.
+      env: {
+        PATH: process.env["PATH"] ?? "",
+        HOME: process.env["HOME"] ?? "",
+        ...(opts.token !== undefined ? { TUNNEL_TOKEN: opts.token } : {}),
+      },
     });
     child = started;
-    if (started.pid !== undefined) writeFileSync(pidPath, `${started.pid}\n`);
+    // The pid and when it was written: a pid on its own names another process of this user after a reboot.
+    if (started.pid !== undefined) writeFileSync(pidPath, `${JSON.stringify({ pid: started.pid, startedAt: new Date().toISOString() })}\n`);
     started.stdout?.on("data", read);
     started.stderr?.on("data", read);
     started.on("error", e => opts.log(`connector: could not start ${opts.bin}: ${e.message}`));
@@ -219,20 +229,48 @@ function alive(pid: number): boolean {
   }
 }
 
+/** What a run wrote down about the connector it started. */
+interface RecordedChild {
+  pid: number;
+  startedAt: string;
+}
+
+function recordedChild(pidPath: string): RecordedChild | undefined {
+  try {
+    const parsed = JSON.parse(readFileSync(pidPath, "utf8")) as Partial<RecordedChild>;
+    return typeof parsed.pid === "number" && Number.isInteger(parsed.pid) && parsed.pid > 0 && typeof parsed.startedAt === "string" ? (parsed as RecordedChild) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether a connector this computer started is running now: the pid a run wrote down, still alive and not from
+ * before the last boot. Every line that says where this host answers from anywhere reads it, so a name in the
+ * record cannot outlive the tunnel that carried it. */
+export function connectorRunning(stateDir: string): boolean {
+  const held = recordedChild(join(stateDir, "connector.pid"));
+  if (held === undefined) return false;
+  return Date.parse(held.startedAt) >= Date.now() - uptime() * 1000 && alive(held.pid);
+}
+
 /** Stops a connector an earlier run of the host left behind, by the pid that run wrote down, and waits for it to
- * go: a tunnel whose connector still holds connections cannot be deleted, so the caller has to know it is gone. */
+ * go: a tunnel whose connector still holds connections cannot be deleted, so the caller has to know it is gone.
+ * A record from before this computer last started names a pid the system has since given to somebody else, so it
+ * is dropped rather than signalled. */
 export async function stopRecordedConnector(stateDir: string, waitMs = 5_000): Promise<void> {
   const pidPath = join(stateDir, "connector.pid");
   if (!existsSync(pidPath)) return;
-  const pid = Number(readFileSync(pidPath, "utf8").trim());
+  const held = recordedChild(pidPath);
   rmSync(pidPath, { force: true });
-  if (!Number.isInteger(pid) || pid <= 0) return;
+  if (held === undefined) return;
+  const bootedAt = Date.now() - uptime() * 1000;
+  if (Date.parse(held.startedAt) < bootedAt) return;
   try {
-    process.kill(pid, "SIGTERM");
+    process.kill(held.pid, "SIGTERM");
   } catch {
     // The connector is already gone; the file above was the only thing left to clear.
     return;
   }
   const until = Date.now() + waitMs;
-  while (alive(pid) && Date.now() < until) await new Promise(done => setTimeout(done, 50));
+  while (alive(held.pid) && Date.now() < until) await new Promise(done => setTimeout(done, 50));
 }

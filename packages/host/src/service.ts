@@ -141,7 +141,8 @@ const systemd: ServiceManager = {
       "[Service]",
       "Type=simple",
       `ExecStart=${plan.argv.map(shellQuote).join(" ")}`,
-      `WorkingDirectory=${shellQuote(plan.cwd)}`,
+      // A bare path: systemd reads a quoted WorkingDirectory as not absolute and refuses the whole unit.
+      `WorkingDirectory=${plan.cwd}`,
       ...Object.entries(plan.env).map(([name, value]) => `Environment=${shellQuote(`${name}=${value}`)}`),
       "Restart=always",
       "RestartSec=5",
@@ -366,7 +367,7 @@ export function statusLines(statePath: string, host: HostReading | undefined, se
   const up = `pid ${lock.pid}, up ${fmtDuration(now - Date.parse(lock.startedAt))}`;
   return [
     host.answering ? `host        running (${up})` : `host        not answering on port ${lock.port} (${up})`,
-    ...addressLines(statePath, { ...lock, ...(publicAt !== undefined ? { public: publicAt } : {}) }),
+    ...addressLines(statePath, lock, publicAt),
     `service     ${service}`,
   ];
 }

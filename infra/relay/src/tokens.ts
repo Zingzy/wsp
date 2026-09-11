@@ -19,7 +19,13 @@ export interface TokenClaims {
 /** A signed-in browser stands for seven days; a stamp only has to survive one trip through GitHub. */
 export const SESSION_MS = 7 * 24 * 60 * 60_000;
 export const STAMP_MS = 15 * 60_000;
-export const SESSION_COOKIE = "wsp_relay_session";
+/** Both cookies carry the __Host- prefix, which a browser only accepts with Secure, Path=/ and no Domain, and
+ * which no other host under the same registrable domain can write. The relay may one day be served beside the
+ * boxes it names (relay.example.com next to h....example.com), and without the prefix any of those boxes could
+ * set a session cookie for it. */
+export const SESSION_COOKIE = "__Host-wsp_relay_session";
+/** The one-trip cookie that ties a sign-in to the browser that started it. */
+export const NONCE_COOKIE = "__Host-wsp_relay_sign_in";
 
 const encoder = new TextEncoder();
 
@@ -81,19 +87,22 @@ export async function readSession(key: string, session: string | undefined, at: 
   return claims.a;
 }
 
-/** A short-lived signed value for one purpose: the link code carried through GitHub, and the approve form's own. */
-export async function mintStamp(key: string, purpose: string, value: string, at: number): Promise<string> {
-  const payload = encode({ v: value, t: at });
+/** A short-lived signed value for one purpose: the link code carried through GitHub, and the approve form's own.
+ * `bound` ties the stamp to whoever it was made for, the browser's nonce on the way to GitHub and the account on
+ * the approval form, so a stamp handed to somebody else is refused in their hands. */
+export async function mintStamp(key: string, purpose: string, value: string, at: number, bound?: string): Promise<string> {
+  const payload = encode({ v: value, t: at, ...(bound !== undefined ? { b: bound } : {}) });
   return `${payload}.${await sign(key, `${purpose}:${payload}`)}`;
 }
 
-export async function readStamp(key: string, purpose: string, stamp: string | undefined, at: number): Promise<string | undefined> {
+export async function readStamp(key: string, purpose: string, stamp: string | undefined, at: number, bound?: string): Promise<string | undefined> {
   if (stamp === undefined) return undefined;
   const [payload, signature, extra] = stamp.split(".");
   if (payload === undefined || signature === undefined || extra !== undefined) return undefined;
   if (!(await signed(key, `${purpose}:${payload}`, signature))) return undefined;
-  const claims = decode(payload) as { v?: unknown; t?: unknown } | undefined;
+  const claims = decode(payload) as { v?: unknown; t?: unknown; b?: unknown } | undefined;
   if (typeof claims?.v !== "string" || typeof claims.t !== "number" || at - claims.t > STAMP_MS) return undefined;
+  if ((claims.b ?? undefined) !== bound) return undefined;
   return claims.v;
 }
 
@@ -109,4 +118,10 @@ export function cookieOf(header: string | null | undefined, name: string): strin
 /** The session cookie as it is set: this host alone, no script, and not sent from another site's form. */
 export function sessionCookie(session: string): string {
   return `${SESSION_COOKIE}=${session}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${Math.floor(SESSION_MS / 1000)}`;
+}
+
+/** The nonce cookie, set on the way to GitHub and cleared by the callback that spends it. Path is the whole site
+ * because the __Host- prefix takes no other. */
+export function nonceCookie(nonce: string, maxAgeSeconds = Math.floor(STAMP_MS / 1000)): string {
+  return `${NONCE_COOKIE}=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAgeSeconds}`;
 }

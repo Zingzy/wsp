@@ -5,9 +5,12 @@
 // since that is what a connector started with a token alone reads.
 import type { Env, Zone } from "./env.js";
 import type { Deps } from "./index.js";
-import { refuse } from "./refusal.js";
+import { Refusal, refuse } from "./refusal.js";
 
 const API = "https://api.cloudflare.com/client/v4";
+
+/** Cloudflare's code for a record that is already there under that name. */
+const ALREADY_EXISTS = 81053;
 
 interface Envelope<T> {
   success: boolean;
@@ -27,8 +30,11 @@ async function api<T>(env: Env, deps: Deps, method: string, path: string, body?:
   const res = await deps.fetch(request);
   const answer = (await res.json().catch(() => undefined)) as Envelope<T> | undefined;
   if (!res.ok || answer?.success !== true) {
-    const why = answer?.errors?.map(e => e.message ?? String(e.code ?? "")).join(", ") ?? `HTTP ${res.status}`;
-    throw refuse(502, `the Cloudflare account API refused ${method} ${path}: ${why}`);
+    const errors = answer?.errors ?? [];
+    const why = errors.length > 0 ? errors.map(e => `${e.code ?? ""} ${e.message ?? ""}`.trim()).join(", ") : `HTTP ${res.status}`;
+    // The codes travel as themselves, not inside the sentence: a refusal whose words happen to quote a code is
+    // still whatever its own code says it is.
+    throw refuse(502, `the Cloudflare account API refused ${method} ${path}: ${why}`, errors.flatMap(e => (typeof e.code === "number" ? [e.code] : [])));
   }
   return answer.result;
 }
@@ -58,14 +64,25 @@ export async function deleteTunnel(env: Env, deps: Deps, tunnelId: string): Prom
   await api(env, deps, "DELETE", `/accounts/${env.CLOUDFLARE_ACCOUNT_ID}/cfd_tunnel/${tunnelId}`);
 }
 
+/** What a CNAME under the zone must say for this tunnel. */
+const tunnelTarget = (tunnelId: string): string => `${tunnelId}.cfargotunnel.com`;
+
+/** The name is only ever one this relay derived from a host id, so a record already standing under it is this
+ * relay's own from a run that did not finish: it is adopted when it already points at this tunnel and pointed at
+ * this one when it does not. Without this a single 81053 leaves a box with no tunnel token for good. */
 export async function createCname(env: Env, deps: Deps, zone: Zone, hostname: string, tunnelId: string): Promise<void> {
-  await api(env, deps, "POST", `/zones/${zone.zoneId}/dns_records`, {
-    type: "CNAME",
-    name: hostname,
-    content: `${tunnelId}.cfargotunnel.com`,
-    proxied: true,
-    comment: "wsp relay",
-  });
+  const record = { type: "CNAME", name: hostname, content: tunnelTarget(tunnelId), proxied: true, comment: "wsp relay" };
+  try {
+    await api(env, deps, "POST", `/zones/${zone.zoneId}/dns_records`, record);
+    return;
+  } catch (e) {
+    if (!(e instanceof Refusal) || !e.codes.includes(ALREADY_EXISTS)) throw e;
+  }
+  const standing = await api<{ id: string; content: string }[]>(env, deps, "GET", `/zones/${zone.zoneId}/dns_records?type=CNAME&name=${encodeURIComponent(hostname)}`);
+  const held = standing[0];
+  if (held === undefined) throw refuse(502, `${hostname} is taken on ${zone.zone} and the zone will not say by what`);
+  if (held.content === tunnelTarget(tunnelId)) return;
+  await api(env, deps, "PUT", `/zones/${zone.zoneId}/dns_records/${held.id}`, record);
 }
 
 export async function deleteCname(env: Env, deps: Deps, zone: Zone, hostname: string): Promise<void> {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { actionRefusal, computerOffline, screenCommandLine, screenCommandTyped, screenCommandsOf, goneRefusal, isBilling, isLocalWorkspace, kindWords, machineWord, needsRebuild, NOT_ON_THIS_KIND, OVER_SSH, reachShown, relayedRefusal, sendRefusal, servesReading, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, workspaceStateOf, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
+import { actionRefusal, agentsKindRefusal, agentsMayDrive, computerOffline, importDest, screenCommandLine, screenCommandTyped, screenCommandsOf, goneRefusal, isBilling, isLocalWorkspace, kindWords, machineWord, needsRebuild, NOT_ON_THIS_KIND, OVER_SSH, reachShown, relayedRefusal, sendRefusal, servesReading, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, workspaceStateOf, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
 
 describe("workspaceState", () => {
   it("phase alone: running, pausing, napping and waking each have one word", () => {
@@ -164,27 +164,37 @@ describe("what a workspace's kind changes about its words", () => {
   });
 
   it("a machine wsp drives has a state, a bill and an image; this computer has none of the three and its row reads its own size", () => {
-    expect(kindWords("cloud")).toEqual({ machine: null, cpu: "vCPU", driven: true, daemon: true, metrics: true, processes: true, imports: "copies" });
+    expect(kindWords("cloud")).toEqual({ machine: null, cpu: "vCPU", driven: true, daemon: true, metrics: true, processes: true, imports: "copies", importsAt: "same path", agents: true });
     // This computer serves a daemon and reads both its own load and its own processes off its host. A folder is
     // already on this computer, so an import registers its path and copies nothing. Its row's second line is its
     // cores and memory in the size line a fork's row reads, in its own word for a cpu, since its cores are not virtual.
-    expect(kindWords("local")).toEqual({ machine: null, cpu: "cores", driven: false, daemon: true, metrics: true, processes: true, imports: "registers" });
-    // A machine over ssh is the person's own too: wsp neither forks it, pauses it, resizes it nor pays for it, and
-    // it serves no daemon at all, so a row for one says what the machine is rather than that its daemon is missing.
-    // Its cpus are cores like this computer's, though its words win over any size today. Nothing lands a folder on
-    // it yet, so a drop tile and the import verb have no road to it.
-    expect(kindWords("ssh")).toEqual({ machine: OVER_SSH, cpu: "cores", driven: false, daemon: false, metrics: false, processes: false, imports: null });
+    expect(kindWords("local")).toEqual({ machine: null, cpu: "cores", driven: false, daemon: true, metrics: true, processes: true, imports: "registers", importsAt: "same path", agents: false });
+    // A machine over ssh is the person's own too: wsp neither forks it, pauses it, resizes it nor pays for it. It
+    // carries the same daemon a fork does, put there under the person's own login, so it serves the panes, reads
+    // its own load off its own /proc and lists its own processes, and a folder is copied onto it the way one is
+    // copied onto a fork. Its cpus are cores like this computer's, though its words win over any size today.
+    expect(kindWords("ssh")).toEqual({ machine: OVER_SSH, cpu: "cores", driven: false, daemon: true, metrics: true, processes: true, imports: "copies", importsAt: "under home", agents: false });
+    // Only the machines wsp forks run agents that could drive this host: this computer answers no request relayed
+    // from a machine, and a machine somebody already owns is handed no wsp to drive one with.
+    expect(agentsMayDrive("cloud")).toBe(true);
+    expect(agentsMayDrive("local")).toBe(false);
+    expect(agentsMayDrive("ssh")).toBe(false);
+    expect(agentsKindRefusal("local")).toContain("cannot drive this host");
+    // A machine wsp made carries the path the folder has here; a machine somebody owns takes it into their own
+    // home, since a path from this computer is neither theirs to write nor theirs to find.
+    expect(importDest("/Users/dev/spoo", { kind: "cloud", home: "/root" })).toBe("/Users/dev/spoo");
+    expect(importDest("/Users/dev/spoo", { kind: "local", home: "/Users/dev" })).toBe("/Users/dev/spoo");
+    expect(importDest("/Users/dev/spoo/", { kind: "ssh", home: "/home/maya" })).toBe("/home/maya/spoo");
+    expect(importDest("/Users/dev/spoo", { kind: "ssh", home: undefined })).toBe("/Users/dev/spoo");
   });
 
   it("the two readings a pane waits on are the table's to answer, so nothing sits at pending for a stream that never comes", () => {
-    // This computer reads its own load and its own processes, where a machine over ssh reads neither yet: the panes
-    // print the words instead of waiting.
-    expect(servesReading("local", "metrics")).toBe(true);
-    expect(servesReading("local", "processes")).toBe(true);
-    expect(servesReading("cloud", "metrics")).toBe(true);
-    expect(servesReading("cloud", "processes")).toBe(true);
-    expect(servesReading("ssh", "metrics")).toBe(false);
-    expect(servesReading("ssh", "processes")).toBe(false);
+    // Every kind reads both today: this computer off its own host, a fork and a machine over ssh off that
+    // machine's own /proc through the daemon on it. The words stay so the next kind that reads neither says so.
+    for (const kind of ["local", "cloud", "ssh"] as const) {
+      expect(servesReading(kind, "metrics")).toBe(true);
+      expect(servesReading(kind, "processes")).toBe(true);
+    }
     expect(NOT_ON_THIS_KIND).toBe("not on this kind");
   });
 

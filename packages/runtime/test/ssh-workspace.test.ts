@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import { SSH_READ_SCRIPT, parseSshMachineId } from "@wsp/engine";
-import { alreadyRecorded, machineWord, noMachineHomeLine, noSshImportLine, OVER_SSH, relayedRecordRefusal, relayedRefusal, sshHostKeyNotice, TURN_TOKEN_ENV, undrivenRefusal, type AdapterEvent, type TurnResult } from "@wsp/protocol";
+import { alreadyRecorded, machineWord, noMachineHomeLine, noSshDaemonLine, OVER_SSH, relayedRecordRefusal, relayedRefusal, sshHostKeyNotice, TURN_TOKEN_ENV, undrivenRefusal, type AdapterEvent, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterContext, type HarnessAdapterFactory, type ProjectImportOptions, type Runtime, type SshWiring } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { fakeSsh } from "./fake-ssh.js";
@@ -46,8 +46,6 @@ describe("ssh workspace", () => {
     expect(ws.phase).toBe("running");
     // The home the machine answered with rides the view, so a client shortens its folders as that login's shell would.
     expect(ws.home).toBe("/home/dev");
-    // Nothing lands a folder on a machine wsp only reaches yet; the kind's import road says so before anything is read.
-    await expect(rt.projects.import({ workspaceId: ws.id, source: "/Users/dev/spoo", dest: "/home/dev/spoo", bundler: {} as ProjectImportOptions["bundler"] })).rejects.toThrow(noSshImportLine("box"));
     // The size on the row is what the machine answered with, not a default: nothing here bills, so nothing offers one.
     expect((await rt.status.list()).find(r => r.id === ws.id)?.size).toEqual({ cpu: 8, memMb: 16_000 });
     // The record's machine id is the dial itself, so a later host process reaches the same machine from it alone.
@@ -210,8 +208,8 @@ describe("ssh workspace", () => {
     await expect(rt.workspaces.snapshot(ws.id)).rejects.toThrow(cannot("be snapshotted"));
     // A machine wsp does not run is running while the person keeps it on: the wake every thread road sends is a no-op.
     expect((await rt.workspaces.wake(ws.id)).phase).toBe("running");
-    // Its terminal, files and ports have no road yet, and the refusal says which machine and why.
-    await expect(rt.workspaces.daemonReach(ws.id)).rejects.toThrow("box is reached over ssh, which carries no daemon yet");
+    // This host wires no deploy, so nothing put a daemon on the machine and the panes say which verb would.
+    await expect(rt.workspaces.daemonReach(ws.id)).rejects.toThrow(noSshDaemonLine("box"));
   });
 
   it("a machine is a machine: a request relayed from one drives an ssh workspace and sees it in the lists", async () => {

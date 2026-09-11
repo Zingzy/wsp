@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, describe, expect, it } from "vitest";
 import { readToken } from "../src/tokens.js";
-import { RELAY_ORIGIN, relayHarness, signIn, type RelayHarness } from "./relay.js";
+import { RELAY_ORIGIN, firstCookie, relayHarness, signIn, type RelayHarness } from "./relay.js";
 
 let relay: RelayHarness | undefined;
 
@@ -51,12 +51,16 @@ describe("the device code flow", () => {
     expect(to.searchParams.get("redirect_uri")).toBe(`${RELAY_ORIGIN}/link/callback`);
     expect(to.searchParams.get("state")).not.toBe("");
 
+    // The redirect set a cookie this browser sends back; the state alone is not enough.
+    const nonce = firstCookie(sent);
+    expect(nonce).toContain("__Host-wsp_relay_sign_in=");
     relay.answer("POST https://github.com/login/oauth/access_token", { access_token: "gho_fake", token_type: "bearer" });
     relay.answer("GET https://api.github.com/user", { id: 4242, login: "maya" });
-    const back = await relay.fetch(`/link/callback?code=gh_code&state=${encodeURIComponent(to.searchParams.get("state") ?? "")}`);
+    const back = await relay.fetch(`/link/callback?code=gh_code&state=${encodeURIComponent(to.searchParams.get("state") ?? "")}`, { headers: { cookie: nonce } });
     expect(back.status).toBe(302);
     expect(back.headers.get("location")).toBe(`/link/verify?code=${code}`);
-    const cookie = back.headers.get("set-cookie") ?? "";
+    const cookie = (back.headers.getSetCookie?.() ?? []).join(" ");
+    expect(cookie).toContain("__Host-wsp_relay_session=");
     expect(cookie).toContain("HttpOnly");
     expect(cookie).toContain("Secure");
     expect(cookie).toContain("SameSite=Lax");
@@ -72,6 +76,24 @@ describe("the device code flow", () => {
     const res = await relay.fetch("/link/callback?code=gh_code&state=made.up");
     expect(res.status).toBe(400);
     expect(relay.calls).toEqual([]);
+  });
+
+  it("refuses a callback in a browser that did not start the sign-in", async () => {
+    relay = await relayHarness();
+    const { code } = await started("host", "box");
+    const sent = await relay.fetch(`/link/verify?code=${code}`);
+    const state = new URL(sent.headers.get("location") ?? "").searchParams.get("state") ?? "";
+
+    // The victim's browser: it has the attacker's callback URL and none of the attacker's cookies.
+    const stolen = await relay.fetch(`/link/callback?code=gh_code&state=${encodeURIComponent(state)}`);
+    expect(stolen.status).toBe(400);
+
+    // And a browser carrying somebody else's nonce is the same refusal.
+    const other = await relay.fetch(`/link/verify?code=${code}`);
+    const wrong = await relay.fetch(`/link/callback?code=gh_code&state=${encodeURIComponent(state)}`, { headers: { cookie: firstCookie(other) } });
+    expect(wrong.status).toBe(400);
+    expect(relay.calls).toEqual([]);
+    expect(await relay.db.prepare("SELECT * FROM accounts").first()).toBe(null);
   });
 
   it("names the host and the account on the page, and approves it onto that account", async () => {
@@ -129,6 +151,38 @@ describe("the device code flow", () => {
     expect((await relay.fetch("/link/approve", form)).status).toBe(200);
     expect((await relay.fetch("/link/approve", form)).status).toBe(409);
     expect((await relay.db.prepare("SELECT COUNT(*) AS n FROM hosts").first()) as Record<string, number>).toMatchObject({ n: 1 });
+  });
+
+  it("sweeps the codes nobody came back for, and the host an approval left behind", async () => {
+    relay = await relayHarness();
+    for (const name of ["one", "two", "three"]) await started("host", name);
+    const approved = await started("host", "four");
+    const cookie = await signIn(relay, "maya", "4242", approved.code);
+    const page = await relay.fetch(`/link/verify?code=${approved.code}`, { headers: { cookie } });
+    const stamp = /name="stamp" value="([^"]+)"/.exec(await page.text())?.[1] ?? "";
+    await relay.fetch("/link/approve", { method: "POST", headers: { cookie, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ code: approved.code, stamp }).toString() });
+    expect((await relay.db.prepare("SELECT COUNT(*) AS n FROM link_codes").first()) as Record<string, number>).toMatchObject({ n: 4 });
+    expect((await relay.db.prepare("SELECT COUNT(*) AS n FROM hosts").first()) as Record<string, number>).toMatchObject({ n: 1 });
+
+    relay.tick(16 * 60_000);
+    await started("host", "five");
+    // Only the fresh one is left, and the host nobody ever collected a token for went with its code.
+    expect((await relay.db.prepare("SELECT COUNT(*) AS n FROM link_codes").first()) as Record<string, number>).toMatchObject({ n: 1 });
+    expect((await relay.db.prepare("SELECT COUNT(*) AS n FROM hosts").first()) as Record<string, number>).toMatchObject({ n: 0 });
+  });
+
+  it("refuses to hand over a token for an approval nobody came back for in time", async () => {
+    relay = await relayHarness();
+    const { code, pollToken } = await started("host", "box");
+    const cookie = await signIn(relay, "maya", "4242", code);
+    const page = await relay.fetch(`/link/verify?code=${code}`, { headers: { cookie } });
+    const stamp = /name="stamp" value="([^"]+)"/.exec(await page.text())?.[1] ?? "";
+    await relay.fetch("/link/approve", { method: "POST", headers: { cookie, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ code, stamp }).toString() });
+
+    relay.tick(3 * 24 * 60 * 60_000);
+    expect(await (await poll(pollToken)).json()).toEqual({ state: "expired" });
+    expect(await relay.db.prepare("SELECT * FROM link_codes WHERE code = ?").bind(code).first()).toBe(null);
+    expect((await relay.db.prepare("SELECT COUNT(*) AS n FROM hosts").first()) as Record<string, number>).toMatchObject({ n: 0 });
   });
 
   it("says expired once the code ran out, and keeps no row for it", async () => {
@@ -189,6 +243,32 @@ describe("the device code flow", () => {
     const stamp = /name="stamp" value="([^"]+)"/.exec(await page.text())?.[1] ?? "";
     const ok = await relay.fetch("/link/approve", { method: "POST", headers: { cookie: sam, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ code: theirs.code, stamp }).toString() });
     expect(ok.status).toBe(200);
+  });
+
+  it("hands one token out when two polls race on the same approved code", async () => {
+    relay = await relayHarness();
+    const { code, pollToken } = await started("client", "the Mac");
+    const cookie = await signIn(relay, "maya", "4242", code);
+    const page = await relay.fetch(`/link/verify?code=${code}`, { headers: { cookie } });
+    const stamp = /name="stamp" value="([^"]+)"/.exec(await page.text())?.[1] ?? "";
+    await relay.fetch("/link/approve", { method: "POST", headers: { cookie, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ code, stamp }).toString() });
+
+    const [one, two] = await Promise.all([poll(pollToken), poll(pollToken)]);
+    expect([one.status, two.status].sort()).toEqual([200, 404]);
+    expect((await relay.db.prepare("SELECT COUNT(*) AS n FROM clients").first()) as Record<string, number>).toMatchObject({ n: 1 });
+  });
+
+  it("follows a person who renamed themselves on GitHub", async () => {
+    relay = await relayHarness();
+    const first = await started("host", "box");
+    await signIn(relay, "maya", "4242", first.code);
+    const second = await started("host", "attic");
+    const cookie = await signIn(relay, "maya-elsewhere", "4242", second.code);
+
+    expect((await relay.db.prepare("SELECT COUNT(*) AS n FROM accounts").first()) as Record<string, number>).toMatchObject({ n: 1 });
+    expect(((await relay.db.prepare("SELECT login FROM accounts").first()) as Record<string, string>)["login"]).toBe("maya-elsewhere");
+    const page = await relay.fetch(`/link/verify?code=${second.code}`, { headers: { cookie } });
+    expect(await page.text()).toContain("maya-elsewhere");
   });
 
   it("gives a client a token bound to the account and no host of its own", async () => {

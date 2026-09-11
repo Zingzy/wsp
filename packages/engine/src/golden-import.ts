@@ -760,9 +760,12 @@ export function rowRoad(e: RecipeEntry, brew: BrewTable): PlannedRow | undefined
   const release = releaseFor(e, brew);
   if (release !== undefined) return { road: releaseRoad(release), bin: release.name };
   if (e.id.startsWith(CATALOG_PREFIX)) return undefined;
-  const manager = (["brew", ...MANAGER_ORDER] as const).find(m => e.id.startsWith(toolRowPrefix(m)));
-  if (manager === undefined) return undefined;
-  const road = ROAD_MODULES[manager].fromRow!({ name: pkg, ...(e.version !== undefined ? { version: e.version } : {}), paths: e.paths, label: e.label });
+  // The manager the row's id names, and the road its own module reads off such a row; a manager whose module reads
+  // none (apt, which every machine has already and no row of its own brings) leaves the row to the hand that added it.
+  const manager = ROADS.find(m => e.id.startsWith(toolRowPrefix(m)));
+  const fromRow = manager === undefined ? undefined : ROAD_MODULES[manager].fromRow;
+  if (fromRow === undefined) return undefined;
+  const road = fromRow({ name: pkg, ...(e.version !== undefined ? { version: e.version } : {}), paths: e.paths, label: e.label });
   const bin = roadModule(road).bin?.(road);
   return { road, ...(bin !== undefined ? { bin } : {}) };
 }

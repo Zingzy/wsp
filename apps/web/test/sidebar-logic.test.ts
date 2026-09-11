@@ -12,6 +12,7 @@ import {
   isThreadWorking,
   resolveAdjacentThreadId,
   searchSidebarThreadsByTitle,
+  nestSpawnedThreads,
   sidebarThreadOrder,
   sortSettledThreadsForSidebar,
   sortThreadsForSidebar,
@@ -293,22 +294,23 @@ describe("workspace row labels", () => {
     expect(spaceHeaderLines({ project: driven("unsupported"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).not.toContain("no daemon on this machine");
     expect(daemonGoneLine("unsupported", kindWords("cloud"))).toBeUndefined();
     expect(daemonGoneLine("unsupported", kindWords("local"))).toBe("no daemon on this machine");
-    // A kind whose machines serve no daemon has none to miss, so neither line reaches its row.
-    expect(daemonGoneLine("unsupported", kindWords("ssh"))).toBeUndefined();
-    expect(daemonGoneLine("no-daemon", kindWords("ssh"))).toBeUndefined();
+    // A machine over ssh carries one under the person's own login, so a row saying there is none is a fact about
+    // that machine, the way it is on this computer.
+    expect(daemonGoneLine("unsupported", kindWords("ssh"))).toBe("no daemon on this machine");
   });
 
-  it("a machine over ssh serves no daemon at all, so its rows say what the machine is and that it is free rather than that a daemon is missing", () => {
+  it("a machine over ssh says what the machine is and that it is free, and says when its daemon is missing", () => {
     const over = (reach: ReachState) => project({ reach: { state: reach } }, { kind: "ssh" });
     const line = (reach: ReachState) => workspaceMetaLine({ project: over(reach), cost: tick(0.29), outOfMemory: undefined, nowMs: now });
-    // unsupported is this kind's steady state, not a daemon that went away.
-    expect(line("unsupported")).toBe(FREE_WORD);
+    // wsp neither forks nor bills this machine, so no rate and no spend reach its row whatever its daemon says.
     expect(line("reachable")).toBe(FREE_WORD);
     expect(machineLine(over("unsupported"))).toBe(OVER_SSH);
-    // The Spaces header reads the same rule, and what the runtime is doing still leads on both surfaces.
-    expect(spaceHeaderLines({ project: over("unsupported"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toEqual([OVER_SSH, FREE_WORD]);
+    // A daemon is put on it under the person's own login, so one missing is a fact the row carries, as on this
+    // computer; what the runtime is doing about it still leads on both surfaces.
+    expect(line("unsupported")).toBe("no daemon on this machine");
+    expect(spaceHeaderLines({ project: over("reachable"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toEqual([OVER_SSH, FREE_WORD]);
     expect(workspaceMetaLine({ project: project({ reach: { state: "unsupported" }, daemonNote: "updating the helper" }, { kind: "ssh" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
-    // This computer keeps the note: its host wires a daemon, so one missing is a fact worth the line.
+    // This computer reads the same rule: its host wires a daemon, so one missing is a fact worth the line.
     expect(workspaceMetaLine({ project: project({ reach: { state: "unsupported" } }, { kind: "local" }), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toBe("no daemon on this machine");
   });
 
@@ -374,6 +376,26 @@ describe("what a space walks", () => {
     expect(topSidebarThread(threads)?.id).toBe("working-new");
     expect(sidebarThreadOrder([])).toEqual([]);
     expect(topSidebarThread([])).toBeNull();
+  });
+
+  it("draws a thread an agent spawned under the thread that spawned it, in the order it holds otherwise", () => {
+    const spawned = (id: string, startedAt: string, parentThreadId?: string) => ({ ...row(id, "running", startedAt), ...(parentThreadId !== undefined ? { parentThreadId } : {}) });
+    const threads = [
+      spawned("lead", "2026-09-01T00:01:00Z"),
+      spawned("other", "2026-09-01T00:09:00Z"),
+      spawned("builder-b", "2026-09-01T00:03:00Z", "lead"),
+      spawned("builder-a", "2026-09-01T00:04:00Z", "lead"),
+      spawned("deeper", "2026-09-01T00:05:00Z", "builder-a"),
+    ];
+    // The sort puts the newest first; the tree then pulls each thread's own under it, keeping that order inside.
+    expect(sidebarThreadOrder(threads).map(t => t.id)).toEqual(["other", "lead", "builder-a", "deeper", "builder-b"]);
+    // A parent that is not in this list leaves the row where the sort put it rather than dropping it.
+    expect(nestSpawnedThreads([spawned("orphan", "2026-09-01T00:01:00Z", "gone")]).map(t => t.id)).toEqual(["orphan"]);
+    // A row naming itself as its own parent is drawn once, not forever, and two rows naming each other are both
+    // drawn: a thread the sidebar leaves out is a thread nobody can reach.
+    expect(nestSpawnedThreads([spawned("loop", "2026-09-01T00:01:00Z", "loop")]).map(t => t.id)).toEqual(["loop"]);
+    const pair = [spawned("a", "2026-09-01T00:01:00Z", "b"), spawned("b", "2026-09-01T00:02:00Z", "a")];
+    expect(nestSpawnedThreads(pair).map(t => t.id).sort()).toEqual(["a", "b"]);
   });
 
   it("shows the selected workspace, and the first in the sidebar's order while what is selected is not one", () => {

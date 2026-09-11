@@ -4,7 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ExecResult, Machine } from "../src/machine.js";
-import { SSH_CONTROL_PERSIST_S, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, makeSshControlDir, sshControlDir, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyOf, sshArgs, sshIdentity, sshMachineId, sshMachineName, sshReachOf, type SshReach, type SshTransport } from "../src/ssh-backend.js";
+import { SSH_CONTROL_PERSIST_S, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, makeSshControlDir, sshControlDir, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyOf, plainPath, DEFAULT_REMOTE_PATH, sshArgs, sshIdentity, sshMachineId, sshMachineName, sshReachOf, type SshReach, type SshTransport } from "../src/ssh-backend.js";
 
 /** An ssh client that never leaves this computer: it answers the read every adopt makes, records every script it was
  * asked to carry, and lets a case script the answer for anything else. */
@@ -37,6 +37,7 @@ describe("ssh backend", () => {
       containers: false,
       callbackRelay: false,
       snapshotListing: false,
+      firstLifeSnapshots: false,
       templates: false,
       kept: true,
       sizes: [],
@@ -86,6 +87,22 @@ describe("ssh backend", () => {
     expect(sshReachOf(machine)).toEqual(REACH);
     // The record keeps the id alone, and a later host process reaches the same machine from it.
     expect(sshReachOf(await backend.get(machine.id))).toEqual(REACH);
+  });
+
+  it("holds each folder of the machine's own PATH to the rule the home is held to, and falls back with nothing left", () => {
+    // The PATH is the last thing the machine answers with that is written rather than run: a turn exports it and
+    // the daemon's unit states it, where systemd splits an Environment= line on whitespace and reads a quote as
+    // quoting. A folder carrying either is dropped at this door, so nothing downstream escapes it twenty times.
+    expect(plainPath("/home/dev/.local/bin:/usr/bin")).toBe("/home/dev/.local/bin:/usr/bin");
+    expect(plainPath('/usr/bin:/opt/a"b/bin:/bin')).toBe("/usr/bin:/bin");
+    expect(plainPath("/usr/bin:/opt/my tools/bin")).toBe("/usr/bin");
+    expect(plainPath("/usr/bin:/opt/$(id)/bin:/opt/`id`/bin")).toBe("/usr/bin");
+    // An empty entry is the working directory, which is a folder nobody meant to put on a PATH.
+    expect(plainPath("/usr/bin::/bin")).toBe("/usr/bin:/bin");
+    expect(plainPath("./bin:/bin")).toBe("/bin");
+    // A machine that answers with nothing usable leaves a harness missing rather than every command missing.
+    for (const answered of [undefined, "", "relative:also/relative", '"'])
+      expect(plainPath(answered), JSON.stringify(answered)).toBe(DEFAULT_REMOTE_PATH);
   });
 
   it("a machine that does not answer the dial is refused with the client's own words, not its debug log", async () => {

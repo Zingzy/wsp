@@ -28,18 +28,26 @@ button { background: #e4e4e7; color: #09090b; border: 0; border-radius: 6px; fon
   return new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
 }
 
-/** What the person reads before they let a box onto their account. */
+/** What the person reads before they let a box, or one of their own computers, onto their account. The two say
+ * different things because they grant different things: a box is one machine on the list, and a person's computer
+ * holds the token that reads and empties that list. */
 export function approvePage(name: string, login: string, code: string, stamp: string, kind: "host" | "client"): Response {
-  const what = kind === "host" ? "computer" : "client";
+  const title = kind === "host" ? "Add this computer to wsp" : "Sign this computer in";
+  const heading = kind === "host" ? `Add <b>${escape(name)}</b> to your wsp relay?` : `Sign <b>${escape(name)}</b> in to your wsp relay?`;
+  const what =
+    kind === "host"
+      ? `<p>The relay learns where this computer answers and nothing else: it never holds a pairing code, a device token or anything your agents say.</p>`
+      : `<p>This computer will hold a token that can <b>list every box on this account and take any of them off it</b>, tunnel and hostname included. It cannot open a box: that still needs a pairing code from the box itself.</p>
+<p>The sign-in stands for 30 days, and you can take it away sooner with <b>wsp relay clients revoke</b>.</p>`;
   return page(
-    "Add this computer to wsp",
-    `<h1>Add <b>${escape(name)}</b> to your wsp relay?</h1>
-<p>Signed in as <b>${escape(login)}</b>. The ${what} asked for this with the code <b>${escape(code)}</b>.</p>
-<p>The relay learns where this ${what} answers and nothing else: it never holds a pairing code, a device token or anything your agents say.</p>
+    title,
+    `<h1>${heading}</h1>
+<p>Signed in as <b>${escape(login)}</b>. It asked for this with the code <b>${escape(code)}</b>.</p>
+${what}
 <form method="post" action="/link/approve">
 <input type="hidden" name="code" value="${escape(code)}">
 <input type="hidden" name="stamp" value="${escape(stamp)}">
-<button type="submit">Add ${escape(name)}</button>
+<button type="submit">${kind === "host" ? `Add ${escape(name)}` : `Sign ${escape(name)} in`}</button>
 </form>`,
   );
 }

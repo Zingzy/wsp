@@ -4,6 +4,7 @@ import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { serve, servingHost, type CliIO, type RunningWsp, type UrlOpener } from "@wsp/host";
+import { hereWord } from "@wsp/protocol";
 import type { Runtime } from "@wsp/runtime";
 
 export type PortState = "free" | "wsp" | "other";
@@ -13,6 +14,14 @@ export interface HostSession {
   port: number;
   /** True when this process started the host and must stop it on quit. */
   owned: boolean;
+  /** True for a host on another computer, whose page carries no token and whose device token the shell holds. */
+  remote: boolean;
+  /** What the window and the menu call this host. */
+  label: string;
+  /** The hosts file's name for a host somewhere else; the app's own host has none. */
+  alias?: string;
+  /** The token this computer was paired with, handed to the page over the bridge and never written into it. */
+  deviceToken?: string;
   close(): Promise<void>;
 }
 
@@ -79,7 +88,7 @@ export async function probeHost(port: number): Promise<PortState> {
 }
 
 function attached(port: number): HostSession {
-  return { url: `http://127.0.0.1:${port}`, port, owned: false, close: async () => {} };
+  return { url: `http://127.0.0.1:${port}`, port, owned: false, remote: false, label: hereWord(process.platform === "darwin"), close: async () => {} };
 }
 
 /** The home WSP_HOME names, or nothing: unset and empty are one answer, and every road that reads the variable
@@ -138,5 +147,5 @@ export async function openHost(opts: OpenHostOptions): Promise<HostSession> {
     ...(opts.openUrl !== undefined ? { openUrl: opts.openUrl } : {}),
     ...(opts.running !== undefined ? { running: opts.running } : {}),
   });
-  return { url: `http://127.0.0.1:${handle.port}`, port: handle.port, owned: true, close: () => handle.close() };
+  return { url: `http://127.0.0.1:${handle.port}`, port: handle.port, owned: true, remote: false, label: hereWord(process.platform === "darwin"), close: () => handle.close() };
 }

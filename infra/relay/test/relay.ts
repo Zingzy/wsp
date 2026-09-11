@@ -7,9 +7,12 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { D1Database } from "@cloudflare/workers-types";
+// The miniflare pin in package.json is the exact version wrangler bundles (4.130.0 depends on 5.20260908.0-alpha),
+// so the D1 these tests run against is the one wrangler dev and wrangler deploy build with, not a second copy.
 import { Miniflare } from "miniflare";
 import type { Env } from "../src/env.js";
 import { handle, type Deps } from "../src/index.js";
+import { SESSION_COOKIE } from "../src/tokens.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const MIGRATIONS_DIR = join(here, "..", "migrations");
@@ -166,9 +169,17 @@ export async function linkedVia(
 export async function signIn(relay: RelayHarness, login: string, githubId: string, code: string): Promise<string> {
   const start = await relay.fetch(`/link/verify?code=${code}`);
   const state = new URL(start.headers.get("location") ?? "").searchParams.get("state") ?? "";
+  // The sign-in is bound to this browser, so the callback carries back the nonce the redirect set.
+  const nonce = firstCookie(start);
   relay.answer("POST https://github.com/login/oauth/access_token", { access_token: "gho_fake", token_type: "bearer" });
   relay.answer("GET https://api.github.com/user", { id: githubId, login });
-  const back = await relay.fetch(`/link/callback?code=gh_code&state=${encodeURIComponent(state)}`);
-  const cookie = back.headers.get("set-cookie") ?? "";
-  return cookie.split(";")[0] ?? "";
+  const back = await relay.fetch(`/link/callback?code=gh_code&state=${encodeURIComponent(state)}`, { headers: { cookie: nonce } });
+  return firstCookie(back, SESSION_COOKIE);
+}
+
+/** The first cookie a redirect set, as a browser would send it back. */
+export function firstCookie(res: Response, named?: string): string {
+  const all = res.headers.getSetCookie?.() ?? [res.headers.get("set-cookie") ?? ""];
+  const wanted = named === undefined ? all[0] : all.find(line => line.startsWith(`${named}=`));
+  return (wanted ?? "").split(";")[0] ?? "";
 }

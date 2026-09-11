@@ -8,9 +8,9 @@
 // home a second copy cannot grow beside.
 
 import { z } from "zod";
-import { LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
+import { HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
-import { openingTitle, titleLine } from "./format.js";
+import { openingTitle, threadWord, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, SIGN_IN_CODE_MAX } from "./init-job.js";
 import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
@@ -165,6 +165,10 @@ export const Capabilities = z.object({
   /** Every size a create may ask for; a create that names another is refused with this list. A create that names
    * none takes the golden's size, which need not be on it. */
   sizes: z.array(MachineSizeOffer),
+  /** Only a machine that was never resumed may be snapshotted: the provider refuses one taken after a resume
+   * (Solari answers 502 deterministically, and same-host and cross-host are invisible from outside). False where a
+   * snapshot is a copy of the disk whatever the machine has done since it booted. */
+  firstLifeSnapshots: z.boolean(),
   /** The machine is the person's own, kept: its files, its sign-ins and its git checkouts outlive every turn, and
    * wsp neither made it nor throws it away. False on a fork wsp made, where a turn that wrecks the disk costs a
    * rebuild and nothing else. What a turn's access starts at reads this, not the workspace's kind. */
@@ -261,6 +265,56 @@ export type WorkspaceKind = z.infer<typeof WorkspaceKind>;
 export const WorkspaceOrigin = z.enum(["here", "relayed"]);
 export type WorkspaceOrigin = z.infer<typeof WorkspaceOrigin>;
 
+/** What a token scoped to one thread names: the thread whose turn holds it, the workspace that thread runs on, and
+ * the thread at the top of the tree that thread was spawned under, which is the thread itself when a person opened
+ * it. The host mints the scope; nothing a client says on the wire can make or widen one. */
+export const ThreadScope = z.object({
+  kind: z.literal("thread"),
+  threadId: z.string(),
+  workspaceId: z.string(),
+  rootThreadId: z.string(),
+});
+export type ThreadScope = z.infer<typeof ThreadScope>;
+
+/** Where a request reached the host from, as every verb takes it: the road alone, or the road with the thread a
+ * machine's turn sent it out of. A bare word is `here` or `relayed` and says nothing about who; the object is a
+ * socket the host authed on a thread scoped token, and the scope is the host's own reading of that token, never
+ * the client's. Read it through `roadOf` and `scopeOf` so no verb decides for itself what the shape means. */
+export type Caller = WorkspaceOrigin | { origin: WorkspaceOrigin; by: ThreadScope };
+
+/** Which road a caller came in by. */
+export const roadOf = (caller: Caller | undefined): WorkspaceOrigin | undefined => (typeof caller === "string" ? caller : caller?.origin);
+
+/** The thread a caller is, when it is one. */
+export const scopeOf = (caller: Caller | undefined): ThreadScope | undefined => (typeof caller === "string" ? undefined : caller?.by);
+
+/** What a workspace lets the agents inside it do to this host. Absent on the record means off: an agent that asks
+ * for a thread or a machine is refused, which is what every workspace made before this switch existed answers. */
+export const WorkspaceAgents = z.object({
+  /** Whether a turn on this workspace gets a token into the host at all. */
+  spawn: z.boolean(),
+  /** How many machines may stand at once under one root thread, counted off the records. */
+  maxMachines: z.number().int().min(0),
+  /** How deep the tree under a root thread may go: 1 is the root's own children and no further. */
+  maxDepth: z.number().int().min(1),
+});
+export type WorkspaceAgents = z.infer<typeof WorkspaceAgents>;
+
+/** What a workspace's switch reads as when nobody has set one: agents drive nothing. */
+export const AGENTS_OFF: WorkspaceAgents = { spawn: false, maxMachines: 0, maxDepth: 1 };
+
+/** What a workspace's switch takes when a person turns it on and names no numbers. Three machines is what one root
+ * thread's builders need and few enough that a runaway is a bill a person notices, and one level is the tree the
+ * app draws without indenting twice. */
+export const AGENTS_ON: WorkspaceAgents = { spawn: true, maxMachines: 3, maxDepth: 1 };
+
+/** The switch a patch leaves on the record, the one rule both roads that set one read: every key the patch does not
+ * name keeps what the record holds, so turning it off and on again does not throw the caps away, and a workspace
+ * that never had one takes the defaults for the caps nobody named. */
+export function agentsFrom(held: WorkspaceAgents | undefined, patch: Partial<WorkspaceAgents>): WorkspaceAgents {
+  return { ...(held ?? (patch.spawn === true ? AGENTS_ON : AGENTS_OFF)), ...patch };
+}
+
 export const WorkspaceView = z.object({
   id: z.string(),
   name: z.string(),
@@ -305,6 +359,13 @@ export const WorkspaceView = z.object({
    * words that also name the rebuild road. Persisted, unlike the wake's own status line, since the machine stays
    * unreachable until something replaces it; cleared by a wake that lands and by the rebuild. */
   wakeRefused: z.string().optional(),
+  /** What the agents on this workspace may ask of this host; absent is off, which every workspace reads as until a
+   * person turns it on. */
+  agents: WorkspaceAgents.optional(),
+  /** The thread that forked this workspace, and the thread at the top of that thread's tree; absent on every
+   * workspace a person made. The root is what the machine cap counts against. */
+  parentThreadId: z.string().optional(),
+  rootThreadId: z.string().optional(),
 });
 export type WorkspaceView = z.infer<typeof WorkspaceView>;
 
@@ -339,6 +400,7 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
 const WORKSPACE_OUT = {
   id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, projects: true, folder: true, home: true,
   claudeSessionId: true, gone: true, theme: true, glyph: true, daemonNote: true, vaultedAt: true, vaultRefused: true, wakeRefused: true,
+  agents: true, parentThreadId: true, rootThreadId: true,
 } as const;
 
 /** A workspace as every verb answers with it: the view without the display stream a desktop machine carries, which
@@ -388,6 +450,11 @@ export const SessionView = z.object({
   claudeSessionId: z.string().optional(),
   /** The thread this turn belongs to, as the runtime stamps its events; rows sharing one are one sidebar thread. */
   threadId: z.string().optional(),
+  /** The thread that opened this row's thread, when an agent inside another thread did; absent on every thread a
+   * person or the command line opened. rootThreadId is the top of that tree, which the machine cap counts against;
+   * a row carrying a parent always carries one. */
+  parentThreadId: z.string().optional(),
+  rootThreadId: z.string().optional(),
   /** The turn that opened this row's thread; a resumed turn keeps it, and its own prompt rides its session.start
    * event, so the title every client derives from a row never follows the latest send. */
   prompt: z.string().optional(),
@@ -434,6 +501,9 @@ export const ThreadView = z.object({
   /** The folder the latest turn's harness runs in, as SessionView.cwd; absent when no turn recorded one. */
   cwd: z.string().optional(),
   turns: z.number().int().positive(),
+  /** The opening turn's parent and root, so a listing draws the tree a root thread spawned without reading rows. */
+  parentThreadId: z.string().optional(),
+  rootThreadId: z.string().optional(),
 });
 export type ThreadView = z.infer<typeof ThreadView>;
 
@@ -467,6 +537,8 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.endedAt !== undefined ? { endedAt: latest.endedAt } : {}),
       ...(latest.cwd !== undefined ? { cwd: latest.cwd } : {}),
       turns: turns.length,
+      ...(first.parentThreadId !== undefined ? { parentThreadId: first.parentThreadId } : {}),
+      ...(first.rootThreadId !== undefined ? { rootThreadId: first.rootThreadId } : {}),
     };
   });
 }
@@ -850,6 +922,26 @@ export type SessionQueuedEvent = z.infer<typeof SessionQueuedEvent>;
  * and otherwise the person who ran it. */
 export const NOTIFY_ME = "me";
 
+/** The host a turn on a machine drives, off its own environment: the address the launch put there and the token
+ * beside it. Nothing unless both are there, since an address with no token opens nothing and a token with no
+ * address names no host. The pair is the lowest precedence road a wsp line takes, under every host on this
+ * computer's own hosts file. */
+export function hostFromEnv(env: Readonly<Record<string, string | undefined>>): { url: string; token: string } | undefined {
+  const url = env[HOST_URL_ENV]?.trim();
+  const token = env[HOST_TOKEN_ENV]?.trim();
+  return url === undefined || url === "" || token === undefined || token === "" ? undefined : { url, token };
+}
+
+/** Where a machine's daemon bundle is unpacked, and the wsp command that rides in it: one file, the whole bundled
+ * command, so a turn on any machine with a daemon can drive this host with no install of its own. Named here
+ * because the host stages the file and the runtime builds the launch that runs it, and neither may import the
+ * other's rule. */
+export const GUEST_DAEMON_DIR = "/root/wsp-daemon";
+/** The name the wsp MCP server has in every agent's config and in every launch that carries it, so an agent's
+ * config on this computer and the launch a turn on a machine gets name one server and not two. */
+export const MCP_SERVER_NAME = "wsp";
+export const GUEST_WSP_BIN = `${GUEST_DAEMON_DIR}/wsp/bin.js`;
+
 /** The token a client puts on its requests, off its own environment; nothing when it is not running inside a turn. */
 export function turnTokenOf(env: Readonly<Record<string, string | undefined>>): string | undefined {
   const token = env[TURN_TOKEN_ENV];
@@ -996,6 +1088,9 @@ export const WorkspaceLookEvent = z.object({
   theme: WorkspaceTheme.nullable(),
   glyph: WorkspaceGlyph.nullable(),
 });
+/** A person changed what the agents on a workspace may ask of this host. The whole switch travels, so a client
+ * never merges one key into what it holds; nothing about the machine changed. */
+export const WorkspaceAgentsEvent = z.object({ type: z.literal("workspace.agents"), workspaceId: z.string(), agents: WorkspaceAgents });
 export const WorkspaceDeletedEvent = z.object({ type: z.literal("workspace.deleted"), workspaceId: z.string() });
 /** The provider stopped knowing the machine: the workspace's phase is gone from here until a rebuild or a delete.
  * Sessions on it ended, the rate is 0, the idle window is dropped; reason carries the provider's words. */
@@ -1363,7 +1458,39 @@ export interface ContextMenuItem {
   shortcut?: string;
   accelerator?: string;
   destructive?: boolean;
+  /** A row that marks a state, drawn with a check when true; a row with no mark at all leaves this out. */
+  checked?: boolean;
 }
+
+// --- hosts the desktop window can move between --------------------------------
+
+/** How this computer reached a host somewhere else: by an address it pairs with, or by an ssh login it forwards. */
+export type HostRoad = "direct" | "ssh";
+
+/** One saved host as the desktop lists it: never the token. The label is what the person reads in the menu and the
+ * sidebar's foot; the alias is what wsp's command line names the same record by. */
+export interface HostListing {
+  alias: string;
+  label: string;
+  url: string;
+  road: HostRoad;
+}
+
+/** The hosts as the window shows them: the word for the app's own computer, which host the window is on (null for
+ * that computer), and every saved host. */
+export interface HostsView {
+  here: string;
+  current: string | null;
+  hosts: HostListing[];
+}
+
+/** What the connect sheet asks the shell for: an address with the code wsp pair printed there, or an ssh login the
+ * shell starts or finds a host behind and forwards. */
+export type HostConnectAsk = { road: "direct"; url: string; code: string } | { road: "ssh"; address: string; port?: number };
+
+/** How a host move or connect ended: done, or refused in the host's own words with the field the words are about, so
+ * the sheet can put them under it. */
+export type HostOutcome = { ok: true } | { ok: false; error: string; at: "url" | "code" | "address" };
 
 /** The class the desktop preload puts on the html element when the window has no title bar of its own: the app's
  * header row is the window's frame, the traffic lights sit in it and the sidebar shows the window's frosted glass. */
@@ -1410,6 +1537,19 @@ export interface DesktopBridge {
   /** A click on that notification, after the shell has raised its window: the page opens the build screen. Returns
    * the unsubscribe. */
   onNeedsYouOpen(handler: () => void): () => void;
+  /** The device token the shell holds for the host that served this page, when the window is on a host somewhere
+   * else; nothing on the app's own host, whose page carries its own token. The token never rides in the page. */
+  hostToken(): Promise<string | undefined>;
+  /** The saved hosts and which one the window is on. */
+  hosts(): Promise<HostsView>;
+  /** Puts the window on a saved host, or on the app's own computer for null. */
+  switchHost(alias: string | null): Promise<HostOutcome>;
+  /** Pairs with a host by one of the two roads and puts the window on it. */
+  connectHost(ask: HostConnectAsk): Promise<HostOutcome>;
+  /** Hands the host's token back and forgets the host; the window returns to the app's own computer if it was there. */
+  disconnectHost(alias: string): Promise<HostOutcome>;
+  /** The shell's own menu asked for the connect sheet. Returns the unsubscribe. */
+  onConnectHostOpen(handler: () => void): () => void;
 }
 
 // --- golden image (manifest, interactive builder, build stages) ---------------
@@ -1754,6 +1894,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   WorkspaceUpgradedEvent.extend(sequenced),
   WorkspaceRenamedEvent.extend(sequenced),
   WorkspaceLookEvent.extend(sequenced),
+  WorkspaceAgentsEvent.extend(sequenced),
   WorkspaceDeletedEvent.extend(sequenced),
   WorkspaceGoneEvent.extend(sequenced),
   WorkspaceStatusEvent.extend(sequenced),
@@ -2040,6 +2181,7 @@ const DAEMON_CONTENTS = [
   "f90fd16f8e5d15707cda18e58524da66fb6ed6b890632fff90d396792dc5604d",
   "9ebea6a49390fd5b1af911f413e77c3e46db091812b55b41515e881e93433292",
   "da0d618fd27965a77c8c15e389fea39c8f3ae691326af0212a8f1c62b9c8499f",
+  "cbfe733de05765b706c3ff4d08aa62ee188258771dd3b02011633716fad62a48",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -2056,7 +2198,9 @@ const DAEMON_CONTENTS = [
  * through a module per kind of machine, and answers a watch only once that module has read the machine, so a
  * pane is refused where it would otherwise wait for a stream that never comes. Version 10 keeps a DISPLAY the
  * caller names on a pty it opens, so a sign-in whose page must return to the machine can be handed a browser to
- * find there. */
+ * find there. Version 11 serves a machine reached over ssh, which reads the load and the processes of the machine
+ * it runs on the way a fork does; the same daemon under the person's own login there, with every path it keeps
+ * under their home. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the daemon's sources, the dependency
@@ -2156,6 +2300,10 @@ export const DeviceView = z.object({
   /** When this device last authed. Set by the redeem that minted it and moved by every later auth frame, never by
    * a JSON route reading the same token, so a listing says when the computer last dialled rather than last asked. */
   lastSeenAt: z.string(),
+  /** What this device may do, when it is not a computer of the person's: a token the host minted into one turn's
+   * environment, which drives only the tree that turn's thread is in. Absent is a paired computer, which drives
+   * everything this host holds. */
+  scope: ThreadScope.optional(),
 });
 export type DeviceView = z.infer<typeof DeviceView>;
 
@@ -2234,6 +2382,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
     memMb: z.number().optional(),
     envs: z.record(z.string()).optional(),
     labels: z.record(z.string()).optional(),
+    /** What the agents on the new workspace may ask of this host; absent is off, and a key left out takes the default. */
+    agents: WorkspaceAgents.partial().optional(),
     /** Auto-nap window for this workspace; absent takes the runtime default (20 min), null turns it off. */
     idleWindowMs: z.number().nullable().optional(),
   }),
@@ -2272,6 +2422,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * record alone changes: nothing on the machine is touched. */
   z.object({ id: reqId, op: z.literal("workspaces.look"), workspaceId: z.string() }).extend(WorkspaceLook.shape),
   z.object({ id: reqId, op: z.literal("workspaces.delete"), workspaceId: z.string() }),
+  /** Turns the workspace's agents switch on or off and names its caps. Every key left out keeps what the record
+   * holds, so the two flags a person gives on one line never clear the third. */
+  z.object({ id: reqId, op: z.literal("workspaces.agents"), workspaceId: z.string() }).extend(WorkspaceAgents.partial().shape),
   /** Drops a workspace whose machine the provider no longer has: the record, its transcripts and its sessions leave the
    * store, workspace.deleted follows, and nothing is asked of the provider. Refused with the reason (kind "conflict")
    * while the machine still exists: pause it or delete it at the provider first. */
@@ -2495,6 +2648,54 @@ const RuntimeOp = z.discriminatedUnion("op", [
  * a machine. It rides the envelope beside the id rather than each op, so a verb added later carries it without
  * saying so. Absent reads here, and today every client on this computer is here in practice. */
 export const RuntimeRequest = z.intersection(RuntimeOp, z.object({ origin: WorkspaceOrigin.optional() }));
+
+/** Every op this host answers, read off the table itself rather than written out beside it, so an op added later
+ * cannot be missing from the reading that decides which of them a thread may send. */
+export const RUNTIME_OPS: readonly string[] = RuntimeOp.options.map(o => o.shape.op.value);
+
+/** The ops a socket holding a thread's own token may send, and the whole of them: the door is shut and these are
+ * the openings, so an op added later reaches no thread until somebody puts it here on purpose. A thread opens
+ * threads and forks machines under its own root and reads the tree it is in; every reach into a workspace is
+ * refused again by the tree rule, and every act by the guard, so this list is the outer door and not the only one.
+ * What is deliberately not here: the golden and its snapshots, the person's keys and their init, their preferences,
+ * their folders, the provider's own capabilities, importing and exporting a folder, every road that hands out or
+ * takes away access to this host, and the two roads that move a running turn's access mode or answer a permission
+ * prompt, which are the person's guard on an agent and not an agent's to lift. */
+export const THREAD_OPS: readonly string[] = [
+  "auth",
+  "events.subscribe",
+  "status.list",
+  "status.subscribe",
+  "workspaces.create",
+  "workspaces.list",
+  "workspaces.get",
+  "workspaces.touch",
+  "workspaces.wake",
+  "workspaces.daemonReach",
+  "workspaces.exec",
+  "harnesses.list",
+  "sessions.start",
+  "sessions.list",
+  "sessions.history",
+  "sessions.interrupt",
+  "sessions.steer",
+  "sessions.rename",
+];
+
+/** The one sentence a thread's own token is refused an op with. It names the op rather than guessing why a caller
+ * wanted it: the reasons are on the acts, and this is the door saying the op is not a thread's at all. */
+export function threadOpRefusal(op: string, threadId: string): string {
+  return `${op} is not a thread's to ask for; the token this request came in on is thread ${threadWord(threadId)} on a machine, which opens threads and forks machines under its own root and reads that tree`;
+}
+
+/** The workspace an event is about, for the one reading every door that hides a workspace from a caller shares: the
+ * id on the event itself, else the id of the record or the status it carries. An event that names none is about
+ * this host rather than about any workspace, which is why a caller that may see only its own tree is sent none. */
+export function workspaceIdOf(event: unknown): string | undefined {
+  const e = event as { workspaceId?: unknown; workspace?: { id?: unknown }; status?: { id?: unknown }; forward?: { workspaceId?: unknown } };
+  for (const found of [e.workspaceId, e.workspace?.id, e.status?.id, e.forward?.workspaceId]) if (typeof found === "string") return found;
+  return undefined;
+}
 export type RuntimeRequest = z.infer<typeof RuntimeRequest>;
 
 /** What a workspaces.exec pushes to the socket that asked. exitCode is null when the command was ended without
@@ -2525,7 +2726,13 @@ export type RuntimeResponse = z.infer<typeof RuntimeResponse>;
  * None of these is an error reply: a stop button has nothing to recover from. */
 export const SessionInterruptOutcome = z.enum(["accepted", "not-running", "not-found"]);
 export type SessionInterruptOutcome = z.infer<typeof SessionInterruptOutcome>;
-export const SessionInterruptResult = z.object({ outcome: SessionInterruptOutcome });
+export const SessionInterruptResult = z.object({
+  outcome: SessionInterruptOutcome,
+  /** The threads under this one that were running and were stopped with it, by id: a root thread and the tree its
+   * agents spawned stop as one, since a lead left standing while its builders are cut is neither state. Absent
+   * where the thread spawned none that were running. */
+  under: z.array(z.string()).optional(),
+});
 export type SessionInterruptResult = z.infer<typeof SessionInterruptResult>;
 
 // --- session steer (what send-now on a queued row gets back) -------------------
@@ -2653,7 +2860,7 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
-export { actionRefusal, computerOffline, goneRefusal, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, type SendBlock, sendRefusal, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
+export { actionRefusal, agentsKindRefusal, agentsMayDrive, computerOffline, goneRefusal, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, type SendBlock, sendRefusal, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";
@@ -2702,12 +2909,12 @@ export {
   type Rgb,
   type ThemePreset,
 } from "./workspace-look.js";
-export { rootsPathIn, underProject } from "./project-path.js";
+export { rootsPathIn, sshDaemonPaths, underProject } from "./project-path.js";
 export * from "./projects.js";
-export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, registerRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
+export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importDest, importRequest, registerRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";
 export * from "./app-ports.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";
-export { LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
+export { HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
 export type { AdapterAttachOptions, AdapterEvent, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";

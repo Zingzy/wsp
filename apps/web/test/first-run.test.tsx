@@ -15,7 +15,7 @@ const manifest: GoldenManifest = {
 };
 const first: WorkspaceView = { id: "ws_first", name: "first", machineId: "m_fork", phase: "running", golden: "snap_golden-v1", createdAt: "t" };
 const local: WorkspaceView = { id: "ws_local", name: "thisbox", kind: "local", machineId: "local", phase: "running", golden: "", createdAt: "t" };
-const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, kept: false, sizes: [] };
+const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: false, kept: false, sizes: [] };
 
 function fakeApi(opts: { golden?: GoldenManifest; workspaces?: WorkspaceView[] }) {
   return {

@@ -8,8 +8,11 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { WS_PATH, usageRefusal } from "@wsp/protocol";
+import { WS_PATH, hostFromEnv, isUrl, usageRefusal, type HostRoad } from "@wsp/protocol";
 import { servingHost } from "./host-lock.js";
+
+/** The address predicate has one home in the protocol; the command line's callers read it from here. */
+export { isUrl };
 
 /** What this computer keeps about a host on another one: the address a person gave wsp connect, the device the host
  * minted for this computer and the token that names it. The token opens the host, so the file is the person's own. */
@@ -18,6 +21,19 @@ export interface HostRecord {
   deviceId: string;
   deviceToken: string;
   pairedAt: string;
+  /** What the desktop shows for this host; the alias stands in when a record from the command line carries none. */
+  label?: string;
+  /** How the desktop reached it; a record the command line wrote carries none and is read as an address. */
+  road?: HostRoad;
+  /** The ssh login the desktop forwards through, and the port the host answers on over there. */
+  ssh?: SshLogin;
+}
+
+/** Where the desktop logs in: the address as ssh takes it and the port when it is not ssh's own. The port the host
+ * answers on over there is not kept: the box's lock says it, and the road reads the lock on every connection. */
+export interface SshLogin {
+  address: string;
+  port?: number;
 }
 
 /** One connected host as wsp hosts prints it: never the token, which no listing has any use for. */
@@ -26,6 +42,8 @@ export interface HostEntry {
   url: string;
   deviceId: string;
   default: boolean;
+  label?: string;
+  road?: HostRoad;
 }
 
 /** The home wsp keeps everything of a person's in when nobody names another. */
@@ -111,7 +129,14 @@ export function listHosts(home: string): HostEntry[] {
     .map(name => ({ alias: name.slice(0, -".json".length), record: readHost(home, name.slice(0, -".json".length)) }))
     .filter((h): h is { alias: string; record: HostRecord } => h.record !== undefined)
     .sort((a, b) => a.alias.localeCompare(b.alias))
-    .map(h => ({ alias: h.alias, url: h.record.url, deviceId: h.record.deviceId, default: h.alias === marked }));
+    .map(h => ({
+      alias: h.alias,
+      url: h.record.url,
+      deviceId: h.record.deviceId,
+      default: h.alias === marked,
+      ...(h.record.label !== undefined ? { label: h.record.label } : {}),
+      ...(h.record.road !== undefined ? { road: h.record.road } : {}),
+    }));
 }
 
 /** Takes the record away, and the default with it when it named this one. True when there was one to take. */
@@ -141,12 +166,6 @@ export function setDefaultHost(home: string, alias: string): void {
   writeFileSync(defaultFile(home), `${checkedAlias(alias)}\n`, { mode: 0o600 });
 }
 
-/** Whether a word is an address rather than an alias. An address is the road wsp connect takes, before any record
- * for it exists; every other verb wants an alias, since only a record carries a token. */
-export function isUrl(word: string): boolean {
-  return /^(https?|wss?):\/\//i.test(word);
-}
-
 /** The WebSocket address of a host at this address: the same authority over ws or wss, with the runtime's path on
  * the end of whatever path the address already carries, which is what a tunnel hostname under a prefix needs. */
 export function wsUrlOf(url: string): string {
@@ -158,7 +177,7 @@ export function wsUrlOf(url: string): string {
 
 /** Which host a line runs against: the host on this computer, an alias this computer paired with, or an address
  * typed on the line, which carries no token and is only a road for wsp connect. */
-export type HostAim = { kind: "here" } | { kind: "alias"; alias: string; record: HostRecord } | { kind: "url"; url: string };
+export type HostAim = { kind: "here" } | { kind: "alias"; alias: string; record: HostRecord } | { kind: "url"; url: string; token?: string };
 
 /** What a caller names when it asks where to dial: the word a --host flag carried, the environment the caller runs
  * in, and the wsp home holding the hosts folder, which that environment names when the caller does not. */
@@ -204,14 +223,23 @@ export function aimedHost(statePath: string, pick: HostPick = {}): HostAim {
   const env = pick.env ?? process.env;
   const home = pick.home ?? wspHome(env);
   const named = [pick.host, env["WSP_HOST"]].map(w => w?.trim()).find(w => w !== undefined && w !== "");
-  if (named !== undefined) return aimAt(named, home);
+  if (named !== undefined) return aimAt(named, home, env);
   if (servingHost(statePath) !== undefined) return { kind: "here" };
   const fallback = defaultHost(home);
-  return fallback === undefined ? { kind: "here" } : aimAt(fallback, home);
+  if (fallback !== undefined) return aimAt(fallback, home, env);
+  // Last of all, the pair a turn's launch left in this environment: a machine has no hosts folder and no host of
+  // its own, so this is the only road it has, and on a computer that has either of the others it never wins.
+  const carried = hostFromEnv(env);
+  return carried === undefined ? { kind: "here" } : { kind: "url", url: carried.url, token: carried.token };
 }
 
-function aimAt(named: string, home: string): HostAim {
-  if (isUrl(named)) return { kind: "url", url: named };
+function aimAt(named: string, home: string, env: Readonly<Record<string, string | undefined>>): HostAim {
+  // An address with a token beside it in this environment is a host this line may drive; one without is only the
+  // road wsp connect takes, since nothing else on this computer holds a token for it.
+  if (isUrl(named)) {
+    const carried = hostFromEnv(env);
+    return { kind: "url", url: named, ...(carried?.url === named ? { token: carried.token } : {}) };
+  }
   const record = readHost(home, named);
   if (record === undefined) throw usageRefusal(noSuchHostLine(named, home));
   return { kind: "alias", alias: named, record };

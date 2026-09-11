@@ -64,9 +64,17 @@ wsp threads --host box
 
 The box stays on loopback. The tunnel carries HTTPS from the public hostname to `127.0.0.1:4400` on the box, and the runtime rides the same hostname, so nothing has to be open to the world.
 
-What the relay knows is the whole of what it knows: which boxes are on your account, what you called each one, and the hostname each answers at. It holds no pairing code, no device token and no byte of anything your agents say. Its database has no column for them. The code still comes from `wsp pair` on the box and travels to you by whatever channel you like.
+What the relay's own database knows is the whole of what it stores: which boxes are on your account, what you called each one, and the hostname each answers at. It holds no pairing code, no device token and no byte of anything your agents say, and its schema has no column for them.
 
-`wsp relay unlink` on the box takes it off your account, stops the tunnel and deletes the hostname. `wsp up --no-relay` serves without the tunnel for one run.
+<Callout type="warning">
+This road is not as private as the two above it, and the difference is worth reading twice. A tunnel terminates TLS at Cloudflare's edge, so **Cloudflare sees your traffic in the clear**, including the device token your laptop sends on every request. The relay's operator holds the Cloudflare account the tunnel lives on: they can read the tunnel's own credential and point your hostname somewhere else. Pairing protects you from strangers on the internet, not from Cloudflare and not from whoever runs the relay. The direct road and the private network road have neither of those properties: nothing in the middle holds your traffic. If that matters for what your agents can reach, use one of them, or run the relay yourself on your own Cloudflare account, which is what the last section is for.
+</Callout>
+
+The code still comes from `wsp pair` on the box and travels to you by whatever channel you like.
+
+`wsp relay unlink` on the box takes it off your account, stops the tunnel and deletes the hostname. `wsp up --no-relay` serves without the tunnel for one run, stopping any connector an earlier run left behind first.
+
+On your own computer, `wsp relay clients` says which computers hold a token for your relay account and `wsp relay clients revoke <id>` signs one out. That token lists your boxes and can take any of them off the account, so a laptop you no longer have is worth revoking; it also runs out on its own after 30 days. It cannot open a box: that still needs a pairing code from the box itself.
 
 ### The connector
 
@@ -85,10 +93,16 @@ wrangler d1 migrations apply wsp-relay --remote
 wrangler secret put CLOUDFLARE_API_TOKEN
 wrangler secret put GITHUB_CLIENT_ID
 wrangler secret put GITHUB_CLIENT_SECRET
-wrangler secret put RELAY_SIGNING_KEY
+wrangler secret put RELAY_SIGNING_KEY   # openssl rand -base64 32
 wrangler deploy
 ```
 
-The API token needs Cloudflare Tunnel write on your account, and DNS write on one zone if you want managed hostnames. `RELAY_ZONE` and `RELAY_ZONE_ID` in `wrangler.jsonc` name that zone; leave them empty and every box gets a quick tunnel instead. The GitHub OAuth app is yours: its callback is `https://<your relay>/link/callback`, and whoever signs in gets their own account with their own boxes.
+Three values go in `wrangler.jsonc` under `vars` before that deploy, and the first is not optional: `CLOUDFLARE_ACCOUNT_ID` is the account the tunnels are made on, and with it empty every tunnel call goes to `/accounts//cfd_tunnel` and your first `wsp up` gets a 502. `RELAY_ZONE` and `RELAY_ZONE_ID` name the zone managed hostnames go under; leave those two empty and every box gets a quick tunnel instead, which needs no DNS permission at all.
+
+The API token needs Cloudflare Tunnel write on that account, and DNS write on that one zone if you want managed hostnames. The GitHub OAuth app is yours: its callback is `https://<your relay>/link/callback`, and whoever signs in gets their own account with their own boxes.
+
+<Callout type="warning">
+Give it a zone nothing else depends on. The relay only ever writes and deletes `<host id>.<zone>`, but the API token you hand it can write any record in that zone, so anyone who takes over the Worker or the token takes over the whole zone and every tunnel on the account. A zone that also holds your mail or your main site is the wrong one to pick.
+</Callout>
 
 Then point your boxes at it: `wsp relay link https://<your relay>` on each one, and `wsp relay hosts https://<your relay>` on the computer you drive them from.

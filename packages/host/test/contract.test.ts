@@ -100,6 +100,10 @@ describe("the agent contract on the command line and the tool door", () => {
     const created = (await last("new", "new", "alpha")) as { workspace: { id: string } };
     const alpha = created.workspace.id;
     await last("workspaces", "workspaces");
+    expect(await last("workspaces agents", "workspaces", "agents", "alpha", "--spawn", "on", "--max-machines", "2")).toEqual({
+      workspace: expect.objectContaining({ name: "alpha", agents: { spawn: true, maxMachines: 2, maxDepth: 1 } }),
+    });
+    await last("workspaces agents", "workspaces", "agents", "alpha", "--spawn", "off");
     await last("threads", "threads");
     await last("setup", "setup");
     // One level of this computer's own folders: the home folder this test stubbed, with a folder inside it to list.

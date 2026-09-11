@@ -75,15 +75,18 @@ export function hostLogPath(statePath: string): string {
 }
 
 /** Where the host serving this state file is, as it prints them when it starts and as wsp status prints them while
- * it runs: one rule for the three lines, so both readings name the same ports, the same address and the same token
- * file. A reading with no address is a host that bound this computer alone. */
-export function addressLines(statePath: string, ports: { port: number; wsPort: number; address?: string; public?: string }): string[] {
-  const at = ports.address ?? LOOPBACK;
+ * it runs: one rule for the lines, so both readings name the same ports, the same address and the same token file.
+ * A reading with no address is a host that bound this computer alone. The bound address and the public one stay
+ * apart, since they are two roads in and not two spellings of one: the first is the object the lock and the init
+ * hand-over both carry, and the second is a name a relay gave this host, which only a caller that read the relay
+ * record can know. */
+export function addressLines(statePath: string, at: { port: number; wsPort: number; address?: string }, publicHostname?: string): string[] {
+  const bound = at.address ?? LOOPBACK;
   return [
-    `app         http://${authority(at, ports.port)}`,
-    `runtime ws  ws://${authority(at, ports.wsPort)} (token: ${hostTokenPath(statePath)})`,
+    `app         http://${authority(bound, at.port)}`,
+    `runtime ws  ws://${authority(bound, at.wsPort)} (token: ${hostTokenPath(statePath)})`,
     `state       ${statePath}`,
-    ...(ports.public !== undefined ? [publicAddressLine(ports.public)] : []),
+    ...(publicHostname !== undefined ? [publicAddressLine(publicHostname)] : []),
   ];
 }
 

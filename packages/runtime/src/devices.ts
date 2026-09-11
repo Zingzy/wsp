@@ -5,7 +5,7 @@
 // once and never stored: only its sha256 is kept, and every reading of it is a
 // timing safe compare of that hash.
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { DeviceView, PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH } from "@wsp/protocol";
+import { DeviceView, PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH, type ThreadScope } from "@wsp/protocol";
 import type { Store } from "./store.js";
 
 /** One document per paired computer, keyed by its id. */
@@ -28,6 +28,9 @@ interface DeviceRecord {
   tokenHash: string;
   createdAt: string;
   lastSeenAt: string;
+  /** Set on a token the host minted into one turn's launch rather than one a person's computer redeemed a code
+   * for: what that token may drive. */
+  scope?: ThreadScope;
 }
 
 interface PairingRecord {
@@ -57,6 +60,7 @@ const viewOf = (record: DeviceRecord): DeviceView => ({
   name: record.name,
   createdAt: record.createdAt,
   lastSeenAt: record.lastSeenAt,
+  ...(record.scope !== undefined ? { scope: record.scope } : {}),
 });
 
 /** What a redeem hands back: the token, once, and the record every later listing shows. */
@@ -74,6 +78,10 @@ export interface DeviceDoor {
   /** Spends the code for a device of that name, or nothing when the host holds no such unexpired code. A spent or
    * expired code is deleted either way, so one guess never gets two tries. */
   redeem(code: string, name: string, now: number): Promise<PairedDevice | undefined>;
+  /** A device with no pairing code behind it: the host itself minting a token for a turn it is about to launch,
+   * scoped to that turn's thread. The same door as a redeem, so a scoped token is revoked, listed and read by the
+   * one road every other token takes. */
+  mint(name: string, scope: ThreadScope, now: number): Promise<PairedDevice>;
   /** The device this token names, or nothing when no device holds it. Reads only: the JSON routes read a token on
    * every request, and a write there would rewrite the whole state file each time. */
   match(token: string): Promise<DeviceView | undefined>;
@@ -101,11 +109,9 @@ export function makeDevices(store: Store): DeviceDoor {
     return next;
   };
 
-  const spend = async (code: string, name: string, now: number): Promise<PairedDevice | undefined> => {
-    const held = await store.get(PAIRINGS, code);
-    if (!isPairing(held)) return undefined;
-    await store.delete(PAIRINGS, code);
-    if (now > held.expiresAt) return undefined;
+  /** One device record and the one token it will ever hand over. Both roads that make a device come through here,
+   * so a scoped token is stored, hashed and named by exactly the rule a paired computer's is. */
+  const admit = async (name: string, scope: ThreadScope | undefined, now: number): Promise<PairedDevice> => {
     const deviceToken = randomBytes(24).toString("base64url");
     const at = new Date(now).toISOString();
     const record: DeviceRecord = {
@@ -116,9 +122,18 @@ export function makeDevices(store: Store): DeviceDoor {
       tokenHash: hashOf(deviceToken),
       createdAt: at,
       lastSeenAt: at,
+      ...(scope !== undefined ? { scope } : {}),
     };
     await store.put(DEVICES, record.id, record);
     return { deviceId: record.id, deviceToken, device: viewOf(record) };
+  };
+
+  const spend = async (code: string, name: string, now: number): Promise<PairedDevice | undefined> => {
+    const held = await store.get(PAIRINGS, code);
+    if (!isPairing(held)) return undefined;
+    await store.delete(PAIRINGS, code);
+    if (now > held.expiresAt) return undefined;
+    return admit(name, undefined, now);
   };
 
   return {
@@ -133,6 +148,7 @@ export function makeDevices(store: Store): DeviceDoor {
         return { code, expiresAt };
       }),
     redeem: (code, name, now) => oneAtATime(() => spend(code, name, now)),
+    mint: (name, scope, now) => oneAtATime(() => admit(name, scope, now)),
     match: async token => {
       const digest = hashOf(token);
       // Every record is compared, and the first match is kept rather than returned: a loop that leaves early would

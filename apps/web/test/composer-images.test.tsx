@@ -75,7 +75,7 @@ function fixtureApi(history: Record<string, SessionEvent[]> = {}, statuses: Work
     nap: async id => workspaces.find(w => w.id === id)!,
     wake: async id => workspaces.find(w => w.id === id)!,
     upgrade: async id => workspaces.find(w => w.id === id)!,
-    capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, templates: false, kept: false, sizes: [] }),
+    capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: false, kept: false, sizes: [] }),
     listSessions: async () => [],
     watchStatuses: async () => statuses,
     createFromGoldenHead: async () => workspaces[0]!,

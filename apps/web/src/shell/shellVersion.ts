@@ -25,11 +25,24 @@ export function useShellVersionEffect(): void {
   useEffect(() => {
     const { app, host, inShell } = shellVersions();
     if (!inShell || host === undefined) return;
-    const notice = shellVersionNotice(app, host);
-    if (notice === undefined) return;
-    useStore.setState({
-      toast: notice.line,
-      toastAction: notice.update ? { for: notice.line, word: GET_THE_APP_WORD, run: () => window.open(RELEASES, "_blank", "noopener,noreferrer") } : null,
-    });
+    let live = true;
+    // On a host somewhere else the sentence names it, so a person with two hosts knows which one is behind.
+    const say = (label?: string): void => {
+      const notice = shellVersionNotice(app, host, label);
+      if (notice === undefined || !live) return;
+      useStore.setState({
+        toast: notice.line,
+        toastAction: notice.update ? { for: notice.line, word: GET_THE_APP_WORD, run: () => window.open(RELEASES, "_blank", "noopener,noreferrer") } : null,
+      });
+    };
+    const hosts = desktopBridge()?.hosts;
+    if (hosts === undefined) {
+      say();
+      return;
+    }
+    hosts().then(view => say(view.hosts.find(h => h.alias === view.current)?.label), () => say());
+    return () => {
+      live = false;
+    };
   }, []);
 }

@@ -6,13 +6,14 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join, sep } from "node:path";
 import { CATALOG_AGENTS, MCP_AGENTS, MCP_AGENT_IDS, type AgentEntry, type McpAgent, type Placed } from "@wsp/catalog";
-import { mcpServerCommandLine, nextInsideAgentLine, type McpServerSpec } from "@wsp/protocol";
+import { MCP_SERVER_NAME, mcpServerCommandLine, nextInsideAgentLine, type McpServerSpec } from "@wsp/protocol";
 import { placeSections, removeSections } from "./agents-md.js";
 import { SKILL_NAME, WSP_SKILL } from "./skill.js";
 import { VERSION } from "./version.js";
 
-/** The name the server has in every agent's config. */
-export const MCP_SERVER_NAME = "wsp";
+/** The name the server has in every agent's config; the protocol's, since the runtime builds a launch that carries
+ * the same server for a turn on a machine. */
+export { MCP_SERVER_NAME };
 
 /** The package `npx` fetches wsp from. */
 const NPM_PACKAGE = "@zingzy/wsp";
@@ -69,7 +70,7 @@ function npxBeside(execPath: string): string {
  * the same wsp back. Run behind the desktop's shim, the command is that shim. Run as the wsp on PATH, the command is
  * that binary. Any other start (a checkout, a bin folder PATH does not hold) is this node with the flags and script
  * it was given. */
-function mcpServerCommand(run: RunningWsp): McpServerSpec {
+export function mcpServerCommand(run: RunningWsp): McpServerSpec {
   if (run.shim !== undefined) return { command: run.shim, args: ["mcp"] };
   const script = run.argv[1];
   if (script !== undefined && script.split(sep).includes(NPX_CACHE_DIR)) return { command: npxBeside(run.execPath), args: ["-y", `${NPM_PACKAGE}@${run.version}`, "mcp"] };

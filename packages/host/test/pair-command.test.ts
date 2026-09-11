@@ -3,7 +3,7 @@
 // print. Both dial the running host over loopback, so a fake client is the
 // whole of what they need.
 import { describe, expect, it } from "vitest";
-import { deviceLines, pairLines, pairOnLoopbackLine, reachAddresses, devicesCommand, pairCommand } from "../src/pairing.js";
+import { advertisedUrl, deviceLines, pairLines, pairOnLoopbackLine, reachAddresses, devicesCommand, pairCommand } from "../src/pairing.js";
 import type { CliIO } from "../src/cli.js";
 import { dialAddress } from "../src/host-lock.js";
 import type { HostClient } from "../src/verbs.js";
@@ -127,6 +127,21 @@ describe("the addresses a client may use", () => {
     expect(reachAddresses("0.0.0.0", interfaces)).not.toContain("169.254.10.2");
     const linkOnly = { en0: [{ address: "fe80::1", family: "IPv6", internal: false }] } as unknown as Interfaces;
     expect(reachAddresses("::", linkOnly)).toEqual(["127.0.0.1"]);
+  });
+
+  it("the address a machine dials this host at follows the bind, and is nothing on a host no machine can reach", () => {
+    // A wildcard stands for the first address that leaves this computer, and a named one is itself.
+    expect(advertisedUrl("0.0.0.0", 4700, undefined, interfaces)).toBe("http://192.168.1.20:4700");
+    expect(advertisedUrl("100.64.0.3", 4700, undefined, interfaces)).toBe("http://100.64.0.3:4700");
+    // Loopback reaches no machine, so no turn is handed a token it could not use; --advertise is the way past that.
+    expect(advertisedUrl("127.0.0.1", 4700, undefined, interfaces)).toBeUndefined();
+    const onlyLoopback = { lo0: [{ address: "127.0.0.1", family: "IPv4", internal: true }] } as unknown as Interfaces;
+    expect(advertisedUrl("0.0.0.0", 4700, undefined, onlyLoopback)).toBeUndefined();
+    // What the person named wins whatever the bind is, and a trailing slash is not part of an address.
+    expect(advertisedUrl("127.0.0.1", 4700, "https://box.example/wsp/", interfaces)).toBe("https://box.example/wsp");
+    expect(advertisedUrl("0.0.0.0", 4700, "  ", interfaces)).toBe("http://192.168.1.20:4700");
+    // An IPv6 address is bracketed, so the url is one a machine's client parses.
+    expect(advertisedUrl("2001:db8::5", 4700, undefined, interfaces)).toBe("http://[2001:db8::5]:4700");
   });
 
   it("brackets an IPv6 address in the line it prints, so the URL is one a browser takes", () => {

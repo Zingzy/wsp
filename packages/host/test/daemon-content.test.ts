@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DAEMON_CONTENT_SHA, DAEMON_ROOTS_PATH, DAEMON_VERSION, workScoreLine } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { OPEN_SHIM_SCRIPT, START_MJS, deployScript } from "../src/doctor.js";
+import { CLOUD_PLACE, deployScript, openShimScript, startMjs } from "../src/doctor.js";
 
 const DAEMON_PKG = fileURLToPath(new URL("../../daemon/", import.meta.url));
 // A fixed hex token: the deploy writes the token it is given, and which one cannot be what moves the sha.
@@ -48,7 +48,9 @@ function daemonContentSha(daemonPkgDir: string, scripts: string[]): string {
   return h.digest("hex");
 }
 
-const deployedScripts = (): string[] => [START_MJS, OPEN_SHIM_SCRIPT, deployScript(TOKEN, SUFFIX)];
+// A fork's place, which is what a golden is built under: the sha pins what lands on a guest, and a
+// machine somebody owns carries its own place and no golden.
+const deployedScripts = (): string[] => [startMjs(CLOUD_PLACE), openShimScript(CLOUD_PLACE), deployScript(CLOUD_PLACE, TOKEN, SUFFIX)];
 
 describe("the daemon version names the content the host deploys", () => {
   it("holds the recorded sha, so a changed daemon cannot ship under a version no machine reads as behind", () => {

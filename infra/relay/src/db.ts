@@ -73,8 +73,14 @@ export async function insertHost(env: Env, row: Pick<HostRow, "id" | "account_id
   await env.DB.prepare("INSERT INTO hosts (id, account_id, name, created_at) VALUES (?, ?, ?, ?)").bind(row.id, row.account_id, row.name, row.created_at).run();
 }
 
-export async function setHostTunnel(env: Env, id: string, tunnelId: string, hostname: string): Promise<void> {
-  await env.DB.prepare("UPDATE hosts SET tunnel_id = ?, hostname = ? WHERE id = ?").bind(tunnelId, hostname, id).run();
+/** Written the moment the tunnel exists, before anything else can fail: a tunnel no row points at is one nothing
+ * can ever delete through this relay. */
+export async function setHostTunnel(env: Env, id: string, tunnelId: string): Promise<void> {
+  await env.DB.prepare("UPDATE hosts SET tunnel_id = ? WHERE id = ?").bind(tunnelId, id).run();
+}
+
+export async function setHostHostname(env: Env, id: string, hostname: string): Promise<void> {
+  await env.DB.prepare("UPDATE hosts SET hostname = ? WHERE id = ?").bind(hostname, id).run();
 }
 
 export async function seenHost(env: Env, id: string, at: string, seen: { hostname?: string; version?: string }): Promise<void> {
@@ -85,6 +91,35 @@ export async function seenHost(env: Env, id: string, at: string, seen: { hostnam
 
 export async function deleteHost(env: Env, id: string): Promise<void> {
   await env.DB.prepare("DELETE FROM hosts WHERE id = ?").bind(id).run();
+}
+
+export interface ClientRow {
+  id: string;
+  account_id: string;
+  name: string;
+  created_at: string;
+  last_seen: string | null;
+}
+
+export async function clientOf(env: Env, id: string): Promise<ClientRow | undefined> {
+  return (await env.DB.prepare("SELECT * FROM clients WHERE id = ?").bind(id).first<ClientRow>()) ?? undefined;
+}
+
+export async function clientsOf(env: Env, accountId: string): Promise<ClientRow[]> {
+  const { results } = await env.DB.prepare("SELECT * FROM clients WHERE account_id = ? ORDER BY created_at").bind(accountId).all<ClientRow>();
+  return results;
+}
+
+export async function insertClient(env: Env, row: Pick<ClientRow, "id" | "account_id" | "name" | "created_at">): Promise<void> {
+  await env.DB.prepare("INSERT INTO clients (id, account_id, name, created_at) VALUES (?, ?, ?, ?)").bind(row.id, row.account_id, row.name, row.created_at).run();
+}
+
+export async function seenClient(env: Env, id: string, at: string): Promise<void> {
+  await env.DB.prepare("UPDATE clients SET last_seen = ? WHERE id = ?").bind(at, id).run();
+}
+
+export async function deleteClient(env: Env, id: string): Promise<void> {
+  await env.DB.prepare("DELETE FROM clients WHERE id = ?").bind(id).run();
 }
 
 export async function insertLink(env: Env, row: LinkRow): Promise<void> {
@@ -110,6 +145,23 @@ export async function approveLink(env: Env, code: string, accountId: string, hos
   return (meta.changes ?? 0) > 0;
 }
 
+/** Takes the row and says whether this caller is the one that took it: two polls racing on one approved code both
+ * read the row, and only the one whose delete changed something may mint. */
+export async function spendLink(env: Env, code: string): Promise<boolean> {
+  const { meta } = await env.DB.prepare("DELETE FROM link_codes WHERE code = ?").bind(code).run();
+  return (meta.changes ?? 0) > 0;
+}
+
 export async function deleteLink(env: Env, code: string): Promise<void> {
   await env.DB.prepare("DELETE FROM link_codes WHERE code = ?").bind(code).run();
+}
+
+/** Every code that ran out, and the host an approval made for a code nobody ever collected: a token was never
+ * handed out for it, so the row it left is nobody's. Run at every start, which is the only clock a Worker has for
+ * free. Answers how many codes went, which the test reads. */
+export async function sweepLinks(env: Env, now: number): Promise<number> {
+  const at = new Date(now).toISOString();
+  await env.DB.prepare("DELETE FROM hosts WHERE id IN (SELECT host_id FROM link_codes WHERE host_id IS NOT NULL AND expires_at <= ?)").bind(at).run();
+  const { meta } = await env.DB.prepare("DELETE FROM link_codes WHERE expires_at <= ?").bind(at).run();
+  return meta.changes ?? 0;
 }

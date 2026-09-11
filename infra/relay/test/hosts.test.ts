@@ -94,14 +94,87 @@ describe("a tunnel for a linked host", () => {
     expect(relay.calls).toEqual([]);
   });
 
-  it("refuses one host's token on another host's tunnel", async () => {
+  it("refuses one host's token on another host's tunnel, on another account and on the same one", async () => {
     relay = await relayHarness({ zone: true });
     const mine = await linkedVia(relay, "host", "box", { login: "maya", githubId: "4242" });
     const theirs = await linkedVia(relay, "host", "attic", { login: "sam", githubId: "7" });
+    // The one that bites: two boxes of the same person, where the account check alone would let one drive the other.
+    const alsoMine = await linkedVia(relay, "host", "cellar", { login: "maya", githubId: "4242", cookie: mine.cookie });
     relay.calls.length = 0;
-    const res = await relay.fetch(`/hosts/${theirs.hostId}/tunnel`, { method: "POST", headers: bearer(mine.token), body: JSON.stringify({ port: 4400 }) });
-    expect(res.status).toBe(403);
+
+    expect((await relay.fetch(`/hosts/${theirs.hostId}/tunnel`, { method: "POST", headers: bearer(mine.token), body: JSON.stringify({ port: 4400 }) })).status).toBe(403);
+    expect((await relay.fetch(`/hosts/${alsoMine.hostId}/tunnel`, { method: "POST", headers: bearer(mine.token), body: JSON.stringify({ port: 4400 }) })).status).toBe(403);
+    expect((await relay.fetch(`/hosts/${alsoMine.hostId}/heartbeat`, { method: "POST", headers: bearer(mine.token), body: JSON.stringify({ version: "1" }) })).status).toBe(403);
+    expect((await relay.fetch(`/hosts/${alsoMine.hostId}`, { method: "DELETE", headers: bearer(mine.token) })).status).toBe(403);
     expect(relay.calls).toEqual([]);
+    expect(await relay.db.prepare("SELECT * FROM hosts WHERE id = ?").bind(alsoMine.hostId).first()).not.toBe(null);
+  });
+
+  it("records the tunnel before the name, so a name that fails cannot leave a tunnel nothing points at", async () => {
+    relay = await relayHarness({ zone: true });
+    const { token, hostId } = await linkedVia(relay, "host", "box", { login: "maya", githubId: "4242" });
+    relay.answer("POST https://api.cloudflare.com/client/v4/accounts/acct_test/cfd_tunnel", cfOk({ id: "tun_1" }));
+    relay.answer("PUT https://api.cloudflare.com/client/v4/accounts/acct_test/cfd_tunnel/tun_1/configurations", cfOk({}));
+    relay.answer("POST https://api.cloudflare.com/client/v4/zones/zone_test/dns_records", { success: false, errors: [{ code: 1004, message: "DNS Validation Error" }] }, 400);
+
+    const res = await relay.fetch(`/hosts/${hostId}/tunnel`, { method: "POST", headers: bearer(token), body: JSON.stringify({ port: 4400 }) });
+    expect(res.status).toBe(502);
+    const row = (await relay.db.prepare("SELECT * FROM hosts WHERE id = ?").bind(hostId).first()) as Record<string, string | null>;
+    expect(row["tunnel_id"]).toBe("tun_1");
+    expect(row["hostname"]).toBe(null);
+  });
+
+  it("says what a refusal that only mentions that code in its words really was", async () => {
+    relay = await relayHarness({ zone: true });
+    const { token, hostId } = await linkedVia(relay, "host", "box", { login: "maya", githubId: "4242" });
+    relay.answer("POST https://api.cloudflare.com/client/v4/accounts/acct_test/cfd_tunnel", cfOk({ id: "tun_1" }));
+    relay.answer("PUT https://api.cloudflare.com/client/v4/accounts/acct_test/cfd_tunnel/tun_1/configurations", cfOk({}));
+    // Another refusal entirely, with that number in its sentence: reading the words rather than the code would
+    // send the Worker looking for a record and then hide what the zone actually said.
+    relay.answer("POST https://api.cloudflare.com/client/v4/zones/zone_test/dns_records", { success: false, errors: [{ code: 10000, message: "Authentication error (ref 81053)" }] }, 403);
+
+    const res = await relay.fetch(`/hosts/${hostId}/tunnel`, { method: "POST", headers: bearer(token), body: JSON.stringify({ port: 4400 }) });
+    expect(res.status).toBe(502);
+    const said = ((await res.json()) as { error: string }).error;
+    expect(said).toContain("Authentication error");
+    expect(said).not.toContain("will not say by what");
+    expect(relay.calls.filter(c => c.method === "GET" && c.url.includes("/dns_records"))).toEqual([]);
+  });
+
+  it("adopts the name already standing for this tunnel rather than leaving the box with none", async () => {
+    relay = await relayHarness({ zone: true });
+    const { token, hostId } = await linkedVia(relay, "host", "box", { login: "maya", githubId: "4242" });
+    relay.answer("POST https://api.cloudflare.com/client/v4/accounts/acct_test/cfd_tunnel", cfOk({ id: "tun_1" }));
+    relay.answer("PUT https://api.cloudflare.com/client/v4/accounts/acct_test/cfd_tunnel/tun_1/configurations", cfOk({}));
+    // A run that wrote the name and never recorded it: the second ask must go through rather than 502 forever.
+    relay.answer("POST https://api.cloudflare.com/client/v4/zones/zone_test/dns_records", { success: false, errors: [{ code: 81053, message: "An A, AAAA, or CNAME record with that host already exists." }] }, 400);
+    relay.answer("GET https://api.cloudflare.com/client/v4/zones/zone_test/dns_records", cfOk([{ id: "dns_1", content: "tun_1.cfargotunnel.com" }]));
+    relay.answer("GET https://api.cloudflare.com/client/v4/accounts/acct_test/cfd_tunnel/tun_1/token", cfOk("eyJhIjoiZmFrZSJ9"));
+
+    const res = await relay.fetch(`/hosts/${hostId}/tunnel`, { method: "POST", headers: bearer(token), body: JSON.stringify({ port: 4400 }) });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ tunnelToken: "eyJhIjoiZmFrZSJ9", hostname: `${hostId}.${TEST_ZONE}` });
+    // Nothing was written over: the record already said what it should.
+    expect(relay.calls.filter(c => c.method === "PUT" && c.url.includes("/dns_records"))).toEqual([]);
+    expect(((await relay.db.prepare("SELECT hostname FROM hosts WHERE id = ?").bind(hostId).first()) as Record<string, string>)["hostname"]).toBe(`${hostId}.${TEST_ZONE}`);
+  });
+
+  it("points a name of its own that is aimed elsewhere back at this tunnel", async () => {
+    relay = await relayHarness({ zone: true });
+    const { token, hostId } = await linkedVia(relay, "host", "box", { login: "maya", githubId: "4242" });
+    relay.answer("POST https://api.cloudflare.com/client/v4/accounts/acct_test/cfd_tunnel", cfOk({ id: "tun_2" }));
+    relay.answer("PUT https://api.cloudflare.com/client/v4/accounts/acct_test/cfd_tunnel/tun_2/configurations", cfOk({}));
+    relay.answer("POST https://api.cloudflare.com/client/v4/zones/zone_test/dns_records", { success: false, errors: [{ code: 81053, message: "An A, AAAA, or CNAME record with that host already exists." }] }, 400);
+    relay.answer("GET https://api.cloudflare.com/client/v4/zones/zone_test/dns_records", cfOk([{ id: "dns_1", content: "an-older-tunnel.cfargotunnel.com" }]));
+    relay.answer("PUT https://api.cloudflare.com/client/v4/zones/zone_test/dns_records/dns_1", cfOk({ id: "dns_1" }));
+    relay.answer("GET https://api.cloudflare.com/client/v4/accounts/acct_test/cfd_tunnel/tun_2/token", cfOk("eyJhIjoiZmFrZSJ9"));
+
+    expect((await relay.fetch(`/hosts/${hostId}/tunnel`, { method: "POST", headers: bearer(token), body: JSON.stringify({ port: 4400 }) })).status).toBe(200);
+    const written = relay.calls.find(c => c.method === "PUT" && c.url.includes("/dns_records/dns_1"))!;
+    // The only name it ever touches is the one it derived, and it now says this host's tunnel.
+    expect(written.body).toMatchObject({ type: "CNAME", name: `${hostId}.${TEST_ZONE}`, content: "tun_2.cfargotunnel.com" });
+    const looked = relay.calls.find(c => c.method === "GET" && c.url.includes("/dns_records"))!;
+    expect(looked.url).toContain(encodeURIComponent(`${hostId}.${TEST_ZONE}`));
   });
 
   it("refuses a token this relay did not sign", async () => {
@@ -110,6 +183,41 @@ describe("a tunnel for a linked host", () => {
     const forged = `${token.slice(0, -4)}AAAA`;
     const res = await relay.fetch(`/hosts/${hostId}/tunnel`, { method: "POST", headers: bearer(forged), body: JSON.stringify({ port: 4400 }) });
     expect(res.status).toBe(401);
+  });
+});
+
+describe("the names the relay may touch", () => {
+  it("never deletes a name it did not derive from the host's own id", async () => {
+    relay = await relayHarness({ zone: true });
+    const { token, hostId } = await linkedVia(relay, "host", "box", { login: "eve", githubId: "66" });
+    armTunnel(relay);
+    await relay.fetch(`/hosts/${hostId}/tunnel`, { method: "POST", headers: bearer(token), body: JSON.stringify({ port: 4400 }) });
+
+    // A box saying it answers at somebody else's name: the relay may show it and may never act on it.
+    await relay.fetch(`/hosts/${hostId}/heartbeat`, { method: "POST", headers: bearer(token), body: JSON.stringify({ hostname: `www.${TEST_ZONE}` }) });
+    relay.calls.length = 0;
+
+    relay.answer("GET https://api.cloudflare.com/client/v4/zones/zone_test/dns_records", cfOk([{ id: "dns_1" }]));
+    relay.answer("DELETE https://api.cloudflare.com/client/v4/zones/zone_test/dns_records/dns_1", cfOk({ id: "dns_1" }));
+    relay.answer("DELETE https://api.cloudflare.com/client/v4/accounts/acct_test/cfd_tunnel/tun_1/connections", cfOk(null));
+    relay.answer("DELETE https://api.cloudflare.com/client/v4/accounts/acct_test/cfd_tunnel/tun_1", cfOk({ id: "tun_1" }));
+    expect((await relay.fetch(`/hosts/${hostId}`, { method: "DELETE", headers: bearer(token) })).status).toBe(200);
+
+    const asked = relay.calls.filter(c => c.url.includes("/dns_records")).map(c => c.url);
+    expect(asked.some(url => url.includes(encodeURIComponent(`www.${TEST_ZONE}`)))).toBe(false);
+    expect(asked[0]).toContain(encodeURIComponent(`${hostId}.${TEST_ZONE}`));
+  });
+
+  it("takes a quick tunnel's name from a heartbeat and refuses any other", async () => {
+    relay = await relayHarness({ zone: true });
+    const { token, hostId } = await linkedVia(relay, "host", "box", { login: "maya", githubId: "4242" });
+    const say = (hostname: string): Promise<Response> => relay!.fetch(`/hosts/${hostId}/heartbeat`, { method: "POST", headers: bearer(token), body: JSON.stringify({ hostname }) });
+
+    expect((await say("blue-sky-1234.trycloudflare.com")).status).toBe(200);
+    expect(((await relay.db.prepare("SELECT hostname FROM hosts WHERE id = ?").bind(hostId).first()) as Record<string, string>)["hostname"]).toBe("blue-sky-1234.trycloudflare.com");
+    const refused = await say(`www.${TEST_ZONE}`);
+    expect(refused.status).toBe(400);
+    expect(((await relay.db.prepare("SELECT hostname FROM hosts WHERE id = ?").bind(hostId).first()) as Record<string, string>)["hostname"]).toBe("blue-sky-1234.trycloudflare.com");
   });
 });
 
@@ -204,5 +312,35 @@ describe("unlinking", () => {
     await relay.fetch(`/hosts/${hostId}`, { method: "DELETE", headers: bearer(token) });
     const res = await relay.fetch(`/hosts/${hostId}/heartbeat`, { method: "POST", headers: bearer(token), body: JSON.stringify({ version: "2026.9.0" }) });
     expect(res.status).toBe(401);
+  });
+});
+
+describe("the computers a person signed in from", () => {
+  it("lists them, marks this one, and takes one away so its token opens nothing", async () => {
+    relay = await relayHarness();
+    const first = await linkedVia(relay, "client", "the Mac", { login: "maya", githubId: "4242" });
+    const second = await linkedVia(relay, "client", "the laptop", { login: "maya", githubId: "4242", cookie: first.cookie });
+
+    const listed = (await (await relay.fetch("/clients", { headers: bearer(first.token) })).json()) as { clients: { id: string; name: string; thisOne: boolean }[] };
+    expect(listed.clients.map(c => c.name).sort()).toEqual(["the Mac", "the laptop"]);
+    expect(listed.clients.find(c => c.thisOne)!.name).toBe("the Mac");
+
+    const gone = listed.clients.find(c => c.name === "the laptop")!;
+    expect((await relay.fetch(`/clients/${gone.id}`, { method: "DELETE", headers: bearer(first.token) })).status).toBe(200);
+    // The token that walked off with that computer opens nothing now, without rotating the key every box depends on.
+    expect((await relay.fetch("/hosts", { headers: bearer(second.token) })).status).toBe(401);
+    expect((await relay.fetch("/hosts", { headers: bearer(first.token) })).status).toBe(200);
+  });
+
+  it("refuses a sign-in older than a month, and one on another account", async () => {
+    relay = await relayHarness();
+    const mine = await linkedVia(relay, "client", "the Mac", { login: "maya", githubId: "4242" });
+    const theirs = await linkedVia(relay, "client", "their Mac", { login: "sam", githubId: "7" });
+    const listed = (await (await relay.fetch("/clients", { headers: bearer(theirs.token) })).json()) as { clients: { id: string }[] };
+
+    expect((await relay.fetch(`/clients/${listed.clients[0]!.id}`, { method: "DELETE", headers: bearer(mine.token) })).status).toBe(403);
+    relay.tick(31 * 24 * 60 * 60_000);
+    expect((await relay.fetch("/hosts", { headers: bearer(mine.token) })).status).toBe(401);
+    expect((await relay.fetch("/clients", { headers: bearer(mine.token) })).status).toBe(401);
   });
 });

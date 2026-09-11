@@ -7,7 +7,13 @@ import {
   Capabilities,
   GoldenVersion,
   DAEMON_ROOTS_PATH,
+  NO_BUILD_TOOLS_LINE,
+  NO_LINGER_LINE,
+  noImportRoadLine,
+  noSshDaemonLine,
+  OVER_SSH,
   rootsPathIn,
+  sshDaemonPaths,
   DAEMON_VERSION,
   daemonVersionOf,
   DaemonAuthRequest,
@@ -504,7 +510,7 @@ describe("daemon wire types (one home for the ops from @wsp/daemon)", () => {
 
 describe("backend capabilities", () => {
   it("requires every flag, containers, callbackRelay, templates, kept and the sizes list included, so no backend can leave one unstated", () => {
-    const full = { liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, snapshotListing: true, templates: true, kept: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
+    const full = { liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: true, kept: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
     expect(Capabilities.parse(full)).toEqual(full);
     const { containers: _c, ...missing } = full;
     expect(() => Capabilities.parse(missing)).toThrow();
@@ -864,6 +870,46 @@ describe("daemon files and diff ops", () => {
     expect(rootsPathIn("/Users/z")).toBe("/Users/z/.wsp/roots");
     expect(rootsPathIn("/Users/z/")).toBe("/Users/z/.wsp/roots");
     expect(rootsPathIn("/")).toBe("/.wsp/roots");
+  });
+
+  it("names everywhere a daemon on a machine reached over ssh keeps something, all under one folder of its own", () => {
+    const at = sshDaemonPaths("/home/maya");
+    expect(at).toEqual({
+      wsp: "/home/maya/.wsp",
+      dir: "/home/maya/.wsp/daemon",
+      bundle: "/home/maya/.wsp/daemon.tgz",
+      inbox: "/home/maya/.wsp/inbox",
+      tokenPath: "/home/maya/.wsp/daemon-token",
+      portFile: "/home/maya/.wsp/daemon.port",
+      runDir: "/home/maya/.wsp/run",
+      openSocket: "/home/maya/.wsp/open.sock",
+      manifestPath: "/home/maya/.wsp/manifest.json",
+      profileFile: "/home/maya/.wsp/profile.sh",
+      nodeDir: "/home/maya/.wsp/node",
+      unitDir: "/home/maya/.config/systemd/user",
+      binDir: "/home/maya/.local/bin",
+      rootsPath: "/home/maya/.wsp/roots",
+    });
+    // The deploy on the host writes these and the runtime reads the token and the port back off them, which is
+    // why the rule sits here and in neither of them.
+    expect(at.rootsPath).toBe(rootsPathIn("/home/maya"));
+    expect(sshDaemonPaths("/home/maya/")).toEqual(at);
+    // Nothing here is root's: the daemon on a machine somebody owns is installed under their own login.
+    expect(Object.values(at).filter(path => !path.startsWith("/home/maya/"))).toEqual([]);
+  });
+
+  it("says a machine over ssh carries no daemon yet, and names no verb, since nobody can type one", () => {
+    // Recorded but not deployed is what the sentence is for. Nothing a person types puts a daemon on a machine
+    // already recorded, so the line says what the host does on its own rather than naming a verb that is not there.
+    expect(noSshDaemonLine("box")).toBe("box carries no daemon yet, so its terminal, files and ports are not served; this host tries again each time it starts");
+    expect(noSshDaemonLine("box")).not.toContain("daemon update");
+    // A login whose services stop with it would lose the daemon the moment the connection closed, so it is
+    // refused with the one command that turns that off.
+    expect(NO_LINGER_LINE).toContain("loginctl enable-linger");
+    // node-pty ships prebuilt binaries for macOS and Windows only, so the terminal is compiled where it runs.
+    expect(NO_BUILD_TOOLS_LINE).toContain("no C compiler");
+    expect(NO_BUILD_TOOLS_LINE).toContain("build-essential");
+    expect(noImportRoadLine("box", OVER_SSH)).toBe("box is a machine over ssh, which lands no folder yet; import to a fork, or register the folder on this computer");
   });
 });
 

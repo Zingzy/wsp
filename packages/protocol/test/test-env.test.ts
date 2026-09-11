@@ -15,9 +15,17 @@ import { ROOT, testFiles } from "./source-files.js";
  * variable that changes what the code under test does is handed in, never read off the process running the suite. */
 const GATES: Record<string, string> = {
   WSP_LIVE: "runs the tests that create real machines",
+  WSP_SSH_LIVE: "runs the tests that reach a real machine over ssh",
+  WSP_SSH_ADDRESS: "the user@host that gate dials",
+  WSP_SSH_PORT: "the port that dial uses, when it is not 22",
+  WSP_SSH_KEY: "the key that dial uses, when it is not the person's own default",
   WSP_LIVE_LONG: "runs the live tests that take hours",
   WSP_LIVE_STATE: "the state file the live tests read their golden from",
   WSP_GOLDEN: "the golden the live tests build on instead of the state file's",
+  WSP_DOCKER_LIVE: "runs the tests that create real containers on a Docker daemon",
+  WSP_DOCKER_LIVE_SSH: "the daemon on a box the live Docker tests take their second pass against",
+  WSP_DOCKER_LIVE_SSH_KEY: "the key that second pass dials the box with",
+  WSP_DOCKER_LIVE_SSH_KNOWN_HOSTS: "the file that second pass checks the box's key against",
   WSP_RENDER: "runs the Chromium render tests",
   WSP_PACK_SMOKE: "runs the npm pack smoke",
   WSP_DESKTOP_SMOKE: "runs the packaged desktop smoke",

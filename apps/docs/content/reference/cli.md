@@ -1,6 +1,6 @@
 # Command line
 
-Every verb, as `wsp --help` prints it. This page is generated from the binary at wsp 0.1.4; do not edit it by hand, run `pnpm --filter @wsp/docs cli` after the host changes.
+Every verb, as `wsp --help` prints it. This page is generated from the binary at wsp 0.2.0; do not edit it by hand, run `pnpm --filter @wsp/docs cli` after the host changes.
 
 Every verb takes `--json` for one JSON object per line, frames first and the result last, and `--state <path>` to name the state file the host serves. A refusal is one line on stderr and an exit code of its class: 0 ok, 1 provider, 2 auth, 3 usage. `wsp exec` exits with the command's own code.
 
@@ -18,11 +18,12 @@ usage:
   wsp status         whether a host is serving this state file, on which ports,
                      and what keeps it there, with a non-zero exit code when
                      none does
-  wsp init           set up your first golden image in six screens: Agents,
-                     Tools, Also on this Mac, Sign-ins, wsp for your agents
-                     on this Mac, and Build, then the browser. With no provider
-                     key it seals nothing and makes this computer your
-                     workspace instead
+  wsp init           set up your first golden image one screen at a time:
+                     Agents, Tools, Also on this computer, Sign-ins, wsp for
+                     your agents on this computer, each shown when it has a
+                     row to pick, then Build, then the browser. With no
+                     provider key it seals nothing and makes this computer
+                     your workspace instead
   wsp doctor         run the reach loop end to end against one live machine
                      (--yes also deletes the snapshots this host left behind);
                      --local proves the other half instead, a thread on this
@@ -71,19 +72,19 @@ started:
       commands your agents ran that no catalog row carries. --tick
       used|installed|default names the rule that decides every tick (used, the
       default, ticks what your agents actually ran here); --set <id>=on|off
-      flips a row by its catalog id, or a package this Mac's own package
+      flips a row by its catalog id, or a package this computer's own package
       managers have by the id wsp recipe scan gives it, which the build installs
       by that package's own road; --signin <id>=copy|machine|key|skip answers a
       sign-in by catalog id, key bringing the key files beside a login and
       nothing else of it; --add <id>=<command> carries a tool neither the
-      catalog nor this Mac has, installed by that command on the machine, with
-      --add-check <id>=<command> saying it is there; --project reads a folder's
-      own manifests for what it takes to build and weighs the histories by it,
-      --out says where the file goes and --json prints the table as one object.
-      Naming --tick or --project decides every tick again; without either, what
-      the file says stands and the flags flip rows on top of it. A sign-in
-      answer stands either way: no rule decides one. All of them repeat. Review
-      it, then wsp init --recipe
+      catalog nor this computer has, installed by that command on the machine,
+      with --add-check <id>=<command> saying it is there; --project reads a
+      folder's own manifests for what it takes to build and weighs the histories
+      by it, --out says where the file goes and --json prints the table as one
+      object. Naming --tick or --project decides every tick again; without
+      either, what the file says stands and the flags flip rows on top of it. A
+      sign-in answer stands either way: no rule decides one. All of them repeat.
+      Review it, then wsp init --recipe
   wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>] | wsp new
     --local [name] | wsp new --ssh <user@host> [name] [--ssh-port <port>]
     [--ssh-key <path>]
@@ -107,18 +108,22 @@ started:
   wsp rebuild <workspace>
       replaces a gone workspace's machine from its image and prints the state of
       the new one
+  wsp image move <workspace>
+      moves the workspace onto the newest version of its image and prints what
+      of the image's own files it kept
   wsp forget <workspace> [--yes]
       drops a gone workspace and its threads from this computer; refused while
       its machine exists
   wsp delete <workspace> [--yes]
       deletes the machine at the provider, then drops the record and threads
       from this computer
-  wsp thread new --in <workspace>
+  wsp thread new [--in <workspace>]
     [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, -…
     "<task>"
       opens a thread with the agent, model, effort and access the app offers, in
-      the project named or the one the app's pick would take; follows its first
-      turn, or with --detach prints the id and returns
+      the project named or the one the app's pick would take; without --in, run
+      from inside a registered repo, on the workspace that project last ran on;
+      follows its first turn, or with --detach prints the id and returns
   wsp thread read <thread> [--last]
       the thread's messages as the app lists them, oldest first: who each one
       is, when the runtime recorded it and the text, with every tool call folded
@@ -142,10 +147,16 @@ started:
       the folders inside one folder on this computer, for naming one to import;
       the home folder and every imported project are the roots and nothing
       outside them is listed
-  wsp import <folder> --to <workspace> [--yes] [--keep, --cut <path>]
+  wsp import <folder> [--to <workspace>] [--yes] [--keep, --cut <path>]
     [--agents <ids>] [--replace]
       lands a folder on the machine at its path here; the plan first, then --yes
-      or one question
+      or one question; on this computer it registers the path and copies
+      nothing; without --to, the workspace the last thread started on
+  wsp setup
+      the cloud setup on this host as the app's Set up cloud machines modal
+      reads it: which keys are held (never their values), the agents here, what
+      a machine costs, and the init job's phase, rows and progress when one runs
+      or ran
   wsp terminal config [--scheme light|dark]
       the Ghostty config on this computer as the app's terminal pane applies it,
       read from ~/.config/ghostty and Application Support with its includes and
@@ -262,11 +273,12 @@ usage:
   wsp status         whether a host is serving this state file, on which ports,
                      and what keeps it there, with a non-zero exit code when
                      none does
-  wsp init           set up your first golden image in six screens: Agents,
-                     Tools, Also on this Mac, Sign-ins, wsp for your agents
-                     on this Mac, and Build, then the browser. With no provider
-                     key it seals nothing and makes this computer your
-                     workspace instead
+  wsp init           set up your first golden image one screen at a time:
+                     Agents, Tools, Also on this computer, Sign-ins, wsp for
+                     your agents on this computer, each shown when it has a
+                     row to pick, then Build, then the browser. With no
+                     provider key it seals nothing and makes this computer
+                     your workspace instead
   wsp doctor         run the reach loop end to end against one live machine
                      (--yes also deletes the snapshots this host left behind);
                      --local proves the other half instead, a thread on this
@@ -315,19 +327,19 @@ started:
       commands your agents ran that no catalog row carries. --tick
       used|installed|default names the rule that decides every tick (used, the
       default, ticks what your agents actually ran here); --set <id>=on|off
-      flips a row by its catalog id, or a package this Mac's own package
+      flips a row by its catalog id, or a package this computer's own package
       managers have by the id wsp recipe scan gives it, which the build installs
       by that package's own road; --signin <id>=copy|machine|key|skip answers a
       sign-in by catalog id, key bringing the key files beside a login and
       nothing else of it; --add <id>=<command> carries a tool neither the
-      catalog nor this Mac has, installed by that command on the machine, with
-      --add-check <id>=<command> saying it is there; --project reads a folder's
-      own manifests for what it takes to build and weighs the histories by it,
-      --out says where the file goes and --json prints the table as one object.
-      Naming --tick or --project decides every tick again; without either, what
-      the file says stands and the flags flip rows on top of it. A sign-in
-      answer stands either way: no rule decides one. All of them repeat. Review
-      it, then wsp init --recipe
+      catalog nor this computer has, installed by that command on the machine,
+      with --add-check <id>=<command> saying it is there; --project reads a
+      folder's own manifests for what it takes to build and weighs the histories
+      by it, --out says where the file goes and --json prints the table as one
+      object. Naming --tick or --project decides every tick again; without
+      either, what the file says stands and the flags flip rows on top of it. A
+      sign-in answer stands either way: no rule decides one. All of them repeat.
+      Review it, then wsp init --recipe
   wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>] | wsp new
     --local [name] | wsp new --ssh <user@host> [name] [--ssh-port <port>]
     [--ssh-key <path>]
@@ -351,18 +363,22 @@ started:
   wsp rebuild <workspace>
       replaces a gone workspace's machine from its image and prints the state of
       the new one
+  wsp image move <workspace>
+      moves the workspace onto the newest version of its image and prints what
+      of the image's own files it kept
   wsp forget <workspace> [--yes]
       drops a gone workspace and its threads from this computer; refused while
       its machine exists
   wsp delete <workspace> [--yes]
       deletes the machine at the provider, then drops the record and threads
       from this computer
-  wsp thread new --in <workspace>
+  wsp thread new [--in <workspace>]
     [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, -…
     "<task>"
       opens a thread with the agent, model, effort and access the app offers, in
-      the project named or the one the app's pick would take; follows its first
-      turn, or with --detach prints the id and returns
+      the project named or the one the app's pick would take; without --in, run
+      from inside a registered repo, on the workspace that project last ran on;
+      follows its first turn, or with --detach prints the id and returns
   wsp thread read <thread> [--last]
       the thread's messages as the app lists them, oldest first: who each one
       is, when the runtime recorded it and the text, with every tool call folded
@@ -386,10 +402,16 @@ started:
       the folders inside one folder on this computer, for naming one to import;
       the home folder and every imported project are the roots and nothing
       outside them is listed
-  wsp import <folder> --to <workspace> [--yes] [--keep, --cut <path>]
+  wsp import <folder> [--to <workspace>] [--yes] [--keep, --cut <path>]
     [--agents <ids>] [--replace]
       lands a folder on the machine at its path here; the plan first, then --yes
-      or one question
+      or one question; on this computer it registers the path and copies
+      nothing; without --to, the workspace the last thread started on
+  wsp setup
+      the cloud setup on this host as the app's Set up cloud machines modal
+      reads it: which keys are held (never their values), the agents here, what
+      a machine costs, and the init job's phase, rows and progress when one runs
+      or ran
   wsp terminal config [--scheme light|dark]
       the Ghostty config on this computer as the app's terminal pane applies it,
       read from ~/.config/ghostty and Application Support with its includes and
@@ -506,11 +528,12 @@ usage:
   wsp status         whether a host is serving this state file, on which ports,
                      and what keeps it there, with a non-zero exit code when
                      none does
-  wsp init           set up your first golden image in six screens: Agents,
-                     Tools, Also on this Mac, Sign-ins, wsp for your agents
-                     on this Mac, and Build, then the browser. With no provider
-                     key it seals nothing and makes this computer your
-                     workspace instead
+  wsp init           set up your first golden image one screen at a time:
+                     Agents, Tools, Also on this computer, Sign-ins, wsp for
+                     your agents on this computer, each shown when it has a
+                     row to pick, then Build, then the browser. With no
+                     provider key it seals nothing and makes this computer
+                     your workspace instead
   wsp doctor         run the reach loop end to end against one live machine
                      (--yes also deletes the snapshots this host left behind);
                      --local proves the other half instead, a thread on this
@@ -559,19 +582,19 @@ started:
       commands your agents ran that no catalog row carries. --tick
       used|installed|default names the rule that decides every tick (used, the
       default, ticks what your agents actually ran here); --set <id>=on|off
-      flips a row by its catalog id, or a package this Mac's own package
+      flips a row by its catalog id, or a package this computer's own package
       managers have by the id wsp recipe scan gives it, which the build installs
       by that package's own road; --signin <id>=copy|machine|key|skip answers a
       sign-in by catalog id, key bringing the key files beside a login and
       nothing else of it; --add <id>=<command> carries a tool neither the
-      catalog nor this Mac has, installed by that command on the machine, with
-      --add-check <id>=<command> saying it is there; --project reads a folder's
-      own manifests for what it takes to build and weighs the histories by it,
-      --out says where the file goes and --json prints the table as one object.
-      Naming --tick or --project decides every tick again; without either, what
-      the file says stands and the flags flip rows on top of it. A sign-in
-      answer stands either way: no rule decides one. All of them repeat. Review
-      it, then wsp init --recipe
+      catalog nor this computer has, installed by that command on the machine,
+      with --add-check <id>=<command> saying it is there; --project reads a
+      folder's own manifests for what it takes to build and weighs the histories
+      by it, --out says where the file goes and --json prints the table as one
+      object. Naming --tick or --project decides every tick again; without
+      either, what the file says stands and the flags flip rows on top of it. A
+      sign-in answer stands either way: no rule decides one. All of them repeat.
+      Review it, then wsp init --recipe
   wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>] | wsp new
     --local [name] | wsp new --ssh <user@host> [name] [--ssh-port <port>]
     [--ssh-key <path>]
@@ -595,18 +618,22 @@ started:
   wsp rebuild <workspace>
       replaces a gone workspace's machine from its image and prints the state of
       the new one
+  wsp image move <workspace>
+      moves the workspace onto the newest version of its image and prints what
+      of the image's own files it kept
   wsp forget <workspace> [--yes]
       drops a gone workspace and its threads from this computer; refused while
       its machine exists
   wsp delete <workspace> [--yes]
       deletes the machine at the provider, then drops the record and threads
       from this computer
-  wsp thread new --in <workspace>
+  wsp thread new [--in <workspace>]
     [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, -…
     "<task>"
       opens a thread with the agent, model, effort and access the app offers, in
-      the project named or the one the app's pick would take; follows its first
-      turn, or with --detach prints the id and returns
+      the project named or the one the app's pick would take; without --in, run
+      from inside a registered repo, on the workspace that project last ran on;
+      follows its first turn, or with --detach prints the id and returns
   wsp thread read <thread> [--last]
       the thread's messages as the app lists them, oldest first: who each one
       is, when the runtime recorded it and the text, with every tool call folded
@@ -630,10 +657,16 @@ started:
       the folders inside one folder on this computer, for naming one to import;
       the home folder and every imported project are the roots and nothing
       outside them is listed
-  wsp import <folder> --to <workspace> [--yes] [--keep, --cut <path>]
+  wsp import <folder> [--to <workspace>] [--yes] [--keep, --cut <path>]
     [--agents <ids>] [--replace]
       lands a folder on the machine at its path here; the plan first, then --yes
-      or one question
+      or one question; on this computer it registers the path and copies
+      nothing; without --to, the workspace the last thread started on
+  wsp setup
+      the cloud setup on this host as the app's Set up cloud machines modal
+      reads it: which keys are held (never their values), the agents here, what
+      a machine costs, and the init job's phase, rows and progress when one runs
+      or ran
   wsp terminal config [--scheme light|dark]
       the Ghostty config on this computer as the app's terminal pane applies it,
       read from ~/.config/ghostty and Application Support with its includes and
@@ -743,18 +776,18 @@ usage: wsp recipe [--tick used|installed|default] [--set <id>=on|off] [--signin 
   your agents ran that no catalog row carries. --tick used|installed|default
   names the rule that decides every tick (used, the default, ticks what your
   agents actually ran here); --set <id>=on|off flips a row by its catalog id, or
-  a package this Mac's own package managers have by the id wsp recipe scan gives
-  it, which the build installs by that package's own road; --signin
+  a package this computer's own package managers have by the id wsp recipe scan
+  gives it, which the build installs by that package's own road; --signin
   <id>=copy|machine|key|skip answers a sign-in by catalog id, key bringing the
   key files beside a login and nothing else of it; --add <id>=<command> carries
-  a tool neither the catalog nor this Mac has, installed by that command on the
-  machine, with --add-check <id>=<command> saying it is there; --project reads a
-  folder's own manifests for what it takes to build and weighs the histories by
-  it, --out says where the file goes and --json prints the table as one object.
-  Naming --tick or --project decides every tick again; without either, what the
-  file says stands and the flags flip rows on top of it. A sign-in answer stands
-  either way: no rule decides one. All of them repeat. Review it, then wsp init
-  --recipe
+  a tool neither the catalog nor this computer has, installed by that command on
+  the machine, with --add-check <id>=<command> saying it is there; --project
+  reads a folder's own manifests for what it takes to build and weighs the
+  histories by it, --out says where the file goes and --json prints the table as
+  one object. Naming --tick or --project decides every tick again; without
+  either, what the file says stands and the flags flip rows on top of it. A
+  sign-in answer stands either way: no rule decides one. All of them repeat.
+  Review it, then wsp init --recipe
 
   --json         print the raw protocol values, one JSON line each
   --state PATH   the state file the host serves
@@ -887,11 +920,12 @@ usage:
   wsp status         whether a host is serving this state file, on which ports,
                      and what keeps it there, with a non-zero exit code when
                      none does
-  wsp init           set up your first golden image in six screens: Agents,
-                     Tools, Also on this Mac, Sign-ins, wsp for your agents
-                     on this Mac, and Build, then the browser. With no provider
-                     key it seals nothing and makes this computer your
-                     workspace instead
+  wsp init           set up your first golden image one screen at a time:
+                     Agents, Tools, Also on this computer, Sign-ins, wsp for
+                     your agents on this computer, each shown when it has a
+                     row to pick, then Build, then the browser. With no
+                     provider key it seals nothing and makes this computer
+                     your workspace instead
   wsp doctor         run the reach loop end to end against one live machine
                      (--yes also deletes the snapshots this host left behind);
                      --local proves the other half instead, a thread on this
@@ -940,19 +974,19 @@ started:
       commands your agents ran that no catalog row carries. --tick
       used|installed|default names the rule that decides every tick (used, the
       default, ticks what your agents actually ran here); --set <id>=on|off
-      flips a row by its catalog id, or a package this Mac's own package
+      flips a row by its catalog id, or a package this computer's own package
       managers have by the id wsp recipe scan gives it, which the build installs
       by that package's own road; --signin <id>=copy|machine|key|skip answers a
       sign-in by catalog id, key bringing the key files beside a login and
       nothing else of it; --add <id>=<command> carries a tool neither the
-      catalog nor this Mac has, installed by that command on the machine, with
-      --add-check <id>=<command> saying it is there; --project reads a folder's
-      own manifests for what it takes to build and weighs the histories by it,
-      --out says where the file goes and --json prints the table as one object.
-      Naming --tick or --project decides every tick again; without either, what
-      the file says stands and the flags flip rows on top of it. A sign-in
-      answer stands either way: no rule decides one. All of them repeat. Review
-      it, then wsp init --recipe
+      catalog nor this computer has, installed by that command on the machine,
+      with --add-check <id>=<command> saying it is there; --project reads a
+      folder's own manifests for what it takes to build and weighs the histories
+      by it, --out says where the file goes and --json prints the table as one
+      object. Naming --tick or --project decides every tick again; without
+      either, what the file says stands and the flags flip rows on top of it. A
+      sign-in answer stands either way: no rule decides one. All of them repeat.
+      Review it, then wsp init --recipe
   wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>] | wsp new
     --local [name] | wsp new --ssh <user@host> [name] [--ssh-port <port>]
     [--ssh-key <path>]
@@ -976,18 +1010,22 @@ started:
   wsp rebuild <workspace>
       replaces a gone workspace's machine from its image and prints the state of
       the new one
+  wsp image move <workspace>
+      moves the workspace onto the newest version of its image and prints what
+      of the image's own files it kept
   wsp forget <workspace> [--yes]
       drops a gone workspace and its threads from this computer; refused while
       its machine exists
   wsp delete <workspace> [--yes]
       deletes the machine at the provider, then drops the record and threads
       from this computer
-  wsp thread new --in <workspace>
+  wsp thread new [--in <workspace>]
     [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, -…
     "<task>"
       opens a thread with the agent, model, effort and access the app offers, in
-      the project named or the one the app's pick would take; follows its first
-      turn, or with --detach prints the id and returns
+      the project named or the one the app's pick would take; without --in, run
+      from inside a registered repo, on the workspace that project last ran on;
+      follows its first turn, or with --detach prints the id and returns
   wsp thread read <thread> [--last]
       the thread's messages as the app lists them, oldest first: who each one
       is, when the runtime recorded it and the text, with every tool call folded
@@ -1011,10 +1049,16 @@ started:
       the folders inside one folder on this computer, for naming one to import;
       the home folder and every imported project are the roots and nothing
       outside them is listed
-  wsp import <folder> --to <workspace> [--yes] [--keep, --cut <path>]
+  wsp import <folder> [--to <workspace>] [--yes] [--keep, --cut <path>]
     [--agents <ids>] [--replace]
       lands a folder on the machine at its path here; the plan first, then --yes
-      or one question
+      or one question; on this computer it registers the path and copies
+      nothing; without --to, the workspace the last thread started on
+  wsp setup
+      the cloud setup on this host as the app's Set up cloud machines modal
+      reads it: which keys are held (never their values), the agents here, what
+      a machine costs, and the init job's phase, rows and progress when one runs
+      or ran
   wsp terminal config [--scheme light|dark]
       the Ghostty config on this computer as the app's terminal pane applies it,
       read from ~/.config/ghostty and Application Support with its includes and
@@ -1162,9 +1206,10 @@ usage: wsp folders [<folder>] [--hidden]
 ## wsp import
 
 ```text
-usage: wsp import <folder> --to <workspace> [--yes] [--keep, --cut <path>] [--agents <ids>] [--replace]
+usage: wsp import <folder> [--to <workspace>] [--yes] [--keep, --cut <path>] [--agents <ids>] [--replace]
   lands a folder on the machine at its path here; the plan first, then --yes or
-  one question
+  one question; on this computer it registers the path and copies nothing;
+  without --to, the workspace the last thread started on
 
   --json         print the raw protocol values, one JSON line each
   --state PATH   the state file the host serves
@@ -1197,11 +1242,12 @@ usage:
   wsp status         whether a host is serving this state file, on which ports,
                      and what keeps it there, with a non-zero exit code when
                      none does
-  wsp init           set up your first golden image in six screens: Agents,
-                     Tools, Also on this Mac, Sign-ins, wsp for your agents
-                     on this Mac, and Build, then the browser. With no provider
-                     key it seals nothing and makes this computer your
-                     workspace instead
+  wsp init           set up your first golden image one screen at a time:
+                     Agents, Tools, Also on this computer, Sign-ins, wsp for
+                     your agents on this computer, each shown when it has a
+                     row to pick, then Build, then the browser. With no
+                     provider key it seals nothing and makes this computer
+                     your workspace instead
   wsp doctor         run the reach loop end to end against one live machine
                      (--yes also deletes the snapshots this host left behind);
                      --local proves the other half instead, a thread on this
@@ -1250,19 +1296,19 @@ started:
       commands your agents ran that no catalog row carries. --tick
       used|installed|default names the rule that decides every tick (used, the
       default, ticks what your agents actually ran here); --set <id>=on|off
-      flips a row by its catalog id, or a package this Mac's own package
+      flips a row by its catalog id, or a package this computer's own package
       managers have by the id wsp recipe scan gives it, which the build installs
       by that package's own road; --signin <id>=copy|machine|key|skip answers a
       sign-in by catalog id, key bringing the key files beside a login and
       nothing else of it; --add <id>=<command> carries a tool neither the
-      catalog nor this Mac has, installed by that command on the machine, with
-      --add-check <id>=<command> saying it is there; --project reads a folder's
-      own manifests for what it takes to build and weighs the histories by it,
-      --out says where the file goes and --json prints the table as one object.
-      Naming --tick or --project decides every tick again; without either, what
-      the file says stands and the flags flip rows on top of it. A sign-in
-      answer stands either way: no rule decides one. All of them repeat. Review
-      it, then wsp init --recipe
+      catalog nor this computer has, installed by that command on the machine,
+      with --add-check <id>=<command> saying it is there; --project reads a
+      folder's own manifests for what it takes to build and weighs the histories
+      by it, --out says where the file goes and --json prints the table as one
+      object. Naming --tick or --project decides every tick again; without
+      either, what the file says stands and the flags flip rows on top of it. A
+      sign-in answer stands either way: no rule decides one. All of them repeat.
+      Review it, then wsp init --recipe
   wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>] | wsp new
     --local [name] | wsp new --ssh <user@host> [name] [--ssh-port <port>]
     [--ssh-key <path>]
@@ -1286,18 +1332,22 @@ started:
   wsp rebuild <workspace>
       replaces a gone workspace's machine from its image and prints the state of
       the new one
+  wsp image move <workspace>
+      moves the workspace onto the newest version of its image and prints what
+      of the image's own files it kept
   wsp forget <workspace> [--yes]
       drops a gone workspace and its threads from this computer; refused while
       its machine exists
   wsp delete <workspace> [--yes]
       deletes the machine at the provider, then drops the record and threads
       from this computer
-  wsp thread new --in <workspace>
+  wsp thread new [--in <workspace>]
     [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, -…
     "<task>"
       opens a thread with the agent, model, effort and access the app offers, in
-      the project named or the one the app's pick would take; follows its first
-      turn, or with --detach prints the id and returns
+      the project named or the one the app's pick would take; without --in, run
+      from inside a registered repo, on the workspace that project last ran on;
+      follows its first turn, or with --detach prints the id and returns
   wsp thread read <thread> [--last]
       the thread's messages as the app lists them, oldest first: who each one
       is, when the runtime recorded it and the text, with every tool call folded
@@ -1321,10 +1371,16 @@ started:
       the folders inside one folder on this computer, for naming one to import;
       the home folder and every imported project are the roots and nothing
       outside them is listed
-  wsp import <folder> --to <workspace> [--yes] [--keep, --cut <path>]
+  wsp import <folder> [--to <workspace>] [--yes] [--keep, --cut <path>]
     [--agents <ids>] [--replace]
       lands a folder on the machine at its path here; the plan first, then --yes
-      or one question
+      or one question; on this computer it registers the path and copies
+      nothing; without --to, the workspace the last thread started on
+  wsp setup
+      the cloud setup on this host as the app's Set up cloud machines modal
+      reads it: which keys are held (never their values), the agents here, what
+      a machine costs, and the init job's phase, rows and progress when one runs
+      or ran
   wsp terminal config [--scheme light|dark]
       the Ghostty config on this computer as the app's terminal pane applies it,
       read from ~/.config/ghostty and Application Support with its includes and

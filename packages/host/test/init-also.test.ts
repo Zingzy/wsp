@@ -1,16 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The Also on this Mac screen: what it draws from a scan, what a tick writes
+// The Also screen: what it draws from a scan, what a tick writes
 // into the recipe, and what an untick takes away again.
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { MIB } from "@wsp/catalog";
 import type { Recipe } from "@wsp/protocol";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { ALSO_TITLE, ALSO_TOP, alsoGroupLine, alsoItems, buildLine, scannedTicks, withScanned } from "../src/init-also.js";
+import { alsoGroupLine, alsoItems, alsoTitle, alsoTop, buildLine, scannedTicks, withScanned } from "../src/init-also.js";
 import { ownRowOf } from "../src/recipe-file.js";
 import type { Manifest, ManifestEntry } from "@wsp/collect";
 import { rungSelect } from "../src/init-select.js";
-import { customFromScan, type ScanRow } from "../src/scan.js";
+import { customFromScan } from "../src/recipe-custom.js";
+import type { ScanRow } from "../src/scan.js";
+
+/** The scan row as a recipe row, for the computer these tests read: a Mac, whose own words the screens keep. */
+const customFromScanAt = (row: ScanRow) => customFromScan(row, "darwin");
 
 const bare: Recipe = { version: 1, at: "2026-09-06T03:00:00Z", histories: [], rows: [] };
 
@@ -21,9 +25,9 @@ const scan: ScanRow[] = [
   { id: "npm/turbo", name: "turbo", manager: "npm", group: "npm globals", install: "npm install -g turbo", check: "command -v turbo", version: "2.5.0" },
 ];
 
-describe("the Also on this Mac screen", () => {
+describe("the Also screen", () => {
   it("draws one row per tool under its manager, with the install line and the size measured here", () => {
-    const items = alsoItems(scan, bare);
+    const items = alsoItems(scan, bare, "darwin");
     expect(items.map(i => i.group)).toEqual(["Homebrew formulae", "Homebrew formulae", "Homebrew formulae", "npm globals"]);
     expect(items[0]).toMatchObject({ id: "brew/just", label: "just", hint: { text: "4 MB" } });
     expect(items[0]!.detail[0]).toBe("brew install just");
@@ -47,19 +51,19 @@ describe("the Also on this Mac screen", () => {
     expect(buildLine(manifest, diskbloom, new Map())).toBe("left out of the build: no Linux bottle known");
     expect(buildLine(manifest, scan[0]!, table)).toBe("installs with Homebrew: brew install just");
     expect(buildLine(manifest, scan[1]!, table)).toBeUndefined();
-    const items = alsoItems(rows, recipe, r => buildLine(manifest, r, table));
+    const items = alsoItems(rows, recipe, "darwin", r => buildLine(manifest, r, table));
     expect(items.find(i => i.id === diskbloom.id)!.detail).toEqual(["installs from its release: the v0.1.0 release of github.com/Zingzy/diskbloom", "installed on this Mac, 0.1.0"]);
     expect(items.find(i => i.id === diskbloom.id)!.hint).toEqual({ text: "4 MB" });
     // A package with no row of its own keeps the screen's words for a custom row.
     expect(items.find(i => i.id === "brew/llvm")!.detail).toEqual(["brew install llvm", "installs on the machine after everything in the catalog"]);
     // A tick on it ticks the recipe's row and writes no custom row; the row stays off until then; an untick turns it off again.
     expect(scannedTicks(recipe, rows)).toEqual(new Set());
-    const ticked = withScanned(recipe, rows, new Set([diskbloom.id, "brew/llvm"]));
+    const ticked = withScanned(recipe, rows, new Set([diskbloom.id, "brew/llvm"]), "darwin");
     expect(ticked.rows.find(r => r.id === tap.id)?.on).toBe(true);
     expect(ticked.rows.find(r => r.id === "tools/brew/just")?.on).toBe(false);
     expect(ticked.custom?.map(c => c.id)).toEqual(["brew/llvm"]);
     expect(scannedTicks(ticked, rows)).toEqual(new Set([diskbloom.id, "brew/llvm"]));
-    const unticked = withScanned(ticked, rows, new Set());
+    const unticked = withScanned(ticked, rows, new Set(), "darwin");
     expect(unticked.rows.find(r => r.id === tap.id)?.on).toBe(false);
     expect(unticked.custom).toEqual([]);
   });
@@ -68,20 +72,20 @@ describe("the Also on this Mac screen", () => {
     const tap = "tools/brew/zingzy/tap/diskbloom";
     const own = (on: boolean): Recipe["rows"][number] => ({ id: tap, kind: "tool", on, source: { kind: "installed", paths: [], bin: true } });
     const diskbloom: ScanRow = { id: "brew/zingzy/tap/diskbloom", name: "zingzy/tap/diskbloom", manager: "brew", group: "Homebrew formulae", install: "brew install zingzy/tap/diskbloom", check: "brew list --versions zingzy/tap/diskbloom", size: 4 * MIB };
-    const stale = customFromScan(diskbloom);
+    const stale = customFromScanAt(diskbloom);
     const recipe: Recipe = { ...bare, rows: [own(false)], custom: [stale, { kind: "custom", id: "cuda", name: "cuda", install: ["apt-get install -y cuda"], check: "command -v cuda", why: "added by the agent" }] };
     const rows = [...scan, diskbloom];
     expect(scannedTicks(recipe, rows)).toEqual(new Set());
-    const untouched = withScanned(recipe, rows, new Set());
+    const untouched = withScanned(recipe, rows, new Set(), "darwin");
     expect(untouched.rows.find(r => r.id === tap)?.on).toBe(false);
     expect(untouched.custom?.map(c => c.id)).toEqual(["cuda"]);
-    const ticked = withScanned(recipe, rows, new Set([diskbloom.id]));
+    const ticked = withScanned(recipe, rows, new Set([diskbloom.id]), "darwin");
     expect(ticked.rows.find(r => r.id === tap)?.on).toBe(true);
     expect(ticked.custom?.map(c => c.id)).toEqual(["cuda"]);
   });
 
   it("says so when nothing here measured a size", () => {
-    expect(alsoItems(scan, bare)[3]!.hint).toEqual({ text: "size unknown" });
+    expect(alsoItems(scan, bare, "darwin")[3]!.hint).toEqual({ text: "size unknown" });
   });
 
   it("colours a heavy row's size by weight and leaves a small one plain", () => {
@@ -92,7 +96,7 @@ describe("the Also on this Mac screen", () => {
       if (was === undefined) delete process.env["FORCE_COLOR"];
       else process.env["FORCE_COLOR"] = was;
     });
-    const items = alsoItems(scan, bare);
+    const items = alsoItems(scan, bare, "darwin");
     const paint = (i: number): ((padded: string) => string) | undefined => (typeof items[i]!.hint === "object" ? items[i]!.hint.paint : undefined);
     // The paint runs on the padded cell, so a colour never changes the column's width.
     expect(paint(0)).toBeUndefined();
@@ -102,7 +106,7 @@ describe("the Also on this Mac screen", () => {
   });
 
   it("a manager's header counts its ticked rows and what they weigh here", () => {
-    const items = alsoItems(scan, bare);
+    const items = alsoItems(scan, bare, "darwin");
     const brew = items.filter(i => i.group === "Homebrew formulae");
     const line = alsoGroupLine(scan);
     expect(line(brew, { ticks: new Set(), answers: new Map() })).toBe("0 of 3  0 B");
@@ -114,7 +118,7 @@ describe("the Also on this Mac screen", () => {
   });
 
   it("writes a ticked row into the recipe as a row of its own, with the install, the check and the size", () => {
-    const recipe = withScanned(bare, scan, new Set(["brew/just"]));
+    const recipe = withScanned(bare, scan, new Set(["brew/just"]), "darwin");
     expect(recipe.custom).toEqual([
       { kind: "custom", id: "brew/just", name: "just", install: ["brew install just"], check: "command -v just", manager: "brew", size: 4 * MIB, why: "installed on this Mac by brew" },
     ]);
@@ -127,17 +131,17 @@ describe("the Also on this Mac screen", () => {
       { id: "pipx/ruff", name: "ruff", manager: "pipx", group: "uv and pipx tools", install: "pipx install ruff", check: "command -v ruff" },
     ];
     const byHand = { kind: "custom" as const, id: "ruff", name: "ruff", install: ["uv tool install ruff --python 3.12"], check: "command -v ruff", why: "used in wsp" };
-    const recipe = withScanned({ ...bare, custom: [byHand] }, both, new Set(["uv/ruff"]));
+    const recipe = withScanned({ ...bare, custom: [byHand] }, both, new Set(["uv/ruff"]), "darwin");
     expect(recipe.custom).toEqual([byHand, { kind: "custom", id: "uv/ruff", name: "ruff", install: ["uv tool install ruff"], check: "command -v ruff", manager: "uv", why: "installed on this Mac by uv" }]);
     expect(scannedTicks(recipe, both)).toEqual(new Set(["uv/ruff"]));
     // A second pass over the same screen leaves the hand-written row where it was.
-    expect(withScanned(recipe, both, new Set()).custom).toEqual([byHand]);
+    expect(withScanned(recipe, both, new Set(), "darwin").custom).toEqual([byHand]);
   });
 
   it("takes a row away again when the screen is left with it unticked, and leaves rows from anywhere else alone", () => {
-    const added = withScanned({ ...bare, custom: [{ kind: "custom", id: "cuda", name: "cuda", install: ["apt-get install -y cuda"], check: "command -v cuda", why: "added by the agent" }] }, scan, new Set(["brew/just"]));
+    const added = withScanned({ ...bare, custom: [{ kind: "custom", id: "cuda", name: "cuda", install: ["apt-get install -y cuda"], check: "command -v cuda", why: "added by the agent" }] }, scan, new Set(["brew/just"]), "darwin");
     expect(added.custom?.map(r => r.id)).toEqual(["cuda", "brew/just"]);
-    const cleared = withScanned(added, scan, new Set());
+    const cleared = withScanned(added, scan, new Set(), "darwin");
     expect(cleared.custom?.map(r => r.id)).toEqual(["cuda"]);
   });
 });
@@ -160,7 +164,7 @@ describe("the screen as a terminal draws it", () => {
       else process.env["FORCE_COLOR"] = was;
     });
     const o = streams();
-    const done = rungSelect({ title: ALSO_TITLE, top: ALSO_TOP, counter: "3/6", items: alsoItems(scan, bare), initial: new Set(), groupLine: alsoGroupLine(scan), input: o.input, output: o.output });
+    const done = rungSelect({ title: alsoTitle("darwin"), top: alsoTop("darwin"), counter: "3/6", items: alsoItems(scan, bare, "darwin"), initial: new Set(), groupLine: alsoGroupLine(scan), input: o.input, output: o.output });
     await settle();
     // Down to the first row under the first manager, so the detail pane is that row's.
     o.input.write("\x1b[B\x1b[B");

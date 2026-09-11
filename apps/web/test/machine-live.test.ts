@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { SysSample } from "@wsp/protocol";
+import { kindWords, type SysSample } from "@wsp/protocol";
 import { percentLabel, reachLabel } from "../src/components/machine/format.js";
 import { getLive, LIVE_WINDOW, outOfMemoryReading, resetLive, useOutOfMemoryReading, useOutOfMemoryReadings } from "../src/machine/live.js";
 
 const sample = (i: number): SysSample => ({ type: "sys.sample", cpu: i, load1: 0.5, mem: { used: i, total: 100 }, disk: { used: i, total: 100 }, at: 1_000 + i });
 
 describe("the Reach row's word", () => {
-  it("a kind whose machines serve no daemon says what the machine is, where the bare state word would read as a fault", () => {
-    // The same table the sidebar row reads: on this kind unsupported is not a state that passes, it is the machine.
-    expect(reachLabel("unsupported", "ssh")).toBe("none on a machine over ssh");
-    // This computer's daemon can be missing for a while, so its row keeps the state word.
-    expect(reachLabel("unsupported", "local")).toBe("unsupported");
-    expect(reachLabel("unsupported", "cloud")).toBe("unsupported");
-    // Every other state reads as it does on every kind.
-    expect(reachLabel("reachable", "ssh")).toBe("reachable");
-    expect(reachLabel("no-daemon", "ssh")).toBe("no daemon");
+  it("keeps the state word on every kind whose machines carry a daemon, and says what the machine is where none does", () => {
+    // Every kind carries one today, each put there its own way, so a daemon missing is a fact about that machine
+    // and the row says the state. The other branch reads the same table and is what the next kind without one gets.
+    for (const kind of ["cloud", "local", "ssh"] as const) {
+      expect(kindWords(kind).daemon).toBe(true);
+      expect(reachLabel("unsupported", kind)).toBe("unsupported");
+      expect(reachLabel("reachable", kind)).toBe("reachable");
+      expect(reachLabel("no-daemon", kind)).toBe("no daemon");
+    }
   });
 });
 

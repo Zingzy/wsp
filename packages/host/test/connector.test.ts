@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CLOUDFLARED, connectorArgs, ensureCloudflared, fetchPinned, pinnedCloudflared, quickHostname, startConnector, type PinnedBinary } from "../src/connector.js";
+import { CLOUDFLARED, connectorArgs, ensureCloudflared, fetchPinned, pinnedCloudflared, quickHostname, startConnector, stopRecordedConnector, type PinnedBinary } from "../src/connector.js";
 
 let dirs: string[] = [];
 const stops: (() => Promise<void>)[] = [];
@@ -32,11 +32,15 @@ function pinFor(bytes: Uint8Array, extra: Partial<PinnedBinary> = {}): PinnedBin
   return { version: "9999.1.0", url: "https://example.invalid/cloudflared", sha256: sha256(bytes), ...extra };
 }
 
-/** A script that stands in for the connector: it writes down how it was called, says what cloudflared says and
- * then waits to be stopped. */
+/** A script that stands in for the connector: it writes down how it was called and what it was given, says what
+ * cloudflared says and then waits to be stopped. */
 function fakeConnector(dir: string, banner: string, sleepSeconds = 30): string {
   const bin = join(dir, "fake-cloudflared");
-  writeFileSync(bin, `#!/bin/sh\necho "$@" > "${join(dir, "argv")}"\necho "$TUNNEL_TOKEN" > "${join(dir, "token")}"\n>&2 echo '${banner}'\nsleep ${sleepSeconds}\n`, { mode: 0o755 });
+  writeFileSync(
+    bin,
+    `#!/bin/sh\necho "$@" > "${join(dir, "argv")}"\necho "$TUNNEL_TOKEN" > "${join(dir, "token")}"\nenv > "${join(dir, "env")}"\n>&2 echo '${banner}'\nsleep ${sleepSeconds}\n`,
+    { mode: 0o755 },
+  );
   return bin;
 }
 
@@ -120,7 +124,7 @@ describe("the connector child", () => {
     const dir = tempDir("connector");
     const connector = startConnector({ bin: fakeConnector(dir, "INF starting"), stateDir: dir, port: 4400, token: "a-tunnel-token", log: () => {} });
     stops.push(() => connector.stop());
-    await vi.waitUntil(() => existsSync(join(dir, "token")), { timeout: 4000 });
+    await vi.waitUntil(() => existsSync(join(dir, "token")) && readFileSync(join(dir, "token"), "utf8").trim() !== "", { timeout: 4000 });
     expect(readFileSync(join(dir, "token"), "utf8").trim()).toBe("a-tunnel-token");
     expect(readFileSync(join(dir, "argv"), "utf8").trim()).toBe("tunnel --no-autoupdate run");
   });
@@ -128,6 +132,20 @@ describe("the connector child", () => {
   it("reads the hostname a quick tunnel printed and nothing else", () => {
     expect(quickHostname("2026-09-11T11:00:00Z INF |  https://blue-sky-1234.trycloudflare.com    |")).toBe("blue-sky-1234.trycloudflare.com");
     expect(quickHostname("INF Registered tunnel connection connIndex=0")).toBeUndefined();
+  });
+
+  it("hands the child the three things it needs and none of this computer's keys", async () => {
+    const dir = tempDir("connector");
+    const connector = startConnector({ bin: fakeConnector(dir, "INF starting"), stateDir: dir, port: 4400, token: "a-tunnel-token", log: () => {} });
+    stops.push(() => connector.stop());
+    // The script writes this file; waiting for it to exist would read it half written under a loaded machine.
+    await vi.waitUntil(() => existsSync(join(dir, "env")) && readFileSync(join(dir, "env"), "utf8").includes("PATH="), { timeout: 4000 });
+    const names = readFileSync(join(dir, "env"), "utf8")
+      .split("\n")
+      .filter(line => line.includes("="))
+      .map(line => line.slice(0, line.indexOf("=")))
+      .filter(name => name !== "PWD" && name !== "SHLVL" && name !== "_");
+    expect(names.sort()).toEqual(["HOME", "PATH", "TUNNEL_TOKEN"]);
   });
 
   it("records the pid it started, hands over the hostname, and stops that pid alone", async () => {
@@ -145,7 +163,9 @@ describe("the connector child", () => {
     expect(readFileSync(join(dir, "argv"), "utf8").trim()).toBe("tunnel --no-autoupdate --url http://127.0.0.1:4400");
 
     const pid = connector.pid!;
-    expect(Number(readFileSync(join(dir, "connector.pid"), "utf8").trim())).toBe(pid);
+    const recorded = JSON.parse(readFileSync(join(dir, "connector.pid"), "utf8")) as { pid: number; startedAt: string };
+    expect(recorded.pid).toBe(pid);
+    expect(Date.parse(recorded.startedAt)).toBeGreaterThan(Date.now() - 60_000);
     expect(() => process.kill(pid, 0)).not.toThrow();
 
     await connector.stop();
@@ -183,3 +203,38 @@ describe("the connector child", () => {
     expect(readFileSync(join(dir, "runs"), "utf8").split("\n").filter(Boolean).length).toBe(runs);
   });
 });
+
+describe("a connector another run left behind", () => {
+  it("stops the pid that run wrote down", async () => {
+    const dir = tempDir("connector");
+    const connector = startConnector({ bin: fakeConnector(dir, "INF starting"), stateDir: dir, port: 4400, log: () => {} });
+    const pid = await vi.waitUntil(() => connector.pid, { timeout: 4000 });
+    await stopRecordedConnector(dir);
+    expect(existsSync(join(dir, "connector.pid"))).toBe(false);
+    expect(alive(pid)).toBe(false);
+    await connector.stop();
+  });
+
+  it("leaves a pid from before this computer last started alone, whoever holds it now", async () => {
+    const dir = tempDir("connector");
+    const connector = startConnector({ bin: fakeConnector(dir, "INF starting"), stateDir: dir, port: 4400, log: () => {} });
+    stops.push(() => connector.stop());
+    const pid = await vi.waitUntil(() => connector.pid, { timeout: 4000 });
+    // A record from before the last boot names a pid the system has since handed to somebody else.
+    writeFileSync(join(dir, "connector.pid"), JSON.stringify({ pid, startedAt: "2020-01-01T00:00:00.000Z" }));
+
+    await stopRecordedConnector(dir);
+    expect(existsSync(join(dir, "connector.pid"))).toBe(false);
+    expect(alive(pid)).toBe(true);
+  });
+});
+
+/** Whether a pid is still there, as this test reads it. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}

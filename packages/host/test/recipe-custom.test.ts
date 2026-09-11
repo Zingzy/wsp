@@ -12,7 +12,7 @@ import { RecipeAnswerRow, answerRows, recipeAnswer, recipePrintout } from "../sr
 import { customFromFlags, parsePair, withCustom } from "../src/recipe-custom.js";
 import type { ScanRow } from "../src/scan.js";
 import { findVerb, runVerb } from "../src/verbs.js";
-import { withHome } from "./recipe-fixture.js";
+import { HERE, HERE_PLATFORM, withHome } from "./recipe-fixture.js";
 
 const bare: Recipe = { version: 1, at: "2026-09-06T03:00:00Z", histories: [], rows: [] };
 
@@ -146,13 +146,13 @@ describe("the recipe verb's flags", () => {
     expect(file().custom ?? []).toEqual([]);
     const refusal: string[] = [];
     expect(await onCli(["--out", out, "--add", `${DISKBLOOM.id}=${DISKBLOOM.install}`], [], refusal, dir, [DISKBLOOM])).toBe(3);
-    expect(refusal[0]).toBe(`wsp recipe: ${addAlreadyHereLine(DISKBLOOM.id, DISKBLOOM.id)}`);
+    expect(refusal[0]).toBe(`wsp recipe: ${addAlreadyHereLine(HERE_PLATFORM, DISKBLOOM.id, DISKBLOOM.id)}`);
     expect(file().custom ?? []).toEqual([]);
     // An id that is no catalog row, no row of the file and no scanned package is a usage refusal, in the words of the
     // one place that resolves a --set target; the scanned id above is not one, so no check ahead of it may refuse it.
     const unknown: string[] = [];
     expect(await onCli(["--out", out, "--set", "nope=on"], [], unknown, dir, [DISKBLOOM])).toBe(3);
-    expect(unknown[0]).toBe(`wsp recipe: --set nope=on: "nope" is no catalog row and no row of ${out} outside the catalog, and no package a manager on this Mac has that id`);
+    expect(unknown[0]).toBe(`wsp recipe: --set nope=on: "nope" is no catalog row and no row of ${out} outside the catalog, and no package a manager on ${HERE} has that id`);
     expect(file().rows.find(r => r.id === TAP_ROW)).toMatchObject({ on: true });
   });
 });

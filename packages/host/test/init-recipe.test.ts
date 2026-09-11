@@ -32,7 +32,7 @@ import {
   withTicksOf,
 } from "../src/init-recipe.js";
 import { MIB } from "@wsp/catalog";
-import type { BrewTable } from "@wsp/engine";
+import { toolInstallsFor, type BrewTable } from "@wsp/engine";
 import { FIXTURE, byId } from "./init-fixture.js";
 
 const ANTHROPIC = "sk-ant-x-fake-anthropic-key";
@@ -385,6 +385,20 @@ describe("the small recipe", () => {
     expect(empty.entries.map(e => e.id)).toEqual(["tools/catalog/gh", "tools/catalog/agent-browser"]);
     const again = applyRecipe(empty, { ...RECIPE, rows: RECIPE.rows.map(r => (r.id === "gh" ? { ...r, on: false } : r)) });
     expect(again.entries.map(e => e.id)).toEqual(["tools/catalog/agent-browser"]);
+  });
+
+  it("a row whose manager the build reads no road off would swallow a ticked catalog tool, which is why the collector files none: with one, nothing installs the tool; with none, the bare row installs it by the catalog's road", () => {
+    const tmux: Recipe = { version: 1, at: "2026-09-11T00:00:00Z", histories: [], rows: [{ id: "tmux", kind: "tool", on: true, source: { kind: "installed", paths: [], bin: true } }] };
+    const plan = (m: Manifest) => toolInstallsFor(applyRecipe(m, tmux).entries.filter(e => e.bring === true), new Map(), []);
+    // What the collector files on Linux: no apt row for tmux, so the tick lands on the catalog's own row and its
+    // apt road installs it, the index read once ahead of it.
+    expect(plan({ entries: [] }).installs.map(t => t.id)).toEqual(["tools/apt-index", "tools/catalog/tmux"]);
+    // What an apt row would do instead: the row counts as tmux being here, so no bare row is added, and no road
+    // reads off an apt row, so the plan installs nothing at all and says nothing about it.
+    const apt: ManifestEntry = { rung: "tools", id: "tools/apt/tmux", label: "tmux", group: "apt packages", paths: [], bytes: 0, default: "bring", linux: "yes" };
+    const swallowed = plan({ entries: [apt] });
+    expect(swallowed.installs).toEqual([]);
+    expect(swallowed.skipped).toEqual([]);
   });
 
   it("a recorded pin rides the small recipe onto the tools row of the catalog id it names, the bare row and this computer's own alike, and survives withTicksOf and the file", () => {

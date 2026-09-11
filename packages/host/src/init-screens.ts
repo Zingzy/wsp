@@ -11,11 +11,11 @@
 // here, once.
 import { basename } from "node:path";
 import { CATALOG_AGENTS, CATALOG_TOOLS, agentName as catalogName, catalogEntry, hasLogin } from "@wsp/catalog";
-import { floorApplies, type LoginChoice, type Manifest } from "@wsp/collect";
-import { BUILDER_DISK_GB, isMcpRow } from "@wsp/engine";
+import { floorApplies, type LoginChoice, type Manifest, type Platform } from "@wsp/collect";
+import { isMcpRow } from "@wsp/engine";
 import { CLOUD_SETUP_WORDS, fmtCalls, initShownScreens, type InitScreen, type InitScreenId, type InitScreenItem, type Recipe } from "@wsp/protocol";
-import { ALSO_TITLE, ALSO_TOP, alsoItems, buildLine, scannedTicks, withScanned } from "./init-also.js";
-import { AGENTS_TITLE, AGENTS_TOP, SIGN_INS_TITLE, SIGN_INS_TOP, TOOLS_TITLE, TOOLS_TOP, WSP_TITLE, WSP_TOP, mcpAgents, pickEstimate, signInItems, tableItems, withAgents, withTools, wspToolsItems } from "./init-pick.js";
+import { alsoItems, alsoTitle, alsoTop, buildLine, scannedTicks, withScanned } from "./init-also.js";
+import { AGENTS_TITLE, AGENTS_TOP, SIGN_INS_TITLE, SIGN_INS_TOP, TOOLS_TITLE, TOOLS_TOP, WSP_TOP, mcpAgents, pickEstimate, signInItems, tableItems, withAgents, withTools, wspTitle, wspToolsItems } from "./init-pick.js";
 import { agentName, isLoginChoice, isTickable } from "./init-recipe.js";
 import type { SelectItem } from "./init-select.js";
 import { agentRows, recipeTable, type TableRow } from "./init-table.js";
@@ -72,8 +72,8 @@ const callsOf = (recipe: Recipe, id: string): number | undefined => {
 /** The tools screen's rows as the app draws them: the base under one divider in the catalog's order with name and
  * size alone, everything else under the person's usage, each usage row carrying its calls, most first; the tick says
  * what the rule decided. */
-function toolItems(tools: readonly TableRow[], recipe: Recipe, manifest: Manifest): InitScreenItem[] {
-  const detail = new Map(tableItems(tools, recipe, manifest, PLAIN, true).map(i => [i.id, i.detail]));
+function toolItems(tools: readonly TableRow[], recipe: Recipe, manifest: Manifest, platform: Platform): InitScreenItem[] {
+  const detail = new Map(tableItems(tools, recipe, manifest, PLAIN, true, platform).map(i => [i.id, i.detail]));
   const rows = tools.map(row => ({ row, calls: callsOf(recipe, row.id) }));
   const byCalls = (a: { calls: number | undefined }, b: { calls: number | undefined }): number => (b.calls ?? -1) - (a.calls ?? -1);
   const shaped = ({ row, calls }: (typeof rows)[number], group: string): InitScreenItem => ({
@@ -131,10 +131,13 @@ function loginItems(items: readonly SelectItem[], manifest: Manifest, saved: Rea
 }
 
 /** What the image's disk holds before any tick, and the disk the build asks the provider for: the base the room
- * leaves out of the builder's disk, plus the files that travel. The ring the app draws grows from here. */
-export function diskOf(reading: Reading, recipe: Recipe, statePath: string): { fixed: number; total: number } {
+ * leaves out of the builder's disk, plus the files that travel. The ring the app draws grows from here. Nothing at
+ * all on a provider that gives a builder no disk figure, where a container takes the box's disk and there is no
+ * ring to draw. */
+export function diskOf(reading: Reading, recipe: Recipe, statePath: string, diskGb?: number): { fixed: number; total: number } | undefined {
+  if (diskGb === undefined) return undefined;
   const est = pickEstimate(manifestFor(reading, recipe, statePath), recipe, reading.brew);
-  const total = BUILDER_DISK_GB * GIB;
+  const total = diskGb * GIB;
   return { fixed: total - est.room + est.files, total };
 }
 
@@ -145,7 +148,7 @@ export function screensOf(reading: Reading, a: ScreenAnswers, at: ScreensAt): In
   const agents = agentRows(recipe);
   const tools = recipeTable(recipe, CATALOG_TOOLS);
   const scan = reading.scanned;
-  const signIns = signInItems(manifest, reading.brew);
+  const signIns = signInItems(manifest, reading.brew, reading.platform);
   const wsp = wspToolsItems(recipe, at.home);
   const answers = Object.fromEntries([...signIns.initial].map(([id, choice]): [string, string] => [id, logins.get(id) ?? choice]));
   return initShownScreens([
@@ -153,7 +156,7 @@ export function screensOf(reading: Reading, a: ScreenAnswers, at: ScreensAt): In
       id: "agents",
       title: AGENTS_TITLE,
       top: AGENTS_TOP,
-      items: tableItems(agents, recipe, manifest, PLAIN, false).map(i => item(i, sizeOf(agents.find(r => r.id === i.id)))),
+      items: tableItems(agents, recipe, manifest, PLAIN, false, reading.platform).map(i => item(i, sizeOf(agents.find(r => r.id === i.id)))),
       ticks: agents.filter(r => r.on).map(r => r.id),
       answers: {},
       footer: [],
@@ -163,7 +166,7 @@ export function screensOf(reading: Reading, a: ScreenAnswers, at: ScreensAt): In
       id: "tools",
       title: TOOLS_TITLE,
       top: TOOLS_TOP,
-      items: toolItems(tools, recipe, manifest),
+      items: toolItems(tools, recipe, manifest, reading.platform),
       ticks: tools.filter(r => r.on).map(r => r.id),
       answers: {},
       footer: [],
@@ -171,10 +174,10 @@ export function screensOf(reading: Reading, a: ScreenAnswers, at: ScreensAt): In
     },
     {
       id: "also",
-      title: ALSO_TITLE,
-      top: ALSO_TOP,
+      title: alsoTitle(reading.platform),
+      top: alsoTop(reading.platform),
       tally: "more",
-      items: alsoItems(scan, recipe, row => buildLine(manifest, row, reading.brew)).map(i => item(i, scan.find(r => r.id === i.id)?.size ?? null)),
+      items: alsoItems(scan, recipe, reading.platform, row => buildLine(manifest, row, reading.brew)).map(i => item(i, scan.find(r => r.id === i.id)?.size ?? null)),
       ticks: [...scannedTicks(recipe, scan)],
       answers: {},
       footer: [],
@@ -190,7 +193,7 @@ export function screensOf(reading: Reading, a: ScreenAnswers, at: ScreensAt): In
     },
     {
       id: "wsp",
-      title: WSP_TITLE,
+      title: wspTitle(reading.platform),
       top: WSP_TOP,
       items: wsp.items.map(i => item(i)),
       ticks: [...(a.wspTicks === undefined ? wsp.initial : new Set([...a.wspTicks].filter(id => wsp.items.some(i => i.id === id))))],
@@ -210,7 +213,7 @@ export function answerScreen(reading: Reading, a: ScreenAnswers, screen: InitScr
     case "tools":
       return { ...a, recipe: withTools(a.recipe, ticks) };
     case "also":
-      return { ...a, recipe: withScanned(a.recipe, reading.scanned, ticks) };
+      return { ...a, recipe: withScanned(a.recipe, reading.scanned, ticks, reading.platform) };
     case "logins": {
       const logins = new Map(a.logins);
       for (const [id, choice] of Object.entries(answer.answers ?? {})) if (isLoginChoice(choice)) logins.set(id, choice);

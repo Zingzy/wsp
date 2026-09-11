@@ -3,8 +3,9 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { GoldenMissingTool, GoldenStage, HarnessCatalog, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, SessionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
+import type { ContextMenuItem, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, SessionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
+import { DEFAULT_PORT } from "./app-ports.js";
 import { compareVersions } from "./semver.mjs";
 import { shellLine } from "./shell-quote.js";
 import type { ThreadMessage } from "./thread-read.js";
@@ -1586,6 +1587,14 @@ export const THIS_COMPUTER = "this computer";
  * that wsp reaches and never runs. */
 export const OVER_SSH = "a machine over ssh";
 
+/** What the computer wsp is reading is called on the screens that read it: a Mac by the name its owner uses for it,
+ * any other computer the plain word. The one place that word is decided, so no screen tells a Linux reader the tool
+ * was built for somebody else. */
+export const thisComputer = (platform: "darwin" | "linux"): string => (platform === "darwin" ? "this Mac" : THIS_COMPUTER);
+
+/** The heading over the tools a package manager here has that no catalog row carries: the wizard's own screen and
+ * the `wsp recipe scan` section are one section, so they carry one name. */
+export const alsoTitle = (platform: "darwin" | "linux"): string => `Also on ${thisComputer(platform)}`;
 
 /** The one sentence a local workspace refuses a request relayed from a machine with. A local workspace is this
  * computer; it answers only its own person, so a request that reached the host from a machine wsp runs cannot drive
@@ -1599,6 +1608,64 @@ export function relayedRefusal(name: string): string {
  * a record stands on are named on this computer, so nothing a machine asks for reaches that road. */
 export function relayedRecordRefusal(named: string): string {
   return `recording ${named} is this computer's own act; a request relayed from a machine cannot record a machine here`;
+}
+
+/** The short form of a thread id every sentence about a thread uses, so a refusal, a table and a tree all name a
+ * thread the same way. */
+export const threadWord = (threadId: string): string => threadId.slice(0, 8);
+
+/** Every act a thread scoped token can be refused for, and the word each is refused by name with. The table is
+ * the whole rule: an act absent from it is one no thread may ask for, and adding an act is one row here. */
+export const SPAWN_ACTS = {
+  thread_new: "open a thread",
+  fork: "fork a machine",
+  send: "send into a thread",
+  delete: "delete a workspace",
+  pause: "pause a machine",
+  import: "import a folder",
+  export: "export a folder",
+  agents: "change what agents may do",
+} as const;
+export type SpawnAct = keyof typeof SPAWN_ACTS;
+
+/** The acts a thread may ask for at all; every other act in the table is refused whatever the caps say. */
+export const SPAWN_ACTS_ALLOWED: readonly SpawnAct[] = ["thread_new", "fork", "send"];
+
+/** The one sentence a thread's own token is refused with when the workspace it runs on lets its agents spawn
+ * nothing. Off is what every workspace reads as until a person turns it on. */
+export function agentsOffRefusal(workspace: string, act: SpawnAct): string {
+  return `agents on ${workspace} may not ${SPAWN_ACTS[act]}; turn it on with wsp workspaces agents ${workspace} --spawn on`;
+}
+
+/** The one sentence a thread's own token is refused with for an act no thread may ask for, whatever the caps. */
+export function spawnActRefusal(threadId: string, act: SpawnAct): string {
+  return `this request came out of thread ${threadWord(threadId)} on a machine, and a thread may only ${SPAWN_ACTS_ALLOWED.map(a => SPAWN_ACTS[a]).join(", ")}, never ${SPAWN_ACTS[act]}`;
+}
+
+/** The one sentence a fork past the machine cap is refused with, naming the root the machines were counted under. */
+export function spawnCapRefusal(rootThreadId: string, standing: number, cap: number): string {
+  return `thread ${threadWord(rootThreadId)} already holds ${standing} of its ${cap} machines; delete one before forking another`;
+}
+
+/** The one sentence a spawn deeper than the workspace allows is refused with. */
+export function spawnDepthRefusal(threadId: string, depth: number, cap: number): string {
+  return `thread ${threadWord(threadId)} is ${depth} deep under its root and this workspace allows ${cap}; a thread this deep may not spawn`;
+}
+
+/** The one sentence a thread is refused with for reaching a workspace outside its own tree. */
+export function spawnReachRefusal(threadId: string, name: string): string {
+  return `thread ${threadWord(threadId)} may drive the workspace it runs on and the ones it forked, and ${name} is neither`;
+}
+
+/** The workspace table's cell for the switch: empty where agents spawn nothing, which is nearly every row, so the
+ * column is quiet until a workspace has one. */
+export function agentsWord(agents: { spawn: boolean; maxMachines: number } | undefined): string {
+  return agents?.spawn !== true ? "" : `${agents.maxMachines} ${agents.maxMachines === 1 ? "machine" : "machines"}`;
+}
+
+/** What a listing and the workspace card say about a workspace's switch, one line either way. */
+export function agentsLine(agents: { spawn: boolean; maxMachines: number; maxDepth: number } | undefined): string {
+  return agents?.spawn !== true ? "agents may not spawn" : `agents may spawn: up to ${agents.maxMachines} ${agents.maxMachines === 1 ? "machine" : "machines"}`;
 }
 
 /** What a first dial says about the machine it reached: the host key it answered with, for the person to compare
@@ -1619,17 +1686,34 @@ export function noMachineHomeLine(name: string): string {
   return `${name} carries no home folder for its machine; record it again with wsp new --ssh`;
 }
 
-/** What the roads that need a daemon are refused with on a machine reached over ssh: the connection carries a
- * command and nothing else yet, so the panes that ride a daemon have nothing to dial. */
+/** What the roads that need a daemon are refused with on a machine reached over ssh before one is on it: the
+ * record was made but the deploy has not landed, so the panes that ride a daemon have nothing to dial yet. The
+ * host tries again on its own at every start, so the line says that rather than naming a verb: nothing a person
+ * types puts a daemon on a machine already recorded, and the one thing they can do is fix what the deploy said
+ * it needed. */
 export function noSshDaemonLine(name: string): string {
-  return `${name} is reached over ssh, which carries no daemon yet: its terminal, files and ports are not served`;
+  return `${name} carries no daemon yet, so its terminal, files and ports are not served; this host tries again each time it starts`;
 }
 
-/** What import is refused with on a machine reached over ssh: no road lands a folder there yet, so the verb says
- * so before the folder is read. */
-export function noSshImportLine(name: string): string {
-  return `${name} is reached over ssh, which lands no folder yet; import to a fork, or register the folder on this computer`;
+/** What import is refused with on a kind no road lands a folder on, said before the folder is read. Every kind
+ * has a road today; the sentence stands for the next kind added without one, which is what the words table's
+ * null import road means. */
+export function noImportRoadLine(name: string, machine: string): string {
+  return `${name} is ${machine}, which lands no folder yet; import to a fork, or register the folder on this computer`;
 }
+
+/** What a machine that cannot build the daemon is refused with. node-pty ships prebuilt binaries for macOS and
+ * Windows only, so the terminal's native part is compiled where the daemon runs; a machine wsp builds carries the
+ * floor's toolchain, and a machine somebody already owns may carry none. Said before the install rather than
+ * after, since a daemon that installed half of itself restarts forever under its unit. */
+export const NO_BUILD_TOOLS_LINE =
+  "this machine has no C compiler, so the daemon's terminal cannot be built on it; install a build toolchain (on Debian or Ubuntu: sudo apt-get install build-essential) and deploy the daemon again";
+
+/** What a machine whose login does not linger is refused with. Its own systemd stops when its last session ends
+ * and takes the daemon with it, so a daemon deployed there is gone the moment the host's connection closes; the
+ * person turns linger on once and it holds for every login after. */
+export const NO_LINGER_LINE =
+  "this machine stops your login's services when you log out, so the daemon would not outlive the connection; run loginctl enable-linger on it and deploy the daemon again";
 
 /** The one sentence a socket a machine's requests arrive on is refused a ticket with. A ticket authenticates the
  * next socket, and a socket this host minted no relay ticket for is one of the person's own, so a machine that
@@ -1825,10 +1909,11 @@ export function pinMovedLine(from: ToolPin | undefined, to: ToolPin | undefined)
 /** Why a tool installs differently now when its road and pin stand: the lines the road runs are not the golden's. */
 export const INSTALLER_MOVED_LINE = "its install lines changed";
 
-/** The detail of a tools row the catalog does not carry: it is on this Mac, at the version this Mac runs when the
- * collector read one. */
-export function installedOnMacLine(version: string | undefined): string {
-  return version === undefined ? "installed on this Mac" : `installed on this Mac, ${version}`;
+/** The detail of a tools row the catalog does not carry: it is on this computer, at the version this computer runs
+ * when the collector read one. */
+export function installedHereLine(platform: "darwin" | "linux", version: string | undefined): string {
+  const here = `installed on ${thisComputer(platform)}`;
+  return version === undefined ? here : `${here}, ${version}`;
 }
 
 /** What the build does with a tools row it installs: the road in its own words, then the line the step runs. */
@@ -1841,17 +1926,17 @@ export function leftOutLine(note: string): string {
   return `left out of the build: ${note}`;
 }
 
-/** Why `wsp recipe --add` refuses a package a manager on this Mac already has: that package is a row of its own,
+/** Why `wsp recipe --add` refuses a package a manager on this computer already has: that package is a row of its own,
  * which the build installs by the road the plan resolves for it (a tap formula from its GitHub release, pinned),
  * and a second row would install it twice by a line the image can refuse. The word that ticks the row instead. */
-export function addAlreadyHereLine(id: string, scanId: string): string {
-  return `--add ${id}: a package manager on this Mac already has ${id}, so it is a row of its own; tick it with --set ${scanId}=on, which installs it by its own road, rather than adding a second row that installs it again`;
+export function addAlreadyHereLine(platform: "darwin" | "linux", id: string, scanId: string): string {
+  return `--add ${id}: a package manager on ${thisComputer(platform)} already has ${id}, so it is a row of its own; tick it with --set ${scanId}=on, which installs it by its own road, rather than adding a second row that installs it again`;
 }
 
-/** A recipe file's tick on a tool outside the catalog that this Mac has no row for: nothing here says how to install
+/** A recipe file's tick on a tool outside the catalog that this computer has no row for: nothing here says how to install
  * it, so the tick is said and left out rather than dropped in silence. */
-export function notHereLine(name: string, file: string): string {
-  return `${name} is ticked in ${file}, but this Mac has no row that installs it; it is left out.`;
+export function notHereLine(platform: "darwin" | "linux", name: string, file: string): string {
+  return `${name} is ticked in ${file}, but ${thisComputer(platform)} has no row that installs it; it is left out.`;
 }
 
 /** The app's line for a workspace still forked from an older golden version, offered the way the helper update is:
@@ -2194,12 +2279,81 @@ export const GET_THE_APP_WORD = "Get";
  * The halves ship together and every call over the bridge needs both, so the older one is named with what to do
  * about it. A shell whose bridge carries no version at all is one from before the bridge carried one, which is
  * older than any host that reads this. */
-export function shellVersionNotice(shell: string | undefined, host: string): ShellVersionNotice | undefined {
-  if (shell === undefined) return { line: `this app is older than the host, which is ${host}: get the new app`, update: true };
+export function shellVersionNotice(shell: string | undefined, host: string, label?: string): ShellVersionNotice | undefined {
+  const named = label === undefined ? "the host" : `the host ${label}`;
+  if (shell === undefined) return { line: `this app is older than ${named}, which is ${host}: get the new app`, update: true };
   const order = compareVersions(shell, host);
   if (order === 0) return undefined;
-  const both = `this app is ${shell}, the host is ${host}`;
+  const both = `this app is ${shell}, ${named} is ${host}`;
   return order < 0 ? { line: `${both}: get the new app`, update: true } : { line: `${both}: run the app's own host`, update: false };
+}
+
+/** The words of the desktop's hosts: the menu, the sidebar's foot and the connect sheet all read them here. */
+export const HOST_WORDS = {
+  hosts: "Hosts",
+  connectMenu: "Connect to a host…",
+  disconnect: (label: string): string => `Disconnect ${label}`,
+  /** Why the disconnect row is dimmed while the window is on the app's own computer. */
+  hereStays: (here: string): string => `${here} is the app's own host`,
+  sheet: {
+    headline: "Connect to a host",
+    top: "A wsp host on another computer, by its address or over ssh.",
+    direct: "Address and code",
+    ssh: "Over ssh",
+    address: "Address",
+    addressPlaceholder: `http://box:${DEFAULT_PORT}`,
+    code: "Code",
+    codePlaceholder: "XXXX-XXXX",
+    login: "Login",
+    loginPlaceholder: "user@host",
+    port: "Port",
+    portPlaceholder: "22",
+    keycap: "Connect",
+    cancel: "Cancel",
+    directNote: "The app pairs with the host at this address, with the code wsp pair printed on that computer, and opens it.",
+    sshNote: "The app logs in over ssh, starts wsp there when nothing serves, forwards its port to this computer and pairs.",
+    /** Why Connect is held, as its tooltip. */
+    fillFirst: "type the address and the code first",
+    fillLoginFirst: "type the login first",
+  },
+} as const;
+
+/** What the app calls the computer it runs on, first in every hosts list. */
+export const hereWord = (mac: boolean): string => (mac ? "This Mac" : "This computer");
+
+const HOST_MENU_SWITCH = "switch:";
+const HOST_MENU_CONNECT = "connect";
+const HOST_MENU_DISCONNECT = "disconnect:";
+
+/** The Hosts menu as one list of rows, read by the shell's own menu bar and by the sidebar's foot alike: this computer
+ * first, every saved host, the current one marked, then the connect row, then the disconnect of the host the window is
+ * on, dimmed on this computer since its host is the app's own. */
+export function hostsMenuItems(view: HostsView): ContextMenuItem[] {
+  const current = view.hosts.find(h => h.alias === view.current);
+  return [
+    { id: HOST_MENU_SWITCH, label: view.here, group: "hosts", enabled: true, checked: view.current === null },
+    ...view.hosts.map((h): ContextMenuItem => ({ id: `${HOST_MENU_SWITCH}${h.alias}`, label: h.label, group: "hosts", enabled: true, checked: h.alias === view.current })),
+    { id: HOST_MENU_CONNECT, label: HOST_WORDS.connectMenu, group: "add", enabled: true },
+    current !== undefined
+      ? { id: `${HOST_MENU_DISCONNECT}${current.alias}`, label: HOST_WORDS.disconnect(current.label), group: "remove", enabled: true, destructive: true }
+      : { id: HOST_MENU_DISCONNECT, label: HOST_WORDS.disconnect(view.here), group: "remove", enabled: false, refusal: HOST_WORDS.hereStays(view.here), destructive: true },
+  ];
+}
+
+/** What a row of the Hosts menu does, read back off its id; nothing for an id the list above never minted. */
+export type HostMenuAction = { kind: "switch"; alias: string | null } | { kind: "connect" } | { kind: "disconnect"; alias: string };
+
+export function hostMenuAction(id: string): HostMenuAction | undefined {
+  if (id === HOST_MENU_CONNECT) return { kind: "connect" };
+  if (id.startsWith(HOST_MENU_SWITCH)) {
+    const alias = id.slice(HOST_MENU_SWITCH.length);
+    return { kind: "switch", alias: alias === "" ? null : alias };
+  }
+  if (id.startsWith(HOST_MENU_DISCONNECT)) {
+    const alias = id.slice(HOST_MENU_DISCONNECT.length);
+    return alias === "" ? undefined : { kind: "disconnect", alias };
+  }
+  return undefined;
 }
 
 /** A colour as CSS spells it, with its alpha as a percent where one is given. */

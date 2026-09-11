@@ -3,15 +3,16 @@
 // the page carries no token, the JSON routes ask for a paired device's, the
 // lock and the address lines name the address, and the runtime answers on the
 // app's own port at WS_PATH.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
-import { afterEach, describe, expect, it } from "vitest";
-import { API_UNAUTHORIZED, listenBeyondLoopbackLine, LOOPBACK, WS_PATH, type BootPayload } from "@wsp/protocol";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { agentsOffRefusal, API_UNAUTHORIZED, listenBeyondLoopbackLine, LOOPBACK, WS_PATH, type BootPayload } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { serve, type CliIO } from "../src/cli.js";
 import { writeRelayRecord } from "../src/relay-link.js";
+import { spawn } from "node:child_process";
 import { addressLines } from "../src/host-lock.js";
 import { httpProbe } from "../src/service.js";
 import { hostAddress } from "../src/verbs.js";
@@ -28,6 +29,10 @@ ${DEV_BOOT}
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
 const quietIO = (lines: string[] = []): CliIO => ({ log: l => lines.push(l), error: l => lines.push(l), ask: noPrompt, askSecret: noPrompt });
+
+// The relay cases here start a real child and wait for it to go, which the default five seconds can miss under a
+// loaded machine.
+vi.setConfig({ testTimeout: 20_000 });
 
 let dirs: string[] = [];
 let handle: HostHandle | undefined;
@@ -158,6 +163,25 @@ describe("a host that listens beyond this computer", () => {
     expect(wrong.status).toBe(401);
   });
 
+  it("a token scoped to a thread is that thread on the JSON routes too, not a paired computer", async () => {
+    const { handle: h, runtime } = await up("0.0.0.0");
+    const own = await runtime.workspaces.create({ golden: GOLDEN.versions[0]!.snapshotId, name: "lead" });
+    const thread = await runtime.devices.mint("thread abcd1234", { kind: "thread", threadId: "t_1", workspaceId: own.id, rootThreadId: "t_1" }, Date.now());
+    const auth = { authorization: `Bearer ${thread.deviceToken}` };
+
+    // The listing is the one that thread may drive: the workspace it runs on, and nothing outside its tree.
+    const listed = await fetch(`http://127.0.0.1:${h.port}/api/workspaces`, { headers: auth });
+    expect(listed.status).toBe(200);
+    expect(((await listed.json()) as { workspaces: { name: string }[] }).workspaces.map(w => w.name)).toEqual(["lead"]);
+
+    // And the route that forks a machine is held to what that thread may do, which on a workspace with no switch
+    // is nothing; a paired computer's token still forks.
+    const made = await fetch(`http://127.0.0.1:${h.port}/api/workspaces`, { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ name: "b1" }) });
+    expect(made.status).toBe(500);
+    expect((await made.json()) as { error: string }).toEqual({ error: agentsOffRefusal("lead", "fork") });
+    expect((await runtime.workspaces.list()).map(w => w.name)).toEqual(["lead"]);
+  });
+
   it("still serves the page and its assets to anyone who reaches the port, since pairing is the gate", async () => {
     const { handle: h } = await up("0.0.0.0");
     expect((await fetch(`http://127.0.0.1:${h.port}/`)).status).toBe(200);
@@ -258,5 +282,27 @@ describe("a host on loopback that a relay carries traffic to", () => {
     expect(redeemed.deviceToken).toMatch(/\S/);
     const authed = await fetch(`http://127.0.0.1:${handle.port}/api/workspaces`, { headers: { authorization: `Bearer ${redeemed.deviceToken!}` } });
     expect(authed.status).toBe(200);
+  });
+});
+
+describe("wsp up --no-relay on a linked box", () => {
+  it("serves no token either, and stops the connector an earlier run left running", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-listen-norelay-"));
+    dirs.push(dir);
+    const statePath = join(dir, "state.json");
+    writeRelayRecord(statePath, { relayUrl: "http://127.0.0.1:1", hostId: "h1", token: "relay-token", name: "box", hostname: "h1.boxes.example", linkedAt: new Date().toISOString() });
+    // A connector from a run that was killed: the tunnel it carries reaches this port whatever this run was asked for.
+    const orphan = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" });
+    writeFileSync(join(dir, "connector.pid"), JSON.stringify({ pid: orphan.pid, startedAt: new Date().toISOString() }));
+    const gone = new Promise<void>(done => orphan.once("exit", () => done()));
+
+    handle = await serve(quietIO(), { port: 0, wsPort: 0, statePath, webDir: fakeWebDir(), runtime: testRuntime(), relay: false });
+
+    const boot = await bootOf(handle.port);
+    expect(boot.token).toBeUndefined();
+    expect(boot.paired).toBe(false);
+    expect((await fetch(`http://127.0.0.1:${handle.port}/api/workspaces`)).status).toBe(401);
+    await gone;
+    expect(existsSync(join(dir, "connector.pid"))).toBe(false);
   });
 });

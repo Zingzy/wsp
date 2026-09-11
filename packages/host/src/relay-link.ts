@@ -11,10 +11,9 @@ import { hostname as thisComputer } from "node:os";
 import { dirname, join } from "node:path";
 import { fmtDuration, usageRefusal } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
-import { ensureCloudflared, startConnector, stopRecordedConnector, type Connector } from "./connector.js";
+import { CLOUDFLARED, connectorRunning, ensureCloudflared, startConnector, stopRecordedConnector, type Connector } from "./connector.js";
 import { publicAddressLine } from "./host-lock.js";
 import { table } from "./verbs.js";
-import { VERSION } from "./version.js";
 
 /** What a linked box keeps: which relay it is on, which host it is there, and the token that names it. The token
  * opens the relay's own routes for this host and nothing else. */
@@ -176,6 +175,9 @@ async function linkThrough(io: CliIO, deps: RelayDeps, relayUrl: string, kind: "
 async function relayClient(io: CliIO, home: string, deps: RelayDeps, url?: string): Promise<RelayClientRecord> {
   const held = readRelayClient(home);
   if (held !== undefined && (url === undefined || trimUrl(url) === held.relayUrl)) return held;
+  if (held !== undefined) {
+    throw usageRefusal(`this computer is signed in to the relay at ${held.relayUrl}; one at a time, so sign out of that one before ${trimUrl(url ?? "")}`);
+  }
   const relayUrl = trimUrl(url ?? "");
   if (relayUrl === "") throw usageRefusal("this computer has signed in to no relay; give the relay's address: wsp relay hosts <url>");
   const name = deps.deviceName();
@@ -227,7 +229,30 @@ export function relayHostLines(hosts: readonly RelayHostView[]): string[] {
   ]);
 }
 
-const RELAY_USAGE = "usage: wsp relay link <url> [--name <name>]\n       wsp relay unlink\n       wsp relay hosts [<url>]";
+const RELAY_USAGE = [
+  "usage: wsp relay link <url> [--name <name>]",
+  "       wsp relay unlink",
+  "       wsp relay hosts [<url>]",
+  "       wsp relay clients",
+  "       wsp relay clients revoke <id>",
+].join("\n");
+
+interface RelayClientView {
+  id: string;
+  name: string;
+  signedInAt?: string;
+  lastSeen?: string | null;
+  thisOne?: boolean;
+}
+
+/** The rows wsp relay clients prints: which computers hold a token for this account, and which one is this. */
+export function relayClientLines(clients: readonly RelayClientView[]): string[] {
+  if (clients.length === 0) return ["No computer is signed in to that relay. Run wsp relay hosts <url> to sign this one in."];
+  return table([
+    ["COMPUTER", "ID", "SIGNED IN", "LAST SEEN", ""],
+    ...clients.map(c => [c.name, c.id, c.signedInAt ?? "", c.lastSeen ?? "", c.thisOne === true ? "this one" : ""]),
+  ]);
+}
 
 export interface RelayCommandOpts {
   statePath: string;
@@ -235,15 +260,42 @@ export interface RelayCommandOpts {
 }
 
 export async function relayCommand(io: CliIO, opts: RelayCommandOpts, args: readonly string[], values: { name?: string }, deps: RelayDeps = systemRelayDeps): Promise<number> {
-  const [word, address, ...rest] = args;
+  const [word, second, third, ...rest] = args;
   if (word === undefined || rest.length > 0) throw usageRefusal(RELAY_USAGE);
-  if (word === "link") return relayLink(io, opts, address, values, deps);
+  const noMore = (): void => {
+    if (third !== undefined) throw usageRefusal(RELAY_USAGE);
+  };
+  if (word === "link") {
+    noMore();
+    return relayLink(io, opts, second, values, deps);
+  }
   if (word === "unlink") {
-    if (address !== undefined) throw usageRefusal(`wsp relay unlink takes the relay this computer is already on, so it needs no address\n\n${RELAY_USAGE}`);
+    if (second !== undefined) throw usageRefusal(`wsp relay unlink takes the relay this computer is already on, so it needs no address\n\n${RELAY_USAGE}`);
     return relayUnlink(io, opts, deps);
   }
-  if (word === "hosts") return relayHostsCommand(io, opts, address, deps);
+  if (word === "hosts") {
+    noMore();
+    return relayHostsCommand(io, opts, second, deps);
+  }
+  if (word === "clients") {
+    if (second !== undefined && (second !== "revoke" || third === undefined)) throw usageRefusal(RELAY_USAGE);
+    return relayClientsCommand(io, opts, second === "revoke" ? third : undefined, deps);
+  }
   throw usageRefusal(`unknown command: wsp relay ${word}\n\n${RELAY_USAGE}`);
+}
+
+/** The computers signed in to this person's relay, and the one line that takes one away. A token that walked off
+ * with a laptop is stopped here, without touching the boxes. */
+async function relayClientsCommand(io: CliIO, opts: RelayCommandOpts, revoke: string | undefined, deps: RelayDeps): Promise<number> {
+  const record = await relayClient(io, opts.home, deps);
+  if (revoke !== undefined) {
+    await relayCall(deps, `${record.relayUrl}/clients/${encodeURIComponent(revoke)}`, { method: "DELETE", token: record.token });
+    io.log(`${revoke} is signed out of ${record.relayUrl}; the token it held opens nothing`);
+    return 0;
+  }
+  const { clients } = await relayCall<{ clients: RelayClientView[] }>(deps, `${record.relayUrl}/clients`, { token: record.token });
+  for (const line of relayClientLines(clients)) io.log(line);
+  return 0;
 }
 
 async function relayLink(io: CliIO, opts: RelayCommandOpts, address: string | undefined, values: { name?: string }, deps: RelayDeps): Promise<number> {
@@ -336,12 +388,15 @@ export async function startRelay(opts: RelayStartOpts, deps: RelayDeps = systemR
     return undefined;
   }
 
+  // A heartbeat carries a hostname only for a quick tunnel, which is the one name the box learns and the relay does
+  // not: a managed name is the relay's own, and a box that reported one back would be refused and never read as up.
+  const ownName = asked.hostname === null;
   const say = async (hostname: string | undefined): Promise<void> => {
-    const name = hostname ?? readRelayRecord(opts.statePath)?.hostname;
+    const name = ownName ? (hostname ?? readRelayRecord(opts.statePath)?.hostname) : undefined;
     await relayCall(deps, `${record.relayUrl}/hosts/${record.hostId}/heartbeat`, {
       method: "POST",
       token: record.token,
-      body: { ...(name !== undefined && name !== "" ? { hostname: name } : {}), version: VERSION },
+      body: { ...(name !== undefined && name !== "" ? { hostname: name } : {}), version: CLOUDFLARED.version },
     });
   };
 
@@ -379,9 +434,12 @@ export function relayOnLoopbackLine(): string {
   return "this host is on a relay, so it can be reached from anywhere it can dial out: the page carries no token and pairing is the gate. Run wsp pair for a code, and wsp devices to see who took one.";
 }
 
-/** Where this host answers from anywhere, as the last run of the connector left it; nothing when it is on no relay. */
+/** Where this host answers from anywhere: the name the record holds, and only while a connector this computer
+ * started is carrying it. A name with nothing behind it is worse than no name, since every line that prints one
+ * is telling somebody where to reach this host. */
 export function publicHostname(statePath: string): string | undefined {
   const record = readRelayRecord(statePath);
-  return record?.hostname;
+  if (record?.hostname === undefined || !connectorRunning(dirname(statePath))) return undefined;
+  return record.hostname;
 }
 

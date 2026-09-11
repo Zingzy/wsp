@@ -4,7 +4,7 @@
 // the ones the app reads, so the terminal and the app say the same tone for the
 // same size and the same share; here they are only mapped onto the terminal's
 // three colours. Hue here means weight and nothing else.
-import { BUILDER_DISK_GB, type DiskEstimate } from "@wsp/engine";
+import type { DiskEstimate } from "@wsp/engine";
 import { diskTone as diskToneOf, fmtBytes, sizeTone as sizeToneOf, type SizeTone } from "@wsp/protocol";
 import type { Tone } from "./init-select.js";
 
@@ -30,13 +30,17 @@ export function diskParts(est: DiskEstimate): string {
   return [parts.join(", "), unknown].filter(p => p !== "").join("; ");
 }
 
-/** The total against the room the builder's disk leaves. */
-export function diskHead(est: DiskEstimate): string {
-  return est.over > 0 ? `${fmtBytes(est.total)}, ${fmtBytes(est.over)} over the ${fmtBytes(est.room)} the ${BUILDER_DISK_GB} GB builder leaves` : `${fmtBytes(est.total)} of ${fmtBytes(est.room)} on the ${BUILDER_DISK_GB} GB builder`;
+/** The total against the room the builder's disk leaves. `diskGb` is what the provider gives a builder, where it
+ * gives a figure at all: a container's disk is the box's, so there is no room to be over and the line says the
+ * total alone. */
+export function diskHead(est: DiskEstimate, diskGb?: number): string {
+  if (diskGb === undefined) return `${fmtBytes(est.total)} on the machine`;
+  return est.over > 0 ? `${fmtBytes(est.total)}, ${fmtBytes(est.over)} over the ${fmtBytes(est.room)} the ${diskGb} GB builder leaves` : `${fmtBytes(est.total)} of ${fmtBytes(est.room)} on the ${diskGb} GB builder`;
 }
 
 /** The Disk line: the total, then the parts in brackets. */
-export function diskLine(est: DiskEstimate): string {
+export function diskLine(est: DiskEstimate, diskGb?: number): string {
   const parts = diskParts(est);
-  return parts === "" ? diskHead(est) : `${diskHead(est)} (${parts})`;
+  const head = diskHead(est, diskGb);
+  return parts === "" ? head : `${head} (${parts})`;
 }

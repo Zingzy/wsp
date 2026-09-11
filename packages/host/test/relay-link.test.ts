@@ -13,7 +13,8 @@ import type { CliIO } from "../src/cli.js";
 import { connectCommand } from "../src/connect.js";
 import { readHost } from "../src/hosts.js";
 import { startConnector } from "../src/connector.js";
-import { readRelayClient, readRelayRecord, relayCommand, relayHostUrl, relayRecordPath, startRelay, type RelayDeps } from "../src/relay-link.js";
+import { publicHostname, readRelayClient, readRelayRecord, relayCommand, relayHostUrl, relayRecordPath, startRelay, type RelayDeps } from "../src/relay-link.js";
+import { CLOUDFLARED } from "../src/connector.js";
 import type { DialOpts, HostClient } from "../src/verbs.js";
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
@@ -56,6 +57,7 @@ interface FakeRelay {
   /** What the tunnel route answers; a hostname of null is a relay with no zone. */
   tunnel: { tunnelToken: string | null; hostname: string | null; why?: string };
   hosts: { id: string; name: string; hostname: string | null }[];
+  clients: { id: string; name: string; thisOne: boolean }[];
   /** Called as each request arrives, for a test that cares what was already true by then. */
   onCall?: (line: string) => void;
   /** A route answers this refusal instead, once armed. */
@@ -63,7 +65,7 @@ interface FakeRelay {
 }
 
 async function fakeRelay(): Promise<FakeRelay> {
-  const state: FakeRelay = { url: "", calls: [], pending: 1, tunnel: { tunnelToken: null, hostname: null, why: "this relay has no zone" }, hosts: [] };
+  const state: FakeRelay = { url: "", calls: [], pending: 1, tunnel: { tunnelToken: null, hostname: null, why: "this relay has no zone" }, hosts: [], clients: [] };
   const server = createServer((req, res) => {
     void (async () => {
       const chunks: Buffer[] = [];
@@ -94,8 +96,18 @@ async function fakeRelay(): Promise<FakeRelay> {
         return send(200, kind === "client" ? { state: "approved", token: "client-token", name } : { state: "approved", token: "host-token", hostId: "hbox1", name });
       }
       if (line === "POST /hosts/hbox1/tunnel") return send(200, state.tunnel);
-      if (line === "POST /hosts/hbox1/heartbeat") return send(200, { ok: true });
+      if (line === "POST /hosts/hbox1/heartbeat") {
+        // The Worker's own rule, held here too: a box may report the quick tunnel it was given and no other name,
+        // so a heartbeat naming a managed hostname is refused exactly as the relay refuses it.
+        const said = body["hostname"];
+        if (typeof said === "string" && !/^[a-z0-9-]+\.trycloudflare\.com$/i.test(said)) {
+          return send(400, { error: "a host may report the quick tunnel it was given and no other name; a managed hostname is the relay's own" });
+        }
+        return send(200, { ok: true });
+      }
       if (line === "GET /hosts") return send(200, { hosts: state.hosts });
+      if (line === "GET /clients") return send(200, { clients: state.clients });
+      if (line.startsWith("DELETE /clients/")) return send(200, { deleted: true });
       if (line === "DELETE /hosts/hbox1") return send(200, { deleted: true });
       return send(404, { error: `no route: ${line}` });
     })().catch(() => {
@@ -121,7 +133,9 @@ function deps(dir: string, extra: Partial<RelayDeps> = {}): RelayDeps {
   return {
     fetch: (input, init) => fetch(input as string, init),
     now: () => Date.now(),
-    sleep: ms => new Promise(done => setTimeout(done, ms)),
+    // The half second the poll floor holds a real box to protects it from a relay that answers zero; a test that
+    // sat through it would only be measuring the floor.
+    sleep: () => Promise.resolve(),
     deviceName: () => "the box",
     cloudflared: async () => fakeConnector(dir),
     connector: startConnector,
@@ -195,6 +209,31 @@ describe("a linked box starting up", () => {
     expect(readRelayRecord(statePath)!.hostname).toBe(hostname);
   });
 
+  it("says which connector is carrying it, not which wsp asked", async () => {
+    const relay = await fakeRelay();
+    const { statePath, home, dir } = box();
+    await relayCommand(io(), { statePath, home }, ["link", relay.url], {}, deps(dir));
+    const up = (await startRelay({ statePath, port: 4400, log: () => {} }, deps(dir)))!;
+    closers.push(() => up.close());
+    await up.hostname();
+    const beat = await vi.waitUntil(() => relay.calls.find(c => c.line === "POST /hosts/hbox1/heartbeat"), { timeout: 4000 });
+    expect(beat.body["version"]).toBe(CLOUDFLARED.version);
+  });
+
+  it("names the public address only while a connector this computer started is carrying it", async () => {
+    const relay = await fakeRelay();
+    const { statePath, home, dir } = box();
+    await relayCommand(io(), { statePath, home }, ["link", relay.url], {}, deps(dir));
+    const up = (await startRelay({ statePath, port: 4400, log: () => {} }, deps(dir)))!;
+    closers.push(() => up.close());
+    const hostname = await up.hostname();
+    expect(publicHostname(statePath)).toBe(hostname);
+
+    // wsp status and wsp pair read this: with the connector stopped, the name in the record serves nothing.
+    await up.close();
+    expect(publicHostname(statePath)).toBeUndefined();
+  });
+
   it("keeps saying it is there", async () => {
     const relay = await fakeRelay();
     const { statePath, home, dir } = box();
@@ -214,7 +253,12 @@ describe("a linked box starting up", () => {
     closers.push(() => up.close());
 
     expect(await up.hostname()).toBe("hbox1.boxes.example");
-    await vi.waitUntil(() => existsSync(join(dir, "argv")), { timeout: 4000 });
+    // The relay already holds the managed name, so the heartbeat carries none: one that named it would be refused
+    // and the box would never read as up.
+    const beat = await vi.waitUntil(() => relay.calls.find(c => c.line === "POST /hosts/hbox1/heartbeat"), { timeout: 4000 });
+    expect(beat.body).toEqual({ version: CLOUDFLARED.version });
+    expect(lines.join("\n")).not.toContain("could not say where this host is");
+    await vi.waitUntil(() => existsSync(join(dir, "argv")) && readFileSync(join(dir, "argv"), "utf8").trim() !== "", { timeout: 4000 });
     expect(readFileSync(join(dir, "argv"), "utf8").trim()).toBe("tunnel --no-autoupdate run");
     expect(lines.join("\n")).toContain("public      https://hbox1.boxes.example");
     expect(lines.join("\n")).not.toContain("tunnel-token");
@@ -320,6 +364,42 @@ describe("the person's own client", () => {
     expect(readRelayRecord(statePath)!.token).toBe("host-token");
     expect(readRelayClient(dir)!.token).toBe("client-token");
     expect(await relayHostUrl(dir, "box", deps(dir))).toBe("https://hbox1.boxes.example");
+  });
+
+  it("refuses a second relay rather than overwriting the sign-in this computer holds", async () => {
+    const relay = await fakeRelay();
+    const other = await fakeRelay();
+    const { statePath, home, dir } = box();
+    await relayCommand(io(), { statePath, home }, ["hosts", relay.url], {}, deps(dir));
+    await expect(relayCommand(io(), { statePath, home }, ["hosts", other.url], {}, deps(dir))).rejects.toThrow(relay.url);
+    expect(readRelayClient(home)!.relayUrl).toBe(relay.url);
+  });
+
+  it("says to sign in again when the relay has taken this computer's sign-in away", async () => {
+    const relay = await fakeRelay();
+    const { statePath, home, dir } = box();
+    await relayCommand(io(), { statePath, home }, ["hosts", relay.url], {}, deps(dir));
+    relay.refuse = { status: 401, error: "this computer's sign-in was taken away; run wsp relay hosts <url> to sign in again" };
+    const err: string[] = [];
+    await expect(relayCommand(io([], err), { statePath, home }, ["hosts"], {}, deps(dir))).rejects.toThrow(/sign in again/);
+  });
+
+  it("lists the computers signed in to the relay and takes one away", async () => {
+    const relay = await fakeRelay();
+    relay.clients = [
+      { id: "c1", name: "the Mac", thisOne: true },
+      { id: "c2", name: "the laptop", thisOne: false },
+    ];
+    const { statePath, home, dir } = box();
+    await relayCommand(io(), { statePath, home }, ["hosts", relay.url], {}, deps(dir));
+    const log: string[] = [];
+    expect(await relayCommand(io(log), { statePath, home }, ["clients"], {}, deps(dir))).toBe(0);
+    expect(log.join("\n")).toContain("the Mac");
+    expect(log.join("\n")).toContain("this one");
+    expect(log.join("\n")).toContain("the laptop");
+
+    expect(await relayCommand(io(), { statePath, home }, ["clients", "revoke", "c2"], {}, deps(dir))).toBe(0);
+    expect(relay.calls.some(c => c.line === "DELETE /clients/c2" && c.token === "client-token")).toBe(true);
   });
 
   it("names a host's address for wsp connect, and says so when the relay has none for it", async () => {

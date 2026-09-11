@@ -165,6 +165,47 @@ describe("tools", () => {
     expect(rows).toEqual([{ rung: "tools", id: `tools/go/${name}`, label: name, group: "Go binaries", paths: [`${path}@${version}`], bytes: 0, default: "bring", linux: "yes", version }]);
   });
 
+  const APT = {
+    platform: "linux" as const,
+    which: ["apt-mark", "dpkg-query"],
+    files: { "/var/lib/dpkg/info/direnv:amd64.list": "/usr/bin/direnv\n", "/var/lib/dpkg/info/libpq5.list": "/usr/lib/libpq.so.5\n" },
+    exec: {
+      "apt-mark showmanual": "direnv\nlibpq5\n",
+      "dpkg-query -Wf ${Package} ${Priority}\n": "direnv optional\nlibpq5 optional\n",
+    },
+  };
+
+  it("what apt has that a person chose is one row per package under its own group, installable on the image", async () => {
+    expect(await detectTools(fakeHost(APT))).toEqual([
+      { rung: "tools", id: "tools/apt/direnv", label: "direnv", group: "apt packages", paths: [], bytes: 0, default: "bring", linux: "yes" },
+    ]);
+  });
+
+  it("files no apt row for a tool the catalog carries, since the build reads no road off an apt row and that row would stand in for the catalog's; a manager whose road it can read keeps such a row", async () => {
+    const both = {
+      ...APT,
+      which: [...APT.which, "npm"],
+      files: { ...APT.files, "/var/lib/dpkg/info/tmux.list": "/usr/bin/tmux\n" },
+      exec: {
+        ...APT.exec,
+        "apt-mark showmanual": "direnv\ntmux\n",
+        "dpkg-query -Wf ${Package} ${Priority}\n": "direnv optional\ntmux optional\n",
+        "npm ls -g --depth=0 --json": JSON.stringify({ dependencies: { tmux: { version: "1.0.0" } } }),
+      },
+    };
+    const ids = (await detectTools(fakeHost(both))).map(r => r.id);
+    expect(ids).toContain("tools/apt/direnv");
+    expect(ids).not.toContain("tools/apt/tmux");
+    // npm's road is read off its row, so a catalog tool it has keeps one and the build installs it by npm.
+    expect(ids).toContain("tools/npm/tmux");
+  });
+
+  it("a computer with no apt is asked nothing about it, so a Mac runs no dpkg", async () => {
+    const host = fakeHost({ ...APT, which: ["brew"], exec: { ...APT.exec, "brew bundle dump --file=-": 'brew "gh"\n' } });
+    expect((await detectTools(host)).map(r => r.id)).toEqual(["tools/brew/gh"]);
+    expect(host.calls.filter(c => c.includes("apt-mark") || c.includes("dpkg"))).toEqual([]);
+  });
+
   it("a go binary without module info is offered unticked", async () => {
     const host = fakeHost({ files: { "~/go/bin/mystery": 1 }, which: ["go"] });
     const rows = await detectTools(host);

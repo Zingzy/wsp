@@ -4,6 +4,7 @@
 // and that is all it can know: no pairing code, no device token and no byte
 // of a thread passes through here. Adding a route is one row in the table
 // below and one function beside the ones it sits with.
+import { clientDelete, clientList } from "./clients.js";
 import type { Env } from "./env.js";
 import { hostDelete, hostHeartbeat, hostList, hostTunnel } from "./hosts.js";
 import { linkApprove, linkCallback, linkPoll, linkStart, linkVerify } from "./link.js";
@@ -44,6 +45,8 @@ const ROUTES: readonly Route[] = [
   { method: "POST", path: "/link/approve", handle: linkApprove },
   { method: "POST", path: "/link/poll", handle: linkPoll },
   { method: "GET", path: "/hosts", handle: hostList },
+  { method: "GET", path: "/clients", handle: clientList },
+  { method: "DELETE", path: "/clients/:id", handle: clientDelete },
   { method: "POST", path: "/hosts/:id/tunnel", handle: hostTunnel },
   { method: "POST", path: "/hosts/:id/heartbeat", handle: hostHeartbeat },
   { method: "DELETE", path: "/hosts/:id", handle: hostDelete },
@@ -68,18 +71,21 @@ function match(path: string, against: string): Record<string, string> | undefine
 export async function handle(req: Request, env: Env, deps: Deps = systemDeps): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname === "/" ? "/" : url.pathname.replace(/\/+$/, "");
-  for (const route of ROUTES) {
-    const params = match(path, route.path);
-    if (params === undefined) continue;
-    if (route.method !== req.method) return Response.json({ error: `${req.method} is not what ${path} answers` }, { status: 405 });
-    try {
+  // The matching is inside the try with the handlers: a path holding a broken percent escape is a refusal a caller
+  // reads, not an exception out of fetch.
+  try {
+    for (const route of ROUTES) {
+      const params = match(path, route.path);
+      if (params === undefined) continue;
+      if (route.method !== req.method) return Response.json({ error: `${req.method} is not what ${path} answers` }, { status: 405 });
       return await route.handle({ req, env, deps, url, params });
-    } catch (e) {
-      if (e instanceof Refusal) return Response.json({ error: e.message }, { status: e.status });
-      // The words of an unexpected failure stay in this Worker's own log: a person on the other end gets the fact and no more.
-      console.error(e);
-      return Response.json({ error: "this relay failed on that request" }, { status: 500 });
     }
+  } catch (e) {
+    if (e instanceof Refusal) return Response.json({ error: e.message }, { status: e.status });
+    if (e instanceof URIError) return Response.json({ error: `that path is not one this relay can read: ${path}` }, { status: 400 });
+    // The words of an unexpected failure stay in this Worker's own log: a person on the other end gets the fact and no more.
+    console.error(e);
+    return Response.json({ error: "this relay failed on that request" }, { status: 500 });
   }
   return Response.json({ error: `no route: ${req.method} ${path}` }, { status: 404 });
 }

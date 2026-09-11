@@ -30,11 +30,11 @@ The tools your agents reach for, each with why it is ticked and its download siz
 
 <Image src="/init/tools.png" alt="The Tools screen: the always-on floor tools, then the You use these group with why each row is on and its size, and the disk line at the bottom" caption="Screen two. The floor tools, then the tools your sessions ran, each with why it is on. The disk line counts as you tick." />
 
-### 3. Also on this Mac
+### 3. Also on this computer
 
-What your own package managers installed that the image could take: Homebrew formulae with a Linux bottle, npm, pnpm, bun, pipx, uv and cargo globals, Go binaries. Each row shows the line that installs it and its size. A formula with no Linux bottle is greyed with the reason. Everything here starts unticked.
+What your own package managers installed that the image could take: Homebrew formulae with a Linux bottle, npm, pnpm, bun, pipx, uv and cargo globals, Go binaries, and on Linux the apt packages you chose yourself. The screen names your own computer, so a Mac reads "Also on this Mac" as the screenshots below do. Each row shows the line that installs it and its size. A formula with no Linux bottle is greyed with the reason. Everything here starts unticked.
 
-<Image src="/init/also.png" alt="The Also on this Mac screen: Homebrew formulae found on this computer, all unticked, each with its size" caption="Screen three. What Homebrew and the package managers installed here. Everything starts unticked." />
+<Image src="/init/also.png" alt="The Also screen: Homebrew formulae found on this computer, all unticked, each with its size" caption="Screen three. What Homebrew and the package managers installed here. Everything starts unticked." />
 
 ### 4. Sign-ins
 
@@ -42,11 +42,11 @@ One row per login present on this computer, with what to do about it: copy it fr
 
 <Image src="/init/sign-ins.png" alt="The Sign-ins screen: agent logins, developer CLI logins and MCP servers, each row with where the login lives and whether it copies, signs in on the machine or is skipped" caption="Screen four. Each login with where it lives and what happens to it. Arrows change one row, space moves a group." />
 
-### 5. wsp for your agents on this Mac
+### 5. wsp for your agents on this computer
 
 The agents on this computer that wsp can put its MCP server into: Claude Code, Codex, Gemini CLI, OpenCode. An agent this computer has run threads with starts ticked. This screen is never defaulted and never taken by `--yes`, because a run that asks nothing writes nothing on this computer. Under `--yes` or `--non-interactive` it prints the `wsp mcp install --agent <id>` line to run instead.
 
-<Image src="/init/wsp.png" alt="The wsp for your agents on this Mac screen: Claude Code and Codex ticked, Gemini CLI and OpenCode unticked, and the file each tick writes" caption="Screen five. The agents here that get the wsp MCP server and skill, and the file each tick writes." />
+<Image src="/init/wsp.png" alt="The wsp for your agents screen: Claude Code and Codex ticked, Gemini CLI and OpenCode unticked, and the file each tick writes" caption="Screen five. The agents here that get the wsp MCP server and skill, and the file each tick writes." />
 
 ### 6. Build
 

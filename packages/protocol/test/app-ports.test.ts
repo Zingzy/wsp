@@ -11,6 +11,7 @@ import {
   WS_PORT_OFFSET,
   authority,
   isLoopback,
+  isUrl,
   isWildcard,
   listenBeyondLoopbackLine,
   portHolderWords,
@@ -20,6 +21,13 @@ import {
   stateFileLine,
 } from "../src/index.js";
 import { ROOT, sourceFiles } from "./source-files.js";
+
+describe("an address where an alias could go", () => {
+  it("is a word with an http, https, ws or wss scheme, and nothing else", () => {
+    for (const word of ["http://box:4400", "https://box.example/wsp", "ws://box:4410", "WSS://box"]) expect(isUrl(word)).toBe(true);
+    for (const word of ["box", "box:4400", "127.0.0.1:14400", "ftp://box", "http:/box", ""]) expect(isUrl(word)).toBe(false);
+  });
+});
 
 describe("the pair of ports the app is served on", () => {
   it("names 4400 and 4410, one offset apart, as the pair nobody named", () => {
@@ -109,11 +117,17 @@ describe("who holds a port, and the lines about it", () => {
   });
 });
 
-describe("one copy of the pair", () => {
+describe("one home for the pair and for the loopback address", () => {
   const HOME = join("packages", "protocol", "src", "app-ports.ts");
+  const HOST = join("packages", "host", "src");
 
   it("no other source file spells out a default port: the app and the desktop read them from here", () => {
     const copies = sourceFiles().filter(rel => rel !== HOME && /\b(4400|4410)\b/.test(readFileSync(join(ROOT, rel), "utf8")));
+    expect(copies).toEqual([]);
+  });
+
+  it("no source file of the host spells the loopback address: every line about where the host is reads it from here", () => {
+    const copies = sourceFiles().filter(rel => rel.startsWith(HOST) && readFileSync(join(ROOT, rel), "utf8").includes(LOOPBACK));
     expect(copies).toEqual([]);
   });
 });
