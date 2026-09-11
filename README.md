@@ -16,7 +16,7 @@ wsp reads your computer once, builds a machine that has what it has (your agents
 - **Agents starting agents.** An agent on your computer drives wsp over MCP: it forks a workspace, opens a Claude Code thread there, starts a Codex thread beside it, reads both back. Everything it does shows in your sidebar.
 - **The machine, in the app.** A terminal that uses your Ghostty config, the ports it listens on as browser tabs, its processes, its files, its cost and state.
 - **Naps and wakes.** An idle workspace naps with its RAM intact and wakes on the next message. A machine the provider loses is rebuilt from the image with your files back.
-- **Your keys never leave your computer.** wsp runs on your computer and talks to the provider with your key. There is no hosted service in between.
+- **Your keys never leave a machine you own.** wsp runs on your own computer, or on a box you own, and talks to the provider with your key. There is no hosted service in between.
 
 ## Before you start
 
