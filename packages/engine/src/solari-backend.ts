@@ -90,7 +90,7 @@ function abort(capMs: number | undefined, signal: AbortSignal | undefined): { si
 export class SolariBackend implements MachineBackend {
   readonly capabilities: Capabilities = {
     liveCloneForks: true,
-    ramPreservingPause: true,
+    pauseMode: "memory",
     resize: false, // Starter plan clamps every sandbox to 2 vCPU
     previewUrls: true,
     signedUrls: true,

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLOUD_SETUP_WORDS } from "@wsp/protocol";
 import { DisconnectedError, makeApi, ProtocolClient, type ConnStatus, type ProtocolClientOptions } from "../src/protocol/client.js";
 import { ScriptedSocket, type Frame } from "./scripted-socket.js";
+import { caps } from "./caps.js";
 
 /** Polls cond every 5 ms until it holds; the redial timer is a real setTimeout, so these tests wait on the wall clock. */
 async function until(cond: () => boolean, ms = 2000): Promise<void> {
@@ -138,7 +139,7 @@ describe("makeApi wrappers", () => {
 
   it("capabilities sends capabilities.get and unwraps the flags", async () => {
     const { api, lastSent } = await connect();
-    const capabilities = { liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: false, kept: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
+    const capabilities = caps({ resize: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] });
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, capabilities });
     expect(await api.capabilities()).toEqual(capabilities);
     expect(lastSent()).toEqual({ id: expect.any(Number), op: "capabilities.get" });

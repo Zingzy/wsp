@@ -10,10 +10,11 @@ import { RequestError, type Api, type ProtocolEvent } from "../src/protocol/clie
 import { useStore } from "../src/protocol/store.js";
 import { ForwardsList } from "../src/sidebar/ForwardsList.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
+import { caps } from "./caps.js";
 
 const view = (id: string, name: string): WorkspaceView => ({ id, name, machineId: `m_${id}`, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" });
 const iso = (offsetMs: number): string => new Date(Date.now() + offsetMs).toISOString();
-const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: false, kept: false, sizes: [] };
+const CAPS = caps();
 
 function fakeApi(workspaces: WorkspaceView[], forwards: PortForward[], opts: { listFails?: string } = {}) {
   const listeners = new Set<(e: ProtocolEvent) => void>();

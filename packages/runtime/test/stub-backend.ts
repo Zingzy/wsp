@@ -99,7 +99,7 @@ export function stubBackend(): StubBackend {
   const backend: StubBackend = {
     capabilities: {
       liveCloneForks: true,
-      ramPreservingPause: true,
+      pauseMode: "memory",
       resize: true,
       previewUrls: true,
       signedUrls: true,

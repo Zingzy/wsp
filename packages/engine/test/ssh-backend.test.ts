@@ -30,7 +30,6 @@ describe("ssh backend", () => {
     const backend = new SshBackend();
     expect(backend.capabilities).toEqual({
       liveCloneForks: false,
-      ramPreservingPause: false,
       resize: false,
       previewUrls: false,
       signedUrls: false,

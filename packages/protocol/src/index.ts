@@ -145,11 +145,19 @@ export type InitSetup = z.infer<typeof InitSetup>;
 export const MachineSizeOffer = WorkspaceSize.extend({ rateUsdPerHour: z.number() });
 export type MachineSizeOffer = z.infer<typeof MachineSizeOffer>;
 
+/** How a provider pauses a machine. memory: a pause keeps the processes and every byte they hold. disk: a pause is a
+ * stop and a snapshot, and the wake is a boot that starts nothing the machine was running. */
+export const PauseMode = z.enum(["memory", "disk"]);
+export type PauseMode = z.infer<typeof PauseMode>;
+
 /** Honest per-backend feature flags; the UI degrades based on these, never on probing. */
 export const Capabilities = z.object({
   liveCloneForks: z.boolean(),
-  ramPreservingPause: z.boolean(),
+  /** Absent: the machine cannot be paused, and the runtime refuses a nap and a wake. The app reads the value for its
+   * words; the runtime reads only whether it is there. */
+  pauseMode: PauseMode.optional(),
   resize: z.boolean(),
+
   previewUrls: z.boolean(),
   signedUrls: z.boolean(),
   /** Guests can run containers; false means services get installed natively. */

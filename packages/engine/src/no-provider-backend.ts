@@ -22,7 +22,6 @@ const refuse = (): never => {
 export class NoProviderBackend implements MachineBackend {
   readonly capabilities: Capabilities = {
     liveCloneForks: false,
-    ramPreservingPause: false,
     resize: false,
     previewUrls: false,
     signedUrls: false,

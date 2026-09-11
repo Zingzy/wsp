@@ -894,7 +894,6 @@ const VAULTS = "vaults";
  * two apart. */
 class DeadlineError extends Error {}
 
-
 /** Rejects once the deadline passes; the underlying promise is left to settle on its own. The deadline is read on
  * the clock given, so a move budget measured on an injected clock times out on that clock. */
 function until<T>(p: Promise<T>, deadline: number, what: string, clock: Clock = realClock): Promise<T> {
@@ -1841,15 +1840,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
   /** The capability a verb reads before it runs: a machine whose capability is false refuses the verb with the one
    * sentence, which reads for the local computer, the only machine short of these capabilities today. */
-  const refuseCannot = (entry: LiveWorkspace, can: keyof Omit<Capabilities, "sizes">, action: string): void => {
+  const refuseCannot = (entry: LiveWorkspace, can: keyof Omit<Capabilities, "sizes" | "pauseMode">, action: string): void => {
     if (backendFor(entry.record.kind).capabilities[can] !== true) throw new Error(undrivenRefusal(entry.record.name, machineWord(entry.record.kind), action));
   };
+  /** Whether a kind's machines pause at all, which is all the runtime asks of the pause mode: the nap and the wake
+   * refuse where no mode is declared, with the same sentence, and never read which mode it is. */
+  const pauses = (kind: WorkspaceKind): boolean => backendFor(kind).capabilities.pauseMode !== undefined;
+  const refusePauseless = (entry: LiveWorkspace, action: string): void => {
+    if (!pauses(entry.record.kind)) throw new Error(undrivenRefusal(entry.record.name, machineWord(entry.record.kind), action));
+  };
   /** Whether a workspace holds one of the account's machine slots: only a kind whose machines the provider can nap
-   * does, the same capability the pause and wake refusals read, so this computer is never counted against the cap
-   * nor named beside the two moves that free a slot. Phase decides the rest off the record alone, since a refusal
-   * has no time to ask the provider about every workspace. */
+   * does, the same fact the pause and wake refusals read, so this computer is never counted against the cap nor
+   * named beside the two moves that free a slot. Phase decides the rest off the record alone, since a refusal has
+   * no time to ask the provider about every workspace. */
   const holdsSlot = (record: WorkspaceRecord): boolean => {
-    if (backendFor(record.kind).capabilities.ramPreservingPause !== true) return false;
+    if (!pauses(record.kind)) return false;
     const state = workspaceState({ phase: record.phase });
     return state !== "paused" && state !== "gone";
   };
@@ -3586,7 +3591,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async nap(id, origin) {
       spawnGuard("pause", origin);
-      refuseCannot(await entryOf(id, origin), "ramPreservingPause", "be paused");
+      refusePauseless(await entryOf(id, origin), "be paused");
       return napWith(id);
     },
 
@@ -3616,7 +3621,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       } else if (await runsUnderNapping(entry)) await adoptRunning(entry);
       // A running workspace has nothing to wake, whatever its kind; only a real resume asks the machine for one.
       if (entry.record.phase === "running") return view(entry.record);
-      refuseCannot(entry, "ramPreservingPause", "be woken");
+      refusePauseless(entry, "be woken");
+
       entry.waking = (async () => {
         // The stop the person pulls from the row. It aborts the provider call the ask is on rather than walking away
         // from one that keeps running: an abandoned resume would go on to run its cap out, write its line back onto

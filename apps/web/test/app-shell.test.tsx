@@ -12,6 +12,7 @@ import { sidebarMaxWidthBeside } from "../src/rightPanelLayout.js";
 import { RIGHT_PANEL_WIDTH_STORAGE_KEY, useRightPanelStore } from "../src/rightPanelStore.js";
 import { AppShell } from "../src/shell/AppShell.js";
 import { onNewThreadRequest } from "../src/shell/shellRequests.js";
+import { caps } from "./caps.js";
 
 const view = (id: string, name: string): WorkspaceView => ({
   id,
@@ -22,7 +23,7 @@ const view = (id: string, name: string): WorkspaceView => ({
   createdAt: "2026-09-01T00:00:00Z",
 });
 
-const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: false, kept: false, sizes: [] };
+const CAPS = caps();
 
 function fakeApi(workspaces: WorkspaceView[]): Api {
   return {

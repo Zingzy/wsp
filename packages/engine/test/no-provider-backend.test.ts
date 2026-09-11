@@ -9,7 +9,6 @@ describe("no provider backend", () => {
   it("every capability is false and it offers no sizes, so every road that reads one refuses before it reaches here", () => {
     expect(new NoProviderBackend().capabilities).toEqual({
       liveCloneForks: false,
-      ramPreservingPause: false,
       resize: false,
       previewUrls: false,
       signedUrls: false,

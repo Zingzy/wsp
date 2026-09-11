@@ -128,7 +128,6 @@ export class LocalMachine implements Machine {
 export class LocalBackend implements MachineBackend {
   readonly capabilities: Capabilities = {
     liveCloneForks: false,
-    ramPreservingPause: false,
     resize: false,
     previewUrls: false,
     signedUrls: false,

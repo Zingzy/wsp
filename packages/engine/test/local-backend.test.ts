@@ -18,7 +18,6 @@ describe("local backend", () => {
     const backend = new LocalBackend({ root });
     expect(backend.capabilities).toEqual({
       liveCloneForks: false,
-      ramPreservingPause: false,
       resize: false,
       previewUrls: false,
       signedUrls: false,

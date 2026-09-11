@@ -135,7 +135,7 @@ describe("DockerBackend against a fake Engine API", () => {
   it("says what a container can and cannot do", () => {
     expect(backend.capabilities).toMatchObject({
       liveCloneForks: false,
-      ramPreservingPause: true,
+      pauseMode: "memory",
       resize: false,
       previewUrls: false,
       signedUrls: false,

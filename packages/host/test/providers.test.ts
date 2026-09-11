@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { DockerBackend, NoProviderBackend, SolariBackend } from "@wsp/engine";
+import { DockerBackend, LocalBackend, NoProviderBackend, SolariBackend, SshBackend } from "@wsp/engine";
 import { goldenRecipe, makeRuntime, optsFor, providerSlotOf, swapProvider } from "../src/cli.js";
 import { PROVIDER_MODULES, providerBackendFor, providerEnvWith, providerModule } from "../src/providers.js";
 
@@ -37,6 +37,15 @@ describe("provider modules", () => {
     expect(PROVIDER_MODULES.at(-1)!.selects(pick())).toBe(true);
   });
 
+  it("every registered backend, and the two kinds outside the registry, either declares a pause mode or cannot be paused", () => {
+    // Built the way the host builds them, with fake picks: a key that looks fake, a daemon nothing dials.
+    const built = PROVIDER_MODULES.map(m => [m.id, m.build(pick({ solari: "sk-ant-x" }, { DOCKER_HOST: "unix:///nonexistent/docker.sock" }))] as const);
+    const all = [...built, ["local", new LocalBackend({ root: "/tmp/wsp-providers" })] as const, ["ssh", new SshBackend()] as const];
+    const modes = Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.pauseMode]));
+    expect(modes).toEqual({ docker: "memory", solari: "memory", none: undefined, local: undefined, ssh: undefined });
+    for (const [, b] of all) expect(b.capabilities.pauseMode === undefined || ["memory", "disk"].includes(b.capabilities.pauseMode)).toBe(true);
+  });
+
   it("the words wsp up and wsp init take land in what the run picks its provider out of", () => {
     expect(optsFor({ state: "/tmp/wsp-providers/state.json", provider: "docker", "docker-host": "ssh://maya@127.0.0.1:2222" }).providerEnv).toMatchObject({
       WSP_PROVIDER: "docker",
@@ -49,7 +58,7 @@ describe("provider modules", () => {
     try {
       const held = providerSlotOf(rt)!.current();
       // Containers: a nap that keeps RAM, no public port routes, and sizes to offer, so the fork roads are open.
-      expect(held.capabilities).toMatchObject({ previewUrls: false, ramPreservingPause: true, liveCloneForks: false });
+      expect(held.capabilities).toMatchObject({ previewUrls: false, pauseMode: "memory", liveCloneForks: false });
       expect(held.capabilities.sizes.length).toBeGreaterThan(0);
       swapProvider(rt, { solari: "slr_live_fake" });
       expect(providerSlotOf(rt)!.current().capabilities.previewUrls).toBe(false);

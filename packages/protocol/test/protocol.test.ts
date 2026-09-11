@@ -5,6 +5,7 @@ import {
   Recipe,
   RecipeSource,
   Capabilities,
+  PauseMode,
   GoldenVersion,
   DAEMON_ROOTS_PATH,
   NO_BUILD_TOOLS_LINE,
@@ -510,7 +511,7 @@ describe("daemon wire types (one home for the ops from @wsp/daemon)", () => {
 
 describe("backend capabilities", () => {
   it("requires every flag, containers, callbackRelay, templates, kept and the sizes list included, so no backend can leave one unstated", () => {
-    const full = { liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: true, kept: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
+    const full = { liveCloneForks: true, pauseMode: "memory", resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: true, kept: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
     expect(Capabilities.parse(full)).toEqual(full);
     const { containers: _c, ...missing } = full;
     expect(() => Capabilities.parse(missing)).toThrow();
@@ -524,6 +525,18 @@ describe("backend capabilities", () => {
     const { sizes: _s, ...noSizes } = full;
     expect(() => Capabilities.parse(noSizes)).toThrow();
     expect(() => Capabilities.parse({ ...full, sizes: [{ cpu: 2, memMb: 4096 }] })).toThrow();
+  });
+
+  it("pauseMode is optional and one of memory or disk; a boolean is refused", () => {
+    const full = { liveCloneForks: true, resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: true, kept: false, sizes: [] };
+    // Absent is a machine that cannot be paused: this computer, a machine reached over ssh.
+    expect(Capabilities.parse(full)).toEqual(full);
+    expect(Capabilities.parse({ ...full, pauseMode: "memory" })).toMatchObject({ pauseMode: "memory" });
+    expect(Capabilities.parse({ ...full, pauseMode: "disk" })).toMatchObject({ pauseMode: "disk" });
+    expect(PauseMode.options).toEqual(["memory", "disk"]);
+    // The old boolean said two things at once; a backend still declaring it is refused rather than read as a mode.
+    expect(() => Capabilities.parse({ ...full, pauseMode: true })).toThrow();
+    expect(() => Capabilities.parse({ ...full, pauseMode: "frozen" })).toThrow();
   });
 });
 

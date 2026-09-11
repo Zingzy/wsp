@@ -6,6 +6,7 @@ import { CLOUD_SETUP_WORDS, DEFAULT_THEME, type GoldenManifest, type InitJob, ty
 import { DisconnectedError, RequestError, type Api, type ProtocolEvent } from "../src/protocol/client.js";
 import { LAST_WORKSPACE_KEY } from "../src/protocol/lastWorkspace.js";
 import { useStore } from "../src/protocol/store.js";
+import { caps } from "./caps.js";
 
 const view = (id: string): WorkspaceView => ({
   id,
@@ -21,7 +22,7 @@ const GOLDEN: GoldenManifest = {
   versions: [{ version: 1, snapshotId: "snap_g", baseTemplate: "default", setupSha: "s", createdAt: "c", smoke: { cmd: "true", exitCode: 0 } }],
 };
 
-const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: false, kept: false, sizes: [] };
+const CAPS = caps();
 
 function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
   const listeners = new Set<(e: ProtocolEvent) => void>();

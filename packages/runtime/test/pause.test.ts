@@ -6,7 +6,7 @@
 // zombie (its retry budget, measured: minutes of silence plus a failed probe).
 import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ALREADY_RUNNING, sendRefusal, workspaceState, workspaceWord, type AdapterEvent, type EventUnion, type SessionEvent } from "@wsp/protocol";
+import { ALREADY_RUNNING, machineWord, sendRefusal, undrivenRefusal, workspaceState, workspaceWord, type AdapterEvent, type EventUnion, type SessionEvent } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type RuntimeOptions } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
@@ -55,6 +55,27 @@ function holdable<T>(): { promise: Promise<T>; release: (v: T) => void } {
 
 const ends = (events: EventUnion[]): Extract<SessionEvent, { type: "session.end" }>[] =>
   events.filter((e): e is Extract<SessionEvent, { type: "session.end" }> => e.type === "session.end");
+
+describe("the pause mode gates the two moves", () => {
+  it("nap and wake are refused with the undriven sentence on a backend without a pause mode, and taken on one declaring disk", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    delete backend.capabilities.pauseMode;
+    await expect(rt.workspaces.nap(ws.id)).rejects.toThrow(undrivenRefusal("x", machineWord("cloud"), "be paused"));
+    expect(backend.machines[0]!.paused).toBe(false);
+    // The runtime reads that a mode is there, never which: a disk pause is a nap and a wake like any other here.
+    backend.capabilities.pauseMode = "disk";
+    expect((await rt.workspaces.nap(ws.id)).phase).toBe("napping");
+    expect(backend.machines[0]!.paused).toBe(true);
+    delete backend.capabilities.pauseMode;
+    await expect(rt.workspaces.wake(ws.id)).rejects.toThrow(undrivenRefusal("x", machineWord("cloud"), "be woken"));
+    expect(backend.machines[0]!.paused).toBe(true);
+    backend.capabilities.pauseMode = "disk";
+    expect((await rt.workspaces.wake(ws.id)).phase).toBe("running");
+    expect(backend.machines[0]!.resumes).toBe(1);
+  });
+});
 
 describe("nap phase order", () => {
   it("persists and pushes pausing before the provider pause, napping after, and a read mid-pause says pausing", async () => {

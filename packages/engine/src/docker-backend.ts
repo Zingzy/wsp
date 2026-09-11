@@ -405,7 +405,7 @@ export class DockerBackend implements MachineBackend {
     this.baseTemplates = { sandbox: image, desktop: image };
     this.capabilities = {
       liveCloneForks: false, // a commit holds no memory, so a fork boots cold and wsp starts the agents again
-      ramPreservingPause: true, // the freezer cgroup keeps the processes and every byte they hold: a nap saves CPU, never memory
+      pauseMode: "memory", // the freezer cgroup keeps the processes and every byte they hold: a nap saves CPU, never memory
       resize: false,
       previewUrls: false, // a published port is bare TCP with no token and no expiry, so nothing public is minted
       signedUrls: false, // bytes go through the archive API instead

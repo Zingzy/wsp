@@ -18,7 +18,7 @@ describe("SolariBackend", () => {
     const b = new SolariBackend({ apiKey: "k", fetch: fakeFetch({}) });
     expect(b.capabilities).toEqual({
       liveCloneForks: true,
-      ramPreservingPause: true,
+      pauseMode: "memory",
       resize: false,
       previewUrls: true,
       signedUrls: true,

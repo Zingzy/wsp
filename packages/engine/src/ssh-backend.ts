@@ -396,7 +396,6 @@ export interface SshBackendOptions {
 export class SshBackend implements MachineBackend {
   readonly capabilities: Capabilities = {
     liveCloneForks: false,
-    ramPreservingPause: false,
     resize: false,
     previewUrls: false,
     signedUrls: false,
