@@ -82,7 +82,7 @@ export async function buildBesideHost(o: BesideOptions): Promise<number> {
         log.warn(`${row.label}: ${row.state}`, out);
         continue;
       }
-      if (!initRowOver(row.state)) continue;
+      if (!initRowOver(row)) continue;
       if (row.state === INIT_ROW_STATES.failed) log.error(rowLine(row), out);
       else if (initRowUnrun(row.state)) log.warn(`${rowLine(row)}  ${dim(row.state)}`, out);
       else log.step(rowLine(row), out);
