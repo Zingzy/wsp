@@ -390,13 +390,17 @@ describe("agents spawning agents", () => {
       // The door is shut and these are the openings: everything else answered the one sentence, whether or not the
       // op would have gone on to refuse it for a reason of its own.
       expect(reached.sort()).toEqual([...THREAD_OPS].filter(op => op !== "auth").sort());
-      expect(refused).toContain("golden.get");
+      // The two reads a fork asks before the act: which snapshot the golden's head is, and whether this host forks
+      // at all and at which sizes. Both are the door's openings, since a thread that may fork has to be able to say
+      // from what; neither writes anything.
+      expect(reached).toContain("golden.get");
+      expect(reached).toContain("capabilities.get");
       expect(refused).toContain("golden.prepare");
       expect(refused).toContain("snapshots.list");
       expect(refused).toContain("snapshots.rollback");
       expect(refused).toContain("preferences.get");
       expect(refused).toContain("preferences.set");
-      expect(refused).toContain("capabilities.get");
+      expect(refused).toContain("projectGoldens.list");
       expect(refused).toContain("init.keys");
       expect(refused).toContain("host.folders");
       expect(refused).toContain("project.import");

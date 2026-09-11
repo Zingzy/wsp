@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { promisify } from "node:util";
 import { gunzipSync } from "node:zlib";
 import { CURL_NET } from "@wsp/catalog";
 import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { WebSocketServer } from "ws";
 import { GUEST_SUPERVISOR_PATH, GUEST_USER_ENV, TOOLS_PATH } from "@wsp/engine";
+import { assetDir, assetProof } from "../src/assets.js";
 import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, GUEST_DAEMON_DIR, GUEST_WSP_BIN, shellQuote, sshDaemonPaths, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
@@ -312,13 +313,16 @@ describe("verifyNoneLeft", () => {
   });
 });
 
-/** A wsp command folder for a test to stage: the bundle's own build is a downstream package's, which a fresh
- * worktree has not built, so no test here reads it. */
+/** A wsp command folder for a test to stage, shaped as npm lays the published command out: its package.json beside
+ * a dist folder the bin reads its version through. The layout tests use this stand-in; the handshake test below is
+ * the one that reads the real bundle. */
 function fakeCliDir(root: string): string {
   const cli = join(root, "cli");
-  mkdirSync(cli, { recursive: true });
-  writeFileSync(join(cli, "bin.js"), 'import "./chunk-1.js";\n');
-  writeFileSync(join(cli, "chunk-1.js"), "export const y = 2;\n");
+  mkdirSync(join(cli, "dist"), { recursive: true });
+  writeFileSync(join(cli, "package.json"), JSON.stringify({ name: "@zingzy/wsp", version: "9.9.9" }));
+  writeFileSync(join(cli, "dist", "bin.js"), 'import "./chunk-1.js";\n');
+  writeFileSync(join(cli, "dist", "chunk-1.js"), "export const y = 2;\n");
+  writeFileSync(join(cli, "tsup.config.ts"), "// never travels\n");
   return cli;
 }
 
@@ -371,13 +375,48 @@ describe("stageDaemonBundle", () => {
     const stage = join(dir, "stage");
     await stageDaemonBundle(stage, CLOUD_PLACE, daemonDir, cliDir);
 
-    expect(readFileSync(join(stage, "wsp", "bin.js"), "utf8")).toContain("./chunk-1.js");
-    expect(existsSync(join(stage, "wsp", "chunk-1.js"))).toBe(true);
+    expect(readFileSync(join(stage, "wsp", "dist", "bin.js"), "utf8")).toContain("./chunk-1.js");
+    expect(existsSync(join(stage, "wsp", "dist", "chunk-1.js"))).toBe(true);
+    // The command travels as the package npm installs it, package.json beside dist, since the bin reads its own
+    // version through that file: a bundle that carried dist alone had it read the daemon bundle's manifest, which
+    // names no version, and an MCP server announcing none is refused its handshake.
+    expect(JSON.parse(readFileSync(join(stage, "wsp", "package.json"), "utf8"))).toMatchObject({ version: "9.9.9" });
+    expect(existsSync(join(stage, "wsp", "tsup.config.ts"))).toBe(false);
     // Where it lands on a fork is the protocol's one reading, which the runtime builds the launch from, and it is
     // under the folder the place unpacks the bundle into.
-    expect(GUEST_WSP_BIN).toBe(`${GUEST_DAEMON_DIR}/wsp/bin.js`);
+    expect(GUEST_WSP_BIN).toBe(`${GUEST_DAEMON_DIR}/wsp/dist/bin.js`);
+    expect(existsSync(join(stage, relative(GUEST_DAEMON_DIR, GUEST_WSP_BIN)))).toBe(true);
     expect(CLOUD_PLACE.dir).toBe(GUEST_DAEMON_DIR);
     expect(deployScript(CLOUD_PLACE, "aabbcc").split("\n")).toContain(`tar -xzf ${GUEST_DAEMON_DIR}.tgz -C ${GUEST_DAEMON_DIR}`);
+  });
+
+  it("the wsp command in the bundle answers an MCP handshake with its version, run from where the bundle puts it", async () => {
+    dir = tmp("wsp-bundle-mcp-");
+    const daemonDir = join(dir, "daemon");
+    mkdirSync(join(daemonDir, "dist"), { recursive: true });
+    writeFileSync(join(daemonDir, "package.json"), JSON.stringify({ name: "@wsp/daemon", dependencies: {} }));
+    writeFileSync(join(daemonDir, "dist", "index.js"), "export const x = 1;");
+    const stage = join(dir, "stage");
+    // The real command bundle on purpose, since the bug was in the built bin's own reading of its version: it needs
+    // packages/wspx built, which the gate does before any test runs; the fork's path is the protocol's, under the stage.
+    await stageDaemonBundle(stage, CLOUD_PLACE, daemonDir);
+    const bin = join(stage, relative(GUEST_DAEMON_DIR, GUEST_WSP_BIN));
+    const { version } = JSON.parse(readFileSync(join(assetDir("cli"), "package.json"), "utf8")) as { version: string };
+    const home = join(dir, "guest-home");
+    mkdirSync(home, { recursive: true });
+    const child = spawn(process.execPath, [bin, "mcp", "--host", "http://127.0.0.1:1"], { env: { PATH: process.env["PATH"] ?? "", HOME: home, WSP_HOME: join(home, ".wsp") }, stdio: ["pipe", "pipe", "pipe"] });
+    let out = "";
+    let err = "";
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => (out += chunk));
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => (err += chunk));
+    child.stdin.end(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "probe", version: "0" } } })}\n`);
+    const code = await new Promise<number | null>(done => child.once("close", done));
+    expect(err).toBe("");
+    expect(code).toBe(0);
+    const reply = JSON.parse(out.split("\n")[0]!) as { result: { serverInfo: unknown } };
+    // The client checks serverInfo against the protocol's schema, which wants a version string; a missing one is a
+    // server that never connects, which is what a thread on a fork read as the wsp tools not being there.
+    expect(reply.result.serverInfo).toEqual({ name: "wsp", version });
   });
 
   it("names an asset folder that was never built rather than failing halfway through a copy", async () => {
@@ -388,7 +427,7 @@ describe("stageDaemonBundle", () => {
     writeFileSync(join(daemonDir, "dist", "index.js"), "export const x = 1;");
     const empty = join(dir, "never-built");
     mkdirSync(empty, { recursive: true });
-    await expect(stageDaemonBundle(join(dir, "stage"), CLOUD_PLACE, daemonDir, empty)).rejects.toThrow(`wsp command bundle missing: ${join(empty, "bin.js")}`);
+    await expect(stageDaemonBundle(join(dir, "stage"), CLOUD_PLACE, daemonDir, empty)).rejects.toThrow(`wsp command bundle missing: ${join(empty, assetProof("cli"))}`);
     expect(existsSync(join(dir, "stage"))).toBe(false);
   });
 
