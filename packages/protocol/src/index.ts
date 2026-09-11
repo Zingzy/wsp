@@ -1363,7 +1363,39 @@ export interface ContextMenuItem {
   shortcut?: string;
   accelerator?: string;
   destructive?: boolean;
+  /** A row that marks a state, drawn with a check when true; a row with no mark at all leaves this out. */
+  checked?: boolean;
 }
+
+// --- hosts the desktop window can move between --------------------------------
+
+/** How this computer reached a host somewhere else: by an address it pairs with, or by an ssh login it forwards. */
+export type HostRoad = "direct" | "ssh";
+
+/** One saved host as the desktop lists it: never the token. The label is what the person reads in the menu and the
+ * sidebar's foot; the alias is what wsp's command line names the same record by. */
+export interface HostListing {
+  alias: string;
+  label: string;
+  url: string;
+  road: HostRoad;
+}
+
+/** The hosts as the window shows them: the word for the app's own computer, which host the window is on (null for
+ * that computer), and every saved host. */
+export interface HostsView {
+  here: string;
+  current: string | null;
+  hosts: HostListing[];
+}
+
+/** What the connect sheet asks the shell for: an address with the code wsp pair printed there, or an ssh login the
+ * shell starts or finds a host behind and forwards. */
+export type HostConnectAsk = { road: "direct"; url: string; code: string } | { road: "ssh"; address: string; port?: number };
+
+/** How a host move or connect ended: done, or refused in the host's own words with the field the words are about, so
+ * the sheet can put them under it. */
+export type HostOutcome = { ok: true } | { ok: false; error: string; at: "url" | "code" | "address" | "port" };
 
 /** The class the desktop preload puts on the html element when the window has no title bar of its own: the app's
  * header row is the window's frame, the traffic lights sit in it and the sidebar shows the window's frosted glass. */
@@ -1410,6 +1442,19 @@ export interface DesktopBridge {
   /** A click on that notification, after the shell has raised its window: the page opens the build screen. Returns
    * the unsubscribe. */
   onNeedsYouOpen(handler: () => void): () => void;
+  /** The device token the shell holds for the host that served this page, when the window is on a host somewhere
+   * else; nothing on the app's own host, whose page carries its own token. The token never rides in the page. */
+  hostToken(): Promise<string | undefined>;
+  /** The saved hosts and which one the window is on. */
+  hosts(): Promise<HostsView>;
+  /** Puts the window on a saved host, or on the app's own computer for null. */
+  switchHost(alias: string | null): Promise<HostOutcome>;
+  /** Pairs with a host by one of the two roads and puts the window on it. */
+  connectHost(ask: HostConnectAsk): Promise<HostOutcome>;
+  /** Hands the host's token back and forgets the host; the window returns to the app's own computer if it was there. */
+  disconnectHost(alias: string): Promise<HostOutcome>;
+  /** The shell's own menu asked for the connect sheet. Returns the unsubscribe. */
+  onConnectHostOpen(handler: () => void): () => void;
 }
 
 // --- golden image (manifest, interactive builder, build stages) ---------------

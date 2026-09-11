@@ -3,8 +3,9 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { GoldenMissingTool, GoldenStage, HarnessCatalog, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, SessionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
+import type { ContextMenuItem, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, SessionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
+import { DEFAULT_PORT } from "./app-ports.js";
 import { compareVersions } from "./semver.mjs";
 import { shellLine } from "./shell-quote.js";
 import type { ThreadMessage } from "./thread-read.js";
@@ -2203,12 +2204,81 @@ export const GET_THE_APP_WORD = "Get";
  * The halves ship together and every call over the bridge needs both, so the older one is named with what to do
  * about it. A shell whose bridge carries no version at all is one from before the bridge carried one, which is
  * older than any host that reads this. */
-export function shellVersionNotice(shell: string | undefined, host: string): ShellVersionNotice | undefined {
-  if (shell === undefined) return { line: `this app is older than the host, which is ${host}: get the new app`, update: true };
+export function shellVersionNotice(shell: string | undefined, host: string, label?: string): ShellVersionNotice | undefined {
+  const named = label === undefined ? "the host" : `the host ${label}`;
+  if (shell === undefined) return { line: `this app is older than ${named}, which is ${host}: get the new app`, update: true };
   const order = compareVersions(shell, host);
   if (order === 0) return undefined;
-  const both = `this app is ${shell}, the host is ${host}`;
+  const both = `this app is ${shell}, ${named} is ${host}`;
   return order < 0 ? { line: `${both}: get the new app`, update: true } : { line: `${both}: run the app's own host`, update: false };
+}
+
+/** The words of the desktop's hosts: the menu, the sidebar's foot and the connect sheet all read them here. */
+export const HOST_WORDS = {
+  hosts: "Hosts",
+  connectMenu: "Connect to a host…",
+  disconnect: (label: string): string => `Disconnect ${label}`,
+  /** Why the disconnect row is dimmed while the window is on the app's own computer. */
+  hereStays: (here: string): string => `${here} is the app's own host`,
+  sheet: {
+    headline: "Connect to a host",
+    top: "A wsp host on another computer, by its address or over ssh.",
+    direct: "Address and code",
+    ssh: "Over ssh",
+    address: "Address",
+    addressPlaceholder: `http://box:${DEFAULT_PORT}`,
+    code: "Code",
+    codePlaceholder: "XXXX-XXXX",
+    login: "Login",
+    loginPlaceholder: "user@host",
+    port: "Port",
+    portPlaceholder: "22",
+    keycap: "Connect",
+    cancel: "Cancel",
+    directNote: "The app pairs with the host at this address, with the code wsp pair printed on that computer, and opens it.",
+    sshNote: "The app logs in over ssh, starts wsp there when nothing serves, forwards its port to this computer and pairs.",
+    /** Why Connect is held, as its tooltip. */
+    fillFirst: "type the address and the code first",
+    fillLoginFirst: "type the login first",
+  },
+} as const;
+
+/** What the app calls the computer it runs on, first in every hosts list. */
+export const hereWord = (mac: boolean): string => (mac ? "This Mac" : "This computer");
+
+const HOST_MENU_SWITCH = "switch:";
+const HOST_MENU_CONNECT = "connect";
+const HOST_MENU_DISCONNECT = "disconnect:";
+
+/** The Hosts menu as one list of rows, read by the shell's own menu bar and by the sidebar's foot alike: this computer
+ * first, every saved host, the current one marked, then the connect row, then the disconnect of the host the window is
+ * on, dimmed on this computer since its host is the app's own. */
+export function hostsMenuItems(view: HostsView): ContextMenuItem[] {
+  const current = view.hosts.find(h => h.alias === view.current);
+  return [
+    { id: HOST_MENU_SWITCH, label: view.here, group: "hosts", enabled: true, checked: view.current === null },
+    ...view.hosts.map((h): ContextMenuItem => ({ id: `${HOST_MENU_SWITCH}${h.alias}`, label: h.label, group: "hosts", enabled: true, checked: h.alias === view.current })),
+    { id: HOST_MENU_CONNECT, label: HOST_WORDS.connectMenu, group: "add", enabled: true },
+    current !== undefined
+      ? { id: `${HOST_MENU_DISCONNECT}${current.alias}`, label: HOST_WORDS.disconnect(current.label), group: "remove", enabled: true, destructive: true }
+      : { id: HOST_MENU_DISCONNECT, label: HOST_WORDS.disconnect(view.here), group: "remove", enabled: false, refusal: HOST_WORDS.hereStays(view.here), destructive: true },
+  ];
+}
+
+/** What a row of the Hosts menu does, read back off its id; nothing for an id the list above never minted. */
+export type HostMenuAction = { kind: "switch"; alias: string | null } | { kind: "connect" } | { kind: "disconnect"; alias: string };
+
+export function hostMenuAction(id: string): HostMenuAction | undefined {
+  if (id === HOST_MENU_CONNECT) return { kind: "connect" };
+  if (id.startsWith(HOST_MENU_SWITCH)) {
+    const alias = id.slice(HOST_MENU_SWITCH.length);
+    return { kind: "switch", alias: alias === "" ? null : alias };
+  }
+  if (id.startsWith(HOST_MENU_DISCONNECT)) {
+    const alias = id.slice(HOST_MENU_DISCONNECT.length);
+    return alias === "" ? undefined : { kind: "disconnect", alias };
+  }
+  return undefined;
 }
 
 /** A colour as CSS spells it, with its alpha as a percent where one is given. */

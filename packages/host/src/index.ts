@@ -35,6 +35,8 @@ export { shimPath } from "./shim.js";
 export { agentHistories, agentsHere, type AgentHere, type AgentSessions } from "./agents-here.js";
 export { installEach, mcpServerSpec, runningWsp, type InstallReport, type RunningWsp } from "./mcp-install.js";
 export { servingHost, type HostLock } from "./host-lock.js";
+export { aliasFrom, defaultHost, isUrl, listHosts, noSuchHostLine, readHost, removeHost, writeHost, type HostEntry, type HostRecord, type SshLogin } from "./hosts.js";
+export { connectCommand, disconnectCommand, type ConnectOpts } from "./connect.js";
 export {
   startCallbackRelay,
   systemOpener,

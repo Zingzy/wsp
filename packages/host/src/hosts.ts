@@ -8,7 +8,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { WS_PATH, usageRefusal } from "@wsp/protocol";
+import { WS_PATH, usageRefusal, type HostRoad } from "@wsp/protocol";
 import { servingHost } from "./host-lock.js";
 
 /** What this computer keeps about a host on another one: the address a person gave wsp connect, the device the host
@@ -18,6 +18,18 @@ export interface HostRecord {
   deviceId: string;
   deviceToken: string;
   pairedAt: string;
+  /** What the desktop shows for this host; the alias stands in when a record from the command line carries none. */
+  label?: string;
+  /** How the desktop reached it; a record the command line wrote carries none and is read as an address. */
+  road?: HostRoad;
+  /** The ssh login the desktop forwards through, and the port the host answers on over there. */
+  ssh?: SshLogin;
+}
+
+export interface SshLogin {
+  address: string;
+  port?: number;
+  hostPort: number;
 }
 
 /** One connected host as wsp hosts prints it: never the token, which no listing has any use for. */
@@ -26,6 +38,8 @@ export interface HostEntry {
   url: string;
   deviceId: string;
   default: boolean;
+  label?: string;
+  road?: HostRoad;
 }
 
 /** The home wsp keeps everything of a person's in when nobody names another. */
@@ -111,7 +125,14 @@ export function listHosts(home: string): HostEntry[] {
     .map(name => ({ alias: name.slice(0, -".json".length), record: readHost(home, name.slice(0, -".json".length)) }))
     .filter((h): h is { alias: string; record: HostRecord } => h.record !== undefined)
     .sort((a, b) => a.alias.localeCompare(b.alias))
-    .map(h => ({ alias: h.alias, url: h.record.url, deviceId: h.record.deviceId, default: h.alias === marked }));
+    .map(h => ({
+      alias: h.alias,
+      url: h.record.url,
+      deviceId: h.record.deviceId,
+      default: h.alias === marked,
+      ...(h.record.label !== undefined ? { label: h.record.label } : {}),
+      ...(h.record.road !== undefined ? { road: h.record.road } : {}),
+    }));
 }
 
 /** Takes the record away, and the default with it when it named this one. True when there was one to take. */

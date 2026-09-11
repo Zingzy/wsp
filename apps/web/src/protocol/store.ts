@@ -89,6 +89,8 @@ interface State {
   /** Whether the cloud setup sheet stands open. Here rather than in the row that opens it, since the toast's Open and
    * a system notification's click open the same sheet. */
   setupOpen: boolean;
+  /** Whether the connect sheet stands open: the shell's menu, the sidebar's foot and a first launch all open one sheet. */
+  connectOpen: boolean;
   /** A workspace id, or a creation's key while that create runs. */
   selectedId: string | null;
   /** A thread of the selected workspace the person picked in the sidebar; null shows the workspace's latest thread. */
@@ -142,6 +144,8 @@ interface State {
    * screen: what the sidebar's row, the toast's Open and a system notification's click all call. */
   openSetup(): void;
   closeSetup(): void;
+  openConnect(): void;
+  closeConnect(): void;
   applyEvent(e: ProtocolEvent): void;
   /** Rows come from the runtime (only it knows harness and final status); events say when to ask. */
   reloadSessions(workspaceId: string): Promise<void>;
@@ -334,6 +338,7 @@ export const useStore = create<State>((set, get) => {
     toast: null,
     toastAction: null,
     setupOpen: false,
+    connectOpen: false,
     selectedId: null,
     selectedThreadId: null,
     creations: [],
@@ -535,6 +540,8 @@ export const useStore = create<State>((set, get) => {
     clearToast() { set({ toast: null, toastAction: null }); },
     openSetup() { set({ setupOpen: true }); },
     closeSetup() { set({ setupOpen: false }); },
+    openConnect() { set({ connectOpen: true }); },
+    closeConnect() { set({ connectOpen: false }); },
     applyWorkspace(workspace) {
       set(s => ({
         workspaces: s.workspaces.map(w => (w.id === workspace.id ? { ...w, ...workspace } : w)),

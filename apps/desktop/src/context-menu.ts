@@ -17,7 +17,8 @@ const isItem = (raw: unknown): raw is ContextMenuItem => {
     optionalString("refusal") &&
     optionalString("shortcut") &&
     optionalString("accelerator") &&
-    (item["destructive"] === undefined || typeof item["destructive"] === "boolean")
+    (item["destructive"] === undefined || typeof item["destructive"] === "boolean") &&
+    (item["checked"] === undefined || typeof item["checked"] === "boolean")
   );
 };
 
@@ -28,7 +29,7 @@ export function parseContextMenuItems(raw: unknown): ContextMenuItem[] {
 }
 
 /** One row per item in the page's order, a separator where the group changes; a row that cannot run is dimmed with its
- * refusal as the hover text. */
+ * refusal as the hover text, and a row that marks a state is a checkbox row with its mark. */
 export function contextMenuTemplate(items: ReadonlyArray<ContextMenuItem>, choose: (id: string) => void): MenuItemConstructorOptions[] {
   const template: MenuItemConstructorOptions[] = [];
   for (const [index, item] of items.entries()) {
@@ -38,6 +39,7 @@ export function contextMenuTemplate(items: ReadonlyArray<ContextMenuItem>, choos
       enabled: item.enabled,
       ...(item.refusal !== undefined ? { toolTip: item.refusal } : {}),
       ...(item.accelerator !== undefined ? { accelerator: item.accelerator } : {}),
+      ...(item.checked !== undefined ? { type: "checkbox" as const, checked: item.checked } : {}),
       click: () => choose(item.id),
     });
   }
