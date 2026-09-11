@@ -899,6 +899,12 @@ export const DAEMON_UPDATE_FAILED = "could not update the helper";
 export const DAEMON_RESTARTING = "restarting the helper";
 export const DAEMON_RESTART_FAILED = "could not restart the helper";
 
+/** The same two lines for the first daemon a machine ever takes. A machine somebody already owned had none until
+ * wsp put one there, so nothing about it is being updated or put back, and a person watching that machine's row
+ * is told what is happening on it rather than that something they never installed is being replaced. */
+export const DAEMON_INSTALLING = "installing the helper";
+export const DAEMON_INSTALL_FAILED = "could not install the helper";
+
 /** Why a nap's vault export was refused: its size against the cap, both in the one byte rule. */
 export function vaultOverCapLine(bytes: number, capBytes: number): string {
   return `the export was ${fmtBytes(bytes)}, over the ${fmtBytes(capBytes)} cap`;
@@ -1688,11 +1694,11 @@ export function noMachineHomeLine(name: string): string {
 
 /** What the roads that need a daemon are refused with on a machine reached over ssh before one is on it: the
  * record was made but the deploy has not landed, so the panes that ride a daemon have nothing to dial yet. The
- * host tries again on its own at every start, so the line says that rather than naming a verb: nothing a person
- * types puts a daemon on a machine already recorded, and the one thing they can do is fix what the deploy said
- * it needed. */
+ * host offers one again on its own, so the line says that rather than naming a verb: nothing a person types puts
+ * a daemon on a machine already recorded, and the one thing they can do is fix what the deploy said it needed.
+ * Later, not at every start: a machine that answered with what it lacks is left alone until its window is out. */
 export function noSshDaemonLine(name: string): string {
-  return `${name} carries no daemon yet, so its terminal, files and ports are not served; this host tries again each time it starts`;
+  return `${name} carries no daemon yet, so its terminal, files and ports are not served; this host offers it again later on its own`;
 }
 
 /** What import is refused with on a kind no road lands a folder on, said before the folder is read. Every kind
@@ -1714,6 +1720,21 @@ export const NO_BUILD_TOOLS_LINE =
  * person turns linger on once and it holds for every login after. */
 export const NO_LINGER_LINE =
   "this machine stops your login's services when you log out, so the daemon would not outlive the connection; run loginctl enable-linger on it and deploy the daemon again";
+
+/** The mark a refusal above carries, put on where the check throws rather than matched against a list of the
+ * sentences: a check added to a place's preflight is then one shell line and one sentence here, and nothing keeps
+ * a second copy of which sentences mean this. What reads it is the row, which shows a machine its own words about
+ * what it lacks and shows a deploy that failed further in the general line, since that one is an npm log. */
+const MACHINE_LACKS = "wspMachineLacks";
+
+export function machineLacking(said: string): Error {
+  return Object.assign(new Error(said), { [MACHINE_LACKS]: true });
+}
+
+/** The sentence a machine refused with, or undefined for every other failure. */
+export function machineLacksLine(e: unknown): string | undefined {
+  return e instanceof Error && (e as unknown as Record<string, unknown>)[MACHINE_LACKS] === true ? e.message : undefined;
+}
 
 /** The one sentence a socket a machine's requests arrive on is refused a ticket with. A ticket authenticates the
  * next socket, and a socket this host minted no relay ticket for is one of the person's own, so a machine that

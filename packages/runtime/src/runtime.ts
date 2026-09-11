@@ -183,7 +183,7 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { GUEST_WSP_BIN, agentsFrom, agentsKindRefusal, agentsMayDrive, MCP_SERVER_NAME, threadWord, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, type SpawnAct } from "@wsp/protocol";
-import { mcpServersBlocked, actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState } from "@wsp/protocol";
+import { mcpServersBlocked, actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
@@ -562,6 +562,10 @@ interface WorkspaceRecord extends WorkspaceView {
    * it: a fork's daemon comes with the golden and its preview route says whether one answers, while a machine the
    * person owns had none until a deploy landed, and nothing may dial one to find out. */
   daemon?: { deployedAt: string; version: number };
+  /** That the machine itself refused a daemon, which machine said so and when. Persisted beside the daemon it
+   * never took: what the machine lacks is a person's to put on it, so a host that forgot this at exit would
+   * deploy, be told the same sentence and flash it again at every start. Cleared by the deploy that lands. */
+  daemonRefusedAt?: { machineId: string; at: string };
 }
 
 interface LiveWorkspace {
@@ -950,6 +954,12 @@ export const GRACE_MS = 10 * 60_000;
  * same way fifteen seconds later and the row has already said so, so the retry is slow enough to be worth
  * watching and quick enough that a machine whose npm registry blinked is not left dark for an hour. */
 export const DAEMON_REVIVE_AGAIN_MS = 5 * 60_000;
+
+/** How long a machine that answered with what it lacks is left alone before a daemon is offered to it again. Far
+ * wider than the revive window because nothing this host does moves it: a compiler or a lingering login is a
+ * person's to put on their own machine, and until they do, every attempt spends a round trip to be told the same
+ * sentence. Read across host starts, since the refusal is on the record. */
+export const DAEMON_LACKS_AGAIN_MS = 60 * 60_000;
 
 /** A machine of this setup's the sweep found with no record and recorded again, under the id and name its fork stamped. */
 export interface AdoptedMachine {
@@ -2446,6 +2456,35 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const canDeployDaemon = (entry: LiveWorkspace): boolean =>
     moduleOf(entry.record.kind).deployDaemon !== undefined && landsBytes(backendFor(entry.record.kind).capabilities, entry.machine);
 
+  /** Every road that puts a daemon on a machine runs the kind's deploy through here, and this is the one place
+   * that writes down how it went: a machine that answered with what it lacks is marked on the record, and the
+   * deploy that lands takes the mark off. The record rather than a map in this process, because the whole point
+   * of remembering is the next host start. */
+  const deployDaemonOn = async (entry: LiveWorkspace, deploy: (e: LiveWorkspace) => Promise<void | string>): Promise<void | string> => {
+    try {
+      const detail = await deploy(entry);
+      if (entry.record.daemonRefusedAt !== undefined) {
+        delete entry.record.daemonRefusedAt;
+        await persist(entry.record);
+      }
+      return detail;
+    } catch (e) {
+      if (machineLacksLine(e) !== undefined) {
+        entry.record.daemonRefusedAt = { machineId: entry.machine.id, at: new Date(clock.now()).toISOString() };
+        await persist(entry.record);
+      }
+      throw e;
+    }
+  };
+
+  /** Whether this machine said what it lacks recently enough that offering it a daemon again would only be told
+   * the same sentence. The revive window's shape, read off the record instead of a map: the machine is checked
+   * too, so a machine swapped under the record is a fresh question. */
+  const lacksSaidRecently = (entry: LiveWorkspace): boolean => {
+    const refused = entry.record.daemonRefusedAt;
+    return refused !== undefined && refused.machineId === entry.machine.id && clock.now() - Date.parse(refused.at) < DAEMON_LACKS_AGAIN_MS;
+  };
+
   /** Everything the runtime settles with a machine's daemon the moment it can reach it, and the only place that
    * does: the folders the record says it may browse, then a daemon older than this wsp replaced with this one's,
    * waiting out any running turn first. Nobody asks for it, and nothing about it is a person's to know: the panes
@@ -2459,12 +2498,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (held !== undefined) return held;
     const work = (async () => {
       await writeDaemonRoots(entry);
-      const version = await moduleOf(entry.record.kind).daemonVersion(entry);
+      const module = moduleOf(entry.record.kind);
+      const version = await module.daemonVersion(entry);
       if (version === null || version >= DAEMON_VERSION) return;
       if (!canDeployDaemon(entry)) return;
+      // A machine with none yet is being given its first daemon, not having one replaced, and the two are told
+      // apart here because everything below reads differently for them: a machine that already answered with what
+      // it lacks is left alone until its window is out, and the words say installing rather than updating.
+      const placing = !module.hasDaemon(entry);
+      if (placing && lacksSaidRecently(entry)) return;
       await whenNoTurnRuns(entry.record.id);
       if (entry.record.phase !== "running") return;
-      await noteDaemon(entry, DAEMON_UPDATING);
+      await noteDaemon(entry, placing ? DAEMON_INSTALLING : DAEMON_UPDATING);
       // Marking the row awaits a push, which is several ticks wide; a turn that opened inside that window would
       // lose its ptys to the deploy, so the wait runs again until nothing is running as the deploy starts.
       while (turnRuns(entry.record.id)) await whenNoTurnRuns(entry.record.id);
@@ -2477,8 +2522,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         await noteDaemon(entry, undefined);
         // A machine that napped or went under the update did not fail one: its row says what its phase says.
         if (entry.record.phase !== "running") return;
-        console.warn(`daemon on ${entry.machine.id} (workspace ${entry.record.id}) not updated: ${reason}`);
-        await flashDaemon(entry, DAEMON_UPDATE_FAILED);
+        console.warn(`daemon on ${entry.machine.id} (workspace ${entry.record.id}) ${placing ? "not installed" : "not updated"}: ${reason}`);
+        // The machine's own sentence where it gave one: it is one line, it names the thing the machine has not
+        // got, and a person can act on it. A deploy that failed further in gives an npm log instead, which is
+        // hundreds of characters of nothing anybody reading a row can do.
+        await flashDaemon(entry, machineLacksLine(e) ?? (placing ? DAEMON_INSTALL_FAILED : DAEMON_UPDATE_FAILED));
       }
     })();
     daemonSyncs.set(key, work);
@@ -3398,21 +3446,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * did not. */
   const deploySshDaemon = async (workspace: WorkspaceView): Promise<string | undefined> => {
     const entry = live.get(workspace.id);
-    const module = moduleOf("ssh");
-    if (entry === undefined || module.deployDaemon === undefined) return undefined;
+    const deploy = moduleOf("ssh").deployDaemon;
+    if (entry === undefined || deploy === undefined) return undefined;
     const began = clock.now();
     const report: StageReport = (stage, message) => {
       bus.emit({ type: "workspace.creating", workspaceId: workspace.id, name: workspace.name, stage, message, elapsedMs: clock.now() - began });
     };
     report("daemon-answering", `Putting the daemon on ${workspace.name} under its own login.`);
     try {
-      const detail = await module.deployDaemon(entry);
+      const detail = await deployDaemonOn(entry, deploy);
       report("ready", `Daemon answering on ${workspace.name}${typeof detail === "string" && detail !== "" ? ` (${detail})` : ""}.`);
       return undefined;
     } catch (e) {
       const reason = e instanceof Error ? e.message : String(e);
       report("ready", `The daemon did not go on ${workspace.name}.`);
-      return `${reason}\nits terminal, files and ports wait on a daemon; this host tries again each time it starts, so put right what the machine asked for and nothing else is needed`;
+      return `${reason}\nits terminal, files and ports wait on a daemon; this host offers it again later on its own, so put right what the machine asked for and nothing else is needed`;
     }
   };
 
@@ -3758,10 +3806,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async updateDaemon(id, origin) {
       const entry = await entryOf(id, origin);
-      const module = moduleOf(entry.record.kind);
-      if (module.deployDaemon === undefined) throw new Error("this runtime cannot deploy a daemon; the host wires the bundle");
+      const deploy = moduleOf(entry.record.kind).deployDaemon;
+      if (deploy === undefined) throw new Error("this runtime cannot deploy a daemon; the host wires the bundle");
       if (entry.record.phase !== "running") throw new Error(`wake ${entry.record.name} before updating its daemon`);
-      await module.deployDaemon(entry);
+      await deployDaemonOn(entry, deploy);
     },
 
     async delete(id, origin) {

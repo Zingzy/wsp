@@ -12,7 +12,7 @@ import { join, posix } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, CURL_NET, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_SUPERVISOR_PATH, GUEST_TMP, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
-import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, DAEMON_ROOTS_PATH, GUEST_DAEMON_DIR, LOOPBACK, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, type SnapshotStorage, type WorkspaceKind } from "@wsp/protocol";
+import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, DAEMON_ROOTS_PATH, GUEST_DAEMON_DIR, LOOPBACK, machineLacking, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, type SnapshotStorage, type WorkspaceKind } from "@wsp/protocol";
 import { DAEMON_TOKEN_PATH, goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import { assetDir, assetName, assetProof, copyAsset } from "./assets.js";
@@ -665,12 +665,13 @@ export function preflightScript(place: DaemonPlace): string {
 /** What that check answers with when the machine can take a daemon. */
 export const PREFLIGHT_OK_LINE = "PREFLIGHT_OK";
 
-/** Runs it and throws with the machine's own words, which are the sentence the refusing line printed. */
+/** Runs it and throws with the machine's own words, which are the sentence the refusing line printed, marked as
+ * what the machine lacks: a caller can then show those words where it would otherwise show a deploy log. */
 export async function preflight(machine: Machine, place: DaemonPlace): Promise<void> {
   if (place.preflight.length === 0) return;
   const res = await machine.run(preflightScript(place), { deadlineMs: 60_000 });
   if (res.exitCode !== 0 || !res.stdout.includes(PREFLIGHT_OK_LINE)) {
-    throw new Error(`${res.stdout.split("\n").filter(line => line !== "").at(-1) ?? res.stderr.slice(-200)}`.trim());
+    throw machineLacking(`${res.stdout.split("\n").filter(line => line !== "").at(-1) ?? res.stderr.slice(-200)}`.trim());
   }
 }
 
