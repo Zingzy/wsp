@@ -173,7 +173,7 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
     const s = script();
     expect(s).toContain(`|| [ "$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -lt 22 ]`);
     expect(s).toContain("-C '/home/maya/.wsp/node' --strip-components=1");
-    expect(s).toContain(`case "$(command -v node)" in '/home/maya/.wsp/node/bin/node') export npm_config_nodedir='/home/maya/.wsp/node' ;; esac`);
+    expect(s).toContain(`if [ "$(command -v node)" = '/home/maya/.wsp/node/bin/node' ] && [ -f '/home/maya/.wsp/node/include/node/node_version.h' ]; then export npm_config_nodedir='/home/maya/.wsp/node'; fi`);
     // Its bin goes first on the deploy's PATH and on the unit's, so the node installed is the node that runs.
     expect(s).toContain('export PATH="/home/maya/.wsp/node/bin:/home/maya/.local/bin:$PATH"');
     expect(daemonUnit(sshDaemonPlace(LOGIN))).toContain('Environment="PATH=/home/maya/.wsp/node/bin:/home/maya/.local/bin:/usr/local/bin:/usr/bin:/bin"');
