@@ -123,7 +123,8 @@ function relayRuntime(guestUrl: string, goldenRecipe?: GoldenRecipe): { rt: Runt
   const store = memoryStore();
   void store.put("goldens", "default", GOLDEN);
   // A wake pings the daemon through the preview route; nothing answers on guest.test, so the wait is kept short.
-  return { rt: createRuntime({ backend, store, adapters: {}, wake: { pingTimeoutMs: 100 }, daemonToken: TOKEN, ...(goldenRecipe !== undefined ? { goldenRecipe } : {}) }), backend };
+  backend.lifecycle.budgets.daemonAnswersMs = 100;
+  return { rt: createRuntime({ backend, store, adapters: {}, daemonToken: TOKEN, ...(goldenRecipe !== undefined ? { goldenRecipe } : {}) }), backend };
 }
 
 /** Ports this file has handed out, none of them twice: the kernel hands an ephemeral port back out while it is free

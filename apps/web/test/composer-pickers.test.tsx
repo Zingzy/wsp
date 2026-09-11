@@ -92,6 +92,7 @@ import { provideDaemonHello, provideDaemonWire } from "../src/files/wire.js";
 import { DAEMON_HELLO, LISTING, fakeWire, resetSurfaces } from "./surface-harness.js";
 import { CHAT_STREAM, CHAT_WS } from "./fixtures/chat-stream.js";
 import { harnessCatalog } from "@wsp/runtime";
+import { caps } from "./caps.js";
 
 let restoreLayout: () => void = () => {};
 beforeAll(() => { restoreLayout = installFakeLayout(); });
@@ -201,7 +202,7 @@ function fixtureApi(opts: {
     nap: async () => workspace,
     wake: async () => workspace,
     upgrade: async () => workspace,
-    capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: false, kept: false, sizes: [] }),
+    capabilities: async () => (caps()),
     listSessions: async () => opts.sessions ?? [],
     watchStatuses: async () => [],
     createFromGoldenHead: async () => workspace,

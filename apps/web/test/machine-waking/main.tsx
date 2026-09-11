@@ -8,19 +8,25 @@
 // machine is paused, the sentence names the road, and the rebuild stands beside
 // a wake that can be tried again.
 import { createRoot } from "react-dom/client";
-import { RESUME_CAP_MS, wakeAsksIn, wakeGaveUpLine, WAKE_ASKS_FOR_MS, WAKE_ASK_EVERY_MS, type EventUnion, type SnapshotLineage, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { wakeAsksIn, wakeGaveUpLine, type EventUnion, type SnapshotLineage, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { MachineSurface } from "../../src/components/machine/MachineSurface";
 import type { Api } from "../../src/protocol/client";
 import { useStore } from "../../src/protocol/store";
 import "../../src/index.css";
+import { caps } from "../caps.js";
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.classList.toggle("dark", params.get("theme") !== "light");
 
-const ASKS = wakeAsksIn(WAKE_ASKS_FOR_MS, WAKE_ASK_EVERY_MS);
+/** The cloud provider's asking as its backend declares it: half an hour once a minute, each call capped at half a
+ * minute. The app never reads those numbers; the fixture plays a host that did. */
+const ASKING_MS = 30 * 60_000;
+const ASK_EVERY_MS = 60_000;
+const RESUME_CAP_MS = 30_000;
+const ASKS = wakeAsksIn(ASKING_MS, ASK_EVERY_MS);
 /** The words the host's asking left on the record once it ran out, as the runtime writes them: the last of the asks
  * ran its cap out a cap short of the half hour. */
-const GAVE_UP = wakeGaveUpLine(ASKS, WAKE_ASKS_FOR_MS - RESUME_CAP_MS);
+const GAVE_UP = wakeGaveUpLine(ASKS, ASKING_MS - RESUME_CAP_MS);
 const gaveUp = params.has("gave-up");
 const workspace: WorkspaceView = {
   id: "ws_b1",
@@ -44,7 +50,7 @@ const lineage: SnapshotLineage = { name: "default", head: 12, versions: [{ versi
 const listeners = new Set<(e: EventUnion) => void>();
 const api: Api = {
   upgrade: async () => workspace,
-  capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: true, kept: false, sizes: [] }),
+  capabilities: async () => (caps({ containers: false, templates: true })),
   portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
   daemonReach: async () => ({ url: "http://127.0.0.1:1", expiresAt: Number.MAX_SAFE_INTEGER }),
   startSession: async o => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" }),

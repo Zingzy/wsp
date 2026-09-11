@@ -4,6 +4,9 @@ import { DAEMON_PORT, refreshPreviewToken } from "./preview.js";
 
 export interface WorkspaceHooks {
   goldenSnapshot: string;
+  /** How many times a wake may resume and check the machine before a fresh fork replaces it: the backend's number,
+   * read off its lifecycle by whoever builds the hooks. */
+  wakeAttempts: number;
   /** Fresh fork from the golden image; used when a paused machine vanished or on upgrade. */
   resurrect?: (spec?: Partial<MachineSpec>) => Promise<Machine>;
   /** Export durable state (vault) off a machine before it is replaced; `drop` names guest paths the archive leaves
@@ -17,12 +20,13 @@ export interface WorkspaceHooks {
   restoreVault?: (m: Machine) => Promise<void>;
   /** Judges a resumed machine; undefined means healthy, a string names the fault. */
   wakeCheck?: (m: Machine) => Promise<string | undefined>;
-  /** Carries out one provider move the guest has to cooperate with, on the machine given: the runtime bounds it,
-   * reads the provider when it does not answer and retries it once. Absent, the move is awaited as the provider runs it. */
+  /** Carries out one provider move on the machine given, so the caller can hand a resume the person's stop and say
+   * on its row what a typed failure means; the backend settles the move itself. Absent, the machine's own call is
+   * awaited. */
   move?: (m: Machine, move: ProviderMove) => Promise<void>;
 }
 
-/** The two provider calls a thrashing guest can hold up for minutes. */
+/** The two provider calls a backend settles on its own budgets. */
 export type ProviderMove = "pause" | "resume";
 
 export type WorkspacePhase = "running" | "napping" | "waking";
@@ -33,36 +37,13 @@ export interface WakeResult {
   reason?: string;
 }
 
-/** Resume, check, and one more resume+check before a machine is given up on. */
-const WAKE_ATTEMPTS = 2;
-
-/** Thrown when a snapshot is asked of a machine that has been resumed. Typed so
- * callers (the wizard) can tell "start over" from an ordinary failure. */
-export class NotFirstLifeError extends Error {
-  readonly kind = "notFirstLife" as const;
-  constructor(
-    readonly machineId: string,
-    action: string,
-  ) {
-    super(`${action} refused: machine ${machineId} is not first-life (it was resumed); snapshots only come from fresh machines`);
-    this.name = "NotFirstLifeError";
-  }
-}
-
-/** The snapshot-fresh rule as one check: every snapshot in the engine goes through it. */
-export function assertFirstLife(machineId: string, firstLife: boolean, action: string): void {
-  if (!firstLife) throw new NotFirstLifeError(machineId, action);
-}
-
 export class Workspace {
   private machine: Machine;
   private phase: WorkspacePhase = "running";
-  // Snapshot-fresh rule: Solari 502s deterministically when snapshotting a
-  // machine that was ever resumed cross-host, and same-host vs cross-host is
-  // invisible from outside. So any resume disqualifies direct snapshots.
+  // Whether this machine was ever resumed, handed to every snapshot: the backend decides whether that matters.
   private firstLife = true;
-  // Keyed by port under one machine id: pause+wake keeps a reach valid
-  // (measured), but a resurrect/upgrade replaces the machine and voids them all.
+  // Keyed by port under one machine id: a resurrect or upgrade replaces the machine and voids them all, and a wake
+  // drops them too, since no provider promises the route minted before a nap still stands after it.
   private preview: { machineId: string; byPort: Map<number, PreviewReach> } = { machineId: "", byPort: new Map() };
 
   constructor(
@@ -96,8 +77,8 @@ export class Workspace {
     return this.portReach(DAEMON_PORT);
   }
 
-  /** Public route to one guest port, reusing the cached one while it is fresh
-   * (under ~50 min old). Whether anything listens there is not checked here. */
+  /** Public route to one guest port, reusing the cached one while it is fresh. Whether anything listens there is
+   * not checked here. */
   async portReach(port: number): Promise<PreviewReach> {
     if (this.preview.machineId !== this.machine.id) this.preview = { machineId: this.machine.id, byPort: new Map() };
     const reach = await refreshPreviewToken(this.machine, port, this.preview.byPort.get(port));
@@ -148,9 +129,9 @@ export class Workspace {
     this.phase = "waking";
     try {
       const faults: string[] = [];
-      for (let attempt = 1; attempt <= WAKE_ATTEMPTS; attempt++) {
+      for (let attempt = 1; attempt <= this.hooks.wakeAttempts; attempt++) {
         // A resume that landed without its call is a resume: the check below still runs and first life still ends,
-        // since the snapshot-fresh rule turns on the machine having been resumed and not on who heard about it.
+        // since what a backend's snapshot rule turns on is the machine having been resumed, not who heard about it.
         if (attempt > 1 || o.landed !== true) {
           try {
             await this.move("resume");
@@ -161,6 +142,9 @@ export class Workspace {
             break;
           }
         }
+        // The resumed machine is asked for its routes again before anything dials it: the check below goes through
+        // daemonReach, and a route cached before the nap is nobody's promise.
+        this.preview.byPort.clear();
         this.firstLife = false;
         const fault = this.hooks.wakeCheck ? await this.hooks.wakeCheck(this.machine) : undefined;
         if (fault === undefined) {
@@ -168,7 +152,7 @@ export class Workspace {
           return faults.length === 0 ? { resurrected: false } : { resurrected: false, reason: faults.join("; ") };
         }
         faults.push(`attempt ${attempt}: ${fault}`);
-        if (attempt < WAKE_ATTEMPTS) {
+        if (attempt < this.hooks.wakeAttempts) {
           await this.move("pause").catch((e: unknown) => {
             faults.push(`re-pause failed: ${e instanceof Error ? e.message : String(e)}`);
           });
@@ -207,10 +191,10 @@ export class Workspace {
     });
   }
 
-  /** A snapshot of the running disk under `name`; `action` is what the refusal names when the machine is not first-life. */
-  async checkpoint(name: string, action = `checkpoint(${name})`): Promise<string> {
-    assertFirstLife(this.machine.id, this.firstLife, action);
-    return this.machine.snapshot(name);
+  /** A snapshot of the running disk under `name`, with the life this workspace tracked; a backend that refuses one
+   * of a resumed machine throws its own NotFirstLifeError. */
+  async checkpoint(name: string): Promise<string> {
+    return this.machine.snapshot(name, { firstLife: this.firstLife });
   }
 
   /** Replace the machine with a fresh golden fork under a new spec, carrying vaulted state across; `drop` names the
