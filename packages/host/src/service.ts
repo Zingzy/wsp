@@ -10,6 +10,7 @@ import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, rmSync
 import { dirname, join } from "node:path";
 import { authority, fmtDuration, shellQuote } from "@wsp/protocol";
 import { addressLines, dialAddress, servingHost, type HostLock } from "./host-lock.js";
+import { publicHostname } from "./relay-link.js";
 
 export type ServiceKind = "launchd" | "systemd";
 
@@ -362,10 +363,11 @@ export interface HostReading {
 export function statusLines(statePath: string, host: HostReading | undefined, service: string, now = Date.now()): string[] {
   if (host === undefined) return ["host        not running", `state       ${statePath}`, `service     ${service}`];
   const { lock } = host;
+  const publicAt = publicHostname(statePath);
   const up = `pid ${lock.pid}, up ${fmtDuration(now - Date.parse(lock.startedAt))}`;
   return [
     host.answering ? `host        running (${up})` : `host        not answering on port ${lock.port} (${up})`,
-    ...addressLines(statePath, lock),
+    ...addressLines(statePath, lock, publicAt),
     `service     ${service}`,
   ];
 }

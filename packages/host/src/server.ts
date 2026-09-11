@@ -48,6 +48,10 @@ export interface HostOptions {
   recipePath?: string;
   /** The state file this host serves, named in the boot object so the page scopes its memory to it. */
   statePath?: string;
+  /** Whether another road reaches this host from beyond the computer it runs on, a relay tunnel carrying traffic
+   * to its loopback port. A host like that binds loopback and is still open to the world, so it is held to the
+   * same rule as one that bound an address: no token in the page, and a paired device's token on every JSON route. */
+  beyondThisComputer?: boolean;
   /** The init job on this computer, served to the app as the init.* ops and the init.job events; absent, they are refused. */
   init?: InitDoor;
 }
@@ -273,7 +277,8 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const address = opts.listen ?? LOOPBACK;
   // Reaching a loopback host already means being on this computer, so the page carries the token and the JSON
   // routes need nothing. Beyond it the page pairs for a device token first and every JSON route asks for one.
-  const onThisComputer = isLoopback(address);
+  // What the host bound is not the whole of who can reach it: a relay tunnel lands on that same loopback port.
+  const onThisComputer = isLoopback(address) && opts.beyondThisComputer !== true;
   let rtServer: RuntimeServer;
 
   // Rendered per request: wsp init saves the recipe while a host may already be serving.
