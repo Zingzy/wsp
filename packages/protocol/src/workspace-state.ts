@@ -3,7 +3,7 @@
 // provider's word and the daemon reach only change it where they contradict
 // it. Every client renders these words, and the runtime refuses a send with
 // the same sentence the composer shows, so one screen never says two things.
-import { fmtThreads, MACHINE_LEFT, OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
+import { fmtThreads, OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
 import type { HarnessCatalog, MachineState, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
 
 export type WorkspaceState = "running" | "pausing" | "paused" | "waking" | "unreachable" | "gone";
@@ -66,6 +66,10 @@ export interface MachineOnDelete {
   asked: string;
   done(machineId: string): string;
 }
+
+/** What a delete does to a machine wsp did not fork and put nothing on: nothing. Both halves of the sentence are
+ * here beside the table that reads them, and each mood supplies the "its" its own line needs. */
+export const MACHINE_LEFT = "machine is left as it is";
 
 /** What a machine somebody already owns keeps and loses: wsp puts a daemon, a user unit and a line in the login
  * file on it, and a delete takes exactly those off again; the machine is theirs and stays. */

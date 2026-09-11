@@ -165,7 +165,7 @@ import {
 import type { CliIO } from "./cli.js";
 import { gitRootOf } from "./repo-root.js";
 import { dialAddress, hostTokenPath, servingHost } from "./host-lock.js";
-import { addressNotPairedLine, aimName, aimedHost, deviceRefusedLine, dialWindowMs, noAnswerRefusal, noAnswerWithin, stateIgnoredLine, wsUrlOf, type HostAim, type HostPick } from "./hosts.js";
+import { addressNotPairedLine, aimAddress, aimName, aimedHost, deviceRefusedLine, dialWindowMs, noAnswerRefusal, noAnswerWithin, stateIgnoredLine, wsUrlOf, type HostAim, type HostPick } from "./hosts.js";
 import { colourDepth, isTTY, wrap } from "./init-layout.js";
 import { RecipeAnswer, RecipeScan, recipePrintout, scanPrintout } from "./recipe-answer.js";
 import { isRecipeTick, runRecipe, runScan, type ScanInput } from "./recipe-command.js";
@@ -283,7 +283,7 @@ export async function dialHost(statePath: string, opts: DialOpts = {}): Promise<
   let timer: NodeJS.Timeout | undefined;
   // What the person reads as the host's address: the authority a host on this computer answers on, and the address
   // as they gave it for one anywhere else, never the ws url the dial builds out of it.
-  const where = aim.kind === "here" ? new URL(url).host : aim.kind === "alias" ? aim.record.url : aim.url;
+  const where = aim.kind === "here" ? new URL(url).host : aimAddress(aim);
   const deadline = new Promise<never>((_, fail) => {
     timer = setTimeout(() => fail(noAnswerWithin(where, deadlineMs)), deadlineMs);
   });

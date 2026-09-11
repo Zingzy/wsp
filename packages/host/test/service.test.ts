@@ -26,7 +26,7 @@ import {
   type ServicePlan,
   type ServiceRunner,
 } from "../src/service.js";
-import { stateIgnoredLine, writeHost } from "../src/hosts.js";
+import { setDefaultHost, stateIgnoredLine, writeHost } from "../src/hosts.js";
 import type { HostClient } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 
@@ -599,6 +599,25 @@ describe("wsp up --service, wsp down and wsp status", () => {
     // exit code its class owns rather than a row saying the host is down.
     const refused = svc({ dial: () => Promise.reject(Object.assign(new Error("the host box refused this computer's token"), { kind: "auth" })) });
     await expect(statusCommand(quietIO(), aimed, refused.deps)).rejects.toThrow("refused this computer's token");
+  });
+
+  it("a bare wsp status answers for this computer even where a default alias would send every verb to a box", async () => {
+    const hostsHome = join(home, ".wsp");
+    writeHost(hostsHome, "box", { url: "http://box.example:4400", deviceId: "d_7", deviceToken: "t_7", pairedAt: "2026-09-11T00:00:00.000Z" });
+    setDefaultHost(hostsHome, "box");
+    const here = { statePath, home: hostsHome, env: {} };
+    // Nothing serves this state file, which is the one moment a person runs this line; the default alias answering
+    // for the box would hide it. The fake dials nothing, so a line that left this computer fails here rather than
+    // printing a row about the box.
+    const lines: string[] = [];
+    expect(await statusCommand(quietIO(lines), here, svc().deps)).toBe(1);
+    expect(lines).toEqual(["host        not running", `state       ${statePath}`, "service     none; wsp up --service installs a fake service"]);
+    // A name on the line or in the shell is what moves it, and the alias the fallback would have picked is the
+    // same one, so the two roads differ by the naming alone.
+    const dialled = svc({ dial: () => Promise.resolve({ close: () => {} } as unknown as HostClient) });
+    const named: string[] = [];
+    expect(await statusCommand(quietIO(named), { ...here, env: { WSP_HOST: "box" } }, dialled.deps)).toBe(0);
+    expect(named[0]).toBe("host        box answering");
   });
 
   it("a command that runs on this computer refuses --host rather than taking it and aiming nowhere", async () => {

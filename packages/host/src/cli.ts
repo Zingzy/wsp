@@ -73,7 +73,7 @@ import {
 import { connectCommand, disconnectCommand, hostsCommand } from "./connect.js";
 import { stopRecordedConnector } from "./connector.js";
 import { publicHostname, readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
-import { aimAddress, aimName, aimedHost, DEFAULT_HOME, type HostPick, stateIgnoredLine, wspHome } from "./hosts.js";
+import { aimAddress, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnoredLine, wspHome } from "./hosts.js";
 import { currentHome, currentHomePointer, servingHome } from "./serving-home.js";
 import { advertiseWord, devicesCommand, hostReach, pairCommand } from "./pairing.js";
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
@@ -182,11 +182,15 @@ options:
                      own state, so --state is not read beside it and a line that
                      gives both says so. With neither, a line goes to the host
                      serving the state file here, and only when none does to the
-                     default alias wsp hosts marks. wsp status beside it reads
-                     that host rather than this computer: where it answers and
-                     whether it did, the service holding it up being that
-                     computer's own to read. The lines that start, stop or hand
-                     out access to something here refuse it
+                     default alias wsp hosts marks. wsp status beside it, or
+                     WSP_HOST, reads that host rather than this computer: where
+                     it answers and whether it did, the service holding it up
+                     being that computer's own to read. Naming one is the only
+                     thing that moves that line: with neither word it answers
+                     for this computer whatever alias wsp hosts marks, since it
+                     is the question whether the host here is serving. The
+                     lines that start, stop or hand out access to something
+                     here refuse it
   --code CODE        connect: the code wsp pair printed on the other computer
   --name ALIAS       connect: the name to call that host here (default what its
                      address calls it); relay link: the name the approval page
@@ -1366,10 +1370,12 @@ export async function downCommand(io: CliIO, opts: { statePath: string }, deps: 
 }
 
 export async function statusCommand(io: CliIO, opts: { statePath: string; state?: string } & HostPick, deps: ServiceDeps): Promise<number> {
-  // Where this line is aimed, read once and the same way every verb reads it, so wsp status and wsp threads in one
-  // shell cannot answer for two different hosts.
-  const aim = aimedHost(opts.statePath, opts);
-  if (aim.kind !== "here") {
+  // The one line that leaves this computer only when a person named a host: --host or WSP_HOST and nothing else.
+  // A verb has a host to speak to whatever the line said, so it follows the fallbacks under those two, the default
+  // alias among them; this line is the question whether the host here is serving, and an alias answering for a box
+  // would hide the one thing it was run to learn.
+  const aim = namedHost(opts);
+  if (aim !== undefined) {
     // The same note the verbs leave, in the same words: a line that named both a file here and a host over there
     // reads neither one from the other.
     if (opts.state !== undefined) io.error(stateIgnoredLine(aimName(aim)));
@@ -1664,6 +1670,16 @@ export const SHARED_OPTIONS: Options = {
 
 const without = (options: Options, names: readonly string[]): Options => Object.fromEntries(Object.entries(options).filter(([name]) => !names.includes(name)));
 
+/** The flags a line of the shared parse takes, read off the command that runs it: a line of two words or more is
+ * selected by its first word, so it advertises exactly what that word's `json` and `host` say and never a list
+ * written out beside it, which is how a flag added to the shared parse reached seven lines that refuse it. */
+function optionsFor(words: string): Options {
+  const word = words.split(" ")[0]!;
+  const command = COMMANDS[word];
+  if (command === undefined) throw new Error(`wsp ${words} is in the command lines and no command answers wsp ${word}`);
+  return without(SHARED_OPTIONS, [...(command.json ? [] : ["json"]), ...(command.host ? [] : ["host"])]);
+}
+
 /** A line `wsp` answers: the words after `wsp` that select it, every flag it parses (anything else is a usage error),
  * and its other door: the MCP tool it is served as, or why it has none. */
 export type CommandLine = { words: string; options: Options } & ({ tool: string } | { cliOnly: string });
@@ -1673,18 +1689,14 @@ export const COMMAND_LINES: readonly CommandLine[] = [
   ...CLI_VERBS.map(v => ({ words: v.name, options: { ...COMMON, ...v.options }, tool: toolName(v.name) })),
   { words: MCP_COMMAND, options: MCP_OPTIONS, cliOnly: "is the tool server itself" },
   { words: `${MCP_COMMAND} install`, options: MCP_OPTIONS, cliOnly: "writes an agent's own config and skills folder, which is done once from a shell" },
-  { words: "devices revoke", options: without(SHARED_OPTIONS, ["json"]), cliOnly: "takes away a computer's token, which belongs with the terminal that handed it the code" },
-  { words: "hosts default", options: without(SHARED_OPTIONS, ["json"]), cliOnly: "moves which host every line on this computer runs against, which no thread decides for the person" },
-  { words: "relay link", options: without(SHARED_OPTIONS, ["json"]), cliOnly: "shows a code a person approves in their own browser, which only somebody at this computer's terminal starts" },
-  { words: "relay unlink", options: without(SHARED_OPTIONS, ["json"]), cliOnly: "takes this computer off a person's relay account and stops the tunnel, which belongs with the terminal that put it there" },
-  { words: "relay hosts", options: without(SHARED_OPTIONS, ["json"]), cliOnly: "signs this person in to their relay and lists the boxes on their account, which no thread does for them" },
-  { words: "relay clients", options: without(SHARED_OPTIONS, ["json"]), cliOnly: "reads and takes away the computers holding a token for this person's relay account, which belongs with the person whose account it is" },
-  { words: "relay clients revoke", options: without(SHARED_OPTIONS, ["json"]), cliOnly: "signs another of this person's computers out of their relay, which no thread decides for them" },
-  ...Object.entries(COMMANDS).map(([words, command]) => ({
-    words,
-    options: without(SHARED_OPTIONS, [...(command.json ? [] : ["json"]), ...(command.host ? [] : ["host"])]),
-    cliOnly: command.cliOnly,
-  })),
+  { words: "devices revoke", options: optionsFor("devices revoke"), cliOnly: "takes away a computer's token, which belongs with the terminal that handed it the code" },
+  { words: "hosts default", options: optionsFor("hosts default"), cliOnly: "moves which host every line on this computer runs against, which no thread decides for the person" },
+  { words: "relay link", options: optionsFor("relay link"), cliOnly: "shows a code a person approves in their own browser, which only somebody at this computer's terminal starts" },
+  { words: "relay unlink", options: optionsFor("relay unlink"), cliOnly: "takes this computer off a person's relay account and stops the tunnel, which belongs with the terminal that put it there" },
+  { words: "relay hosts", options: optionsFor("relay hosts"), cliOnly: "signs this person in to their relay and lists the boxes on their account, which no thread does for them" },
+  { words: "relay clients", options: optionsFor("relay clients"), cliOnly: "reads and takes away the computers holding a token for this person's relay account, which belongs with the person whose account it is" },
+  { words: "relay clients revoke", options: optionsFor("relay clients revoke"), cliOnly: "signs another of this person's computers out of their relay, which no thread decides for them" },
+  ...Object.entries(COMMANDS).map(([words, command]) => ({ words, options: optionsFor(words), cliOnly: command.cliOnly })),
 ];
 
 /** `run` is how this process was started, which the MCP install writes into an agent's config as the way to start it

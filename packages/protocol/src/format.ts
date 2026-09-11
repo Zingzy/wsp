@@ -523,10 +523,6 @@ export function forgetNotice(threads: number): string {
   return `Its record and ${fmtThreads(threads)} leave this computer; the machine is already gone.`;
 }
 
-/** What a delete does to a machine wsp did not fork and put nothing on: nothing. The one phrase, read by the kind
- * table's own words for a delete; each mood supplies the "its" its own sentence needs. */
-export const MACHINE_LEFT = "machine is left as it is";
-
 /** Text cut to one line: its first non-empty line with the whitespace collapsed, so a multi-paragraph brief is one
  * row in the CLI's table and one line in the sidebar, and a heredoc of a command is one line of a turn's activity. */
 export function titleLine(text: string): string {
