@@ -182,7 +182,7 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
-import { GUEST_WSP_BIN, agentsFrom, agentsKindRefusal, agentsMayDrive, MCP_SERVER_NAME, threadWord, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, type SpawnAct } from "@wsp/protocol";
+import { GUEST_WSP_BIN, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadWord, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct } from "@wsp/protocol";
 import { mcpServersBlocked, actionRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
@@ -1064,11 +1064,13 @@ export interface Runtime {
      * refuse this request with, or nothing when it may drive that workspace; a target no record here names, as a
      * builder whose ports the host forwards is, is nobody's to hide or refuse for. */
     originRefusal(id: string, origin?: Caller): Promise<string | undefined>;
-    /** The same rule read without asking anything, for the one road that cannot await: the event fan-out, where a
-     * per event promise would sit in the path every delta of every turn takes. A workspace this host does not hold
-     * is nobody's to refuse for, as the sentence has it, unless the caller is a thread: a thread sees its own tree,
-     * and an id no record answers for is not in it, which is what a fork still landing under somebody else is. */
-    drivenBy(id: string, origin?: Caller): boolean;
+    /** Whether one event off the bus is this caller's to see: the same rule read without asking anything, for the
+     * one road that cannot await, where a per event promise would sit in the path every delta of every turn takes.
+     * A workspace this host does not hold is nobody's to refuse for, as the sentence has it, unless the caller is a
+     * thread: a thread sees its own tree, and an id no record answers for is not in it, which is what a fork still
+     * landing under somebody else is. An event naming the thread it was asked for by is that thread's and its
+     * tree's whatever the records say, which is what a fork's own stages are before its record exists. */
+    seenBy(event: unknown, origin?: Caller): boolean;
   };
   readonly projects: {
     /** Lands the host's bundle of a folder on the workspace's machine; progress rides project.import events. */
@@ -3488,8 +3490,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       forking.add(o.name);
       const id = `ws_${randomBytes(4).toString("hex")}`;
       const began = clock.now();
+      // Who asked rides every stage from the first, which is emitted before the fork has a record: the stream's
+      // tree rule has nothing to read until then, so a thread watching its own fork boot would see it start midway.
+      const askedBy = spawned !== undefined ? { threadId: spawned.threadId, rootThreadId: spawned.rootThreadId } : undefined;
       const report: StageReport = (stage, message, notice) => {
-        bus.emit({ type: "workspace.creating", workspaceId: id, name: o.name, stage, message, elapsedMs: clock.now() - began, ...(notice !== undefined ? { notice } : {}) });
+        bus.emit({
+          type: "workspace.creating",
+          workspaceId: id,
+          name: o.name,
+          stage,
+          message,
+          elapsedMs: clock.now() - began,
+          ...(notice !== undefined ? { notice } : {}),
+          ...(askedBy !== undefined ? { askedBy } : {}),
+        });
       };
       try {
         return await createStaged(o, id, report, spawned, freePlace);
@@ -3911,10 +3925,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return refusalFor(live.get(id)?.record, origin);
     },
 
-    drivenBy(id, origin) {
-      const record = live.get(id)?.record;
-      if (record === undefined) return scopeOf(origin) === undefined;
-      return refusalFor(record, origin) === undefined;
+    seenBy(event, origin) {
+      const scope = scopeOf(origin);
+      if (scope === undefined) return true;
+      const asked = askerOf(event);
+      if (asked !== undefined) return asked.threadId === scope.threadId || asked.rootThreadId === scope.rootThreadId;
+      const id = workspaceIdOf(event);
+      const record = id === undefined ? undefined : live.get(id)?.record;
+      return record !== undefined && refusalFor(record, origin) === undefined;
     },
   };
 
