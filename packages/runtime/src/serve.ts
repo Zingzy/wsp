@@ -11,7 +11,7 @@ import type { IncomingMessage, Server as HttpServer } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
 import {
-  DEVICES_RELAY_REFUSAL,
+  DEVICES_TICKET_REFUSAL,
   DEVICE_REVOKE_REFUSAL,
   HOST_STOPPING_CLOSE,
   LOOPBACK,
@@ -159,7 +159,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
   const whoIs = async (token: string): Promise<Authed | undefined> => {
     if (safeEqual(token, opts.authToken)) return { kind: "host" };
     if (opts.devices === undefined) return undefined;
-    const device = await opts.devices.match(token, now());
+    const device = await opts.devices.match(token);
     return device === undefined ? undefined : { kind: "device", device };
   };
 
@@ -171,7 +171,11 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
   const attached = opts.attach === undefined ? undefined : new WebSocketServer({ noServer: true });
   const onUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
     if (new URL(req.url ?? "/", "ws://localhost").pathname !== WS_PATH) {
-      socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+      // The listener goes on before the write. A peer that resets right after its upgrade raises an error on this
+      // raw socket, and an unhandled one ends the process, so on a host bound beyond loopback a stranger who
+      // knocks on the wrong path and hangs up could stop it. This is what the ws library does for its own refusals.
+      socket.on("error", () => socket.destroy());
+      socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n", () => socket.destroy());
       return;
     }
     attached!.handleUpgrade(req, socket, head, ws => attached!.emit("connection", ws, req));
@@ -253,8 +257,10 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
           if (deciding) return refuse("unauthorized");
           deciding = true;
           if (msg.op === "pair.redeem") {
-            const paired = await devices()
-              .redeem(msg.code, msg.name, now())
+            // A runtime with no device door, and a store that failed, both read as a code this host is not
+            // holding: the caller is unauthenticated, so one refusal for every reason tells it nothing.
+            const paired = await Promise.resolve()
+              .then(() => devices().redeem(msg.code, msg.name, now()))
               .catch(() => undefined);
             if (paired === undefined) return refuse(PAIR_CODE_REFUSAL);
             authed = true;
@@ -266,8 +272,12 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
           const who = await whoIs(msg.token).catch(() => undefined);
           if (who === undefined) return refuse("unauthorized");
           authed = true;
-          if (who.kind === "device") bind(who.device);
-          else me = who;
+          if (who.kind === "device") {
+            bind(who.device);
+            // The auth frame and a redeem are the two roads that move a device's last seen; a JSON route reading
+            // the same token must not, or every request beyond loopback would rewrite the whole state file.
+            void opts.devices?.seen(who.device.id, now()).catch(() => undefined);
+          } else me = who;
           send({ id: msg.id, ok: true });
           return;
         }
@@ -295,14 +305,14 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             case "devices.list":
               if (!ownRoad) {
-                send({ id: msg.id, ok: false, error: DEVICES_RELAY_REFUSAL });
+                send({ id: msg.id, ok: false, error: DEVICES_TICKET_REFUSAL });
                 return;
               }
               send({ id: msg.id, ok: true, devices: await devices().list() });
               return;
             case "devices.revoke": {
               if (!ownRoad) {
-                send({ id: msg.id, ok: false, error: DEVICES_RELAY_REFUSAL });
+                send({ id: msg.id, ok: false, error: DEVICES_TICKET_REFUSAL });
                 return;
               }
               if (me?.kind === "device" && msg.deviceId !== me.device.id) {

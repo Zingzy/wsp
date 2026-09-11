@@ -9,7 +9,9 @@ import {
   PORT_TAKEN_REFUSAL,
   WS_PATH,
   WS_PORT_OFFSET,
+  authority,
   isLoopback,
+  isWildcard,
   listenBeyondLoopbackLine,
   portHolderWords,
   portTakenLine,
@@ -62,6 +64,18 @@ describe("the address the pair is bound on", () => {
 
   it("serves the runtime on one path, so a forwarded port carries the page and the protocol", () => {
     expect(WS_PATH).toBe("/ws");
+  });
+
+  it("names the wildcard, which covers loopback, apart from an address that answers only on itself", () => {
+    for (const at of ["0.0.0.0", "::"]) expect(isWildcard(at), at).toBe(true);
+    for (const at of [LOOPBACK, "::1", "100.64.0.3", "0.0.0.1"]) expect(isWildcard(at), at).toBe(false);
+  });
+
+  it("brackets an IPv6 literal in a URL authority and leaves everything else alone", () => {
+    expect(authority("127.0.0.1", 4400)).toBe("127.0.0.1:4400");
+    expect(authority("box.example.com", 4400)).toBe("box.example.com:4400");
+    expect(authority("2001:db8::5", 4410)).toBe("[2001:db8::5]:4410");
+    expect(authority("[2001:db8::5]", 4410)).toBe("[2001:db8::5]:4410");
   });
 });
 

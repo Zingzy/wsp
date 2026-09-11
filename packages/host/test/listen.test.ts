@@ -12,6 +12,8 @@ import { API_UNAUTHORIZED, listenBeyondLoopbackLine, LOOPBACK, WS_PATH, type Boo
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { serve, type CliIO } from "../src/cli.js";
 import { addressLines } from "../src/host-lock.js";
+import { httpProbe } from "../src/service.js";
+import { hostAddress } from "../src/verbs.js";
 import { startHost, type HostHandle } from "../src/server.js";
 import { SEALED_GOLDEN as GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
@@ -168,8 +170,55 @@ describe("the address every reading names", () => {
     expect(addressLines("/s/state.json", { port: 4400, wsPort: 4410 })[0]).toBe(`app         http://${LOOPBACK}:4400`);
   });
 
+  it("addressLines spells an IPv6 address the way every other line does, through the one authority rule", () => {
+    const lines = addressLines("/s/state.json", { port: 4400, wsPort: 4410, address: "2001:db8::5" });
+    expect(lines[0]).toBe("app         http://[2001:db8::5]:4400");
+    expect(lines[1]).toContain("ws://[2001:db8::5]:4410");
+  });
+
   it("says once, as it starts, that the page is now reachable and pairing is the gate", () => {
     expect(listenBeyondLoopbackLine("0.0.0.0")).toContain("wsp pair");
+  });
+});
+
+describe("where a tool on this computer dials", () => {
+  it("reads the address out of the lock, so a host on one named address is reachable and not assumed loopback", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-listen-dial-"));
+    dirs.push(dir);
+    const statePath = join(dir, "state.json");
+    writeFileSync(join(dir, "host-token"), "a-token");
+    const lock = (address?: string): void =>
+      writeFileSync(join(dir, "host.lock"), JSON.stringify({ pid: process.pid, port: 4400, wsPort: 4410, startedAt: new Date().toISOString(), ...(address !== undefined ? { address } : {}) }));
+
+    lock("100.64.0.3");
+    expect(hostAddress(statePath)).toEqual({ url: "ws://100.64.0.3:4410", token: "a-token" });
+    lock("::1");
+    expect(hostAddress(statePath).url).toBe("ws://[::1]:4410");
+    lock("0.0.0.0");
+    expect(hostAddress(statePath).url).toBe(`ws://${LOOPBACK}:4410`);
+    lock();
+    expect(hostAddress(statePath).url).toBe(`ws://${LOOPBACK}:4410`);
+  });
+});
+
+describe("the probe wsp status and wsp up --service wait on", () => {
+  it("asks the address the lock names, so a host on one named address does not read as dead", async () => {
+    const seen: string[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      seen.push(String(input));
+      return new Response("", { status: 200 });
+    }) as typeof fetch;
+    try {
+      const lock = (address?: string) => ({ pid: process.pid, port: 4401, wsPort: 4411, startedAt: "", ...(address !== undefined ? { address } : {}) });
+      expect(await httpProbe(lock("172.17.0.2"))).toBe(true);
+      expect(await httpProbe(lock("::1"))).toBe(true);
+      expect(await httpProbe(lock("0.0.0.0"))).toBe(true);
+      expect(await httpProbe(lock())).toBe(true);
+      expect(seen).toEqual(["http://172.17.0.2:4401/", "http://[::1]:4401/", `http://${LOOPBACK}:4401/`, `http://${LOOPBACK}:4401/`]);
+    } finally {
+      globalThis.fetch = original;
+    }
   });
 });
 

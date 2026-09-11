@@ -29,6 +29,19 @@ export function isLoopback(address: string): boolean {
   return address === "localhost" || address === "::1" || address === "[::1]" || /^127\./.test(address);
 }
 
+/** Whether an address is the wildcard, which binds every address this computer answers on, loopback included. A
+ * tool on the computer itself dials such a host at loopback; a host on one named address answers only there. */
+export function isWildcard(address: string): boolean {
+  return address === "0.0.0.0" || address === "::";
+}
+
+/** An address and a port as the authority of a URL: an IPv6 literal needs brackets and everything else is itself.
+ * The one rule, so the address wsp pair prints and the one every local tool dials are spelled the same way. */
+export function authority(address: string, port: number): string {
+  const bracketed = address.includes(":") && !address.startsWith("[") ? `[${address}]` : address;
+  return `${bracketed}:${port}`;
+}
+
 /** The one line a host binding beyond this computer prints as it starts, so nobody learns from a stranger that the
  * page was reachable. */
 export function listenBeyondLoopbackLine(address: string): string {

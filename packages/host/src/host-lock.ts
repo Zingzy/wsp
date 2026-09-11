@@ -3,7 +3,7 @@
 // ports it bound, so a second host refuses and other local tools find it.
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { LOOPBACK } from "@wsp/protocol";
+import { authority, isWildcard, LOOPBACK } from "@wsp/protocol";
 
 export interface HostLock {
   pid: number;
@@ -80,10 +80,18 @@ export function hostLogPath(statePath: string): string {
 export function addressLines(statePath: string, ports: { port: number; wsPort: number; address?: string }): string[] {
   const at = ports.address ?? LOOPBACK;
   return [
-    `app         http://${at}:${ports.port}`,
-    `runtime ws  ws://${at}:${ports.wsPort} (token: ${hostTokenPath(statePath)})`,
+    `app         http://${authority(at, ports.port)}`,
+    `runtime ws  ws://${authority(at, ports.wsPort)} (token: ${hostTokenPath(statePath)})`,
     `state       ${statePath}`,
   ];
+}
+
+/** Where a tool on this computer dials the host serving this state file: the address the host bound, and loopback
+ * only for the wildcard, which is the one address that is not itself a place to dial. Every other spelling is
+ * passed through as it was given, since a host on ::1 or on 127.0.0.2 answers there and nowhere else. */
+export function dialAddress(lock: { address?: string }): string {
+  const at = lock.address ?? LOOPBACK;
+  return isWildcard(at) ? LOOPBACK : at;
 }
 
 /** The host whose lock names this state file, when that process is still alive. */

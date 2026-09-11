@@ -2148,12 +2148,14 @@ export const TICKET_ORIGIN: Record<TicketPurpose, WorkspaceOrigin> = { connect: 
 
 /** A computer that redeemed a pairing code and holds a token of its own, as devices.list answers and wsp devices
  * prints it. The token is never here: the host keeps only its hash, so a listing can leak nothing that opens a
- * socket. `lastSeenAt` is absent until the device has authed once. */
+ * socket. */
 export const DeviceView = z.object({
   id: z.string(),
   name: z.string(),
   createdAt: z.string(),
-  lastSeenAt: z.string().optional(),
+  /** When this device last authed. Set by the redeem that minted it and moved by every later auth frame, never by
+   * a JSON route reading the same token, so a listing says when the computer last dialled rather than last asked. */
+  lastSeenAt: z.string(),
 });
 export type DeviceView = z.infer<typeof DeviceView>;
 
@@ -2178,9 +2180,10 @@ export const PAIR_ISSUE_REFUSAL = "only a socket holding this host's own token m
  * so guessing tells a caller nothing about which. */
 export const PAIR_CODE_REFUSAL = "that pairing code is not one this host is waiting for; run wsp pair on the host for a fresh one";
 
-/** The refusal a socket a machine's requests arrive on gets for reaching the device ops. Who may drive this host is
- * the person's own to hand out, read and take away, and never something running on a machine they forked. */
-export const DEVICES_RELAY_REFUSAL = "a request relayed from a machine cannot see or change the devices paired with this host";
+/** The refusal a socket that was let in on a single-use ticket gets for reaching the device ops, whether the ticket
+ * was the road a machine's requests arrive by or another client's. Who may drive this host is handed out, read and
+ * taken away at the terminal of the computer it runs on, and nowhere else. */
+export const DEVICES_TICKET_REFUSAL = "a socket let in on a ticket cannot see or change the devices paired with this host; run wsp devices on the computer the host runs on";
 
 /** The refusal a device gets for revoking another device: a paired computer can hand its own token back, and only
  * the host takes anyone else's away. */
@@ -2194,7 +2197,7 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("auth"), token: z.string() }),
   z.object({ id: reqId, op: z.literal("ticket.issue"), purpose: TicketPurpose }),
   /** Mints a one time code another computer redeems for a device token of its own. Answers `{ code, expiresAt }`.
-   * Only on a socket holding the host's own token, and never on one a machine's requests arrive over. */
+   * Only on a socket holding the host's own token, and never on one let in by a ticket. */
   z.object({ id: reqId, op: z.literal("pair.issue") }),
   /** Spends a code for this computer's own token, as the first frame of a socket nothing has authed. Answers
    * `{ deviceId, deviceToken }` once, and the socket is authed as that device from then on. */

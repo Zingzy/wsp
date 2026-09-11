@@ -33,7 +33,6 @@ import {
   IMAGE_MOVE_CONFIRM,
   IMAGE_TYPE_WORDS,
   LOGIN_CHOICES,
-  LOOPBACK,
   NOTIFY_CALLER,
   NOTIFY_ME,
   NOTIFY_WORDS,
@@ -62,6 +61,7 @@ import {
   WorkspaceView,
   actionRefusal,
   authRefusal,
+  authority,
   canTravel,
   defaultAgents,
   defaultConsent,
@@ -156,7 +156,7 @@ import {
 } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
 import { gitRootOf } from "./repo-root.js";
-import { hostTokenPath, servingHost } from "./host-lock.js";
+import { dialAddress, hostTokenPath, servingHost } from "./host-lock.js";
 import { addressNotPairedLine, aimName, aimedHost, deviceRefusedLine, noAnswerLine, stateIgnoredLine, wsUrlOf, type HostAim, type HostPick } from "./hosts.js";
 import { colourDepth, isTTY, wrap } from "./init-layout.js";
 import { RecipeAnswer, RecipeScan, recipePrintout, scanPrintout } from "./recipe-answer.js";
@@ -197,9 +197,10 @@ export interface DialOpts extends HostPick {
   redeem?: { code: string; name: string };
 }
 
-/** Where a line dials and what it presents there: a host on this computer is loopback and the token it wrote beside
- * its state file, a host somewhere else is its own address on the runtime's path and the device token this computer
- * was paired with, and an address typed on the line carries no token, which only a redeem can make up for. */
+/** Where a line dials and what it presents there: a host on this computer is the address its lock records (one
+ * bound to a single address answers only there) and the token it wrote beside its state file, a host somewhere
+ * else is its own address on the runtime's path and the device token this computer was paired with, and an address
+ * typed on the line carries no token, which only a redeem can make up for. */
 export function hostAddress(statePath: string, pick: HostPick & { aim?: HostAim } = {}): { url: string; token: string } {
   const aim = pick.aim ?? aimedHost(statePath, pick);
   if (aim.kind === "url") return { url: wsUrlOf(aim.url), token: "" };
@@ -213,7 +214,7 @@ export function hostAddress(statePath: string, pick: HostPick & { aim?: HostAim 
   } catch {
     throw authRefusal(`the host's token file is missing: ${tokenPath}`);
   }
-  return { url: `ws://${LOOPBACK}:${lock.wsPort}`, token };
+  return { url: `ws://${authority(dialAddress(lock), lock.wsPort)}`, token };
 }
 
 /** One socket to the host: the token rides in the first frame, never in the URL; then request and reply by id.
@@ -266,7 +267,9 @@ export async function dialHost(statePath: string, opts: DialOpts = {}): Promise<
     return frame as T;
   };
   let timer: NodeJS.Timeout | undefined;
-  const where = aim.kind === "here" ? url : aim.kind === "alias" ? aim.record.url : aim.url;
+  // What the person reads as the host's address: the authority a host on this computer answers on, and the address
+  // as they gave it for one anywhere else, never the ws url the dial builds out of it.
+  const where = aim.kind === "here" ? new URL(url).host : aim.kind === "alias" ? aim.record.url : aim.url;
   const deadline = new Promise<never>((_, fail) => {
     timer = setTimeout(() => fail(new Error(noAnswerLine(where, `nothing came back within ${deadlineMs} ms`))), deadlineMs);
   });

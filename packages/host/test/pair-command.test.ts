@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { deviceLines, pairLines, pairOnLoopbackLine, reachAddresses, devicesCommand, pairCommand } from "../src/pairing.js";
 import type { CliIO } from "../src/cli.js";
+import { dialAddress } from "../src/host-lock.js";
 import type { HostClient } from "../src/verbs.js";
 
 type Interfaces = Parameters<typeof reachAddresses>[1];
@@ -61,8 +62,8 @@ describe("wsp devices", () => {
     const host = fakeHost({
       "devices.list": {
         devices: [
-          { id: "d_1a2b3c4d", name: "maya's laptop", createdAt: "2026-09-11T10:00:00.000Z", lastSeenAt: "2026-09-11T10:05:00.000Z" },
-          { id: "d_5e6f7a8b", name: "a phone", createdAt: "2026-09-11T11:00:00.000Z" },
+          { id: "d_1a2b3c4d5e6f7a8b", name: "maya's laptop", createdAt: "2026-09-11T10:00:00.000Z", lastSeenAt: "2026-09-11T10:05:00.000Z" },
+          { id: "d_5e6f7a8b1a2b3c4d", name: "a phone", createdAt: "2026-09-11T11:00:00.000Z", lastSeenAt: "2026-09-11T11:00:00.000Z" },
         ],
       },
     });
@@ -70,7 +71,7 @@ describe("wsp devices", () => {
     expect(await devicesCommand(io(log, []), { statePath: "/s/state.json" }, [], deps(host.client))).toBe(0);
     expect(log[0]).toContain("DEVICE");
     expect(log[1]).toContain("maya's laptop");
-    expect(log[2]).toContain("never");
+    expect(log[2]).toContain("a phone");
     expect(host.closes()).toBe(1);
   });
 
@@ -103,22 +104,52 @@ describe("wsp devices", () => {
 });
 
 describe("the addresses a client may use", () => {
-  it("expands the wildcard to every address this computer answers on, and leaves any other address alone", () => {
-    const interfaces = {
-      lo0: [{ address: "127.0.0.1", family: "IPv4", internal: true }],
-      en0: [
-        { address: "192.168.1.20", family: "IPv4", internal: false },
-        { address: "fe80::1", family: "IPv6", internal: false },
-      ],
-    } as unknown as Interfaces;
-    expect(reachAddresses("0.0.0.0", interfaces)).toEqual(["192.168.1.20", "[fe80::1]"]);
-    expect(reachAddresses("::", interfaces)).toEqual(["192.168.1.20", "[fe80::1]"]);
+  const interfaces = {
+    lo0: [{ address: "127.0.0.1", family: "IPv4", internal: true }],
+    en0: [
+      { address: "192.168.1.20", family: "IPv4", internal: false },
+      { address: "fe80::aede:48ff:fe00:1122", family: "IPv6", internal: false },
+      { address: "2001:db8::5", family: "IPv6", internal: false },
+    ],
+    en1: [{ address: "169.254.10.2", family: "IPv4", internal: false }],
+  } as unknown as Interfaces;
+
+  it("expands the wildcard to the addresses of the family it covers, and leaves any other address alone", () => {
+    // An IPv4 wildcard listens on no IPv6 address, so naming one would send a person at another computer to a
+    // port nothing answers on; the IPv6 wildcard is dual stack and covers both.
+    expect(reachAddresses("0.0.0.0", interfaces)).toEqual(["192.168.1.20"]);
+    expect(reachAddresses("::", interfaces)).toEqual(["192.168.1.20", "2001:db8::5"]);
     expect(reachAddresses("100.64.0.3", interfaces)).toEqual(["100.64.0.3"]);
+  });
+
+  it("leaves out the addresses that reach only the link they sit on, which no browser opens", () => {
+    expect(reachAddresses("::", interfaces)).not.toContain("fe80::aede:48ff:fe00:1122");
+    expect(reachAddresses("0.0.0.0", interfaces)).not.toContain("169.254.10.2");
+    const linkOnly = { en0: [{ address: "fe80::1", family: "IPv6", internal: false }] } as unknown as Interfaces;
+    expect(reachAddresses("::", linkOnly)).toEqual(["127.0.0.1"]);
+  });
+
+  it("brackets an IPv6 address in the line it prints, so the URL is one a browser takes", () => {
+    expect(pairLines("7K3MQP2X", 1_000, 0, ["2001:db8::5"], 4400)).toContain("open        http://[2001:db8::5]:4400");
   });
 
   it("falls back to loopback when this computer answers on nothing else, rather than printing no address at all", () => {
     const onlyLoopback = { lo0: [{ address: "127.0.0.1", family: "IPv4", internal: true }] } as unknown as Interfaces;
     expect(reachAddresses("0.0.0.0", onlyLoopback)).toEqual(["127.0.0.1"]);
+  });
+
+  it("dials the address the lock records, and turns only the wildcard into loopback", () => {
+    expect(dialAddress({})).toBe("127.0.0.1");
+    expect(dialAddress({ address: "0.0.0.0" })).toBe("127.0.0.1");
+    expect(dialAddress({ address: "::" })).toBe("127.0.0.1");
+    // Every other spelling is passed through as given: a host on ::1 or on a second loopback alias answers there
+    // and nowhere else, so rewriting it to 127.0.0.1 would dial a port nothing is listening on.
+    expect(dialAddress({ address: "127.0.0.1" })).toBe("127.0.0.1");
+    expect(dialAddress({ address: "::1" })).toBe("::1");
+    expect(dialAddress({ address: "127.0.0.2" })).toBe("127.0.0.2");
+    expect(dialAddress({ address: "localhost" })).toBe("localhost");
+    expect(dialAddress({ address: "100.64.0.3" })).toBe("100.64.0.3");
+    expect(dialAddress({ address: "2001:db8::5" })).toBe("2001:db8::5");
   });
 });
 
@@ -128,7 +159,7 @@ describe("the words", () => {
   });
 
   it("pads the device table's columns and never carries a token", () => {
-    const lines = deviceLines([{ id: "d_1", name: "one", createdAt: "2026-09-11T10:00:00.000Z" }]);
+    const lines = deviceLines([{ id: "d_1", name: "one", createdAt: "2026-09-11T10:00:00.000Z", lastSeenAt: "2026-09-11T10:00:00.000Z" }]);
     expect(lines[0]!.startsWith("DEVICE")).toBe(true);
     expect(lines.join("\n")).not.toContain("token");
   });

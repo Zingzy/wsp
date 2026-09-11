@@ -27,7 +27,7 @@ interface DeviceRecord {
   name: string;
   tokenHash: string;
   createdAt: string;
-  lastSeenAt?: string;
+  lastSeenAt: string;
 }
 
 interface PairingRecord {
@@ -56,7 +56,7 @@ const viewOf = (record: DeviceRecord): DeviceView => ({
   id: record.id,
   name: record.name,
   createdAt: record.createdAt,
-  ...(record.lastSeenAt !== undefined ? { lastSeenAt: record.lastSeenAt } : {}),
+  lastSeenAt: record.lastSeenAt,
 });
 
 /** What a redeem hands back: the token, once, and the record every later listing shows. */
@@ -74,8 +74,11 @@ export interface DeviceDoor {
   /** Spends the code for a device of that name, or nothing when the host holds no such unexpired code. A spent or
    * expired code is deleted either way, so one guess never gets two tries. */
   redeem(code: string, name: string, now: number): Promise<PairedDevice | undefined>;
-  /** The device this token names, its last seen moved to now, or nothing when no device holds it. */
-  match(token: string, now: number): Promise<DeviceView | undefined>;
+  /** The device this token names, or nothing when no device holds it. Reads only: the JSON routes read a token on
+   * every request, and a write there would rewrite the whole state file each time. */
+  match(token: string): Promise<DeviceView | undefined>;
+  /** Moves a device's last seen. The auth frame is the one road that calls this; a redeem stamps its own. */
+  seen(id: string, now: number): Promise<DeviceView | undefined>;
   list(): Promise<DeviceView[]>;
   /** True when a device of that id was there to take away. */
   revoke(id: string): Promise<boolean>;
@@ -88,9 +91,15 @@ export const NO_DEVICE_DOOR = "this runtime keeps no devices; the host that serv
 export function makeDevices(store: Store): DeviceDoor {
   const devices = async (): Promise<DeviceRecord[]> => (await store.list(DEVICES)).filter(isDevice);
 
-  // Redeems run one after another: two sockets spending one code at the same moment would each read the pairing
-  // before the other's delete and each be handed a device.
-  let redeems: Promise<unknown> = Promise.resolve();
+  // One writer over the device and pairing records: every road that reads a record and writes it back goes through
+  // this chain, so two sockets cannot each spend one code, and a revoke that lands between another road's read and
+  // its write cannot be undone by that write. Reads outside it (match, list) never write, so they need no place here.
+  let writes: Promise<unknown> = Promise.resolve();
+  const oneAtATime = <T>(work: () => Promise<T>): Promise<T> => {
+    const next = writes.then(work);
+    writes = next.catch(() => undefined);
+    return next;
+  };
 
   const spend = async (code: string, name: string, now: number): Promise<PairedDevice | undefined> => {
     const held = await store.get(PAIRINGS, code);
@@ -98,48 +107,57 @@ export function makeDevices(store: Store): DeviceDoor {
     await store.delete(PAIRINGS, code);
     if (now > held.expiresAt) return undefined;
     const deviceToken = randomBytes(24).toString("base64url");
+    const at = new Date(now).toISOString();
     const record: DeviceRecord = {
-      id: `d_${randomBytes(4).toString("hex")}`,
+      // Eight bytes, not four: the id keys the store, so two devices that drew the same one would be one record
+      // and the older computer's access would vanish under the newer.
+      id: `d_${randomBytes(8).toString("hex")}`,
       name: name.trim() === "" ? "a paired computer" : name.trim(),
       tokenHash: hashOf(deviceToken),
-      createdAt: new Date(now).toISOString(),
+      createdAt: at,
+      lastSeenAt: at,
     };
     await store.put(DEVICES, record.id, record);
     return { deviceId: record.id, deviceToken, device: viewOf(record) };
   };
 
   return {
-    issue: async ({ now, ttlMs }) => {
-      // A code nobody redeemed is dead weight in the state file, and minting is the one moment the list is already
-      // worth reading: every host restart and every fresh code clears what has run out.
-      for (const held of await store.list(PAIRINGS)) if (isPairing(held) && now > held.expiresAt) await store.delete(PAIRINGS, held.code);
-      const code = mintCode();
-      const expiresAt = now + ttlMs;
-      await store.put(PAIRINGS, code, { code, expiresAt } satisfies PairingRecord);
-      return { code, expiresAt };
-    },
-    redeem: (code, name, now) => {
-      const work = redeems.then(() => spend(code, name, now));
-      redeems = work.catch(() => undefined);
-      return work;
-    },
-    match: async (token, now) => {
+    issue: ({ now, ttlMs }) =>
+      oneAtATime(async () => {
+        // A code nobody redeemed is dead weight in the state file, and minting is the one moment the list is
+        // already worth reading: every host restart and every fresh code clears what has run out.
+        for (const held of await store.list(PAIRINGS)) if (isPairing(held) && now > held.expiresAt) await store.delete(PAIRINGS, held.code);
+        const code = mintCode();
+        const expiresAt = now + ttlMs;
+        await store.put(PAIRINGS, code, { code, expiresAt } satisfies PairingRecord);
+        return { code, expiresAt };
+      }),
+    redeem: (code, name, now) => oneAtATime(() => spend(code, name, now)),
+    match: async token => {
       const digest = hashOf(token);
       // Every record is compared, and the first match is kept rather than returned: a loop that leaves early would
       // say by its own duration how far down the list the token sat.
       let found: DeviceRecord | undefined;
       for (const record of await devices()) if (safeEqual(digest, record.tokenHash) && found === undefined) found = record;
-      if (found === undefined) return undefined;
-      const seen: DeviceRecord = { ...found, lastSeenAt: new Date(now).toISOString() };
-      await store.put(DEVICES, seen.id, seen);
-      return viewOf(seen);
+      return found === undefined ? undefined : viewOf(found);
     },
+    // A read and a write with an await between them: through the chain, so a revoke that lands in that gap is not
+    // undone by this write. A device redialing with backoff while somebody revokes it hits exactly that.
+    seen: (id, now) =>
+      oneAtATime(async () => {
+        const held = await store.get(DEVICES, id);
+        if (!isDevice(held)) return undefined;
+        const moved: DeviceRecord = { ...held, lastSeenAt: new Date(now).toISOString() };
+        await store.put(DEVICES, id, moved);
+        return viewOf(moved);
+      }),
     list: async () => (await devices()).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map(viewOf),
-    revoke: async id => {
-      const held = await store.get(DEVICES, id);
-      if (!isDevice(held)) return false;
-      await store.delete(DEVICES, id);
-      return true;
-    },
+    revoke: id =>
+      oneAtATime(async () => {
+        const held = await store.get(DEVICES, id);
+        if (!isDevice(held)) return false;
+        await store.delete(DEVICES, id);
+        return true;
+      }),
   };
 }

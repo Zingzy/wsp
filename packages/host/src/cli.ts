@@ -790,6 +790,7 @@ async function init(
         nonInteractive: flags.nonInteractive,
         statePath: opts.statePath,
         ports: { port: opts.port, wsPort: opts.wsPort, named: opts.named, states: statesHere(opts.statePath) },
+        address: opts.address,
         upCommand: flags.upCommand,
         runtime: () => makeRuntime(keys, opts.statePath),
         roads: rt => workspaceRoads(rt, agentHomes(homedir()), workspaceEnvsFor(keys)),
@@ -826,6 +827,7 @@ async function init(
       scan: recipe => scanTools(nodeHost(), recipe),
       runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `daemon on node ${(await deployDaemon(machine)).node}` }),
       ports: { port: opts.port, wsPort: opts.wsPort, named: opts.named, states: statesHere(opts.statePath) },
+      address: opts.address,
       upCommand: flags.upCommand,
       forkCommand: flags.forkCommand,
       relay: async (rt, builder, hooks) =>

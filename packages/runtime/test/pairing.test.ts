@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
+import { connect } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import { DEVICES_RELAY_REFUSAL, DEVICE_REVOKE_REFUSAL, HOST_STOPPING_CLOSE, PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH, PAIR_CODE_REFUSAL, PAIR_ISSUE_REFUSAL, WS_PATH } from "@wsp/protocol";
+import { DEVICES_TICKET_REFUSAL, DEVICE_REVOKE_REFUSAL, HOST_STOPPING_CLOSE, PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH, PAIR_CODE_REFUSAL, PAIR_ISSUE_REFUSAL, WS_PATH } from "@wsp/protocol";
 import { createRuntime } from "../src/runtime.js";
+import { makeDevices } from "../src/devices.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend } from "./stub-backend.js";
+import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
 
 let srv: RuntimeServer | undefined;
@@ -62,14 +66,14 @@ describe("pairing codes", () => {
     relayed.close();
   });
 
-  it("refuses the device ops on a relayed socket: who may drive this host is never a machine's to read or change", async () => {
+  it("refuses the device ops on a socket let in by a ticket, whichever purpose the ticket had", async () => {
     await serving();
     const host = await WsClient.connect(srv!.port, { token: "host-token" });
     const { ticket } = (await host.request("ticket.issue", { purpose: "relay" })) as { ticket: string };
     host.close();
     const relayed = await WsClient.connect(srv!.port, { ticket });
-    expect(await relayed.request("devices.list")).toMatchObject({ ok: false, error: DEVICES_RELAY_REFUSAL });
-    expect(await relayed.request("devices.revoke", { deviceId: "d_1" })).toMatchObject({ ok: false, error: DEVICES_RELAY_REFUSAL });
+    expect(await relayed.request("devices.list")).toMatchObject({ ok: false, error: DEVICES_TICKET_REFUSAL });
+    expect(await relayed.request("devices.revoke", { deviceId: "d_1" })).toMatchObject({ ok: false, error: DEVICES_TICKET_REFUSAL });
     relayed.close();
   });
 
@@ -182,16 +186,28 @@ describe("the device listing", () => {
     const { deviceToken } = (await first.request("pair.redeem", { code, name: "maya's laptop" })) as { deviceToken: string };
     first.close();
 
+    const paired = new Date(clock).toISOString();
     const host = await WsClient.connect(srv!.port, { token: "host-token" });
-    const before = (await host.request("devices.list")) as { devices: { name: string; lastSeenAt?: string }[] };
+    const before = (await host.request("devices.list")) as { devices: { name: string; createdAt: string; lastSeenAt: string }[] };
     expect(before.devices.map(d => d.name)).toEqual(["maya's laptop"]);
-    expect(before.devices[0]!.lastSeenAt).toBeUndefined();
+    // The redeem is itself the first time this computer was seen, so the row reads the same on both counts.
+    expect(before.devices[0]).toMatchObject({ createdAt: paired, lastSeenAt: paired });
 
     clock += 60_000;
     const back = await WsClient.connect(srv!.port, { token: deviceToken });
     back.close();
-    const after = (await host.request("devices.list")) as { devices: { lastSeenAt?: string }[] };
-    expect(after.devices[0]!.lastSeenAt).toBe(new Date(clock).toISOString());
+    // The auth frame's own reply does not wait on the write, so the listing is polled rather than read once.
+    const moved = new Date(clock).toISOString();
+    await until(async () => {
+      const { devices } = (await host.request("devices.list")) as { devices: { lastSeenAt: string }[] };
+      return devices[0]!.lastSeenAt === moved;
+    });
+
+    // A JSON route reading the same token must not move it: a write per request would rewrite the state file.
+    clock += 60_000;
+    expect(await srv!.authorize(deviceToken)).toMatchObject({ kind: "device" });
+    const unmoved = (await host.request("devices.list")) as { devices: { lastSeenAt: string }[] };
+    expect(unmoved.devices[0]!.lastSeenAt).not.toBe(new Date(clock).toISOString());
     host.close();
   });
 
@@ -237,6 +253,36 @@ describe("the runtime on an HTTP server's own port", () => {
     await expect(WsClient.connectTo(`ws://127.0.0.1:${port}/socket`, {})).rejects.toThrow();
   });
 
+  it("survives a peer that resets right after an upgrade it refuses, which nothing else would catch", async () => {
+    const port = await attached();
+    const faults: unknown[] = [];
+    const catchIt = (e: unknown): void => void faults.push(e);
+    process.on("uncaughtException", catchIt);
+    try {
+      // The refusal writes to a raw socket the ws library never wrapped; without an error listener on it a reset
+      // here reaches the process, and a host bound beyond loopback would be ended by a stranger knocking.
+      for (let i = 0; i < 30; i++) {
+        await new Promise<void>(done => {
+          const sock = connect({ port, host: "127.0.0.1" }, () => {
+            sock.write(`GET /nope HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${randomBytes(16).toString("base64")}\r\nSec-WebSocket-Version: 13\r\n\r\n`);
+            sock.resetAndDestroy();
+            done();
+          });
+          sock.on("error", () => done());
+        });
+      }
+      // Long enough for every reset to land on the host's side of the socket.
+      await new Promise(r => setTimeout(r, 500));
+      expect(faults).toEqual([]);
+    } finally {
+      process.off("uncaughtException", catchIt);
+    }
+    // The host is still answering after all of it.
+    const alive = await WsClient.connectTo(`ws://127.0.0.1:${port}${WS_PATH}`, { token: "host-token" });
+    expect((await alive.request("workspaces.list")).ok).toBe(true);
+    alive.close();
+  });
+
   it("closes a client on WS_PATH with the stopping code, not by cutting the socket", async () => {
     const port = await attached();
     const client = await WsClient.connectTo(`ws://127.0.0.1:${port}${WS_PATH}`, { token: "host-token" });
@@ -244,6 +290,62 @@ describe("the runtime on an HTTP server's own port", () => {
     await srv!.close();
     srv = undefined;
     expect(await closed).toBe(HOST_STOPPING_CLOSE);
+  });
+});
+
+describe("one writer over the device records", () => {
+  it("a revoke that lands while a last seen write is in flight stays revoked", async () => {
+    const store = memoryStore();
+    const door = makeDevices(store);
+    const { code } = await door.issue({ now: 1_000, ttlMs: 60_000 });
+    const paired = (await door.redeem(code, "laptop", 1_000))!;
+
+    // What a paired client redialing with backoff does while somebody at the host runs wsp devices revoke: both
+    // roads read the record, and without one writer the later write puts the revoked device back.
+    const [, revoked] = await Promise.all([door.seen(paired.deviceId, 2_000), door.revoke(paired.deviceId)]);
+    expect(revoked).toBe(true);
+    expect(await door.list()).toEqual([]);
+    expect(await door.match(paired.deviceToken)).toBeUndefined();
+    expect(await store.get("devices", paired.deviceId)).toBeUndefined();
+  });
+
+  it("holds in the other order too, and a seen after a revoke writes nothing back", async () => {
+    const store = memoryStore();
+    const door = makeDevices(store);
+    const { code } = await door.issue({ now: 1_000, ttlMs: 60_000 });
+    const paired = (await door.redeem(code, "laptop", 1_000))!;
+    const [revoked, moved] = await Promise.all([door.revoke(paired.deviceId), door.seen(paired.deviceId, 2_000)]);
+    expect(revoked).toBe(true);
+    expect(moved).toBeUndefined();
+    expect(await door.list()).toEqual([]);
+  });
+
+  it("two sockets spending one code get one device between them", async () => {
+    const store = memoryStore();
+    const door = makeDevices(store);
+    const { code } = await door.issue({ now: 1_000, ttlMs: 60_000 });
+    const both = await Promise.all([door.redeem(code, "one", 1_000), door.redeem(code, "two", 1_000)]);
+    expect(both.filter(p => p !== undefined)).toHaveLength(1);
+    expect(await door.list()).toHaveLength(1);
+  });
+});
+
+describe("a runtime served with no device door", () => {
+  it("refuses a pair.redeem first frame in one line rather than leaving the socket open", async () => {
+    const runtime = rt();
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token" });
+    const client = await WsClient.connect(srv.port);
+    const answer = await client.request("pair.redeem", { code: "AAAAAAAA", name: "laptop" });
+    expect(answer).toMatchObject({ ok: false, error: PAIR_CODE_REFUSAL, kind: "auth" });
+    expect(await client.closed()).toBe(4401);
+  });
+
+  it("still takes the host's own token, so a runtime without one is unchanged", async () => {
+    const runtime = rt();
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token" });
+    const client = await WsClient.connect(srv.port, { token: "host-token" });
+    expect((await client.request("workspaces.list")).ok).toBe(true);
+    client.close();
   });
 });
 
