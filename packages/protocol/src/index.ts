@@ -2044,6 +2044,7 @@ const DAEMON_CONTENTS = [
   "f90fd16f8e5d15707cda18e58524da66fb6ed6b890632fff90d396792dc5604d",
   "9ebea6a49390fd5b1af911f413e77c3e46db091812b55b41515e881e93433292",
   "da0d618fd27965a77c8c15e389fea39c8f3ae691326af0212a8f1c62b9c8499f",
+  "cbfe733de05765b706c3ff4d08aa62ee188258771dd3b02011633716fad62a48",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -2060,7 +2061,9 @@ const DAEMON_CONTENTS = [
  * through a module per kind of machine, and answers a watch only once that module has read the machine, so a
  * pane is refused where it would otherwise wait for a stream that never comes. Version 10 keeps a DISPLAY the
  * caller names on a pty it opens, so a sign-in whose page must return to the machine can be handed a browser to
- * find there. */
+ * find there. Version 11 serves a machine reached over ssh, which reads the load and the processes of the machine
+ * it runs on the way a fork does; the same daemon under the person's own login there, with every path it keeps
+ * under their home. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the daemon's sources, the dependency
@@ -2706,9 +2709,9 @@ export {
   type Rgb,
   type ThemePreset,
 } from "./workspace-look.js";
-export { rootsPathIn, underProject } from "./project-path.js";
+export { rootsPathIn, sshDaemonPaths, underProject } from "./project-path.js";
 export * from "./projects.js";
-export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, registerRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
+export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importDest, importRequest, registerRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";
 export * from "./app-ports.js";
 export * from "./init-job.js";

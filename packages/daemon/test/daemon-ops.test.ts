@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
+import type { WorkspaceKind } from "@wsp/protocol";
 import { startDaemon, type DaemonHandle } from "../src/main.js";
 import type { ListeningPort } from "../src/ports.js";
 import { fakePasswd, fakeProcTree, writeProc } from "./fake-proc.js";
@@ -298,12 +299,22 @@ describe("nothing a pane asks for stays pending", () => {
   }
 
   it("a kind with no modules refuses both watches in the words the pane prints, rather than accepting a stream it never sends", async () => {
-    await withDaemon({ kind: "ssh" }, async c => {
+    // Every kind in the enum has a module today, so the guard is proved against a kind that is not one: a kind
+    // added to the enum without a row here is what this refuses, and a pane prints the words rather than waiting.
+    await withDaemon({ kind: "plan9" as WorkspaceKind }, async c => {
       for (const op of ["sys.watch", "proc.watch"]) {
         const res = await c.request(op);
         expect(res).toMatchObject({ ok: false, code: "unsupported" });
         expect(String(res["error"])).toMatch(/^not on this kind/);
       }
+    });
+  });
+
+  it("a machine reached over ssh reads its own machine, since the daemon on it is the one a fork runs", async () => {
+    // Its metrics module is the fork's own object, which this file's cloud cases already drive; what is proved
+    // here is that the kind takes the watch at all rather than refusing it as a kind with no row.
+    await withDaemon({ kind: "ssh", root: tmp, procRoot, procIntervalMs: 20 }, async c => {
+      expect(await c.request("proc.watch")).toMatchObject({ ok: true });
     });
   });
 

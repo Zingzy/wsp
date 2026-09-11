@@ -4,7 +4,7 @@
 // kill with a fake clock, and the fixed row height.
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProcEntry, ProcSnapshot } from "@wsp/protocol";
+import { NOT_ON_THIS_KIND, servesReading, type ProcEntry, type ProcSnapshot } from "@wsp/protocol";
 import { ProcessesSurface, ROW_PX } from "../src/components/procs/ProcessesSurface.js";
 import { provideDaemonHello, provideDaemonWire } from "../src/files/wire.js";
 import { getProcs, resetProcs } from "../src/machine/procs.js";
@@ -284,14 +284,16 @@ describe("processes surface", () => {
     expect(document.querySelector("[data-procs-count]")!.textContent).toBe("napping");
   });
 
-  it("a kind whose machines list no processes says so where the count sits, and never pending", async () => {
+  it("a machine over ssh lists its own, since the daemon on it reads that machine's own /proc", async () => {
     act(() => useStore.setState({ workspaces: [{ ...view, kind: "ssh" }] }));
     render(<ProcessesSurface workspaceId={WS} />);
     await flush();
-    expect(document.querySelector("[data-procs-count]")!.textContent).toBe("not on this kind");
-    expect(screen.queryByText("pending")).toBeNull();
-    expect(document.querySelector("[data-procs-unavailable]")).toBeNull();
-    expect(rows()).toHaveLength(0);
+    // Pending until the first snapshot lands, the way a fork's does, rather than the kind's word: this kind
+    // answers the watch now.
+    expect(document.querySelector("[data-procs-count]")!.textContent).toBe("pending");
+    expect(document.querySelector("[data-procs-count]")!.textContent).not.toBe(NOT_ON_THIS_KIND);
+    // The slot a kind that lists none would fill is the table's to decide, and every kind lists its own today.
+    for (const kind of ["local", "cloud", "ssh"] as const) expect(servesReading(kind, "processes")).toBe(true);
   });
 
   it("this computer lists its own: pending only until the first snapshot lands", async () => {

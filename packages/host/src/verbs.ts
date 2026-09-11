@@ -138,10 +138,11 @@ import {
   WorkspaceProject,
   type WorkspaceSize,
   homeShortened,
+  importDest,
   lastTargetLine,
   noLastTargetLine,
   noProjectLine,
-  noSshImportLine,
+  noImportRoadLine,
   noThreadTargetLine,
   noWorkspaceForFolderLine,
   projectCountCell,
@@ -413,6 +414,9 @@ export interface LocalRuntime {
     createLocal(name?: string): Promise<WorkspaceView>;
     createSsh(address: string, opts?: SshAsked): Promise<WorkspaceView & { notice?: string }>;
   };
+  /** The stages a create reaches as it reaches them, so the road with no host serving prints what the one behind
+   * a host prints. Answers the call that stops listening. */
+  creating(on: (e: WorkspaceCreatingEvent) => void): () => void;
   close(): Promise<void>;
 }
 
@@ -865,16 +869,30 @@ export async function createLocalWorkspaceHere(rt: LocalRuntime, out: Out, name?
 /** A workspace on a machine the person already has, reached over ssh. It forks nothing, so there is no image and no
  * size to pick; the dial is made before the record exists, so a machine that does not answer leaves nothing behind. */
 export async function createSshWorkspace(client: HostClient, out: Out, address: string, asked: SshAsked = {}): Promise<WorkspaceCreateResult> {
-  const { workspace, notice } = await client.request<{ workspace: WorkspaceOut; notice?: string }>("workspaces.createSsh", { address, ...asked });
-  return createdExisting(out, workspace, notice);
+  const pushed = pushedFrames(client);
+  await client.events();
+  // Every creating frame, not the ones for a name this command could work out: the name is the machine's to give
+  // when the person named none, and working it out here would be a second copy of the rule that gives it.
+  pushed.follow(
+    f => f.type === "workspace.creating",
+    f => out.stream(`${(f as unknown as WorkspaceCreatingEvent).message}\n`),
+  );
+  try {
+    const { workspace, notice } = await client.request<{ workspace: WorkspaceOut; notice?: string }>("workspaces.createSsh", { address, ...asked });
+    return createdExisting(out, workspace, notice);
+  } finally {
+    pushed.stop();
+  }
 }
 
 /** The same with no host serving, the road an empty state takes. */
 export async function createSshWorkspaceHere(rt: LocalRuntime, out: Out, address: string, asked: SshAsked = {}): Promise<WorkspaceCreateResult> {
+  const off = rt.creating(e => out.stream(`${e.message}\n`));
   try {
     const { notice, ...workspace } = await rt.workspaces.createSsh(address, asked);
     return createdExisting(out, workspace, notice);
   } finally {
+    off();
     await rt.close();
   }
 }
@@ -1013,7 +1031,7 @@ export async function threadTarget(client: HostClient, ref: string | undefined, 
  * folder is read, with the runtime's own sentence for it. */
 function importRoad(workspace: WorkspaceView): "copies" | "registers" {
   const road = kindWords(workspaceKind(workspace)).imports;
-  if (road === null) throw new Error(noSshImportLine(workspace.name));
+  if (road === null) throw new Error(noImportRoadLine(workspace.name, machineWord(workspaceKind(workspace))));
   return road;
 }
 
@@ -1441,14 +1459,14 @@ export function agentsChosen(plan: ProjectPlan, named: readonly string[] | undef
 /** The plan as the dialog shows it, one fact per line: the repository, the files and their size, the caches left
  * behind, the paths not carried, where it lands, then each secret-shaped row with its signals, size and what its tick
  * means, and each agent with its sessions and whether they travel. */
-export function planLines(plan: ProjectPlan, ticked: ReadonlySet<string>, agents: ReadonlySet<string>): string[] {
+export function planLines(plan: ProjectPlan, ticked: ReadonlySet<string>, agents: ReadonlySet<string>, workspace?: Pick<WorkspaceView, "kind" | "home">): string[] {
   const rows: string[][] = [
     ["Repository", plan.repo ? "git, .git travels whole" : "none"],
     ["Files", `${plural(plan.files, "file")}, ${fmtBytes(plan.bytes)}`],
     ["Caches left behind", plan.excluded.length === 0 ? "none" : plan.excluded.join(", ")],
     ["Not carried", plan.skipped.length === 0 ? "none" : plural(plan.skipped.length, "path")],
     ...plan.skipped.map(s => [`  ${s.path}`, s.note]),
-    ["Lands at", plan.source],
+    ["Lands at", workspace === undefined ? plan.source : importDest(plan.source, workspace)],
     ["Secret-shaped", plan.secrets.length === 0 ? "none" : plural(plan.secrets.length, "file")],
     ...plan.secrets.map(s => [`  ${s.path}`, secretSignalsLine(s), secretOffer(s, ticked.has(s.path)).full]),
     ["Agents", plan.agents.length === 0 ? "none with sessions for the folder" : `${plural(plan.agents.length, "agent")} with sessions for the folder`],
@@ -2412,7 +2430,7 @@ export const VERBS: readonly Verb[] = [
       const cut = flagList(ctx.flags, "cut");
       const ticked = secretsChosen(plan, keep, cut);
       const agents = agentsChosen(plan, named);
-      ctx.out.emit({ plan }, planLines(plan, ticked, agents).join("\n"));
+      ctx.out.emit({ plan }, planLines(plan, ticked, agents, workspace).join("\n"));
       if (!importConsented({ yes: ctx.flags["yes"] === true, keep, cut })) {
         if (ctx.io.isTTY !== true) {
           ctx.io.error(PLAN_ONLY);
@@ -2422,7 +2440,7 @@ export const VERBS: readonly Verb[] = [
       }
       let done = "";
       try {
-        const imported = await importProject(client, workspace.id, importRequest(plan, source, ticked, agents, ctx.flags["replace"] === true), e => {
+        const imported = await importProject(client, workspace.id, importRequest(plan, source, ticked, agents, ctx.flags["replace"] === true, workspace), e => {
           if (e.stage === "done") done = e.message;
           else if (e.stage !== "failed") ctx.out.stream(`${e.message}\n`);
         });
@@ -2462,9 +2480,9 @@ export const VERBS: readonly Verb[] = [
         const plan = await planProject(client, folder);
         const ticked = secretsChosen(plan, keep, cut);
         const chosen = agentsChosen(plan, agents);
-        const lines = planLines(plan, ticked, chosen).join("\n");
+        const lines = planLines(plan, ticked, chosen, target).join("\n");
         if (!importConsented({ yes, keep, cut })) return asText(`${said}${lines}\n${PLAN_ONLY_TOOL}`, { plan });
-        const imported = await importProject(client, target.id, importRequest(plan, folder, ticked, chosen, replace), e => {
+        const imported = await importProject(client, target.id, importRequest(plan, folder, ticked, chosen, replace, target), e => {
           if (e.stage === "done") done = e.message;
         });
         return asText(`${said}${done}`, { plan, imported });

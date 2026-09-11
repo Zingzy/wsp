@@ -16,7 +16,14 @@ export const INLINE_EXEC_MS = 20_000;
 /** What a run past its deadline exits with, the same code the guest-side guard uses for its own timeout. */
 export const DEADLINE_EXIT = 124;
 
-const RUN_DIR = "/tmp/wsp-run";
+/** The folder a machine wsp made keeps wsp's own working files in. The whole disk there is wsp's, so the shared
+ * temporary folder is wsp's too; a machine somebody else owns names its own, since a folder every account on it
+ * shares is one another account could sit in first. */
+export const GUEST_TMP = "/tmp";
+/** Where a run's script, its streams and its exit code live on a machine wsp made. A machine somebody else owns
+ * names its own under their home, since a folder every account on it shares is one another account could sit in
+ * first; both roads read one rule rather than each spelling a path. */
+export const RUN_DIR = `${GUEST_TMP}/wsp-run`;
 /** Room left under the cap for what a backend wraps around the command on the wire: its JSON keys, its exec env line,
  * one escape byte per newline. */
 const EXEC_ENVELOPE_BYTES = 512;
