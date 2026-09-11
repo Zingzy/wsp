@@ -20,12 +20,13 @@ export interface WorkspaceHooks {
   restoreVault?: (m: Machine) => Promise<void>;
   /** Judges a resumed machine; undefined means healthy, a string names the fault. */
   wakeCheck?: (m: Machine) => Promise<string | undefined>;
-  /** Carries out one provider move the guest has to cooperate with, on the machine given: the runtime bounds it,
-   * reads the provider when it does not answer and retries it once. Absent, the move is awaited as the provider runs it. */
+  /** Carries out one provider move on the machine given, so the caller can hand a resume the person's stop and say
+   * on its row what a typed failure means; the backend settles the move itself. Absent, the machine's own call is
+   * awaited. */
   move?: (m: Machine, move: ProviderMove) => Promise<void>;
 }
 
-/** The two provider calls a thrashing guest can hold up for minutes. */
+/** The two provider calls a backend settles on its own budgets. */
 export type ProviderMove = "pause" | "resume";
 
 export type WorkspacePhase = "running" | "napping" | "waking";

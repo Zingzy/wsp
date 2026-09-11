@@ -6,12 +6,13 @@
 // zombie (its retry budget, measured: minutes of silence plus a failed probe).
 import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ALREADY_RUNNING, machineWord, sendRefusal, undrivenRefusal, workspaceState, workspaceWord, type AdapterEvent, type EventUnion, type SessionEvent } from "@wsp/protocol";
+import { MoveUnansweredError, ResumeUnansweredError } from "@wsp/engine";
+import { ALREADY_RUNNING, machineWord, moveTimedOutLine, RESUME_UNANSWERED, sendRefusal, undrivenRefusal, workspaceState, workspaceWord, type AdapterEvent, type EventUnion, type SessionEvent } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type RuntimeOptions } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
-import { abortedCall, cappedCall, stubBackend, type StubBackend } from "./stub-backend.js";
+import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { until } from "./until.js";
 import { wsRequest } from "./ws-client.js";
 
@@ -554,199 +555,88 @@ describe("a pause the runtime did not start", () => {
   });
 });
 
-// A pause or a resume the provider never answers (the guest thrashing under a pause, a resume that never lands):
-// the move gets a bounded wait, the provider is read once, the call goes out once more when the machine still reads
-// as before, and the row then says in words what happened and what the provider reads. Never an endless Pausing or
-// Waking.
-describe("a provider move that never answers", () => {
-  /** The provider's call hangs; after `land` the machine reaches the state under the hanging call anyway, as a
-   * pause that took late would. A resume also carries the engine's cap, which `cap()` fires, since the runtime no
-   * longer holds a timer of its own on that call. */
-  function hang(backend: StubBackend, move: "pause" | "resume"): { calls: number; land: () => void; cap: () => void } {
+// The backend settles its own pause and resume, on its own budgets and with its own reads of the machine: the runtime
+// sends each move once, puts a typed failure's words on the row, and never reads the machine inside a move. What a
+// provider does when a call hangs is that provider's, in its backend and its tests.
+describe("a provider move the backend gave up on", () => {
+  const pushes = (events: EventUnion[]) => events.filter(e => e.type === "workspace.status").map(e => (e.type === "workspace.status" ? e.status : null)!);
+  const PAUSE_WORDS = moveTimedOutLine("pause", 20, "running");
+  /** A move that ends the way a backend ends one it gave up on: with the typed error carrying the row's words. After
+   * `land` the machine reaches the state instead, as a provider that took the call late would. */
+  function unanswered(backend: StubBackend, move: "pause" | "resume"): { calls: number; land: () => void } {
     const m = backend.machines[0]!;
     let lands = false;
-    const counter = { calls: 0, land: () => { lands = true; }, cap: () => {} };
-    m[move] = async (signal?: AbortSignal) => {
+    const counter = { calls: 0, land: () => { lands = true; } };
+    m[move] = async () => {
       counter.calls++;
-      if (lands) m.paused = move === "pause";
-      return new Promise<never>((_resolve, reject) => {
-        counter.cap = () => reject(cappedCall(`${move} of ${m.id}`));
-        signal?.addEventListener("abort", () => reject(abortedCall(`${move} of ${m.id}`)), { once: true });
-      });
+      if (lands) {
+        m.paused = move === "pause";
+        return;
+      }
+      throw move === "pause" ? new MoveUnansweredError(PAUSE_WORDS) : new ResumeUnansweredError(RESUME_UNANSWERED);
     };
     return counter;
   }
-  const pushes = (events: EventUnion[]) => events.filter(e => e.type === "workspace.status").map(e => (e.type === "workspace.status" ? e.status : null)!);
-  type Budgets = Pick<RuntimeOptions, "nap" | "wake" | "providerReadMs">;
-  /** A runtime on a clock the test moves, so a move's budget is spent only where the test says and the vault stash
-   * before a pause costs it nothing. */
-  function rig(budgets: Budgets) {
+  /** A runtime on a clock the test moves, so the late read and the asking cadence fire only where the test says. */
+  function rig(o: Pick<RuntimeOptions, "wake"> = {}) {
     const backend = stubBackend();
     const store = memoryStore();
     const fc = fakeClock();
-    const rt = createRuntime({ backend, store, adapters: {}, clock: fc.clock, ...budgets });
+    const rt = createRuntime({ backend, store, adapters: {}, clock: fc.clock, ...o });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
     return { backend, store, fc, rt, events };
   }
-  /** Once the provider has been asked n times, the clock moves ms so the runtime stops waiting on that call. */
-  async function giveUp(fc: ReturnType<typeof fakeClock>, asked: () => number, n: number, ms: number): Promise<void> {
-    await until(() => asked() === n);
-    fc.advance(ms);
-  }
 
-  it("a pause the provider never finishes is tried twice, then the record goes back to running with the words on the row, and the next pause works", async () => {
-    const { backend, store, fc, rt, events } = rig({ nap: { pauseDeadlineMs: 20 } });
+  it("a pause that ends in MoveUnansweredError puts the record back to running with the backend's words on the row, and the next pause works", async () => {
+    const { backend, store, rt, events } = rig();
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const hung = hang(backend, "pause");
-    try {
-      const failed = expect(rt.workspaces.nap(ws.id)).rejects.toThrow("pause did not complete in 20ms; the provider did not answer and reads the machine running; try again");
-      // The first call gets half the budget, the second the rest.
-      await giveUp(fc, () => hung.calls, 1, 10);
-      await giveUp(fc, () => hung.calls, 2, 10);
-      await failed;
-    } finally {
-      warn.mockRestore();
-    }
-    expect(hung.calls).toBe(2);
+    const hung = unanswered(backend, "pause");
+    await expect(rt.workspaces.nap(ws.id)).rejects.toThrow(PAUSE_WORDS);
+    expect(hung.calls).toBe(1);
     expect((await rt.workspaces.get(ws.id)).phase).toBe("running");
     expect(await store.get("workspaces", ws.id)).toMatchObject({ phase: "running" });
-    const last = pushes(events).at(-1)!;
-    expect(last).toMatchObject({ phase: "running", machineState: "running" });
-    expect(last.reason).toMatch(/^pause did not complete in /);
-    const m = backend.machines[0]!;
-    m.pause = async () => { m.paused = true; };
-    expect((await rt.workspaces.nap(ws.id)).phase).toBe("napping");
-  });
-
-  it("a pause whose call never answers but landed at the provider is a pause: one call, the record says napping", async () => {
-    const { backend, fc, rt } = rig({ nap: { pauseDeadlineMs: 20 } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
-    const hung = hang(backend, "pause");
+    expect(pushes(events).at(-1)).toMatchObject({ phase: "running", machineState: "running", reason: PAUSE_WORDS });
     hung.land();
-    const napped = rt.workspaces.nap(ws.id);
-    await giveUp(fc, () => hung.calls, 1, 10);
-    expect((await napped).phase).toBe("napping");
-    expect(hung.calls).toBe(1);
+    expect((await rt.workspaces.nap(ws.id)).phase).toBe("napping");
+    expect(hung.calls).toBe(2);
   });
 
-  // Asking again is the host's own road and has its own file; a runtime given no asks ends the wake on the first one.
-  it("a wake the provider never takes ends with its silence on the row and the wake control open, and the next wake works", async () => {
-    const { backend, store, fc, rt, events } = rig({ wake: { deadlineMs: 20 } });
+  // Asking again is the host's own road and has its own file; a backend that declares no asking ends the wake on the first one.
+  it("a wake that ends in ResumeUnansweredError says so on the row, leaves the wake control open, and the next wake works", async () => {
+    const { backend, store, rt, events } = rig();
     delete backend.lifecycle.budgets.resumeAsks;
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
     await rt.workspaces.nap(ws.id);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const hung = hang(backend, "resume");
+    const hung = unanswered(backend, "resume");
     try {
-      const failed = expect(rt.workspaces.wake(ws.id)).rejects.toThrow(/^the provider answered none of 1 resume request over /);
-      await until(() => hung.calls === 1);
-      hung.cap();
-      await failed;
+      await expect(rt.workspaces.wake(ws.id)).rejects.toThrow(/^the provider answered none of 1 resume request over /);
     } finally {
       warn.mockRestore();
     }
     expect(hung.calls).toBe(1);
+    // The row said the machine was being read about while the wake was still in flight.
+    expect(pushes(events).some(s => s.phase === "waking" && s.reason === RESUME_UNANSWERED)).toBe(true);
     expect((await rt.workspaces.get(ws.id)).phase).toBe("napping");
     expect(await store.get("workspaces", ws.id)).toMatchObject({ phase: "napping" });
     const last = pushes(events).at(-1)!;
     expect(last).toMatchObject({ phase: "napping", machineState: "paused" });
     expect(last.reason).toMatch(/^the provider answered none of 1 resume request over /);
     expect(workspaceWord(workspaceState({ phase: last.phase }))).toBe("Paused");
-    const m = backend.machines[0]!;
-    m.resume = async () => { m.paused = false; };
+    hung.land();
     expect((await rt.workspaces.wake(ws.id)).phase).toBe("running");
   });
 
-  it("a resume whose call never answers but landed at the provider goes on to the wake check: one call, the record runs", async () => {
-    const { backend, rt } = rig({ wake: { deadlineMs: 20 } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
-    await rt.workspaces.nap(ws.id);
-    const hung = hang(backend, "resume");
-    hung.land();
-    const woken = rt.workspaces.wake(ws.id);
-    await until(() => hung.calls === 1);
-    hung.cap();
-    expect((await woken).phase).toBe("running");
-    expect(hung.calls).toBe(1);
-  });
-
-  it("a provider that cannot be read after the deadline ends the move at once with that in the words: no second call", async () => {
-    const { backend, fc, rt } = rig({ nap: { pauseDeadlineMs: 20 } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
-    const hung = hang(backend, "pause");
-    backend.machines[0]!.state = async () => { throw new Error("fetch failed"); };
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      const failed = expect(rt.workspaces.nap(ws.id)).rejects.toThrow("pause did not complete in 10ms; the provider did not answer and could not be read about the machine; try again");
-      await giveUp(fc, () => hung.calls, 1, 10);
-      await failed;
-    } finally {
-      warn.mockRestore();
-    }
-    expect(hung.calls).toBe(1);
-    expect((await rt.workspaces.get(ws.id)).phase).toBe("running");
-  });
-
-  it("a provider whose read hangs after the deadline is given up on within its own bound: one call, the words say it could not be read", async () => {
-    const { backend, fc, rt } = rig({ nap: { pauseDeadlineMs: 20 }, providerReadMs: 20 });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
-    const hung = hang(backend, "pause");
-    let reads = 0;
-    backend.machines[0]!.state = async () => {
-      reads++;
-      return new Promise<never>(() => {});
-    };
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      const failed = expect(rt.workspaces.nap(ws.id)).rejects.toThrow("pause did not complete in 30ms; the provider did not answer and could not be read about the machine; try again");
-      await giveUp(fc, () => hung.calls, 1, 10);
-      // The read has a bound of its own; the move ends when that passes, whatever is left of the budget.
-      await giveUp(fc, () => reads, 1, 20);
-      await failed;
-    } finally {
-      warn.mockRestore();
-    }
-    expect(hung.calls).toBe(1);
-  });
-
-  it("a wake carries one budget across its resume, re-pause and second resume: a re-pause that hangs ends within it, and the words measure the whole wake", async () => {
-    const { backend, fc, rt, events } = rig({ wake: { deadlineMs: 200 } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x", memMb: 4096 });
-    await rt.workspaces.nap(ws.id);
-    const m1 = backend.machines[0]!;
-    // The resumed machine fails the wake check on its size, so the engine re-pauses it for a second try.
-    m1.shape = { cpu: 2, memMb: 2048 };
-    const hung = hang(backend, "pause");
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    let woken;
-    try {
-      const waking = rt.workspaces.wake(ws.id);
-      await giveUp(fc, () => hung.calls, 1, 100);
-      await giveUp(fc, () => hung.calls, 2, 100);
-      woken = await waking;
-    } finally {
-      warn.mockRestore();
-    }
-    expect(woken.machineId).toBe("m2");
-    expect(hung.calls).toBe(2);
-    const last = pushes(events).at(-1)!;
-    expect(last.reason).toMatch(/re-pause failed: wake did not complete in 200ms; the provider did not answer and reads the machine running; try again/);
-  });
-
   it("a resume that lands after the wake gave up is found by one later read: the record follows to running instead of billing under a paused row", async () => {
-    const { backend, store, fc, rt, events } = rig({ wake: { deadlineMs: 20, lateReadMs: 50 } });
+    const { backend, store, fc, rt, events } = rig({ wake: { lateReadMs: 50 } });
     delete backend.lifecycle.budgets.resumeAsks;
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
     await rt.workspaces.nap(ws.id);
-    const hung = hang(backend, "resume");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    unanswered(backend, "resume");
     try {
-      const failed = expect(rt.workspaces.wake(ws.id)).rejects.toThrow(/^the provider answered none of 1 resume request over /);
-      await until(() => hung.calls === 1);
-      hung.cap();
-      await failed;
+      await expect(rt.workspaces.wake(ws.id)).rejects.toThrow(/^the provider answered none of 1 resume request over /);
     } finally {
       warn.mockRestore();
     }
@@ -760,38 +650,46 @@ describe("a provider move that never answers", () => {
     expect(pushes(events).at(-1)).toMatchObject({ phase: "running", machineState: "running", reason: ALREADY_RUNNING });
   });
 
-  it("a pause that fails on a network error is read and tried once more inside the budget; a second failure ends it with the words", async () => {
-    const { backend, rt } = rig({ nap: { pauseDeadlineMs: 20 } });
+  it("the runtime sends a pause once and never reads the machine inside it; a wake reads the machine before its resume and before a second ask, never inside a move", async () => {
+    const { backend, fc, rt } = rig();
+    backend.lifecycle.budgets.resumeAsks = { everyMs: 60, forMs: 120 };
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
     const m = backend.machines[0]!;
-    const pause = m.pause.bind(m);
-    let calls = 0;
-    let failing = 2;
-    m.pause = async () => {
-      calls++;
-      if (failing-- > 0) throw new Error("fetch failed");
-      await pause();
+    const log: string[] = [];
+    const realState = m.state.bind(m);
+    const realPause = m.pause.bind(m);
+    const realResume = m.resume.bind(m);
+    m.state = async () => { log.push("state"); return realState(); };
+    m.pause = async () => { log.push("pause"); return realPause(); };
+    m.resume = async signal => { log.push("resume"); return realResume(signal); };
+    await rt.workspaces.nap(ws.id);
+    expect(log).toEqual(["pause"]);
+    log.length = 0;
+    await rt.workspaces.wake(ws.id);
+    // One read before the resume, which is the adopt check on a napping record; nothing between the resume and its outcome.
+    expect(log).toEqual(["state", "resume"]);
+    await rt.workspaces.nap(ws.id);
+    log.length = 0;
+    // A resume the backend gave up on: the host reads the machine once before it asks again, never inside the move.
+    let deaf = 1;
+    m.resume = async () => {
+      log.push("resume");
+      if (deaf-- > 0) throw new ResumeUnansweredError(RESUME_UNANSWERED);
+      m.paused = false;
     };
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      await expect(rt.workspaces.nap(ws.id)).rejects.toThrow("pause did not complete in 1ms; the provider did not answer and reads the machine running; try again");
+      const waking = rt.workspaces.wake(ws.id);
+      await until(() => log.filter(c => c === "resume").length === 1);
+      // The cadence is on the runtime's clock; a step taken before the timer exists is simply taken again.
+      while (log.filter(c => c === "resume").length < 2) {
+        fc.advance(60);
+        await new Promise(r => setTimeout(r, 5));
+      }
+      expect((await waking).phase).toBe("running");
     } finally {
       warn.mockRestore();
     }
-    expect(calls).toBe(2);
-    expect((await rt.workspaces.get(ws.id)).phase).toBe("running");
-    failing = 1;
-    expect((await rt.workspaces.nap(ws.id)).phase).toBe("napping");
-    expect(calls).toBe(4);
-    expect(m.paused).toBe(true);
-  });
-
-  it("a pause the provider refuses is not retried: the refusal is the answer", async () => {
-    const { backend, rt } = rig({ nap: { pauseDeadlineMs: 20 } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
-    let calls = 0;
-    backend.machines[0]!.pause = async () => { calls++; throw new Error("upstream request timeout"); };
-    await expect(rt.workspaces.nap(ws.id)).rejects.toThrow("upstream request timeout");
-    expect(calls).toBe(1);
+    expect(log).toEqual(["state", "resume", "state", "resume"]);
   });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { isCapped, isMissing, NotFirstLifeError } from "../src/errors.js";
+import { RESUME_UNANSWERED } from "@wsp/protocol";
+import { isCapped, isMissing, MoveUnansweredError, NotFirstLifeError, ResumeUnansweredError } from "../src/errors.js";
 import { IDLE_TIMEOUT_MAX_MS, PREVIEW_TTL_MS, previewTokenExpiry, REQUEST_ID_HEADER, RESUME_CAP_MS, SOLARI_LIFECYCLE, SOLARI_PRICING, SolariBackend } from "../src/solari-backend.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { EXEC_ENV } from "../src/golden-import.js";
@@ -543,18 +544,181 @@ describe("SolariBackend road retries", () => {
   });
 });
 
+// The backend settles its own pause and resume: a call the provider does not answer inside its share of the budget,
+// or that the network dropped, is followed by one bounded read of the machine, and the runtime only ever sees the
+// machine moved or one of the two typed failures with the row's words.
+describe("a pause and a resume the provider does not answer", () => {
+  type Play = Response | Error | "hangs";
+  /** A fetch scripted per route: a Response, an error to throw, or "hangs", which holds the call until the signal on
+   * it fires and then rejects with the signal's reason, as a socket under AbortSignal.timeout does. A list plays its
+   * entries in order and repeats the last. */
+  function scripted(script: Record<string, Play | Play[]>) {
+    const calls: string[] = [];
+    const f = vi.fn(async (url: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const key = `${init?.method ?? "GET"} ${new URL(String(url)).pathname}`;
+      calls.push(key);
+      const plays = script[key];
+      const play = Array.isArray(plays) ? (plays.length > 1 ? plays.shift()! : plays[0]!) : plays;
+      if (play === undefined) return new Response(JSON.stringify({ error: `no route ${key}` }), { status: 404 });
+      if (play instanceof Error) throw play;
+      if (play === "hangs") return new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason as Error), { once: true }));
+      return play.clone();
+    });
+    return { f, calls, sent: (key: string) => calls.filter(c => c === key).length };
+  }
+  const reads = (state: string) => new Response(JSON.stringify({ sandboxId: "x", kind: "sandbox", state }), { status: 200 });
+  const ok = () => new Response("{}", { status: 200 });
+  const noRoad = () => new TypeError("fetch failed");
+  const BUDGETS = { pauseMs: 40, resumeCapMs: 20, stateReadMs: 20 };
+  const PAUSE = "POST /sandboxes/x/pause";
+  const RESUME = "POST /sandboxes/x/resume";
+  const STATE = "GET /sandboxes/x";
+  /** A machine handle off a create, so the first read the test sees is the move's own. */
+  async function machine(f: typeof globalThis.fetch) {
+    const b = new SolariBackend({ apiKey: "k", fetch: f, budgets: BUDGETS });
+    return b.create({ kind: "sandbox" });
+  }
+  const created = () => new Response(JSON.stringify({ sandboxId: "x", kind: "sandbox" }), { status: 201 });
+  const quiet = () => vi.spyOn(console, "warn").mockImplementation(() => {});
+
+  it("a pause the provider never finishes is sent twice, half the budget then the rest, and ends unanswered with the row's words and what the provider reads", async () => {
+    const { f, sent } = scripted({ "POST /sandboxes": created(), [PAUSE]: "hangs", [STATE]: reads("running") });
+    const m = await machine(f);
+    const warn = quiet();
+    const started = Date.now();
+    try {
+      const err = await m.pause().catch(e => e as unknown);
+      expect(err).toBeInstanceOf(MoveUnansweredError);
+      expect((err as Error).message).toMatch(/^pause did not complete in \d+ms; the provider did not answer and reads the machine running; try again$/);
+      expect(isCapped((err as Error).cause)).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+    expect(Date.now() - started).toBeGreaterThanOrEqual(BUDGETS.pauseMs - 5);
+    expect(sent(PAUSE)).toBe(2);
+    expect(sent(STATE)).toBe(2);
+  });
+
+  it("a pause whose call never answers but landed at the provider is a pause: one call, one read", async () => {
+    const { f, sent } = scripted({ "POST /sandboxes": created(), [PAUSE]: "hangs", [STATE]: reads("paused") });
+    const m = await machine(f);
+    await m.pause();
+    expect(sent(PAUSE)).toBe(1);
+    expect(sent(STATE)).toBe(1);
+  });
+
+  it("a provider that cannot be read after the call ends the move at once with that in the words: no second call", async () => {
+    const { f, sent } = scripted({ "POST /sandboxes": created(), [PAUSE]: "hangs", [STATE]: noRoad() });
+    const m = await machine(f);
+    const warn = quiet();
+    try {
+      await expect(m.pause()).rejects.toThrow(/^pause did not complete in \d+ms; the provider did not answer and could not be read about the machine; try again$/);
+    } finally {
+      warn.mockRestore();
+    }
+    expect(sent(PAUSE)).toBe(1);
+    expect(sent(STATE)).toBe(1);
+  });
+
+  it("a read that hangs is given up on within its own bound: one call, and the words say the provider could not be read", async () => {
+    const { f, sent } = scripted({ "POST /sandboxes": created(), [PAUSE]: "hangs", [STATE]: "hangs" });
+    const m = await machine(f);
+    const warn = quiet();
+    const started = Date.now();
+    try {
+      await expect(m.pause()).rejects.toThrow(/could not be read about the machine/);
+    } finally {
+      warn.mockRestore();
+    }
+    // Half the pause budget on the call, then the read's own bound, and nothing more.
+    expect(Date.now() - started).toBeLessThan(BUDGETS.pauseMs + BUDGETS.stateReadMs + 500);
+    expect(sent(PAUSE)).toBe(1);
+    expect(sent(STATE)).toBe(1);
+  });
+
+  it("a pause that fails on a network error is read and sent once more inside the budget; a second failure ends it with the words", async () => {
+    const { f, sent } = scripted({ "POST /sandboxes": created(), [PAUSE]: [noRoad(), noRoad()], [STATE]: reads("running") });
+    const m = await machine(f);
+    const warn = quiet();
+    try {
+      await expect(m.pause()).rejects.toThrow(/^pause did not complete in \d+ms; the provider did not answer and reads the machine running; try again$/);
+    } finally {
+      warn.mockRestore();
+    }
+    expect(sent(PAUSE)).toBe(2);
+    expect(sent(STATE)).toBe(2);
+  });
+
+  it("a pause that fails once on a network error and lands on the second call is a pause: two calls, one read", async () => {
+    const { f, sent } = scripted({ "POST /sandboxes": created(), [PAUSE]: [noRoad(), ok()], [STATE]: reads("running") });
+    const m = await machine(f);
+    await m.pause();
+    expect(sent(PAUSE)).toBe(2);
+    expect(sent(STATE)).toBe(1);
+  });
+
+  it("a pause the provider refuses is not retried: the refusal is the answer, thrown as itself", async () => {
+    const { f, sent } = scripted({ "POST /sandboxes": created(), [PAUSE]: new Response(JSON.stringify({ error: "upstream request timeout" }), { status: 400 }), [STATE]: reads("running") });
+    const m = await machine(f);
+    const err = await m.pause().catch(e => e as unknown);
+    expect((err as Error).message).toBe("upstream request timeout");
+    expect(err).not.toBeInstanceOf(MoveUnansweredError);
+    expect(sent(PAUSE)).toBe(1);
+    expect(sent(STATE)).toBe(0);
+  });
+
+  it("a resume whose call never answers but landed at the provider goes through: one call, one read", async () => {
+    const { f, sent } = scripted({ "POST /sandboxes": created(), [RESUME]: "hangs", [STATE]: reads("running") });
+    const m = await machine(f);
+    await m.resume();
+    expect(sent(RESUME)).toBe(1);
+    expect(sent(STATE)).toBe(1);
+  });
+
+  it("a resume cut off at its cap with the machine still paused ends unanswered with the row's words: one call, one read, nothing sent twice", async () => {
+    const { f, sent } = scripted({ "POST /sandboxes": created(), [RESUME]: "hangs", [STATE]: reads("paused") });
+    const m = await machine(f);
+    const warn = quiet();
+    try {
+      const err = await m.resume().catch(e => e as unknown);
+      expect(err).toBeInstanceOf(ResumeUnansweredError);
+      expect(err).toBeInstanceOf(MoveUnansweredError);
+      expect((err as Error).message).toBe(RESUME_UNANSWERED);
+      expect(isCapped((err as Error).cause)).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+    expect(sent(RESUME)).toBe(1);
+    expect(sent(STATE)).toBe(1);
+  });
+
+  it("a resume the network dropped is read like a capped one, and a machine that reads starting is a resume that landed", async () => {
+    const { f, sent } = scripted({ "POST /sandboxes": created(), [RESUME]: noRoad(), [STATE]: reads("starting") });
+    const m = await machine(f);
+    await m.resume();
+    expect(sent(RESUME)).toBe(1);
+    expect(sent(STATE)).toBe(1);
+  });
+
+  it("ships four minutes for a pause, half a minute for a resume call and for a read, and takes shorter ones for tests", () => {
+    const b = new SolariBackend({ apiKey: "k", fetch: fakeFetch({}) });
+    expect(b.budgets).toEqual({ pauseMs: 4 * 60_000, resumeCapMs: RESUME_CAP_MS, stateReadMs: 30_000 });
+    expect(new SolariBackend({ apiKey: "k", fetch: fakeFetch({}), budgets: { pauseMs: 40 } }).budgets).toEqual({ pauseMs: 40, resumeCapMs: 30_000, stateReadMs: 30_000 });
+  });
+});
+
 describe("the cap the caller puts on one call", () => {
-  it("resume carries the protocol's cap into the fetch, and no other call carries one", async () => {
-    const seen: (number | undefined)[] = [];
+  it("a resume carries its cap and a pause half its budget into the fetch; a read of the machine carries none", async () => {
+    const seen: boolean[] = [];
     const f = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
-      seen.push(init?.signal === undefined || init.signal === null ? undefined : RESUME_CAP_MS);
+      seen.push(init?.signal !== undefined && init.signal !== null);
       return new Response(JSON.stringify({ sandboxId: "x", kind: "sandbox", state: "paused" }), { status: 200 });
     });
     const b = new SolariBackend({ apiKey: "k", fetch: f });
     const m = await b.get("x");
     await m.pause();
     await m.resume();
-    expect(seen).toEqual([undefined, undefined, RESUME_CAP_MS]);
+    expect(seen).toEqual([false, true, true]);
   });
 
   it("the caller's own signal ends the call, so a resume nobody waits on is not left running behind them", async () => {

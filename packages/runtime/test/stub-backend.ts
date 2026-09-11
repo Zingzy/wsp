@@ -24,11 +24,8 @@ export interface StubMachine extends Machine {
   metrics(): Promise<void>;
 }
 
-/** The failure the engine's cap on the resume raises, so a fake provider ends a call the way the real one does. */
-export const cappedCall = (what: string): Error => Object.assign(new Error(`${what} was aborted due to timeout`), { name: "TimeoutError" });
-
-/** The failure a call the caller's own signal cut off raises; the runtime reads it as neither a cap nor a network
- * fault, which is what makes a stopped wake end as stopped rather than as a provider that did not answer. */
+/** The failure a call the caller's own signal cut off raises; the runtime reads it as neither of the two typed move
+ * failures, which is what makes a stopped wake end as stopped rather than as a provider that did not answer. */
 export const abortedCall = (what: string): Error => Object.assign(new Error(`${what} was aborted`), { name: "AbortError" });
 
 export interface StubBackend extends MachineBackend {

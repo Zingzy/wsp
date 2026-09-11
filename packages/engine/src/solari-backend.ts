@@ -1,5 +1,5 @@
-import { providerRoadRetryLine, type Capabilities } from "@wsp/protocol";
-import { NotFirstLifeError, ROAD_TRIES, backoffMs, classify, isMissing, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
+import { moveTimedOutLine, providerRoadRetryLine, RESUME_UNANSWERED, type Capabilities } from "@wsp/protocol";
+import { MoveUnansweredError, NotFirstLifeError, ResumeUnansweredError, ROAD_TRIES, backoffMs, classify, isCapped, isMissing, isNetworkError, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
 import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
 import type { BackendPricing, ExecResult, Lifecycle, Machine, MachineBackend, MachineKind, MachineLife, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
@@ -13,6 +13,16 @@ export interface SolariBackendOptions {
   fetch?: Fetch;
   /** The clock the retries sleep on; tests hand in one that costs nothing. */
   clock?: RetryClock;
+  /** How long a pause gets in all, the cap on one resume call, and the bound on one read of a machine's state after
+   * a call that did not answer; the measured defaults when absent (tests shrink them to milliseconds). */
+  budgets?: Partial<MoveBudgets>;
+}
+
+/** The budgets a pause and a resume run on here, in milliseconds. */
+export interface MoveBudgets {
+  pauseMs: number;
+  resumeCapMs: number;
+  stateReadMs: number;
 }
 
 interface SandboxView {
@@ -78,6 +88,11 @@ export const SOLARI_PRICING: BackendPricing = {
  * a paused machine answered in 0.4 s while POST resume answered nothing for the 30 s a curl gave it, so a wake that
  * sits on the call tells the person nothing for as long as it sits; nothing else holds a wake's clock. */
 export const RESUME_CAP_MS = 30_000;
+/** How long a pause gets in all: about 75 s live, and its call can hang at the HTTP level while the operation lands
+ * (measured 2026-09-10), so the call is sent twice at most inside four minutes. */
+export const PAUSE_MS = 4 * 60_000;
+/** One read of the state after a call that did not answer; the client sets no request timeout of its own. */
+export const STATE_READ_MS = 30_000;
 
 /** The longest idleTimeoutMs the create API has taken from us: six hours, the golden builder's. */
 export const IDLE_TIMEOUT_MAX_MS = 6 * 60 * 60_000;
@@ -141,16 +156,19 @@ export class SolariBackend implements MachineBackend {
 
   readonly lifecycle = SOLARI_LIFECYCLE;
 
+  readonly budgets: MoveBudgets;
+  readonly clock: RetryClock;
+
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly fetch: Fetch;
-  private readonly clock: RetryClock;
 
   constructor(opts: SolariBackendOptions) {
     this.apiKey = opts.apiKey;
     this.baseUrl = opts.baseUrl ?? "https://api.getsolari.com";
     this.fetch = opts.fetch ?? globalThis.fetch;
     this.clock = opts.clock ?? realRetryClock;
+    this.budgets = { pauseMs: opts.budgets?.pauseMs ?? PAUSE_MS, resumeCapMs: opts.budgets?.resumeCapMs ?? RESUME_CAP_MS, stateReadMs: opts.budgets?.stateReadMs ?? STATE_READ_MS };
   }
 
   /** capMs cuts the call off here when the provider has not answered it in that long, and `signal` cuts it off when
@@ -345,14 +363,64 @@ class SolariMachine implements Machine {
     return res.snapshotId;
   }
 
+  /** Returns when the provider reads the machine paused. The call hangs at the HTTP level while the operation lands
+   * (measured 2026-09-10), so a call that did not answer inside its share of the budget, or that the network dropped,
+   * is followed by one read of the state: paused is done, running gets the call once more with the rest of the
+   * budget, and anything else, a second miss or a spent budget ends the move with the row's words. A refusal the
+   * provider answered with is thrown as itself. */
   async pause(): Promise<void> {
-    await this.backend.request("POST", this.path("/pause"), {});
+    const { pauseMs, stateReadMs } = this.backend.budgets;
+    const now = this.backend.clock.now;
+    const started = now();
+    const deadline = started + pauseMs;
+    let unanswered: unknown;
+    for (let attempt = 1; ; attempt++) {
+      const left = deadline - now();
+      if (left > 0) {
+        try {
+          // The two attempts share what is left: the first takes half, the second the rest.
+          await this.backend.request("POST", this.path("/pause"), {}, attempt === 1 ? left / 2 : left);
+          return;
+        } catch (e) {
+          if (!isCapped(e) && !isNetworkError(e)) throw e;
+          unanswered = e;
+        }
+      }
+      const reads = await this.readState(stateReadMs);
+      if (reads === "paused") return;
+      if (attempt === 1 && reads === "running" && deadline > now()) continue;
+      const words = moveTimedOutLine("pause", now() - started, reads);
+      console.warn(`${this.id}: ${words}`);
+      throw new MoveUnansweredError(words, { cause: unanswered });
+    }
   }
 
+  /** Returns when the provider reads the machine running or starting. The provider has answered nothing at all to
+   * this call for half an hour at a stretch while taking the resume anyway (measured 2026-09-10), so the call is
+   * cut off at its cap and the machine's own state settles it: running or starting is a resume that landed, and
+   * anything else ends in ResumeUnansweredError, the one failure the host answers by asking again. `signal` is the
+   * caller's own stop, whose failure is thrown as itself. */
   async resume(signal?: AbortSignal): Promise<void> {
-    // The provider has answered nothing at all to this call for half an hour at a stretch (measured 2026-09-10),
-    // so it is the one call that is cut off here rather than left to the socket.
-    await this.backend.request("POST", this.path("/resume"), {}, RESUME_CAP_MS, signal);
+    const { resumeCapMs, stateReadMs } = this.backend.budgets;
+    try {
+      await this.backend.request("POST", this.path("/resume"), {}, resumeCapMs, signal);
+    } catch (e) {
+      if (!isCapped(e) && !isNetworkError(e)) throw e;
+      const reads = await this.readState(stateReadMs);
+      if (reads === "running" || reads === "starting") return;
+      console.warn(`${this.id}: ${RESUME_UNANSWERED}, which still reads ${reads ?? "nothing"}`);
+      throw new ResumeUnansweredError(RESUME_UNANSWERED, { cause: e });
+    }
+  }
+
+  /** The provider's word on the machine, under its own bound; undefined where the read could not be had. */
+  private async readState(capMs: number): Promise<MachineState | undefined> {
+    try {
+      const view = await this.backend.request<SandboxView>("GET", this.path(), undefined, capMs);
+      return STATE_MAP[view.state] ?? "gone";
+    } catch (e) {
+      return isMissing(e) ? "gone" : undefined;
+    }
   }
 
   async kill(): Promise<void> {
