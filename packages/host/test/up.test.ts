@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRuntime, jsonFileStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { NOTHING_TO_SERVE_LINE, type ExecStream } from "@wsp/protocol";
+import { thisComputerLine, type ExecStream } from "@wsp/protocol";
 import { cli, localWiring, localWorkFolder, noClaudeKeyNote, optsFor, statesHere, up, type CliIO } from "../src/cli.js";
 import type { HostHandle } from "../src/server.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
@@ -93,15 +93,20 @@ describe("wsp up", () => {
     expect(readFileSync(tokenPath, "utf8")).toBe(handle.authToken);
   });
 
-  it("refuses with one plain line and starts nothing when the manifest's head has no version", async () => {
+  it("records this computer and serves when the state holds nothing, rather than sending a fresh computer to another command first", async () => {
+    // A manifest whose head names no version is a state with nothing to show, the same as an empty one: this is the
+    // box story's first line, where the host is installed before anyone has forked or sealed anything.
     stateFile({ goldens: { default: { ...SEALED_GOLDEN, head: 2 } } });
     const lines: string[] = [];
     const errors: string[] = [];
-    const handle = await up(quietIO(lines, errors), { port: 0, wsPort: 0, statePath, webDir, runtime: fileRuntime() });
-    expect(handle).toBeUndefined();
-    expect(errors).toEqual([NOTHING_TO_SERVE_LINE]);
-    expect(lines).toEqual([]);
-    expect(existsSync(join(home, "state", "host.lock"))).toBe(false);
+    const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath), adapters: {}, local: localWiring(home) });
+    const handle = await up(quietIO(lines, errors), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
+    handles.push(handle);
+    expect(errors).toEqual([]);
+    const [recorded] = await rt.workspaces.list();
+    expect(recorded?.kind).toBe("local");
+    expect(lines[0]).toBe(thisComputerLine(recorded!.name, recorded!.id));
+    expect((await fetch(`http://127.0.0.1:${handle.port}/`)).status).toBe(200);
   });
 
   it("serves a state that holds only a local workspace and no golden: this computer is something to show", async () => {
@@ -212,11 +217,11 @@ describe("wsp up", () => {
   it.each([
     ["wsp up", ["up"]],
     ["plain wsp", []],
-  ])("%s exits 1 with the same line before any state exists", async (_, cmd) => {
+  ])("%s is the one command, refusing the same flag and starting nothing", async (_, cmd) => {
     const errors: string[] = [];
-    const code = await cli([...cmd, "--port", "0", "--ws-port", "0", "--state", statePath], quietIO([], errors));
-    expect(code).toBe(1);
-    expect(errors).toEqual([NOTHING_TO_SERVE_LINE]);
+    const code = await cli([...cmd, "--json", "--port", "0", "--ws-port", "0", "--state", statePath], quietIO([], errors));
+    expect(code).toBe(3);
+    expect(errors[0]).toContain("Unknown option '--json' for wsp up");
     expect(existsSync(join(home, "state", "host.lock"))).toBe(false);
   });
 
