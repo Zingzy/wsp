@@ -2556,14 +2556,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (held !== undefined) return held;
     const work = (async () => {
       const module = moduleOf(entry.record.kind);
-      // A machine with none yet is being given its first daemon, not having one replaced, and the two are told
-      // apart here because everything below reads differently for them: a machine that already answered with what
-      // it lacks is left alone until its window is out, and the words say installing rather than updating. Both
-      // are read off the record, above every round trip below, so a tick that finds the window still holding
-      // costs that machine nothing.
+      // A machine that answered with what it lacks is left alone until its window is out, whether it is being
+      // given a first daemon or having one replaced: the thing it has not got stops both roads, and only a person
+      // can change that answer. Read off the record above every round trip below, so a tick that finds the window
+      // still holding costs that machine nothing. Whether a daemon is being placed or replaced decides the words
+      // alone, which say installing rather than updating.
       const placing = !module.hasDaemon(entry);
       const said = await lacksSaid(entry);
-      if (placing && said !== undefined && clock.now() - Date.parse(said.at) < DAEMON_LACKS_AGAIN_MS) return;
+      if (said !== undefined && clock.now() - Date.parse(said.at) < DAEMON_LACKS_AGAIN_MS) return;
       await writeDaemonRoots(entry);
       const version = await module.daemonVersion(entry);
       if (version === null || version >= DAEMON_VERSION) return;
@@ -2647,8 +2647,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * row until they restarted the host. The hour itself stays where it is decided, in the sync; this says only
    * which machines are worth asking it about, and asks about none the poll did not just hear from: a status
    * carries the machine's own facts only when it answered a dial this tick, so a box that is off is left alone
-   * rather than dialled a second time for the same silence. The window restarts on each refusal, so a machine
-   * still lacking what it named is asked once an hour and not once a tick. */
+   * rather than dialled a second time for the same silence, and so is one whose answer came back unreadable. The
+   * window restarts on each refusal, so a machine still lacking what it named is asked once an hour and not once
+   * a tick.
+   * The evidence is the kind's own read of what its machine is, so only a kind whose machines answer that read can
+   * be offered again: one that cannot say what it is gives the same nothing whether it is up or dark. What makes
+   * that whole today is that the ssh place is the only one carrying preflight lines, so no other kind records a
+   * refusal at all; a check added to another place's preflight needs that kind to answer for itself here first. */
   const offerDaemonAgain = (entry: LiveWorkspace, polled: WorkspaceStatus): void => {
     if (entry.record.daemonRefusedAt === undefined || polled.facts === undefined) return;
     void syncDaemon(entry);

@@ -407,8 +407,8 @@ describe("putting a daemon on a machine already recorded", () => {
 });
 
 describe("offering a refusing machine the daemon again with the host still up", () => {
-  /** The rig for all four: a machine that refuses the daemon for want of a compiler, a host that stays up across
-   * the hour, and a poll ticking the whole time, which is what a person with the app open in front of the row has. */
+  /** The rig for most of these: a machine that refuses the daemon for want of a compiler, a host that stays up
+   * across the hour, and a poll ticking the whole time, which is what a person with the app open on the row has. */
   const refusing = (dark?: { on: boolean }): ReturnType<typeof host> & { fc: ReturnType<typeof fakeClock>; polls: () => number } => {
     const fc = fakeClock();
     const made = host({ clock: fc.clock, refuse: NO_BUILD_TOOLS_LINE, lacks: true, ...(dark !== undefined ? { dark } : {}) });
@@ -527,6 +527,49 @@ describe("offering a refusing machine the daemon again with the host still up", 
       fc.advance(0);
       warn.mockRestore();
       await rt.close();
+    }
+  });
+
+  it("leaves a machine that already carries a daemon and refuses its replacement alone for the hour too", async () => {
+    const store = memoryStore();
+    const first = host({ store });
+    const ws = await first.rt.workspaces.createSsh("dev@box");
+    expect(first.daemon.deploys).toHaveLength(1);
+    await first.rt.close();
+    // That daemon is older than this wsp would deploy, and the machine has since lost what the checks ask for:
+    // the replacement is refused with the machine's own sentence while a daemon is still on the record.
+    const stored = (await store.get("workspaces", ws.id)) as { daemon: { deployedAt: string; version: number } };
+    await store.put("workspaces", ws.id, { ...stored, daemon: { ...stored.daemon, version: DAEMON_VERSION - 1 } });
+
+    const fc = fakeClock();
+    const second = host({ store, clock: fc.clock, refuse: NO_BUILD_TOOLS_LINE, lacks: true });
+    // The daemon's own road answers, so the row stays reachable and the poll keeps reading what the machine is: a
+    // row that fell to unreachable would stop those reads and leave this passing for the wrong reason.
+    const server = createServer((_req, res) => {
+      res.writeHead(426);
+      res.end();
+    });
+    await new Promise<void>(done => server.listen(0, "127.0.0.1", done));
+    second.daemon.forwards.push({ machineId: "ssh://dev@box:22", remotePort: 42891, localPort: (server.address() as AddressInfo).port, dropped: false });
+    const at = { fc, polls: (): number => second.carried.filter(c => c.script === SSH_FACTS_SCRIPT).length };
+    const reaches: string[] = [];
+    second.rt.events.on("workspace.status", e => reaches.push((e as { status: WorkspaceStatus }).status.reach.state));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const stop = second.rt.status.watch();
+    try {
+      await vi.waitFor(() => expect(second.daemon.deploys).toHaveLength(1));
+      await vi.waitFor(async () => expect((await second.rt.workspaces.get(ws.id)).daemonRefusedAt?.why).toBe(NO_BUILD_TOOLS_LINE));
+      for (let i = 0; i < 3; i++) await tick(at);
+      // Inside the hour, and a daemon on the record changes nothing about that: the thing the machine has not got
+      // stops a replacement as flatly as it stops a first one.
+      expect(second.daemon.deploys).toHaveLength(1);
+      expect(reaches).toContain("reachable");
+    } finally {
+      stop();
+      fc.advance(0);
+      warn.mockRestore();
+      await second.rt.close();
+      await new Promise<void>(done => server.close(() => done()));
     }
   });
 });
