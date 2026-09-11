@@ -10,7 +10,7 @@
 import { spawn } from "node:child_process";
 import { createServer, type Server, type Socket } from "node:net";
 import { platform } from "node:os";
-import { DaemonEvent, hostOf, isHttpUrl, type DaemonReachView, type ForwardEvent, type GoldenBuilderView, type PortForward } from "@wsp/protocol";
+import { DaemonEvent, LOOPBACK, hostOf, isHttpUrl, type DaemonReachView, type ForwardEvent, type GoldenBuilderView, type PortForward } from "@wsp/protocol";
 import { realClock, type Clock, type EventUnion, type Runtime } from "@wsp/runtime";
 import { DAEMON_CONNECT_TIMEOUT_MS, connectDaemonSocket, type ConnectOptions, type DaemonSocket } from "./doctor.js";
 
@@ -193,7 +193,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
   const idleMs = o.idleMs ?? FORWARD_IDLE_MS;
   const connect = o.connect ?? connectDaemonSocket;
   const retryMs = o.retryMs ?? 2_000;
-  const listenHosts = o.listenHosts ?? ["127.0.0.1", "::1"];
+  const listenHosts = o.listenHosts ?? [LOOPBACK, "::1"];
   const autoOpen = o.autoOpen ?? (() => false);
   const openLine = o.openLine ?? ((workspace: string, hostname: string) => `${workspace}: a sign-in page for ${hostname} is ready; open it from the app`);
   const jitter = o.jitter ?? Math.random;
