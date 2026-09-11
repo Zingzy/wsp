@@ -6,10 +6,11 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { D1Database } from "@cloudflare/workers-types";
+import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
 // The miniflare pin in package.json is the exact version wrangler bundles (4.130.0 depends on 5.20260908.0-alpha),
 // so the D1 these tests run against is the one wrangler dev and wrangler deploy build with, not a second copy.
 import { Miniflare } from "miniflare";
+import { afterAll } from "vitest";
 import type { Env } from "../src/env.js";
 import { handle, type Deps } from "../src/index.js";
 import { SESSION_COOKIE } from "../src/tokens.js";
@@ -52,34 +53,105 @@ export interface RelayHarness {
   fetch(path: string, init?: { method?: string; body?: string; headers?: Record<string, string> }): Promise<Response>;
   /** Moves the clock the Worker reads. */
   tick(ms: number): void;
-  dispose(): Promise<void>;
 }
 
 export const RELAY_ORIGIN = "https://relay.example";
 export const TEST_ZONE = "boxes.example";
 
-let counter = 0;
+/** The relay's own tables, apart from the bookkeeping D1 keeps in the same database. */
+export const OWN_TABLES = "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT LIKE 'd1_%'";
 
-export async function relayHarness(opts: { zone?: boolean } = {}): Promise<RelayHarness> {
+/** The worker the test miniflare runs: every statement a test or the Worker hands in, against the D1 bound here. */
+const D1_WORKER = `export default {
+  async fetch(request, env) {
+    const calls = await request.json();
+    const answers = [];
+    try {
+      for (const { sql, params, kind } of calls) {
+        const stmt = params.length === 0 ? env.DB.prepare(sql) : env.DB.prepare(sql).bind(...params);
+        answers.push(kind === "first" ? await stmt.first() : kind === "all" ? await stmt.all() : await stmt.run());
+      }
+    } catch (e) {
+      return new Response(e instanceof Error ? e.message : String(e), { status: 500 });
+    }
+    return Response.json(answers);
+  },
+};`;
+
+interface Call {
+  sql: string;
+  params: unknown[];
+  kind: "first" | "all" | "run";
+}
+
+/** The D1 in the worker, reached one request at a time: what the relay asks of a database and no more, beside the
+ * one road the harness itself needs for a list of statements. Every statement lands on the same database either
+ * way; this is the road to it, not a second copy of it. The binding miniflare hands back to node charges about
+ * 14 ms a statement, where a request into the worker charges 3 (measured on this Mac, 2026-09-11), and a case
+ * here runs dozens of them. */
+function d1Through(mf: Miniflare): { db: D1Database; runAll: (sql: string[]) => Promise<void> } {
+  const send = async (calls: Call[]): Promise<unknown[]> => {
+    // JSON carries an undefined through as null, where D1 itself throws: a bind the real database would refuse
+    // has to be refused here too, or the shorter road writes a row the deployed Worker never could.
+    const loose = calls.find(call => call.params.includes(undefined));
+    if (loose !== undefined) throw new Error(`D1_TYPE_ERROR: Type 'undefined' not supported for value 'undefined' (${loose.sql})`);
+    const res = await mf.dispatchFetch("http://d1.test/", { method: "POST", body: JSON.stringify(calls) });
+    if (!res.ok) throw new Error(`${await res.text()} (${calls.map(c => c.sql).join("; ")})`);
+    return (await res.json()) as unknown[];
+  };
+  const statement = (sql: string, params: unknown[]): D1PreparedStatement =>
+    ({
+      bind: (...next: unknown[]) => statement(sql, next),
+      first: async () => (await send([{ sql, params, kind: "first" }]))[0],
+      all: async () => (await send([{ sql, params, kind: "all" }]))[0],
+      run: async () => (await send([{ sql, params, kind: "run" }]))[0],
+    }) as unknown as D1PreparedStatement;
+  return {
+    db: { prepare: (sql: string) => statement(sql, []) } as unknown as D1Database,
+    runAll: async sql => {
+      await send(sql.map(one => ({ sql: one, params: [], kind: "run" as const })));
+    },
+  };
+}
+
+/** One miniflare with the repo's own migrations applied, and the way to empty what they made. */
+async function bootRelay(): Promise<{ mf: Miniflare; db: D1Database; empty: () => Promise<void> }> {
   const mf = new Miniflare({
     workers: [
       {
         config: {
           type: "worker",
-          name: `relay-test-${counter++}`,
+          name: "relay-test",
           compatibilityDate: "2026-09-01",
-          env: { DB: { type: "d1", id: `relay-test-${counter}` } },
+          env: { DB: { type: "d1", id: "relay-test" } },
           manifest: {
             modulesRoot: here,
             mainModule: "index.js",
-            modules: { "index.js": { type: "esm", contents: "export default { fetch() { return new Response('unused'); } };" } },
+            modules: { "index.js": { type: "esm", contents: D1_WORKER } },
           },
         },
       },
     ],
   });
-  const db = (await mf.getD1Database("DB")) as unknown as D1Database;
-  for (const statement of migrationStatements()) await db.prepare(statement).run();
+  const { db, runAll } = d1Through(mf);
+  await runAll(migrationStatements());
+  const { results } = await db.prepare(OWN_TABLES).all<{ name: string }>();
+  const tables = results.map(row => row.name);
+  return { mf, db, empty: () => runAll(tables.map(name => `DELETE FROM ${name}`)) };
+}
+
+// The miniflare is booted while this file is being collected rather than inside the first case that asks for one.
+// A workerd takes about half a second to come up and several times that when the Mac is building something else,
+// and a case paying for it out of the five seconds a test is given went over whenever it landed in a busy moment
+// (measured on this Mac, 2026-09-11). Collection is not on any test's clock, so the boot is no longer on one.
+const { mf, db, empty } = await bootRelay();
+
+afterAll(() => mf.dispose());
+
+export async function relayHarness(opts: { zone?: boolean } = {}): Promise<RelayHarness> {
+  // The rows go on the way in rather than on the way out, so a case that fails halfway through leaves nothing
+  // behind for the next one.
+  await empty();
 
   const zone = opts.zone === true;
   const env: Env = {
@@ -136,7 +208,6 @@ export async function relayHarness(opts: { zone?: boolean } = {}): Promise<Relay
     tick: ms => {
       clock += ms;
     },
-    dispose: () => mf.dispose(),
   };
 }
 
