@@ -18,7 +18,7 @@ import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, lo
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { agentInstallsFor, brewfileFor, BUILDER_DISK_GB, estimateDisk, isMcpRow, PACK_BUDGET_BYTES, pinState, plural, recordedPins, shownOf, toolInstallsFor, TOOLS_DISK_FLOOR, type BrewTable, type ImportResult } from "@wsp/engine";
+import { agentInstallsFor, brewfileFor, estimateDisk, isMcpRow, PACK_BUDGET_BYTES, pinState, plural, recordedPins, shownOf, toolInstallsFor, TOOLS_DISK_FLOOR, type BrewTable, type ImportResult } from "@wsp/engine";
 import { ALREADY_APPLIED, BREW_ID_PREFIX, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, initStageWhile, initStoppedAt, INIT_ROW_STATES, MACHINE_GONE_LINE, notHereLine, packageOf, SAVED_KEY_STOPPED_LINE, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote, type AppPorts, type PortsAsked, GOLDEN_STAGE_WORDS } from "@wsp/protocol";
 import { importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
 import {
@@ -685,6 +685,9 @@ export function summaryNote(
   upload: number = manifest.entries.filter(e => ticks.has(e.id)).reduce((n, e) => n + e.bytes, 0),
   brew: BrewTable = new Map(),
   custom: readonly RecipeCustomRow[] = [],
+  /** The disk the provider gives a builder, where it gives a figure; without one the Disk line names no cap and
+   * carries no weight, since a container's disk is the box's. */
+  builderDiskGb?: number,
 ): string[] {
   const perRung = RUNGS.map(rung => manifest.entries.filter(e => e.rung === rung)).filter(entries => entries.length > 0);
   const answer = (e: ManifestEntry): string => { const c = choices.get(e.id); return isLoginChoice(c) ? SIGN_IN_WORDS[c].short : "skip"; };
@@ -725,7 +728,7 @@ export function summaryNote(
     // A row outside the catalog is a line the person's own agent wrote, run as root on the builder: the card is the
     // last thing read before the boot, so each one is named here with the command it runs, never only counted.
     ...custom.map((c, i): [string, string, Tone | undefined] => [i === 0 ? ADDED_LABEL : "", `${c.name} runs ${shownOf(c.install)}`, undefined]),
-    ["Disk", diskLine(est), diskTone(est.total, est.room)],
+    ["Disk", diskLine(est, builderDiskGb), builderDiskGb === undefined ? undefined : diskTone(est.total, est.room)],
   ];
   const column = Math.max(...closing.map(([label]) => label.length)) + GUTTER.length;
   return [...lines, "", ...closing.flatMap(([label, text, tone]) => wrap(`${label.padEnd(column)}${text}`, inner, " ".repeat(column)).map(l => (tone === undefined ? l : styleText(tone, l))))];
@@ -739,7 +742,11 @@ function builderSize(recipe: GoldenRecipe, pricing: BackendPricing): { cpu: numb
 /** Names the builder about to bill: its size and the backend's rate for it, the one place the rate is said. */
 function bootQuestion(recipe: GoldenRecipe, pricing: BackendPricing): string {
   const size = builderSize(recipe, pricing);
-  return `Boot a ${size.cpu} vCPU, ${fmtMemGb(size.memMb)} builder on Solari and build this? About $${pricing.rateUsdPerHour(size).toFixed(2)}/hr while it runs.`;
+  // No provider is named and no bill is quoted where there is none: a container on the person's own box costs
+  // nothing, and the provider a run forks on is the registry's business, not this sentence's.
+  const rate = pricing.rateUsdPerHour(size);
+  const cost = rate > 0 ? ` About $${rate.toFixed(2)}/hr while it runs.` : "";
+  return `Boot a ${size.cpu} vCPU, ${fmtMemGb(size.memMb)} builder and build this?${cost}`;
 }
 
 function isCapRefusal(e: unknown): boolean {
@@ -944,6 +951,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       from: opts.recipeFile === undefined ? "agents" : "logins",
       home: opts.home,
       platform: opts.platform,
+      ...(opts.pricing.builderDiskGb !== undefined ? { builderDiskGb: opts.pricing.builderDiskGb } : {}),
       scan: scanned,
       ...(opts.project !== undefined ? { project: opts.project } : {}),
       scanProject: opts.scanProject,
@@ -1033,7 +1041,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     });
   let imp = importOf(bring);
   const uploadBytes = imp.files?.bytes ?? 0;
-  card("Summary", summaryNote(offered, ticks, choices, widthOf(io.output), uploadBytes, brew, customRows(catalogRecipe)), io.output);
+  card("Summary", summaryNote(offered, ticks, choices, widthOf(io.output), uploadBytes, brew, customRows(catalogRecipe), opts.pricing.builderDiskGb), io.output);
   saveRecipe(path, manifest, ticks, choices);
   const attachCommand = `wsp init --recipe ${shellQuote(small.path)}`;
   saveSmallRecipe(small.path, smallRecipeNow());
@@ -1048,8 +1056,11 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   // The whole recipe against the disk, before the account is read or anything boots: the tools stage would
   // otherwise fill the disk after the machine billed.
   const disk = estimateDisk(asBring(bring), uploadBytes, brew, customRows(catalogRecipe));
-  if (disk.over > 0) {
-    log.error(`This recipe needs about ${fmtBytes(disk.total)} on the machine; the ${BUILDER_DISK_GB} GB disk leaves ${fmtBytes(disk.room)} after the base image and ${fmtBytes(TOOLS_DISK_FLOOR)} of headroom.`, out);
+  // Only where the provider caps a builder's disk: a container takes the box's, so there is no cap to be over and
+  // the recipe is not refused against another provider's figure.
+  const builderDiskGb = opts.pricing.builderDiskGb;
+  if (builderDiskGb !== undefined && disk.over > 0) {
+    log.error(`This recipe needs about ${fmtBytes(disk.total)} on the machine; the ${builderDiskGb} GB disk leaves ${fmtBytes(disk.room)} after the base image and ${fmtBytes(TOOLS_DISK_FLOOR)} of headroom.`, out);
     // Where the person can take rows off: the screens whose ticks moved the number, or the file that answered them.
     const screens = customRows(catalogRecipe).length > 0 ? `${TOOLS_TITLE} or ${alsoTitle(opts.platform)}` : TOOLS_TITLE;
     const where = opts.recipeFile !== undefined ? `in ${opts.recipeFile}` : `under ${screens}`;

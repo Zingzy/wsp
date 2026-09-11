@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { hasByteRoad, landBytes } from "./land-bytes.js";
 import { once } from "node:events";
 import { createWriteStream } from "node:fs";
 import { rm, stat } from "node:fs/promises";
@@ -416,9 +417,12 @@ export async function importInto(machine: Machine, tar: Buffer, destDir: string,
   const partPaths = parts === 1 ? [tmp] : Array.from({ length: parts }, (_, i) => `${tmp}.part${i}`);
   try {
     for (const [i, path] of partPaths.entries()) {
-      const url = await machine.uploadUrl(path);
       const end = Math.min((i + 1) * UPLOAD_PART_BYTES, tar.length);
-      await putPart(doFetch, url, new Uint8Array(tar.subarray(i * UPLOAD_PART_BYTES, end)), i + 1, parts);
+      const part = tar.subarray(i * UPLOAD_PART_BYTES, end);
+      // The backend's own road where it has one; the signed URL keeps the retries below, which are this road's own
+      // answer to a part lost between here and the provider's storage.
+      if (hasByteRoad(machine)) await landBytes(machine, path, part);
+      else await putPart(doFetch, await machine.uploadUrl(path), new Uint8Array(part), i + 1, parts);
       opts.onPart?.({ part: i + 1, parts, bytes: end, total: tar.length });
     }
   } catch (e) {

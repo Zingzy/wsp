@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { RESUME_CAP_MS } from "@wsp/protocol";
 import { isCapped, isMissing } from "../src/errors.js";
-import { REQUEST_ID_HEADER, SolariBackend } from "../src/solari-backend.js";
+import { REQUEST_ID_HEADER, SOLARI_PRICING, SolariBackend } from "../src/solari-backend.js";
+import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { EXEC_ENV } from "../src/golden-import.js";
 
 function fakeFetch(routes: Record<string, { status: number; body: unknown; headers?: Record<string, string> }>) {
@@ -24,6 +25,7 @@ describe("SolariBackend", () => {
       containers: false,
       callbackRelay: true,
       snapshotListing: true,
+      firstLifeSnapshots: true,
       templates: true,
       // A fork wsp made and can rebuild: nothing on it is the person's, so a turn runs without asking.
       kept: false,
@@ -35,6 +37,10 @@ describe("SolariBackend", () => {
     // The offers' rates are the pricing's own, and the default size is the first offer.
     for (const s of b.capabilities.sizes) expect(s.rateUsdPerHour).toBeCloseTo(b.pricing.rateUsdPerHour(s), 10);
     expect(b.capabilities.sizes[0]).toMatchObject(b.pricing.defaultSize);
+    // The root disk every builder and fork asks for here: this provider's cap, which the golden road reads off the
+    // pricing rather than off a constant of its own, and the reason the estimate has a room to be over at all.
+    expect(b.pricing.builderDiskGb).toBe(20);
+    expect(SOLARI_PRICING.builderDiskGb).toBe(BUILDER_DISK_GB);
   });
 
   it("lists every snapshot on the account with the size the provider bills and the name wsp's owner mark rides on", async () => {

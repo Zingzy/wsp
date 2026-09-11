@@ -96,6 +96,7 @@ import {
   snapshotStorage,
   applyMachineContext,
   GUEST_USER_ENV,
+  landsBytes,
   LOCAL_MACHINE_ID,
   TOOLS_PATH,
 } from "@wsp/engine";
@@ -1473,6 +1474,21 @@ async function readBodyUpTo(res: Response, cap: number): Promise<string> {
   return Buffer.concat(chunks, Math.min(size, cap)).toString("utf8");
 }
 
+/** The calls a backend carries only when its provider has them. One list, so a handle built out of a backend
+ * forwards every one of them rather than naming the few a road happened to need. */
+const OPTIONAL_BACKEND_CALLS = ["checkKey", "listSnapshots", "promoteSnapshot", "getTemplate", "listTemplates", "deleteTemplate"] as const;
+
+/** Those calls bound to the backend, for a handle that stands in front of it. A backend is a module with its
+ * methods on its prototype, so a spread of it carries none of them; each one is taken by name here. */
+function forwardedCalls(backend: MachineBackend): Partial<MachineBackend> {
+  const out: Record<string, unknown> = {};
+  for (const name of OPTIONAL_BACKEND_CALLS) {
+    const call = backend[name];
+    if (typeof call === "function") out[name] = call.bind(backend);
+  }
+  return out as Partial<MachineBackend>;
+}
+
 export function createRuntime(opts: RuntimeOptions): Runtime {
   const { backend, store, adapters } = opts;
   const local = opts.local;
@@ -2263,10 +2279,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
 
   /** Whether this runtime has a road to put a daemon on a machine: the host must have wired the bundle, and the
-   * deploy uploads it, so a backend that mints no upload URL has none. Both roads into updateDaemon read this, so
-   * neither offers to deploy where the other would not. */
-  const canDeployDaemon = (record: WorkspaceRecord): boolean =>
-    opts.goldenRecipe?.deployDaemon !== undefined && backendFor(record.kind).capabilities.signedUrls === true;
+   * deploy lands the bundle on the machine, so a backend with no road for bytes has none. Both roads into
+   * updateDaemon read this, so neither offers to deploy where the other would not. */
+  const canDeployDaemon = (entry: LiveWorkspace): boolean =>
+    opts.goldenRecipe?.deployDaemon !== undefined && landsBytes(backendFor(entry.record.kind).capabilities, entry.machine);
 
   /** Everything the runtime settles with a machine's daemon the moment it can reach it, and the only place that
    * does: the folders the record says it may browse, then a daemon older than this wsp replaced with this one's,
@@ -2283,7 +2299,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await writeDaemonRoots(entry);
       const version = await helloVersion(entry);
       if (version === null || version >= DAEMON_VERSION) return;
-      if (!canDeployDaemon(entry.record)) return;
+      if (!canDeployDaemon(entry)) return;
       await whenNoTurnRuns(entry.record.id);
       if (entry.record.phase !== "running") return;
       await noteDaemon(entry, DAEMON_UPDATING);
@@ -2327,7 +2343,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * no ptys to lose. One run per machine at a time. */
   const reviveDaemon = (entry: LiveWorkspace, reach: ReachState): void => {
     if (reach !== "no-daemon" || entry.record.phase !== "running") return;
-    if (!canDeployDaemon(entry.record)) return;
+    if (!canDeployDaemon(entry)) return;
     const key = entry.machine.id;
     if (daemonRevivals.has(key)) return;
     const last = revivedAt.get(entry.record.id);
@@ -2414,14 +2430,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const b: MachineBackend = {
       capabilities: backend.capabilities,
       pricing: backend.pricing,
+      // The golden's builder is created through this handle, so the image the provider boots from rides along.
+      ...(backend.baseTemplates !== undefined ? { baseTemplates: backend.baseTemplates } : {}),
       get: id => backend.get(id),
       list: labels => backend.list(labels),
       deleteSnapshot: id => backend.deleteSnapshot(id),
-      // The seal promotes through this handle, so the template calls ride along when the provider has them.
-      ...(backend.promoteSnapshot !== undefined ? { promoteSnapshot: backend.promoteSnapshot.bind(backend) } : {}),
-      ...(backend.getTemplate !== undefined ? { getTemplate: backend.getTemplate.bind(backend) } : {}),
-      ...(backend.listTemplates !== undefined ? { listTemplates: backend.listTemplates.bind(backend) } : {}),
-      ...(backend.deleteTemplate !== undefined ? { deleteTemplate: backend.deleteTemplate.bind(backend) } : {}),
+      // Every call a backend may or may not carry, in one place: a module keeps its methods on its prototype, so
+      // this handle cannot be a spread of the backend, and a call left out is one the roads inside here lose.
+      ...forwardedCalls(backend),
       create: async spec => {
         const m = await keyedCreate(purpose, spec);
         inflight.add(m.id);
