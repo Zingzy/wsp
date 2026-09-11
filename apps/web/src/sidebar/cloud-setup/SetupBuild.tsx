@@ -15,7 +15,7 @@
 // link stops the job after asking once.
 import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, SIGN_IN_STAGE_ID, initBuildRows, initElapsedLine, initJobBuilding, initJobOver, initRowFailed, initRowOver, initRowTimed, initRowUnrun, initSignInLine, initStageCount, initStageCountLine, type InitJob, type InitRow } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, SIGN_IN_STAGE_ID, initBuildRows, initElapsedLine, initJobBuilding, initJobOver, initRowFailed, initRowOver, initRowTimed, initRowUnrun, initSignInLine, initStageCount, initStageCountLine, type InitJob, type InitRow } from "@wsp/protocol";
 import { Button } from "../../components/ui/button.js";
 import { cn } from "../../lib/utils.js";
 import { ansiSpans, toolPrefix } from "./ansi.js";
@@ -52,9 +52,9 @@ export function SetupBuild({ job, onCancel, onRetry, onCode, onOpenWorkspace, on
   const signInStage = rows.find(r => r.id === SIGN_IN_STAGE_ID);
   const slide = building && signInStage !== undefined && (signInStage.state === INIT_ROW_STATES.open || signInStage.state === INIT_ROW_STATES.running);
   // The one row the card keeps in view, as the screen appears and whenever it changes: a sign-in to retry first, else the stage that runs or failed, else a machine still being removed, which is the one row left on a stopped screen that is still costing money; on the slide, the first sign-in waiting on the person.
-  const attention = building && signIns.some(s => s.state === INIT_SIGN_IN_WORDS["not-signed-in"]);
+  const attention = building && signIns.some(s => s.login === "not-signed-in");
   const focusId = attention && signInStage !== undefined ? signInStage.id : (rows.find(r => onIt(r.state) || r.state === INIT_ROW_STATES.failed) ?? rows.find(r => r.state === INIT_ROW_STATES.retrying))?.id;
-  const slideFocusId = (signIns.find(s => s.state === INIT_ROW_STATES.open) ?? signIns.find(s => s.state === INIT_SIGN_IN_WORDS["not-signed-in"]))?.id;
+  const slideFocusId = (signIns.find(s => s.state === INIT_ROW_STATES.open) ?? signIns.find(s => s.login === "not-signed-in"))?.id;
   // A saved key the provider refused offers the step that fixes it, not another build off the same key.
   const primary: ScreenAction | undefined =
     job.phase === "done" && job.workspace !== undefined ? { word: words.keycap, onPress: onOpenWorkspace } : job.keyRefused === true ? { word: CLOUD_SETUP_WORDS.keys.changeKey, onPress: onChangeKey } : job.phase === "failed" || job.phase === "cancelled" ? { word: words.again, onPress: onAgain } : undefined;
@@ -74,7 +74,7 @@ export function SetupBuild({ job, onCancel, onRetry, onCode, onOpenWorkspace, on
         </p>
         <Card label={words.slideHeadline} cap={false}>
           {signIns.map(s => (
-            <SignInSlideRow key={s.id} row={s} marked={marked(signIns)} focus={s.id === slideFocusId} onRetry={s.state === INIT_SIGN_IN_WORDS["not-signed-in"] ? () => onRetry(s.tool ?? s.id) : undefined} onCode={s.finish === "code" ? code => onCode({ tool: s.tool ?? s.id, code }) : undefined} />
+            <SignInSlideRow key={s.id} row={s} marked={marked(signIns)} focus={s.id === slideFocusId} onRetry={s.login === "not-signed-in" ? () => onRetry(s.tool ?? s.id) : undefined} onCode={s.finish === "code" ? code => onCode({ tool: s.tool ?? s.id, code }) : undefined} />
           ))}
         </Card>
       </SetupScreen>
@@ -200,7 +200,7 @@ function BuildRow({ row, focus, signIns, onRetry, onCode }: { row: InitRow; focu
   const has = signIns !== undefined ? signIns.length > 0 : lines.length > 0;
   const live = running || waitedOn;
   // A sign-in that ran out while the build goes on has a Retry to show, so its stage opens on its own too.
-  const attention = onRetry !== undefined && signIns?.some(s => s.state === INIT_SIGN_IN_WORDS["not-signed-in"]) === true;
+  const attention = onRetry !== undefined && signIns?.some(s => s.login === "not-signed-in") === true;
   // A running stage and the sign-ins being waited on are open and stay so; a failed one, or one with a sign-in to retry, opens on its own and folds on a click; a done one opens on a click.
   const canOpen = row.kind === "stage" && has && !live;
   const open = has && (live || (opened ?? (failed || attention)));
@@ -212,7 +212,7 @@ function BuildRow({ row, focus, signIns, onRetry, onCode }: { row: InitRow; focu
     <li ref={item} data-k="row" data-row={row.id} data-state={row.state} data-open={open} className={ROW_LINE}>
       <div className={cn(ROW, canOpen && "cursor-pointer hover:bg-accent/30")} title={row.detail} onClick={canOpen ? () => setOpened(!open) : undefined} role={canOpen ? "button" : undefined} aria-expanded={canOpen ? open : undefined}>
         <span data-k="glyph" aria-hidden className="flex size-[18px] shrink-0 items-center justify-center text-foreground">
-          <StageGlyph state={row.state} />
+          <StageGlyph row={row} />
         </span>
         <span className={cn(NAME, row.state === INIT_ROW_STATES.waiting && "text-muted-foreground")}>{row.label}</span>
         <Slot>
@@ -224,7 +224,7 @@ function BuildRow({ row, focus, signIns, onRetry, onCode }: { row: InitRow; focu
       {open && signIns !== undefined ? (
         <ul data-k="sign-ins" className="border-t border-border">
           {signIns.map(s => (
-            <SignInRow key={s.id} row={s} marked={marked(signIns)} onRetry={onRetry !== undefined && s.state === INIT_SIGN_IN_WORDS["not-signed-in"] ? () => onRetry(s.tool ?? s.id) : undefined} onCode={s.finish === "code" ? code => onCode(s.tool ?? s.id, code) : undefined} />
+            <SignInRow key={s.id} row={s} marked={marked(signIns)} onRetry={onRetry !== undefined && s.login === "not-signed-in" ? () => onRetry(s.tool ?? s.id) : undefined} onCode={s.finish === "code" ? code => onCode(s.tool ?? s.id, code) : undefined} />
           ))}
         </ul>
       ) : null}
@@ -307,23 +307,23 @@ function TerminalLine({ line, danger }: { line: string; danger: boolean }) {
  * spinner says so), a filled dot while a machine is still being removed, a check once it ended well, a cross when
  * it failed, the sign-in stage with a run-out included. A row that ended without running keeps the ring it waited
  * with: it is over, but a check beside it would read as work that happened. */
-function StageGlyph({ state }: { state: string }) {
-  if (initRowUnrun(state)) return <span data-glyph="ring" className="size-2 rounded-full border border-muted-foreground/60" />;
-  if (state === INIT_ROW_STATES.retrying) return <span data-glyph="dot" className="size-2 rounded-full bg-foreground" />;
-  if (initRowFailed(state)) {
+function StageGlyph({ row }: { row: Pick<InitRow, "state" | "login"> }) {
+  if (initRowUnrun(row.state)) return <span data-glyph="ring" className="size-2 rounded-full border border-muted-foreground/60" />;
+  if (row.state === INIT_ROW_STATES.retrying) return <span data-glyph="dot" className="size-2 rounded-full bg-foreground" />;
+  if (initRowFailed(row)) {
     return (
       <svg data-glyph="failed" viewBox="0 0 16 16" className="size-3.5 fill-none stroke-destructive-foreground" strokeWidth={1.75} strokeLinecap="round">
         <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
       </svg>
     );
   }
-  if (initRowOver(state)) {
+  if (initRowOver(row)) {
     return (
       <svg data-glyph="done" viewBox="0 0 16 16" className="size-3.5 fill-none stroke-current" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
         <path d="M3.5 8.5 6.5 11.5 12.5 5" />
       </svg>
     );
   }
-  if (onIt(state) || state === INIT_ROW_STATES.open) return <span data-glyph="dot" className="size-2 rounded-full bg-foreground" />;
+  if (onIt(row.state) || row.state === INIT_ROW_STATES.open) return <span data-glyph="dot" className="size-2 rounded-full bg-foreground" />;
   return <span data-glyph="ring" className="size-2 rounded-full border border-muted-foreground/60" />;
 }

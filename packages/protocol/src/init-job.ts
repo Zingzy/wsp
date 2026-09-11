@@ -77,6 +77,12 @@ export const initShownScreens = <S extends { items: readonly unknown[] }>(screen
 export const InitRowKind = z.enum(["fact", "stage", "sign-in", "secret", "agent", "workspace", "project", "machine"]);
 export type InitRowKind = z.infer<typeof InitRowKind>;
 
+/** What each login came to by the time the golden sealed: a sign-in on the machine, or a copy from this computer
+ * checked there with the tool's status command. `copied` is a copy nothing checked: an update re-imported it, or the
+ * tool has no status command or is not on the machine. */
+export const LoginState = z.enum(["signed-in", "not-signed-in", "not-verified", "skipped", "copied"]);
+export type LoginState = z.infer<typeof LoginState>;
+
 /** How a sign-in finishes where nobody is at the machine's terminal, which is the app's case: `callback` for a page
  * that redirects to a port on the machine, forwarded from this computer, so no code ever comes back; `code` for a
  * page that hands a code back, which goes to the tool on the machine as the person would type it; `none` for a flow
@@ -94,8 +100,12 @@ export const InitRow = z.object({
   /** A sign-in's tool, the catalog's sign-in row id, so a client picks its mark without reading the row id. */
   tool: z.string().optional(),
   label: z.string(),
-  /** The state as a word the row prints. */
+  /** The state as a word the row prints, drawn for the computer the run reads: a copy on a Linux computer says
+   * copied from this computer. Nothing compares it. */
   state: z.string(),
+  /** A sign-in's outcome under its own name, which is what every client compares; the stage the sign-ins fold into
+   * carries the name of the one that ran out. Absent on a row whose outcome is not in, and on every other kind. */
+  login: LoginState.optional(),
   detail: z.string().optional(),
   /** A sign-in's page, the person's to open on this computer. */
   page: z.string().optional(),

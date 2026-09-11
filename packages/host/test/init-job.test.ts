@@ -11,7 +11,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
 import { BUILDER_DISK_GB, NoProviderBackend, SMOKE_LABEL, SNAPSHOT_STORAGE, checkProviderKey, type BackendPricing, type MachineBackend } from "@wsp/engine";
-import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initStageCount, keyRefusedLine, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, initSignInOutcome, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initRowOver, initStageCount, keyRefusedLine, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
 import { runLogPath } from "../src/init-log.js";
 import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -100,7 +100,7 @@ interface Fake {
   settled(): Promise<void>;
 }
 
-function fake(over: { env?: Record<string, string>; provider?: MachineBackend; configured?: boolean; read?: Partial<InitJobDeps["read"]>; now?: () => number; agent?: { adapter: HarnessAdapterFactory; starts: HarnessStartOptions[] }; writesRecipe?: boolean; agents?: AgentHere[]; adapters?: Record<string, HarnessAdapterFactory>; deployDaemon?: () => Promise<string> } = {}): Fake {
+function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string>; provider?: MachineBackend; configured?: boolean; read?: Partial<InitJobDeps["read"]>; now?: () => number; agent?: { adapter: HarnessAdapterFactory; starts: HarnessStartOptions[] }; writesRecipe?: boolean; agents?: AgentHere[]; adapters?: Record<string, HarnessAdapterFactory>; deployDaemon?: () => Promise<string> } = {}): Fake {
   const dir = mkdtempSync(join(tmpdir(), "wsp-init-job-"));
   dirs.push(dir);
   const home = mkdtempSync(join(tmpdir(), "wsp-init-job-home-"));
@@ -134,7 +134,7 @@ function fake(over: { env?: Record<string, string>; provider?: MachineBackend; c
     rt,
     statePath,
     home,
-    platform: "darwin",
+    platform: over.platform ?? "darwin",
     saved: () => env,
     saveKeys: set => {
       saved.push(set);
@@ -397,7 +397,7 @@ describe("the init job, manual road", () => {
     expect(ids.indexOf("sign-in/gh")).toBeGreaterThan(ids.indexOf("stage/ready"));
     expect(ids.indexOf("sign-in/gh")).toBeLessThan(ids.indexOf("stage/snapshotting"));
     // A copied credential is a row that needs nothing, and while the phase says signing in a sign-in row is on the list.
-    expect(done.rows.find(r => r.id === "sign-in/codex")).toMatchObject({ kind: "sign-in", state: INIT_SIGN_IN_WORDS.copied });
+    expect(done.rows.find(r => r.id === "sign-in/codex")).toMatchObject({ kind: "sign-in", ...initSignInOutcome("copied", "darwin") });
     const signing = f.events.filter(e => e.job.phase === "signing-in");
     expect(signing.length).toBeGreaterThan(0);
     expect(signing.every(e => e.job.rows.some(r => r.kind === "sign-in"))).toBe(true);
@@ -417,7 +417,7 @@ describe("the init job, manual road", () => {
     expect(recipe.rows.find(r => r.id === "gh")?.signIn).toBe("machine");
     // Each sign-in was a row with its page while it waited, then its state word.
     const gh = done.rows.find(r => r.id === "sign-in/gh")!;
-    expect(gh).toMatchObject({ kind: "sign-in", tool: "gh", label: "GitHub CLI login", state: INIT_SIGN_IN_WORDS["signed-in"] });
+    expect(gh).toMatchObject({ kind: "sign-in", tool: "gh", label: "GitHub CLI login", ...initSignInOutcome("signed-in", "darwin") });
     expect(gh.state).toBe("done");
     const waited = f.events.map(e => e.job.rows.find(r => r.id === "sign-in/gh")).find(r => r?.state === SIGN_IN_OPEN_STATE);
     expect(waited).toMatchObject({ page: DEVICE_URL });
@@ -432,6 +432,41 @@ describe("the init job, manual road", () => {
     expect(done.log.some(l => l.includes("Golden v1 sealed"))).toBe(true);
     // Done: the setup carries the job for a client opening late, and a new start is allowed again.
     expect((await f.jobs.get()).job?.phase).toBe("done");
+  });
+
+  it("the sign-in rows are worded for the computer the run reads, and their outcome travels as its own name: a copy on a Linux computer says copied from this computer, on a Mac copied from this Mac, and both read as over", async () => {
+    for (const [platform, word] of [
+      ["linux", "copied from this computer"],
+      ["darwin", "copied from this Mac"],
+    ] as const) {
+      const f = fake({ platform });
+      await f.jobs.start({ road: "manual" });
+      await f.settled();
+      await f.jobs.answer({ screen: "agents", ticks: ["claude", "codex"] });
+      await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "machine", "logins/codex": "copy" } });
+      await f.jobs.build({ firstWorkspace: "first" });
+      await f.settled();
+      const done = f.jobs.view()!;
+      expect(done.phase).toBe("done");
+      const copied = done.rows.find(r => r.id === "sign-in/codex")!;
+      expect(copied, platform).toMatchObject({ kind: "sign-in", state: word, login: "copied" });
+      // The name is what a client reads, so a row a Linux host worded ends, folds and counts where a Mac's does.
+      expect(initRowOver(copied)).toBe(true);
+      expect(initBuildRows(done.rows).rows.find(r => r.id === SIGN_IN_STAGE_ID)).toMatchObject({ state: INIT_ROW_STATES.done });
+      expect(done.progress).toEqual({ done: done.progress.total, total: done.progress.total });
+    }
+  });
+
+  it("nothing a build on a Linux computer draws names a Mac: not a row, not a screen, not a line of the log", async () => {
+    const f = fake({ platform: "linux", read: { scan: async () => [JQ] } });
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "copy", "logins/codex": "copy" } });
+    await f.jobs.build({ firstWorkspace: "first" });
+    await f.settled();
+    expect(f.jobs.view()!.phase).toBe("done");
+    // The word, not the letters: "Machine created" is a line of every build.
+    expect(JSON.stringify(f.events)).not.toMatch(/\bMac\b/);
   });
 
   it("a name forks the first workspace whatever the list already holds: this computer is a workspace and the build still ends with the cloud one on the golden it just sealed", async () => {
@@ -666,7 +701,7 @@ describe("the init job, manual road", () => {
     await f.settled();
     const done = f.jobs.view()!;
     expect(done.phase).toBe("done");
-    expect(done.rows.find(r => r.id === "sign-in/claude")).toMatchObject({ state: INIT_SIGN_IN_WORDS["signed-in"] });
+    expect(done.rows.find(r => r.id === "sign-in/claude")).toMatchObject({ ...initSignInOutcome("signed-in", "darwin") });
     // The row is over: no page left to open and no code left to take.
     expect(done.rows.find(r => r.id === "sign-in/claude")).not.toHaveProperty("finish");
     // The code went to the machine and nowhere else: not a row, not the log, not an event.
