@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, DAEMON_VERSION, FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, NOT_ON_THIS_KIND, fmtBytes, fmtSize, imageKeptLine, kindWords, servesReading, workspaceKind } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, DAEMON_VERSION, FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, NO_LINGER_LINE, NOT_ON_THIS_KIND, fmtBytes, fmtSize, imageKeptLine, kindWords, machineLacksShort, servesReading, workspaceKind } from "@wsp/protocol";
 import type {
   Capabilities,
   EventUnion,
@@ -222,6 +222,19 @@ describe("machine facts", () => {
     act(() => api.emit({ type: "workspace.status", status: { ...status(w), vaultedAt: "2026-09-09T08:00:00.000Z", vaultRefused: undefined } }));
     await waitFor(() => expect(document.querySelector('[data-k="vault"]')).toBeNull());
     expect(document.querySelector('[data-k="vault-refused"]')).toBeNull();
+  });
+
+  it("a machine that told the host what it lacks reads the whole sentence here, where the command it names has room", async () => {
+    const w = { ...view("ws_a", "api"), kind: "ssh" as const, daemonRefusedAt: { machineId: "ssh://dev@box:22", at: "2026-09-11T14:04:50.380Z", why: NO_LINGER_LINE } };
+    const api = await mount([w]);
+    // The sidebar row shows the first clause, since it cuts from the right; the command to type is at the end of
+    // the sentence, so this surface carries all of it.
+    expect(fact("daemon-refused")).toBe(NO_LINGER_LINE);
+    expect(fact("daemon-refused")).toContain("loginctl enable-linger");
+    expect(machineLacksShort(NO_LINGER_LINE)).not.toContain("loginctl");
+    // A deploy that lands takes it off the record, and the line goes with it.
+    act(() => api.emit({ type: "workspace.status", status: { ...status(w), daemonRefusedAt: undefined } }));
+    await waitFor(() => expect(document.querySelector('[data-k="daemon-refused"]')).toBeNull());
   });
 
   it("a machine id hundreds of characters long is cut inside its cell and rides its title in full", async () => {

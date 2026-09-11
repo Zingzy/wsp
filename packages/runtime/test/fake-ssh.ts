@@ -4,7 +4,7 @@
 // SshBackend and the real address rules with nothing on the network. One home
 // for it, read by the runtime's own tests and by the host's keyless roads.
 import { SSH_BYTES_OK, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SshBackend, parseSshAddress, sshIdentity, sshMachineName, type ExecResult, type SshReach, type SshTransport } from "@wsp/engine";
-import { sshDaemonPaths } from "@wsp/protocol";
+import { machineLacking, machineUnanswered, sshDaemonPaths } from "@wsp/protocol";
 import type { SshWiring } from "../src/runtime.js";
 
 /** Two machines a person could reach over ssh, each with a home and a PATH of its own, so a road that reads one
@@ -75,7 +75,11 @@ export function fakeSsh(answer: (script: string, reach: SshReach) => Partial<Exe
         : {
             deployDaemon: async (machine, login) => {
               deployed.deploys.push({ machineId: machine.id, ...login });
-              if (deployed.refuse !== undefined) throw new Error(deployed.refuse);
+              if (deployed.refuse !== undefined) {
+                if (deployed.lacks === true) throw machineLacking(deployed.refuse);
+                if (deployed.unanswered === true) throw machineUnanswered(deployed.refuse);
+                throw new Error(deployed.refuse);
+              }
               // The real deploy lands the token file over this same road before it starts the daemon, and the
               // rotation afterwards reads that the file is there; a fake that skipped it would prove neither.
               await machine.putBytes!(sshDaemonPaths(login.home).tokenPath, new TextEncoder().encode("0".repeat(48)));
@@ -115,6 +119,12 @@ export interface FakeSshDaemon {
   closed: boolean;
   /** Set to make the deploy refuse, the way a machine with no compiler does. */
   refuse?: string;
+  /** That the refusal is the machine's own words about what it lacks, which is what the real preflight marks its
+   * throw with; without it the refusal is a deploy that failed further in, the way npm does. */
+  lacks?: boolean;
+  /** That the check never reached the machine, the way a box switched off ends it: the words are the ssh client's
+   * own, and the real preflight marks that throw apart from a machine's refusal. */
+  unanswered?: boolean;
   /** Set to make the removal refuse, the way a machine that will not answer the dial does. */
   refuseRemoval?: string;
 }
