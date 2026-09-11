@@ -1910,7 +1910,7 @@ describe("wsp verbs over the host", () => {
       for (const server of [silent, mute]) {
         const wsPort = (server.address() as AddressInfo).port;
         writeFileSync(lockPathFor(statePath), JSON.stringify({ pid: process.pid, port: wsPort, wsPort, startedAt: new Date().toISOString() }));
-        await expect(dialHost(statePath, 200)).rejects.toThrow(`the host on port ${wsPort} did not answer within 200 ms`);
+        await expect(dialHost(statePath, 200)).rejects.toThrow(`the host at 127.0.0.1:${wsPort} did not answer within 200 ms`);
       }
     } finally {
       for (const client of mute.clients) client.terminate();

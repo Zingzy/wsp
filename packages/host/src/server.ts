@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes } from "@wsp/engine";
-import { DEFAULT_PORT, DEFAULT_WS_PORT, recordRestoredLine, type BootPayload, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
+import { API_UNAUTHORIZED, DEFAULT_PORT, DEFAULT_WS_PORT, WS_PATH, isLoopback, recordRestoredLine, type BootPayload, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
 import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { nodeHost, readGhosttyConfig } from "@wsp/collect";
 import { hostFolders } from "./host-folders.js";
@@ -27,6 +27,9 @@ export interface HostOptions {
   port?: number;
   /** Port for serveRuntime's WS (0 picks a free one). Default DEFAULT_WS_PORT. */
   wsPort?: number;
+  /** The address both servers bind. Default LOOPBACK; anything else serves the page with no token inlined and asks
+   * every JSON route for a paired device's token. */
+  listen?: string;
   /** Auth token for the runtime WS; generated when omitted. */
   authToken?: string;
   /** Envs baked into a workspace created from the JSON route, given the golden version it forks. */
@@ -114,6 +117,13 @@ function loadPage(webDir: string, boot: BootPayload): string {
   const html = readFileSync(path, "utf8");
   if (!BOOT_SCRIPT.test(html)) throw new Error(`${path} has no window.__WSP__ boot line to replace`);
   return html.replace(BOOT_SCRIPT, `<script>window.__WSP__ = ${inlineJson(boot)};</script>`);
+}
+
+/** The token an Authorization header carries, or nothing when it carries none in the one scheme this host takes.
+ * A bearer never rides the URL here, where a proxy log would keep it. */
+function bearerOf(header: string | undefined): string | undefined {
+  const match = /^Bearer\s+(\S+)$/i.exec(header ?? "");
+  return match?.[1];
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -256,25 +266,29 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     ...(opts.autoOpen !== undefined ? { autoOpen: opts.autoOpen } : {}),
     ...(opts.openLine !== undefined ? { openLine: opts.openLine } : {}),
   });
+  const address = opts.listen ?? LOOPBACK;
+  // Reaching a loopback host already means being on this computer, so the page carries the token and the JSON
+  // routes need nothing. Beyond it the page pairs for a device token first and every JSON route asks for one.
+  const onThisComputer = isLoopback(address);
   let rtServer: RuntimeServer;
-  try {
-    rtServer = await serveRuntime(rt, { port: opts.wsPort ?? DEFAULT_WS_PORT, host: LOOPBACK, authToken, forwards: relay, projects: bundlerFor, landing: projectLander(homes), folders: hostFolders(() => rt.workspaces.list()), terminalConfig: { read: scheme => readGhosttyConfig(nodeHost(), scheme) }, ...(opts.init !== undefined ? { init: opts.init } : {}) });
-  } catch (e) {
-    await relay.close();
-    throw e;
-  }
+
   // Rendered per request: wsp init saves the recipe while a host may already be serving.
   const page = (): string => {
     const terminalFont = terminalFontOf(opts.recipePath);
-    return loadPage(webDir, { wsPort: rtServer.port, token: authToken, version: VERSION, ...(terminalFont !== undefined ? { terminalFont } : {}), ...(opts.statePath !== undefined ? { statePath: opts.statePath } : {}) });
+    return loadPage(webDir, {
+      wsPort: rtServer.port,
+      ...(onThisComputer ? { token: authToken } : {}),
+      wsPath: WS_PATH,
+      paired: onThisComputer,
+      version: VERSION,
+      ...(terminalFont !== undefined ? { terminalFont } : {}),
+      ...(opts.statePath !== undefined ? { statePath: opts.statePath } : {}),
+    });
   };
-  try {
-    page();
-  } catch (e) {
-    await relay.close();
-    await rtServer.close();
-    throw e;
-  }
+
+  /** Whether a request may drive the JSON routes: on this computer anyone who reached the port may, beyond it only
+   * a paired device's token in an Authorization header. The runtime server owns the one reading of a token. */
+  const mayDrive = async (req: IncomingMessage): Promise<boolean> => onThisComputer || (await rtServer.authorize(bearerOf(req.headers.authorization))) !== undefined;
 
   const server = createServer((req, res) => {
     void (async () => {
@@ -282,6 +296,10 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       if (req.method === "GET" && path === "/") {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         res.end(page());
+        return;
+      }
+      if (path.startsWith("/api/") && !(await mayDrive(req))) {
+        sendJson(res, 401, { error: API_UNAUTHORIZED });
         return;
       }
       if (req.method === "GET" && path === "/api/workspaces") {
@@ -317,10 +335,38 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     });
   });
 
+  // The runtime answers upgrades of WS_PATH on the server above as well as on its own port, so a client that
+  // reached the app through one forwarded port has the protocol on that same port.
+  try {
+    rtServer = await serveRuntime(rt, {
+      port: opts.wsPort ?? DEFAULT_WS_PORT,
+      host: address,
+      attach: server,
+      devices: rt.devices,
+      authToken,
+      forwards: relay,
+      projects: bundlerFor,
+      landing: projectLander(homes),
+      folders: hostFolders(() => rt.workspaces.list()),
+      terminalConfig: { read: scheme => readGhosttyConfig(nodeHost(), scheme) },
+      ...(opts.init !== undefined ? { init: opts.init } : {}),
+    });
+  } catch (e) {
+    await relay.close();
+    throw e;
+  }
+  try {
+    page();
+  } catch (e) {
+    await relay.close();
+    await rtServer.close();
+    throw e;
+  }
+
   try {
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
-      server.listen(opts.port ?? DEFAULT_PORT, LOOPBACK, resolve);
+      server.listen(opts.port ?? DEFAULT_PORT, address, resolve);
     });
   } catch (e) {
     await relay.close();
@@ -362,9 +408,11 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     close: async () => {
       clearInterval(reapTimer);
       await relay.close();
+      // The runtime first: the sockets it holds on WS_PATH are this server's connections, and closing them here is
+      // what sends a waiting client the stopping code instead of cutting the socket under it.
+      await rtServer.close();
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) => server.close(err => (err ? reject(err) : resolve())));
-      await rtServer.close();
       // Last: with the servers gone nothing can record another event, so the
       // flush this waits on is the final word in the store.
       await rt.close();

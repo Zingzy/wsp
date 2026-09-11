@@ -20,22 +20,35 @@ const subscribeHash = (onChange: () => void) => {
 };
 const readHash = () => window.location.hash;
 
+/** What the page hands the app: where the runtime is, the token to open it with, and, for a token this browser was
+ * paired with rather than the host's own, what to do when the host stops honouring it. */
+export interface AppProps {
+  wsUrl: string;
+  token: string;
+  onUnauthorized?: () => void;
+}
+
 /** #gallery mounts the ui kit proof page with no runtime behind it; every other hash is the app. */
-export function Root(props: { wsUrl: string; token: string }) {
+export function Root(props: AppProps) {
   const hash = useSyncExternalStore(subscribeHash, readHash);
   return hash === "#gallery" ? <Gallery /> : <App {...props} />;
 }
 
-export function App({ wsUrl, token }: { wsUrl: string; token: string }) {
+export function App({ wsUrl, token, onUnauthorized }: AppProps) {
   const bind = useStore(s => s.bind);
   const setConn = useStore(s => s.setConn);
   const noteGap = useStore(s => s.noteGap);
   useEffect(() => {
-    const client = new ProtocolClient({ url: wsUrl, token, onStatus: setConn, onGap: noteGap });
+    const client = new ProtocolClient({ url: wsUrl, token, onStatus: setConn, onGap: noteGap, ...(onUnauthorized !== undefined ? { onUnauthorized } : {}) });
     let live = true;
-    void client.connect().then(() => { if (live) bind(makeApi(client)); });
+    // A refused token settles this rejected, and nothing else awaits it: the page hears about that through
+    // onUnauthorized, so swallowing it here is what keeps a revoked device from faulting the renderer.
+    void client.connect().then(
+      () => { if (live) bind(makeApi(client)); },
+      () => {},
+    );
     return () => { live = false; client.close(); };
-  }, [wsUrl, token, bind, setConn, noteGap]);
+  }, [wsUrl, token, bind, setConn, noteGap, onUnauthorized]);
   useEffect(() => wireTerminals(useStore), []);
   useThemeEffect();
   useNeedsYouEffect();

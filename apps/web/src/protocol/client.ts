@@ -59,6 +59,9 @@ export interface ProtocolClientOptions {
   WebSocketCtor?: typeof WebSocket;
   /** Fires on every transition; "closed" is terminal (client closed, or the token was refused). */
   onStatus?: (s: ConnStatus) => void;
+  /** Fires once when the runtime refused this token and no redial can fix it, which "closed" alone does not say:
+   * a client the page closed on its own reaches "closed" too. A page holding a paired device's token drops it here. */
+  onUnauthorized?: () => void;
   /** Delay before redial number `attempt` (1-based); the default doubles from 250 ms and caps at 5 s. */
   backoffMs?: (attempt: number) => number;
   /** A re-subscribe found the runtime could not replay what this socket missed: anything folded from events is
@@ -226,7 +229,10 @@ export class ProtocolClient {
     this.#setStatus("closed");
     const first = this.#firstLive;
     this.#firstLive = null;
-    if (reason === "unauthorized") first?.reject(new DisconnectedError(reason));
+    if (reason === "unauthorized") {
+      first?.reject(new DisconnectedError(reason));
+      this.#opts.onUnauthorized?.();
+    }
   }
 
   #onMessage(data: string): void {
