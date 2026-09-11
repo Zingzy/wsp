@@ -90,7 +90,13 @@ describe("the hosts file", () => {
     expect(aliasFrom("[::1]")).toBe("1-");
     expect(aliasFrom("///")).toBe("host");
     expect(aliasFrom("a".repeat(200))).toHaveLength(64);
-    for (const folded of ["box.local", "[::1]", "///", "a".repeat(200)].map(aliasFrom)) expect(checkedAlias(folded)).toBe(folded);
+    // A dot is in the alias class and the checker refuses a dot-dot, so a run of dots is the one fold that could
+    // hand back a word the checker would not take: new URL("http://a..b:4400").hostname is a..b, and a person who
+    // typed no --name would have died on a name they never chose.
+    expect(aliasFrom(new URL("http://a..b:4400").hostname)).toBe("a.b");
+    expect(aliasFrom("a....b")).toBe("a.b");
+    expect(aliasFrom("..")).toBe("host");
+    for (const folded of ["box.local", "[::1]", "///", "a..b", "a....b", "..", "a..", ".", "-.-", "a".repeat(200)].map(aliasFrom)) expect(checkedAlias(folded)).toBe(folded);
   });
 
   it("refuses a word that could never be a file under the hosts folder, in one sentence", () => {
