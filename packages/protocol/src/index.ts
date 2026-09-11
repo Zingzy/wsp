@@ -281,6 +281,12 @@ export const ThreadScope = z.object({
 });
 export type ThreadScope = z.infer<typeof ThreadScope>;
 
+/** Who an event is on behalf of, taken off the scope that asked so the two cannot drift: the thread and the root of
+ * its tree. An event about work that has no record yet carries this, since the reading that hides a workspace from
+ * a caller has nothing to read until the record exists. */
+export const EventAsker = ThreadScope.pick({ threadId: true, rootThreadId: true });
+export type EventAsker = z.infer<typeof EventAsker>;
+
 /** Where a request reached the host from, as every verb takes it: the road alone, or the road with the thread a
  * machine's turn sent it out of. A bare word is `here` or `relayed` and says nothing about who; the object is a
  * socket the host authed on a thread scoped token, and the scope is the host's own reading of that token, never
@@ -1066,6 +1072,10 @@ export const WorkspaceCreatingEvent = z.object({
   message: z.string(),
   elapsedMs: z.number(),
   notice: z.string().optional(),
+  /** The thread this fork was asked for by, from the first stage: a create streams stages before the workspace has
+   * a record, so the stream's tree rule reads who asked off the event rather than off a record that is not there
+   * yet. Absent where a person asked for the machine. */
+  askedBy: EventAsker.optional(),
 });
 export type WorkspaceCreatingEvent = z.infer<typeof WorkspaceCreatingEvent>;
 /** found is set when the provider had already paused the machine and this host only followed it: the awake
@@ -2714,6 +2724,14 @@ export function workspaceIdOf(event: unknown): string | undefined {
   const e = event as { workspaceId?: unknown; workspace?: { id?: unknown }; status?: { id?: unknown }; forward?: { workspaceId?: unknown } };
   for (const found of [e.workspaceId, e.workspace?.id, e.status?.id, e.forward?.workspaceId]) if (typeof found === "string") return found;
   return undefined;
+}
+
+/** The thread an event is on behalf of, beside the reading above and for the same door: an event about a workspace
+ * that has no record yet is nobody's by the reading above, so the caller it was asked for by is named on it. */
+export function askerOf(event: unknown): EventAsker | undefined {
+  const asked = (event as { askedBy?: { threadId?: unknown; rootThreadId?: unknown } }).askedBy;
+  if (typeof asked?.threadId !== "string" || typeof asked.rootThreadId !== "string") return undefined;
+  return { threadId: asked.threadId, rootThreadId: asked.rootThreadId };
 }
 export type RuntimeRequest = z.infer<typeof RuntimeRequest>;
 
