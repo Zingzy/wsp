@@ -592,6 +592,9 @@ export interface SharedOpts extends ListenAsked {
   /** The environment this run picks its machine provider out of: the one the caller runs in, with the provider
    * words the command line was given in front of it. */
   providerEnv: ProviderEnv;
+  /** The environment the caller runs in, as given: what reads WSP_HOST and the pair a turn's launch left, so a
+   * command decides where a line is aimed from the run's own environment rather than this process's. */
+  env: Readonly<Record<string, string | undefined>>;
 }
 
 /** The environment the caller runs in decides the home, the same reading the verbs take, so a run with its own
@@ -608,6 +611,7 @@ export function optsFor(
     ...(advertise !== undefined ? { advertise } : {}),
     statePath: statePathFrom(values.state),
     home: wspHome(env),
+    env,
     providerEnv: providerEnvWith({
       ...(values.provider !== undefined ? { provider: values.provider } : {}),
       ...(values["docker-host"] !== undefined ? { dockerHost: values["docker-host"] } : {}),
@@ -1302,12 +1306,12 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   pair: {
     json: false,
     cliOnly: "hands out a code that lets another computer drive this host; only a person at the host's own terminal gives that away",
-    run: (io, opts, _values, args) => pairCommand(io, opts, args),
+    run: (io, opts, _values, args) => pairCommand(io, { statePath: opts.statePath, home: opts.home, env: opts.env }, args),
   },
   devices: {
     json: false,
     cliOnly: "lists and takes away the computers that may drive this host, which belongs with the terminal that handed them the code",
-    run: (io, opts, _values, args) => devicesCommand(io, opts, args),
+    run: (io, opts, _values, args) => devicesCommand(io, { statePath: opts.statePath, home: opts.home, env: opts.env }, args),
   },
   connect: {
     json: false,

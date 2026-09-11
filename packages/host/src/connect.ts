@@ -5,9 +5,9 @@
 // hands a token back and forgets it. Nothing here prints a token: a listing
 // that leaked one would open the host to whoever read the terminal.
 import { hostname } from "node:os";
-import { usageRefusal } from "@wsp/protocol";
+import { servedHostname, usageRefusal } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
-import { aliasFrom, checkedAlias, defaultHost, isUrl, listHosts, noSuchHostLine, readHost, removeHost, setDefaultHost, writeHost, type HostRecord } from "./hosts.js";
+import { aliasFrom, checkedAlias, defaultHost, listHosts, noSuchHostLine, readHost, removeHost, setDefaultHost, writeHost, type HostRecord } from "./hosts.js";
 import { relayHostUrl } from "./relay-link.js";
 import { dialHost, table, type DialOpts, type HostClient } from "./verbs.js";
 
@@ -32,10 +32,6 @@ interface ConnectDeps {
 }
 
 const systemDeps: ConnectDeps = { dial: dialHost, now: Date.now, deviceName: hostname, relayUrl: (home, name) => relayHostUrl(home, name) };
-
-/** The name a host takes when nobody gives it one: what its address calls it, held to the same rule as a name a
- * person types, which the hosts file owns. */
-export const aliasFor = (url: string): string => aliasFrom(new URL(url).hostname);
 
 /** What wsp connect prints: which host this computer now holds and where, never the token it holds it by. */
 export function connectedLines(alias: string, record: HostRecord, madeDefault: boolean): string[] {
@@ -64,10 +60,15 @@ export async function connectCommand(io: CliIO, opts: ConnectOpts, values: { cod
   // The relay says where a host answers and nothing more: the code still comes from wsp pair on the box itself,
   // and the road from here is the ordinary one against the address it named.
   const url = named !== undefined ? await deps.relayUrl(opts.home, named) : args[0]!;
-  if (!isUrl(url)) throw usageRefusal(`wsp connect takes the address the host is served at, starting http:// or https://, got ${JSON.stringify(url)}`);
+  // One sentence for every address this cannot dial, and the name of the computer for one it can: the protocol's
+  // reading of an address is what says which it is, so a ws or wss address, an http:// with no computer after it
+  // and a word that is no address at all read alike rather than one of them reaching the URL parser and throwing
+  // a line nobody can act on, and the name the alias is folded out of comes from that one parse.
+  const at = servedHostname(url);
+  if (at === undefined) throw usageRefusal(`wsp connect takes the address the host is served at, starting http:// or https:// and naming the computer it runs on, got ${JSON.stringify(url)}\n\n${CONNECT_USAGE}`);
   // Checked before the dial, never after it: a code is spent the moment it is redeemed, and a name refused on the
   // way back would leave the host holding a device whose only token went nowhere.
-  const alias = checkedAlias(values.name ?? (named !== undefined ? aliasFrom(named) : aliasFor(url)));
+  const alias = checkedAlias(values.name ?? aliasFrom(named ?? at));
   if (readHost(opts.home, alias) !== undefined) {
     throw usageRefusal(`a host named ${alias} is already connected; wsp disconnect ${alias} first, or give this one another name with --name.`);
   }

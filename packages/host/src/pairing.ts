@@ -8,8 +8,9 @@ import { networkInterfaces } from "node:os";
 import { authority, fmtDuration, isLoopback, isWildcard, LOOPBACK, usageRefusal, type DeviceView } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
+import { aimName, aimedHost, type HostAim, type HostPick } from "./hosts.js";
 import { publicHostname } from "./relay-link.js";
-import { dialHost, table, type HostClient } from "./verbs.js";
+import { dialHost, table, type DialOpts, type HostClient } from "./verbs.js";
 
 /** An address that only reaches the link it sits on: IPv6 fe80::/10, which no browser opens without a scope id,
  * and IPv4's own 169.254/16. Neither is an address to hand somebody at another computer. */
@@ -58,6 +59,13 @@ export function deviceLines(devices: readonly DeviceView[]): string[] {
   return table([["DEVICE", "ID", "PAIRED", "LAST SEEN"], ...devices.map(d => [d.name, d.id, d.createdAt, d.lastSeenAt])]);
 }
 
+/** What the person reads when one of these two is aimed at a host on another computer: a code is handed out and
+ * taken back at the host's own terminal and nowhere else, so there is no road from here to there. Every way a line
+ * is aimed reads the same, whether a --host flag, WSP_HOST or the default alias wsp hosts marks did the aiming. */
+export function hostSideOnlyLine(word: string, where: string): string {
+  return `wsp ${word} runs on the computer the host runs on, and this line is aimed at ${where}; run it in a terminal over there. Handing out access is the one thing a paired computer cannot do from here.`;
+}
+
 /** The line a host that binds this computer alone answers wsp pair with: nothing outside can reach it, so a code
  * would open nothing. */
 export function pairOnLoopbackLine(address: string): string {
@@ -65,17 +73,32 @@ export function pairOnLoopbackLine(address: string): string {
 }
 
 interface PairDeps {
-  dial(statePath: string): Promise<HostClient>;
+  dial(statePath: string, opts: DialOpts): Promise<HostClient>;
   now(): number;
 }
 
 const systemDeps: PairDeps = { dial: dialHost, now: Date.now };
 
-export async function pairCommand(io: CliIO, opts: { statePath: string }, args: readonly string[], deps: PairDeps = systemDeps): Promise<number> {
+/** What the two commands work on: the state file the host on this computer serves, and where this run would aim a
+ * line, which is the flag it was given, the environment it runs in and the home holding the hosts folder. They read
+ * the aim to refuse anywhere but here, and hand it to the dial so the hosts folder is read once and the dial cannot
+ * fall back to a different environment than the refusal was decided from. */
+export interface PairOpts extends HostPick {
+  statePath: string;
+}
+
+function aimHere(word: string, opts: PairOpts): HostAim {
+  const aim = aimedHost(opts.statePath, opts);
+  if (aim.kind !== "here") throw usageRefusal(hostSideOnlyLine(word, aimName(aim)));
+  return aim;
+}
+
+export async function pairCommand(io: CliIO, opts: PairOpts, args: readonly string[], deps: PairDeps = systemDeps): Promise<number> {
   if (args.length !== 0) throw usageRefusal("wsp pair takes no positional arguments");
+  const aim = aimHere("pair", opts);
   const lock = servingHost(opts.statePath);
   const address = lock?.address ?? LOOPBACK;
-  const client = await deps.dial(opts.statePath);
+  const client = await deps.dial(opts.statePath, { aim });
   try {
     const { code, expiresAt } = await client.request<{ code: string; expiresAt: number }>("pair.issue");
     // A relay is a road in of its own, so a host on loopback alone behind one is reachable and the warning would be wrong.
@@ -88,12 +111,13 @@ export async function pairCommand(io: CliIO, opts: { statePath: string }, args: 
   }
 }
 
-export async function devicesCommand(io: CliIO, opts: { statePath: string }, args: readonly string[], deps: PairDeps = systemDeps): Promise<number> {
+export async function devicesCommand(io: CliIO, opts: PairOpts, args: readonly string[], deps: PairDeps = systemDeps): Promise<number> {
   const [word, id] = args;
   if (word !== undefined && (word !== "revoke" || id === undefined || args.length !== 2)) {
     throw usageRefusal("usage: wsp devices\n       wsp devices revoke <id>");
   }
-  const client = await deps.dial(opts.statePath);
+  const aim = aimHere("devices", opts);
+  const client = await deps.dial(opts.statePath, { aim });
   try {
     if (word === "revoke") {
       const { revoked } = await client.request<{ revoked: boolean }>("devices.revoke", { deviceId: id });

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
+import { once } from "node:events";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { Readable } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ProcSnapshot } from "@wsp/protocol";
 import { OpError } from "../src/workspace-paths.js";
@@ -33,6 +35,35 @@ function sampler(procs: FakeProc[], opts: { ptys?: { id: string; pid: number }[]
     wire.push(e);
   });
   return { s, got, root, clock };
+}
+
+/** Waits for a line a child printed, counting the ones already read; a child that ends first fails the wait by name, so
+ * a kill road that took the child early reads as that and not as a slow machine. */
+function lines(out: Readable): (line: string) => Promise<void> {
+  let text = "";
+  let ended = false;
+  const waiting: (() => void)[] = [];
+  const settle = () => {
+    for (const check of waiting.splice(0)) check();
+  };
+  out.setEncoding("utf8");
+  out.on("data", (chunk: string) => {
+    text += chunk;
+    settle();
+  });
+  out.on("end", () => {
+    ended = true;
+    settle();
+  });
+  return line =>
+    new Promise((arrived, never) => {
+      const check = () => {
+        if (text.includes(`${line}\n`)) arrived();
+        else if (ended) never(new Error(`the child ended without printing ${line}`));
+        else waiting.push(check);
+      };
+      check();
+    });
 }
 
 describe("proc parsing", () => {
@@ -215,6 +246,11 @@ describe("ProcSampler", () => {
 describe("killProcess", () => {
   const protectedPids = { self: 5000, parent: 4000 };
 
+  const children: ChildProcess[] = [];
+  afterEach(() => {
+    for (const c of children.splice(0)) if (c.exitCode === null && c.signalCode === null) c.kill("SIGKILL");
+  });
+
   it("refuses init, the daemon and the daemon's parent with code forbidden", () => {
     for (const pid of [1, 5000, 4000]) {
       let err: unknown;
@@ -241,17 +277,29 @@ describe("killProcess", () => {
 
   it("sends TERM, then KILL, to a child this test started", async () => {
     const child = spawn("sleep", ["30"], { stdio: "ignore" });
+    children.push(child);
     const exited = new Promise<{ code: number | null; signal: string | null }>(resolve => child.once("exit", (code, signal) => resolve({ code, signal })));
-    await new Promise(r => setTimeout(r, 50));
+    await once(child, "spawn");
     killProcess(child.pid!, "TERM", protectedPids);
     expect(await exited).toEqual({ code: null, signal: "SIGTERM" });
 
-    // One process that ignores TERM, so nothing is left behind when KILL takes it.
-    const stubborn = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { stdio: "ignore" });
+    // One process that ignores TERM, so nothing is left behind when KILL takes it. It speaks once its handlers are in
+    // place, again when the TERM lands and again when asked: the case waits for those lines instead of for a delay,
+    // since killProcess sends one signal and returns and there is no grace anywhere in the kill road to read.
+    const script = "process.on('SIGTERM', () => console.log('termed')); process.on('SIGUSR1', () => console.log('alive')); console.log('ready'); setInterval(() => {}, 1000)";
+    const stubborn = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "pipe", "ignore"] });
+    children.push(stubborn);
+    const printed = lines(stubborn.stdout!);
     const stubbornExit = new Promise<string | null>(resolve => stubborn.once("exit", (_code, signal) => resolve(signal)));
-    await new Promise(r => setTimeout(r, 100));
+    await printed("ready");
+    const termed = printed("termed");
     killProcess(stubborn.pid!, "TERM", protectedPids);
-    await new Promise(r => setTimeout(r, 100));
+    await termed;
+    // A process that exited but has not been reaped answers signal 0 too, so the child is also asked to speak again.
+    const alive = printed("alive");
+    expect(() => process.kill(stubborn.pid!, 0)).not.toThrow();
+    process.kill(stubborn.pid!, "SIGUSR1");
+    await alive;
     expect(stubborn.exitCode).toBeNull();
     killProcess(stubborn.pid!, "KILL", protectedPids);
     expect(await stubbornExit).toBe("SIGKILL");
