@@ -2,7 +2,7 @@
 import { chmodSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { OS_READ, UPTIME_READ } from "../src/machine-facts.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 import { SSH_CONTROL_PERSIST_S, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, makeSshControlDir, sshControlDir, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyOf, plainPath, DEFAULT_REMOTE_PATH, sshArgs, sshIdentity, sshMachineId, sshMachineName, sshReachOf, type SshReach, type SshTransport } from "../src/ssh-backend.js";
@@ -265,15 +265,39 @@ describe("what a machine over ssh says it is", () => {
     expect(facts.uptimeMs).toBeLessThan(7_205_000);
   });
 
+  it("says why the rows sit at pending once for a machine, and again only when the machine says something else", async () => {
+    let stderr = "ssh: connect to host 10.0.0.5 port 2222: Connection refused\n";
+    const { machine } = await machineOf(script => (script === SSH_FACTS_SCRIPT ? { exitCode: 255, stderr } : {}));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      // The caller shows pending and swallows the refusal, so a read that fails every 15 seconds would otherwise
+      // say nothing anywhere; it says it here, and not four times an hour.
+      for (let i = 0; i < 3; i++) await machine.facts!().catch(() => {});
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]![0]).toContain("Connection refused");
+      stderr = "ssh: Permission denied (publickey).\n";
+      await machine.facts!().catch(() => {});
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(warn.mock.calls[1]![0]).toContain("Permission denied");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("a machine that did not answer leaves the rows waiting rather than showing this computer's own answers for it", async () => {
-    const { machine } = await machineOf(script =>
-      script === SSH_FACTS_SCRIPT ? { exitCode: 255, stderr: "debug1: Connecting to 10.0.0.5\nssh: connect to host 10.0.0.5 port 2222: Connection refused\n" } : {},
-    );
-    const refused = await machine.facts!().then(() => "", (e: unknown) => (e as Error).message);
-    expect(refused).toContain("Connection refused");
-    expect(refused).not.toContain("debug1:");
-    // A machine that answered the dial but not the lines is the same: no name of this computer's stands in for it.
-    const { machine: quiet } = await machineOf(() => ({ stdout: "\n" }));
-    await expect(quiet.facts!()).rejects.toThrow("did not say what it is over ssh");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { machine } = await machineOf(script =>
+        script === SSH_FACTS_SCRIPT ? { exitCode: 255, stderr: "debug1: Connecting to 10.0.0.5\nssh: connect to host 10.0.0.5 port 2222: Connection refused\n" } : {},
+      );
+      const refused = await machine.facts!().then(() => "", (e: unknown) => (e as Error).message);
+      expect(refused).toContain("Connection refused");
+      expect(refused).not.toContain("debug1:");
+      // A machine that answered the dial but not the lines is the same: no name of this computer's stands in for it.
+      const { machine: quiet } = await machineOf(() => ({ stdout: "\n" }));
+      await expect(quiet.facts!()).rejects.toThrow("did not say what it is over ssh");
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

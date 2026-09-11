@@ -325,6 +325,9 @@ export class SshMachine implements Machine {
   readonly id: string;
   readonly kind = "sandbox" as const;
   readonly streamUrl = undefined;
+  /** The last thing said about this machine failing to say what it is; held so a read that fails every tick is one
+   * line in the log rather than four an hour, and a read that fails for a new reason is heard. */
+  private quiet: string | undefined;
 
   constructor(
     readonly reach: SshReach,
@@ -374,8 +377,14 @@ export class SshMachine implements Machine {
     const uptimeMs = uptimeMsOf(values, Date.now());
     const folder = values["home"];
     if (os === undefined || uptimeMs === undefined || folder === undefined || folder === "") {
-      throw new Error(`${this.reach.user}@${this.reach.host} did not say what it is over ssh (exit ${res.exitCode}): ${(clientWords(res.stderr) || res.stdout.trim()).slice(-300)}`);
+      // The caller shows pending and swallows this, so the reason lands in the host's own log instead: once for
+      // this machine, and again only when what it says changes, since the read runs on every status tick.
+      const why = `${this.reach.user}@${this.reach.host} did not say what it is over ssh (exit ${res.exitCode}): ${(clientWords(res.stderr) || res.stdout.trim()).slice(-300)}`;
+      if (this.quiet !== why) console.warn(why);
+      this.quiet = why;
+      throw new Error(why);
     }
+    this.quiet = undefined;
     return { os, uptimeMs, folder };
   }
 

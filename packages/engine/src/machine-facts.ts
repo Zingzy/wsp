@@ -54,8 +54,9 @@ export function osNameOf(values: Record<string, string>): string | undefined {
 }
 
 /** How long the machine has been up, in ms. Linux says it directly; macOS says when it booted, so the length is
- * read against the clock here, which is close enough for a row that shows days and hours and is the only reading
- * either machine offers. */
+ * worked out against the clock of the computer wsp runs on rather than the machine's own, so a machine whose clock
+ * differs from this one carries that difference into the row. At days and hours it does not show, and the machine
+ * offers no second reading to check it against. */
 export function uptimeMsOf(values: Record<string, string>, now: number): number | undefined {
   const secs = Number(values["uptime"]);
   if (values["uptime"] !== undefined && values["uptime"] !== "" && Number.isFinite(secs)) return Math.round(secs * 1_000);
