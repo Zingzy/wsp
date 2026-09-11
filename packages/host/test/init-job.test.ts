@@ -10,14 +10,14 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
-import { BUILDER_DISK_GB, SMOKE_LABEL, SNAPSHOT_STORAGE, checkProviderKey, type BackendPricing } from "@wsp/engine";
+import { BUILDER_DISK_GB, NoProviderBackend, SMOKE_LABEL, SNAPSHOT_STORAGE, checkProviderKey, type BackendPricing, type MachineBackend } from "@wsp/engine";
 import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initStageCount, keyRefusedLine, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
 import { runLogPath } from "../src/init-log.js";
 import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localWiring, type Keys } from "../src/cli.js";
 import { InitJobs, type InitJobDeps } from "../src/init-job.js";
-import { saveSmallRecipe, smallRecipePath } from "../src/recipe-file.js";
+import { loadRecipe, saveSmallRecipe, smallRecipePath } from "../src/recipe-file.js";
 import { workspaceRoads } from "../src/server.js";
 import type { AgentHere } from "../src/agents-here.js";
 import type { FakePtyLink } from "./fake-pty-link.js";
@@ -100,7 +100,7 @@ interface Fake {
   settled(): Promise<void>;
 }
 
-function fake(over: { env?: Record<string, string>; configured?: boolean; read?: Partial<InitJobDeps["read"]>; now?: () => number; agent?: { adapter: HarnessAdapterFactory; starts: HarnessStartOptions[] }; writesRecipe?: boolean; agents?: AgentHere[]; adapters?: Record<string, HarnessAdapterFactory>; deployDaemon?: () => Promise<string> } = {}): Fake {
+function fake(over: { env?: Record<string, string>; provider?: MachineBackend; configured?: boolean; read?: Partial<InitJobDeps["read"]>; now?: () => number; agent?: { adapter: HarnessAdapterFactory; starts: HarnessStartOptions[] }; writesRecipe?: boolean; agents?: AgentHere[]; adapters?: Record<string, HarnessAdapterFactory>; deployDaemon?: () => Promise<string> } = {}): Fake {
   const dir = mkdtempSync(join(tmpdir(), "wsp-init-job-"));
   dirs.push(dir);
   const home = mkdtempSync(join(tmpdir(), "wsp-init-job-home-"));
@@ -121,7 +121,8 @@ function fake(over: { env?: Record<string, string>; configured?: boolean; read?:
       if (over.writesRecipe !== false) writeFileSync(smallRecipePath(statePath), JSON.stringify(AGENT_RECIPE));
       return `written ${prompt.length}`;
     });
-  const rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, ...over.adapters }, local: localWiring(dir), hostId: "box:h1" });
+  // The provider the runtime forks on: the stub, or one a case hands over to stand for a host set up for none.
+  const rt = createRuntime({ backend: over.provider ?? backend, store, adapters: { claude: claude.adapter, ...over.adapters }, local: localWiring(dir), hostId: "box:h1" });
   runtimes.push(rt);
   let link = scriptedLink({ signedIn: true, hold: false, missing: false });
   const relay: Fake["relay"] = { hooks: [], closed: 0 };
@@ -225,7 +226,7 @@ describe("the init job, manual road", () => {
       keys: { solari: true },
       home: f.home,
       agents: [{ id: "claude", name: "Claude Code", configured: false, takesTools: true }],
-      pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: expect.closeTo(0.11, 5) as unknown as number },
+      pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: expect.closeTo(0.11, 5) as unknown as number, builderDiskGb: BUILDER_DISK_GB },
       job: null,
     });
   });
@@ -961,11 +962,13 @@ describe("the init job, manual road", () => {
     await expect(f.jobs.answer({ screen: "agents", ticks: [] })).rejects.toThrow(/no screens/);
   });
 
-  it("a build with no provider key is refused before anything is read into the recipe", async () => {
-    const f = fake({ env: {} });
+  it("a build on a host whose provider forks nothing is refused before anything is read into the recipe", async () => {
+    // No key saved and no provider wired is what the keys step is for; the reading is the runtime's provider, so a
+    // host forking containers with no key is not caught by it.
+    const f = fake({ env: {}, provider: new NoProviderBackend() });
     await f.jobs.start({ road: "manual" });
     await f.settled();
-    await expect(f.jobs.build({})).rejects.toThrow(/Solari/);
+    await expect(f.jobs.build({})).rejects.toThrow(/forks no machines/);
   });
 
   it("Save puts the key to the provider first: a refused key is not written, nothing is wired, and the refusal carries the provider's own word", async () => {
@@ -1190,5 +1193,83 @@ describe("the init job, agent road", () => {
     expect(f.starts).toHaveLength(2);
     expect(view.thread!.id).not.toBe(f.events[0]!.job.thread!.id);
     expect(phases(f)).toEqual(["agent", "reading", "answering", "cancelled", "agent", "reading", "answering"]);
+  });
+});
+
+describe("the init job, terminal road", () => {
+  it("builds the recipe wsp init wrote beside the state on the host's own runtime, writes no wsp tools, and refuses with no recipe there", async () => {
+    const f = fake();
+    const path = smallRecipePath(f.statePath);
+    await expect(f.jobs.start({ road: "terminal" })).rejects.toThrow(path);
+    expect(f.jobs.view()).toBeNull();
+
+    // What the terminal's own screens answered: the recipe file wsp init saves before it hands the build over.
+    saveSmallRecipe(path, AGENT_RECIPE);
+    const started = await f.jobs.start({ road: "terminal" });
+    expect(started.road).toBe("terminal");
+    await f.settled();
+    const read = f.jobs.view()!;
+    expect(read.phase).toBe("answering");
+    // The file's ticks stand: Codex is on because that recipe says so, not because this computer's rule ticked it.
+    expect(read.screens.find(s => s.id === "agents")!.ticks.sort()).toEqual(["claude", "codex"]);
+
+    await f.jobs.build({ firstWorkspace: "beside" });
+    await f.settled();
+    const done = f.jobs.view()!;
+    expect(done.phase).toBe("done");
+    // The golden and its first workspace are on the runtime this host serves, which is the whole point of the road.
+    expect(goldenHead(await f.rt.golden.get())?.version).toBe(1);
+    expect((await f.rt.workspaces.list()).map(w => w.name)).toEqual(["beside"]);
+    expect(done.golden).toEqual({ version: 1 });
+    // wsp init wrote the tools into the agents its own screen asked about; the build writes into none.
+    expect(f.installed).toEqual([]);
+    expect(phases(f)).toEqual(["reading", "answering", "building", "signing-in", "sealing", "finishing", "done"]);
+  });
+
+  it("keeps the sign-in answers the terminal's own screens wrote into the recipe, and a run taken as yes signs nothing in", async () => {
+    const f = fake();
+    const path = smallRecipePath(f.statePath);
+    // What wsp init --recipe --signin claude=skip leaves beside the state: an answer no screen here will be asked again.
+    saveSmallRecipe(path, { ...RECIPE, rows: RECIPE.rows.map(r => (r.id === "claude" ? { ...r, signIn: "skip" as const } : r)) });
+    await f.jobs.start({ road: "terminal" });
+    await f.settled();
+    const building = await f.jobs.build({});
+    expect(building.rows.filter(r => r.kind === "sign-in").map(r => r.tool)).not.toContain("claude");
+    await f.settled();
+    expect(f.jobs.view()!.phase).toBe("done");
+    // The file still says what the person answered: the build wrote it back as it read it.
+    expect(loadRecipe(path).rows.find(r => r.id === "claude")!.signIn).toBe("skip");
+
+    // --yes at the terminal skips the sign-ins on the machine there; through the door it means the same.
+    const yes = fake();
+    saveSmallRecipe(smallRecipePath(yes.statePath), RECIPE);
+    await yes.jobs.start({ road: "terminal" });
+    await yes.settled();
+    await yes.jobs.build({ yes: true });
+    await yes.settled();
+    const done = yes.jobs.view()!;
+    expect(done.phase).toBe("done");
+    expect(done.rows.filter(r => r.kind === "sign-in").every(r => r.state === INIT_ROW_STATES.skipped)).toBe(true);
+  });
+
+  it("the provider the host wired is what may build, not a key: a host forking containers with no key builds, one with no provider prices nothing and refuses", async () => {
+    // A box whose host forks Docker containers: no provider key anywhere, and the build is still its to run.
+    const keyless = fake({ env: {} });
+    saveSmallRecipe(smallRecipePath(keyless.statePath), RECIPE);
+    expect((await keyless.jobs.get()).keys).toEqual({ solari: false });
+    await keyless.jobs.start({ road: "terminal" });
+    await keyless.settled();
+    await keyless.jobs.build({});
+    await keyless.settled();
+    expect(keyless.jobs.view()!.phase).toBe("done");
+    expect(goldenHead(await keyless.rt.golden.get())?.version).toBe(1);
+
+    const none = fake({ env: {}, provider: new NoProviderBackend() });
+    saveSmallRecipe(smallRecipePath(none.statePath), RECIPE);
+    expect((await none.jobs.get()).pricing).toBeNull();
+    await none.jobs.start({ road: "terminal" });
+    await none.settled();
+    await expect(none.jobs.build({})).rejects.toThrow(/forks no machines/);
+    expect(none.backend.machines).toEqual([]);
   });
 });
