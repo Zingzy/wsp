@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { DockerBackend, NoProviderBackend, SolariBackend } from "@wsp/engine";
 import { goldenRecipe, makeRuntime, optsFor, providerSlotOf, swapProvider } from "../src/cli.js";
-import { PROVIDER_MODULES, providerBackendFor, providerEnvWith, providerModule } from "../src/providers.js";
+import { PROVIDER_MODULES, providerBackendFor, providerEnvNames, providerEnvWith, providerModule, type ProviderModule } from "../src/providers.js";
 
 const pick = (keys: Record<string, string> = {}, env: Record<string, string | undefined> = {}) => ({ keys, env });
 
@@ -62,5 +62,15 @@ describe("provider modules", () => {
     // The words a run picks a provider out of are not the words a typed key is checked under: a person typing a
     // cloud key on a computer that forks containers is asking about the key.
     expect(providerModule({ keys: { solari: "slr_live_fake" }, env: {} }).id).toBe("solari");
+  });
+
+  it("the variables a service carries are the rows' own, so a provider added brings its variable with it", () => {
+    expect(providerEnvNames()).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST"]);
+    // The row a provider is added as: the list follows it, and nothing else has to be remembered for the unit its
+    // host is installed as to be given the variable that selects it.
+    const fly: ProviderModule = { id: "fly", envNames: ["WSP_PROVIDER", "FLY_API_TOKEN"], selects: p => p.env["FLY_API_TOKEN"] !== undefined, build: () => new NoProviderBackend() };
+    expect(providerEnvNames([...PROVIDER_MODULES, fly])).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST", "FLY_API_TOKEN"]);
+    // What a row selects on is what it names: a row reading a variable it never listed would be carried by neither.
+    for (const m of PROVIDER_MODULES) for (const name of m.envNames) expect(providerEnvNames()).toContain(name);
   });
 });
