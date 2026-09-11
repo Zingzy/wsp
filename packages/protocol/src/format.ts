@@ -523,18 +523,9 @@ export function forgetNotice(threads: number): string {
   return `Its record and ${fmtThreads(threads)} leave this computer; the machine is already gone.`;
 }
 
-/** What a delete does to a machine wsp did not fork: nothing. The one phrase, read by the question a client asks
- * before a delete and by the line the command line prints after; each supplies the "its" its own sentence needs. */
+/** What a delete does to a machine wsp did not fork and put nothing on: nothing. The one phrase, read by the kind
+ * table's own words for a delete; each mood supplies the "its" its own sentence needs. */
 export const MACHINE_LEFT = "machine is left as it is";
-
-/** What deleting a workspace takes, the one sentence every client's confirmation shows: a machine wsp forked goes at
- * the provider, a machine that already existed is left as it is, and either way the record and the threads go from
- * here. `driven` is the kind's own word for which of the two it is, named by every caller so a road that forgets it
- * cannot land on the wrong half. */
-export function deleteNotice(threads: number, driven: boolean): string {
-  const machine = driven ? "Its machine is deleted at the provider" : `Its ${MACHINE_LEFT}`;
-  return `${machine}; its record and ${fmtThreads(threads)} leave this computer.`;
-}
 
 /** Text cut to one line: its first non-empty line with the whitespace collapsed, so a multi-paragraph brief is one
  * row in the CLI's table and one line in the sidebar, and a heredoc of a command is one line of a turn's activity. */

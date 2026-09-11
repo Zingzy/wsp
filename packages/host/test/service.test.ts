@@ -6,9 +6,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from "node:os";
 import { parseArgs } from "node:util";
 import { dirname, join } from "node:path";
-import { LOOPBACK } from "@wsp/protocol";
+import { EXIT_CODES, LOOPBACK } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SERVE_FLAGS, SHARED_OPTIONS, claudeKeyOnlyInThisShell, downCommand, keyOnlyInThisShell, optsFor, statusCommand, upServiceCommand, type CliIO, type ServeAsked, type ServiceDeps } from "../src/cli.js";
+import { SERVE_FLAGS, SHARED_OPTIONS, claudeKeyOnlyInThisShell, cli, downCommand, keyOnlyInThisShell, optsFor, statusCommand, upServiceCommand, type CliIO, type ServeAsked, type ServiceDeps } from "../src/cli.js";
 import {
   SERVICE_MANAGERS,
   installService,
@@ -26,6 +26,8 @@ import {
   type ServicePlan,
   type ServiceRunner,
 } from "../src/service.js";
+import { stateIgnoredLine, writeHost } from "../src/hosts.js";
+import type { HostClient } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
@@ -119,6 +121,8 @@ describe("one module per service manager", () => {
   it("a service starts with the PATH the install had, WSP_HOME when it moved the state folder, the provider the shell named, and never a key", () => {
     expect(serviceEnv({ PATH: "/opt/homebrew/bin:/usr/bin", SOLARI_API_KEY: KEY })).toEqual({ PATH: "/opt/homebrew/bin:/usr/bin" });
     expect(serviceEnv({ PATH: "/usr/bin", WSP_HOME: "/Users/z/dev/.wsp" })).toEqual({ PATH: "/usr/bin", WSP_HOME: "/Users/z/dev/.wsp" });
+    // An empty variable names no home, so the unit carries none rather than one the service would read as a folder.
+    expect(serviceEnv({ PATH: "/usr/bin", WSP_HOME: "" })).toEqual({ PATH: "/usr/bin" });
     expect(serviceEnv({}).PATH).toContain("/usr/bin");
     // Every variable a provider is named in travels: the shell that installed the service is gone by the time it runs.
     expect(serviceEnv({ PATH: "/usr/bin", WSP_PROVIDER: "docker", WSP_DOCKER: "1", DOCKER_HOST: "tcp://10.0.0.4:2375" })).toEqual({
@@ -199,6 +203,7 @@ function fakeService(over: Partial<ServiceDeps> = {}): { deps: ServiceDeps; mana
       waitMs: 0,
       keys: { env: process.env, cwd: tmpdir(), home: tmpdir() },
       answers: () => Promise.resolve(true),
+      dial: () => Promise.reject(new Error("this fake service dials nothing")),
       ...over,
     },
     manager,
@@ -366,6 +371,10 @@ describe("wsp up --service, wsp down and wsp status", () => {
     // own layers, and the notes and refusals here are all about which layer holds a key.
     vi.stubEnv("SOLARI_API_KEY", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "");
+    // Where a line is aimed is read off the environment now, so a shell that ran this suite inside a turn on a
+    // machine would otherwise send wsp status to the host that launched it.
+    vi.stubEnv("WSP_HOST", "");
+    vi.stubEnv("WSP_HOST_URL", "");
   });
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -550,6 +559,52 @@ describe("wsp up --service, wsp down and wsp status", () => {
       `state       ${statePath}`,
     ]);
     expect(after[4]).toBe(`service     fake service fake.${serviceTag(statePath)}, loaded (${join(home, "fake-units", `${serviceTag(statePath)}.unit`)})`);
+  });
+
+  it("wsp status takes --host and reports the host it is aimed at, reading neither this computer's lock nor its manager", async () => {
+    const hostsHome = join(home, ".wsp");
+    writeHost(hostsHome, "box", { url: "http://box.example:4400", deviceId: "d_7", deviceToken: "t_7", pairedAt: "2026-09-11T00:00:00.000Z" });
+    // The flag comes off the one shared parse every other flag of a command comes off, so there is no second
+    // reading of --host beside the one the verbs take.
+    expect(parseArgs({ args: ["status", "--host", "box"], options: SHARED_OPTIONS, allowPositionals: true }).values.host).toBe("box");
+    const aimed = { statePath, host: "box", home: hostsHome, env: {} };
+    const named = { ...aimed, state: statePath };
+
+    let closed = 0;
+    const answering = svc({ dial: () => Promise.resolve({ close: () => void closed++ } as unknown as HostClient) });
+    const up: string[] = [];
+    expect(await statusCommand(quietIO(up), aimed, answering.deps)).toBe(0);
+    expect(up).toEqual([
+      "host        box answering",
+      "app         http://box.example:4400",
+      "service     what keeps it up is that computer's own; run wsp status in a terminal there",
+    ]);
+    expect(closed).toBe(1);
+    // The host on this computer is not what the line asked about: its lock is not read and its manager is not asked.
+    expect(answering.ran).toEqual([]);
+    // A line that named a file here and a host over there gets the note every verb leaves, and neither is read
+    // from the other.
+    const noted: string[] = [];
+    expect(await statusCommand(quietIO([], noted), named, answering.deps)).toBe(0);
+    expect(noted).toEqual([stateIgnoredLine("box")]);
+
+    const gone = svc({ dial: () => Promise.reject(Object.assign(new Error("the host at http://box.example:4400 did not answer: getaddrinfo ENOTFOUND box.example"), { kind: "unreachable" })) });
+    const down: string[] = [];
+    expect(await statusCommand(quietIO(down), aimed, gone.deps)).toBe(1);
+    expect(down[0]).toBe("host        box did not answer");
+    expect(down[2]).toBe("            the host at http://box.example:4400 did not answer: getaddrinfo ENOTFOUND box.example");
+    expect(gone.ran).toEqual([]);
+
+    // A road that carried nothing is a status; anything the host itself said is this line's own failure, with the
+    // exit code its class owns rather than a row saying the host is down.
+    const refused = svc({ dial: () => Promise.reject(Object.assign(new Error("the host box refused this computer's token"), { kind: "auth" })) });
+    await expect(statusCommand(quietIO(), aimed, refused.deps)).rejects.toThrow("refused this computer's token");
+  });
+
+  it("a command that runs on this computer refuses --host rather than taking it and aiming nowhere", async () => {
+    const errors: string[] = [];
+    expect(await cli(["up", "--host", "box"], quietIO([], errors))).toBe(EXIT_CODES.usage);
+    expect(errors).toEqual(["Unknown option '--host' for wsp up: it runs on this computer. wsp status reads it, and so does every verb."]);
   });
 
   it("wsp down stops a service the manager still holds after the unit file went, rather than refusing with the one thing that could stop it gone", async () => {

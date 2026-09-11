@@ -10,7 +10,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { WS_PATH, hostFromEnv, isLoopback, isUrl, servedHostname, usageRefusal, type HostRoad } from "@wsp/protocol";
 import { servingHost } from "./host-lock.js";
-import { defaultHomeIn } from "./serving-home.js";
+import { defaultHomeIn, homeNamed } from "./serving-home.js";
 
 /** The address predicate has one home in the protocol; the command line's callers read it from here. */
 export { isUrl };
@@ -51,9 +51,10 @@ export interface HostEntry {
 export const DEFAULT_HOME = defaultHomeIn(homedir());
 
 /** The folder wsp keeps its state, its keys and its hosts in. One reading, since the command line, the verbs and the
- * tool server all have to name the same folder. */
+ * tool server all have to name the same folder, and the variable itself is read where every other road reads it,
+ * so `WSP_HOME=` with nothing after it is a home nobody named rather than the folder the run happens to sit in. */
 export function wspHome(env: Readonly<Record<string, string | undefined>> = process.env): string {
-  return env["WSP_HOME"] ?? DEFAULT_HOME;
+  return homeNamed(env["WSP_HOME"]) ?? DEFAULT_HOME;
 }
 
 export function hostsDir(home: string): string {
@@ -285,4 +286,10 @@ function aimAt(named: string, home: string, env: Readonly<Record<string, string 
 /** How a host is named in a line the person reads: the alias where there is one, the address otherwise. */
 export function aimName(aim: HostAim): string {
   return aim.kind === "alias" ? aim.alias : aim.kind === "url" ? aim.url : "this computer";
+}
+
+/** Where a host on another computer answers, for the lines that print the address beside the name. The aim for
+ * this computer carries none: its address is the one its own lock records, which those lines read there. */
+export function aimAddress(aim: Exclude<HostAim, { kind: "here" }>): string {
+  return aim.kind === "alias" ? aim.record.url : aim.url;
 }

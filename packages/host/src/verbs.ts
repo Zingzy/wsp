@@ -88,10 +88,10 @@ import {
   imageTypeOf,
   imagesRefusal,
   importConsented,
-  MACHINE_LEFT,
   importRequest,
   fmtSize,
   kindWords,
+  type MachineOnDelete,
   machineWord,
   needsRebuild,
   noAdapterLine,
@@ -694,9 +694,9 @@ export function renameLine(renamed: Renamed): string {
   return `thread ${renamed.threadId} ${words[renamed.outcome]}`;
 }
 
-/** Whether wsp forked this workspace's machine and can take it away again, or it is a machine that already existed
- * and is only recorded here. Every line about what a delete takes reads it. */
-const driven = (workspace: WorkspaceView): boolean => kindWords(workspaceKind(workspace)).driven;
+/** What a delete does to this workspace's machine, in its kind's own words: both lines about what a delete takes
+ * read the one entry, so neither can say the other kind's sentence. */
+const onDelete = (workspace: WorkspaceView): MachineOnDelete => kindWords(workspaceKind(workspace)).onDelete;
 
 /** What dropping a workspace takes off this computer, counted before anyone is asked: its record and its threads. */
 export interface Dropping {
@@ -725,7 +725,7 @@ export function forgotLine(f: Dropping): string {
 
 /** The one confirmation a delete asks, in the words every client shows: what a forget takes, and the machine too. */
 export function deleteQuestion(d: Dropping): string {
-  return `Delete ${d.workspace.name}?\n${deleteNotice(d.threads, driven(d.workspace))}`;
+  return `Delete ${d.workspace.name}?\n${deleteNotice(d.threads, workspaceKind(d.workspace))}`;
 }
 
 /** Kills the workspace's machine at the provider, then drops its record here; a machine already gone is no error. */
@@ -734,8 +734,7 @@ export async function deleteWorkspace(client: HostClient, d: Dropping): Promise<
 }
 
 export function deletedLine(d: Dropping): string {
-  const machine = driven(d.workspace) ? `machine ${d.workspace.machineId} is gone at the provider` : `its ${MACHINE_LEFT}`;
-  return `deleted ${d.workspace.name} ${d.workspace.id}: ${machine}, and its record and ${fmtThreads(d.threads)} are gone from this computer`;
+  return `deleted ${d.workspace.name} ${d.workspace.id}: ${onDelete(d.workspace).done(d.workspace.machineId)}, and its record and ${fmtThreads(d.threads)} are gone from this computer`;
 }
 
 /** The most characters a folder cell holds before its front is cut: the end of a path is what a person recognises. */
@@ -2287,7 +2286,7 @@ export const VERBS: readonly Verb[] = [
         // The command line asks a person before this and the app will; over MCP the second call is that step, so a
         // machine is never killed by one tool call the caller made on its own.
         if (confirm !== true) {
-          return { ...asText(`${d.workspace.name} kept. ${deleteNotice(d.threads, driven(d.workspace))} Ask the person, then call delete again with confirm true.`, going), isError: true };
+          return { ...asText(`${d.workspace.name} kept. ${deleteNotice(d.threads, workspaceKind(d.workspace))} Ask the person, then call delete again with confirm true.`, going), isError: true };
         }
         await deleteWorkspace(client, d);
         return asText(deletedLine(d), going);
