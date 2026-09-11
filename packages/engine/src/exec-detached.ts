@@ -24,6 +24,10 @@ export const GUEST_TMP = "/tmp";
  * names its own under their home, since a folder every account on it shares is one another account could sit in
  * first; both roads read one rule rather than each spelling a path. */
 export const RUN_DIR = `${GUEST_TMP}/wsp-run`;
+/** Where a backend that cannot hand a machine its environment at create writes it for the daemon's unit alone to
+ * read, one KEY="value" line each, under /etc so it travels with the disk. The daemon's unit names it as an
+ * EnvironmentFile it may lack; nothing else on the machine reads it. */
+export const DAEMON_ENV_FILE = "/etc/wsp/daemon.env";
 /** Room left under the cap for what a backend wraps around the command on the wire: its JSON keys, its exec env line,
  * one escape byte per newline. */
 const EXEC_ENVELOPE_BYTES = 512;

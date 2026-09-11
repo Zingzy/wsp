@@ -84,7 +84,7 @@ import { VERSION } from "./version.js";
 
 /** The computer every screen and every reader here is told it is on; the one reading, so a run, its hand-off and
  * the init job a host serves never disagree about which of the two this is. */
-const hostPlatform = (): Platform => (platform() === "darwin" ? "darwin" : "linux");
+export const hostPlatform = (): Platform => (platform() === "darwin" ? "darwin" : "linux");
 
 /** One line per exit class, the code first, wrapped to the help's width. */
 const exitCodeHelp = (): string => ExitClass.options.map(cls => wrap(`  ${EXIT_CODES[cls]} ${cls.padEnd(8)}  ${EXIT_WORDS[cls]}`, 80, " ".repeat(14)).join("\n")).join("\n");
@@ -235,8 +235,10 @@ options:
                      the only workspace there is
   --provider NAME    up, init: which machine provider this computer forks on.
                      docker forks containers on a Docker daemon, yours or one
-                     on a box; without this a saved Solari key takes the cloud
-                     and no key leaves this computer as the only workspace
+                     on a box; box forks Box by ASCII machines with BOX_API_KEY
+                     in the environment; without this a saved Solari key takes
+                     the cloud and no key leaves this computer as the only
+                     workspace
   --docker-host URL  up, init: the Docker daemon to dial, as DOCKER_HOST words
                      it (unix:///var/run/docker.sock, ssh://you@box); this
                      computer's own socket without it

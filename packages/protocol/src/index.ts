@@ -2208,6 +2208,8 @@ const DAEMON_CONTENTS = [
   "da0d618fd27965a77c8c15e389fea39c8f3ae691326af0212a8f1c62b9c8499f",
   "cbfe733de05765b706c3ff4d08aa62ee188258771dd3b02011633716fad62a48",
   "12eac7cd2f4b90f9064279a1ea3b3169d24e34c30279f5c19d046252e2d5ec66",
+  "877eda4200afad3842bedad0e49d6efc942ef1ef3ea7181af22f9e726d72b669",
+  "206d96d53b9734c3dce0e84bf11d5455e210b2419b6c9572748ebf69861afca5",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -2227,7 +2229,12 @@ const DAEMON_CONTENTS = [
  * find there. Version 11 serves a machine reached over ssh, which reads the load and the processes of the machine
  * it runs on the way a fork does; the same daemon under the person's own login there, with every path it keeps
  * under their home. Version 12 asks the prefix it would compile against for the headers themselves, so a machine
- * where an installer symlinked a foreign node into that prefix builds node-pty instead of failing on it. */
+ * where an installer symlinked a foreign node into that prefix builds node-pty instead of failing on it. Version
+ * 13 asks those headers which major they are and compiles against them only when the node that will load the
+ * result agrees, so an older Node's headers left in the prefix send node-gyp after the right ones instead of
+ * building against the API another Node declared. Version 14 reads the environment a provider could not hand a
+ * fork at create off a file under /etc the unit may lack, so a backend that lands it there hands the daemon its
+ * keys without touching anything else on the machine. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the daemon's sources, the dependency
