@@ -1,5 +1,5 @@
 import type { Machine, MachineSpec, PreviewReach } from "./machine.js";
-import { isMissing } from "./errors.js";
+import { isMissing, NotFirstLifeError } from "./errors.js";
 import { DAEMON_PORT, refreshPreviewToken } from "./preview.js";
 
 export interface WorkspaceHooks {
@@ -36,21 +36,9 @@ export interface WakeResult {
 /** Resume, check, and one more resume+check before a machine is given up on. */
 const WAKE_ATTEMPTS = 2;
 
-/** Thrown when a snapshot is asked of a machine that has been resumed. Typed so
- * callers (the wizard) can tell "start over" from an ordinary failure. */
-export class NotFirstLifeError extends Error {
-  readonly kind = "notFirstLife" as const;
-  constructor(
-    readonly machineId: string,
-    action: string,
-  ) {
-    super(`${action} refused: machine ${machineId} is not first-life (it was resumed); snapshots only come from fresh machines`);
-    this.name = "NotFirstLifeError";
-  }
-}
-
 /** The snapshot-fresh rule as one check: every snapshot in the engine goes through it. */
-export function assertFirstLife(machineId: string, firstLife: boolean, action: string): void {
+export function assertFirstLife
+(machineId: string, firstLife: boolean, action: string): void {
   if (!firstLife) throw new NotFirstLifeError(machineId, action);
 }
 

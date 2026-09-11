@@ -7,7 +7,7 @@ import { BUILDER_IDLE_MS, MachineAliveError, SnapshotFailedError, applyDelta, ap
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { CURL_NET, GOLDEN_SETUP, MCP_SERVERS_JSON, NODE_RELEASES, ROAD_STEPS, nodeInstallScript } from "@wsp/catalog";
 import { shellQuote, type RecipeDigest } from "@wsp/protocol";
-import { NotFirstLifeError } from "../src/lifecycle.js";
+import { NotFirstLifeError } from "../src/errors.js";
 import { AGENT_INSTALLERS, HOMEBREW, NODE_PATH_LINE, type ToolInstall } from "../src/golden-import.js";
 import { INLINE_EXEC_MS } from "../src/exec-detached.js";
 import { USED_KB_CMD } from "../src/golden-tools.js";

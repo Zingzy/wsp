@@ -7,7 +7,10 @@ import {
   BUILDER_IDLE_MS,
   DAEMON_PORT,
   INLINE_EXEC_MS,
+  MoveUnansweredError,
   NotFirstLifeError,
+  ResumeUnansweredError,
+
   SnapshotFailedError,
   BUILDER_LABEL,
   CREATED_AT_LABEL,
@@ -891,13 +894,6 @@ const VAULTS = "vaults";
  * two apart. */
 class DeadlineError extends Error {}
 
-/** What settleMove ends with when the provider never answered the move (a missed deadline, a call the network
- * dropped), carrying the last such failure as its cause; a refusal the provider answered with is rethrown as itself. */
-class MoveUnansweredError extends Error {}
-
-/** What a resume ends with when the provider never took the call inside its cap and the machine is still paused:
- * the one failure the host answers by asking again on its own rather than by handing the row back to the person. */
-class ResumeUnansweredError extends MoveUnansweredError {}
 
 /** Rejects once the deadline passes; the underlying promise is left to settle on its own. The deadline is read on
  * the clock given, so a move budget measured on an injected clock times out on that clock. */
