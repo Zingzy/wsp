@@ -396,7 +396,6 @@ export interface SshBackendOptions {
 export class SshBackend implements MachineBackend {
   readonly capabilities: Capabilities = {
     liveCloneForks: false,
-    ramPreservingPause: false,
     resize: false,
     previewUrls: false,
     signedUrls: false,
@@ -404,7 +403,6 @@ export class SshBackend implements MachineBackend {
     callbackRelay: false,
     snapshotListing: false,
     templates: false,
-    firstLifeSnapshots: false,
     sizes: [],
     // The machine is the person's own: nothing on it was made by wsp and nothing on it is thrown away, so a turn's
     // access starts at what its harness asks for rather than at skip-everything.

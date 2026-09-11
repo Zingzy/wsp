@@ -30,14 +30,12 @@ describe("ssh backend", () => {
     const backend = new SshBackend();
     expect(backend.capabilities).toEqual({
       liveCloneForks: false,
-      ramPreservingPause: false,
       resize: false,
       previewUrls: false,
       signedUrls: false,
       containers: false,
       callbackRelay: false,
       snapshotListing: false,
-      firstLifeSnapshots: false,
       templates: false,
       kept: true,
       sizes: [],
@@ -214,7 +212,7 @@ describe("ssh backend", () => {
     const backend = new SshBackend({ transport });
     // Read as the runtime holds it, through the seam, so a refusal is proven on the interface every road calls.
     const machine: Machine = (await backend.adopt(REACH)).machine;
-    await expect(machine.snapshot("x")).rejects.toThrow("cannot be snapshotted");
+    await expect(machine.snapshot("x", { firstLife: true })).rejects.toThrow("cannot be snapshotted");
     await expect(machine.pause()).rejects.toThrow("cannot be paused");
     await expect(machine.resume()).rejects.toThrow("cannot be resumed");
     expect(machine.previewUrl).toBeUndefined();

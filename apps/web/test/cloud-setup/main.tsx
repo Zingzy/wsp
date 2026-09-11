@@ -15,6 +15,7 @@ import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS } from "./keyRefusedJob";
 import { useStore } from "../../src/protocol/store";
 import { CloudSetupDialog } from "../../src/sidebar/CloudSetupDialog";
 import "../../src/index.css";
+import { caps } from "../caps.js";
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.classList.toggle("dark", params.get("theme") !== "light");
@@ -262,7 +263,7 @@ const api: Api = {
   upgrade: async () => {
     throw new Error("none");
   },
-  capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: true, kept: false, sizes: [] }),
+  capabilities: async () => (caps({ resize: false, containers: false, templates: true })),
   daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
   portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
   startSession: async () => ({ id: "s1", workspaceId: "ws", harness: "claude", status: "running" }),

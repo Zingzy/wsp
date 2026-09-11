@@ -15,11 +15,10 @@ import { PRELUDE } from "./dotfiles-presets.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { MIB, closing, freeBytes, freeNote, guardDeadlineMs, guarded, installTools, plural, reasonOf, sweepCaches, usedBytes, withRecordedPins, type ToolResult } from "./golden-tools.js";
 import { installBase } from "./golden-base.js";
-import { assertFirstLife } from "./lifecycle.js";
 import { applyMcp, mcpTally, type McpPlan, type McpResult } from "./golden-mcp.js";
 import { BROWSER_SHIM_PATH, applyMachineContext, type ContextResult } from "./machine-context.js";
 import type { Machine, MachineBackend, MachineKind, MachineState, TemplateRow } from "./machine.js";
-import { isMissing } from "./errors.js";
+import { isMissing, NotFirstLifeError } from "./errors.js";
 import { BUILDER_LABEL, CREATED_AT_LABEL, SMOKE_LABEL } from "./labels.js";
 import { goldenName } from "./snapshot-names.js";
 import { recipeOwnedFiles } from "./recipe-owned.js";
@@ -820,9 +819,6 @@ const isCapRefusal = (e: unknown): boolean => (e as { kind?: unknown }).kind ===
 // the smoke fork boots, so the seal itself never holds more than one machine.
 export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Promise<SealResult> {
   const { stage, current } = staged(opts.onStage);
-  // Only where the provider refuses a snapshot of a machine that was resumed; a commit of a container's disk is
-  // the same copy whatever the machine has done, so the rule is read off the backend rather than kept for all.
-  if (opts.backend.capabilities.firstLifeSnapshots) assertFirstLife(builder.machine.id, builder.firstLife, "seal");
   const smoke = builder.import?.smoke ?? opts.smoke;
 
   const prior = opts.manifest?.versions ?? [];
@@ -852,7 +848,7 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
   const takeSnapshot = async (): Promise<string> => {
     for (let attempt = 1; ; attempt++) {
       try {
-        return await builder.machine.snapshot(name);
+        return await builder.machine.snapshot(name, { firstLife: builder.firstLife });
       } catch (e) {
         if (!isSnapshotRefusal(e)) throw e;
         const answer = answerOf(e);
@@ -937,8 +933,9 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
       if (at !== undefined) stage(at, machineLeftLine(messageOf(k)));
       left.push(machine.id);
     };
-    // A refused snapshot changed nothing on the builder: it is left as the person set it up, for the next attach.
-    if (builderAlive && !(e instanceof MachineAliveError) && !(e instanceof SnapshotFailedError)) await kill(builder.machine).catch(leaked(builder.machine));
+    // A refused snapshot changed nothing on the builder, whether the provider refused it or the backend refused a
+    // resumed machine: it is left as the person set it up, and whoever holds the record decides what becomes of it.
+    if (builderAlive && !(e instanceof MachineAliveError) && !(e instanceof SnapshotFailedError) && !(e instanceof NotFirstLifeError)) await kill(builder.machine).catch(leaked(builder.machine));
     if (fork) await kill(fork).catch(leaked(fork));
     // A template that read ready and then lost its smoke goes first: the provider refuses to delete a snapshot while
     // a template stands on it.

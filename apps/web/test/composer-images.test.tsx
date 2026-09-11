@@ -14,6 +14,7 @@ import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { useComposerImagesStore } from "../src/components/chat/composerImages.js";
 import { CHAT_WS } from "./fixtures/chat-stream.js";
+import { caps } from "./caps.js";
 
 let restoreLayout: () => void = () => {};
 const urls: string[] = [];
@@ -75,7 +76,7 @@ function fixtureApi(history: Record<string, SessionEvent[]> = {}, statuses: Work
     nap: async id => workspaces.find(w => w.id === id)!,
     wake: async id => workspaces.find(w => w.id === id)!,
     upgrade: async id => workspaces.find(w => w.id === id)!,
-    capabilities: async () => ({ liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: false, kept: false, sizes: [] }),
+    capabilities: async () => (caps()),
     listSessions: async () => [],
     watchStatuses: async () => statuses,
     createFromGoldenHead: async () => workspaces[0]!,

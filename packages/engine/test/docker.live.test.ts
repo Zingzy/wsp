@@ -73,7 +73,7 @@ describe.runIf(LIVE)("Docker machines, live", () => {
       const shape = await machine.describe!();
       expect(shape).toMatchObject({ cpu: 1, memMb: MEM_MB });
 
-      const snapshotId = await machine.snapshot(`wsp-live543-${Date.now()}`);
+      const snapshotId = await machine.snapshot(`wsp-live543-${Date.now()}`, { firstLife: true });
       made.images.push(snapshotId);
       expect(snapshotId).toMatch(/^sha256:/);
       const listed = (await backend.listSnapshots()).find(s => s.id === snapshotId);

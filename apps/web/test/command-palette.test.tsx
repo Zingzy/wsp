@@ -19,6 +19,7 @@ import { stepInOrder } from "../src/shell/shellCommands.js";
 import { onComposerFocusRequest, onNewThreadRequest } from "../src/shell/shellRequests.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { provideTerminals, WorkspaceTerminals } from "../src/terminal/link.js";
+import { caps } from "./caps.js";
 
 // The triggers keep their elements, and no popup mounts: this file focuses the
 // sidebar's search row, and Base UI's positioning against jsdom's zero-size
@@ -50,7 +51,7 @@ const session = (id: string, workspaceId: string, prompt: string, over: Partial<
   ...over,
 });
 
-const CAPS = { liveCloneForks: true, ramPreservingPause: true, resize: true, previewUrls: true, signedUrls: true, containers: true, callbackRelay: true, snapshotListing: true, firstLifeSnapshots: true, templates: false, kept: false, sizes: [] };
+const CAPS = caps();
 
 function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]): Api & { nap: ReturnType<typeof vi.fn> } {
   return {

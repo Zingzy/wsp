@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { RESUME_CAP_MS } from "@wsp/protocol";
-import { isCapped, isMissing } from "../src/errors.js";
-import { REQUEST_ID_HEADER, SOLARI_PRICING, SolariBackend } from "../src/solari-backend.js";
+import { RESUME_UNANSWERED } from "@wsp/protocol";
+import { isCapped, isMissing, MoveUnansweredError, NotFirstLifeError, ResumeUnansweredError } from "../src/errors.js";
+import { IDLE_TIMEOUT_MAX_MS, PREVIEW_TTL_MS, previewTokenExpiry, REQUEST_ID_HEADER, RESUME_CAP_MS, SOLARI_LIFECYCLE, SOLARI_PRICING, SolariBackend } from "../src/solari-backend.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { EXEC_ENV } from "../src/golden-import.js";
 
@@ -18,14 +18,13 @@ describe("SolariBackend", () => {
     const b = new SolariBackend({ apiKey: "k", fetch: fakeFetch({}) });
     expect(b.capabilities).toEqual({
       liveCloneForks: true,
-      ramPreservingPause: true,
+      pauseMode: "memory",
       resize: false,
       previewUrls: true,
       signedUrls: true,
       containers: false,
       callbackRelay: true,
       snapshotListing: true,
-      firstLifeSnapshots: true,
       templates: true,
       // A fork wsp made and can rebuild: nothing on it is the person's, so a turn runs without asking.
       kept: false,
@@ -41,6 +40,28 @@ describe("SolariBackend", () => {
     // pricing rather than off a constant of its own, and the reason the estimate has a room to be over at all.
     expect(b.pricing.builderDiskGb).toBe(20);
     expect(SOLARI_PRICING.builderDiskGb).toBe(BUILDER_DISK_GB);
+  });
+
+  it("declares its lifecycle: two wake attempts, half a minute for the daemon, half an hour of asking once a minute, and a resume cap of half a minute", () => {
+    const b = new SolariBackend({ apiKey: "k", fetch: fakeFetch({}) });
+    expect(b.lifecycle).toBe(SOLARI_LIFECYCLE);
+    expect(SOLARI_LIFECYCLE.budgets).toEqual({ wakeAttempts: 2, daemonAnswersMs: 30_000, resumeAsks: { everyMs: 60_000, forMs: 30 * 60_000 } });
+    expect(RESUME_CAP_MS).toBe(30_000);
+    expect(b.capabilities.pauseMode).toBe("memory");
+    // One object for every backend built here: a test that shrank a budget on it would shrink it for every file after.
+    expect(Object.isFrozen(SOLARI_LIFECYCLE)).toBe(true);
+    expect(Object.isFrozen(SOLARI_LIFECYCLE.budgets)).toBe(true);
+    expect(Object.isFrozen(SOLARI_LIFECYCLE.budgets.resumeAsks)).toBe(true);
+  });
+
+  it("idleTimeoutMs above six hours is sent as six hours, the longest the create API has taken", async () => {
+    const f = fakeFetch({ "POST /sandboxes": { status: 201, body: { sandboxId: "s1", kind: "sandbox" } } });
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    await b.create({ kind: "sandbox", onIdle: "pause", idleTimeoutMs: 12 * 60 * 60_000 });
+    expect(JSON.parse(String(f.mock.calls[0]![1]!.body))).toMatchObject({ timeoutMs: IDLE_TIMEOUT_MAX_MS });
+    await b.create({ kind: "sandbox", onIdle: "pause", idleTimeoutMs: 40 * 60_000 });
+    expect(JSON.parse(String(f.mock.calls[1]![1]!.body))).toMatchObject({ timeoutMs: 40 * 60_000 });
+    expect(IDLE_TIMEOUT_MAX_MS).toBe(6 * 60 * 60_000);
   });
 
   it("lists every snapshot on the account with the size the provider bills and the name wsp's owner mark rides on", async () => {
@@ -183,7 +204,26 @@ describe("SolariBackend", () => {
     });
     const b = new SolariBackend({ apiKey: "k", fetch: f });
     const m = await b.create({ kind: "sandbox", template: "base" });
-    await expect(m.snapshot("g")).rejects.toMatchObject({ kind: "snapshotUnavailable", status: 502, requestId: "req_42" });
+    await expect(m.snapshot("g", { firstLife: true })).rejects.toMatchObject({ kind: "snapshotUnavailable", status: 502, requestId: "req_42" });
+  });
+
+  it("a snapshot of a machine whose life is not first is refused as notFirstLife before any call, and a first-life one posts", async () => {
+    const f = fakeFetch({
+      "GET /sandboxes/x": { status: 200, body: { sandboxId: "x", kind: "sandbox", state: "running" } },
+      "POST /sandboxes/x/snapshots": { status: 200, body: { snapshotId: "snap_1" } },
+    });
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    const m = await b.get("x");
+    const sent = f.mock.calls.length;
+    const err = await m.snapshot("v2", { firstLife: false }).catch(e => e as unknown);
+    expect(err).toBeInstanceOf(NotFirstLifeError);
+    expect((err as NotFirstLifeError).kind).toBe("notFirstLife");
+    expect((err as NotFirstLifeError).machineId).toBe("x");
+    expect((err as NotFirstLifeError).message).toMatch(/^snapshot v2 refused: machine x is not first-life/);
+    // The provider answers this with a 502 (measured), so the refusal is made here and nothing is sent.
+    expect(f.mock.calls.length).toBe(sent);
+    expect(await m.snapshot("v2", { firstLife: true })).toBe("snap_1");
+    expect(f.mock.calls.length).toBe(sent + 1);
   });
 
   it("surfaces snapshotUnavailable without retrying", async () => {
@@ -194,8 +234,52 @@ describe("SolariBackend", () => {
     });
     const b = new SolariBackend({ apiKey: "k", fetch: f });
     const m = await b.create({ kind: "sandbox" });
-    await expect(m.snapshot("g")).rejects.toMatchObject({ kind: "snapshotUnavailable" });
+    await expect(m.snapshot("g", { firstLife: true })).rejects.toMatchObject({ kind: "snapshotUnavailable" });
     expect(f.mock.calls.filter(c => String(c[0]).includes("/snapshots")).length).toBe(1);
+  });
+});
+
+// Token in the measured Solari shape: base64url(JSON claims) + "." + signature. Not a 3-part JWT, the sandboxId
+// claim embeds literal dots, and exp is epoch milliseconds.
+function mintToken(exp: number): string {
+  const claims = {
+    sandboxId: "desktop-pool-i-0fd9ed7dc03a79db2:vm_001130:cmthqj8lg.TIblxI9qSig",
+    port: 7070,
+    orgId: "cmthqj8lg00sso001svwbxyxb",
+    exp,
+  };
+  return Buffer.from(JSON.stringify(claims)).toString("base64url") + ".WO_khRk6fakeSignature";
+}
+
+describe("previewTokenExpiry", () => {
+  it("reads the ms exp claim from the real token shape", () => {
+    const exp = Date.now() + 60 * 60_000;
+    expect(previewTokenExpiry(mintToken(exp))).toBe(exp);
+  });
+
+  it("falls back to the measured 60-min TTL when the token is opaque", () => {
+    const now = Date.now();
+    expect(previewTokenExpiry("not-a-token-at-all", now)).toBe(now + PREVIEW_TTL_MS);
+    expect(PREVIEW_TTL_MS).toBe(60 * 60_000);
+  });
+});
+
+describe("SolariMachine.previewUrl", () => {
+  it("mints via GET /sandboxes/:id/ports/:port and derives expiresAt from the token", async () => {
+    const id = "pool:vm_1:org.SIG"; // ids contain : and . and must be encoded
+    const exp = Date.now() + 60 * 60_000;
+    const token = mintToken(exp);
+    const url = `https://3fe6a8b705a72d14c7cc-7070.preview.getsolari.com?pt_token=${token}`;
+    const f = vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/sandboxes") return new Response(JSON.stringify({ sandboxId: id, kind: "sandbox" }), { status: 201 });
+      if (path === `/sandboxes/${encodeURIComponent(id)}/ports/7070`) return new Response(JSON.stringify({ url, token }), { status: 200 });
+      return new Response(JSON.stringify({ error: `no route ${path}` }), { status: 404 });
+    });
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    const m = await b.create({ kind: "sandbox" });
+    if (!m.previewUrl) throw new Error("SolariMachine must support previewUrl");
+    expect(await m.previewUrl(7070)).toEqual({ url, token, expiresAt: exp });
   });
 });
 
@@ -451,7 +535,7 @@ describe("SolariBackend road retries", () => {
     try {
       const b = new SolariBackend({ apiKey: "k", fetch: f, clock });
       const m = await b.create({ kind: "sandbox", template: "base" });
-      expect(await m.snapshot("g")).toBe("snap_1");
+      expect(await m.snapshot("g", { firstLife: true })).toBe("snap_1");
       await m.pause();
       expect(await m.state()).toBe("running");
       expect(await b.promoteSnapshot("snap_1", "wsp-default-v1")).toBe("tpl_1");
@@ -464,18 +548,181 @@ describe("SolariBackend road retries", () => {
   });
 });
 
+// The backend settles its own pause and resume: a call the provider does not answer inside its share of the budget,
+// or that the network dropped, is followed by one bounded read of the machine, and the runtime only ever sees the
+// machine moved or one of the two typed failures with the row's words.
+describe("a pause and a resume the provider does not answer", () => {
+  type Play = Response | Error | "hangs";
+  /** A fetch scripted per route: a Response, an error to throw, or "hangs", which holds the call until the signal on
+   * it fires and then rejects with the signal's reason, as a socket under AbortSignal.timeout does. A list plays its
+   * entries in order and repeats the last. */
+  function scripted(script: Record<string, Play | Play[]>) {
+    const calls: string[] = [];
+    const f = vi.fn(async (url: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const key = `${init?.method ?? "GET"} ${new URL(String(url)).pathname}`;
+      calls.push(key);
+      const plays = script[key];
+      const play = Array.isArray(plays) ? (plays.length > 1 ? plays.shift()! : plays[0]!) : plays;
+      if (play === undefined) return new Response(JSON.stringify({ error: `no route ${key}` }), { status: 404 });
+      if (play instanceof Error) throw play;
+      if (play === "hangs") return new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason as Error), { once: true }));
+      return play.clone();
+    });
+    return { f, calls, sent: (key: string) => calls.filter(c => c === key).length };
+  }
+  const reads = (state: string) => new Response(JSON.stringify({ sandboxId: "x", kind: "sandbox", state }), { status: 200 });
+  const ok = () => new Response("{}", { status: 200 });
+  const noRoad = () => new TypeError("fetch failed");
+  const BUDGETS = { pauseMs: 40, resumeCapMs: 20, stateReadMs: 20 };
+  const PAUSE = "POST /sandboxes/x/pause";
+  const RESUME = "POST /sandboxes/x/resume";
+  const STATE = "GET /sandboxes/x";
+  /** A machine handle off a create, so the first read the test sees is the move's own. */
+  async function machine(f: typeof globalThis.fetch) {
+    const b = new SolariBackend({ apiKey: "k", fetch: f, budgets: BUDGETS });
+    return b.create({ kind: "sandbox" });
+  }
+  const created = () => new Response(JSON.stringify({ sandboxId: "x", kind: "sandbox" }), { status: 201 });
+  const quiet = () => vi.spyOn(console, "warn").mockImplementation(() => {});
+
+  it("a pause the provider never finishes is sent twice, half the budget then the rest, and ends unanswered with the row's words and what the provider reads", async () => {
+    const { f, sent } = scripted({ "POST /sandboxes": created(), [PAUSE]: "hangs", [STATE]: reads("running") });
+    const m = await machine(f);
+    const warn = quiet();
+    const started = Date.now();
+    try {
+      const err = await m.pause().catch(e => e as unknown);
+      expect(err).toBeInstanceOf(MoveUnansweredError);
+      expect((err as Error).message).toMatch(/^pause did not complete in \d+ms; the provider did not answer and reads the machine running; try again$/);
+      expect(isCapped((err as Error).cause)).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+    expect(Date.now() - started).toBeGreaterThanOrEqual(BUDGETS.pauseMs - 5);
+    expect(sent(PAUSE)).toBe(2);
+    expect(sent(STATE)).toBe(2);
+  });
+
+  it("a pause whose call never answers but landed at the provider is a pause: one call, one read", async () => {
+    const { f, sent } = scripted({ "POST /sandboxes": created(), [PAUSE]: "hangs", [STATE]: reads("paused") });
+    const m = await machine(f);
+    await m.pause();
+    expect(sent(PAUSE)).toBe(1);
+    expect(sent(STATE)).toBe(1);
+  });
+
+  it("a provider that cannot be read after the call ends the move at once with that in the words: no second call", async () => {
+    const { f, sent } = scripted({ "POST /sandboxes": created(), [PAUSE]: "hangs", [STATE]: noRoad() });
+    const m = await machine(f);
+    const warn = quiet();
+    try {
+      await expect(m.pause()).rejects.toThrow(/^pause did not complete in \d+ms; the provider did not answer and could not be read about the machine; try again$/);
+    } finally {
+      warn.mockRestore();
+    }
+    expect(sent(PAUSE)).toBe(1);
+    expect(sent(STATE)).toBe(1);
+  });
+
+  it("a read that hangs is given up on within its own bound: one call, and the words say the provider could not be read", async () => {
+    const { f, sent } = scripted({ "POST /sandboxes": created(), [PAUSE]: "hangs", [STATE]: "hangs" });
+    const m = await machine(f);
+    const warn = quiet();
+    const started = Date.now();
+    try {
+      await expect(m.pause()).rejects.toThrow(/could not be read about the machine/);
+    } finally {
+      warn.mockRestore();
+    }
+    // Half the pause budget on the call, then the read's own bound, and nothing more.
+    expect(Date.now() - started).toBeLessThan(BUDGETS.pauseMs + BUDGETS.stateReadMs + 500);
+    expect(sent(PAUSE)).toBe(1);
+    expect(sent(STATE)).toBe(1);
+  });
+
+  it("a pause that fails on a network error is read and sent once more inside the budget; a second failure ends it with the words", async () => {
+    const { f, sent } = scripted({ "POST /sandboxes": created(), [PAUSE]: [noRoad(), noRoad()], [STATE]: reads("running") });
+    const m = await machine(f);
+    const warn = quiet();
+    try {
+      await expect(m.pause()).rejects.toThrow(/^pause did not complete in \d+ms; the provider did not answer and reads the machine running; try again$/);
+    } finally {
+      warn.mockRestore();
+    }
+    expect(sent(PAUSE)).toBe(2);
+    expect(sent(STATE)).toBe(2);
+  });
+
+  it("a pause that fails once on a network error and lands on the second call is a pause: two calls, one read", async () => {
+    const { f, sent } = scripted({ "POST /sandboxes": created(), [PAUSE]: [noRoad(), ok()], [STATE]: reads("running") });
+    const m = await machine(f);
+    await m.pause();
+    expect(sent(PAUSE)).toBe(2);
+    expect(sent(STATE)).toBe(1);
+  });
+
+  it("a pause the provider refuses is not retried: the refusal is the answer, thrown as itself", async () => {
+    const { f, sent } = scripted({ "POST /sandboxes": created(), [PAUSE]: new Response(JSON.stringify({ error: "upstream request timeout" }), { status: 400 }), [STATE]: reads("running") });
+    const m = await machine(f);
+    const err = await m.pause().catch(e => e as unknown);
+    expect((err as Error).message).toBe("upstream request timeout");
+    expect(err).not.toBeInstanceOf(MoveUnansweredError);
+    expect(sent(PAUSE)).toBe(1);
+    expect(sent(STATE)).toBe(0);
+  });
+
+  it("a resume whose call never answers but landed at the provider goes through: one call, one read", async () => {
+    const { f, sent } = scripted({ "POST /sandboxes": created(), [RESUME]: "hangs", [STATE]: reads("running") });
+    const m = await machine(f);
+    await m.resume();
+    expect(sent(RESUME)).toBe(1);
+    expect(sent(STATE)).toBe(1);
+  });
+
+  it("a resume cut off at its cap with the machine still paused ends unanswered with the row's words: one call, one read, nothing sent twice", async () => {
+    const { f, sent } = scripted({ "POST /sandboxes": created(), [RESUME]: "hangs", [STATE]: reads("paused") });
+    const m = await machine(f);
+    const warn = quiet();
+    try {
+      const err = await m.resume().catch(e => e as unknown);
+      expect(err).toBeInstanceOf(ResumeUnansweredError);
+      expect(err).toBeInstanceOf(MoveUnansweredError);
+      expect((err as Error).message).toBe(RESUME_UNANSWERED);
+      expect(isCapped((err as Error).cause)).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+    expect(sent(RESUME)).toBe(1);
+    expect(sent(STATE)).toBe(1);
+  });
+
+  it("a resume the network dropped is read like a capped one, and a machine that reads starting is a resume that landed", async () => {
+    const { f, sent } = scripted({ "POST /sandboxes": created(), [RESUME]: noRoad(), [STATE]: reads("starting") });
+    const m = await machine(f);
+    await m.resume();
+    expect(sent(RESUME)).toBe(1);
+    expect(sent(STATE)).toBe(1);
+  });
+
+  it("ships four minutes for a pause, half a minute for a resume call and for a read, and takes shorter ones for tests", () => {
+    const b = new SolariBackend({ apiKey: "k", fetch: fakeFetch({}) });
+    expect(b.budgets).toEqual({ pauseMs: 4 * 60_000, resumeCapMs: RESUME_CAP_MS, stateReadMs: 30_000 });
+    expect(new SolariBackend({ apiKey: "k", fetch: fakeFetch({}), budgets: { pauseMs: 40 } }).budgets).toEqual({ pauseMs: 40, resumeCapMs: 30_000, stateReadMs: 30_000 });
+  });
+});
+
 describe("the cap the caller puts on one call", () => {
-  it("resume carries the protocol's cap into the fetch, and no other call carries one", async () => {
-    const seen: (number | undefined)[] = [];
+  it("a resume carries its cap and a pause half its budget into the fetch; a read of the machine carries none", async () => {
+    const seen: boolean[] = [];
     const f = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
-      seen.push(init?.signal === undefined || init.signal === null ? undefined : RESUME_CAP_MS);
+      seen.push(init?.signal !== undefined && init.signal !== null);
       return new Response(JSON.stringify({ sandboxId: "x", kind: "sandbox", state: "paused" }), { status: 200 });
     });
     const b = new SolariBackend({ apiKey: "k", fetch: f });
     const m = await b.get("x");
     await m.pause();
     await m.resume();
-    expect(seen).toEqual([undefined, undefined, RESUME_CAP_MS]);
+    expect(seen).toEqual([false, true, true]);
   });
 
   it("the caller's own signal ends the call, so a resume nobody waits on is not left running behind them", async () => {

@@ -32,6 +32,10 @@ export interface IdlePolicyOptions {
   onIdle(id: string, windowMs: number): Promise<void>;
   /** How long after a nap that failed the window is asked again. */
   retryMs: number;
+  /** Fires on every arming with the instant this policy's own backstop computes for the workspace, now plus
+   * backstopMs of its window, so a window that is off still hands over the six-hour instant. Not fired on forget.
+   * Synchronous from arm; whoever hands it on to a provider does so without awaiting. */
+  onBackstop?(id: string, until: number): void;
   /** Defaults to the process timers; tests inject one they advance by hand. */
   clock?: Clock;
 }
@@ -71,6 +75,7 @@ export function createIdlePolicy(o: IdlePolicyOptions): IdlePolicy {
     forget(id);
     if (closed) return;
     const windowMs = o.windowOf(id);
+    o.onBackstop?.(id, clock.now() + backstopMs(windowMs));
     if (windowMs === null) return;
     const entry: Armed = { at: clock.now() + windowMs, cancel: () => {} };
     const fire = (): void => {
