@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { SSH_READ_SCRIPT, parseSshMachineId } from "@wsp/engine";
+import { SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, parseSshMachineId } from "@wsp/engine";
 import { alreadyRecorded, machineWord, noMachineHomeLine, noSshDaemonLine, OVER_SSH, relayedRecordRefusal, relayedRefusal, sshHostKeyNotice, TURN_TOKEN_ENV, undrivenRefusal, type AdapterEvent, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterContext, type HarnessAdapterFactory, type ProjectImportOptions, type Runtime, type SshWiring } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
-import { fakeSsh } from "./fake-ssh.js";
+import { fakeSsh, FAKE_OS, FAKE_UPTIME_S } from "./fake-ssh.js";
 import { stubBackend } from "./stub-backend.js";
 
 /** A scripted harness: it answers with the home and the PATH it was handed, so what lands in the chat is what the
@@ -50,9 +50,21 @@ describe("ssh workspace", () => {
     expect((await rt.status.list()).find(r => r.id === ws.id)?.size).toEqual({ cpu: 8, memMb: 16_000 });
     // The record's machine id is the dial itself, so a later host process reaches the same machine from it alone.
     expect(parseSshMachineId(ws.machineId)).toEqual({ user: "dev", host: "box", port: 22 });
-    // One dial made the record, and it was the read.
-    expect(carried.map(c => c.script)).toEqual([SSH_READ_SCRIPT]);
+    // One dial made the record, and it was the read; the status read above is the second, which is the machine
+    // being asked what it is for the rows that say so.
+    expect(carried.map(c => c.script)).toEqual([SSH_READ_SCRIPT, SSH_FACTS_SCRIPT]);
     expect((await rt.workspaces.list()).map(w => ({ name: w.name, kind: w.kind }))).toEqual([{ name: "box", kind: "ssh" }]);
+  });
+
+  it("the status of a machine somebody owns carries what that machine says it is: its system, its uptime and the folder its commands start in", async () => {
+    const { wiring } = fakeSsh();
+    const rt = runtime(wiring);
+    const ws = await rt.workspaces.createSsh("dev@box");
+    const status = (await rt.status.list()).find(r => r.id === ws.id);
+    expect(status?.facts).toEqual({ os: FAKE_OS, uptimeMs: FAKE_UPTIME_S * 1_000, folder: "/home/dev" });
+    // The folder is that machine's own login home, not this computer's and not another machine's.
+    const other = await rt.workspaces.createSsh("root@10.0.0.7");
+    expect((await rt.status.list()).find(r => r.id === other.id)?.facts?.folder).toBe("/root");
   });
 
   it("the port and the key the person named ride the dial and the record", async () => {

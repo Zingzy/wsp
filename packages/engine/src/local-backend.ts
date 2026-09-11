@@ -9,9 +9,10 @@
 // meaning on a computer and throw, since the runtime refuses them by capability
 // before it ever reaches here.
 
-import { mkdirSync, readFileSync } from "node:fs";
-import { cpus, platform, release, totalmem, type, uptime } from "node:os";
+import { mkdirSync } from "node:fs";
+import { cpus, release, totalmem, type, uptime } from "node:os";
 import { runChild } from "./child-exec.js";
+import { readOsName } from "./machine-facts.js";
 import type { BackendPricing, ExecResult, Machine, MachineBackend, MachineShape, MachineState, RunOptions, SnapshotStoragePricing } from "./machine.js";
 import type { Capabilities, MachineFacts } from "@wsp/protocol";
 
@@ -37,23 +38,6 @@ export interface LocalBackendOptions {
   /** The environment every exec and run on this computer runs under: the person's own, so a tool on their PATH is
    * found and their own session stores are read. process.env by default. */
   env?: Readonly<Record<string, string | undefined>>;
-}
-
-/** The operating system as its maker names it, with its version: macOS by its product version, a Linux by its
- * distribution's own name, and the kernel's type and release where neither answers. */
-async function osName(exec: (cmd: string) => Promise<ExecResult>): Promise<string> {
-  if (platform() === "darwin") {
-    const res = await exec("sw_vers -productVersion").catch(() => undefined);
-    const version = res?.stdout.trim();
-    if (res?.exitCode === 0 && version) return `macOS ${version}`;
-  }
-  if (platform() === "linux") {
-    try {
-      const pretty = /^PRETTY_NAME="?([^"\n]+?)"?$/m.exec(readFileSync("/etc/os-release", "utf8"))?.[1];
-      if (pretty !== undefined) return pretty;
-    } catch {}
-  }
-  return `${type()} ${release()}`;
 }
 
 /** One shell command on this computer: bash -c, cwd the backend's root, the person's own environment. The child
@@ -110,7 +94,8 @@ export class LocalMachine implements Machine {
   }
 
   async facts(): Promise<MachineFacts> {
-    this.os ??= osName(cmd => this.exec(cmd, { timeoutMs: 5_000 }));
+    // A computer that answered nothing still has a name for its row: the kernel this process itself runs on.
+    this.os ??= readOsName(cmd => this.exec(cmd, { timeoutMs: 5_000 })).then(name => name ?? `${type()} ${release()}`);
     return { os: await this.os, uptimeMs: Math.round(uptime() * 1_000), folder: this.root };
   }
 

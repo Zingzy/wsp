@@ -3,7 +3,7 @@
 // that records or drives a machine over ssh is proved against the real
 // SshBackend and the real address rules with nothing on the network. One home
 // for it, read by the runtime's own tests and by the host's keyless roads.
-import { SSH_BYTES_OK, SSH_READ_SCRIPT, SshBackend, parseSshAddress, sshIdentity, sshMachineName, type ExecResult, type SshReach, type SshTransport } from "@wsp/engine";
+import { SSH_BYTES_OK, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SshBackend, parseSshAddress, sshIdentity, sshMachineName, type ExecResult, type SshReach, type SshTransport } from "@wsp/engine";
 import { sshDaemonPaths } from "@wsp/protocol";
 import type { SshWiring } from "../src/runtime.js";
 
@@ -22,6 +22,11 @@ const MACHINES: Record<string, { home: string; user: string; path: string; cpu: 
   "127.0.0.1": { home: "/root", user: "root", path: "/usr/bin", cpu: 2, memkb: 4_096_000, key: "ssh-ed25519 SHA256:hereherehereherehereherehere" },
 };
 
+/** The system and the length of time every machine in this fake says it is running, so a test reads one pair of
+ * expected words wherever it asks. */
+export const FAKE_OS = "Ubuntu 24.04.3 LTS";
+export const FAKE_UPTIME_S = 90_061;
+
 /** An ssh client that never leaves this computer: each machine answers the read with its own facts, every script it
  * was asked to carry is recorded, and a case scripts the answers. */
 export function fakeSsh(answer: (script: string, reach: SshReach) => Partial<ExecResult> = () => ({}), deployed?: FakeSshDaemon): { wiring: SshWiring; carried: { reach: SshReach; script: string; stdin?: Uint8Array }[] } {
@@ -37,6 +42,11 @@ export function fakeSsh(answer: (script: string, reach: SshReach) => Partial<Exe
       const log = opts.hostKey === true ? `debug1: Server host key: ${machine.key}\ndebug1: Authenticating to ${reach.host}\n` : "";
       const store = machine.store === undefined ? "" : `store:CLAUDE_CONFIG_DIR ${machine.store}\n`;
       return { exitCode: 0, stdout: `home ${machine.home}\nuser ${machine.user}\npath ${machine.path}\n${store}cpu ${machine.cpu}\nmemkb ${machine.memkb}\n`, stderr: log };
+    }
+    // What every one of these machines says it is when a status asks: a Linux, up for a day, and its own home,
+    // so a row built for one machine that showed another's folder would be a failure rather than a coincidence.
+    if (script === SSH_FACTS_SCRIPT) {
+      return { exitCode: 0, stdout: `pretty ${FAKE_OS}\nmac \nkernel Linux 6.8.0-79-generic\nuptime ${FAKE_UPTIME_S}\nboot \nhome ${machine.home}\n`, stderr: "" };
     }
     // The machine's own byte road: the script the ssh machine writes a file with answers the way that machine's
     // shell would, so a road that lands bytes over the connection is proved with nothing on the network. What
