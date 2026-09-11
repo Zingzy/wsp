@@ -125,6 +125,11 @@
                 "type": "page",
                 "title": "The host",
                 "filepath": "content/setup/the-host.mdx"
+              },
+              "/reach-your-box": {
+                "type": "page",
+                "title": "Reach your box from anywhere",
+                "filepath": "content/setup/reach-your-box.mdx"
               }
             }
           },
