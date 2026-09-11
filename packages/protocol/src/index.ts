@@ -136,7 +136,9 @@ export const InitSetup = z.object({
   /** This computer's home directory, so a field can show a real path of the person's as its example. */
   home: z.string(),
   agents: z.array(InitAgent),
-  pricing: z.object({ size: WorkspaceSize, rateUsdPerHour: z.number() }).nullable(),
+  /** What a machine costs on this host's provider, and the disk that provider gives a builder where it caps one;
+   * null where the host forks none, so there is no golden to build here and nothing to price. */
+  pricing: z.object({ size: WorkspaceSize, rateUsdPerHour: z.number(), builderDiskGb: z.number().positive().optional() }).nullable(),
   job: InitJob.nullable(),
 });
 export type InitSetup = z.infer<typeof InitSetup>;
@@ -2602,7 +2604,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * sign-in declares. Replies with { setup: InitSetup }, which says a key is held and never says what it is. */
   z.object({ id: reqId, op: z.literal("init.keys"), solari: z.string().optional(), rows: z.record(z.string()).optional() }),
   /** Starts the init job on the road named, an agent's harness on the agent road; replies with { job: InitJob } and
-   * every change after rides init.job events. One job runs at a time; a second start while one runs is refused. */
+   * every change after rides init.job events. One job runs at a time; a second start while one runs is refused. The
+   * terminal road takes its answers from the recipe beside the state, which wsp init wrote from its own screens, and
+   * is refused when there is none there. */
   z.object({ id: reqId, op: z.literal("init.start"), road: InitRoad, harness: z.string().optional() }),
   /** Answers one screen: the rows ticked, the answers chosen; replies with { job: InitJob }, its screens recomputed
    * and its step moved to the next. */
@@ -2615,8 +2619,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("init.draft"), at: z.string().min(1).max(64), ticks: z.array(z.string()).optional(), answers: z.record(z.string()).optional() }),
   /** Runs a sign-in that ran out or failed again on the machine while the build goes on; replies with { job: InitJob }. */
   z.object({ id: reqId, op: z.literal("init.retry"), tool: z.string() }),
-  /** Writes the recipe as answered and starts the build; replies with { job: InitJob } at once, the build riding on. */
-  z.object({ id: reqId, op: z.literal("init.build"), firstWorkspace: z.string().optional(), importFolder: z.string().optional() }),
+  /** Writes the recipe as answered and starts the build; replies with { job: InitJob } at once, the build riding on.
+   * `yes` skips the sign-ins on the machine, as wsp init --yes does: a caller that asked for no waiting gets none. */
+  z.object({ id: reqId, op: z.literal("init.build"), firstWorkspace: z.string().optional(), importFolder: z.string().optional(), yes: z.boolean().optional() }),
   /** Types the code a sign-in's page handed back into the tool waiting for it on the machine, as the person would at
    * that terminal; replies with { job: InitJob }. The code is never logged, kept or carried on the view. Refused when
    * no sign-in for that tool is waiting for one. */

@@ -144,6 +144,9 @@ export interface PromptOptions {
   hint?: string;
   input?: Readable;
   output?: Writable;
+  /** Ends the prompt from outside, as a cancel: the question stopped meaning something before it was answered. It
+   * hands the terminal back and settles, which is what a caller waiting on the prompt needs it to do. */
+  signal?: AbortSignal;
 }
 
 /** The frame the two prompts share: the question, the hint, then the body rows down the bar; the screen being answered takes the thick bar, the cyan question and the help line, a finished one clack's thin bar. */
@@ -160,7 +163,7 @@ function promptFrame(state: PromptState, o: PromptOptions, body: readonly string
   return lines.join("\n");
 }
 
-const streamsOf = (o: PromptOptions) => ({ ...(o.input ? { input: o.input } : {}), ...(o.output ? { output: o.output } : {}) });
+const streamsOf = (o: PromptOptions) => ({ ...(o.input ? { input: o.input } : {}), ...(o.output ? { output: o.output } : {}), ...(o.signal ? { signal: o.signal } : {}) });
 
 /** A yes or no question in the frame; the marker starts on No unless told otherwise, arrows move it, y and n answer, esc and ctrl-c cancel. */
 export async function confirmPrompt(o: PromptOptions & { initialValue?: boolean }): Promise<boolean | symbol> {

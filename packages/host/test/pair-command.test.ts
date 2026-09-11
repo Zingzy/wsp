@@ -38,6 +38,9 @@ function fakeHost(answers: Record<string, Record<string, unknown>>): { client: H
     close: () => {
       closed++;
     },
+    terminate: () => {
+      closed++;
+    },
   };
   return { client, asked, closes: () => closed };
 }

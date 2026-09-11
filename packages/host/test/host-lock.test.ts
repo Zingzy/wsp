@@ -130,15 +130,22 @@ describe("serve takes host.lock next to the state file", () => {
     expect(readFileSync(pointerPath, "utf8")).toBe(`${join(dir, "newer")}\n`);
   });
 
-  it("wsp init refuses while a host serves the state, naming the pid and how to stop it, and boots nothing", async () => {
-    const first = await start();
+  it("wsp init refuses when the host holding the lock cannot take the build, naming wsp down before any pid, and boots nothing", async () => {
+    // A lock a live process holds whose host answers nowhere: the build cannot go through its door, so the run says
+    // how to take that host down. A host that does answer takes the build instead; that road is init-beside's test.
+    mkdirSync(join(home, "state"), { recursive: true });
+    writeFileSync(lockPath, JSON.stringify({ pid: process.pid, port: 1, wsPort: 1, address: "127.0.0.1", startedAt: new Date().toISOString() }));
+    writeFileSync(join(home, "state", "host-token"), "tok");
+    // A host somewhere else is where every other verb would go; the build belongs to the process holding this lock.
+    vi.stubEnv("WSP_HOST", "elsewhere");
     const errors: string[] = [];
     const code = await cli(["init", "--state", statePath], { ...quietIO, error: line => errors.push(line) });
     expect(code).toBe(1);
-    expect(errors).toEqual([
-      `wsp init: a wsp host (pid ${process.pid}) is already serving ${statePath}. Stop it first (Ctrl-C in its terminal, or kill ${process.pid}), then run wsp init again, or point --state at a different file.`,
-    ]);
-    expect(readLock(lockPath).port).toBe(first.port);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain(`wsp init: the wsp host serving ${statePath} (pid ${process.pid}) cannot take this build`);
+    expect(errors[0]).toContain(`Take it down first (wsp down for a service, Ctrl-C in its terminal or kill ${process.pid} for one started by hand)`);
+    expect(errors[0]).not.toContain("elsewhere");
+    expect(readLock(lockPath).pid).toBe(process.pid);
   });
 
   it("does not leave a lock behind when the host fails to start", async () => {
