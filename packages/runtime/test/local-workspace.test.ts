@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { alreadyRecorded, inFolder, NO_SUCH_TURN, NOTIFY_ME, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, rootsPathIn, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type EventUnion, type PortForward, type ProjectImportEvent, type TurnResult } from "@wsp/protocol";
+import { alreadyRecorded, inFolder, machineWord, undrivenRefusal, NO_SUCH_TURN, NOTIFY_ME, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, rootsPathIn, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type EventUnion, type PortForward, type ProjectImportEvent, type TurnResult } from "@wsp/protocol";
 import type { MachineExecOptions } from "../src/machine-exec.js";
 import { createRuntime, type HarnessAdapterContext, type HarnessAdapterFactory, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
@@ -293,7 +293,7 @@ describe("local workspace", () => {
     await expect(rt.workspaces.upgrade(ws.id, { cpu: 4, memMb: 8192 })).rejects.toThrow(cannot);
     await expect(rt.workspaces.rebuild(ws.id)).rejects.toThrow(cannot);
     await expect(rt.workspaces.updateImage(ws.id)).rejects.toThrow(cannot);
-    await expect(rt.workspaces.snapshot(ws.id)).rejects.toThrow(cannot);
+    await expect(rt.workspaces.snapshot(ws.id)).rejects.toThrow(undrivenRefusal("mac", machineWord("local"), "be snapshotted"));
   });
 
   it("every verb refuses a request relayed from a machine with the one sentence", async () => {

@@ -22,7 +22,7 @@ Every refusal in wsp is one line on stderr that says what happened and, where th
 | a refusal naming the account's machine cap | two machines are already up; the builder stays up ten minutes after a seal and counts as one | `wsp pause <workspace>` on one you are not using |
 | a refusal listing sizes and rates | `--size` named one the provider does not offer | pick one from the list, `2x4` or `2x8` |
 | a pause or a wake that does not return | the provider side is stuck | wait, then try once more; do not retry in a loop |
-| `snapshot` refused | the machine is not a running first-life machine with a project imported | snapshot a fresh workspace after an import, not a woken one |
+| `snapshot` refused | the machine is not running, holds no project, or its provider will not copy the disk of a machine that was resumed | the line names which of the three; import first, and on the cloud provider snapshot a fresh workspace rather than a woken one |
 | `import` refused, workspace paused | the machine is napping | `wsp wake <workspace>` first |
 | `forget` refused | the machine still exists at the provider | `wsp delete` deletes it; `forget` is for a machine the provider already lost |
 
