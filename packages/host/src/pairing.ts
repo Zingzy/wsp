@@ -6,10 +6,11 @@
 // access, and only somebody at the host's own terminal hands it out.
 import { networkInterfaces } from "node:os";
 import { authority, fmtDuration, isLoopback, isWildcard, LOOPBACK, usageRefusal, type DeviceView } from "@wsp/protocol";
+import type { HostReach } from "@wsp/runtime";
 import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
 import { aimName, aimedHost, type HostAim, type HostPick } from "./hosts.js";
-import { publicHostname } from "./relay-link.js";
+import { publicHostname, relayUrlOf } from "./relay-link.js";
 import { dialHost, table, type DialOpts, type HostClient } from "./verbs.js";
 
 /** An address that only reaches the link it sits on: IPv6 fe80::/10, which no browser opens without a scope id,
@@ -41,13 +42,36 @@ export function advertisedUrl(bound: string, port: number, asked?: string, inter
   return isLoopback(at) ? undefined : `http://${authority(at, port)}`;
 }
 
+/** What a turn's launch is told about this host, for the kinds that need it. The address the person named with
+ * --advertise stands above every kind's own answer; the address a machine somewhere else dials is the name a relay
+ * carries this host under while a connector is holding it, since that one works from anywhere, else what this
+ * computer answers on; and the port is for a kind whose machines know an address of their own, which a host bound
+ * to this computer alone hands out none of, since nothing outside reaches it there. The url is read at each turn:
+ * a quick tunnel is given a new name every time its connector runs. */
+export function hostReach(
+  at: { address: string; port: number },
+  asked: string | undefined,
+  publicAt: () => string | undefined,
+  interfaces = networkInterfaces(),
+): HostReach {
+  const named = asked === undefined || asked.trim() === "" ? undefined : advertisedUrl(at.address, at.port, asked);
+  return {
+    ...(named !== undefined ? { advertise: named } : {}),
+    get url(): string | undefined {
+      const relayed = publicAt();
+      return relayed !== undefined ? relayUrlOf(relayed) : advertisedUrl(at.address, at.port, undefined, interfaces);
+    },
+    ...(isLoopback(at.address) ? {} : { port: at.port }),
+  };
+}
+
 /** What wsp pair prints: the code, how long it stands, and the addresses to hand the person at the other computer.
  * A host behind a relay leads with the address that works from anywhere, since that is the one to hand over. */
 export function pairLines(code: string, expiresAt: number, now: number, addresses: readonly string[], port: number, publicAt?: string): string[] {
   return [
     `code        ${code}`,
     `expires     in ${fmtDuration(Math.max(0, expiresAt - now))}, at ${new Date(expiresAt).toISOString()}`,
-    ...(publicAt !== undefined ? [`open        https://${publicAt}`] : []),
+    ...(publicAt !== undefined ? [`open        ${relayUrlOf(publicAt)}`] : []),
     ...addresses.map(at => `open        http://${authority(at, port)}`),
     "The code is spent by the first client that redeems it; wsp devices lists what took one.",
   ];

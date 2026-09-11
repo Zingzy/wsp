@@ -69,9 +69,9 @@ import {
 } from "./service.js";
 import { connectCommand, disconnectCommand, hostsCommand } from "./connect.js";
 import { stopRecordedConnector } from "./connector.js";
-import { readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
+import { publicHostname, readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
 import { DEFAULT_HOME, wspHome } from "./hosts.js";
-import { advertisedUrl, devicesCommand, pairCommand } from "./pairing.js";
+import { devicesCommand, hostReach, pairCommand } from "./pairing.js";
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, registeredLine, removeEach, removeLines, runningWsp, type RunningWsp } from "./mcp-install.js";
@@ -153,8 +153,9 @@ options:
                      port follows ${WS_PORT_OFFSET} above it
   --ws-port N        runtime websocket port on its own (default
                      ${DEFAULT_WS_PORT}); --port alone moves both
-  --advertise URL    up: the address a machine dials this host at
-                     (default the bound address; nothing on loopback)
+  --advertise URL    up: the address every machine dials this host at,
+                     whatever kind it is (default: what each kind answers
+                     for its own machines; nothing on loopback)
   --listen ADDR      up: the address to bind (default ${LOOPBACK}, this
                      computer alone). On any other address the page is served
                      without the host token and every client pairs for a device
@@ -585,8 +586,9 @@ export function sshWiring(forwards = new SshForwards()): SshWiring {
  * what the service starts is the line that was typed. */
 export interface ServeAsked extends ListenAsked {
   statePath: string;
-  /** The address a machine dials this host at, which is what a turn on one is told; absent where the host binds
-   * this computer alone and nobody named another, so no turn is handed a token it could not use. */
+  /** The address the person named with --advertise, as they named it: the address every machine dials this host
+   * at, whatever kind it is. Absent leaves each kind to answer for its own machines, which is the default, so only
+   * a word the person typed is spelled back into a service's unit. */
   advertise?: string;
   /** The machine provider this host forks on, as `--provider` named it. */
   provider?: string;
@@ -640,7 +642,7 @@ export function optsFor(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): SharedOpts {
   const asked = portsAsked({ port: values.port, wsPort: values["ws-port"], listen: values.listen });
-  const advertise = advertisedUrl(asked.address, asked.port, values.advertise);
+  const advertise = values.advertise === undefined || values.advertise.trim() === "" ? undefined : values.advertise;
   const provider = {
     ...(values.provider !== undefined ? { provider: values.provider } : {}),
     ...(values["docker-host"] !== undefined ? { dockerHost: values["docker-host"] } : {}),
@@ -684,20 +686,30 @@ export function swapProvider(rt: Runtime, keys: Keys): void {
   slot.swap(providerBackend(keys, PROVIDER_ENVS.get(rt) ?? process.env));
 }
 
+/** What a host serving this line tells a turn about where it answers: the address and port it binds, and the
+ * address the person named with --advertise. The kind of the machine a turn runs on picks from it. */
+const agentsReachOf = (opts: { address?: string; port: number; advertise?: string }): { at: { address: string; port: number }; advertise?: string } => ({
+  at: { address: opts.address ?? LOOPBACK, port: opts.port },
+  ...(opts.advertise !== undefined ? { advertise: opts.advertise } : {}),
+});
+
 export function makeRuntime(
   keys: Keys,
   statePath: string,
   recipe: GoldenRecipe = goldenRecipe(keys),
   env: ProviderEnv = process.env,
-  agents?: { url?: string; run?: RunningWsp },
+  agents?: { at?: { address: string; port: number }; advertise?: string; run?: RunningWsp },
 ): Runtime {
   const slot = providerSlot(providerBackend(keys, env));
   const rt = createRuntime({
     backend: slot.backend,
-    // What a turn's own agent needs to reach back in: the address this host is reachable at from a machine, and on
-    // this computer the same command an agent's config here is given, so a thread on the local workspace and one
-    // on a fork run the same wsp against the same host.
-    ...(agents?.url !== undefined ? { agents: { url: agents.url, wspMcp: mcpServerCommand(agents.run ?? runningWsp()) } } : {}),
+    // What a turn's own agent needs to reach back in: what this host knows about where it answers, which each kind
+    // reads for its own machines, and the same wsp command an agent's config on this computer is given, so a thread
+    // on the local workspace and one on a fork run the same wsp against the same host.
+    agents: {
+      ...(agents?.at !== undefined ? { reach: hostReach(agents.at, agents.advertise, () => publicHostname(statePath)) } : {}),
+      wspMcp: mcpServerCommand(agents?.run ?? runningWsp()),
+    },
     local: localWiring(),
     ssh: sshWiring(),
     store: jsonFileStore(statePath),
@@ -912,7 +924,7 @@ async function init(
         ports: { port: opts.port, wsPort: opts.wsPort, named: opts.named, states: statesHere(opts.statePath) },
         address: opts.address,
         upCommand: flags.upCommand,
-        runtime: () => makeRuntime(keys, opts.statePath, goldenRecipe(keys), opts.providerEnv, opts.advertise !== undefined ? { url: opts.advertise } : {}),
+        runtime: () => makeRuntime(keys, opts.statePath, goldenRecipe(keys), opts.providerEnv, agentsReachOf(opts)),
         roads: rt => workspaceRoads(rt, agentHomes(homedir()), workspaceEnvsFor(keys)),
         host: (rt, ports) => hostFor(rt, keys, { ...opts, port: ports.port, wsPort: ports.wsPort, providerEnv: opts.providerEnv }, say),
       },
@@ -945,7 +957,7 @@ async function init(
       platform: platform() === "darwin" ? "darwin" : "linux",
       brew: () => readBrewTable(nodeHost()),
       scan: recipe => scanTools(nodeHost(), recipe),
-      runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `daemon on node ${(await deployDaemon(machine)).node}` }, opts.providerEnv, opts.advertise !== undefined ? { url: opts.advertise } : {}),
+      runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `daemon on node ${(await deployDaemon(machine)).node}` }, opts.providerEnv, agentsReachOf(opts)),
       ports: { port: opts.port, wsPort: opts.wsPort, named: opts.named, states: statesHere(opts.statePath) },
       address: opts.address,
       upCommand: flags.upCommand,
@@ -975,8 +987,9 @@ export interface ServeOptions {
   wsPort: number;
   /** The address the host binds; this computer alone when absent. */
   address?: string;
-  /** The address a machine reaches this host at, which every turn on a spawn enabled workspace is told; absent
-   * leaves those turns without a token, since a machine cannot dial this computer's loopback. */
+  /** The address the person named with --advertise: every machine dials this host there, whatever kind it is.
+   * Absent leaves each kind to answer for its own machines, which is where a turn's address comes from by
+   * default, and a host no kind can reach hands its turns no token. */
   advertise?: string;
   statePath: string;
   /** What this host picks its machine provider out of; this process's own environment when the caller names none. */
@@ -997,7 +1010,7 @@ export interface ServeOptions {
 export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   await adoptLoginPath(line => io.log(line));
   const keys = await loadKeys(io, undefined, { anthropic: false, noSolari: "local" });
-  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(keys), opts.providerEnv, { ...(opts.advertise !== undefined ? { url: opts.advertise } : {}), ...(opts.running !== undefined ? { run: opts.running } : {}) });
+  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(keys), opts.providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) });
   return hostFor(rt, keys, { ...opts, providerEnv: opts.providerEnv ?? process.env }, io, opts.running);
 }
 
@@ -1014,7 +1027,7 @@ export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   // A state file with nothing but this computer in it is served with no provider key: wsp init's local road is
   // what wrote it, and asking for a key to serve it would take that road away the next morning.
   const keys = await loadKeys(io, undefined, { anthropic: false, noSolari: "local" });
-  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(keys), opts.providerEnv, { ...(opts.advertise !== undefined ? { url: opts.advertise } : {}), ...(opts.running !== undefined ? { run: opts.running } : {}) });
+  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(keys), opts.providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) });
   // A state with nothing in it is recorded, not refused: this computer becomes its own workspace the way the app's
   // first launch records it, so a machine the host was just installed on serves and listens for pairing at once.
   // Found or made, the shape the app's own road takes, so the three roads that record this computer read alike and
