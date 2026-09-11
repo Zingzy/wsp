@@ -4784,7 +4784,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // address a machine can reach it at, since a token with nowhere to go is one more secret for nothing.
       const reach = agentsReach(entry);
       const scoped =
-        entry.record.agents?.spawn === true && reach !== undefined
+        agentsOf(entry.record)?.spawn === true && reach !== undefined
           ? await deviceDoor.mint(`thread ${threadWord(threadId)}`, { kind: "thread", threadId, workspaceId, rootThreadId: tree.rootThreadId ?? threadId }, Date.now())
           : undefined;
       const dropScope = (): void => {

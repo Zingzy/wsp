@@ -57,12 +57,14 @@ import {
   TurnStatus,
   UpgradeResult,
   WorkspaceAgents,
+  type WorkspaceKind,
   WorkspaceListing,
   WorkspaceOut,
   WorkspaceView,
   actionRefusal,
   agentsKindRefusal,
   agentsLine,
+  agentsMayDrive,
   agentsWord,
   authRefusal,
   authority,
@@ -1951,16 +1953,16 @@ export const VERBS: readonly Verb[] = [
       const address = flag(ctx.flags, "ssh");
       // Neither forks anything, so both refuse the words that pick an image or a size.
       const agents = agentsAsked(flag(ctx.flags, "spawn"), flag(ctx.flags, "max-machines"), flag(ctx.flags, "max-depth"));
-      const forksNothing = (word: string): void => {
+      const forksNothing = (word: string, kind: WorkspaceKind): void => {
         if (from !== undefined || size !== undefined) throw usageRefusal(`${word} forks nothing, so it takes no --from or --size`);
-        // The same rule and the same sentence the verb that sets the switch on a workspace that exists reads, off
-        // the one table of what each kind's machines are.
-        if (agents?.spawn === true) throw usageRefusal(agentsKindRefusal(ctx.flags["local"] === true ? "local" : "ssh"));
+        // The same rule and the same sentence the verb that sets the switch on a workspace that exists reads: the
+        // kind is named here and the table is asked, so which kinds may have the switch has one home.
+        if (agents?.spawn === true && !agentsMayDrive(kind)) throw usageRefusal(agentsKindRefusal(kind));
         if (ctx.args.length > 1) throw usageRefusal(`${word} takes at most a name`);
       };
       if (ctx.flags["local"] === true) {
         if (address !== undefined) throw usageRefusal("wsp new takes --local or --ssh, not both");
-        forksNothing("wsp new --local");
+        forksNothing("wsp new --local", "local");
         // With no host serving the record is written straight into the state file: the way into an empty state.
         const here = runtimeHere(ctx);
         if (here !== undefined) await createLocalWorkspaceHere(await here(ctx.statePath), ctx.out, name);
@@ -1968,7 +1970,7 @@ export const VERBS: readonly Verb[] = [
         return 0;
       }
       if (address !== undefined) {
-        forksNothing("wsp new --ssh");
+        forksNothing("wsp new --ssh", "ssh");
         const asked = sshAsked(name, flag(ctx.flags, "ssh-port"), flag(ctx.flags, "ssh-key"));
         const here = runtimeHere(ctx);
         if (here !== undefined) await createSshWorkspaceHere(await here(ctx.statePath), ctx.out, address, asked);

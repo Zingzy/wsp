@@ -11,6 +11,7 @@ import {
   WS_PORT_OFFSET,
   authority,
   isLoopback,
+  isUrl,
   isWildcard,
   listenBeyondLoopbackLine,
   portHolderWords,
@@ -20,6 +21,13 @@ import {
   stateFileLine,
 } from "../src/index.js";
 import { ROOT, sourceFiles } from "./source-files.js";
+
+describe("an address where an alias could go", () => {
+  it("is a word with an http, https, ws or wss scheme, and nothing else", () => {
+    for (const word of ["http://box:4400", "https://box.example/wsp", "ws://box:4410", "WSS://box"]) expect(isUrl(word)).toBe(true);
+    for (const word of ["box", "box:4400", "127.0.0.1:14400", "ftp://box", "http:/box", ""]) expect(isUrl(word)).toBe(false);
+  });
+});
 
 describe("the pair of ports the app is served on", () => {
   it("names 4400 and 4410, one offset apart, as the pair nobody named", () => {

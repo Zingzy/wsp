@@ -4,18 +4,20 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { adoptLoginPath, agentHistories, agentsHere, assetDir, currentHome, installEach, mcpServerSpec, runningWsp, shimPath, wspHome, type CliIO } from "@wsp/host";
-import { DEFAULT_PORT, DEFAULT_WS_PORT, InitNeedsYou, ThemePreference } from "@wsp/protocol";
+import { DEFAULT_PORT, DEFAULT_WS_PORT, HOST_WORDS, InitNeedsYou, ThemePreference, hereWord, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
 import type { Runtime } from "@wsp/runtime";
 import { BrowserWindow, Menu, Notification, app, dialog, ipcMain, nativeTheme, shell, type IpcMainInvokeEvent } from "electron";
-import { chooseFrom, parseContextMenuItems } from "./context-menu.js";
+import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./context-menu.js";
 import { fontDirs, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { locateHost, openHost, statePathIn, type HostSession, type Launch, type Located } from "./host-lifecycle.js";
+import { hostSwitcher, parseConnectAsk, type HostSwitcher } from "./host-switch.js";
 import { offerMove, type MoveGate } from "./move.js";
 import { sayNeedsYou, type Notifier } from "./needs-you.js";
 import { fromAppPage, fromOnboardingPage } from "./origin.js";
 import { pagePreviews } from "./previews.js";
 import { checkSetup, recordThisComputer } from "./setup.js";
 import { installShim, shimText } from "./shim.js";
+import { sshRoad, systemSshDeps } from "./ssh-road.js";
 import { windowOptions } from "./window.js";
 import { isShellZoomChord, shellChordOf } from "./zoom.js";
 
@@ -43,7 +45,12 @@ function launch(): Launch {
   return { packaged: app.isPackaged, cwd: process.cwd(), ...(env !== undefined ? { env } : {}) };
 }
 
+/** The host the window is on; every bridge call is gated on its origin. */
 let session: HostSession | undefined;
+/** The app's own host, attached or started: the window opens on it, returns to it, and it is stopped on quit alone. */
+let local: HostSession | undefined;
+let switcher: HostSwitcher | undefined;
+let win: BrowserWindow | undefined;
 
 // Read once per run: a font installed while the app is open is seen after a restart.
 let fontIndex: Promise<FontFile[]> | undefined;
@@ -121,14 +128,81 @@ ipcMain.on("needs-you:say", (event, need: unknown) => {
   sayNeedsYou(parsed.data, { focused: () => win.isFocused(), raise: () => raiseWindow(win), open: () => win.webContents.send("needs-you:open") }, NOTIFIER);
 });
 
+/** Whether a frame is the page of the host the window is on, so a page from anywhere else is answered nothing. */
+const fromCurrentPage = (event: { senderFrame: { url: string } | null }): boolean => session !== undefined && fromAppPage(event.senderFrame?.url, session.url);
+
+// The device token of a host somewhere else is the shell's to hold: the page asks for it over the bridge and it never
+// rides in the page the host served.
+ipcMain.handle("hosts:token", event => {
+  if (!fromCurrentPage(event)) throw new Error("hosts:token: not the app's page");
+  return switcher?.token();
+});
+ipcMain.handle("hosts:list", event => {
+  if (!fromCurrentPage(event)) throw new Error("hosts:list: not the app's page");
+  return switcher?.view();
+});
+// A move, a connect and a disconnect answer with what the host said rather than throwing: a thrown refusal reaches the
+// page wrapped in the channel's own words, and the sheet puts the host's sentence under a field as it is.
+ipcMain.handle("hosts:switch", async (event, alias: unknown) => {
+  if (!fromCurrentPage(event) || switcher === undefined) throw new Error("hosts:switch: not the app's page");
+  const answer = await switcher.to(typeof alias === "string" ? alias : null);
+  refreshMenu();
+  return answer;
+});
+ipcMain.handle("hosts:connect", async (event, raw: unknown) => {
+  if (!fromCurrentPage(event) || switcher === undefined) throw new Error("hosts:connect: not the app's page");
+  const ask = parseConnectAsk(raw);
+  if (ask === undefined) throw new Error("hosts:connect: not the sheet's ask");
+  const answer = await switcher.connect(ask);
+  refreshMenu();
+  return answer;
+});
+ipcMain.handle("hosts:disconnect", async (event, alias: unknown) => {
+  if (!fromCurrentPage(event) || switcher === undefined) throw new Error("hosts:disconnect: not the app's page");
+  const answer = await switcher.disconnect(typeof alias === "string" ? alias : "");
+  refreshMenu();
+  return answer;
+});
+
+/** The shell's own menu bar: the platform's rows by their roles, and Hosts, drawn from the same list the sidebar's
+ * foot draws its menu from, so a host saved by either shows in both. Rebuilt whenever the list or the current host
+ * moves, since a native menu is a copy. */
+function refreshMenu(): void {
+  const hostsHeld = switcher;
+  if (hostsHeld === undefined) return;
+  const hosts = contextMenuTemplate(hostsMenuItems(hostsHeld.view()), id => {
+    const action = hostMenuAction(id);
+    if (action === undefined) return;
+    if (action.kind === "connect") {
+      win?.webContents.send("hosts:connect-open");
+      return;
+    }
+    const moved = action.kind === "switch" ? hostsHeld.to(action.alias) : hostsHeld.disconnect(action.alias);
+    void moved.then(answer => {
+      if (!answer.ok) io.error(answer.error);
+      refreshMenu();
+    });
+  });
+  const template: Electron.MenuItemConstructorOptions[] = [
+    ...(process.platform === "darwin" ? [{ role: "appMenu" as const }] : []),
+    { role: "fileMenu" },
+    { role: "editMenu" },
+    { role: "viewMenu" },
+    { label: HOST_WORDS.hosts, submenu: hosts },
+    { role: "windowMenu" },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 function locate(): Promise<Located> {
   const pointer = currentHome();
   return locateHost({ port: envPort("WSP_PORT", DEFAULT_PORT), ...launch(), ...(pointer !== undefined ? { pointer } : {}) });
 }
 
 /** A serving host is attached to with no gate; otherwise a host is started over the runtime the first launch just
- * recorded this computer on, or, with none, over the located home once the gate says it holds something to show. */
-async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
+ * recorded this computer on, or, with none, over the located home once the gate says it holds something to show. The
+ * hash rides on the page's url for what the page opens on (#connect is the connect sheet). */
+async function showApp(located: Located, recorded?: Runtime, hash = ""): Promise<boolean> {
   const statePath = statePathIn(located.home, launch());
   if (located.session === undefined) {
     let runtime = recorded;
@@ -152,37 +226,52 @@ async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
   } else {
     session = located.session;
   }
+  local = session;
   io.log(`${session.owned ? "serving" : "attached"} ${session.url} (home ${located.home})`);
   // Dark until the page says otherwise: the page opens on its dark side too, and tells the shell the preference once it has read it.
   nativeTheme.themeSource = "dark";
-  const win = newWindow(PRELOAD);
+  win = newWindow(PRELOAD);
+  const page = win;
+  switcher = hostSwitcher({
+    local,
+    home: wspHome(),
+    statePath,
+    here: hereWord(process.platform === "darwin"),
+    load: async next => {
+      session = next;
+      await page.loadURL(next.url);
+    },
+    log: io.log,
+    ssh: sshRoad(systemSshDeps()),
+  });
+  refreshMenu();
   // A link the page opens (a workspace's sign-in page, a preview in a new tab) belongs in the default browser, not a second window.
-  win.webContents.setWindowOpenHandler(({ url }) => {
+  page.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//.test(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
-  // The window stays on the host's page, the only one the preload's bridge answers; a link away from it opens in the default browser.
-  const appUrl = session.url;
-  win.webContents.on("will-navigate", (event, url) => {
-    if (fromAppPage(url, appUrl)) return;
+  // The window stays on the page of the host it is on, the only one the preload's bridge answers; a link away from it
+  // opens in the default browser. Read at the time of the navigation, since a move to another host changes the page.
+  page.webContents.on("will-navigate", (event, url) => {
+    if (session !== undefined && fromAppPage(url, session.url)) return;
     event.preventDefault();
     if (/^https?:\/\//.test(url)) void shell.openExternal(url);
   });
   // The window's contents are gone by the time it reports closed, so its id is read while they are here.
-  const contentsId = win.webContents.id;
+  const contentsId = page.webContents.id;
   // The menu's zoom rows are registered chords, so the page never receives them; while a terminal has focus they mean
   // that pane's text size, so the window's zoom stands aside and the press goes to the page's own keybindings.
-  win.webContents.on("before-input-event", (event, input) => {
+  page.webContents.on("before-input-event", (event, input) => {
     if (!terminalFocus.has(contentsId) || !isShellZoomChord(input, process.platform)) return;
     event.preventDefault();
-    win.webContents.send("shell:chord", shellChordOf(input));
+    page.webContents.send("shell:chord", shellChordOf(input));
   });
-  win.on("closed", () => terminalFocus.delete(contentsId));
-  await win.loadURL(session.url);
+  page.on("closed", () => terminalFocus.delete(contentsId));
+  await page.loadURL(`${session.url}${hash}`);
   return true;
 }
 
-const ONBOARDING_CHANNELS = ["onboarding:agents", "onboarding:history", "onboarding:install", "onboarding:finish"] as const;
+const ONBOARDING_CHANNELS = ["onboarding:agents", "onboarding:history", "onboarding:install", "onboarding:finish", "onboarding:connect"] as const;
 
 /** The ids the page asked to install, as strings and nothing else; the catalog refuses an id it does not know. */
 function agentIds(raw: unknown): string[] {
@@ -214,15 +303,23 @@ async function showOnboarding(located: Located): Promise<void> {
     return installEach(agentIds(raw), mcpServerSpec(statePath, { ...runningWsp(), shim }), homedir());
   });
   let finishing: Promise<void> | undefined;
-  ipcMain.handle("onboarding:finish", event => {
-    gate(event, "onboarding:finish");
-    return (finishing ??= (async () => {
+  // Both ways out record this computer and open the app on it; the second opens the app on the connect sheet, for a
+  // person whose work is on a box, and the app's own host still serves the page the sheet is drawn in.
+  const finish = (hash: string): Promise<void> =>
+    (finishing ??= (async () => {
       const { runtime, workspace } = await recordThisComputer({ statePath });
       io.log(`${workspace.name} (${workspace.id}) is this computer`);
-      await showApp(located, runtime);
+      await showApp(located, runtime, hash);
       for (const channel of ONBOARDING_CHANNELS) ipcMain.removeHandler(channel);
       page.close();
     })());
+  ipcMain.handle("onboarding:finish", event => {
+    gate(event, "onboarding:finish");
+    return finish("");
+  });
+  ipcMain.handle("onboarding:connect", event => {
+    gate(event, "onboarding:connect");
+    return finish("#connect");
   });
   // The page follows the Mac's appearance: no preference record exists yet for it to read.
   nativeTheme.themeSource = "system";
@@ -230,10 +327,14 @@ async function showOnboarding(located: Located): Promise<void> {
 }
 
 let stopping: Promise<void> | undefined;
+// The forwards the ssh road holds go with the app; the app's own host is stopped only when this process started it,
+// whichever host the window was on.
 app.on("before-quit", event => {
-  if (session === undefined || !session.owned || stopping !== undefined) return;
+  if (stopping !== undefined) return;
+  switcher?.closeAll();
+  if (local === undefined || !local.owned) return;
   event.preventDefault();
-  stopping = session
+  stopping = local
     .close()
     .catch((e: unknown) => io.error(`host close failed: ${e instanceof Error ? e.message : String(e)}`))
     .then(() => app.quit());

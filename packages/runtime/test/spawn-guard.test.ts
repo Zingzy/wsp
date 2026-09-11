@@ -487,6 +487,31 @@ describe("agents spawning agents", () => {
     await rt.close();
   });
 
+  it("a thread on a fork is handed a token too, and under a lead allowing two levels it forks once more", async () => {
+    const held = heldAdapter();
+    const rt = runtimeWith({ claude: held.factory }, { url: "http://10.0.0.2:4700" });
+    const lead = await rt.workspaces.create({ golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 3, maxDepth: 2 } });
+    const opener = await rt.sessions.start(lead.id, { prompt: "lead" });
+    const rootThread = opener.view().threadId!;
+    const rootScope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: lead.id, rootThreadId: rootThread };
+    const forked = await rt.workspaces.create({ golden: "snap_g", name: "builder" }, asThread(rootScope));
+    // The fork stores no switch of its own, so a mint reading the record itself would hand this turn nothing.
+    const onFork = await rt.sessions.start(forked.id, { prompt: "build" }, asThread(rootScope));
+    const forkThread = onFork.view().threadId!;
+    const launch = held.launches[1]!;
+    expect(launch.env[HOST_URL_ENV]).toBe("http://10.0.0.2:4700");
+    expect(launch.env[HOST_TOKEN_ENV]).toMatch(/\S/);
+    const scoped = (await rt.devices.list()).find(d => d.scope?.threadId === forkThread);
+    expect(scoped?.scope).toEqual({ kind: "thread", threadId: forkThread, workspaceId: forked.id, rootThreadId: rootThread });
+    // And at one level deep under a lead that allows two, it forks once more.
+    const forkScope: ThreadScope = { kind: "thread", threadId: forkThread, workspaceId: forked.id, rootThreadId: rootThread };
+    const deeper = await rt.workspaces.create({ golden: "snap_g", name: "deeper" }, asThread(forkScope));
+    expect(deeper.rootThreadId).toBe(rootThread);
+    held.end(1);
+    held.end(0);
+    await rt.close();
+  });
+
   it("a workspace whose agents could not drive this host is refused the switch, in the words both doors read", async () => {
     const rt = runtimeWith({ claude: heldAdapter().factory });
     const mac = await rt.workspaces.createLocal("mac");

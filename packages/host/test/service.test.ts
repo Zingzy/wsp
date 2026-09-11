@@ -87,7 +87,8 @@ describe("one module per service manager", () => {
     expect(systemd.unit(at)).toEqual({ name: `wsp-host-${tag}.service`, path: `/Users/z/.config/systemd/user/wsp-host-${tag}.service` });
     const text = systemd.text(planFor(at));
     expect(text).toContain("ExecStart='/usr/bin/node' '/opt/wsp/bin.js' 'up' '--state' '/Users/z/.wsp/state.json' '--port' '4400' '--ws-port' '4410' '--listen' '127.0.0.1'");
-    expect(text).toContain("WorkingDirectory='/Users/z/work'");
+    // systemd reads WorkingDirectory= as a bare path and refuses a quoted one as not absolute; the unit never starts.
+    expect(text).toContain("WorkingDirectory=/Users/z/work\n");
     expect(text).toContain("Environment='PATH=/usr/bin:/bin'");
     expect(text).toContain("Restart=always");
     expect(text).toContain("StandardOutput=append:/Users/z/.wsp/host.log");
