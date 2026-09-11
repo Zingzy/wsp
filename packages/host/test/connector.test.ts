@@ -202,6 +202,29 @@ describe("the connector child", () => {
     await new Promise(done => setTimeout(done, 100));
     expect(readFileSync(join(dir, "runs"), "utf8").split("\n").filter(Boolean).length).toBe(runs);
   });
+
+  it("reads the name afresh at every start and hands over the ones that are new", async () => {
+    const dir = tempDir("connector");
+    const bin = join(dir, "renaming");
+    const runs = join(dir, "runs");
+    // cloudflared is handed a fresh quick tunnel name every time it runs, and there is nothing to stop it handing
+    // out the same one twice; this stand-in repeats itself once before it moves on and stays up.
+    writeFileSync(
+      bin,
+      `#!/bin/sh\nn=$(cat "${runs}" 2>/dev/null || echo 0)\nn=$((n+1))\necho "$n" > "${runs}"\nif [ "$n" -ge 3 ]; then\n  >&2 echo 'INF |  https://next-name.trycloudflare.com  |'\n  sleep 30\nelse\n  >&2 echo 'INF |  https://same-name.trycloudflare.com  |'\n  exit 1\nfi\n`,
+      { mode: 0o755 },
+    );
+    const names: string[] = [];
+    const connector = startConnector({ bin, stateDir: dir, port: 4400, log: () => {}, restartMs: 20, onHostname: name => names.push(name) });
+    stops.push(() => connector.stop());
+
+    // The first name is still the one the hostname promise hands over, for the line printed at start.
+    expect(await connector.hostname()).toBe("same-name.trycloudflare.com");
+    await vi.waitUntil(() => names.length >= 2, { timeout: 4000 });
+    expect(Number(readFileSync(runs, "utf8").trim())).toBe(3);
+    // Three starts, two names: the start that repeated the name before it has nothing to report.
+    expect(names).toEqual(["same-name.trycloudflare.com", "next-name.trycloudflare.com"]);
+  });
 });
 
 describe("a connector another run left behind", () => {

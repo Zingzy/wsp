@@ -80,7 +80,7 @@ On your own computer, `wsp relay clients` says which computers hold a token for 
 
 At every start a linked box asks the relay for a tunnel and runs Cloudflare's connector against its own loopback port. wsp downloads that connector once into the state folder, verifying it against a sha256 pinned in the repo, and refuses to run anything whose bytes do not match. Nothing is piped from a download into a shell. The child is started by the host, its pid is written to `connector.pid` beside the state file, and that pid is the only one wsp ever stops.
 
-With no zone configured on the relay, it hands out no hostname and the box runs a quick tunnel instead, reporting the name it was given. Those names change at every start, which is why the address lines print it and `wsp status` reads it back.
+With no zone configured on the relay, it hands out no hostname and the box runs a quick tunnel instead, reporting the name it was given. A quick tunnel is given a new name every time the connector runs, the restarts after a connector exits included, so the box reports each one as it arrives and the address lines and `wsp status` follow it.
 
 ## Hosting the relay yourself
 
