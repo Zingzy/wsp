@@ -1,14 +1,37 @@
 // Protocol server over WS. Auth model: the long-lived authToken travels only
 // in an `auth` frame on an already-open socket (never in a URL, where it would
-// land in logs); anything else that needs to authenticate a NEW socket uses a
+// land in logs); a computer that is not this one redeems a one-time pairing
+// code as the first frame of a socket and holds a device token of its own
+// afterwards; anything else that needs to authenticate a NEW socket uses a
 // 5-minute single-use ticket minted over an authed socket (`ticket.issue`) and
 // redeemed as `?ticket=...` on the next connect.
 
 import { randomBytes } from "node:crypto";
-import { timingSafeEqual } from "node:crypto";
-import type { IncomingMessage } from "node:http";
+import type { IncomingMessage, Server as HttpServer } from "node:http";
+import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
-import { HOST_STOPPING_CLOSE, RELAY_TICKET_REFUSAL, RuntimeRequest, TICKET_ORIGIN, WorkspaceListing, WorkspaceOut, type ExecEvent, type ForwardEvent, type PortForward, type WorkspaceOrigin, type WorkspaceView } from "@wsp/protocol";
+import {
+  DEVICES_RELAY_REFUSAL,
+  DEVICE_REVOKE_REFUSAL,
+  HOST_STOPPING_CLOSE,
+  LOOPBACK,
+  PAIR_CODE_REFUSAL,
+  PAIR_CODE_TTL_MS,
+  PAIR_ISSUE_REFUSAL,
+  RELAY_TICKET_REFUSAL,
+  RuntimeRequest,
+  TICKET_ORIGIN,
+  WS_PATH,
+  WorkspaceListing,
+  WorkspaceOut,
+  type DeviceView,
+  type ExecEvent,
+  type ForwardEvent,
+  type PortForward,
+  type WorkspaceOrigin,
+  type WorkspaceView,
+} from "@wsp/protocol";
+import { NO_DEVICE_DOOR, safeEqual, type DeviceDoor } from "./devices.js";
 import type { HostFolders, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
 
 /** The port forwards a host holds, as the app lists and stops them. The
@@ -20,14 +43,22 @@ export interface ForwardsSource {
   on(fn: (e: ForwardEvent) => void): () => void;
 }
 
-/** The address every host socket binds: the app carries the runtime token, so nothing listens beyond this computer. */
-export const LOOPBACK = "127.0.0.1";
+/** The address a host binds when nobody names another and the path the runtime answers upgrades on, both the
+ * protocol's own rule; re-exported so the host and its tests keep reading them off the server they start. */
+export { LOOPBACK, WS_PATH } from "@wsp/protocol";
 
 export interface ServeOptions {
   port: number;
   authToken: string;
   host?: string;
+  /** An HTTP server whose upgrades of WS_PATH this runtime answers too, beside its own port, so one address and one
+   * port carry the page and the protocol. An upgrade of any other path is refused rather than left hanging. */
+  attach?: HttpServer;
+  /** Where paired computers and their unspent codes are kept; without it the pairing ops are refused and the host
+   * token is the only way in. */
+  devices?: DeviceDoor;
   ticketTtlMs?: number;
+  pairTtlMs?: number;
   /** Injectable clock for ticket-expiry tests. */
   now?: () => number;
   forwards?: ForwardsSource;
@@ -44,8 +75,15 @@ export interface ServeOptions {
   init?: InitDoor;
 }
 
+/** Who a token names: this host's own process, or one paired computer. Every road in reads it from one function, so
+ * a road cannot be opened wider than the others by accident. */
+export type Authed = { kind: "host" } | { kind: "device"; device: DeviceView };
+
 export interface RuntimeServer {
   port: number;
+  /** Who the bearer token of an HTTP request names, or nothing when it names nobody. The JSON routes the host
+   * serves beyond loopback gate on this, so the WebSocket and those routes read one token store. */
+  authorize(token: string | undefined): Promise<Authed | undefined>;
   close(): Promise<void>;
 }
 
@@ -65,12 +103,6 @@ function bundlerFrom(opts: ServeOptions): (source: string) => ProjectBundler {
     if (opts.projects === undefined) throw new Error("this runtime cannot read folders on this computer");
     return opts.projects(source);
   };
-}
-
-function safeEqual(a: string, b: string): boolean {
-  const ab = Buffer.from(a);
-  const bb = Buffer.from(b);
-  return ab.length === bb.length && timingSafeEqual(ab, bb);
 }
 
 function landerFrom(opts: ServeOptions): () => ProjectLander {
@@ -115,11 +147,38 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
   if (!opts.authToken) throw new Error("serveRuntime refuses to start without an auth token");
   const now = opts.now ?? Date.now;
   const ticketTtlMs = opts.ticketTtlMs ?? 300_000;
+  const pairTtlMs = opts.pairTtlMs ?? PAIR_CODE_TTL_MS;
   const tickets = new Map<string, Ticket>();
+  const devices = (): DeviceDoor => {
+    if (opts.devices === undefined) throw new Error(NO_DEVICE_DOOR);
+    return opts.devices;
+  };
+
+  /** Who a token names. The one reading: the auth frame, a socket that just redeemed a code and the HTTP routes the
+   * host guards all come through here, so no road can be widened without widening every road. */
+  const whoIs = async (token: string): Promise<Authed | undefined> => {
+    if (safeEqual(token, opts.authToken)) return { kind: "host" };
+    if (opts.devices === undefined) return undefined;
+    const device = await opts.devices.match(token, now());
+    return device === undefined ? undefined : { kind: "device", device };
+  };
+
+  /** Every live socket a device holds, so revoking that device cuts them rather than leaving a token that is gone
+   * still driving the host until the client happens to redial. */
+  const held = new Set<{ deviceId: string; cut: () => void }>();
 
   const wss = new WebSocketServer({ host: opts.host ?? LOOPBACK, port: opts.port });
+  const attached = opts.attach === undefined ? undefined : new WebSocketServer({ noServer: true });
+  const onUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
+    if (new URL(req.url ?? "/", "ws://localhost").pathname !== WS_PATH) {
+      socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+      return;
+    }
+    attached!.handleUpgrade(req, socket, head, ws => attached!.emit("connection", ws, req));
+  };
+  if (opts.attach !== undefined) opts.attach.on("upgrade", onUpgrade);
 
-  wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
+  const onConnection = (ws: WebSocket, req: IncomingMessage): void => {
     const url = new URL(req.url ?? "/", "ws://localhost");
     const ticketParam = url.searchParams.get("ticket");
     let authed = false;
@@ -140,11 +199,29 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
       authed = true;
     }
 
+    // Who this socket is once it is let in: the host's own process, or the paired computer whose token it sent.
+    // A ticket redeemed at the door is the host's own road, so a socket that came in that way counts as the host.
+    let me: Authed | undefined = authed ? { kind: "host" } : undefined;
+    // Whether this socket is one of the person's own rather than the road a machine's requests arrive by. Who may
+    // reach this host is never a machine's to hand out, list or take away, and it is the same rule a ticket is.
+    const ownRoad = stamped === undefined;
+    /** Set while an unauthed socket's first frame is being decided, so a second frame cannot race past the door. */
+    let deciding = false;
+
     const detaches: (() => void)[] = [];
+    let bound: { deviceId: string; cut: () => void } | undefined;
     ws.on("close", () => {
       for (const un of detaches) un();
       detaches.length = 0;
+      if (bound !== undefined) held.delete(bound);
     });
+
+    /** Remembers the socket under the device that authed it, so a revoke can cut it. */
+    const bind = (device: DeviceView): void => {
+      me = { kind: "device", device };
+      bound = { deviceId: device.id, cut: () => ws.close(4401, "unauthorized") };
+      held.add(bound);
+    };
 
     const send = (payload: Record<string, unknown>): void => {
       if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(payload));
@@ -169,12 +246,28 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
         const msg = req2.data;
 
         if (!authed) {
-          if (msg.op !== "auth" || !safeEqual(msg.token, opts.authToken)) {
-            send({ id: msg.id, ok: false, error: "unauthorized", kind: "auth" });
+          const refuse = (error: string): void => {
+            send({ id: msg.id, ok: false, error, kind: "auth" });
             ws.close(4401, "unauthorized");
+          };
+          if (deciding) return refuse("unauthorized");
+          deciding = true;
+          if (msg.op === "pair.redeem") {
+            const paired = await devices()
+              .redeem(msg.code, msg.name, now())
+              .catch(() => undefined);
+            if (paired === undefined) return refuse(PAIR_CODE_REFUSAL);
+            authed = true;
+            bind(paired.device);
+            send({ id: msg.id, ok: true, deviceId: paired.deviceId, deviceToken: paired.deviceToken });
             return;
           }
+          if (msg.op !== "auth") return refuse("unauthorized");
+          const who = await whoIs(msg.token).catch(() => undefined);
+          if (who === undefined) return refuse("unauthorized");
           authed = true;
+          if (who.kind === "device") bind(who.device);
+          else me = who;
           send({ id: msg.id, ok: true });
           return;
         }
@@ -185,6 +278,43 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "auth":
               send({ id: msg.id, ok: true });
               return;
+            case "pair.issue": {
+              // A code lets a stranger in, so only the process that already holds this host's own token, over a
+              // socket no machine's requests arrive on, may mint one.
+              if (!ownRoad || me?.kind !== "host") {
+                send({ id: msg.id, ok: false, error: PAIR_ISSUE_REFUSAL });
+                return;
+              }
+              const { code, expiresAt } = await devices().issue({ now: now(), ttlMs: pairTtlMs });
+              send({ id: msg.id, ok: true, code, expiresAt });
+              return;
+            }
+            case "pair.redeem":
+              // The door above spends a code; a socket already through it is asking for a second identity.
+              send({ id: msg.id, ok: false, error: PAIR_CODE_REFUSAL });
+              return;
+            case "devices.list":
+              if (!ownRoad) {
+                send({ id: msg.id, ok: false, error: DEVICES_RELAY_REFUSAL });
+                return;
+              }
+              send({ id: msg.id, ok: true, devices: await devices().list() });
+              return;
+            case "devices.revoke": {
+              if (!ownRoad) {
+                send({ id: msg.id, ok: false, error: DEVICES_RELAY_REFUSAL });
+                return;
+              }
+              if (me?.kind === "device" && msg.deviceId !== me.device.id) {
+                send({ id: msg.id, ok: false, error: DEVICE_REVOKE_REFUSAL });
+                return;
+              }
+              const revoked = await devices().revoke(msg.deviceId);
+              send({ id: msg.id, ok: true, revoked });
+              // Cut after the reply so the device that revoked itself reads the answer before its socket goes.
+              for (const socket of [...held]) if (socket.deviceId === msg.deviceId) socket.cut();
+              return;
+            }
             case "ticket.issue": {
               if (stamped !== undefined) {
                 send({ id: msg.id, ok: false, error: RELAY_TICKET_REFUSAL });
@@ -496,7 +626,10 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
         }
       })();
     });
-  });
+  };
+
+  wss.on("connection", onConnection);
+  attached?.on("connection", onConnection);
 
   await new Promise<void>((resolve, reject) => {
     wss.once("listening", resolve);
@@ -504,18 +637,22 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
   });
   const addr = wss.address();
   const port = typeof addr === "object" && addr !== null ? addr.port : opts.port;
+  const servers = attached === undefined ? [wss] : [wss, attached];
+  const clients = (): WebSocket[] => servers.flatMap(server => [...server.clients]);
 
   return {
     port,
+    authorize: async token => (token === undefined || token === "" ? undefined : whoIs(token)),
     close: async () => {
+      opts.attach?.off("upgrade", onUpgrade);
       // The socket did not break under a client, the host let it go: the close code is what tells a command waiting
       // on a turn that its turn goes on. A client that does not answer the frame is cut, so a stop stays bounded.
-      for (const client of wss.clients) client.close(HOST_STOPPING_CLOSE, "stopping");
+      for (const client of clients()) client.close(HOST_STOPPING_CLOSE, "stopping");
       const cut = setTimeout(() => {
-        for (const client of wss.clients) client.terminate();
+        for (const client of clients()) client.terminate();
       }, STOP_GRACE_MS);
       try {
-        await new Promise<void>((resolve, reject) => wss.close(err => (err ? reject(err) : resolve())));
+        await Promise.all(servers.map(server => new Promise<void>((resolve, reject) => server.close(err => (err ? reject(err) : resolve())))));
       } finally {
         clearTimeout(cut);
       }

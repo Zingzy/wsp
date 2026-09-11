@@ -327,7 +327,7 @@ function formatter(io: CliIO, json: boolean): Out {
 }
 
 /** Columns padded to their widest cell, two spaces apart; the last column is never padded. */
-function table(rows: ReadonlyArray<ReadonlyArray<string>>): string[] {
+export function table(rows: ReadonlyArray<ReadonlyArray<string>>): string[] {
   const widths = rows.reduce<number[]>((w, row) => row.map((cell, i) => Math.max(w[i] ?? 0, cell.length)), []);
   return rows.map(row => row.map((cell, i) => (i === row.length - 1 ? cell : cell.padEnd(widths[i]!))).join("  ").trimEnd());
 }

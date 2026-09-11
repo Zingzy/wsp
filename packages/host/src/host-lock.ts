@@ -3,11 +3,14 @@
 // ports it bound, so a second host refuses and other local tools find it.
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { LOOPBACK } from "@wsp/protocol";
 
 export interface HostLock {
   pid: number;
   port: number;
   wsPort: number;
+  /** The address the host bound, absent on a lock a host of an earlier build wrote, which bound this computer alone. */
+  address?: string;
   startedAt: string;
 }
 
@@ -72,11 +75,13 @@ export function hostLogPath(statePath: string): string {
 }
 
 /** Where the host serving this state file is, as it prints them when it starts and as wsp status prints them while
- * it runs: one rule for the three lines, so both readings name the same ports and the same token file. */
-export function addressLines(statePath: string, ports: { port: number; wsPort: number }): string[] {
+ * it runs: one rule for the three lines, so both readings name the same ports, the same address and the same token
+ * file. A reading with no address is a host that bound this computer alone. */
+export function addressLines(statePath: string, ports: { port: number; wsPort: number; address?: string }): string[] {
+  const at = ports.address ?? LOOPBACK;
   return [
-    `app         http://127.0.0.1:${ports.port}`,
-    `runtime ws  ws://127.0.0.1:${ports.wsPort} (token: ${hostTokenPath(statePath)})`,
+    `app         http://${at}:${ports.port}`,
+    `runtime ws  ws://${at}:${ports.wsPort} (token: ${hostTokenPath(statePath)})`,
     `state       ${statePath}`,
   ];
 }
@@ -96,7 +101,7 @@ function refuseIfServed(lockPath: string, statePath: string): void {
 
 /** Seeded with the requested ports so a refusal during startup can name them;
  * rewritten with the bound ports once the host is up. */
-export function takeLock(lockPath: string, statePath: string, ports: { port: number; wsPort: number }): HostLock {
+export function takeLock(lockPath: string, statePath: string, ports: { port: number; wsPort: number; address?: string }): HostLock {
   refuseIfServed(lockPath, statePath);
   const lock: HostLock = { pid: process.pid, ...ports, startedAt: new Date().toISOString() };
   mkdirSync(dirname(lockPath), { recursive: true });

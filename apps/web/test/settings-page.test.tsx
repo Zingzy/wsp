@@ -175,7 +175,7 @@ describe("the settings page", () => {
     useStore.getState().bind(api);
     await flush();
     const fact = (): string => document.querySelector<HTMLElement>("[data-k=version]")!.textContent!;
-    served({ wsPort: 1, token: "t", version: "0.1.5" });
+    served({ wsPort: 1, token: "t", wsPath: "/ws", paired: true, version: "0.1.5" });
     window.wsp = { version: "0.1.3" };
     render(<SettingsPage />);
     expect(fact()).toBe("app 0.1.3 · host 0.1.5");
