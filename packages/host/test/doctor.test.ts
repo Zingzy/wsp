@@ -598,15 +598,18 @@ describe("deployScript", () => {
       for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
     });
 
-    /** What the node the machine already carries answers, and what the prefix's own node answers in every case
-     * but the mismatch: a rule missing the half that asks which node will run is one these headers satisfy, so
-     * the case standing for that half cannot pass without it. */
+    /** What the node the machine already carries answers, and what the prefix's own node answers wherever a case
+     * is not about them disagreeing: a rule missing the half that asks which node will run is one these headers
+     * satisfy, so the case standing for that half cannot pass without it. */
     const MACHINE_MAJOR = 22;
     /** A node stands in for its own major: the rule asks a node which one it is, and a script that answers is as
      * much of a node as the rule reads. */
     const nodeSaying = (major: number): string => `#!/bin/sh\necho ${major}\n`;
+    /** A node that is in the prefix and cannot say what it is: a tarball half unpacked, a binary for another
+     * architecture, a wrapper whose own interpreter is gone. */
+    const MUTE_NODE = "#!/bin/sh\nexit 1\n";
 
-    async function evaluateRule(has: { node: number | false; headers: number | false }): Promise<{ nodeDir: string; out: string }> {
+    async function evaluateRule(has: { node: number | false | "mute"; headers: number | false }): Promise<{ nodeDir: string; out: string }> {
       const home = tmp("wsp-nodedir-");
       homes.push(home);
       const at = sshDaemonPaths(home);
@@ -616,16 +619,13 @@ describe("deployScript", () => {
       writeFileSync(join(elsewhere, "node"), nodeSaying(MACHINE_MAJOR), { mode: 0o755 });
       if (has.node !== false) {
         mkdirSync(join(at.nodeDir, "bin"), { recursive: true });
-        writeFileSync(join(at.nodeDir, "bin", "node"), nodeSaying(has.node), { mode: 0o755 });
+        writeFileSync(join(at.nodeDir, "bin", "node"), has.node === "mute" ? MUTE_NODE : nodeSaying(has.node), { mode: 0o755 });
       }
       if (has.headers !== false) {
         mkdirSync(join(at.nodeDir, "include", "node"), { recursive: true });
-        // The shape a real header has: it names its own macro again below the define that carries the number, so a
-        // rule that read anything less than whole lines would find the major it was looking for in that one.
-        writeFileSync(
-          join(at.nodeDir, "include", "node", "node_version.h"),
-          `#define NODE_MAJOR_VERSION ${has.headers}\n#define NODE_MINOR_VERSION 3\n# define NODE_EXE_VERSION NODE_STRINGIFY(NODE_MAJOR_VERSION) "."\n`,
-        );
+        // The define as a real header writes it, one space and nothing after the number: the line the rule matches
+        // whole, and the line a pattern ending in a space is a prefix of.
+        writeFileSync(join(at.nodeDir, "include", "node", "node_version.h"), `#define NODE_MAJOR_VERSION ${has.headers}\n`);
       }
       const place = sshDaemonPlace({ home, path: "/usr/bin:/bin" });
       const rule = deployScript(place, "aabbcc").split("\n").filter(line => line.includes("npm_config_nodedir"));
@@ -658,6 +658,11 @@ describe("deployScript", () => {
 
     it("points node-gyp nowhere when the headers left in the prefix are another major's than the node beside them", async () => {
       const { out } = await evaluateRule({ node: MACHINE_MAJOR, headers: MACHINE_MAJOR - 2 });
+      expect(out).toBe("NODEDIR[] SURVIVED");
+    });
+
+    it("points node-gyp nowhere when the node in the prefix cannot say which major it is", async () => {
+      const { out } = await evaluateRule({ node: "mute", headers: MACHINE_MAJOR });
       expect(out).toBe("NODEDIR[] SURVIVED");
     });
   });

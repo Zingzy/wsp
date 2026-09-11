@@ -472,8 +472,11 @@ function nodeBootstrap(place: DaemonPlace): string {
     // headers of another major compile an addon against the API that other Node declared. Both measured on Ubuntu
     // 24.04 (2026-09-11); with Node 20 headers in a Node 22 prefix an addon on the V8 macros comes out at
     // NODE_MODULE_VERSION 115 and the node that loads it wants 127, and node-pty's own binding is Node-API, so it
-    // is every other native dependency that is at risk. Whole lines, since the header names its own macro again
-    // further down. With no answer node-gyp fetches the right headers.
+    // is every other native dependency that is at risk. Whole lines, because the pattern is the define with the
+    // answer appended and a prefix of that line is not that line: a node that is there and cannot say its major
+    // leaves the pattern ending in a space, and a major that is a digit prefix of another (2 against 22) leaves
+    // one too, both of which a substring match takes for agreement (measured 2026-09-11). With no answer at all
+    // node-gyp fetches the right headers.
     `if [ "$(command -v node)" = ${sh(place, `${place.nodeDir}/bin/node`)} ] && grep -qx "#define NODE_MAJOR_VERSION $(${NODE_MAJOR} 2>/dev/null)" ${sh(place, `${place.nodeDir}/include/node/node_version.h`)} 2>/dev/null; then export npm_config_nodedir=${sh(place, place.nodeDir)}; fi`,
   ].join("\n");
 }
