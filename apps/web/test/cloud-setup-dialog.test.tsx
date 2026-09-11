@@ -9,7 +9,7 @@
 // happen. Esc hides it with the job running on.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLOUD_SETUP_WORDS, KEY_REFUSED, KEY_UNCHECKED, SIGN_IN_STAGE_ID, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, MACHINE_SWEEP_LINE, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initBuildRows, initDiskLine, initDiskOverLine, MACHINE_GONE_LINE, MACHINE_ROW_LABEL, initStageCount, initStoppedAt, initStageCountLine, initTallyLine, initButtonLine, initProgressLine, initSignInLine, keyRefusedLine, keyUncheckedLine, snapshotStageLine, type EventUnion, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, KEY_REFUSED, KEY_UNCHECKED, SIGN_IN_STAGE_ID, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, initSignInOutcome, MACHINE_SWEEP_LINE, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initBuildRows, initDiskLine, initDiskOverLine, MACHINE_GONE_LINE, MACHINE_ROW_LABEL, initStageCount, initStoppedAt, initStageCountLine, initTallyLine, initButtonLine, initProgressLine, initSignInLine, keyRefusedLine, keyUncheckedLine, snapshotStageLine, type EventUnion, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS, keyStoppedRows } from "./cloud-setup/keyRefusedJob.js";
 import { useStore } from "../src/protocol/store.js";
@@ -951,8 +951,8 @@ describe("the cloud setup sheet", () => {
         { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "Sign in to GitHub CLI", state: SIGN_IN_OPEN_STATE, page: "https://github.com/login/device", code: "8F4A-C21B" },
         { id: "sign-in/claude", kind: "sign-in", tool: "claude", label: "Sign in to Claude Code", state: INIT_ROW_STATES.keySet },
         // The host's note names the command the machine ran; no screen shows it.
-        { id: "sign-in/codex", kind: "sign-in", tool: "codex", label: "Sign in to Codex", state: INIT_SIGN_IN_WORDS.copied, detail: "codex login --api-key exited 0" },
-        { id: "sign-in/wrangler", kind: "sign-in", tool: "wrangler", label: "Sign in to Cloudflare Wrangler", state: INIT_SIGN_IN_WORDS["not-signed-in"], detail: "wrangler login exited 1; no sign-in within 16m" },
+        { id: "sign-in/codex", kind: "sign-in", tool: "codex", label: "Sign in to Codex", ...initSignInOutcome("copied", "darwin"), detail: "codex login --api-key exited 0" },
+        { id: "sign-in/wrangler", kind: "sign-in", tool: "wrangler", label: "Sign in to Cloudflare Wrangler", ...initSignInOutcome("not-signed-in", "darwin"), detail: "wrangler login exited 1; no sign-in within 16m" },
         { id: "stage/snapshotting", kind: "stage", label: GOLDEN_STAGE_WORDS.snapshotting, state: INIT_ROW_STATES.running, lines: [snapshotStageLine(13 * GIB)], since: Date.now() - 41_000 },
         { id: "stage/sealed", kind: "stage", label: GOLDEN_STAGE_WORDS.sealed, state: "waiting" },
         { id: "workspace/first", kind: "workspace", label: "first", state: "waiting" },
@@ -1030,7 +1030,7 @@ describe("the cloud setup sheet", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(api.initCancel).not.toHaveBeenCalled();
     // The result lands as a state word and the page link goes.
-    emit({ ...building, rows: building.rows.map(r => (r.id === "sign-in/gh" || r.id === "sign-in/wrangler" ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, state: INIT_SIGN_IN_WORDS["signed-in"] } : r)), progress: { done: 6, total: 9 } });
+    emit({ ...building, rows: building.rows.map(r => (r.id === "sign-in/gh" || r.id === "sign-in/wrangler" ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, ...initSignInOutcome("signed-in", "darwin") } : r)), progress: { done: 6, total: 9 } });
     // With the last sign-in settled the list is back: stages in order, the sign-ins one stage reading done and folded, the count and the line along the card's top edge.
     await waitFor(() => expect(k(dialog, "title").textContent).toBe(CLOUD_SETUP_WORDS.build.headline));
     expect(within(dialog).getByRole("progressbar").getAttribute("aria-valuenow")).toBe("60");
@@ -1063,7 +1063,7 @@ describe("the cloud setup sheet", () => {
     expect(creating.querySelector("[data-k=lines]")!.textContent).toBe("sandbox from base");
     expect(dialog.querySelector('[data-row="stage/sealed"] [role=button]')).toBeNull();
     // Done: the headline turns and the one keycap opens the workspace.
-    emit({ ...building, phase: "done", golden: { version: 1 }, workspace: { id: "ws_first", name: "first" }, rows: building.rows.map(r => ({ ...r, state: r.kind === "workspace" ? "forked" : r.kind === "sign-in" ? INIT_SIGN_IN_WORDS["signed-in"] : "done" })), progress: { done: 9, total: 9 } });
+    emit({ ...building, phase: "done", golden: { version: 1 }, workspace: { id: "ws_first", name: "first" }, rows: building.rows.map(r => (r.kind === "sign-in" ? { ...r, ...initSignInOutcome("signed-in", "darwin") } : { ...r, state: r.kind === "workspace" ? "forked" : "done" })), progress: { done: 9, total: 9 } });
     await waitFor(() => expect(dialog.textContent).toContain(CLOUD_SETUP_WORDS.build.done));
     // The sentence says what stands, not what was running.
     expect(k(dialog, "sentence").textContent).toBe(CLOUD_SETUP_WORDS.build.doneTop);
@@ -1122,7 +1122,7 @@ describe("the cloud setup sheet", () => {
       screens: [],
       rows: [
         { id: "stage/ready", kind: "stage", label: GOLDEN_STAGE_WORDS.ready, state: "done" },
-        { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "Sign in to GitHub CLI", state: INIT_SIGN_IN_WORDS["not-signed-in"], detail: "no sign-in within 16m" },
+        { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "Sign in to GitHub CLI", ...initSignInOutcome("not-signed-in", "darwin"), detail: "no sign-in within 16m" },
         { id: "stage/snapshotting", kind: "stage", label: GOLDEN_STAGE_WORDS.snapshotting, state: INIT_ROW_STATES.running },
       ],
       progress: { done: 1, total: 3 },
@@ -1156,6 +1156,38 @@ describe("the cloud setup sheet", () => {
     fireEvent.click(cancel);
     expect(api.initCancel).not.toHaveBeenCalled();
     expect(dialog.querySelector("[data-k=refusal]")).toBeNull();
+  });
+
+  it("a build a Linux host worded for itself reads as one a Mac wrote: the copy says copied from this computer and is over, and the stage, the glyph and Retry follow the outcome rather than the sentence", async () => {
+    const sealing: InitJob = {
+      ...JOB,
+      phase: "sealing",
+      stoppable: false,
+      screens: [],
+      rows: [
+        { id: "stage/ready", kind: "stage", label: GOLDEN_STAGE_WORDS.ready, state: "done" },
+        { id: "sign-in/codex", kind: "sign-in", tool: "codex", label: "Sign in to Codex", ...initSignInOutcome("copied", "linux") },
+        { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "Sign in to GitHub CLI", ...initSignInOutcome("not-signed-in", "linux"), detail: "no sign-in within 16m" },
+        { id: "stage/snapshotting", kind: "stage", label: GOLDEN_STAGE_WORDS.snapshotting, state: INIT_ROW_STATES.running },
+      ],
+      progress: { done: 2, total: 3 },
+    };
+    const { api, dialog } = await open({ setup: { ...HELD, job: sealing } });
+    await waitFor(() => expect(k(dialog, "build")).toBeDefined());
+    // Every sign-in is over, so the screen is the list with them folded, not the slide that waits on the person.
+    expect(k(dialog, "title").textContent).toBe(CLOUD_SETUP_WORDS.build.headline);
+    expect(k(dialog, "count").textContent).toBe("2 of 3");
+    const codex = dialog.querySelector<HTMLElement>('[data-row="sign-in/codex"]')!;
+    expect(codex.querySelector("[data-k=state]")!.textContent).toBe("copied from this computer");
+    expect(codex.querySelector("[data-k=retry]"), "a copy is over, so there is nothing to run again").toBeNull();
+    // The run-out decides the stage it folds into, which wears that host's own word beside the failed glyph.
+    const stage = dialog.querySelector<HTMLElement>(`[data-row="${SIGN_IN_STAGE_ID}"]`)!;
+    expect(stage.querySelector("[data-k=state]")!.textContent).toBe("not signed in");
+    expect(stage.querySelector("[data-glyph]")!.getAttribute("data-glyph")).toBe("failed");
+    expect(stage.dataset["open"]).toBe("true");
+    fireEvent.click(dialog.querySelector<HTMLElement>('[data-row="sign-in/gh"] [data-k=retry]')!);
+    await waitFor(() => expect(api.initRetry).toHaveBeenCalledWith({ tool: "gh" }));
+    expect(dialog.textContent).not.toMatch(/\bMac\b/);
   });
 
   it("a sign-in whose page hands a code back takes it on its row and sends it to the host for that tool; a refused submit says so and the row stays", async () => {

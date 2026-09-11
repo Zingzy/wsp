@@ -12,6 +12,7 @@ import {
   InitNeedsYouEvent,
   InitSetup,
   LOGIN_STATE_WORDS,
+  LoginState,
   NEEDS_YOU,
   RuntimeRequest,
   INIT_ROW_STATES,
@@ -229,7 +230,7 @@ describe("the words the clients print for the job", () => {
       expect(initNeedWhat(job), phase).toBeUndefined();
     }
     // A sign-in that moved on waits on nobody, whatever it once said.
-    expect(initNeedWhat({ ...WAITING, rows: WAITING.rows.map(r => (r.kind === "sign-in" ? { ...r, state: INIT_SIGN_IN_WORDS["signed-in"] } : r)) })).toBeUndefined();
+    expect(initNeedWhat({ ...WAITING, rows: WAITING.rows.map(r => (r.kind === "sign-in" ? { ...r, state: INIT_SIGN_IN_WORDS["signed-in"]("darwin"), login: "signed-in" as const } : r)) })).toBeUndefined();
     // The sidebar's line and the need are one spelling, so the toast never says it a second way.
     expect(initProgressLine(WAITING)).toBe(initNeedWhat(WAITING));
   });
@@ -311,10 +312,17 @@ describe("the words the clients print for the job", () => {
 
   it("a row's state words have one table, and one predicate says which of them end the row", () => {
     expect(INIT_ROW_STATES).toEqual({ waiting: "waiting", running: "running", done: "done", failed: "failed", forking: "forking", forked: "forked", importing: "importing", imported: "imported", open: "waiting for you", slot: "waiting for a machine slot", notMade: "not made", retrying: "machine still running, retrying", gone: "gone", stopped: "stopped", keySet: "key set", skipped: "skipped", mcpAdded: "MCP added" });
-    for (const word of ["done", "failed", "stopped", "forked", "imported", "MCP added", "key set", "not made", "gone", "signed in", "not signed in", "copied", "copied from this Mac", "not verified", "skipped"]) expect(initRowOver(word), word).toBe(true);
-    for (const word of ["waiting", "running", "forking", "importing", "waiting for you", "waiting for a machine slot", "machine still running, retrying"]) expect(initRowOver(word), word).toBe(false);
-    // The app's row words for a sign-in's outcome: done once the machine has the credential, the copy named as such.
-    expect(INIT_SIGN_IN_WORDS).toEqual({ "signed-in": "done", "not-signed-in": "not signed in", copied: "copied from this Mac", "not-verified": "not verified", skipped: "skipped" });
+    for (const word of ["done", "failed", "stopped", "forked", "imported", "MCP added", "key set", "not made", "gone", "skipped"]) expect(initRowOver({ state: word }), word).toBe(true);
+    for (const word of ["waiting", "running", "forking", "importing", "waiting for you", "waiting for a machine slot", "machine still running, retrying"]) expect(initRowOver({ state: word }), word).toBe(false);
+    // A sign-in ends on its outcome, never on the sentence it prints: the word a Linux host drew ends the row the
+    // same as a Mac's, and a sentence with no outcome beside it ends nothing.
+    for (const state of LoginState.options) expect(initRowOver({ state: INIT_SIGN_IN_WORDS[state]("linux"), login: state }), state).toBe(true);
+    expect(initRowOver({ state: "copied from this computer", login: "copied" })).toBe(true);
+    expect(initRowOver({ state: "copied from this Mac" }), "a sentence nothing names").toBe(false);
+    // The app's row words for a sign-in's outcome, drawn for the computer the run read: done once the machine has
+    // the credential, the copy named with that computer.
+    expect(Object.fromEntries(LoginState.options.map(state => [state, INIT_SIGN_IN_WORDS[state]("darwin")]))).toEqual({ "signed-in": "done", "not-signed-in": "not signed in", copied: "copied from this Mac", "not-verified": "not verified", skipped: "skipped" });
+    expect(Object.fromEntries(LoginState.options.map(state => [state, INIT_SIGN_IN_WORDS[state]("linux")]))).toEqual({ "signed-in": "done", "not-signed-in": "not signed in", copied: "copied from this computer", "not-verified": "not verified", skipped: "skipped" });
   });
 
   it("the sidebar's line says a machine an earlier build left is still going before it says anything about the job it is on", () => {
@@ -399,7 +407,9 @@ describe("the words the clients print for the job", () => {
     // Past the disk the tooltip carries the overshoot too: said there and in Continue's refusal, nowhere else.
     expect(initDiskLine(21 * 1024 * MIB, 20 * 1024 * MIB)).toBe("about 21 GB of 20 GB on the image, over by 1 GB");
     // The sign-in stage with a run-out is a failure to draw as one, beside the stage that failed; nothing else is.
-    expect([initRowFailed(INIT_ROW_STATES.failed), initRowFailed(INIT_SIGN_IN_WORDS["not-signed-in"]), initRowFailed(INIT_ROW_STATES.done), initRowFailed(INIT_ROW_STATES.stopped)]).toEqual([true, true, false, false]);
+    expect([initRowFailed({ state: INIT_ROW_STATES.failed }), initRowFailed({ state: INIT_SIGN_IN_WORDS["not-signed-in"]("linux"), login: "not-signed-in" }), initRowFailed({ state: INIT_ROW_STATES.done }), initRowFailed({ state: INIT_ROW_STATES.stopped })]).toEqual([true, true, false, false]);
+    // The sentence alone says nothing: a row that carries no outcome is no failure, whatever its word reads.
+    expect(initRowFailed({ state: "not signed in" })).toBe(false);
     expect(CLOUD_SETUP_WORDS.build.doneTop).toBe("The image is sealed; every thread forks it");
     const rows: InitRow[] = [
       { id: "agent/claude", kind: "agent", label: "Claude Code", state: "MCP added" },
@@ -413,9 +423,12 @@ describe("the words the clients print for the job", () => {
     expect(folded.rows.map(r => r.id)).toEqual(["stage/creating", SIGN_IN_STAGE_ID, "stage/snapshotting", "workspace/first"]);
     expect(folded.rows[1]).toMatchObject({ kind: "stage", label: "Signing in on the machine", state: "waiting for you" });
     expect(folded.signIns.map(r => r.id)).toEqual(["sign-in/gh", "sign-in/claude"]);
-    const settled = initBuildRows(rows.map(r => (r.id === "sign-in/gh" ? { ...r, state: "not signed in" } : r)));
-    expect(settled.rows[1]!.state, "a sign-in that ran out keeps the stage from reading done").toBe("not signed in");
-    expect(initBuildRows(rows.map(r => (r.id === "sign-in/gh" ? { ...r, state: "done" } : r))).rows[1]!.state).toBe("done");
+    const settled = initBuildRows(rows.map(r => (r.id === "sign-in/gh" ? { ...r, state: "not signed in", login: "not-signed-in" as const } : r)));
+    expect(settled.rows[1], "a sign-in that ran out keeps the stage from reading done and hands it its own outcome").toMatchObject({ state: "not signed in", login: "not-signed-in" });
+    // The stage folds on the outcomes, so a run on a Linux computer folds where a Mac's does, on the words that computer drew.
+    const linux = initBuildRows(rows.map(r => (r.id === "sign-in/gh" ? { ...r, state: INIT_SIGN_IN_WORDS.copied("linux"), login: "copied" as const } : r)));
+    expect(linux.rows[1]).toMatchObject({ state: "done" });
+    expect(initBuildRows(rows.map(r => (r.id === "sign-in/gh" ? { ...r, state: "done", login: "signed-in" as const } : r))).rows[1]!.state).toBe("done");
     expect(initBuildRows(rows.map(r => (r.kind === "sign-in" ? { ...r, state: "waiting" } : r))).rows[1]!.state).toBe("waiting");
     // Stages alone: the bar measures the build, so the first workspace beside them moves neither end of it.
     expect(initStageCount(folded.rows)).toEqual({ done: 1, total: 3 });
@@ -467,9 +480,9 @@ describe("the words the clients print for the job", () => {
     expect(initSignInLine({ state: INIT_ROW_STATES.open, code: "8F4A-C21B" })).toBe("waiting for the code");
     expect(initSignInLine({ state: INIT_ROW_STATES.open, finish: "code" })).toBe("waiting for the code");
     expect(initSignInLine({ state: INIT_ROW_STATES.open })).toBe("the page is open on this computer");
-    expect(initSignInLine({ state: INIT_SIGN_IN_WORDS.copied })).toBeUndefined();
+    expect(initSignInLine({ state: INIT_SIGN_IN_WORDS.copied("darwin") })).toBeUndefined();
     expect(initSignInLine({ state: INIT_ROW_STATES.done })).toBeUndefined();
-    expect(initSignInLine({ state: INIT_SIGN_IN_WORDS["not-signed-in"] })).toBeUndefined();
+    expect(initSignInLine({ state: INIT_SIGN_IN_WORDS["not-signed-in"]("darwin") })).toBeUndefined();
     expect(snapshotStageLine(13 * 1024 * MIB)).toBe("snapshotting about 13 GB, usually under a minute");
     expect(snapshotStageLine(undefined)).toBe("snapshotting, usually under a minute");
     expect(SAVING_IMAGE_LINE).toBe("saving the image");
