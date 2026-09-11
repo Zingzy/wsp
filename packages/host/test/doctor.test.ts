@@ -10,7 +10,7 @@ import { CURL_NET } from "@wsp/catalog";
 import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { WebSocketServer } from "ws";
 import { GUEST_SUPERVISOR_PATH, GUEST_USER_ENV, TOOLS_PATH } from "@wsp/engine";
-import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, GUEST_DAEMON_DIR, GUEST_WSP_BIN, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, GUEST_DAEMON_DIR, GUEST_WSP_BIN, shellQuote, sshDaemonPaths, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { isReserved, LocalBackend, NoProviderBackend } from "@wsp/engine";
@@ -42,6 +42,7 @@ import {
   localDoctor,
   localPrompt,
   promoteGoldens,
+  sshDaemonPlace,
   stageDaemonBundle,
   tarPackCommand,
   verifyNoneLeft,
@@ -521,7 +522,7 @@ describe("deployScript", () => {
     const npm = script.indexOf("npm install");
     expect(bootstrap).toBeGreaterThan(-1);
     expect(bootstrap).toBeLessThan(npm);
-    const nodedir = script.indexOf('case "$(command -v node)" in /usr/local/bin/node) export npm_config_nodedir=/usr/local ;; esac');
+    const nodedir = script.indexOf('if [ "$(command -v node)" = /usr/local/bin/node ] && [ -f /usr/local/include/node/node_version.h ]; then export npm_config_nodedir=/usr/local; fi');
     expect(nodedir).toBeGreaterThan(bootstrap);
     expect(nodedir).toBeLessThan(npm);
     expect(script).toContain(`https://nodejs.org/dist/v${GUEST_NODE.version}/`);
@@ -548,6 +549,59 @@ describe("deployScript", () => {
     // The deploy also runs as the update of a live workspace; its owner's npm and node-gyp caches are the golden
     // build's sweep to take, not this script's.
     expect(script).not.toMatch(/rm -rf[^\n]*\/root\/\.(npm|cache)/);
+  });
+
+  /** The rule that points node-gyp at a Node's own headers is decided on the machine and not in the script's text,
+   * so each of its cases is run here under bash with a folder standing in for the place's own node prefix. */
+  describe("the npm_config_nodedir rule", () => {
+    const homes: string[] = [];
+    afterEach(() => {
+      for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
+    });
+
+    async function evaluateRule(has: { node: boolean; headers: boolean }): Promise<{ nodeDir: string; out: string }> {
+      const home = tmp("wsp-nodedir-");
+      homes.push(home);
+      const at = sshDaemonPaths(home);
+      // The node a machine already carries, which the deploy's own PATH line leaves behind the place's prefix.
+      const elsewhere = join(home, "elsewhere");
+      mkdirSync(elsewhere, { recursive: true });
+      writeFileSync(join(elsewhere, "node"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+      if (has.node) {
+        mkdirSync(join(at.nodeDir, "bin"), { recursive: true });
+        writeFileSync(join(at.nodeDir, "bin", "node"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+      }
+      if (has.headers) {
+        mkdirSync(join(at.nodeDir, "include", "node"), { recursive: true });
+        writeFileSync(join(at.nodeDir, "include", "node", "node_version.h"), "#define NODE_MAJOR_VERSION 22\n");
+      }
+      const place = sshDaemonPlace({ home, path: "/usr/bin:/bin" });
+      const rule = deployScript(place, "aabbcc").split("\n").filter(line => line.includes("npm_config_nodedir"));
+      expect(rule).toHaveLength(1);
+      // One variable and the deploy's own -e: a node on the runner's own PATH, or an npm_config_nodedir from
+      // somebody's .npmrc, cannot answer for the machine here. Every command in the rule is a shell builtin.
+      const { stdout } = await promisify(execFile)("/bin/bash", ["-ec", [
+        `export PATH=${shellQuote(join(at.nodeDir, "bin"))}:"$PATH"`,
+        ...rule,
+        "printf 'NODEDIR[%s] SURVIVED' \"${npm_config_nodedir-}\"",
+      ].join("\n")], { env: { PATH: elsewhere } });
+      return { nodeDir: at.nodeDir, out: stdout };
+    }
+
+    it("points node-gyp at the prefix when the node there carries its headers", async () => {
+      const { nodeDir, out } = await evaluateRule({ node: true, headers: true });
+      expect(out).toBe(`NODEDIR[${nodeDir}] SURVIVED`);
+    });
+
+    it("points node-gyp nowhere when an installer symlinked a foreign node into the prefix, leaving no headers", async () => {
+      const { out } = await evaluateRule({ node: true, headers: false });
+      expect(out).toBe("NODEDIR[] SURVIVED");
+    });
+
+    it("points node-gyp nowhere when the node that will run is not the prefix's own", async () => {
+      const { out } = await evaluateRule({ node: false, headers: true });
+      expect(out).toBe("NODEDIR[] SURVIVED");
+    });
   });
 
   it("stops the daemon holding the port before starting the new one, so an update replaces a running daemon instead of reading it as up", () => {
