@@ -3806,9 +3806,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const projects = workspaceProjects(entry.record);
       const project = projectFor(projects, { named: undefined, last: (await preferences.get()).project[id] }) ?? projects.at(-1);
       if (project === undefined) throw new Error(`${name} has no project loaded; import one before snapshotting it`);
-      if (entry.record.phase !== "running") throw new Error(`${name} is ${entry.record.phase}; only a running first-life machine can be snapshotted`);
+      if (entry.record.phase !== "running") throw new Error(`${name} is ${entry.record.phase}; only a running machine can be snapshotted`);
       const createdAt = new Date(clock.now()).toISOString();
-      const snapshotId = await entry.ws.checkpoint(projectSnapshotName(templateHostId, project.name, createdAt.replace(/[:.]/g, "-")), `snapshot of ${name}`);
+      const snapshotId = await entry.ws.checkpoint(projectSnapshotName(templateHostId, project.name, createdAt.replace(/[:.]/g, "-")));
       const image = await imageOf(entry.record.golden);
       const golden: ProjectGolden = {
         snapshotId,

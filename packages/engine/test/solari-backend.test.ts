@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { RESUME_CAP_MS } from "@wsp/protocol";
-import { isCapped, isMissing } from "../src/errors.js";
+import { isCapped, isMissing, NotFirstLifeError } from "../src/errors.js";
 import { REQUEST_ID_HEADER, SOLARI_PRICING, SolariBackend } from "../src/solari-backend.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { EXEC_ENV } from "../src/golden-import.js";
@@ -25,7 +25,6 @@ describe("SolariBackend", () => {
       containers: false,
       callbackRelay: true,
       snapshotListing: true,
-      firstLifeSnapshots: true,
       templates: true,
       // A fork wsp made and can rebuild: nothing on it is the person's, so a turn runs without asking.
       kept: false,
@@ -183,7 +182,26 @@ describe("SolariBackend", () => {
     });
     const b = new SolariBackend({ apiKey: "k", fetch: f });
     const m = await b.create({ kind: "sandbox", template: "base" });
-    await expect(m.snapshot("g")).rejects.toMatchObject({ kind: "snapshotUnavailable", status: 502, requestId: "req_42" });
+    await expect(m.snapshot("g", { firstLife: true })).rejects.toMatchObject({ kind: "snapshotUnavailable", status: 502, requestId: "req_42" });
+  });
+
+  it("a snapshot of a machine whose life is not first is refused as notFirstLife before any call, and a first-life one posts", async () => {
+    const f = fakeFetch({
+      "GET /sandboxes/x": { status: 200, body: { sandboxId: "x", kind: "sandbox", state: "running" } },
+      "POST /sandboxes/x/snapshots": { status: 200, body: { snapshotId: "snap_1" } },
+    });
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    const m = await b.get("x");
+    const sent = f.mock.calls.length;
+    const err = await m.snapshot("v2", { firstLife: false }).catch(e => e as unknown);
+    expect(err).toBeInstanceOf(NotFirstLifeError);
+    expect((err as NotFirstLifeError).kind).toBe("notFirstLife");
+    expect((err as NotFirstLifeError).machineId).toBe("x");
+    expect((err as NotFirstLifeError).message).toMatch(/^snapshot v2 refused: machine x is not first-life/);
+    // The provider answers this with a 502 (measured), so the refusal is made here and nothing is sent.
+    expect(f.mock.calls.length).toBe(sent);
+    expect(await m.snapshot("v2", { firstLife: true })).toBe("snap_1");
+    expect(f.mock.calls.length).toBe(sent + 1);
   });
 
   it("surfaces snapshotUnavailable without retrying", async () => {
@@ -194,7 +212,7 @@ describe("SolariBackend", () => {
     });
     const b = new SolariBackend({ apiKey: "k", fetch: f });
     const m = await b.create({ kind: "sandbox" });
-    await expect(m.snapshot("g")).rejects.toMatchObject({ kind: "snapshotUnavailable" });
+    await expect(m.snapshot("g", { firstLife: true })).rejects.toMatchObject({ kind: "snapshotUnavailable" });
     expect(f.mock.calls.filter(c => String(c[0]).includes("/snapshots")).length).toBe(1);
   });
 });
@@ -451,7 +469,7 @@ describe("SolariBackend road retries", () => {
     try {
       const b = new SolariBackend({ apiKey: "k", fetch: f, clock });
       const m = await b.create({ kind: "sandbox", template: "base" });
-      expect(await m.snapshot("g")).toBe("snap_1");
+      expect(await m.snapshot("g", { firstLife: true })).toBe("snap_1");
       await m.pause();
       expect(await m.state()).toBe("running");
       expect(await b.promoteSnapshot("snap_1", "wsp-default-v1")).toBe("tpl_1");

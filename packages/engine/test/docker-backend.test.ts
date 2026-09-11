@@ -144,7 +144,6 @@ describe("DockerBackend against a fake Engine API", () => {
       snapshotListing: true,
       templates: true,
       kept: false,
-      firstLifeSnapshots: false,
     });
     expect(backend.capabilities.sizes).toEqual([
       { cpu: 2, memMb: 4096, rateUsdPerHour: 0 },
@@ -297,7 +296,7 @@ describe("DockerBackend against a fake Engine API", () => {
     engine.json("GET", /^\/containers\/c1\/json$/, RUNNING("c1"));
     engine.json("POST", /^\/commit$/, { Id: "sha256:img1" }, 201);
     const machine = await backend.get("c1");
-    const id = await machine.snapshot("wsp-mac-default-v1");
+    const id = await machine.snapshot("wsp-mac-default-v1", { firstLife: true });
     expect(id).toBe("sha256:img1");
     const commit = engine.took("POST", "/commit")!;
     expect(commit.query.get("container")).toBe("c1");
@@ -305,6 +304,18 @@ describe("DockerBackend against a fake Engine API", () => {
     expect(commit.query.get("tag")).toBe("wsp-mac-default-v1");
     expect(commit.query.get("pause")).toBe("true");
     expect(commit.body).toMatchObject({ Labels: { [WSP_LABEL]: "1", "wsp-snapshot": "wsp-mac-default-v1" } });
+  });
+
+  it("a commit after an unpause takes the life it is handed and commits: the disk is the same copy from any life", async () => {
+    engine.json("GET", /^\/containers\/c1\/json$/, RUNNING("c1"));
+    engine.json("POST", /^\/containers\/c1\/pause$/, {}, 204);
+    engine.json("POST", /^\/containers\/c1\/unpause$/, {}, 204);
+    engine.json("POST", /^\/commit$/, { Id: "sha256:img2" }, 201);
+    const machine = await backend.get("c1");
+    await machine.pause();
+    await machine.resume();
+    expect(await machine.snapshot("wsp-mac-default-v2", { firstLife: false })).toBe("sha256:img2");
+    expect(engine.took("POST", "/commit")!.query.get("tag")).toBe("wsp-mac-default-v2");
   });
 
   it("promotes a snapshot by tagging the image under the template name", async () => {

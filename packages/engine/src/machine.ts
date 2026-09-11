@@ -60,6 +60,12 @@ export interface MachineShape {
   createdAt?: string;
 }
 
+/** The history the runtime hands a snapshot: whether this machine was ever resumed. The fact is the record's; the
+ * rule about it, if the provider has one, is the backend's. */
+export interface MachineLife {
+  firstLife: boolean;
+}
+
 export interface Machine {
   readonly id: string;
   readonly kind: MachineKind;
@@ -77,7 +83,9 @@ export interface Machine {
   /** A command that may run for minutes: started detached on the guest and read until it exits or the deadline
    * kills it; the result is shaped like exec's. */
   run(script: string, opts: RunOptions): Promise<ExecResult>;
-  snapshot(name: string): Promise<string>;
+  /** Answers when the provider holds the snapshot. A backend that refuses one of a resumed machine throws
+   * NotFirstLifeError before any call; one whose snapshot copies the disk from any life ignores `life`. */
+  snapshot(name: string, life: MachineLife): Promise<string>;
   pause(): Promise<void>;
   /** `signal` ends the call where the caller has stopped waiting on it, so a resume nobody is waiting on is not left
    * running behind them; the backend's own cap on how long it waits for an answer is its business, not the caller's. */

@@ -1,8 +1,8 @@
 import { providerRoadRetryLine, RESUME_CAP_MS, type Capabilities } from "@wsp/protocol";
-import { ROAD_TRIES, backoffMs, classify, isMissing, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
+import { NotFirstLifeError, ROAD_TRIES, backoffMs, classify, isMissing, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
 import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
-import type { BackendPricing, ExecResult, Machine, MachineBackend, MachineKind, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
+import type { BackendPricing, ExecResult, Machine, MachineBackend, MachineKind, MachineLife, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
 import { previewTokenExpiry } from "./preview.js";
 import { BUILDER_DISK_GB } from "./tool-sizes.js";
 
@@ -98,7 +98,6 @@ export class SolariBackend implements MachineBackend {
     callbackRelay: true, // the daemon link rides previewUrls
     snapshotListing: true,
     templates: true,
-    firstLifeSnapshots: true, // a snapshot taken after a resume is refused with 502, and same-host or cross-host is invisible from outside (measured)
     kept: false, // a fork wsp made and can rebuild in a minute: a turn that wrecks its disk costs nothing else
     sizes: SIZES.map(size => ({ ...size, rateUsdPerHour: rateUsdPerHour(size) })),
   };
@@ -301,7 +300,10 @@ class SolariMachine implements Machine {
     return execDetached(this, script, opts);
   }
 
-  async snapshot(name: string): Promise<string> {
+  /** A snapshot of a machine that was ever resumed is refused with a 502, and same-host or cross-host is invisible
+   * from outside (measured), so a resumed machine is refused here before any call. */
+  async snapshot(name: string, life: MachineLife): Promise<string> {
+    if (!life.firstLife) throw new NotFirstLifeError(this.id, `snapshot ${name}`);
     const res = await this.backend.request<{ snapshotId: string }>("POST", this.path("/snapshots"), { name });
     return res.snapshotId;
   }

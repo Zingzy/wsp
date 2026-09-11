@@ -13,7 +13,6 @@ export function caps(overrides: Partial<Capabilities> = {}): Capabilities {
     containers: true,
     callbackRelay: true,
     snapshotListing: true,
-    firstLifeSnapshots: true,
     templates: false,
     kept: false,
     sizes: [],

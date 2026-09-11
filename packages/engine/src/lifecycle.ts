@@ -1,5 +1,5 @@
 import type { Machine, MachineSpec, PreviewReach } from "./machine.js";
-import { isMissing, NotFirstLifeError } from "./errors.js";
+import { isMissing } from "./errors.js";
 import { DAEMON_PORT, refreshPreviewToken } from "./preview.js";
 
 export interface WorkspaceHooks {
@@ -36,18 +36,10 @@ export interface WakeResult {
 /** Resume, check, and one more resume+check before a machine is given up on. */
 const WAKE_ATTEMPTS = 2;
 
-/** The snapshot-fresh rule as one check: every snapshot in the engine goes through it. */
-export function assertFirstLife
-(machineId: string, firstLife: boolean, action: string): void {
-  if (!firstLife) throw new NotFirstLifeError(machineId, action);
-}
-
 export class Workspace {
   private machine: Machine;
   private phase: WorkspacePhase = "running";
-  // Snapshot-fresh rule: Solari 502s deterministically when snapshotting a
-  // machine that was ever resumed cross-host, and same-host vs cross-host is
-  // invisible from outside. So any resume disqualifies direct snapshots.
+  // Whether this machine was ever resumed, handed to every snapshot: the backend decides whether that matters.
   private firstLife = true;
   // Keyed by port under one machine id: pause+wake keeps a reach valid
   // (measured), but a resurrect/upgrade replaces the machine and voids them all.
@@ -138,7 +130,7 @@ export class Workspace {
       const faults: string[] = [];
       for (let attempt = 1; attempt <= WAKE_ATTEMPTS; attempt++) {
         // A resume that landed without its call is a resume: the check below still runs and first life still ends,
-        // since the snapshot-fresh rule turns on the machine having been resumed and not on who heard about it.
+        // since what a backend's snapshot rule turns on is the machine having been resumed, not who heard about it.
         if (attempt > 1 || o.landed !== true) {
           try {
             await this.move("resume");
@@ -195,10 +187,10 @@ export class Workspace {
     });
   }
 
-  /** A snapshot of the running disk under `name`; `action` is what the refusal names when the machine is not first-life. */
-  async checkpoint(name: string, action = `checkpoint(${name})`): Promise<string> {
-    assertFirstLife(this.machine.id, this.firstLife, action);
-    return this.machine.snapshot(name);
+  /** A snapshot of the running disk under `name`, with the life this workspace tracked; a backend that refuses one
+   * of a resumed machine throws its own NotFirstLifeError. */
+  async checkpoint(name: string): Promise<string> {
+    return this.machine.snapshot(name, { firstLife: this.firstLife });
   }
 
   /** Replace the machine with a fresh golden fork under a new spec, carrying vaulted state across; `drop` names the

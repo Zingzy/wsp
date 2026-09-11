@@ -24,7 +24,6 @@ describe("local backend", () => {
       containers: false,
       callbackRelay: false,
       snapshotListing: false,
-      firstLifeSnapshots: false,
       templates: false,
       // This computer is the person's own: its files and sign-ins outlive every turn, so a thread on it starts at
       // the access its harness asks for rather than at skip-everything. The one fact that road reads.
@@ -104,7 +103,7 @@ describe("local backend", () => {
     const backend = new LocalBackend({ root });
     const machine = await backend.get();
     // Each refusal is a rejection, never a synchronous throw, so a caller's .catch sees it.
-    await expect(machine.snapshot("x")).rejects.toThrow();
+    await expect(machine.snapshot("x", { firstLife: true })).rejects.toThrow();
     await expect(machine.pause()).rejects.toThrow();
     await expect(machine.resume()).rejects.toThrow();
     expect(machine.previewUrl).toBeUndefined();

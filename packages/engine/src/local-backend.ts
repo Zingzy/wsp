@@ -135,7 +135,6 @@ export class LocalBackend implements MachineBackend {
     callbackRelay: false,
     snapshotListing: false,
     templates: false,
-    firstLifeSnapshots: false,
     sizes: [],
     // This computer is the person's own: nothing here was made by wsp and nothing here is thrown away, so a turn's
     // access starts at what its harness asks for rather than at skip-everything.

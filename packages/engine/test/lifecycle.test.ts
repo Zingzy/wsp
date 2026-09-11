@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Workspace } from "../src/lifecycle.js";
-import type { Machine } from "../src/machine.js";
+import type { Machine, MachineLife } from "../src/machine.js";
 
 function stubMachine(overrides: Partial<Machine> = {}): Machine {
   return {
@@ -26,15 +26,20 @@ function counting(overrides: Partial<Machine> = {}) {
 }
 
 describe("Workspace lifecycle", () => {
-  it("refuses direct snapshot after any resume (snapshot-fresh rule)", async () => {
-    const ws = new Workspace(stubMachine(), { goldenSnapshot: "snap_g" });
+  it("checkpoint hands the machine the life it tracked, true before a wake and false after, and refuses nothing itself", async () => {
+    const lives: MachineLife[] = [];
+    const ws = new Workspace(stubMachine({ snapshot: async (_name, life) => { lives.push(life); return "snap_x"; } }), { goldenSnapshot: "snap_g" });
+    await expect(ws.checkpoint("v1")).resolves.toBe("snap_x");
     await ws.nap();
     await ws.wake();
-    await expect(ws.checkpoint("v2")).rejects.toThrow(/first-life/);
+    await expect(ws.checkpoint("v2")).resolves.toBe("snap_x");
+    expect(lives).toEqual([{ firstLife: true }, { firstLife: false }]);
   });
-  it("allows checkpoint while first-life", async () => {
-    const ws = new Workspace(stubMachine(), { goldenSnapshot: "snap_g" });
-    await expect(ws.checkpoint("v1")).resolves.toBe("snap_x");
+  it("a backend's refusal of a resumed machine comes through checkpoint as itself", async () => {
+    const ws = new Workspace(stubMachine({ snapshot: async (name, life) => { if (!life.firstLife) throw new Error(`snapshot ${name} refused: resumed`); return "snap_x"; } }), { goldenSnapshot: "snap_g" });
+    await ws.nap();
+    await ws.wake();
+    await expect(ws.checkpoint("v2")).rejects.toThrow("snapshot v2 refused: resumed");
   });
   it("wake resurrects from golden when the paused machine vanished", async () => {
     const dead = stubMachine({ resume: async () => { throw Object.assign(new Error("gone"), { kind: "missing" }); } });

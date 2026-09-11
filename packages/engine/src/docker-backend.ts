@@ -20,7 +20,7 @@ import { classify, isMissing, type WspError } from "./errors.js";
 import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
 import { WSP_LABEL } from "./labels.js";
-import type { BackendPricing, DaemonSupervisor, ExecResult, Machine, MachineBackend, MachineKind, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
+import type { BackendPricing, DaemonSupervisor, ExecResult, Machine, MachineBackend, MachineKind, MachineLife, MachineShape, MachineSpec, MachineState, PreviewReach, RunOptions, SnapshotRow, SnapshotStoragePricing, TemplateRow } from "./machine.js";
 import { DAEMON_PORT } from "./preview.js";
 import { makeSshControlDir, SSH_CONTROL_PERSIST_S, sshControlPath } from "./ssh-backend.js";
 
@@ -415,8 +415,6 @@ export class DockerBackend implements MachineBackend {
       callbackRelay: this.onThisComputer,
       snapshotListing: true,
       templates: true,
-      // A commit is a copy of the disk whatever the container has done since it booted, so a nap disqualifies nothing.
-      firstLifeSnapshots: false,
       kept: false, // a fork wsp made and can rebuild: a turn that wrecks its disk costs nothing else
       sizes: SIZES.map(size => ({ ...size, rateUsdPerHour: 0 })),
     };
@@ -663,8 +661,9 @@ export class DockerMachine implements Machine {
   }
 
   /** A commit: the container's filesystem as an image, the container held still while it is taken. It holds no
-   * memory, so whatever the agents had in theirs is gone and a fork of it starts them again. */
-  async snapshot(name: string): Promise<string> {
+   * memory, so whatever the agents had in theirs is gone and a fork of it starts them again. The disk is the same
+   * copy whatever the container has done since it booted, so the life it is handed changes nothing. */
+  async snapshot(name: string, _life: MachineLife): Promise<string> {
     const res = await this.backend.request<{ Id: string }>("POST", "/commit", {
       query: { container: this.id, repo: DOCKER_REPO, tag: imageTag(name), pause: "true" },
       body: { Labels: { [WSP_LABEL]: "1", [SNAPSHOT_LABEL]: name } },

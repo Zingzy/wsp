@@ -29,7 +29,6 @@ export class NoProviderBackend implements MachineBackend {
     callbackRelay: false,
     snapshotListing: false,
     templates: false,
-    firstLifeSnapshots: false,
     sizes: [],
     kept: false,
   };
