@@ -561,7 +561,7 @@ describe("deployScript", () => {
     const npm = script.indexOf("npm install");
     expect(bootstrap).toBeGreaterThan(-1);
     expect(bootstrap).toBeLessThan(npm);
-    const nodedir = script.indexOf('if [ "$(command -v node)" = /usr/local/bin/node ] && [ -f /usr/local/include/node/node_version.h ]; then export npm_config_nodedir=/usr/local; fi');
+    const nodedir = script.indexOf(`if [ "$(command -v node)" = /usr/local/bin/node ] && grep -qx "#define NODE_MAJOR_VERSION $(node -p 'process.versions.node.split(".")[0]' 2>/dev/null)" /usr/local/include/node/node_version.h 2>/dev/null; then export npm_config_nodedir=/usr/local; fi`);
     expect(nodedir).toBeGreaterThan(bootstrap);
     expect(nodedir).toBeLessThan(npm);
     expect(script).toContain(`https://nodejs.org/dist/v${GUEST_NODE.version}/`);
@@ -598,47 +598,71 @@ describe("deployScript", () => {
       for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
     });
 
-    async function evaluateRule(has: { node: boolean; headers: boolean }): Promise<{ nodeDir: string; out: string }> {
+    /** What the node the machine already carries answers, and what the prefix's own node answers wherever a case
+     * is not about them disagreeing: a rule missing the half that asks which node will run is one these headers
+     * satisfy, so the case standing for that half cannot pass without it. */
+    const MACHINE_MAJOR = 22;
+    /** A node stands in for its own major: the rule asks a node which one it is, and a script that answers is as
+     * much of a node as the rule reads. */
+    const nodeSaying = (major: number): string => `#!/bin/sh\necho ${major}\n`;
+    /** A node that is in the prefix and cannot say what it is: a tarball half unpacked, a binary for another
+     * architecture, a wrapper whose own interpreter is gone. */
+    const MUTE_NODE = "#!/bin/sh\nexit 1\n";
+
+    async function evaluateRule(has: { node: number | false | "mute"; headers: number | false }): Promise<{ nodeDir: string; out: string }> {
       const home = tmp("wsp-nodedir-");
       homes.push(home);
       const at = sshDaemonPaths(home);
       // The node a machine already carries, which the deploy's own PATH line leaves behind the place's prefix.
       const elsewhere = join(home, "elsewhere");
       mkdirSync(elsewhere, { recursive: true });
-      writeFileSync(join(elsewhere, "node"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-      if (has.node) {
+      writeFileSync(join(elsewhere, "node"), nodeSaying(MACHINE_MAJOR), { mode: 0o755 });
+      if (has.node !== false) {
         mkdirSync(join(at.nodeDir, "bin"), { recursive: true });
-        writeFileSync(join(at.nodeDir, "bin", "node"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+        writeFileSync(join(at.nodeDir, "bin", "node"), has.node === "mute" ? MUTE_NODE : nodeSaying(has.node), { mode: 0o755 });
       }
-      if (has.headers) {
+      if (has.headers !== false) {
         mkdirSync(join(at.nodeDir, "include", "node"), { recursive: true });
-        writeFileSync(join(at.nodeDir, "include", "node", "node_version.h"), "#define NODE_MAJOR_VERSION 22\n");
+        // The define as a real header writes it, one space and nothing after the number: the line the rule matches
+        // whole, and the line a pattern ending in a space is a prefix of.
+        writeFileSync(join(at.nodeDir, "include", "node", "node_version.h"), `#define NODE_MAJOR_VERSION ${has.headers}\n`);
       }
       const place = sshDaemonPlace({ home, path: "/usr/bin:/bin" });
       const rule = deployScript(place, "aabbcc").split("\n").filter(line => line.includes("npm_config_nodedir"));
       expect(rule).toHaveLength(1);
-      // One variable and the deploy's own -e: a node on the runner's own PATH, or an npm_config_nodedir from
-      // somebody's .npmrc, cannot answer for the machine here. Every command in the rule is a shell builtin.
+      // The whole environment, so a node on the runner's own PATH or an npm_config_nodedir from somebody's .npmrc
+      // cannot answer for the machine here: the planted node comes first and the system paths are there for the
+      // grep and the shell alone. The deploy's own PATH line then puts the place's prefix ahead of all of it.
       const { stdout } = await promisify(execFile)("/bin/bash", ["-ec", [
         `export PATH=${shellQuote(join(at.nodeDir, "bin"))}:"$PATH"`,
         ...rule,
         "printf 'NODEDIR[%s] SURVIVED' \"${npm_config_nodedir-}\"",
-      ].join("\n")], { env: { PATH: elsewhere } });
+      ].join("\n")], { env: { PATH: `${elsewhere}:/usr/bin:/bin` } });
       return { nodeDir: at.nodeDir, out: stdout };
     }
 
     it("points node-gyp at the prefix when the node there carries its headers", async () => {
-      const { nodeDir, out } = await evaluateRule({ node: true, headers: true });
+      const { nodeDir, out } = await evaluateRule({ node: MACHINE_MAJOR, headers: MACHINE_MAJOR });
       expect(out).toBe(`NODEDIR[${nodeDir}] SURVIVED`);
     });
 
     it("points node-gyp nowhere when an installer symlinked a foreign node into the prefix, leaving no headers", async () => {
-      const { out } = await evaluateRule({ node: true, headers: false });
+      const { out } = await evaluateRule({ node: MACHINE_MAJOR, headers: false });
       expect(out).toBe("NODEDIR[] SURVIVED");
     });
 
     it("points node-gyp nowhere when the node that will run is not the prefix's own", async () => {
-      const { out } = await evaluateRule({ node: false, headers: true });
+      const { out } = await evaluateRule({ node: false, headers: MACHINE_MAJOR });
+      expect(out).toBe("NODEDIR[] SURVIVED");
+    });
+
+    it("points node-gyp nowhere when the headers left in the prefix are another major's than the node beside them", async () => {
+      const { out } = await evaluateRule({ node: MACHINE_MAJOR, headers: MACHINE_MAJOR - 2 });
+      expect(out).toBe("NODEDIR[] SURVIVED");
+    });
+
+    it("points node-gyp nowhere when the node in the prefix cannot say which major it is", async () => {
+      const { out } = await evaluateRule({ node: "mute", headers: MACHINE_MAJOR });
       expect(out).toBe("NODEDIR[] SURVIVED");
     });
   });
