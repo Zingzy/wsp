@@ -28,8 +28,9 @@ import {
   GUEST_ENVS,
   GUEST_NODE,
   claudeEnvs,
-  OPEN_SHIM_SCRIPT,
-  START_MJS,
+  CLOUD_PLACE,
+  openShimScript,
+  startMjs,
   packBundle,
   cleanOrphans,
   doctor,
@@ -323,7 +324,7 @@ describe("stageDaemonBundle", () => {
     writeFileSync(join(daemonDir, "dist", "index.js"), "export const x = 1;");
 
     const stage = join(dir, "stage");
-    await stageDaemonBundle(stage, daemonDir);
+    await stageDaemonBundle(stage, CLOUD_PLACE, daemonDir);
 
     const pkg = JSON.parse(readFileSync(join(stage, "package.json"), "utf8")) as {
       type: string;
@@ -338,7 +339,7 @@ describe("stageDaemonBundle", () => {
     expect(readFileSync(join(stage, "start.mjs"), "utf8")).toContain('host: "0.0.0.0"');
     // The browser shim rides along and the daemon opens the socket it posts to.
     expect(readFileSync(join(stage, "start.mjs"), "utf8")).toContain("openSocketPath: OPEN_SOCKET_PATH");
-    expect(readFileSync(join(stage, "wsp-open"), "utf8")).toBe(OPEN_SHIM_SCRIPT);
+    expect(readFileSync(join(stage, "wsp-open"), "utf8")).toBe(openShimScript(CLOUD_PLACE));
     expect(statSync(join(stage, "wsp-open")).mode & 0o111).toBe(0o111);
   });
 
@@ -353,7 +354,7 @@ describe("stageDaemonBundle", () => {
       'export const OPEN_SOCKET_PATH = "/root/.wsp/open.sock";\nexport async function startDaemon(o) { console.log(JSON.stringify({ path: process.env.PATH, ...o })); return { port: 7070 }; }\n',
     );
     const stage = join(dir, "stage");
-    await stageDaemonBundle(stage, daemonDir);
+    await stageDaemonBundle(stage, CLOUD_PLACE, daemonDir);
 
     const { stdout, stderr } = await promisify(execFile)(process.execPath, [join(stage, "start.mjs")], { env: { PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" } });
     const started = JSON.parse(stdout.split("\n")[0]!) as { path: string; host: string; openSocketPath: string };
@@ -365,9 +366,9 @@ describe("stageDaemonBundle", () => {
   });
 
   it("start.mjs writes the daemon's own memory-killer score and nice value before the daemon loads, so every relaunch road gives them", () => {
-    const write = START_MJS.indexOf(`writeFileSync("/proc/self/oom_score_adj", "${DAEMON_OOM_SCORE_ADJ}")`);
-    const nice = START_MJS.indexOf(`setPriority(${DAEMON_NICE})`);
-    const load = START_MJS.indexOf('await import("./dist/index.js")');
+    const write = startMjs(CLOUD_PLACE).indexOf(`writeFileSync("/proc/self/oom_score_adj", "${DAEMON_OOM_SCORE_ADJ}")`);
+    const nice = startMjs(CLOUD_PLACE).indexOf(`setPriority(${DAEMON_NICE})`);
+    const load = startMjs(CLOUD_PLACE).indexOf('await import("./dist/index.js")');
     expect(write).toBeGreaterThan(-1);
     expect(nice).toBeGreaterThan(-1);
     expect(Math.max(write, nice)).toBeLessThan(load);
@@ -378,7 +379,7 @@ describe("stageDaemonBundle", () => {
 
 describe("browser shim in the guest", () => {
   it("is installed as BROWSER and as xdg-open, first on PATH, and login shells lose the image's DISPLAY", () => {
-    const script = deployScript("aabbcc");
+    const script = deployScript(CLOUD_PLACE, "aabbcc");
     // Not in every machine's envs: an old golden without the shim would otherwise point tools at a missing file.
     expect(GUEST_ENVS["BROWSER"]).toBeUndefined();
     expect(claudeEnvs("sk-ant-x", { browserShim: true })["BROWSER"]).toBe("/usr/local/bin/wsp-open");
@@ -396,7 +397,7 @@ describe("browser shim in the guest", () => {
 
 describe("guest environment", () => {
   it("exports HOME and USER before anything runs, so the daemon started here hands them on, and never pins SHELL", () => {
-    const script = deployScript("aabbcc");
+    const script = deployScript(CLOUD_PLACE, "aabbcc");
     const lines = script.split("\n");
     expect(lines.indexOf("export HOME=/root USER=root")).toBeGreaterThan(-1);
     expect(lines.indexOf("export HOME=/root USER=root")).toBeLessThan(lines.findIndex(l => l.startsWith("mkdir")));
@@ -404,7 +405,7 @@ describe("guest environment", () => {
   });
 
   it("with a preview host suffix, login shells and the daemon's ptys both learn the hosts Vite may answer for", () => {
-    const script = deployScript("aabbcc", ".preview.example.com");
+    const script = deployScript(CLOUD_PLACE, "aabbcc", ".preview.example.com");
     expect(VITE_ALLOWED_HOSTS_ENV).toBe("__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS");
     expect(script).toContain("printf 'export __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=%s\\n' '.preview.example.com' > /etc/profile.d/wsp-preview.sh");
     const lines = script.split("\n");
@@ -412,9 +413,9 @@ describe("guest environment", () => {
     expect(exported).toBeGreaterThan(-1);
     expect(exported).toBeLessThan(lines.indexOf("systemctl daemon-reload"));
     // The daemon's own copy comes from its unit: a restart inherits nothing from the exec that deployed it.
-    expect(daemonUnit(".preview.example.com")).toContain("Environment=__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=.preview.example.com");
+    expect(daemonUnit(CLOUD_PLACE, ".preview.example.com")).toContain("Environment=__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=.preview.example.com");
     // Without a suffix nothing is written: a backend with no preview edge has no host to allow.
-    expect(deployScript("aabbcc")).not.toContain("VITE");
+    expect(deployScript(CLOUD_PLACE, "aabbcc")).not.toContain("VITE");
     expect(daemonUnit()).not.toContain("VITE");
   });
 
@@ -436,7 +437,7 @@ describe("deployScript", () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-deploy-script-"));
     try {
       const path = join(dir, "deploy.sh");
-      writeFileSync(path, deployScript("aabbcc"));
+      writeFileSync(path, deployScript(CLOUD_PLACE, "aabbcc"));
       await promisify(execFile)("bash", ["-n", path]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -445,7 +446,7 @@ describe("deployScript", () => {
 
   it("writes the token the way the rotation does, owner-only, in the one shape the run log redacts", () => {
     const token = "aabbccddeeff00112233445566778899";
-    const script = deployScript(token);
+    const script = deployScript(CLOUD_PLACE, token);
     expect(script).toContain(writeDaemonTokenScript(token));
     expect(script.indexOf("umask 077")).toBeLessThan(script.indexOf("systemctl restart"));
     expect(redact(script)).not.toContain(token);
@@ -453,7 +454,7 @@ describe("deployScript", () => {
   });
 
   it("bootstraps a pinned, sha256-checked Node into /usr/local only when the guest has none, and compiles against a /usr/local Node's own headers", () => {
-    const script = deployScript("aabbcc");
+    const script = deployScript(CLOUD_PLACE, "aabbcc");
     const bootstrap = script.indexOf("if ! command -v node");
     expect(script).not.toContain("node_major");
     const npm = script.indexOf("npm install");
@@ -477,7 +478,7 @@ describe("deployScript", () => {
   });
 
   it("drops the foreign prebuilds out of its own bundle and touches no cache of the machine's owner", () => {
-    const script = deployScript("aabbcc");
+    const script = deployScript(CLOUD_PLACE, "aabbcc");
     // Headers ship inside the node tarball; pointing node-gyp at them skips a 65MB download.
     expect(script).toContain("export npm_config_nodedir=/usr/local");
     const cleanup = script.indexOf("rm -rf /root/wsp-daemon/node_modules/node-pty/prebuilds");
@@ -489,7 +490,7 @@ describe("deployScript", () => {
   });
 
   it("stops the daemon holding the port before starting the new one, so an update replaces a running daemon instead of reading it as up", () => {
-    const script = deployScript("aabbcc");
+    const script = deployScript(CLOUD_PLACE, "aabbcc");
     const stop = script.indexOf(stopDaemonScript());
     expect(stop).toBeGreaterThan(script.indexOf("npm install"));
     expect(stop).toBeGreaterThan(script.indexOf("umask 077"));
@@ -508,11 +509,11 @@ describe("deployScript", () => {
   });
 
   it("leaves the daemon under a supervisor that restarts it, never a bare background process", () => {
-    const script = deployScript("aabbcc", ".preview.example.com");
+    const script = deployScript(CLOUD_PLACE, "aabbcc", ".preview.example.com");
     expect(script).not.toContain("setsid");
     expect(script).not.toContain("nohup");
     expect(script).toContain(`cat > ${DAEMON_UNIT_PATH} <<'WSP_UNIT'`);
-    expect(script).toContain(daemonUnit(".preview.example.com"));
+    expect(script).toContain(daemonUnit(CLOUD_PLACE, ".preview.example.com"));
     const lines = script.split("\n");
     const reload = lines.indexOf("systemctl daemon-reload");
     expect(lines.indexOf(`cat > ${DAEMON_UNIT_PATH} <<'WSP_UNIT'`)).toBeLessThan(reload);
@@ -524,7 +525,7 @@ describe("deployScript", () => {
   });
 
   it("refuses a guest with no systemd rather than starting a daemon nothing would restart", () => {
-    const lines = deployScript("aabbcc").split("\n");
+    const lines = deployScript(CLOUD_PLACE, "aabbcc").split("\n");
     const check = lines.indexOf("command -v systemctl >/dev/null || { echo NO_SYSTEMD; false; }");
     expect(check).toBeGreaterThan(-1);
     expect(check).toBeLessThan(lines.indexOf("mkdir -p /root/wsp-daemon /root/inbox"));
@@ -550,7 +551,7 @@ describe("deployScript", () => {
     expect(unit).not.toContain("append:");
     expect(daemonLogCommand()).toBe("journalctl -u wsp-daemon.service -n 50 --no-pager");
     // A deploy that never saw the port come up reads the journal, and reads it bounded.
-    expect(deployScript("aabbcc")).not.toContain("/root/daemon.log");
+    expect(deployScript(CLOUD_PLACE, "aabbcc")).not.toContain("/root/daemon.log");
   });
 
   it("the unit states the environment the daemon hands to every pty, since a restart inherits none of the deploy's", () => {
@@ -561,7 +562,7 @@ describe("deployScript", () => {
   });
 
   it("names the node version on stdout before installing, so the deploy log can carry it", () => {
-    const script = deployScript("aabbcc");
+    const script = deployScript(CLOUD_PLACE, "aabbcc");
     expect(script.indexOf("NODE_VERSION $(node --version)")).toBeLessThan(script.indexOf("npm install"));
   });
 });
@@ -633,9 +634,9 @@ describe("deployDaemon", () => {
 
       const out = await deployDaemon(machine, { token: "abc123", daemonDir });
       expect(out).toEqual({ token: "abc123", node: "v22.23.2" });
-      expect(stub.execLog).toEqual([deployScript("abc123")]);
+      expect(stub.execLog).toEqual([deployScript(CLOUD_PLACE, "abc123")]);
       // npm install on the guest can run past what one exec is allowed, so the deploy is a run.
-      expect(stub.runLog).toEqual([deployScript("abc123")]);
+      expect(stub.runLog).toEqual([deployScript(CLOUD_PLACE, "abc123")]);
       // The same deploy is the daemon update on a person's live workspace: nothing of theirs is removed.
       expect(stub.execLog.join("\n")).not.toMatch(/rm -rf[^\n]*\/root\/\.(npm|cache)/);
       expect(uploads).toHaveLength(1);
@@ -647,7 +648,7 @@ describe("deployDaemon", () => {
       edgedStub.uploadUrl = async () => `http://127.0.0.1:${port}/put`;
       edgedStub.previewUrl = async p => ({ url: `https://${edgedStub.id}-${p}.preview.example.com/?pt_token=x`, token: "x", expiresAt: 0 });
       await deployDaemon(edged, { token: "abc123", daemonDir });
-      expect(edgedStub.execLog).toEqual([deployScript("abc123", ".preview.example.com")]);
+      expect(edgedStub.execLog).toEqual([deployScript(CLOUD_PLACE, "abc123", ".preview.example.com")]);
       expect(edgedStub.execLog[0]).toContain("export __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS='.preview.example.com'");
     } finally {
       server.close();

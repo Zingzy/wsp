@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, DAEMON_VERSION, FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, NOT_ON_THIS_KIND, fmtBytes, fmtSize, imageKeptLine, kindWords, workspaceKind } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, DAEMON_VERSION, FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, NOT_ON_THIS_KIND, fmtBytes, fmtSize, imageKeptLine, kindWords, servesReading, workspaceKind } from "@wsp/protocol";
 import type {
   Capabilities,
   EventUnion,
@@ -1223,24 +1223,17 @@ describe("live", () => {
     expect(liveRow("cpu").querySelector("[data-live-line]")).not.toBeNull();
   });
 
-  it("a kind whose machines read no metrics says so in every slot, from the first paint and after any status", async () => {
+  it("a machine over ssh reads its own load, since the daemon on it reads that machine's own /proc", async () => {
     await mount([{ ...view("ws_a", "box"), kind: "ssh" }]);
-    for (const k of ["cpu", "mem", "disk"]) {
-      expect(fact(k)).toBe("not on this kind");
-      expect(liveRow(k).hasAttribute("data-stale")).toBe(false);
-      expect(liveRow(k).className).toMatch(/\bh-7\b/);
-      expect(valueSlot(k).className).toMatch(/muted-foreground/);
-    }
-    expect(screen.queryByText(/^load /)).toBeNull();
-    // Nothing a link does puts the word back to pending: there is no stream to wait for on this kind.
     feed("ws_a", []);
-    await waitFor(() => expect(fact("cpu")).toBe("not on this kind"));
-    expect(["cpu", "mem", "disk"].map(fact)).not.toContain("pending");
-    // A refusal recorded against such a kind is not this row's business either: the words stand, and the row
-    // carries no reason for a stream nobody asked for.
-    act(() => getLive("ws_a").feedUnavailable("unknown op: sys.watch"));
-    await waitFor(() => expect(fact("cpu")).toBe("not on this kind"));
-    for (const k of ["cpu", "mem", "disk"]) expect(liveRow(k).hasAttribute("data-unavailable")).toBe(false);
+    await waitFor(() => expect(fact("cpu")).toBe("pending"));
+    feed("ws_a", [sysSample(0)]);
+    await waitFor(() => expect(fact("cpu")).toBe("33%"));
+    expect(fact("disk")).toBe("20 GB of 100 GB");
+    // A machine that is not Linux has no /proc for the daemon on it to read, and the refusal comes from the
+    // module at read time rather than from the kind: the row carries the reason it was given.
+    act(() => getLive("ws_a").feedUnavailable("/proc/stat: ENOENT"));
+    await waitFor(() => expect(liveRow("cpu").hasAttribute("data-unavailable")).toBe(true));
   });
 
   it("this computer reads its own metrics: pending only until the first sample lands, then the figures", async () => {
@@ -1388,19 +1381,10 @@ describe("this computer as a workspace", () => {
     await waitFor(() => expect(fact("cpu")).toBe("33%"));
     for (const k of ["cpu", "mem", "disk"]) expect(liveRow(k).hasAttribute("data-kind-word")).toBe(false);
 
-    // A machine over ssh reads neither, and says so where the figure would be rather than pending forever.
-    cleanup();
-    await mount([{ ...view("ws_a", "box"), kind: "ssh" }]);
-    for (const k of ["cpu", "mem", "disk"]) {
-      const el = document.querySelector(`[data-k="${k}"]`)!;
-      expect(el.textContent).toBe(NOT_ON_THIS_KIND);
-      expect(el.className).toContain("font-mono");
-      expect(el.className).not.toMatch(/border|bg-|badge|destructive|warning/);
-      // The kind's word is not a daemon's refusal: the row carries no refusal and the slot no title for one.
-      expect(liveRow(k).hasAttribute("data-unavailable")).toBe(false);
-      expect(el.getAttribute("title")).toBeNull();
-      expect(liveRow(k).getAttribute("data-kind-word")).toBe(NOT_ON_THIS_KIND);
-    }
+    // Every kind reads both today, each off its own modules; the slot's kind word is what a kind that reads
+    // neither would put where the figure goes, which is the table's to say and no component's.
+    for (const kind of ["local", "cloud", "ssh"] as const) expect(servesReading(kind, "metrics")).toBe(true);
+    expect(NOT_ON_THIS_KIND).toBe("not on this kind");
     // A fork's rows read the link's own word instead: with no daemon link in this fixture, unreachable.
     cleanup();
     await mount([view("ws_a", "api")]);

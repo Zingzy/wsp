@@ -6,6 +6,7 @@ export * from "./preview.js";
 export * from "./solari-backend.js";
 export * from "./local-backend.js";
 export * from "./ssh-backend.js";
+export * from "./ssh-forward.js";
 export * from "./child-exec.js";
 export * from "./no-provider-backend.js";
 export * from "./lifecycle.js";

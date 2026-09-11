@@ -34,13 +34,21 @@ export interface KindReadings {
   processes: (o: ReadingsOptions) => ProcSource;
 }
 
-/** The kinds a daemon serves these two readings for. A machine over ssh carries no daemon, so it has no row: it
- * gets the same two modules over its exec, one file each, when that road exists. */
+/** What a daemon on a Linux machine reads, whichever way the host reaches it: that machine's own /proc for both.
+ * One module under both kinds rather than two alike, since a fork and a machine somebody owns differ in how the
+ * host gets to the daemon and not in what the daemon can see of the machine under it. */
+const procReadings: KindReadings = {
+  metrics: o => procSysSource(o.root, o.procRoot),
+  processes: o => new ProcFsSource({ ...(o.procRoot !== undefined ? { procRoot: o.procRoot } : {}), ...(o.passwdPath !== undefined ? { passwdPath: o.passwdPath } : {}) }),
+};
+
+/** The kinds a daemon serves these two readings for. A machine over ssh runs the same daemon a fork does, on the
+ * same Linux, so it reads the same /proc: the difference between the two is how the host reaches the daemon, not
+ * what the daemon can see of its own machine. A daemon on a machine that is not Linux has no /proc to read and
+ * refuses both with the sentence below, which is what the pane prints. */
 export const KIND_READINGS: Partial<Record<WorkspaceKind, KindReadings>> = {
-  cloud: {
-    metrics: o => procSysSource(o.root, o.procRoot),
-    processes: o => new ProcFsSource({ ...(o.procRoot !== undefined ? { procRoot: o.procRoot } : {}), ...(o.passwdPath !== undefined ? { passwdPath: o.passwdPath } : {}) }),
-  },
+  cloud: procReadings,
+  ssh: procReadings,
   local: {
     metrics: o => hostSysSource(o.workFolder),
     processes: o => new LocalProcSource({ ports: o.ports }),

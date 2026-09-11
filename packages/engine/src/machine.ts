@@ -81,6 +81,10 @@ export interface Machine {
   state(): Promise<MachineState>;
   downloadUrl(path: string): Promise<string>;
   uploadUrl(path: string): Promise<string>;
+  /** Optional: a machine that carries a file's bytes over its own connection instead of a signed URL. Every road
+   * that puts bytes on a machine goes through landBytes, which reads this first and mints a URL where it is absent,
+   * so a backend without signed URLs is a machine with this and nothing else changes. */
+  putBytes?(path: string, bytes: Uint8Array, opts?: { timeoutMs?: number }): Promise<void>;
   /** Optional: only backends whose capabilities include previewUrls have it. */
   previewUrl?(port: number): Promise<PreviewReach>;
   /** Optional: backends that expose size and creation time per machine. */

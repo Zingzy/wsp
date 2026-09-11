@@ -8,7 +8,7 @@ import { finished } from "node:stream/promises";
 import { gzipSync } from "node:zlib";
 import { shellQuote, vaultOverCapLine } from "@wsp/protocol";
 import { backoffMs, classify, shouldRetry } from "./errors.js";
-import { INLINE_EXEC_MS } from "./exec-detached.js";
+import { GUEST_TMP, INLINE_EXEC_MS } from "./exec-detached.js";
 import { plural } from "./golden-tools.js";
 import type { Machine } from "./machine.js";
 
@@ -27,6 +27,9 @@ export interface VaultOptions {
   drop?: readonly string[];
   /** Import only: merge into what the destination already holds instead of replacing its directories. */
   overlay?: boolean;
+  /** The folder on the machine the trip's own parts are written in; the machine's shared temporary one unless the
+   * caller names wsp's own folder there, which a machine somebody owns needs. */
+  tmpDir?: string;
   /** Import only: called as each part lands, with the bytes sent so far. */
   onPart?: (progress: UploadProgress) => void;
   /** Export only: called as the archive comes down, with the bytes received so far of its total. */
@@ -160,8 +163,11 @@ export function folderExportScript(dir: string, rule: CacheRule, out: string): s
   return excludingArchiveScript(dir, ["."], rule, out);
 }
 
-/** A path on the guest for one trip's own file or directory, named so two trips never write the same one. */
-export const guestTmpPath = (what: string): string => `/tmp/${what}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+/** A path on the machine for one trip's own file or directory, named so two trips never write the same one. The
+ * folder it sits in is the caller's to name: /tmp on a machine wsp made, whose whole disk is wsp's, and wsp's own
+ * folder under the login's home on a machine somebody else owns, where a folder every account on it shares is a
+ * folder another account can sit in first. */
+export const guestTmpPath = (what: string, dir: string = GUEST_TMP): string => `${dir.replace(/\/+$/, "")}/${what}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 /** Paths to archive from one root on the guest: the directory tar runs in and absolute paths under it, which travel
  * at their path relative to it. A filtered copy written under a scratch root that mirrors the homes travels at the
@@ -318,6 +324,28 @@ async function putPart(doFetch: Fetch, url: string, bytes: Uint8Array<ArrayBuffe
   }
 }
 
+/** The one road bytes take onto a machine, whichever kind it is: the machine's own connection where it carries
+ * one, else a signed URL PUT. Both callers that put a file on a machine import this, so a machine whose provider
+ * mints no URL needs nothing said about it anywhere else. `part` and `parts` name where this piece sits in a
+ * larger archive, for the words a failure carries. */
+export async function landBytes(
+  machine: Machine,
+  path: string,
+  bytes: Uint8Array<ArrayBuffer>,
+  opts: { fetch?: Fetch; timeoutMs?: number; part?: number; parts?: number } = {},
+): Promise<void> {
+  if (machine.putBytes !== undefined) {
+    await machine.putBytes(path, bytes, { timeoutMs: opts.timeoutMs ?? PUT_BYTES_MS });
+    return;
+  }
+  const url = await machine.uploadUrl(path);
+  await putPart(opts.fetch ?? globalThis.fetch, url, bytes, opts.part ?? 1, opts.parts ?? 1);
+}
+
+/** How long one part has to travel a machine's own connection. A signed URL PUT is bounded by the backend; a
+ * connection that carries the bytes itself is bounded here, wide enough for a part on a slow link. */
+const PUT_BYTES_MS = 600_000;
+
 /** A file for the upload road: its path on the guest, its mode and its bytes. */
 export interface TarFile {
   path: string;
@@ -411,14 +439,13 @@ const HASH_MISMATCH_EXIT = 65;
 export async function importInto(machine: Machine, tar: Buffer, destDir: string, opts: VaultOptions = {}): Promise<{ parts: number }> {
   const doFetch = opts.fetch ?? globalThis.fetch;
   if (tar.length === 0) throw new Error("vault import: empty archive, nothing to import");
-  const tmp = `${guestTmpPath("wsp-vault-in")}.tgz`;
+  const tmp = `${guestTmpPath("wsp-vault-in", opts.tmpDir)}.tgz`;
   const parts = Math.ceil(tar.length / UPLOAD_PART_BYTES);
   const partPaths = parts === 1 ? [tmp] : Array.from({ length: parts }, (_, i) => `${tmp}.part${i}`);
   try {
     for (const [i, path] of partPaths.entries()) {
-      const url = await machine.uploadUrl(path);
       const end = Math.min((i + 1) * UPLOAD_PART_BYTES, tar.length);
-      await putPart(doFetch, url, new Uint8Array(tar.subarray(i * UPLOAD_PART_BYTES, end)), i + 1, parts);
+      await landBytes(machine, path, new Uint8Array(tar.subarray(i * UPLOAD_PART_BYTES, end)), { fetch: doFetch, part: i + 1, parts });
       opts.onPart?.({ part: i + 1, parts, bytes: end, total: tar.length });
     }
   } catch (e) {
@@ -456,6 +483,9 @@ export async function importInto(machine: Machine, tar: Buffer, destDir: string,
 export interface LandOptions {
   fetch?: Fetch;
   timeoutMs?: number;
+  /** Where the archive's parts are written on the machine while they travel; the machine's shared temporary
+   * folder unless the caller names wsp's own there. */
+  tmpDir?: string;
   /** Remove what is at the destination first; without it an existing path is refused with kind "exists". */
   replace?: boolean;
   onPart?: (progress: UploadProgress) => void;
@@ -480,6 +510,7 @@ export async function landBundle(machine: Machine, tar: Buffer, dest: string, op
   const staging = `${target}.wsp-in-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const { parts } = await importInto(machine, tar, staging, {
     overlay: true,
+    ...(opts.tmpDir !== undefined ? { tmpDir: opts.tmpDir } : {}),
     ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),
     ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
     ...(opts.onPart !== undefined ? { onPart: opts.onPart } : {}),

@@ -4,7 +4,9 @@
 // script for a fresh daemon, the rotation script for a machine that already
 // has one, so a token leaked from an earlier run dies with that run.
 
-/** Mirrors @wsp/daemon's DEFAULT_TOKEN_PATH; the runtime cannot import the daemon package (it only runs inside guests). */
+/** Mirrors @wsp/daemon's DEFAULT_TOKEN_PATH; the runtime cannot import the daemon package (it only runs inside guests).
+ * Where a machine wsp forked keeps the file; a machine the person owns keeps it under their own home, and the
+ * kind that reaches it says where. */
 export const DAEMON_TOKEN_PATH = "/root/.wsp-daemon-token";
 /** The rotation script's answer on a machine that has a daemon. */
 export const DAEMON_TOKEN_SET = "WSP_DAEMON_TOKEN_SET";
@@ -18,17 +20,17 @@ export function assertTokenShape(token: string): void {
 
 /** Writes the token owner-readable, the whole file replaced at once so a daemon reading it mid-write never sees half.
  * The assignment carries the token, the only shape the run log's redaction knows. */
-export function writeDaemonTokenScript(token: string): string {
+export function writeDaemonTokenScript(token: string, path: string = DAEMON_TOKEN_PATH): string {
   assertTokenShape(token);
   return [
     `WSP_DAEMON_TOKEN='${token}'`,
     "umask 077",
-    `printf '%s' "$WSP_DAEMON_TOKEN" > ${DAEMON_TOKEN_PATH}.next`,
-    `mv -f ${DAEMON_TOKEN_PATH}.next ${DAEMON_TOKEN_PATH}`,
+    `printf '%s' "$WSP_DAEMON_TOKEN" > ${path}.next`,
+    `mv -f ${path}.next ${path}`,
   ].join("\n");
 }
 
 /** Replaces the token on a machine that has a daemon; a machine without one is left as it is and says so. */
-export function rotateDaemonTokenScript(token: string): string {
-  return [`test -f ${DAEMON_TOKEN_PATH} || { echo ${DAEMON_TOKEN_NONE}; exit 0; }`, writeDaemonTokenScript(token), `echo ${DAEMON_TOKEN_SET}`].join("\n");
+export function rotateDaemonTokenScript(token: string, path: string = DAEMON_TOKEN_PATH): string {
+  return [`test -f ${path} || { echo ${DAEMON_TOKEN_NONE}; exit 0; }`, writeDaemonTokenScript(token, path), `echo ${DAEMON_TOKEN_SET}`].join("\n");
 }

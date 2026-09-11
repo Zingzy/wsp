@@ -7,7 +7,12 @@ import {
   Capabilities,
   GoldenVersion,
   DAEMON_ROOTS_PATH,
+  NO_BUILD_TOOLS_LINE,
+  noImportRoadLine,
+  noSshDaemonLine,
+  OVER_SSH,
   rootsPathIn,
+  sshDaemonPaths,
   DAEMON_VERSION,
   daemonVersionOf,
   DaemonAuthRequest,
@@ -864,6 +869,42 @@ describe("daemon files and diff ops", () => {
     expect(rootsPathIn("/Users/z")).toBe("/Users/z/.wsp/roots");
     expect(rootsPathIn("/Users/z/")).toBe("/Users/z/.wsp/roots");
     expect(rootsPathIn("/")).toBe("/.wsp/roots");
+  });
+
+  it("names everywhere a daemon on a machine reached over ssh keeps something, all under one folder of its own", () => {
+    const at = sshDaemonPaths("/home/maya");
+    expect(at).toEqual({
+      wsp: "/home/maya/.wsp",
+      dir: "/home/maya/.wsp/daemon",
+      bundle: "/home/maya/.wsp/daemon.tgz",
+      inbox: "/home/maya/.wsp/inbox",
+      tokenPath: "/home/maya/.wsp/daemon-token",
+      portFile: "/home/maya/.wsp/daemon.port",
+      runDir: "/home/maya/.wsp/run",
+      openSocket: "/home/maya/.wsp/open.sock",
+      manifestPath: "/home/maya/.wsp/manifest.json",
+      profileFile: "/home/maya/.wsp/profile.sh",
+      nodeDir: "/home/maya/.wsp/node",
+      unitDir: "/home/maya/.config/systemd/user",
+      binDir: "/home/maya/.local/bin",
+      rootsPath: "/home/maya/.wsp/roots",
+    });
+    // The deploy on the host writes these and the runtime reads the token and the port back off them, which is
+    // why the rule sits here and in neither of them.
+    expect(at.rootsPath).toBe(rootsPathIn("/home/maya"));
+    expect(sshDaemonPaths("/home/maya/")).toEqual(at);
+    // Nothing here is root's: the daemon on a machine somebody owns is installed under their own login.
+    expect(Object.values(at).filter(path => !path.startsWith("/home/maya/"))).toEqual([]);
+  });
+
+  it("says a machine over ssh carries no daemon yet, and names both ways to put one on it", () => {
+    // Recorded but not deployed is what the sentence is for now, so it names the verb that finishes the job as
+    // well as the one the person just ran.
+    expect(noSshDaemonLine("box")).toBe("box carries no daemon yet, so its terminal, files and ports are not served; run wsp new --ssh again, or wsp workspaces daemon update box");
+    // node-pty ships prebuilt binaries for macOS and Windows only, so the terminal is compiled where it runs.
+    expect(NO_BUILD_TOOLS_LINE).toContain("no C compiler");
+    expect(NO_BUILD_TOOLS_LINE).toContain("build-essential");
+    expect(noImportRoadLine("box", OVER_SSH)).toBe("box is a machine over ssh, which lands no folder yet; import to a fork, or register the folder on this computer");
   });
 });
 

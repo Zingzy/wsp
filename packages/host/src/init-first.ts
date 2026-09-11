@@ -191,7 +191,7 @@ export async function runFirst(o: FirstRun): Promise<FirstResult | undefined> {
     log.step(planLine(plan), out);
     spinner = o.spin(`Importing ${o.first.folder}`);
     // The app's dialog seeds its ticks from these two and sends this request; nothing is changed on the way here.
-    const imported = await o.handle.importProject({ workspaceId: workspace.id, ...importRequest(plan, o.first.folder, defaultConsent(plan.secrets), defaultAgents(plan.agents)) });
+    const imported = await o.handle.importProject({ workspaceId: workspace.id, ...importRequest(plan, o.first.folder, defaultConsent(plan.secrets), defaultAgents(plan.agents), undefined, workspace) });
     spinner.stop();
     o.json?.({ event: "import", folder: o.first.folder, state: "imported", dest: imported.dest, files: imported.files, bytes: imported.bytes });
     log.step(importedLine(imported, workspace.name), out);

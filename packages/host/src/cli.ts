@@ -27,10 +27,10 @@ import {
   type SshWiring,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, NOTHING_TO_SERVE_LINE, type PortsAsked, portsAsked, shellQuote, SOLARI_CONSOLE, THIS_COMPUTER, TURN_END_WORDS, usageRefusal, WS_PORT_OFFSET } from "@wsp/protocol";
-import { agentHome, agentHomes, checkProviderKey, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, NoProviderBackend, SOLARI_PRICING, parseSshAddress, providerSlot, type ProviderSlot, SshBackend, sshIdentity, sshMachineName } from "@wsp/engine";
+import { authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, NOTHING_TO_SERVE_LINE, type PortsAsked, portsAsked, shellQuote, SOLARI_CONSOLE, THIS_COMPUTER, TURN_END_WORDS, usageRefusal, WS_PORT_OFFSET, type WorkspaceCreatingEvent } from "@wsp/protocol";
+import { agentHome, agentHomes, checkProviderKey, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, NoProviderBackend, SOLARI_PRICING, parseSshAddress, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshIdentity, sshMachineName, sshReachOf, type SshReach } from "@wsp/engine";
 import { assetDir } from "./assets.js";
-import { claudeEnvs, deployDaemon, doctor, localDoctor } from "./doctor.js";
+import { claudeEnvs, deployDaemon, doctor, localDoctor, removeDaemon, sshDaemonPlace } from "./doctor.js";
 import { agentsHere } from "./agents-here.js";
 import { InitJobs } from "./init-job.js";
 import { agentKeyEnvs, parseEnvFile, savedEnv, type Keys } from "./env-keys.js";
@@ -70,7 +70,7 @@ import {
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerSpec, nextLine, registeredLine, removeEach, removeLines, runningWsp, type RunningWsp } from "./mcp-install.js";
-import { CLI_VERBS, COMMON, failed, findVerb, jsonAsked, runVerb, toolName, verbHelp, verbUsage, type VerbDeps } from "./verbs.js";
+import { CLI_VERBS, COMMON, failed, findVerb, jsonAsked, runVerb, toolName, verbHelp, verbUsage, type LocalRuntime, type VerbDeps } from "./verbs.js";
 import { VERSION } from "./version.js";
 
 /** One line per exit class, the code first, wrapped to the help's width. */
@@ -490,10 +490,19 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
 }
 
 /** The machines this computer reaches over ssh: the ssh client here dials them with the person's own key, and one
- * dial both proves a machine answers and reads what its record stands on. Nothing is kept between dials; a record's
- * id is the whole address. */
-export function sshWiring(): SshWiring {
+ * dial both proves a machine answers and reads what its record stands on. A record's id is the whole address, so
+ * nothing is kept between dials but the forwards, which are children of this host and go with it.
+ *
+ * The daemon on such a machine is put under the login it answered with and binds that machine's own loopback, so
+ * nothing there listens where the network can reach it; the road to it is a port on this computer carried over
+ * ssh, one child per machine and reused by every dial. */
+export function sshWiring(forwards = new SshForwards()): SshWiring {
   const backend = new SshBackend();
+  const reachOf = (machine: Machine): SshReach => {
+    const reach = sshReachOf(machine);
+    if (reach === undefined) throw new Error(`${machine.id} is not a machine this host reaches over ssh`);
+    return reach;
+  };
   return {
     backend,
     adopt: async (address, opts) => {
@@ -509,6 +518,11 @@ export function sshWiring(): SshWiring {
         ...(hostKey !== undefined ? { identity: sshIdentity(hostKey, login.USER), hostKey } : {}),
       };
     },
+    deployDaemon: async (machine, login) => `daemon on node ${(await deployDaemon(machine, { place: sshDaemonPlace(login) })).node}`,
+    forward: (machine, remotePort) => forwards.forward(machine.id, reachOf(machine), remotePort),
+    removeDaemon: (machine, login) => removeDaemon(machine, sshDaemonPlace(login)),
+    dropForward: machine => forwards.drop(machine.id),
+    close: () => forwards.close(),
   };
 }
 
@@ -1317,9 +1331,16 @@ export const COMMAND_LINES: readonly CommandLine[] = [
 export async function cli(argv: string[], io: CliIO = terminalIO(), run: RunningWsp = runningWsp(), env: Readonly<Record<string, string | undefined>> = process.env): Promise<number> {
   const verb = findVerb(argv);
   // The one verb that runs with no host serving, new --local, builds the runtime over the state file in this process.
-  const verbRuntime = async (statePath: string): Promise<Runtime> => {
+  const verbRuntime = async (statePath: string): Promise<LocalRuntime> => {
     await adoptLoginPath(line => io.log(line));
-    return makeRuntime(await loadKeys(io, undefined, { anthropic: false, noSolari: "local" }), statePath);
+    const rt = makeRuntime(await loadKeys(io, undefined, { anthropic: false, noSolari: "local" }), statePath);
+    // Handed on as the two calls the verb makes and the stages it prints, so the verbs read nothing of the
+    // runtime's own shape: they speak to a host over the wire, and this is the one road that has none.
+    return {
+      workspaces: rt.workspaces,
+      creating: on => rt.events.on("workspace.creating", e => on(e as WorkspaceCreatingEvent)),
+      close: () => rt.close(),
+    };
   };
   if (verb !== undefined) return runVerb(verb, argv, io, statePathFrom, { alsoHere, cwd: process.cwd(), env, runtime: verbRuntime });
   if (argv[0] === MCP_COMMAND) return mcp(io, argv.slice(1), statePathFrom, run, env);
