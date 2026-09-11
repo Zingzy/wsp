@@ -166,6 +166,33 @@ describe("idle policy mechanics", () => {
     }
   });
 
+  it("onBackstop hears now plus twice the window on every arming, now plus six hours when the window is off, and nothing on forget", () => {
+    const heard: { id: string; until: number }[] = [];
+    windows.set("off", null);
+    const p = (policy = createIdlePolicy({
+      windowOf: id => (windows.has(id) ? windows.get(id)! : WINDOW),
+      onIdle: async () => {},
+      retryMs: RETRY,
+      clock: fc.clock,
+      onBackstop: (id, until) => heard.push({ id, until }),
+    }));
+    const t0 = fc.clock.now();
+    p.touch("a");
+    p.touch("off");
+    expect(heard).toEqual([{ id: "a", until: t0 + 2 * WINDOW }, { id: "off", until: t0 + IDLE_OFF_BACKSTOP_MS }]);
+    // Every arming pushes again, from now: a touch, and the last release of a hold.
+    fc.advance(1_000);
+    p.touch("a");
+    p.hold("a");
+    p.release("a");
+    expect(heard.slice(2)).toEqual([{ id: "a", until: t0 + 1_000 + 2 * WINDOW }, { id: "a", until: t0 + 1_000 + 2 * WINDOW }]);
+    // A forget pushes nothing: a napped or deleted machine needs no stop timer.
+    p.forget("a");
+    p.forget("off");
+    expect(heard).toHaveLength(4);
+    expect(p.idleAt("off")).toBeUndefined();
+  });
+
   it("a touch or a forget during the retries ends them: the person acted, or the nap landed another way", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
@@ -447,6 +474,47 @@ describe("provider backstop on the fork spec", () => {
     backend.machines[0]!.killed = true;
     await rt.workspaces.wake(ws.id);
     expect(backend.machines[1]!.spec).toMatchObject({ onIdle: "pause", idleTimeoutMs: 10 * 60_000 });
+  });
+
+  it("a backend declaring a backstop is handed the machine and the instant on create and on activity, nothing on nap, the six-hour instant with auto-nap off, and a call that fails is logged", async () => {
+    const { rt, backend, fc } = testRuntime({ idle: { defaultWindowMs: 20 * 60_000 } });
+    const heard: { machine: string; until: number }[] = [];
+    let refuse = false;
+    backend.lifecycle.backstop = async (machine, until) => {
+      if (refuse) throw new Error("PATCH ttlSeconds refused");
+      heard.push({ machine: machine.id, until });
+    };
+    const t0 = fc.clock.now();
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    expect(heard).toEqual([{ machine: "m1", until: t0 + 40 * 60_000 }]);
+    fc.advance(5_000);
+    await rt.workspaces.touch(ws.id);
+    expect(heard).toEqual([{ machine: "m1", until: t0 + 40 * 60_000 }, { machine: "m1", until: t0 + 5_000 + 40 * 60_000 }]);
+    await rt.workspaces.nap(ws.id);
+    expect(heard).toHaveLength(2);
+    // With auto-nap off the runtime still hands over its six-hour instant, so a dead host never leaves a machine billing.
+    const off = await rt.workspaces.create({ golden: "snap_g", name: "b", idleWindowMs: null });
+    expect(heard.at(-1)).toEqual({ machine: "m2", until: fc.clock.now() + IDLE_OFF_BACKSTOP_MS });
+    // A call the provider refuses is logged, and the window is armed all the same.
+    refuse = true;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await rt.workspaces.touch(off.id);
+      await new Promise(r => setImmediate(r));
+      expect(warn.mock.calls.map(c => c[0])).toContainEqual(expect.stringMatching(/^backstop of ws_\w+ on m2 not set: PATCH ttlSeconds refused$/));
+    } finally {
+      warn.mockRestore();
+    }
+    expect((await rt.status.list()).find(s => s.id === off.id)!.idleAt).toBeUndefined();
+    expect(heard).toHaveLength(3);
+  });
+
+  it("a backend without a backstop is never asked: the window arms as before", async () => {
+    const { rt, backend, fc } = testRuntime();
+    expect(backend.lifecycle.backstop).toBeUndefined();
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await rt.workspaces.touch(ws.id);
+    expect((await rt.status.list())[0]!.idleAt).toBe(fc.clock.now() + WINDOW);
   });
 
   it("off still leaves a long pause backstop so a crashed runtime stops billing", async () => {

@@ -171,6 +171,12 @@ export interface LifecycleBudgets {
  * capabilities carry a pauseMode; a registry test holds the two together. */
 export interface Lifecycle {
   budgets: LifecycleBudgets;
+  /** Optional: the instant by which the provider may stop this running machine if this host is gone, computed by
+   * the runtime's own backstop policy and handed over whenever the idle window is armed, for a provider whose
+   * backstop is pushed rather than set once at create. Never called for a machine the runtime has napped or
+   * forgotten. Called from the policy's own arming and not awaited: a rejection is logged, and the backend decides
+   * whether a given instant is worth a call, since the window is armed on every streamed chunk. */
+  backstop?(machine: Machine, until: number): Promise<void>;
 }
 
 export interface MachineBackend {

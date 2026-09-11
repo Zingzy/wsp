@@ -2992,6 +2992,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
     retryMs: opts.status?.pollIntervalMs ?? POLL_INTERVAL_MS,
     clock,
+    // A backend whose backstop is pushed rather than set at create hears the instant on every arming; the backend
+    // decides whether one is worth a call, and a call that fails changes nothing about the window.
+    onBackstop: (id, until) => {
+      const entry = live.get(id);
+      if (entry === undefined) return;
+      void backendFor(entry.record.kind)
+        .lifecycle?.backstop?.(entry.machine, until)
+        .catch((e: unknown) => console.warn(`backstop of ${id} on ${entry.machine.id} not set: ${e instanceof Error ? e.message : String(e)}`));
+    },
   });
   // Every road into a workspace the runtime can see starts its window over;
   // typing over the browser's daemon link arrives as workspaces.touch.
