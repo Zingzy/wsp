@@ -6054,7 +6054,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(e.machine.daemonAnswers !== undefined ? { daemonAnswers: e.machine.daemonAnswers.bind(e.machine) } : {}),
         providerState: () => e.machine.state(),
         ...(e.machine.metrics !== undefined ? { metrics: e.machine.metrics.bind(e.machine) } : {}),
-        ...(e.machine.facts !== undefined ? { facts: e.machine.facts.bind(e.machine) } : {}),
+        // A machine the poll last found unreachable is not asked what it is: over ssh that read is a dial of its
+        // own, so a box that is off would pay one every tick beside the dial the reach already makes.
+        ...(e.machine.facts !== undefined && reachOf(e) !== "unreachable" ? { facts: e.machine.facts.bind(e.machine) } : {}),
         exec: (cmd, o) => e.machine.exec(cmd, o),
       }));
     },

@@ -11,7 +11,7 @@ import { z } from "zod";
 import { HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
 import { openingTitle, threadWord, titleLine } from "./format.js";
-import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, SIGN_IN_CODE_MAX } from "./init-job.js";
+import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
 import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
 import { WorkspaceGlyph, WorkspaceLook, WorkspaceTheme } from "./workspace-look.js";
@@ -435,7 +435,7 @@ export type WorkspaceOut = z.infer<typeof WorkspaceOut>;
 /** A workspace as the command line and the MCP tool list it: the same fields with what the rail reads live beside
  * them, and the reach without the route it carries, since a table needs the state word and nothing that opens a
  * machine. Parsing a status through it is what drops the routes; the app's own socket still gets both. */
-export const WorkspaceListing = WorkspaceStatus.pick({ ...WORKSPACE_OUT, machineState: true, size: true, rateUsdPerHour: true, reason: true, idleAt: true }).extend({ reach: ReachView });
+export const WorkspaceListing = WorkspaceStatus.pick({ ...WORKSPACE_OUT, machineState: true, size: true, rateUsdPerHour: true, reason: true, idleAt: true, facts: true }).extend({ reach: ReachView });
 export type WorkspaceListing = z.infer<typeof WorkspaceListing>;
 
 /** What moving a workspace onto a newer image came to: the workspace as it now stands, whether a machine was
@@ -1587,11 +1587,6 @@ export interface DesktopBridge {
 export const MachineKind = z.enum(["sandbox", "desktop"]);
 export type MachineKind = z.infer<typeof MachineKind>;
 
-/** What each login came to by the time the golden sealed: a sign-in on the machine, or a copy from this computer
- * checked there with the tool's status command. `copied` is a copy nothing checked: an update re-imported it, or the
- * tool has no status command or is not on the machine. */
-export const LoginState = z.enum(["signed-in", "not-signed-in", "not-verified", "skipped", "copied"]);
-export type LoginState = z.infer<typeof LoginState>;
 export const GoldenLogin = z.object({ name: z.string(), state: LoginState });
 export type GoldenLogin = z.infer<typeof GoldenLogin>;
 /** A tool the builder's import did not put on the image: set aside at plan or install time, or failed to install,

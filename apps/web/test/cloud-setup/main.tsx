@@ -8,7 +8,7 @@
 // is what the host hands over for a small laptop: three agents, the tools with
 // the base locked on and the rest by calls, a manager's rows, three sign-ins.
 import { createRoot } from "react-dom/client";
-import { GOLDEN_STAGE_WORDS, INIT_ROW_STATES, INIT_SIGN_IN_WORDS, KEY_REFUSED, MCP_ADDED_WORD, NETWORK_LOST_LINE, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initAgentNoRecipeLine, initBuildRows, MACHINE_GONE_LINE, MACHINE_ROW_LABEL, initStageCount, initStoppedAt, keyRefusedLine, snapshotStageLine, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { GOLDEN_STAGE_WORDS, INIT_ROW_STATES, initSignInOutcome, KEY_REFUSED, MCP_ADDED_WORD, NETWORK_LOST_LINE, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initAgentNoRecipeLine, initBuildRows, MACHINE_GONE_LINE, MACHINE_ROW_LABEL, initStageCount, initStoppedAt, keyRefusedLine, snapshotStageLine, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import { RequestError, type Api } from "../../src/protocol/client";
 import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS } from "./keyRefusedJob";
@@ -130,9 +130,9 @@ const machine = (state: string, detail?: string, id = "b_dlb9oeig"): InitJob["ro
 // page hands a code back, with the field for it on its action line.
 const signIns: InitJob["rows"] = [
   { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "Sign in to GitHub CLI", state: SIGN_IN_OPEN_STATE, page: "https://github.com/login/device", code: "8F4A-C21B" },
-  { id: "sign-in/codex", kind: "sign-in", tool: "codex", label: "Sign in to Codex", state: INIT_SIGN_IN_WORDS.copied, detail: "codex login --api-key exited 0" },
-  { id: "sign-in/gemini", kind: "sign-in", tool: "gemini", label: "Sign in to Gemini CLI", state: INIT_SIGN_IN_WORDS["signed-in"] },
-  { id: "sign-in/wrangler", kind: "sign-in", tool: "wrangler", label: "Sign in to Cloudflare Wrangler", state: INIT_SIGN_IN_WORDS["not-signed-in"], detail: "wrangler login exited 1; no sign-in within 16m" },
+  { id: "sign-in/codex", kind: "sign-in", tool: "codex", label: "Sign in to Codex", ...initSignInOutcome("copied", "darwin"), detail: "codex login --api-key exited 0" },
+  { id: "sign-in/gemini", kind: "sign-in", tool: "gemini", label: "Sign in to Gemini CLI", ...initSignInOutcome("signed-in", "darwin") },
+  { id: "sign-in/wrangler", kind: "sign-in", tool: "wrangler", label: "Sign in to Cloudflare Wrangler", ...initSignInOutcome("not-signed-in", "darwin"), detail: "wrangler login exited 1; no sign-in within 16m" },
   { id: "sign-in/gcloud", kind: "sign-in", tool: "gcloud", label: "Sign in to Google Cloud", state: SIGN_IN_OPEN_STATE, page: "https://accounts.google.com/o/oauth2/auth", finish: "code" },
 ];
 
@@ -172,13 +172,13 @@ const JOBS: Record<string, InitJob> = {
     phase: "sealing",
     stoppable: false,
     screens: [],
-    rows: [...done(STAGES.slice(0, 9)), ...signIns.map(r => (r.id === "sign-in/gh" ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, state: INIT_SIGN_IN_WORDS["not-signed-in"], detail: "no sign-in within 16m" } : r.state === SIGN_IN_OPEN_STATE ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, state: INIT_SIGN_IN_WORDS["signed-in"] } : r)), stage("snapshotting", INIT_ROW_STATES.running, { lines: [snapshotStageLine(13 * GIB)], since: Date.now() - 41_000 }), ...STAGES.slice(10)]
+    rows: [...done(STAGES.slice(0, 9)), ...signIns.map(r => (r.id === "sign-in/gh" ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, ...initSignInOutcome("not-signed-in", "darwin"), detail: "no sign-in within 16m" } : r.state === SIGN_IN_OPEN_STATE ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, ...initSignInOutcome("signed-in", "darwin") } : r)), stage("snapshotting", INIT_ROW_STATES.running, { lines: [snapshotStageLine(13 * GIB)], since: Date.now() - 41_000 }), ...STAGES.slice(10)]
   },
   done: {
     ...base,
     phase: "done",
     screens: [],
-    rows: [...done(STAGES.slice(0, 9)), ...signIns.map(r => (r.state === SIGN_IN_OPEN_STATE ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, state: INIT_SIGN_IN_WORDS["signed-in"] } : r)), ...done(STAGES.slice(9, 13)), { id: "workspace/first", kind: "workspace", label: "first", state: "forked" }],
+    rows: [...done(STAGES.slice(0, 9)), ...signIns.map(r => (r.state === SIGN_IN_OPEN_STATE ? { id: r.id, kind: r.kind, tool: r.tool, label: r.label, ...initSignInOutcome("signed-in", "darwin") } : r)), ...done(STAGES.slice(9, 13)), { id: "workspace/first", kind: "workspace", label: "first", state: "forked" }],
     golden: { version: 1 },
     workspace: { id: "ws_first", name: "first" },
   },

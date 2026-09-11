@@ -489,7 +489,7 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     expect(await page!.locator("[role=dialog] [data-row='stage/sign-ins'][data-open=true]").count()).toBe(1);
     // The stage with a run-out wears the failed glyph beside not signed in, never a tick.
     expect(await page!.locator("[role=dialog] [data-row='stage/sign-ins'] [data-glyph]").getAttribute("data-glyph")).toBe("failed");
-    expect(await page!.locator("[role=dialog] [data-row='stage/sign-ins'] > div [data-k=state]").textContent()).toBe(INIT_SIGN_IN_WORDS["not-signed-in"]);
+    expect(await page!.locator("[role=dialog] [data-row='stage/sign-ins'] > div [data-k=state]").textContent()).toBe(INIT_SIGN_IN_WORDS["not-signed-in"]("darwin"));
     const stageRow = await box("[role=dialog] [data-row='stage/sign-ins'] > div");
     const subRow = await box("[role=dialog] [data-row='sign-in/gh'] > div [data-row-mark]");
     expect(near(subRow.x - (stageRow.x + SPEC.rowLeft), 24), `sub-rows indented ${subRow.x - (stageRow.x + SPEC.rowLeft)}`).toBe(true);

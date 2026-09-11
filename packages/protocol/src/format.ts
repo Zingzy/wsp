@@ -1222,15 +1222,21 @@ export const INIT_ROW_STATES = {
   mcpAdded: "MCP added",
 } as const;
 
-/** A sign-in row's word once its outcome is in, the app's and wsp setup's spelling; the terminal's table keeps
- * LOGIN_STATE_WORDS. */
-export const INIT_SIGN_IN_WORDS: Record<LoginState, string> = {
-  "signed-in": INIT_ROW_STATES.done,
-  "not-signed-in": "not signed in",
-  copied: "copied from this Mac",
-  "not-verified": "not verified",
-  skipped: INIT_ROW_STATES.skipped,
+/** A sign-in row's word once its outcome is in, the app's and wsp setup's spelling, drawn for the computer the run
+ * reads; the terminal's own table of the same outcomes keeps LOGIN_STATE_WORDS. The word is what a row prints and
+ * never what a client reads: the outcome travels beside it as the row's login. */
+export const INIT_SIGN_IN_WORDS: Record<LoginState, (platform: "darwin" | "linux") => string> = {
+  "signed-in": () => INIT_ROW_STATES.done,
+  "not-signed-in": () => "not signed in",
+  copied: platform => `copied from ${thisComputer(platform)}`,
+  "not-verified": () => "not verified",
+  skipped: () => INIT_ROW_STATES.skipped,
 };
+
+/** A sign-in row's outcome as it travels: the name every client reads and, beside it, the word drawn for the
+ * computer that ran the sign-in. The two are set together, so no row can carry one computer's word under another's
+ * outcome. */
+export const initSignInOutcome = (login: LoginState, platform: "darwin" | "linux"): Pick<InitRow, "state" | "login"> => ({ state: INIT_SIGN_IN_WORDS[login](platform), login });
 
 /** Every build stage in plain words, the one table the app's rows and the terminal's lines read. */
 export const GOLDEN_STAGE_WORDS: Record<Exclude<GoldenStage, "failed">, string> = {
@@ -1300,7 +1306,7 @@ export const SIGN_IN_OPEN_STATE = INIT_ROW_STATES.open;
 /** The state word of an agent on this computer whose config carries the wsp tools. */
 export const MCP_ADDED_WORD = INIT_ROW_STATES.mcpAdded;
 
-const ROW_OVER: ReadonlySet<string> = new Set([INIT_ROW_STATES.done, INIT_ROW_STATES.failed, INIT_ROW_STATES.stopped, INIT_ROW_STATES.forked, INIT_ROW_STATES.imported, INIT_ROW_STATES.keySet, INIT_ROW_STATES.mcpAdded, INIT_ROW_STATES.skipped, INIT_ROW_STATES.notMade, INIT_ROW_STATES.gone, ...Object.values(INIT_SIGN_IN_WORDS), ...Object.values(LOGIN_STATE_WORDS)]);
+const ROW_OVER: ReadonlySet<string> = new Set([INIT_ROW_STATES.done, INIT_ROW_STATES.failed, INIT_ROW_STATES.stopped, INIT_ROW_STATES.forked, INIT_ROW_STATES.imported, INIT_ROW_STATES.keySet, INIT_ROW_STATES.mcpAdded, INIT_ROW_STATES.skipped, INIT_ROW_STATES.notMade, INIT_ROW_STATES.gone]);
 
 const ROW_UNRUN: ReadonlySet<string> = new Set([INIT_ROW_STATES.skipped, INIT_ROW_STATES.notMade, INIT_ROW_STATES.stopped]);
 
@@ -1313,12 +1319,14 @@ export const initRowUnrun = (state: string): boolean => ROW_UNRUN.has(state);
  * stopped, or never reached a stage never reads complete. */
 const ROW_UNDONE: ReadonlySet<string> = new Set([INIT_ROW_STATES.failed, ...ROW_UNRUN]);
 
-/** Whether a row's state is a failure to show as one: the stage that failed, and the sign-in stage whose one sign-in
- * ran out, which reads not signed in and must never wear a tick. */
-export const initRowFailed = (state: string): boolean => state === INIT_ROW_STATES.failed || state === INIT_SIGN_IN_WORDS["not-signed-in"];
+/** Whether a row is a failure to show as one: the stage that failed, and the sign-in or the stage it folds into whose
+ * sign-in ran out, which must never wear a tick. The one answer to "this sign-in ran out", so the cross, the
+ * attention mark and the Retry keycap all read it and none of them spells it again. */
+export const initRowFailed = (row: Pick<InitRow, "state" | "login">): boolean => row.state === INIT_ROW_STATES.failed || row.login === "not-signed-in";
 
-/** Whether a row's state word is one it ends on: what the progress count and a section's count read. */
-export const initRowOver = (state: string): boolean => ROW_OVER.has(state);
+/** Whether a row has ended: what the progress count and a section's count read. A sign-in answers from its outcome,
+ * so a row a Linux host worded for itself ends the same as a Mac's; every other row from the word it prints. */
+export const initRowOver = (row: Pick<InitRow, "state" | "login">): boolean => row.login !== undefined || ROW_OVER.has(row.state);
 
 /** Where a stopped build was, from the stage that was running: one spelling for the terminal's stop line and the
  * app's sentence, since the stage names read as sentence openings ("Creating the machine"). */
@@ -1433,6 +1441,19 @@ export function initProgressState(job: Pick<InitJob, "progress" | "needsYou">): 
 /** The id of the stage row the build's sign-ins fold into. */
 export const SIGN_IN_STAGE_ID = "stage/sign-ins";
 
+/** What the stage the sign-ins fold into stands at, from the sign-ins themselves. A run-out hands the stage its own
+ * outcome and its own word, so the stage says what the row under it says on whichever computer wrote it. */
+function signInStageState(signIns: readonly InitRow[]): Pick<InitRow, "state" | "login"> {
+  if (signIns.some(r => r.state === SIGN_IN_OPEN_STATE)) return { state: SIGN_IN_OPEN_STATE };
+  if (signIns.some(r => r.state === INIT_ROW_STATES.running)) return { state: INIT_ROW_STATES.running };
+  if (!signIns.every(r => initRowOver(r))) return { state: signIns.every(r => r.state === INIT_ROW_STATES.waiting) ? INIT_ROW_STATES.waiting : INIT_ROW_STATES.running };
+  const ranOut = signIns.find(r => initRowFailed(r));
+  if (ranOut !== undefined) return { state: ranOut.state, login: ranOut.login };
+  // A build that ended before it reached any of them signed none in, so the fold says so rather than done.
+  if (signIns.every(r => r.state === INIT_ROW_STATES.skipped)) return { state: INIT_ROW_STATES.skipped };
+  return { state: INIT_ROW_STATES.done };
+}
+
 /** The build's list as the app draws it: stages only, in the job's order, the sign-ins folded into one stage row where
  * the first of them sits, whose state is the sign-ins' own (waiting for you while a page waits on the person, running
  * while one runs, not signed in once every one is over and one ran out, done once every one is over well, waiting
@@ -1449,21 +1470,7 @@ export function initBuildRows(rows: readonly InitRow[]): { rows: InitRow[]; sign
     }
     if (folded) continue;
     folded = true;
-    const state = signIns.some(r => r.state === SIGN_IN_OPEN_STATE)
-      ? SIGN_IN_OPEN_STATE
-      : signIns.some(r => r.state === INIT_ROW_STATES.running)
-        ? INIT_ROW_STATES.running
-        : signIns.every(r => initRowOver(r.state))
-          ? signIns.some(r => r.state === INIT_SIGN_IN_WORDS["not-signed-in"])
-            ? INIT_SIGN_IN_WORDS["not-signed-in"]
-            : // A build that ended before it reached any of them signed none in, so the fold says so rather than done.
-              signIns.every(r => r.state === INIT_ROW_STATES.skipped)
-              ? INIT_ROW_STATES.skipped
-              : INIT_ROW_STATES.done
-          : signIns.every(r => r.state === INIT_ROW_STATES.waiting)
-            ? INIT_ROW_STATES.waiting
-            : INIT_ROW_STATES.running;
-    out.push({ id: SIGN_IN_STAGE_ID, kind: "stage", label: CLOUD_SETUP_WORDS.build.signingIn, state });
+    out.push({ id: SIGN_IN_STAGE_ID, kind: "stage", label: CLOUD_SETUP_WORDS.build.signingIn, ...signInStageState(signIns) });
   }
   return { rows: out, signIns };
 }
@@ -1476,7 +1483,7 @@ export function initBuildRows(rows: readonly InitRow[]): { rows: InitRow[]; sign
  * that stopped never reads complete however early it stopped. */
 export function initStageCount(rows: readonly InitRow[]): { done: number; total: number } {
   const stages = rows.filter(r => r.kind === "stage");
-  return { done: stages.filter(r => initRowOver(r.state) && !ROW_UNDONE.has(r.state)).length, total: stages.length };
+  return { done: stages.filter(r => initRowOver(r) && !ROW_UNDONE.has(r.state)).length, total: stages.length };
 }
 
 /** Where a step sits in the steps its run shows, over the title ("2/4"): the steps the person sees, the build or the

@@ -1444,6 +1444,46 @@ describe("this computer as a workspace", () => {
   });
 });
 
+describe("a machine over ssh as a workspace", () => {
+  const BOX: WorkspaceView = { id: "ws_b", name: "box", machineId: "ssh://dev@10.0.0.5:2222", phase: "running", golden: "", createdAt: "2026-09-10T09:00:00Z", kind: "ssh" };
+
+  const FACTS = { os: "Ubuntu 24.04.3 LTS", uptimeMs: 26 * 3_600_000, folder: "/home/dev" };
+
+  /** The same mount, with a record for a machine somebody owns and what that machine answered on its status. */
+  async function mountSsh(facts: typeof FACTS | null = FACTS) {
+    const api = fakeApi([BOX]);
+    api.watchStatuses = vi.fn(async () => [{ ...status(BOX), kind: "ssh" as const, size: { cpu: 8, memMb: 16384 }, rateUsdPerHour: 0, ...(facts === null ? {} : { facts }) }]);
+    useStore.getState().bind(api);
+    render(<MachineSurface workspaceId={BOX.id} />);
+    await waitFor(() => expect(fact("size")).toBe(fmtSize({ cpu: 8, memMb: 16384 }, kindWords("ssh").cpu)));
+    return api;
+  }
+
+  it("the system it runs, how long it has been up and the folder its commands start in fill from what the machine said, beside the rows that already filled", async () => {
+    await mountSsh();
+    expect(fact("os")).toBe("Ubuntu 24.04.3 LTS");
+    expect(fact("uptime")).toBe("1d 2h");
+    expect(fact("folder")).toBe("/home/dev");
+    expect(fact("cost")).toBe(FREE_WORD);
+    expect(fact("state")).toBe("Running");
+    expect(fact("reach")).toBe("reachable");
+    for (const k of ["os", "uptime", "folder"]) {
+      const el = document.querySelector(`[data-k="${k}"]`)!;
+      expect(el.getAttribute("title")).toBe(el.textContent);
+    }
+    // Nothing wsp drives on this kind either: no awake meter and no nap countdown beside them.
+    expect(document.querySelector('[data-k="awake"]')).toBeNull();
+    expect(document.querySelector('[data-k="idle"]')).toBeNull();
+  });
+
+  it("before the machine has answered they read pending, the way this computer's do", async () => {
+    await mountSsh(null);
+    expect(fact("os")).toBe("pending");
+    expect(fact("uptime")).toBe("pending");
+    expect(fact("folder")).toBe("pending");
+  });
+});
+
 describe("daemon version", () => {
   it("the machine tab offers nothing about a daemon older than the app: the runtime replaces it and the machine's row says so", async () => {
     await mount([view("ws_a", "api")]);
