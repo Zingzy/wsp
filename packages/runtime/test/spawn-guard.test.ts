@@ -369,6 +369,54 @@ describe("agents spawning agents", () => {
     }
   });
 
+  it("a thread that forks sees every creating stage of its own fork and none of another thread's", async () => {
+    const held = heldAdapter();
+    const rt = runtimeWith({ claude: held.factory }, { url: "http://10.0.0.2:4700" });
+    const mine = await rt.workspaces.create({ golden: "snap_g", name: "mine", agents: AGENTS_ON });
+    const theirs = await rt.workspaces.create({ golden: "snap_g", name: "theirs", agents: AGENTS_ON });
+    const onMine = await rt.sessions.start(mine.id, { prompt: "hi" });
+    const onTheirs = await rt.sessions.start(theirs.id, { prompt: "hi" });
+    const myScope: ThreadScope = { kind: "thread", threadId: onMine.view().threadId!, workspaceId: mine.id, rootThreadId: onMine.view().threadId! };
+    const theirScope: ThreadScope = { kind: "thread", threadId: onTheirs.view().threadId!, workspaceId: theirs.id, rootThreadId: onTheirs.view().threadId! };
+    // What the bus said, by workspace, so each socket is read against every stage the runtime actually reached
+    // rather than against a list of stage names a backend change would quietly make wrong.
+    const staged = new Map<string, string[]>();
+    const offBus = rt.events.on("workspace.creating", e => {
+      const stage = e as { workspaceId: string; stage: string };
+      staged.set(stage.workspaceId, [...(staged.get(stage.workspaceId) ?? []), stage.stage]);
+    });
+    const srv = await serveRuntime(rt, { port: 0, authToken: "secret", devices: rt.devices });
+    try {
+      const myClient = await WsClient.connect(srv.port, { token: held.launches[0]!.env[HOST_TOKEN_ENV]! });
+      const theirClient = await WsClient.connect(srv.port, { token: held.launches[1]!.env[HOST_TOKEN_ENV]! });
+      await myClient.request("events.subscribe", {});
+      await theirClient.request("events.subscribe", {});
+      const ours = await rt.workspaces.create({ golden: "snap_g", name: "ours" }, asThread(myScope));
+      const others = await rt.workspaces.create({ golden: "snap_g", name: "others" }, asThread(theirScope));
+      await new Promise(r => setTimeout(r, 50));
+      const stagesOn = (client: WsClient, id: string): unknown[] =>
+        client.events.filter(e => e.type === "workspace.creating" && e["workspaceId"] === id).map(e => e["stage"]);
+      // Every stage from the first, which is emitted before the fork has a record for the filter to read.
+      expect(staged.get(ours.id)![0]).toBe("fork-requested");
+      expect(staged.get(ours.id)!.length).toBeGreaterThan(1);
+      expect(stagesOn(myClient, ours.id)).toEqual(staged.get(ours.id));
+      expect(stagesOn(theirClient, others.id)).toEqual(staged.get(others.id));
+      // And nothing of the other tree's fork, at any stage, in either direction.
+      expect(stagesOn(myClient, others.id)).toEqual([]);
+      expect(stagesOn(theirClient, ours.id)).toEqual([]);
+      myClient.close();
+      theirClient.close();
+    } finally {
+      offBus();
+      await srv.close();
+      held.end(1);
+      held.end(0);
+      await onTheirs.finished;
+      await onMine.finished;
+      await rt.close();
+    }
+  });
+
   it("every op this host answers is either one a thread may send or one its socket is refused", async () => {
     const held = heldAdapter();
     const rt = runtimeWith({ claude: held.factory }, { url: "http://10.0.0.2:4700" });
@@ -390,13 +438,17 @@ describe("agents spawning agents", () => {
       // The door is shut and these are the openings: everything else answered the one sentence, whether or not the
       // op would have gone on to refuse it for a reason of its own.
       expect(reached.sort()).toEqual([...THREAD_OPS].filter(op => op !== "auth").sort());
-      expect(refused).toContain("golden.get");
+      // The two reads a fork asks before the act: which snapshot the golden's head is, and whether this host forks
+      // at all and at which sizes. Both are the door's openings, since a thread that may fork has to be able to say
+      // from what; neither writes anything.
+      expect(reached).toContain("golden.get");
+      expect(reached).toContain("capabilities.get");
       expect(refused).toContain("golden.prepare");
       expect(refused).toContain("snapshots.list");
       expect(refused).toContain("snapshots.rollback");
       expect(refused).toContain("preferences.get");
       expect(refused).toContain("preferences.set");
-      expect(refused).toContain("capabilities.get");
+      expect(refused).toContain("projectGoldens.list");
       expect(refused).toContain("init.keys");
       expect(refused).toContain("host.folders");
       expect(refused).toContain("project.import");

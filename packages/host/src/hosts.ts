@@ -8,8 +8,9 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { WS_PATH, hostFromEnv, isUrl, usageRefusal, type HostRoad } from "@wsp/protocol";
+import { WS_PATH, hostFromEnv, isLoopback, isUrl, servedHostname, usageRefusal, type HostRoad } from "@wsp/protocol";
 import { servingHost } from "./host-lock.js";
+import { defaultHomeIn } from "./serving-home.js";
 
 /** The address predicate has one home in the protocol; the command line's callers read it from here. */
 export { isUrl };
@@ -47,7 +48,7 @@ export interface HostEntry {
 }
 
 /** The home wsp keeps everything of a person's in when nobody names another. */
-export const DEFAULT_HOME = join(homedir(), ".wsp");
+export const DEFAULT_HOME = defaultHomeIn(homedir());
 
 /** The folder wsp keeps its state, its keys and its hosts in. One reading, since the command line, the verbs and the
  * tool server all have to name the same folder. */
@@ -209,9 +210,40 @@ export function deviceRefusedLine(alias: string, url: string): string {
   return `the host ${alias} refused this computer's token, which it has taken away; run wsp pair on ${url} and wsp connect ${url} --code <code> --name ${alias} to pair again.`;
 }
 
-/** What the person reads when a host did not answer at all. */
-export function noAnswerLine(where: string, why: string): string {
+/** What the person reads when a host did not answer at all. Private on purpose: the stamped refusal below is the
+ * only way to build this sentence, so no road can raise it as an error a caller cannot tell from a host's own. */
+function noAnswerLine(where: string, why: string): string {
   return `the host at ${where} did not answer: ${why}`;
+}
+
+/** A host that did not answer at all: the road or the host, never the token this computer holds. A caller whose act
+ * cannot be redone once it has moved on tries again on this kind and on no other. */
+export function noAnswerRefusal(where: string, why: string): Error {
+  return Object.assign(new Error(noAnswerLine(where, why)), { kind: "unreachable" });
+}
+
+/** A road that carried nothing before its window was out. The dial waits on one and the hand back's reply waits on
+ * another, so the words for that wait are written here once rather than at each of them. */
+export function noAnswerWithin(where: string, windowMs: number): Error {
+  return noAnswerRefusal(where, `nothing came back within ${windowMs} ms`);
+}
+
+/** The window for a host that answers over loopback, where an answer that is late is a host that is gone. */
+const NEAR_WINDOW_MS = 5_000;
+/** The window for a host at an address off this computer, which is reached through whatever sits between: for a box
+ * behind a relay that is DNS, a content delivery edge and the tunnel's connector. Measured on that road, a warm
+ * tunnel opens the socket and answers the first frame in 0.3 s, while an edge whose tunnel has just come up holds a
+ * request for 5.8 s before it answers anything at all, and a busy box answers later still. */
+const FAR_WINDOW_MS = 15_000;
+
+/** How long a dial waits for its socket and for the answer to its first frame, by the road the host is on. Read
+ * here by every dial, since a loopback's window on a relayed road calls a host that is answering dead. */
+export function dialWindowMs(aim: HostAim): number {
+  if (aim.kind === "here") return NEAR_WINDOW_MS;
+  // A record a hand edited holds any word at all, and the window a dial gets is no place to throw over one: a word
+  // the protocol's own reading of an address cannot read is not loopback either, so it takes the longer window.
+  const where = servedHostname(aim.kind === "alias" ? aim.record.url : aim.url);
+  return where !== undefined && isLoopback(where) ? NEAR_WINDOW_MS : FAR_WINDOW_MS;
 }
 
 /** The note a line naming both --state and a host somewhere else gets: the state file is this computer's, and a
@@ -220,21 +252,22 @@ export function stateIgnoredLine(where: string): string {
   return `--state names a file on this computer and this line runs against ${where}, which serves its own, so it is not read.`;
 }
 
-/** The one reading of which host a line runs against: the flag, then WSP_HOST, then the default alias when no host
- * on this computer serves the state file, then that host. The command line and the tool server both come here, so
- * a verb and a tool started the same way go to the same host. */
+/** The one reading of which host a line runs against: the flag, then WSP_HOST, then the pair a turn's launch left
+ * in the environment, then the host on this computer serving the state file, then the default alias. The command
+ * line and the tool server both come here, so a verb and a tool started the same way go to the same host. */
 export function aimedHost(statePath: string, pick: HostPick = {}): HostAim {
   const env = pick.env ?? process.env;
   const home = pick.home ?? wspHome(env);
   const named = [pick.host, env["WSP_HOST"]].map(w => w?.trim()).find(w => w !== undefined && w !== "");
   if (named !== undefined) return aimAt(named, home, env);
+  // The pair is the identity the launch handed this turn, and it goes ahead of anything this computer holds: a
+  // guest's default state file is a path nothing serves, and a turn on this computer under a host that does serve
+  // it was still given its own token and not the host's. What a person types on the line still wins above.
+  const carried = hostFromEnv(env);
+  if (carried !== undefined) return { kind: "url", url: carried.url, token: carried.token };
   if (servingHost(statePath) !== undefined) return { kind: "here" };
   const fallback = defaultHost(home);
-  if (fallback !== undefined) return aimAt(fallback, home, env);
-  // Last of all, the pair a turn's launch left in this environment: a machine has no hosts folder and no host of
-  // its own, so this is the only road it has, and on a computer that has either of the others it never wins.
-  const carried = hostFromEnv(env);
-  return carried === undefined ? { kind: "here" } : { kind: "url", url: carried.url, token: carried.token };
+  return fallback === undefined ? { kind: "here" } : aimAt(fallback, home, env);
 }
 
 function aimAt(named: string, home: string, env: Readonly<Record<string, string | undefined>>): HostAim {

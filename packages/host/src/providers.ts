@@ -21,6 +21,10 @@ export interface ProviderPick {
 export interface ProviderModule {
   /** The word `--provider` takes and WSP_PROVIDER holds. */
   id: string;
+  /** The variables this row reads, so a host that starts with none of the installing shell's environment can be
+   * handed them: `wsp up --service` copies whichever of them that shell held into the unit. A row that selects on
+   * keys alone names none. */
+  envNames: readonly string[];
   /** Whether this computer is set up for this provider. */
   selects(pick: ProviderPick): boolean;
   build(pick: ProviderPick): MachineBackend;
@@ -38,6 +42,7 @@ const on = (value: string | undefined): boolean => value !== undefined && value 
 export const PROVIDER_MODULES: readonly ProviderModule[] = [
   {
     id: "docker",
+    envNames: [PROVIDER_ENV, DOCKER_ENV, DOCKER_HOST_ENV],
     // Named, or asked for by the shorthand. A person who names Docker gets it even with a cloud key saved: the
     // machines are on their own box and the key is for another provider's.
     selects: pick => pick.env[PROVIDER_ENV] === "docker" || on(pick.env[DOCKER_ENV]),
@@ -45,6 +50,7 @@ export const PROVIDER_MODULES: readonly ProviderModule[] = [
   },
   {
     id: "solari",
+    envNames: [],
     // Selected by the key alone: the word without a key would build a module that refuses every call with a 401,
     // where the row below says what to do about it in one sentence.
     selects: pick => pick.keys.solari !== undefined,
@@ -52,10 +58,17 @@ export const PROVIDER_MODULES: readonly ProviderModule[] = [
   },
   {
     id: "none",
+    envNames: [],
     selects: () => true,
     build: () => new NoProviderBackend(),
   },
 ];
+
+/** Every variable the rows select on, each once: what a service carries over from the shell that installed it, so
+ * a provider added tomorrow travels with its row rather than with a list somebody remembered to edit. */
+export function providerEnvNames(modules: readonly ProviderModule[] = PROVIDER_MODULES): string[] {
+  return [...new Set(modules.flatMap(m => m.envNames))];
+}
 
 /** The provider module this computer is set up for. */
 export function providerModule(pick: ProviderPick): ProviderModule {

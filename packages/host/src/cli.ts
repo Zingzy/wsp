@@ -9,7 +9,7 @@ import { dirname, join, resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 import { isCancel } from "@clack/prompts";
-import { collect, computeRecipe, expand, nodeHost, scanProject, type Manifest, type Rung } from "@wsp/collect";
+import { collect, computeRecipe, expand, nodeHost, scanProject, type Manifest, type Platform, type Rung } from "@wsp/collect";
 import {
   HARNESS_ADAPTERS,
   createRuntime,
@@ -26,7 +26,7 @@ import {
   type SshWiring,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, NOTHING_TO_SERVE_LINE, portsAsked, shellQuote, SOLARI_CONSOLE, THIS_COMPUTER, TURN_END_WORDS, usageRefusal, WS_PORT_OFFSET, type WorkspaceCreatingEvent } from "@wsp/protocol";
+import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, portsAsked, shellQuote, SOLARI_CONSOLE, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, usageRefusal, WS_PORT_OFFSET, type WorkspaceCreatingEvent } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, parseSshAddress, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshIdentity, sshMachineName, sshReachOf, type SshReach } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, type ProviderEnv } from "./providers.js";
 import { assetDir } from "./assets.js";
@@ -38,15 +38,17 @@ import { keychainReader } from "./init-import.js";
 import { adoptLoginPath } from "./login-path.js";
 import { CACHE_RULE } from "./project-bundle.js";
 import { readBrewTable } from "./init-brew.js";
-import { exitCodeOf, runInit, type InitIO } from "./init.js";
+import { exitCodeOf, runInit, type InitIO, type InitPricing, type InitResult } from "./init.js";
 import { recipePath } from "./init-recipe.js";
 import { historyCache } from "./recipe-file.js";
 import { scanTools } from "./scan.js";
 import { colourDepth, confirmPrompt, isTTY, muted, passwordPrompt, wrap, type PromptOptions } from "./init-layout.js";
 import { TAGLINE, opening } from "./init-opening.js";
 import { runLocalInit } from "./init-local.js";
+import { askFirst } from "./init-first.js";
+import { buildBesideHost } from "./init-beside.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
-import { addressLines, hostLogPath, hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
+import { addressLines, dialAddress, hostLogPath, hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
 import type { LocalDaemon } from "./local-daemon.js";
 import {
   httpProbe,
@@ -71,12 +73,17 @@ import { connectCommand, disconnectCommand, hostsCommand } from "./connect.js";
 import { stopRecordedConnector } from "./connector.js";
 import { readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
 import { DEFAULT_HOME, wspHome } from "./hosts.js";
+import { currentHome, currentHomePointer, servingHome } from "./serving-home.js";
 import { advertisedUrl, devicesCommand, pairCommand } from "./pairing.js";
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, registeredLine, removeEach, removeLines, runningWsp, type RunningWsp } from "./mcp-install.js";
-import { CLI_VERBS, COMMON, failed, findVerb, jsonAsked, runVerb, toolName, verbHelp, verbUsage, type LocalRuntime, type VerbDeps } from "./verbs.js";
+import { CLI_VERBS, COMMON, dialHost, failed, findVerb, type HostClient, jsonAsked, runVerb, toolName, verbHelp, verbUsage, type LocalRuntime, type VerbDeps } from "./verbs.js";
 import { VERSION } from "./version.js";
+
+/** The computer every screen and every reader here is told it is on; the one reading, so a run, its hand-off and
+ * the init job a host serves never disagree about which of the two this is. */
+const hostPlatform = (): Platform => (platform() === "darwin" ? "darwin" : "linux");
 
 /** One line per exit class, the code first, wrapped to the help's width. */
 const exitCodeHelp = (): string => ExitClass.options.map(cls => wrap(`  ${EXIT_CODES[cls]} ${cls.padEnd(8)}  ${EXIT_WORDS[cls]}`, 80, " ".repeat(14)).join("\n")).join("\n");
@@ -118,7 +125,10 @@ usage:
                      your agents on this computer, each shown when it has a
                      row to pick, then Build, then the browser. With no
                      provider key it seals nothing and makes this computer
-                     your workspace instead
+                     your workspace instead. Beside a host already serving
+                     this state file the screens are the same and the build
+                     runs in that host, so a box whose host is a service
+                     needs nothing stopped
   wsp doctor         run the reach loop end to end against one live machine
                      (--yes also deletes the snapshots this host left behind);
                      --local proves the other half instead, a thread on this
@@ -160,8 +170,10 @@ options:
                      without the host token and every client pairs for a device
                      token of its own: wsp pair prints a code, wsp devices
                      lists and revokes them
-  --state PATH       state file (default ~/.wsp/state.json, or ./.wsp/state.json
-                     when the current directory has a .env)
+  --state PATH       state file (default ./.wsp/state.json when the current
+                     directory has a .env, else state.json in the home the
+                     running host serves, which is ~/.wsp unless WSP_HOME or
+                     current-home names another)
   --host ALIAS       on any verb: run the line against a host on another
                      computer, by the name wsp connect gave it. WSP_HOST names
                      one for a whole shell. That host serves its own state, so
@@ -283,19 +295,6 @@ export interface KeySources {
 // The hosts file sits under the same home, so where that home is lives beside it and is re-exported here for every
 // reader that already had it from the command line.
 export { wspHome };
-
-/** Fixed spot a launcher without WSP_HOME (Finder, a service) can read to
- * learn which home the running host serves. */
-export function currentHomePointer(): string {
-  return join(homedir(), ".wsp", "current-home");
-}
-
-export function currentHome(): string | undefined {
-  const path = currentHomePointer();
-  if (!existsSync(path)) return undefined;
-  const home = readFileSync(path, "utf8").trim();
-  return home === "" ? undefined : home;
-}
 
 type Stream<T> = T & { isTTY?: boolean };
 
@@ -482,10 +481,12 @@ export function goldenRecipe(
   };
 }
 
-function defaultStatePath(): string {
-  // A .env in cwd marks a dev checkout; share its .wsp state with wspx.
-  if (existsSync(join(process.cwd(), ".env"))) return join(process.cwd(), ".wsp", "state.json");
-  return join(wspHome(), "state.json");
+/** The state file a run works on when it names none: a .env in cwd marks a dev checkout whose .wsp state is shared
+ * with wspx, and anywhere else the home whose host is serving, so a line typed with no flags on a computer whose
+ * host runs under a moved home reaches that host rather than a state file nothing serves. */
+export function defaultStatePath(cwd: string = process.cwd(), env: Readonly<Record<string, string | undefined>> = process.env): string {
+  if (existsSync(join(cwd, ".env"))) return join(cwd, ".wsp", "state.json");
+  return join(servingHome(env), "state.json");
 }
 
 /** The state file a command works on: its `--state` word when it gave one, else this computer's default, absolute
@@ -580,15 +581,50 @@ export function sshWiring(forwards = new SshForwards()): SshWiring {
   };
 }
 
-/** What every command of the shared parse works on: the port pair and the address the one rule reads off the flags,
- * whether a person named either port, the state file, and the home the hosts file sits under. wsp up and wsp init
- * take theirs from this one call. */
-export interface SharedOpts extends ListenAsked {
+/** Everything a person asked a host to serve with: the port pair and the address the one rule read off the flags,
+ * the state file, and the words that only a serving host reads. `wsp up --service` writes its unit out of this, so
+ * what the service starts is the line that was typed. */
+export interface ServeAsked extends ListenAsked {
   statePath: string;
-  home: string;
   /** The address a machine dials this host at, which is what a turn on one is told; absent where the host binds
    * this computer alone and nobody named another, so no turn is handed a token it could not use. */
   advertise?: string;
+  /** The machine provider this host forks on, as `--provider` named it. */
+  provider?: string;
+  /** The Docker daemon this host dials, as `--docker-host` named it. */
+  dockerHost?: string;
+  /** Whether a box linked to a relay runs its connector; false is `--no-relay`. */
+  relay?: boolean;
+}
+
+/** A flag of the line a host serves on: how the shared parse reads it, and the words it is spelled back as. The
+ * parse and the service's unit both come out of this one table, so a flag that shapes a serving host cannot reach a
+ * terminal run and be dropped by the service that was asked for the same line. */
+interface ServeFlag {
+  /** The flag's word, which is a key of the shared parse: a row cannot name one the parse would not read. */
+  name: Extract<keyof SharedFlags, string>;
+  option: Options[string];
+  words(asked: ServeAsked): string[];
+}
+
+export const SERVE_FLAGS: readonly ServeFlag[] = [
+  { name: "state", option: { type: "string" }, words: a => ["--state", a.statePath] },
+  { name: "port", option: { type: "string" }, words: a => ["--port", String(a.port)] },
+  { name: "ws-port", option: { type: "string" }, words: a => ["--ws-port", String(a.wsPort)] },
+  { name: "listen", option: { type: "string" }, words: a => ["--listen", a.address] },
+  { name: "advertise", option: { type: "string" }, words: a => (a.advertise === undefined ? [] : ["--advertise", a.advertise]) },
+  { name: "provider", option: { type: "string" }, words: a => (a.provider === undefined ? [] : ["--provider", a.provider]) },
+  { name: "docker-host", option: { type: "string" }, words: a => (a.dockerHost === undefined ? [] : ["--docker-host", a.dockerHost]) },
+  { name: "no-relay", option: { type: "boolean" }, words: a => (a.relay === false ? ["--no-relay"] : []) },
+];
+
+/** The serving flags as the parser takes them. */
+const SERVE_OPTIONS: Options = Object.fromEntries(SERVE_FLAGS.map(flag => [flag.name, flag.option]));
+
+/** What every command of the shared parse works on: what was asked of a serving host, the home the hosts file sits
+ * under, and the environment the run was made in. wsp up and wsp init take theirs from this one call. */
+export interface SharedOpts extends ServeAsked {
+  home: string;
   /** The environment this run picks its machine provider out of: the one the caller runs in, with the provider
    * words the command line was given in front of it. */
   providerEnv: ProviderEnv;
@@ -601,21 +637,24 @@ export interface SharedOpts extends ListenAsked {
  * environment cannot send wsp connect to one folder and --host to another. It is also what the provider words
  * stand in front of, so one run picks its folder and its provider out of the same environment. */
 export function optsFor(
-  values: Pick<SharedFlags, "port" | "ws-port" | "listen" | "advertise" | "state" | "provider" | "docker-host">,
+  values: Pick<SharedFlags, "port" | "ws-port" | "listen" | "advertise" | "state" | "provider" | "docker-host" | "no-relay">,
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): SharedOpts {
   const asked = portsAsked({ port: values.port, wsPort: values["ws-port"], listen: values.listen });
   const advertise = advertisedUrl(asked.address, asked.port, values.advertise);
+  const provider = {
+    ...(values.provider !== undefined ? { provider: values.provider } : {}),
+    ...(values["docker-host"] !== undefined ? { dockerHost: values["docker-host"] } : {}),
+  };
   return {
     ...asked,
     ...(advertise !== undefined ? { advertise } : {}),
+    ...provider,
+    ...(values["no-relay"] === true ? { relay: false } : {}),
     statePath: statePathFrom(values.state),
     home: wspHome(env),
     env,
-    providerEnv: providerEnvWith({
-      ...(values.provider !== undefined ? { provider: values.provider } : {}),
-      ...(values["docker-host"] !== undefined ? { dockerHost: values["docker-host"] } : {}),
-    }, env),
+    providerEnv: providerEnvWith(provider, env),
   };
 }
 
@@ -679,7 +718,7 @@ export function makeRuntime(
  * tools written by the road wsp mcp install takes, under the command this process runs as. */
 function hostInitDoor(rt: Runtime, statePath: string, run: RunningWsp, openUrl: UrlOpener, log: (line: string) => void, providerEnv: ProviderEnv): InitJobs {
   const home = homedir();
-  const os = platform() === "darwin" ? "darwin" : "linux";
+  const os = hostPlatform();
   return new InitJobs({
     rt,
     statePath,
@@ -798,25 +837,70 @@ function projectFlag(verb: string, folder: string | undefined): ProjectFlag {
   return exists ? { ok: true, path } : { ok: false, message: `wsp ${verb}: no folder at ${path}` };
 }
 
-/** Init writes the state a host serving it would also write, and may end by serving it; the lock is read first so
- * the clash costs nothing rather than a booted builder. */
-function initRefusal(lock: HostLock, statePath: string): string {
-  return `wsp init: a wsp host (pid ${lock.pid}) is already serving ${statePath}. Stop it first (Ctrl-C in its terminal, or kill ${lock.pid}), then run wsp init again, or point --state at a different file.`;
+/** One state file has one writer, and while a host serves it that writer is the host: a run beside one asks its
+ * screens here and builds through the host's init job. This is what is left when that door cannot take the build,
+ * and it names the road that needs no pid first, since the host on a box is a service nobody can Ctrl-C. */
+function initRefusal(lock: HostLock, statePath: string, why: string): string {
+  return `wsp init: the wsp host serving ${statePath} (pid ${lock.pid}) cannot take this build: ${why}. Take it down first (wsp down for a service, Ctrl-C in its terminal or kill ${lock.pid} for one started by hand), run wsp init again and start it again, or point --state at a different file.`;
+}
+
+/** A serving host whose provider forks nothing: its init job would refuse at the first stage, so the run says so
+ * before it reads this computer. The provider is the host's, not this terminal's: it is the process that builds. */
+function noGoldenThroughHost(lock: HostLock, statePath: string): string {
+  return `wsp init: the wsp host serving ${statePath} (pid ${lock.pid}) forks no machines, so there is no golden to build through it. Give that host a provider (SOLARI_API_KEY in its environment, or wsp up --provider) and run wsp init again.`;
+}
+
+/** What the run reads off the host serving this state before it asks anything: the door to build through, what that
+ * host's provider charges for the builder, and where the app it already serves answers. */
+interface BesideHost {
+  client: HostClient;
+  pricing: InitPricing;
+  appUrl: string;
+}
+
+/** Opens the door of the host serving this state, or refuses with the way back that needs no pid. The price and the
+ * builder disk come from that host: it owns the provider, so a terminal that named none (or another) still asks the
+ * person about the machine the build will really boot. Its default size is the one every build here boots. */
+async function besideHost(lock: HostLock, statePath: string): Promise<BesideHost> {
+  const refuse = (why: string): Error => Object.assign(new Error(initRefusal(lock, statePath, why)), { kind: "conflict" });
+  let client: HostClient;
+  try {
+    // The host holding this state file's lock and no other: WSP_HOST and the default alias aim a verb at another
+    // computer, and the build belongs to the process that writes this file.
+    client = await dialHost(statePath, { aim: { kind: "here" } });
+  } catch (e) {
+    throw refuse(e instanceof Error ? e.message : String(e));
+  }
+  try {
+    const setup = InitSetup.parse((await client.request<{ setup: unknown }>("init.get")).setup);
+    const job = setup.job;
+    if (job !== null && !initJobOver(job.phase)) throw refuse(`a setup is already running there (${job.phase})`);
+    if (setup.pricing === null) throw Object.assign(new Error(noGoldenThroughHost(lock, statePath)), { kind: "conflict" });
+    const price = setup.pricing;
+    return {
+      client,
+      pricing: { rateUsdPerHour: () => price.rateUsdPerHour, defaultSize: price.size, ...(price.builderDiskGb !== undefined ? { builderDiskGb: price.builderDiskGb } : {}) },
+      appUrl: `http://${authority(dialAddress(lock), lock.port)}`,
+    };
+  } catch (e) {
+    client.close();
+    throw e;
+  }
 }
 
 /** The --state a later command needs to find what this init wrote, only when the init was given one. */
 const stateFlag = (opts: { statePath: string }, values: Pick<SharedFlags, "state">): string[] => (values.state !== undefined ? ["--state", shellQuote(opts.statePath)] : []);
 
-/** The wsp up that serves what this init records, carrying the state, port and address flags the init was given. */
-export function upCommandFor(opts: { port: number; wsPort: number; address?: string; advertise?: string; statePath: string }, values: Pick<SharedFlags, "state" | "port" | "ws-port" | "listen" | "advertise">): string {
-  return [
-    "wsp up",
-    ...stateFlag(opts, values),
-    ...(values.listen !== undefined ? ["--listen", shellQuote(opts.address ?? LOOPBACK)] : []),
-    ...(values.advertise !== undefined && opts.advertise !== undefined ? ["--advertise", shellQuote(opts.advertise)] : []),
-    ...(values.port !== undefined ? ["--port", String(opts.port)] : []),
-    ...(values["ws-port"] !== undefined ? ["--ws-port", String(opts.wsPort)] : []),
-  ].join(" ");
+/** The wsp up that serves what this init records: the serving flags off the one table the parse and the service's
+ * unit are written out of, resolved as this run resolved them and quoted for a shell to take. Only the flags the
+ * init was given, so the line names what the person said and defaults stay defaults. */
+export function upCommandFor(asked: ServeAsked, values: SharedFlags): string {
+  const words = SERVE_FLAGS.filter(flag => values[flag.name] !== undefined).flatMap(flag => {
+    const [word, ...given] = flag.words(asked);
+    // The flag's own word is wsp's; everything after it is the person's and is quoted for the shell that runs it.
+    return word === undefined ? [] : [word, ...given.map(shellQuote)];
+  });
+  return ["wsp up", ...words].join(" ");
 }
 
 /** The wsp new that forks the first workspace from what this init records, against the host wsp up starts. */
@@ -839,6 +923,24 @@ const GOLDEN_FLAGS: readonly [string, (flags: { recipe?: string; project?: strin
   ["--import", f => f.importFolder !== undefined],
 ];
 
+/** The build handed to the host serving this state: the workspace question is asked here, where the person is, and
+ * everything from the first billed machine on happens in that host's job. Its own init job forks no workspace for
+ * this computer, so the tick beside the question is not offered; wsp new --local is that road. */
+async function handOffTo(beside: BesideHost, screen: InitIO, interactive: boolean, flags: { yes: boolean; firstWorkspace?: string; importFolder?: string }): Promise<number> {
+  const step = await askFirst({
+    interactive,
+    unattended: !interactive,
+    ...(flags.firstWorkspace !== undefined ? { name: flags.firstWorkspace } : {}),
+    ...(flags.importFolder !== undefined ? { folder: resolve(flags.importFolder) } : {}),
+    noLocal: true,
+    platform: hostPlatform(),
+    input: screen.input,
+    output: screen.output,
+  });
+  const fork = typeof step === "symbol" ? undefined : step.fork;
+  return buildBesideHost({ client: beside.client, io: screen, ...(fork !== undefined ? { fork } : {}), ...(flags.yes ? { yes: true } : {}), appUrl: beside.appUrl });
+}
+
 async function init(
   io: CliIO,
   opts: SharedOpts,
@@ -847,18 +949,26 @@ async function init(
   if (flags.json && flags.yes) throw usageRefusal("wsp init: --json prints the sign-ins as they are handed to you, and --yes skips the sign-ins, so there would be nothing to print. Drop one of them.");
   await adoptLoginPath(line => io.log(line));
   const held = servingHost(opts.statePath);
-  if (held !== undefined) throw Object.assign(new Error(initRefusal(held, opts.statePath)), { kind: "conflict" });
   const flag = projectFlag("init", flags.project);
   if (!flag.ok) throw usageRefusal(flag.message);
   const project = flag.path;
   // Under --json every line this run says, the host's own included, goes to stderr so stdout is the objects' alone.
   const say = flags.json ? jsonCliIO() : io;
   const screen = terminalInitIO(flags.json);
+  // The objects --json prints are the build's own, and a build handed over is that host's run: its objects land on
+  // its job, where wsp setup reads them, not on this stdout. Refused rather than printing an empty stream.
+  if (held !== undefined && flags.json) {
+    throw usageRefusal(`wsp init --json prints the build's own objects, and the host serving ${opts.statePath} (pid ${held.pid}) is what runs this build: its sign-ins and stages ride its own setup, which wsp setup --json reads. Drop --json, or take that host down (wsp down) and run this again.`);
+  }
+  // A host already serving this state file is the process that writes it and holds the provider, so this run asks
+  // its screens and hands the build to that host. Read before the opening: a refusal here is the whole run, and it
+  // reads better without a banner over it. Nothing is asked for a key: the host has the one that builds.
+  const beside = held === undefined ? undefined : await besideHost(held, opts.statePath);
   opening(screen, { command: "init", version: VERSION, yes: flags.yes, statePath: opts.statePath });
-  const keys = await loadKeys(say, undefined, { anthropic: false, noSolari: "offer", checkSaved: true });
+  const keys = beside !== undefined ? keysFound() : await loadKeys(say, undefined, { anthropic: false, noSolari: "offer", checkSaved: true });
   // A provider with no size to boot a builder on has no image to build, so the run makes this computer the workspace
   // and serves the app on it. Every flag about the golden is about a road this run does not take.
-  if (forksNoMachines(providerBackend(keys, opts.providerEnv).capabilities)) {
+  if (beside === undefined && forksNoMachines(providerBackend(keys, opts.providerEnv).capabilities)) {
     if (flags.noLocal) throw usageRefusal(`wsp init: with no provider key ${THIS_COMPUTER} is all this run makes, so --no-local would leave it with nothing. Drop it, or set SOLARI_API_KEY first.`);
     // Every other flag is about a golden: what goes on the image, what forks from it and what lands on that fork.
     // This road builds no image, and the workspace it makes is this computer, whose files are already here.
@@ -883,51 +993,59 @@ async function init(
     if (local.handle !== undefined) stopOnSignals(local.handle, say);
     return local.code;
   }
-  const result = await runInit(
-    {
-      yes: flags.yes,
-      nonInteractive: flags.nonInteractive,
-      ...(flags.recipe !== undefined ? { recipeFile: resolve(flags.recipe) } : {}),
-      ...(project !== undefined ? { project } : {}),
-      ...(flags.firstWorkspace !== undefined ? { firstWorkspace: flags.firstWorkspace } : {}),
-      ...(flags.importFolder !== undefined ? { importFolder: resolve(flags.importFolder) } : {}),
-      ...(flags.noLocal ? { noLocal: true } : {}),
-      collect: collectThisComputer,
-      recipe: (onHistory, onProject, onHistoryProgress) =>
-        computeRecipe(nodeHost(), { threadAgents: THREAD_AGENTS, onHistory, onProject, onHistoryProgress, cache: historyCache(opts.statePath), ...(project !== undefined ? { folders: [project] } : {}) }),
-      scanProject: async folder => {
-        const { path, exists } = projectFolder(folder);
-        return exists ? scanProject(nodeHost(), path) : undefined;
+  // The socket the hand-off drives is closed on every road out of the run: node ends this process when the loop
+  // drains, and one left open would hold the terminal after the last line.
+  let result: InitResult;
+  try {
+    result = await runInit(
+      {
+        yes: flags.yes,
+        nonInteractive: flags.nonInteractive,
+        ...(flags.recipe !== undefined ? { recipeFile: resolve(flags.recipe) } : {}),
+        ...(project !== undefined ? { project } : {}),
+        ...(flags.firstWorkspace !== undefined ? { firstWorkspace: flags.firstWorkspace } : {}),
+        ...(flags.importFolder !== undefined ? { importFolder: resolve(flags.importFolder) } : {}),
+        ...(flags.noLocal ? { noLocal: true } : {}),
+        collect: collectThisComputer,
+        recipe: (onHistory, onProject, onHistoryProgress) =>
+          computeRecipe(nodeHost(), { threadAgents: THREAD_AGENTS, onHistory, onProject, onHistoryProgress, cache: historyCache(opts.statePath), ...(project !== undefined ? { folders: [project] } : {}) }),
+        scanProject: async folder => {
+          const { path, exists } = projectFolder(folder);
+          return exists ? scanProject(nodeHost(), path) : undefined;
+        },
+        agentKeys: agentKeyEnvs(keys),
+        pricing: beside?.pricing ?? providerBackend(keys, opts.providerEnv).pricing,
+        statePath: opts.statePath,
+        home: homedir(),
+        secrets: keychainReader(),
+        platform: hostPlatform(),
+        brew: () => readBrewTable(nodeHost()),
+        scan: recipe => scanTools(nodeHost(), recipe),
+        runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `daemon on node ${(await deployDaemon(machine)).node}` }, opts.providerEnv, opts.advertise !== undefined ? { url: opts.advertise } : {}),
+        ports: { port: opts.port, wsPort: opts.wsPort, named: opts.named, states: statesHere(opts.statePath) },
+        address: opts.address,
+        upCommand: flags.upCommand,
+        forkCommand: flags.forkCommand,
+        relay: async (rt, builder, hooks) =>
+          startCallbackRelay({
+            runtime: rt,
+            openUrl: systemOpener(),
+            log: line => {
+              if (!hooks.onLine(line)) say.log(line);
+            },
+            autoOpen: hooks.autoOpen,
+            openLine: hooks.openLine,
+            builder,
+          }),
+        roads: rt => workspaceRoads(rt, agentHomes(homedir()), workspaceEnvsFor(keys)),
+        host: (rt, ports) => hostFor(rt, keys, { ...opts, port: ports.port, wsPort: ports.wsPort }, say),
+        ...(beside !== undefined ? { handOff: (o: { interactive: boolean }) => handOffTo(beside, screen, o.interactive, flags) } : {}),
       },
-      agentKeys: agentKeyEnvs(keys),
-      pricing: providerBackend(keys, opts.providerEnv).pricing,
-      statePath: opts.statePath,
-      home: homedir(),
-      secrets: keychainReader(),
-      platform: platform() === "darwin" ? "darwin" : "linux",
-      brew: () => readBrewTable(nodeHost()),
-      scan: recipe => scanTools(nodeHost(), recipe),
-      runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `daemon on node ${(await deployDaemon(machine)).node}` }, opts.providerEnv, opts.advertise !== undefined ? { url: opts.advertise } : {}),
-      ports: { port: opts.port, wsPort: opts.wsPort, named: opts.named, states: statesHere(opts.statePath) },
-      address: opts.address,
-      upCommand: flags.upCommand,
-      forkCommand: flags.forkCommand,
-      relay: async (rt, builder, hooks) =>
-        startCallbackRelay({
-          runtime: rt,
-          openUrl: systemOpener(),
-          log: line => {
-            if (!hooks.onLine(line)) say.log(line);
-          },
-          autoOpen: hooks.autoOpen,
-          openLine: hooks.openLine,
-          builder,
-        }),
-      roads: rt => workspaceRoads(rt, agentHomes(homedir()), workspaceEnvsFor(keys)),
-      host: (rt, ports) => hostFor(rt, keys, { ...opts, port: ports.port, wsPort: ports.wsPort }, say),
-    },
-    screen,
-  );
+      screen,
+    );
+  } finally {
+    beside?.client.close();
+  }
   if (result.handle !== undefined) stopOnSignals(result.handle, say);
   return result.code;
 }
@@ -964,21 +1082,26 @@ export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> 
 }
 
 /** Whether the state has anything for the app to show: a sealed golden to fork from, or any workspace record, this
- * computer's included. An empty state is refused with the two ways in rather than served as a blank app. The one
- * reading of it, so the command line, the service and the desktop's own gate all ask the same question. */
+ * computer's included. One reading, asked by wsp up and by the desktop's first launch; what each does with the
+ * answer is its own, since the app has onboarding screens to open and the command line records this computer and
+ * serves at once. */
 export async function servesNothing(rt: Runtime): Promise<boolean> {
   return goldenHead(await rt.golden.get()) === undefined && (await rt.workspaces.list()).length === 0;
 }
 
-export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle | undefined> {
+export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   await adoptLoginPath(line => io.log(line));
   // A state file with nothing but this computer in it is served with no provider key: wsp init's local road is
   // what wrote it, and asking for a key to serve it would take that road away the next morning.
   const keys = await loadKeys(io, undefined, { anthropic: false, noSolari: "local" });
   const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(keys), opts.providerEnv, { ...(opts.advertise !== undefined ? { url: opts.advertise } : {}), ...(opts.running !== undefined ? { run: opts.running } : {}) });
+  // A state with nothing in it is recorded, not refused: this computer becomes its own workspace the way the app's
+  // first launch records it, so a machine the host was just installed on serves and listens for pairing at once.
+  // Found or made, the shape the app's own road takes, so the three roads that record this computer read alike and
+  // a runtime that already holds one is never asked for a second.
   if (await servesNothing(rt)) {
-    io.error(NOTHING_TO_SERVE_LINE);
-    return undefined;
+    const workspace = (await rt.workspaces.list()).find(isLocalWorkspace) ?? (await rt.workspaces.createLocal());
+    io.log(thisComputerLine(workspace.name, workspace.id));
   }
   return hostFor(rt, keys, { ...opts, providerEnv: opts.providerEnv ?? process.env }, io, opts.running);
 }
@@ -1095,15 +1218,13 @@ function serviceAddress(statePath: string): ServiceAddress {
   return { statePath, home: homedir(), uid: process.getuid?.() ?? 0 };
 }
 
-/** The line the service runs: this node and this wsp, serving the same state file and ports the install was given.
- * Every one is spelled out, since a service has no cwd of the person's to read a default from. */
-function serviceArgv(opts: { port: number; wsPort: number; address?: string; advertise?: string; statePath: string }): string[] {
+/** The line the service runs: this node and this wsp, serving the state file, the ports, the address and the
+ * provider the install was given. Every word is spelled out, since a service has no cwd of the person's to read a
+ * default from and no shell of theirs to read a variable from. */
+function serviceArgv(asked: ServeAsked): string[] {
   const bin = process.argv[1];
   if (bin === undefined) throw new Error("wsp up --service needs the path wsp was started from, and this process has none");
-  return [
-    process.execPath, resolve(bin), "up", "--state", opts.statePath, "--port", String(opts.port), "--ws-port", String(opts.wsPort), "--listen", opts.address ?? LOOPBACK,
-    ...(opts.advertise !== undefined ? ["--advertise", opts.advertise] : []),
-  ];
+  return [process.execPath, resolve(bin), "up", ...SERVE_FLAGS.flatMap(flag => flag.words(asked))];
 }
 
 /** A host already holds the state file, so the service would only start a second one that refuses the lock. */
@@ -1140,7 +1261,7 @@ export function claudeKeyOnlyInThisShell(sources: KeySources = keySources()): st
   return `note: ANTHROPIC_API_KEY is only in this shell's environment, so the service starts without it and the workspaces it forks get no claude credentials. Put it in ${join(sources.home, ".env")} to carry it over.`;
 }
 
-export async function upServiceCommand(io: CliIO, opts: { port: number; wsPort: number; address?: string; statePath: string; providerEnv?: ProviderEnv }, deps: ServiceDeps): Promise<number> {
+export async function upServiceCommand(io: CliIO, opts: ServeAsked, deps: ServiceDeps): Promise<number> {
   const manager = deps.manager;
   if (manager === undefined) {
     io.error(noManagerLine(deps.platform));
@@ -1152,23 +1273,10 @@ export async function upServiceCommand(io: CliIO, opts: { port: number; wsPort: 
     return 1;
   }
   await adoptLoginPath(line => io.log(line));
-  // The service serves what wsp init recorded, and with no provider key that is this computer alone: asking for a
-  // key to keep the host up would take the local road away at the next login.
-  const keys = await loadKeys(io, deps.keys, { anthropic: false, noSolari: "local" });
   const shellOnly = keyOnlyInThisShell(deps.keys);
   if (shellOnly !== undefined) {
     io.error(shellOnly);
     return 1;
-  }
-  // This runtime answers one question and is thrown away; the host the service starts builds its own.
-  const asked = makeRuntime(keys, opts.statePath, goldenRecipe(keys), opts.providerEnv);
-  try {
-    if (await servesNothing(asked)) {
-      io.error(NOTHING_TO_SERVE_LINE);
-      return 1;
-    }
-  } finally {
-    await asked.close();
   }
   const claudeOnly = claudeKeyOnlyInThisShell(deps.keys);
   if (claudeOnly !== undefined) io.log(claudeOnly);
@@ -1190,7 +1298,7 @@ export async function upServiceCommand(io: CliIO, opts: { port: number; wsPort: 
   }
   io.log(`${manager.words} ${unit.name} is loaded; it serves again at every login`);
   for (const line of addressLines(opts.statePath, lock)) io.log(line);
-  if (!isLoopback(opts.address ?? LOOPBACK)) io.log(listenBeyondLoopbackLine(opts.address ?? LOOPBACK));
+  if (!isLoopback(opts.address)) io.log(listenBeyondLoopbackLine(opts.address));
   io.log(`log         ${logPath}`);
   const after = manager.afterLoad?.(at);
   if (after !== undefined) io.log(after);
@@ -1287,9 +1395,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     cliOnly: "starts the host on the person's computer; a tool runs against a host that is already up",
     run: async (io, opts, values) => {
       if (values.service === true) return upServiceCommand(io, opts, systemService());
-      const handle = await up(io, { ...opts, ...(values["no-relay"] === true ? { relay: false } : {}) });
-      if (handle === undefined) return 1;
-      stopOnSignals(handle, io);
+      stopOnSignals(await up(io, opts), io);
       return 0;
     },
   },
@@ -1467,15 +1573,12 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
   return report.failures.length > 0 ? 1 : 0;
 }
 
-/** The flags the shared parse reads for up, init and doctor. */
+/** The flags the shared parse reads for up, init and doctor. The ones that shape a serving host come from the table
+ * the service's unit is written out of, so neither road can read a flag the other has never heard of. */
 export const SHARED_OPTIONS: Options = {
   version: { type: "boolean", short: "v" },
   help: { type: "boolean", short: "h" },
-  port: { type: "string" },
-  "ws-port": { type: "string" },
-  listen: { type: "string" },
-  advertise: { type: "string" },
-  state: { type: "string" },
+  ...SERVE_OPTIONS,
   yes: { type: "boolean", short: "y" },
   "non-interactive": { type: "boolean" },
   json: { type: "boolean" },
@@ -1489,9 +1592,6 @@ export const SHARED_OPTIONS: Options = {
   code: { type: "string" },
   name: { type: "string" },
   relay: { type: "string" },
-  "no-relay": { type: "boolean" },
-  provider: { type: "string" },
-  "docker-host": { type: "string" },
 };
 
 const without = (options: Options, names: readonly string[]): Options => Object.fromEntries(Object.entries(options).filter(([name]) => !names.includes(name)));

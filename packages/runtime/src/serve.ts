@@ -26,7 +26,6 @@ import {
   WorkspaceListing,
   WorkspaceOut,
   threadOpRefusal,
-  workspaceIdOf,
   type DeviceView,
   type ExecEvent,
   type ForwardEvent,
@@ -371,15 +370,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               // An event about a workspace this caller may not drive never reaches it, replayed or live: a socket
               // that may not read a workspace's rows may not read its turns going by either. Read through the
               // runtime's one rule, so what a listing hides and what the stream hides cannot come apart.
-              // A caller that sees only its own tree is sent only what is about that tree: an event about a
-              // workspace it may not drive, and an event about no workspace at all, which is about this host.
-              const mine = (e: unknown): boolean => {
-                if (by === undefined) return true;
-                const workspaceId = workspaceIdOf(e);
-                return workspaceId !== undefined && rt.workspaces.drivenBy(workspaceId, origin);
-              };
               const pass = (e: unknown): void => {
-                if (mine(e)) send(e as Record<string, unknown>);
+                if (rt.workspaces.seenBy(e, origin)) send(e as Record<string, unknown>);
               };
               detaches.push(rt.events.on("*", pass));
               if (opts.forwards) detaches.push(opts.forwards.on(pass));
@@ -644,7 +636,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, job: await init().retry({ tool: msg.tool }) });
               return;
             case "init.build":
-              send({ id: msg.id, ok: true, job: await init().build({ ...(msg.firstWorkspace !== undefined ? { firstWorkspace: msg.firstWorkspace } : {}), ...(msg.importFolder !== undefined ? { importFolder: msg.importFolder } : {}) }) });
+              send({ id: msg.id, ok: true, job: await init().build({ ...(msg.firstWorkspace !== undefined ? { firstWorkspace: msg.firstWorkspace } : {}), ...(msg.importFolder !== undefined ? { importFolder: msg.importFolder } : {}), ...(msg.yes !== undefined ? { yes: msg.yes } : {}) }) });
               return;
             case "init.signInCode":
               send({ id: msg.id, ok: true, job: await init().signInCode({ tool: msg.tool, code: msg.code }) });

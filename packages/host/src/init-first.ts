@@ -13,7 +13,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { isCancel, log } from "@clack/prompts";
 import type { Platform } from "@wsp/collect";
-import { authority, canTravel, defaultAgents, defaultConsent, FIRST_WORKSPACE, fmtBytes, importRequest, plural, THIS_COMPUTER, thisComputer, workspaceHash, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
+import { authority, canTravel, defaultAgents, defaultConsent, FIRST_WORKSPACE, fmtBytes, importRequest, plural, THIS_COMPUTER, thisComputer, thisComputerLine, workspaceHash, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
 import type { CreatedWorkspace } from "@wsp/runtime";
 import { dialAddress } from "./host-lock.js";
 import { confirmPrompt, textPrompt } from "./init-layout.js";
@@ -214,7 +214,7 @@ export async function runFirst(o: FirstRun): Promise<FirstResult | undefined> {
 export async function runLocal(roads: Pick<WorkspaceRoads, "createLocalWorkspace">, output: Writable): Promise<WorkspaceView | undefined> {
   try {
     const workspace = await roads.createLocalWorkspace();
-    log.step(`Workspace ${workspace.name} (${workspace.id}) is ${THIS_COMPUTER}; its threads run here, under your own sign-ins.`, { output });
+    log.step(thisComputerLine(workspace.name, workspace.id), { output });
     return workspace;
   } catch (e) {
     log.warn(`${THIS_COMPUTER} was not made a workspace: ${errorText(e)}. wsp new --local makes it from a terminal.`, { output });

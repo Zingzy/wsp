@@ -4211,3 +4211,54 @@ describe("wsp init, the first workspace and its project", () => {
     expect(f.text()).toContain("Done. Golden v1 is sealed; wsp up starts the app.");
   });
 });
+
+describe("wsp init beside a host already serving the state", () => {
+  it("asks its own screens, saves the recipe and hands the build over: nothing is built, served or booted here", async () => {
+    const handed: { interactive: boolean }[] = [];
+    const f = fake({
+      yes: true,
+      handOff: async o => {
+        handed.push(o);
+        return 0;
+      },
+    });
+    expect((await runInit(f.opts, f.io)).code).toBe(0);
+    expect(handed).toEqual([{ interactive: false }]);
+    const out = f.text();
+    // The run's own words up to the hand-off: the same cards, the same recipe, the same question about the money.
+    expect(out).toContain("Found on this computer");
+    expect(out).toContain("Recipe saved to");
+    expect(out).toMatch(BOOT);
+    expect(readFileSync(join(dirname(f.opts.statePath), "recipe.json"), "utf8")).toContain('"rows"');
+    // No second writer of this state file: no runtime was made here, so nothing booted and nothing billed.
+    expect(f.runtimes).toEqual([]);
+    expect(f.backends).toEqual([]);
+    expect(f.recipes).toEqual([]);
+    expect(f.hosts).toBe(0);
+  });
+
+  it("asks for the spend where the person is: No hands nothing over and boots nothing, Enter hands it over", async () => {
+    const handed: { interactive: boolean }[] = [];
+    const handOff = async (o: { interactive: boolean }): Promise<number> => {
+      handed.push(o);
+      return 0;
+    };
+    const no = fake({ handOff });
+    const refused = runInit(no.opts, no.io);
+    await throughScreens(no);
+    await no.until(BOOT);
+    await no.press("n");
+    expect((await refused).code).toBe(1);
+    expect(handed).toEqual([]);
+    expect(no.text()).toContain("Nothing was booted. The recipe is kept.");
+
+    const yes = fake({ handOff });
+    const taken = runInit(yes.opts, yes.io);
+    await throughScreens(yes);
+    await yes.until(BOOT);
+    await yes.press(KEY.enter);
+    expect((await taken).code).toBe(0);
+    expect(handed).toEqual([{ interactive: true }]);
+    expect(yes.backends).toEqual([]);
+  });
+});

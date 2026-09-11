@@ -10,6 +10,7 @@ import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, rmSync
 import { dirname, join } from "node:path";
 import { authority, fmtDuration, shellQuote } from "@wsp/protocol";
 import { addressLines, dialAddress, servingHost, type HostLock } from "./host-lock.js";
+import { providerEnvNames } from "./providers.js";
 import { publicHostname } from "./relay-link.js";
 
 export type ServiceKind = "launchd" | "systemd";
@@ -78,12 +79,17 @@ export function serviceTag(statePath: string): string {
 /** A service inherits almost no environment, so a PATH the install never saw is the one it would get. */
 const FALLBACK_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
 
-/** The envs the service starts with: the PATH the install ran with, and WSP_HOME when it moved the state folder.
- * The keys stay out: the host reads them off the `.env` it would read at a terminal, so a rotated key needs no new
- * unit file and nothing secret is copied into the manager's own folder. */
+/** The envs the service starts with: the PATH the install ran with, WSP_HOME when it moved the state folder, and
+ * whichever provider variables the installing shell held, since a host that picks its provider out of an
+ * environment naming none forks nothing. The keys stay out: the host reads them off the `.env` it would read at a
+ * terminal, so a rotated key needs no new unit file and nothing secret is copied into the manager's own folder. */
 export function serviceEnv(env: Record<string, string | undefined>): Record<string, string> {
   const home = env["WSP_HOME"];
-  return { PATH: env["PATH"] ?? FALLBACK_PATH, ...(home !== undefined ? { WSP_HOME: home } : {}) };
+  return {
+    PATH: env["PATH"] ?? FALLBACK_PATH,
+    ...(home !== undefined ? { WSP_HOME: home } : {}),
+    ...Object.fromEntries(providerEnvNames().flatMap(name => ((env[name] ?? "") === "" ? [] : [[name, env[name]!]]))),
+  };
 }
 
 const xml = (value: string): string => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");

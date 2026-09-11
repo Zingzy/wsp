@@ -1,13 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { cfOk, linkedVia, relayHarness, TEST_ZONE, type RelayHarness } from "./relay.js";
-
-let relay: RelayHarness | undefined;
-
-afterEach(async () => {
-  await relay?.dispose();
-  relay = undefined;
-});
 
 const bearer = (token: string): Record<string, string> => ({ authorization: `Bearer ${token}` });
 
@@ -21,7 +14,7 @@ function armTunnel(r: RelayHarness, tunnelId = "tun_1", token = "eyJhIjoiZmFrZSJ
 
 describe("a tunnel for a linked host", () => {
   it("creates it on the account, points it at the loopback port, names it under the zone and answers the token", async () => {
-    relay = await relayHarness({ zone: true });
+    const relay = await relayHarness({ zone: true });
     const { token, hostId } = await linkedVia(relay, "host", "box", { login: "maya", githubId: "4242" });
     armTunnel(relay);
 
@@ -46,7 +39,7 @@ describe("a tunnel for a linked host", () => {
   });
 
   it("points the tunnel it already made at the port the box serves now, and asks for its token again", async () => {
-    relay = await relayHarness({ zone: true });
+    const relay = await relayHarness({ zone: true });
     const { token, hostId } = await linkedVia(relay, "host", "box", { login: "maya", githubId: "4242" });
     armTunnel(relay);
     await relay.fetch(`/hosts/${hostId}/tunnel`, { method: "POST", headers: bearer(token), body: JSON.stringify({ port: 4400 }) });
@@ -67,7 +60,7 @@ describe("a tunnel for a linked host", () => {
   });
 
   it("gives a box that ran a quick tunnel a name of its own once the relay has a zone", async () => {
-    relay = await relayHarness({ zone: true });
+    const relay = await relayHarness({ zone: true });
     const { token, hostId } = await linkedVia(relay, "host", "box", { login: "maya", githubId: "4242" });
     // What a heartbeat from a run with no zone leaves behind: a name that belongs to nobody's zone.
     await relay.fetch(`/hosts/${hostId}/heartbeat`, { method: "POST", headers: bearer(token), body: JSON.stringify({ hostname: "blue-sky-1234.trycloudflare.com" }) });
@@ -82,7 +75,7 @@ describe("a tunnel for a linked host", () => {
   });
 
   it("makes nothing at all with no zone configured, so the host falls back to a quick tunnel", async () => {
-    relay = await relayHarness();
+    const relay = await relayHarness();
     const { token, hostId } = await linkedVia(relay, "host", "box", { login: "maya", githubId: "4242" });
     relay.calls.length = 0;
     const res = await relay.fetch(`/hosts/${hostId}/tunnel`, { method: "POST", headers: bearer(token), body: JSON.stringify({ port: 4400 }) });
@@ -95,7 +88,7 @@ describe("a tunnel for a linked host", () => {
   });
 
   it("refuses one host's token on another host's tunnel, on another account and on the same one", async () => {
-    relay = await relayHarness({ zone: true });
+    const relay = await relayHarness({ zone: true });
     const mine = await linkedVia(relay, "host", "box", { login: "maya", githubId: "4242" });
     const theirs = await linkedVia(relay, "host", "attic", { login: "sam", githubId: "7" });
     // The one that bites: two boxes of the same person, where the account check alone would let one drive the other.
@@ -111,7 +104,7 @@ describe("a tunnel for a linked host", () => {
   });
 
   it("records the tunnel before the name, so a name that fails cannot leave a tunnel nothing points at", async () => {
-    relay = await relayHarness({ zone: true });
+    const relay = await relayHarness({ zone: true });
     const { token, hostId } = await linkedVia(relay, "host", "box", { login: "maya", githubId: "4242" });
     relay.answer("POST https://api.cloudflare.com/client/v4/accounts/acct_test/cfd_tunnel", cfOk({ id: "tun_1" }));
     relay.answer("PUT https://api.cloudflare.com/client/v4/accounts/acct_test/cfd_tunnel/tun_1/configurations", cfOk({}));
@@ -125,7 +118,7 @@ describe("a tunnel for a linked host", () => {
   });
 
   it("says what a refusal that only mentions that code in its words really was", async () => {
-    relay = await relayHarness({ zone: true });
+    const relay = await relayHarness({ zone: true });
     const { token, hostId } = await linkedVia(relay, "host", "box", { login: "maya", githubId: "4242" });
     relay.answer("POST https://api.cloudflare.com/client/v4/accounts/acct_test/cfd_tunnel", cfOk({ id: "tun_1" }));
     relay.answer("PUT https://api.cloudflare.com/client/v4/accounts/acct_test/cfd_tunnel/tun_1/configurations", cfOk({}));
@@ -142,7 +135,7 @@ describe("a tunnel for a linked host", () => {
   });
 
   it("adopts the name already standing for this tunnel rather than leaving the box with none", async () => {
-    relay = await relayHarness({ zone: true });
+    const relay = await relayHarness({ zone: true });
     const { token, hostId } = await linkedVia(relay, "host", "box", { login: "maya", githubId: "4242" });
     relay.answer("POST https://api.cloudflare.com/client/v4/accounts/acct_test/cfd_tunnel", cfOk({ id: "tun_1" }));
     relay.answer("PUT https://api.cloudflare.com/client/v4/accounts/acct_test/cfd_tunnel/tun_1/configurations", cfOk({}));
@@ -160,7 +153,7 @@ describe("a tunnel for a linked host", () => {
   });
 
   it("points a name of its own that is aimed elsewhere back at this tunnel", async () => {
-    relay = await relayHarness({ zone: true });
+    const relay = await relayHarness({ zone: true });
     const { token, hostId } = await linkedVia(relay, "host", "box", { login: "maya", githubId: "4242" });
     relay.answer("POST https://api.cloudflare.com/client/v4/accounts/acct_test/cfd_tunnel", cfOk({ id: "tun_2" }));
     relay.answer("PUT https://api.cloudflare.com/client/v4/accounts/acct_test/cfd_tunnel/tun_2/configurations", cfOk({}));
@@ -178,7 +171,7 @@ describe("a tunnel for a linked host", () => {
   });
 
   it("refuses a token this relay did not sign", async () => {
-    relay = await relayHarness({ zone: true });
+    const relay = await relayHarness({ zone: true });
     const { hostId, token } = await linkedVia(relay, "host", "box", { login: "maya", githubId: "4242" });
     const forged = `${token.slice(0, -4)}AAAA`;
     const res = await relay.fetch(`/hosts/${hostId}/tunnel`, { method: "POST", headers: bearer(forged), body: JSON.stringify({ port: 4400 }) });
@@ -188,7 +181,7 @@ describe("a tunnel for a linked host", () => {
 
 describe("the names the relay may touch", () => {
   it("never deletes a name it did not derive from the host's own id", async () => {
-    relay = await relayHarness({ zone: true });
+    const relay = await relayHarness({ zone: true });
     const { token, hostId } = await linkedVia(relay, "host", "box", { login: "eve", githubId: "66" });
     armTunnel(relay);
     await relay.fetch(`/hosts/${hostId}/tunnel`, { method: "POST", headers: bearer(token), body: JSON.stringify({ port: 4400 }) });
@@ -209,9 +202,9 @@ describe("the names the relay may touch", () => {
   });
 
   it("takes a quick tunnel's name from a heartbeat and refuses any other", async () => {
-    relay = await relayHarness({ zone: true });
+    const relay = await relayHarness({ zone: true });
     const { token, hostId } = await linkedVia(relay, "host", "box", { login: "maya", githubId: "4242" });
-    const say = (hostname: string): Promise<Response> => relay!.fetch(`/hosts/${hostId}/heartbeat`, { method: "POST", headers: bearer(token), body: JSON.stringify({ hostname }) });
+    const say = (hostname: string): Promise<Response> => relay.fetch(`/hosts/${hostId}/heartbeat`, { method: "POST", headers: bearer(token), body: JSON.stringify({ hostname }) });
 
     expect((await say("blue-sky-1234.trycloudflare.com")).status).toBe(200);
     expect(((await relay.db.prepare("SELECT hostname FROM hosts WHERE id = ?").bind(hostId).first()) as Record<string, string>)["hostname"]).toBe("blue-sky-1234.trycloudflare.com");
@@ -223,7 +216,7 @@ describe("the names the relay may touch", () => {
 
 describe("a host that says where it is", () => {
   it("records the hostname it got, its version and when it was last seen", async () => {
-    relay = await relayHarness();
+    const relay = await relayHarness();
     const { token, hostId } = await linkedVia(relay, "host", "box", { login: "maya", githubId: "4242" });
     relay.tick(90_000);
     const res = await relay.fetch(`/hosts/${hostId}/heartbeat`, {
@@ -241,7 +234,7 @@ describe("a host that says where it is", () => {
 
 describe("the listing a person's own client reads", () => {
   it("names that account's hosts and nobody else's", async () => {
-    relay = await relayHarness();
+    const relay = await relayHarness();
     const mine = await linkedVia(relay, "host", "box", { login: "maya", githubId: "4242" });
     await linkedVia(relay, "host", "attic", { login: "maya", githubId: "4242", cookie: mine.cookie });
     await linkedVia(relay, "host", "theirs", { login: "sam", githubId: "7" });
@@ -254,20 +247,20 @@ describe("the listing a person's own client reads", () => {
   });
 
   it("refuses a host's own token, which names one box and not a person", async () => {
-    relay = await relayHarness();
+    const relay = await relayHarness();
     const { token } = await linkedVia(relay, "host", "box", { login: "maya", githubId: "4242" });
     expect((await relay.fetch("/hosts", { headers: bearer(token) })).status).toBe(403);
   });
 
   it("refuses a request with no token at all", async () => {
-    relay = await relayHarness();
+    const relay = await relayHarness();
     expect((await relay.fetch("/hosts")).status).toBe(401);
   });
 });
 
 describe("unlinking", () => {
   it("takes the tunnel, the name under the zone and the row away", async () => {
-    relay = await relayHarness({ zone: true });
+    const relay = await relayHarness({ zone: true });
     const { token, hostId } = await linkedVia(relay, "host", "box", { login: "maya", githubId: "4242" });
     armTunnel(relay);
     await relay.fetch(`/hosts/${hostId}/tunnel`, { method: "POST", headers: bearer(token), body: JSON.stringify({ port: 4400 }) });
@@ -291,7 +284,7 @@ describe("unlinking", () => {
   });
 
   it("refuses another account's host and leaves the row standing", async () => {
-    relay = await relayHarness();
+    const relay = await relayHarness();
     const mine = await linkedVia(relay, "host", "box", { login: "maya", githubId: "4242" });
     const theirs = await linkedVia(relay, "host", "attic", { login: "sam", githubId: "7" });
     expect((await relay.fetch(`/hosts/${theirs.hostId}`, { method: "DELETE", headers: bearer(mine.token) })).status).toBe(403);
@@ -299,7 +292,7 @@ describe("unlinking", () => {
   });
 
   it("lets the person's own client take a host away without that host being up", async () => {
-    relay = await relayHarness();
+    const relay = await relayHarness();
     const host = await linkedVia(relay, "host", "box", { login: "maya", githubId: "4242" });
     const client = await linkedVia(relay, "client", "the Mac", { login: "maya", githubId: "4242", cookie: host.cookie });
     expect((await relay.fetch(`/hosts/${host.hostId}`, { method: "DELETE", headers: bearer(client.token) })).status).toBe(200);
@@ -307,7 +300,7 @@ describe("unlinking", () => {
   });
 
   it("refuses the token of a host that was already taken away", async () => {
-    relay = await relayHarness();
+    const relay = await relayHarness();
     const { token, hostId } = await linkedVia(relay, "host", "box", { login: "maya", githubId: "4242" });
     await relay.fetch(`/hosts/${hostId}`, { method: "DELETE", headers: bearer(token) });
     const res = await relay.fetch(`/hosts/${hostId}/heartbeat`, { method: "POST", headers: bearer(token), body: JSON.stringify({ version: "2026.9.0" }) });
@@ -317,7 +310,7 @@ describe("unlinking", () => {
 
 describe("the computers a person signed in from", () => {
   it("lists them, marks this one, and takes one away so its token opens nothing", async () => {
-    relay = await relayHarness();
+    const relay = await relayHarness();
     const first = await linkedVia(relay, "client", "the Mac", { login: "maya", githubId: "4242" });
     const second = await linkedVia(relay, "client", "the laptop", { login: "maya", githubId: "4242", cookie: first.cookie });
 
@@ -333,7 +326,7 @@ describe("the computers a person signed in from", () => {
   });
 
   it("refuses a sign-in older than a month, and one on another account", async () => {
-    relay = await relayHarness();
+    const relay = await relayHarness();
     const mine = await linkedVia(relay, "client", "the Mac", { login: "maya", githubId: "4242" });
     const theirs = await linkedVia(relay, "client", "their Mac", { login: "sam", githubId: "7" });
     const listed = (await (await relay.fetch("/clients", { headers: bearer(theirs.token) })).json()) as { clients: { id: string }[] };

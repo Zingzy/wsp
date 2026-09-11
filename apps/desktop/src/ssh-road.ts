@@ -13,7 +13,7 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import type { Readable } from "node:stream";
-import { dialAddress, type SshLogin } from "@wsp/host";
+import { SERVING_HOME_SH, dialAddress, type SshLogin } from "@wsp/host";
 import { authority } from "@wsp/protocol";
 import { probeHost } from "./host-lifecycle.js";
 
@@ -61,9 +61,9 @@ export const nothingServingLine = (address: string): string => `no wsp host is s
 export const forwardKey = (login: Login): string => (login.port !== undefined ? `${login.address}:${login.port}` : login.address);
 
 /** What the box is asked, as one sh script so the login's own shell is not read: where wsp is (PATH first, then the
- * npm prefix, then the folders npm i -g lands in when PATH has not been told), and the lock of the host serving its
- * wsp home, following the current-home pointer the way the app does on this computer. A lock whose pid is gone reads
- * as none. */
+ * npm prefix, then the folders npm i -g lands in when PATH has not been told), and the lock of the host serving the
+ * box's wsp home. Which home that is comes from the host package, in the sh spelling of the reading every wsp line
+ * on the box takes, so the probe and the box's own pair cannot pick different homes. */
 const PROBE_SCRIPT = [
   'found=""',
   'if command -v wsp >/dev/null 2>&1; then found=$(command -v wsp); fi',
@@ -71,10 +71,8 @@ const PROBE_SCRIPT = [
   'if [ -z "$found" ]; then for p in "$HOME/.npm-global/bin/wsp" "$HOME/.local/bin/wsp" "$HOME"/.nvm/versions/node/*/bin/wsp /usr/local/bin/wsp /opt/homebrew/bin/wsp; do if [ -x "$p" ]; then found="$p"; break; fi; done; fi',
   'if [ -z "$found" ]; then echo no-wsp; exit 0; fi',
   'echo "wsp $found"',
-  'home="${WSP_HOME:-$HOME/.wsp}"',
-  'if [ -f "$home/current-home" ]; then p=$(cat "$home/current-home"); [ -f "$p/host.lock" ] && home="$p"; fi',
-  'lock="$home/host.lock"',
-  'if [ -f "$lock" ]; then pid=$(sed -n \'s/.*"pid":\\([0-9]*\\).*/\\1/p\' "$lock"); if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then echo "lock $(cat "$lock")"; exit 0; fi; fi',
+  SERVING_HOME_SH,
+  'if wsp_serving "$home"; then echo "lock $(cat "$home/host.lock")"; exit 0; fi',
   "echo none",
 ].join("\n");
 /** The script travels base64 into sh: no quoting a fish or a zsh login could read differently. */
