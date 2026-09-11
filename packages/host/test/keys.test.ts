@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
-import { exitClassOf, keyRefusedLine, savedKeyRefusedLine } from "@wsp/protocol";
+import { exitClassOf, keyRefusedLine, LOOPBACK, savedKeyRefusedLine } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HELP, cli, forkCommandFor, jsonCliIO, loadKeys, saveQuestion, terminalIO, upCommandFor, type CliIO } from "../src/cli.js";
+import { HELP, SERVE_FLAGS, cli, forkCommandFor, jsonCliIO, loadKeys, saveQuestion, terminalIO, upCommandFor, type CliIO } from "../src/cli.js";
 import type { KeyCheck } from "@wsp/engine";
 import { AGENT_KEY_VARIABLES, agentKeyEnvs, agentKeysIn, keysOf, savedEnv } from "../src/env-keys.js";
 
@@ -21,11 +21,21 @@ describe("help", () => {
 });
 
 describe("the wsp up an init names", () => {
-  it("carries the state and port flags the init was given, resolved and quoted, and none it was not", () => {
-    const opts = { port: 4500, wsPort: 4510, statePath: "/tmp/wsp test/state.json" };
+  it("carries the serving flags the init was given, resolved and quoted, and none it was not", () => {
+    const opts = { port: 4500, wsPort: 4510, named: true, address: LOOPBACK, statePath: "/tmp/wsp test/state.json" };
     expect(upCommandFor(opts, {})).toBe("wsp up");
     expect(upCommandFor(opts, { state: "state.json" })).toBe("wsp up --state '/tmp/wsp test/state.json'");
-    expect(upCommandFor(opts, { port: "4500", "ws-port": "4510" })).toBe("wsp up --port 4500 --ws-port 4510");
+    // Every value the line hands over is quoted, as the unit spells the same words: a path with a space in it and a
+    // port read the same way, and the person pastes the line whole.
+    expect(upCommandFor(opts, { port: "4500", "ws-port": "4510" })).toBe("wsp up --port '4500' --ws-port '4510'");
+    // The line the init hands over starts the host the init built: a run told to fork containers says so again, or
+    // the host that line starts picks no provider and forks nothing.
+    const docker = { ...opts, address: "0.0.0.0", advertise: "http://10.0.0.9:4500", provider: "docker", dockerHost: "tcp://10.0.0.4:2375", relay: false };
+    expect(upCommandFor(docker, { provider: "docker", "docker-host": "tcp://10.0.0.4:2375" })).toBe("wsp up --provider 'docker' --docker-host 'tcp://10.0.0.4:2375'");
+    expect(upCommandFor(docker, { listen: "0.0.0.0", advertise: "http://10.0.0.9:4500", "no-relay": true })).toBe("wsp up --listen '0.0.0.0' --advertise 'http://10.0.0.9:4500' --no-relay");
+    // Every row of the table, so one added tomorrow is spelled here too rather than dropped from the handover.
+    const all = upCommandFor(docker, { state: "s", port: "4500", "ws-port": "4510", listen: "0.0.0.0", advertise: "http://10.0.0.9:4500", provider: "docker", "docker-host": "tcp://10.0.0.4:2375", "no-relay": true });
+    for (const flag of SERVE_FLAGS) expect(all, `--${flag.name} in the line an init hands over`).toContain(`--${flag.name}`);
     // The fork runs against the host wsp up started, so it needs the state and not the ports.
     expect(forkCommandFor(opts, {})).toBe("wsp new first");
     expect(forkCommandFor(opts, { state: "state.json" })).toBe("wsp new first --state '/tmp/wsp test/state.json'");

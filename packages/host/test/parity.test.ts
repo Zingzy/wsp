@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_AGENT } from "@wsp/catalog";
 import { COORDINATOR_HANDOFF, EXIT_CODES, EXIT_WORDS, ExitClass, NOTIFY_CALLER, NOTIFY_WORDS, RuntimeRequest, SessionStartOutcome, TURN_END_WORDS, effortsFor, markedDefault, stillWorkingLine, type WorkspaceView } from "@wsp/protocol";
 import { harnessCatalog } from "@wsp/runtime";
-import { COMMAND_LINES, HELP, JSON_COMMANDS, PROSE_COMMANDS, type CommandLine } from "../src/cli.js";
+import { COMMAND_LINES, HELP, JSON_COMMANDS, PROSE_COMMANDS, SERVE_FLAGS, type CommandLine } from "../src/cli.js";
 import { mcpServer } from "../src/mcp.js";
 import { INSTRUCTIONS, RULES_HEADING, SHELL_HEADING, VERBS_HEADING, WSP_SKILL } from "../src/skill.js";
 import { CLI_VERBS, COMMON, VERBS, flagList, openingOf, toolName, type Flags } from "../src/verbs.js";
@@ -340,6 +340,15 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       const deeper = COMMAND_LINES.filter(c => c.words.startsWith(`${line.words} `)).map(c => c.words.split(" ").at(-1)!);
       const rest = argv.slice(1 + line.words.split(" ").length).filter(w => !w.startsWith("-"));
       expect(rest.filter(w => deeper.includes(w)), `${argv.join(" ")} puts a flag before the subcommand`).toEqual([]);
+    }
+  });
+
+  it("every flag that shapes a serving host is in the help and in the skill, so a row added to the table is a word a person can read", () => {
+    // The table drives the parse and the unit wsp up --service writes, so a row added is read and travels; without
+    // this, it would do both and be named nowhere a person or an agent looks.
+    for (const flag of SERVE_FLAGS) {
+      expect(HELP, `--${flag.name} in wsp --help`).toMatch(new RegExp(`--${flag.name}\\b`));
+      expect(WSP_SKILL, `--${flag.name} in the skill`).toMatch(new RegExp(`--${flag.name}\\b`));
     }
   });
 
