@@ -141,6 +141,7 @@ describe("DockerBackend against a fake Engine API", () => {
       signedUrls: false,
       containers: false,
       callbackRelay: true,
+      diskSnapshots: true,
       snapshotListing: true,
       templates: true,
       kept: false,

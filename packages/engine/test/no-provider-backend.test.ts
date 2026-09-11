@@ -14,6 +14,7 @@ describe("no provider backend", () => {
       signedUrls: false,
       containers: false,
       callbackRelay: false,
+      diskSnapshots: false,
       snapshotListing: false,
       templates: false,
       sizes: [],
