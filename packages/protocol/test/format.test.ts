@@ -44,7 +44,6 @@ import {
   nameDeletingRefusal,
   nameTakenRefusal,
   recordRestoredLine,
-  deleteNotice,
   execFolderLine,
   folderRefusalLine,
   fmtBytes,
@@ -525,7 +524,7 @@ describe("the one registry every client reads a tool call from", () => {
   });
 });
 
-describe("plural, fmtThreads, forgetNotice and deleteNotice", () => {
+describe("plural, fmtThreads and forgetNotice", () => {
   it("is the one rule for a count and its noun, and fmtThreads reads it", () => {
     expect([0, 1, 2].map(n => plural(n, "row"))).toEqual(["0 rows", "1 row", "2 rows"]);
     expect(plural(1, "tool call")).toBe("1 tool call");
@@ -538,12 +537,9 @@ describe("plural, fmtThreads, forgetNotice and deleteNotice", () => {
     expect(plural(2, "secret-shaped file")).toBe("2 secret-shaped files");
   });
 
-  it("counts threads with the noun, and names what a forget and a delete each take off this computer", () => {
+  it("counts threads with the noun, and names what a forget takes off this computer", () => {
     expect([0, 1, 2].map(fmtThreads)).toEqual(["0 threads", "1 thread", "2 threads"]);
     expect(forgetNotice(1)).toBe("Its record and 1 thread leave this computer; the machine is already gone.");
-    expect(deleteNotice(2, true)).toBe("Its machine is deleted at the provider; its record and 2 threads leave this computer.");
-    // A machine wsp did not fork is not wsp's to delete: this computer and a machine over ssh are left as they are.
-    expect(deleteNotice(1, false)).toBe("Its machine is left as it is; its record and 1 thread leave this computer.");
   });
 });
 
