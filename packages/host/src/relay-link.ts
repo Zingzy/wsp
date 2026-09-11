@@ -9,7 +9,7 @@
 import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname as thisComputer } from "node:os";
 import { dirname, join } from "node:path";
-import { fmtDuration, usageRefusal } from "@wsp/protocol";
+import { fmtDuration, relayUrlOf, usageRefusal } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
 import { CLOUDFLARED, connectorRunning, ensureCloudflared, startConnector, stopRecordedConnector, type Connector } from "./connector.js";
 import { publicAddressLine } from "./host-lock.js";
@@ -198,12 +198,6 @@ interface RelayHostView {
 async function relayHosts(record: RelayClientRecord, deps: RelayDeps): Promise<RelayHostView[]> {
   const { hosts } = await relayCall<{ hosts: RelayHostView[] }>(deps, `${record.relayUrl}/hosts`, { token: record.token });
   return hosts;
-}
-
-/** Where a host the relay carries answers: the one home for how that name is written, so a line that prints it
- * and a turn that dials it name the same address. */
-export function relayUrlOf(hostname: string): string {
-  return `https://${hostname}`;
 }
 
 /** Where a host on the relay answers, for the connect that pairs with it. The relay carries no pairing code: the

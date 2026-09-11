@@ -225,6 +225,9 @@ describe("the addresses a client may use", () => {
     // still the port, since a container reaches the gateway whatever this computer's own cards say.
     const onlyLoopback = { lo0: [{ address: "127.0.0.1", family: "IPv4", internal: true }] } as unknown as Interfaces;
     expect({ ...hostReach(at, undefined, none, onlyLoopback) }).toEqual({ url: undefined, port: 4700 });
+    // A host bound to one address names no port: it answers there and nowhere else, so a kind that would write
+    // an address of its own with it would write one this host does not listen on.
+    expect({ ...hostReach({ address: "192.168.1.20", port: 4700 }, undefined, none, interfaces) }).toEqual({ url: "http://192.168.1.20:4700" });
     // A host bound to this computer alone names no port either: nothing outside this computer reaches it there,
     // so a kind that would write an address of its own with it is told none.
     expect({ ...hostReach({ address: "127.0.0.1", port: 4700 }, undefined, none, interfaces) }).toEqual({ url: undefined });

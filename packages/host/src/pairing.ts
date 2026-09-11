@@ -5,12 +5,12 @@
 // neither is a road a paired client or an agent can reach: a code hands out
 // access, and only somebody at the host's own terminal hands it out.
 import { networkInterfaces } from "node:os";
-import { authority, fmtDuration, isLoopback, isWildcard, LOOPBACK, usageRefusal, type DeviceView } from "@wsp/protocol";
+import { authority, fmtDuration, isLoopback, isWildcard, LOOPBACK, relayUrlOf, usageRefusal, type DeviceView } from "@wsp/protocol";
 import type { HostReach } from "@wsp/runtime";
 import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
 import { aimName, aimedHost, type HostAim, type HostPick } from "./hosts.js";
-import { publicHostname, relayUrlOf } from "./relay-link.js";
+import { publicHostname } from "./relay-link.js";
 import { dialHost, table, type DialOpts, type HostClient } from "./verbs.js";
 
 /** An address that only reaches the link it sits on: IPv6 fe80::/10, which no browser opens without a scope id,
@@ -32,12 +32,21 @@ export function reachAddresses(bound: string, interfaces = networkInterfaces()):
   return found.length === 0 ? [LOOPBACK] : [...new Set(found)];
 }
 
+/** The address the person named with --advertise, as an address: one reading of a blank and of a trailing slash,
+ * since the flag, the rule a turn is told by and the words spelled back into a service unit all ask the same
+ * question. Nothing where they named none, or only spaces. */
+export function advertiseWord(word: string | undefined): string | undefined {
+  const said = word?.trim().replace(/\/+$/, "") ?? "";
+  return said === "" ? undefined : said;
+}
+
 /** The address a machine dials this host at, the one rule for it: what the person named with --advertise, else the
  * address the host bound turned into a url, and for a wildcard the first address this computer answers on that
  * leaves it. Loopback is what is left when nothing else answers, which is a host no machine can reach; the runtime
  * hands out no token to a turn when it is told none, and this is what a person overrides with --advertise. */
 export function advertisedUrl(bound: string, port: number, asked?: string, interfaces = networkInterfaces()): string | undefined {
-  if (asked !== undefined && asked.trim() !== "") return asked.trim().replace(/\/+$/, "");
+  const named = advertiseWord(asked);
+  if (named !== undefined) return named;
   const at = reachAddresses(bound, interfaces)[0] ?? LOOPBACK;
   return isLoopback(at) ? undefined : `http://${authority(at, port)}`;
 }
@@ -45,23 +54,25 @@ export function advertisedUrl(bound: string, port: number, asked?: string, inter
 /** What a turn's launch is told about this host, for the kinds that need it. The address the person named with
  * --advertise stands above every kind's own answer; the address a machine somewhere else dials is the name a relay
  * carries this host under while a connector is holding it, since that one works from anywhere, else what this
- * computer answers on; and the port is for a kind whose machines know an address of their own, which a host bound
- * to this computer alone hands out none of, since nothing outside reaches it there. The url is read at each turn:
- * a quick tunnel is given a new name every time its connector runs. */
+ * computer answers on; and the port travels only where the host bound the wildcard. That last one is the whole
+ * rule about a kind's own address: a host on the wildcard answers on every address this computer has, the ones a
+ * machine knows of its own included, and a host bound to one address answers there and nowhere else, however a
+ * machine would rather reach it. The url is read at each turn: a quick tunnel is given a new name every time its
+ * connector runs. */
 export function hostReach(
   at: { address: string; port: number },
   asked: string | undefined,
   publicAt: () => string | undefined,
   interfaces = networkInterfaces(),
 ): HostReach {
-  const named = asked === undefined || asked.trim() === "" ? undefined : advertisedUrl(at.address, at.port, asked);
+  const advertise = advertiseWord(asked);
   return {
-    ...(named !== undefined ? { advertise: named } : {}),
+    ...(advertise !== undefined ? { advertise } : {}),
     get url(): string | undefined {
       const relayed = publicAt();
       return relayed !== undefined ? relayUrlOf(relayed) : advertisedUrl(at.address, at.port, undefined, interfaces);
     },
-    ...(isLoopback(at.address) ? {} : { port: at.port }),
+    ...(isWildcard(at.address) ? { port: at.port } : {}),
   };
 }
 
