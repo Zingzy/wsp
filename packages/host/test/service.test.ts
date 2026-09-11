@@ -51,7 +51,7 @@ const LOCAL_RECORD = {
 function planFor(at: ServiceAddress, over: Partial<ServicePlan> = {}): ServicePlan {
   return {
     ...at,
-    argv: ["/usr/bin/node", "/opt/wsp/bin.js", "up", "--state", at.statePath, "--port", "4400", "--ws-port", "4410"],
+    argv: ["/usr/bin/node", "/opt/wsp/bin.js", "up", "--state", at.statePath, "--port", "4400", "--ws-port", "4410", "--listen", "127.0.0.1"],
     cwd: "/Users/z/work",
     env: { PATH: "/usr/bin:/bin" },
     logPath: join(dirname(at.statePath), "host.log"),
@@ -86,7 +86,7 @@ describe("one module per service manager", () => {
     const systemd = SERVICE_MANAGERS.systemd;
     expect(systemd.unit(at)).toEqual({ name: `wsp-host-${tag}.service`, path: `/Users/z/.config/systemd/user/wsp-host-${tag}.service` });
     const text = systemd.text(planFor(at));
-    expect(text).toContain("ExecStart='/usr/bin/node' '/opt/wsp/bin.js' 'up' '--state' '/Users/z/.wsp/state.json' '--port' '4400' '--ws-port' '4410'");
+    expect(text).toContain("ExecStart='/usr/bin/node' '/opt/wsp/bin.js' 'up' '--state' '/Users/z/.wsp/state.json' '--port' '4400' '--ws-port' '4410' '--listen' '127.0.0.1'");
     expect(text).toContain("WorkingDirectory='/Users/z/work'");
     expect(text).toContain("Environment='PATH=/usr/bin:/bin'");
     expect(text).toContain("Restart=always");
@@ -379,7 +379,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(errors).toEqual([]);
     const plan = fake.plans[0]!;
     expect(plan.argv[0]).toBe(process.execPath);
-    expect(plan.argv.slice(2)).toEqual(["up", "--state", statePath, "--port", "4400", "--ws-port", "4410"]);
+    expect(plan.argv.slice(2)).toEqual(["up", "--state", statePath, "--port", "4400", "--ws-port", "4410", "--listen", "127.0.0.1"]);
     expect(plan.env["PATH"]).toBeDefined();
     expect(JSON.stringify(plan)).not.toContain(KEY);
     expect(lines).toEqual([
