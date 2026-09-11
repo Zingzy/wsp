@@ -151,6 +151,9 @@ describe("BoxBackend declarations", () => {
       liveCloneForks: false,
       pauseMode: "disk",
       resize: false,
+      // A box that exists keeps the class its create picked, and a fresh one deployed from the snapshot stands in
+      // for one that is gone: the pair the resize gate and the rebuild gate read apart.
+      replacesMachine: true,
       previewUrls: true,
       signedUrls: false,
       containers: true,

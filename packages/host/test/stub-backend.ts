@@ -129,6 +129,7 @@ export function stubBackend(): StubBackend {
       liveCloneForks: true,
       pauseMode: "memory",
       resize: true,
+      replacesMachine: true,
       previewUrls: true,
       signedUrls: true,
       containers: true,

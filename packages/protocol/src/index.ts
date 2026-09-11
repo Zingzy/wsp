@@ -154,11 +154,23 @@ export type PauseMode = z.infer<typeof PauseMode>;
 
 /** Honest per-backend feature flags; the UI degrades based on these, never on probing. */
 export const Capabilities = z.object({
+  /** What a fork of an image comes up as: on a provider whose images hold memory the processes are still running,
+   * and on one whose images hold only a disk it boots cold and wsp starts the agents on it again. The provider
+   * table publishes it; no verb reads it, since each verb reads the one road its own move needs. */
   liveCloneForks: z.boolean(),
   /** Absent: the machine cannot be paused, and the runtime refuses a nap and a wake. The app reads the value for its
    * words; the runtime reads only whether it is there. */
   pauseMode: PauseMode.optional(),
+  /** The provider asks for a machine at a size another one was not made at. False on a provider that clamps every
+   * machine to one size, whatever else it can do to one. Half of the resize road, since a resize replaces the
+   * machine first: resizesMachines reads the pair, and the verb and the button that offers a size both read that. */
   resize: z.boolean(),
+  /** The provider replaces a machine with a fresh fork of the image behind it and the workspace goes on, its
+   * vaulted files carried over: the one road a rebuild and an image move both take, since both throw a machine away
+   * and hand its workspace another. False where nothing forks: this computer, a machine reached over ssh, a host with
+   * no provider. Whether the replacement comes up with the processes still running is liveCloneForks, which says
+   * nothing about whether one may stand in at all. */
+  replacesMachine: z.boolean(),
   previewUrls: z.boolean(),
   signedUrls: z.boolean(),
   /** Guests can run containers; false means services get installed natively. */
@@ -192,6 +204,21 @@ export type Capabilities = z.infer<typeof Capabilities>;
  * one place that reading is made, so nothing above the provider module asks whether there is a key. */
 export function forksNoMachines(capabilities: { sizes: readonly MachineSizeOffer[] }): boolean {
   return capabilities.sizes.length === 0;
+}
+
+/** Whether this provider can give a machine that already exists a new size, which is both halves of that one road:
+ * a resize replaces the machine with a fresh fork of its image, then asks for that one at a size the old was not
+ * made at. The one place the pair is read, so the gate that refuses a resize and the button that offers a size
+ * cannot hold half the rule each. */
+export function resizesMachines(capabilities: Pick<Capabilities, "resize" | "replacesMachine">): boolean {
+  return capabilities.replacesMachine && capabilities.resize;
+}
+
+/** Whether a request asks for a size at all, the one reading both roads that take one make: a create naming none
+ * takes the golden's own size and a resize naming none replaces the machine at the size it has, so neither checks
+ * a size nor reads the road a new one needs. */
+export function namesSize(asked: Partial<WorkspaceSize> | undefined): boolean {
+  return asked?.cpu !== undefined || asked?.memMb !== undefined;
 }
 
 // --- views -----------------------------------------------------------------

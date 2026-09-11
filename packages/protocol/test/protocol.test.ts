@@ -5,7 +5,9 @@ import {
   Recipe,
   RecipeSource,
   Capabilities,
+  namesSize,
   PauseMode,
+  resizesMachines,
   GoldenVersion,
   DAEMON_ROOTS_PATH,
   MACHINE_LACKS_LINES,
@@ -73,6 +75,7 @@ import {
   foldThreads,
   NOTIFY_ME,
   WorkspaceListing,
+  WorkspaceSize,
   WorkspaceStatus,
   WorkspaceView,
 } from "../src/index.js";
@@ -542,8 +545,8 @@ describe("daemon wire types (one home for the ops from @wsp/daemon)", () => {
 });
 
 describe("backend capabilities", () => {
-  it("requires every flag, containers, callbackRelay, templates, diskSnapshots, kept and the sizes list included, so no backend can leave one unstated", () => {
-    const full = { liveCloneForks: true, pauseMode: "memory", resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, diskSnapshots: true, snapshotListing: true, templates: true, kept: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
+  it("requires every flag, containers, callbackRelay, templates, diskSnapshots, replacesMachine, kept and the sizes list included, so no backend can leave one unstated", () => {
+    const full = { liveCloneForks: true, pauseMode: "memory", resize: false, replacesMachine: true, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, diskSnapshots: true, snapshotListing: true, templates: true, kept: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
     expect(Capabilities.parse(full)).toEqual(full);
     const { containers: _c, ...missing } = full;
     expect(() => Capabilities.parse(missing)).toThrow();
@@ -554,6 +557,9 @@ describe("backend capabilities", () => {
     // A backend that never says whether its machine's disk can be copied would have the snapshot verb guessing.
     const { diskSnapshots: _d, ...noDiskSnapshots } = full;
     expect(() => Capabilities.parse(noDiskSnapshots)).toThrow();
+    // And one that never says whether a fresh machine may stand in for another leaves the rebuild and the image move guessing.
+    const { replacesMachine: _m, ...noReplace } = full;
+    expect(() => Capabilities.parse(noReplace)).toThrow();
     // A backend that never says whether its machine is the person's own would have every turn's access decided for it.
     const { kept: _k, ...noKept } = full;
     expect(() => Capabilities.parse(noKept)).toThrow();
@@ -562,8 +568,21 @@ describe("backend capabilities", () => {
     expect(() => Capabilities.parse({ ...full, sizes: [{ cpu: 2, memMb: 4096 }] })).toThrow();
   });
 
+  it("the two readings a caller makes over these flags have one home each, so no gate and no button holds half a rule", () => {
+    const caps = { replacesMachine: true, resize: true };
+    // A resize is both halves of one road: the machine is replaced by a fresh fork of its image, and that one is
+    // asked for at a size the old was not made at. A provider missing either gives no resize.
+    expect(resizesMachines(caps)).toBe(true);
+    expect(resizesMachines({ ...caps, resize: false })).toBe(false);
+    expect(resizesMachines({ ...caps, replacesMachine: false })).toBe(false);
+    expect(resizesMachines({ replacesMachine: false, resize: false })).toBe(false);
+    // And whether a request asks for a size at all, which both roads that take one read: either half names one.
+    expect([namesSize({ cpu: 4 }), namesSize({ memMb: 8192 }), namesSize({ cpu: 4, memMb: 8192 })]).toEqual([true, true, true]);
+    expect([namesSize({}), namesSize(undefined), namesSize({ envs: { A: "1" } } as Partial<WorkspaceSize>)]).toEqual([false, false, false]);
+  });
+
   it("pauseMode is optional and one of memory or disk; a boolean is refused", () => {
-    const full = { liveCloneForks: true, resize: false, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, diskSnapshots: true, snapshotListing: true, templates: true, kept: false, sizes: [] };
+    const full = { liveCloneForks: true, resize: false, replacesMachine: true, previewUrls: true, signedUrls: true, containers: false, callbackRelay: true, diskSnapshots: true, snapshotListing: true, templates: true, kept: false, sizes: [] };
     // Absent is a machine that cannot be paused: this computer, a machine reached over ssh.
     expect(Capabilities.parse(full)).toEqual(full);
     expect(Capabilities.parse({ ...full, pauseMode: "memory" })).toMatchObject({ pauseMode: "memory" });
