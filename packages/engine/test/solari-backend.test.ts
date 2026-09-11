@@ -20,6 +20,7 @@ describe("SolariBackend", () => {
       liveCloneForks: true,
       pauseMode: "memory",
       resize: false,
+      replacesMachine: true,
       previewUrls: true,
       signedUrls: true,
       containers: false,

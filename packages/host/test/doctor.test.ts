@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { execFile, spawn } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -705,10 +705,58 @@ describe("deployScript", () => {
 
   it("refuses a guest with no systemd rather than starting a daemon nothing would restart", () => {
     const lines = deployScript(CLOUD_PLACE, "aabbcc").split("\n");
-    const check = lines.indexOf("command -v systemctl >/dev/null || { echo NO_SYSTEMD; false; }");
+    const check = lines.indexOf("command -v systemctl >/dev/null || { echo NO_SYSTEMD; exit 1; }");
     expect(check).toBeGreaterThan(-1);
     expect(check).toBeLessThan(lines.indexOf("mkdir -p /root/wsp-daemon /root/inbox"));
     expect(lines[0]).toBe("set -e");
+  });
+
+  /** The guard as the deploy runs it, plus the guard on its own: a refusal that ends the script only because the
+   * shell honours `set -e` for the last command of an `||` list is one bash flag away from installing anyway. */
+  const guardRuns = (fragment: string[], path: string): { status: number | null; stdout: string } => {
+    const ran = spawnSync("/bin/bash", ["-c", [...fragment, "echo WENT_ON"].join("\n")], { encoding: "utf8", env: { PATH: path } });
+    return { status: ran.status, stdout: ran.stdout };
+  };
+
+  it("a guest with no systemctl stops the deploy there, the guard's own exit and not the shell's", () => {
+    const lines = deployScript(CLOUD_PLACE, "aabbcc").split("\n");
+    const guard = lines.findIndex(line => line.includes("NO_SYSTEMD"));
+    expect(guard).toBeGreaterThan(-1);
+    // An empty folder is the whole PATH the fragment is given; what the script itself exports is the guest's own.
+    const empty = tmp("wsp-deploy-guard-");
+    try {
+      for (const fragment of [lines.slice(0, guard + 1), lines.slice(guard, guard + 1)]) {
+        const ran = guardRuns(fragment, empty);
+        expect(ran.stdout).toContain("NO_SYSTEMD");
+        expect(ran.stdout).not.toContain("WENT_ON");
+        expect(ran.status).toBe(1);
+      }
+    } finally {
+      rmSync(empty, { recursive: true, force: true });
+    }
+  });
+
+  it("an npm install that fails stops the deploy there, its last lines and the marker read out", () => {
+    // A machine's own place, since a fork's npm log sits in the shared /tmp and two runs of this on one machine
+    // would take turns writing it; the line the guard rides is the same one for every place.
+    const home = tmp("wsp-deploy-npm-");
+    try {
+      const lines = deployScript(sshDaemonPlace({ home, path: "/usr/bin:/bin" }), "aabbcc").split("\n");
+      const make = lines.find(line => line.startsWith("mkdir -p"))!;
+      const install = lines.find(line => line.includes("npm install"))!;
+      const bin = join(home, "bin");
+      mkdirSync(bin, { recursive: true });
+      writeFileSync(join(bin, "npm"), "#!/bin/sh\necho 'npm ERR! gyp ERR! not ok' >&2\nexit 1\n", { mode: 0o755 });
+      for (const fragment of [["set -e", make, install], [make, install]]) {
+        const ran = guardRuns(fragment, `${bin}:/usr/bin:/bin`);
+        expect(ran.stdout).toContain("npm ERR! gyp ERR! not ok");
+        expect(ran.stdout).toContain("NPM_FAIL");
+        expect(ran.stdout).not.toContain("WENT_ON");
+        expect(ran.status).toBe(1);
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   /** The supervisor as the deploy writes it into the guest, out of the heredoc it rides in. */
@@ -785,6 +833,9 @@ describe("deployScript", () => {
     // The link is made from the node the deploy resolved, before the modules are built under it and before the
     // unit that reads it exists.
     const lines = deployScript(CLOUD_PLACE, "aabbcc").split("\n");
+    // The name is read through to the file before it is linked: a hard link to a symlink is another symlink under
+    // GNU's ln, so a pin taken from the name would be a second name for a target the restore can take away.
+    expect(lines).toContain('node_pin="$(readlink -f "$(command -v node)")"');
     const pin = lines.findIndex(line => line.startsWith(`ln -f "$node_pin" ${daemonNodePath(CLOUD_PLACE)} `));
     expect(pin).toBeGreaterThan(-1);
     expect(pin).toBeLessThan(lines.findIndex(line => line.includes("npm install")));

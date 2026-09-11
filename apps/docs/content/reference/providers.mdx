@@ -12,9 +12,10 @@ A backend gives wsp `create`, `get`, `list`, `deleteSnapshot`, a `capabilities` 
 
 | flag | meaning | Solari |
 | --- | --- | --- |
-| `liveCloneForks` | a fork boots from an existing image in seconds | yes |
+| `liveCloneForks` | what a fork of an image comes up as: with the processes still running where the image holds memory, or booted cold with the agents started again where it holds only a disk. The provider table publishes it; no verb reads it, since each verb reads the road its own move needs | yes |
 | `pauseMode` | how a pause works: `memory` keeps the processes and every byte they hold, `disk` stops the machine and boots it again on wake; absent, the machine cannot be paused | `memory` |
-| `resize` | a machine can change size | no, the Starter plan clamps every machine to 2 vCPU |
+| `resize` | a machine is asked for at a size another was not made at. Half of the resize road, since a resize replaces the machine first, so the verb and the app's Upgrade button both read this flag and `replacesMachine` together | no, the Starter plan clamps every machine to 2 vCPU |
+| `replacesMachine` | a fresh fork of the image behind a machine stands in for it and the workspace goes on, its vaulted files carried over: the road a rebuild and an image move both read | yes |
 | `previewUrls` | a port reaches a browser through a signed URL; without it there is no browser reach and no framed ports | yes |
 | `signedUrls` | files travel by signed download and upload URLs; without it there is no import or export road | yes |
 | `containers` | the guest runs containers; without it services install natively | no, the guest kernel has no overlayfs or netfilter, so Docker does not run |

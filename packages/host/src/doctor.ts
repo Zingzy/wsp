@@ -182,8 +182,10 @@ export interface DaemonSupervision {
  * Restart=always with no start limit has no end. */
 export const SYSTEMD: DaemonSupervision = {
   // An unsupervised daemon is what this deploy exists to stop shipping, so a machine with no service manager says
-  // so here rather than starting one nothing would restart.
-  requires: ["command -v systemctl >/dev/null || { echo NO_SYSTEMD; false; }"],
+  // so here rather than starting one nothing would restart. It ends the script itself: a marker followed by
+  // `false` leaves the refusal resting on the shell honouring `set -e` for the last command of an `||` list,
+  // which is the deploy's most expensive line to be wrong about, since what follows it installs.
+  requires: ["command -v systemctl >/dev/null || { echo NO_SYSTEMD; exit 1; }"],
   start: (place, previewHostSuffix) => [
     stopDaemonScript(place),
     `cat > ${sh(place, place.unitPath)} <<'WSP_UNIT'\n${daemonUnit(place, previewHostSuffix)}WSP_UNIT`,
@@ -598,7 +600,7 @@ export function deployScript(place: DaemonPlace, token: string, previewHostSuffi
     `node_pin="$(readlink -f "$(command -v node)")"`,
     `ln -f "$node_pin" ${sh(place, daemonNodePath(place))} 2>/dev/null || cp "$node_pin" ${sh(place, daemonNodePath(place))}`,
     `cd ${sh(place, place.dir)}`,
-    `npm install --omit=dev --no-audit --no-fund > ${sh(place, `${place.scratch}/wsp-npm.log`)} 2>&1 || { tail -3 ${sh(place, `${place.scratch}/wsp-npm.log`)}; echo NPM_FAIL; false; }`,
+    `npm install --omit=dev --no-audit --no-fund > ${sh(place, `${place.scratch}/wsp-npm.log`)} 2>&1 || { tail -3 ${sh(place, `${place.scratch}/wsp-npm.log`)}; echo NPM_FAIL; exit 1; }`,
     `rm -rf ${sh(place, `${place.dir}/node_modules/node-pty/prebuilds`)}`,
     // Both names: only some tools read BROWSER; the rest exec xdg-open by name, and the place's bin folder is first on PATH.
     // BROWSER itself is set by the daemon for its ptys, by the profile file for login shells, and in a fork's envs

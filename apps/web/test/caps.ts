@@ -8,6 +8,7 @@ export function caps(overrides: Partial<Capabilities> = {}): Capabilities {
     liveCloneForks: true,
     pauseMode: "memory",
     resize: true,
+    replacesMachine: true,
     previewUrls: true,
     signedUrls: true,
     containers: true,

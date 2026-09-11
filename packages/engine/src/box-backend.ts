@@ -307,7 +307,8 @@ export class BoxBackend implements MachineBackend {
   readonly capabilities: Capabilities = {
     liveCloneForks: false, // a fork boots from a disk snapshot; no memory travels, so the agents start again
     pauseMode: "disk", // a stop snapshots the disk and kills every process; the ptys and the daemon die with it
-    resize: false,
+    resize: false, // nothing above the engine asks a live box for another class; a create picks one and keeps it
+    replacesMachine: true, // a fresh box deployed from the snapshot stands in for one that is gone, which is what a create does here
     previewUrls: true, // POST /host mints a stable tokened route per port that passes a WebSocket upgrade (measured)
     signedUrls: false, // bytes go through PUT /files as JSON
     containers: true, // Docker and BuildKit are on the image and the box runs its own kernel

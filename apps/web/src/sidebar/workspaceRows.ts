@@ -105,12 +105,13 @@ function spendLine({ project, cost }: Pick<WorkspaceMetaInput, "project" | "cost
     .join(" · ");
 }
 
-/** What the machine is, the row's second line and one of the Spaces header's: the kind's own words where it has
- * them (a machine over ssh), else the size its status carries in the kind's word for a cpu, a fork's vCPUs or this
- * computer's cores. Null before a status carries a size, so a surface leaves the slot empty rather than drawing it half. */
+/** What the machine is, the row's second line and one of the Spaces header's: the size its status carries in the
+ * kind's word for a cpu, a fork's vCPUs or this computer's cores, on a kind whose rows read a size there, else what
+ * that kind calls its machine (a machine over ssh). Null before a status carries a size, so a surface leaves the
+ * slot empty rather than drawing it half. */
 export function machineLine(project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string | null {
   const kind = kindWords(workspaceKind(project.workspace));
-  if (kind.machine !== null) return kind.machine;
+  if (!kind.rowReadsMachine) return kind.machine;
   return project.status === null ? null : fmtSize(project.status.size, kind.cpu);
 }
 

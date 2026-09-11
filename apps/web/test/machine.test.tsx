@@ -1038,6 +1038,15 @@ describe("upgrade", () => {
     expect(footer.querySelector("[role=status]")).toBeNull();
   });
 
+  it("a backend that would replace no machine gets no Upgrade button either, whatever it says about sizes", async () => {
+    // A resize replaces the machine and then asks for a new size, so the button reads the whole road: offering a
+    // picker off the size flag alone would hand a person a confirm the runtime refuses.
+    await mount([view("ws_a", "api")], { ...CAPS, resize: true, replacesMachine: false });
+    expect(screen.queryByRole("button", { name: "upgrade api" })).toBeNull();
+    expect(document.querySelector('[data-k="resize-hint"]')).toBeNull();
+    expect(screen.getByRole("button", { name: "Pause api" })).toBeDefined();
+  });
+
   it("a machine already at the largest size offered gets no Upgrade button either", async () => {
     await mount([view("ws_a", "api")], { ...CAPS, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] });
     expect(screen.queryByRole("button", { name: "upgrade api" })).toBeNull();

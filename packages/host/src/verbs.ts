@@ -788,7 +788,7 @@ export function threadTree(rows: readonly ThreadRow[]): { row: ThreadRow; depth:
  * one whose daemon is dark says here what it says there. The projects themselves are wsp projects' table. */
 function workspaceLine(w: WorkspaceListing): string[] {
   const kind = kindWords(workspaceKind(w));
-  const machine = kind.machine ?? (kind.driven ? w.machineId : fmtSize(w.size, kind.cpu));
+  const machine = kind.rowReadsMachine ? (kind.driven ? w.machineId : fmtSize(w.size, kind.cpu)) : kind.machine;
   return [w.name, w.id, machine, kind.driven ? workspaceWord(workspaceStateOf(w, w)) : "", projectCountCell(workspaceProjects(w)), agentsWord(w.agents)];
 }
 

@@ -4,7 +4,7 @@ import { SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, parseSshMachineId } from "@wsp/engin
 import { alreadyRecorded, machineWord, noMachineHomeLine, noSshDaemonLine, OVER_SSH, relayedRecordRefusal, relayedRefusal, sshHostKeyNotice, TURN_TOKEN_ENV, undrivenRefusal, type AdapterEvent, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterContext, type HarnessAdapterFactory, type ProjectImportOptions, type Runtime, type SshWiring } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
-import { fakeSsh, FAKE_OS, FAKE_UPTIME_S } from "./fake-ssh.js";
+import { fakeSsh, FAKE_BOX_KEY, FAKE_OS, FAKE_UPTIME_S } from "./fake-ssh.js";
 import { stubBackend } from "./stub-backend.js";
 
 /** A scripted harness: it answers with the home and the PATH it was handed, so what lands in the chat is what the
@@ -105,7 +105,24 @@ describe("ssh workspace", () => {
   it("the key the machine answered with is said once, where the person can compare it", async () => {
     const { wiring } = fakeSsh();
     const created = await runtime(wiring).workspaces.createSsh("dev@box");
-    expect(created.notice).toBe(sshHostKeyNotice("ssh-ed25519 SHA256:boxboxboxboxboxboxboxboxboxboxboxboxbox"));
+    expect(created.notice).toBe(sshHostKeyNotice(FAKE_BOX_KEY));
+  });
+
+  it("a dial that rode the master the last one left open still says which machine it reached", async () => {
+    const { wiring, masters } = fakeSsh();
+    const rt = runtime(wiring);
+    const first = await rt.workspaces.createSsh("dev@box");
+    await rt.workspaces.delete(first.id);
+    // The client holds a master connection for a minute after a turn, and a dial that rides it exchanges no key,
+    // which is what a record with no identity came from: the same box could then be recorded twice.
+    const again = await rt.workspaces.createSsh("dev@box", { name: "box-again" });
+    expect(masters.size).toBe(1);
+    expect(again.notice).toBe(sshHostKeyNotice(FAKE_BOX_KEY));
+    // And the record refuses a second workspace on that machine either way: this dial rode the warm master too,
+    // and the one under the box's other address opened its own.
+    await expect(rt.workspaces.createSsh("dev@box", { name: "by-key", keyPath: "/tmp/k/other" })).rejects.toThrow(alreadyRecorded(OVER_SSH, "box-again"));
+    await expect(rt.workspaces.createSsh("dev@10.0.0.9", { name: "by-address" })).rejects.toThrow(alreadyRecorded(OVER_SSH, "box-again"));
+    expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["box-again"]);
   });
 
   it("a request relayed from a machine records nothing and dials nothing: recording is this computer's own act", async () => {
