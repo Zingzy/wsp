@@ -149,6 +149,8 @@ export interface InitOptions {
    * serving the app, so it probes the pair before anything is read: a pair nobody named steps over a busy port, one
    * a person named is refused, both before a machine bills. */
   ports: PortsAsked & PortProbes;
+  /** The address the host this run serves binds; this computer alone when absent. */
+  address?: string;
   /** The command that starts the app once the golden is recorded, with the flags this run was given. */
   upCommand: string;
   /** The command that forks the first workspace from it, for a run with nobody at a terminal that asked for none. */
@@ -1537,7 +1539,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     await closeRuntime();
     return result;
   }
-  const url = appUrl(handle.port, opened?.id);
+  const url = appUrl({ port: handle.port, address: opts.address }, opened?.id);
   runLog.note(`app ${url}`);
   await openApp(url, handle, io, interactive, logLine());
   outro("wsp keeps serving the app from this terminal; Ctrl-C stops it.", out);

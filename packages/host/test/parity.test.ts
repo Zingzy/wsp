@@ -290,7 +290,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       expect(row, `${tool.name} is in no row of the skill's verbs table`).toBeDefined();
       expect(row!.tools.find(t => t.name === tool.name)!.inputs, `${tool.name}'s inputs in the skill`).toEqual(tool.inputs);
     }
-    expect(COMMAND_LINES.filter(c => "cliOnly" in c).map(c => c.words).sort()).toEqual(["doctor", "down", "init", "mcp", "mcp install", "status", "up"]);
+    expect(COMMAND_LINES.filter(c => "cliOnly" in c).map(c => c.words).sort()).toEqual(["devices", "devices revoke", "doctor", "down", "init", "mcp", "mcp install", "pair", "status", "up"]);
     // Every tool has a command line of its own: the seam above still holds a tool that has none to a stated reason.
     expect(VERBS.filter(v => "toolOnly" in v).map(v => v.name)).toEqual([]);
   });

@@ -196,7 +196,12 @@ describe("the two lines the import prints", () => {
 
 describe("the app's address", () => {
   it("carries the workspace just forked, and is the plain address when none was", () => {
-    expect(appUrl(4400, "ws_a1b2")).toBe("http://127.0.0.1:4400/#w/ws_a1b2");
-    expect(appUrl(4400)).toBe("http://127.0.0.1:4400/");
+    expect(appUrl({ port: 4400 }, "ws_a1b2")).toBe("http://127.0.0.1:4400/#w/ws_a1b2");
+    expect(appUrl({ port: 4400 })).toBe("http://127.0.0.1:4400/");
+    // The address the run bound, through the one rule every local client dials by: the wildcard is the only
+    // spelling that becomes loopback, and an IPv6 literal is bracketed.
+    expect(appUrl({ port: 4400, address: "0.0.0.0" })).toBe("http://127.0.0.1:4400/");
+    expect(appUrl({ port: 4400, address: "100.64.0.3" }, "ws_a1b2")).toBe("http://100.64.0.3:4400/#w/ws_a1b2");
+    expect(appUrl({ port: 4400, address: "::1" })).toBe("http://[::1]:4400/");
   });
 });

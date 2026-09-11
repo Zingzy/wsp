@@ -61,6 +61,7 @@ import {
   WorkspaceView,
   actionRefusal,
   authRefusal,
+  authority,
   canTravel,
   defaultAgents,
   defaultConsent,
@@ -155,7 +156,7 @@ import {
 } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
 import { gitRootOf } from "./repo-root.js";
-import { hostTokenPath, servingHost } from "./host-lock.js";
+import { dialAddress, hostTokenPath, servingHost } from "./host-lock.js";
 import { colourDepth, isTTY, wrap } from "./init-layout.js";
 import { RecipeAnswer, RecipeScan, recipePrintout, scanPrintout } from "./recipe-answer.js";
 import { isRecipeTick, runRecipe, runScan, type ScanInput } from "./recipe-command.js";
@@ -183,8 +184,9 @@ const UNAUTHORIZED_CLOSE = 4401;
 /** How long a refused auth waits for the close that follows its frame before the frame's own class stands. */
 const CLOSE_GRACE_MS = 500;
 
-/** Where the host serving this state file listens and the token it wrote, or a plain refusal when none serves it. */
-export function hostAddress(statePath: string): { wsPort: number; token: string } {
+/** Where the host serving this state file listens and the token it wrote, or a plain refusal when none serves it.
+ * The address is the lock's, not loopback: a host started with --listen on one address answers only there. */
+export function hostAddress(statePath: string): { host: string; wsPort: number; token: string } {
   const lock = servingHost(statePath);
   if (lock === undefined) throw new Error(`no wsp host is serving ${statePath}; run wsp up first`);
   const tokenPath = hostTokenPath(statePath);
@@ -194,14 +196,14 @@ export function hostAddress(statePath: string): { wsPort: number; token: string 
   } catch {
     throw authRefusal(`the host's token file is missing: ${tokenPath}`);
   }
-  return { wsPort: lock.wsPort, token };
+  return { host: dialAddress(lock), wsPort: lock.wsPort, token };
 }
 
 /** One socket to the host: the token rides in the first frame, never in the URL; then request and reply by id.
  * Open and auth share one deadline, so a port that accepts and never answers fails in one line. */
 export async function dialHost(statePath: string, deadlineMs = DIAL_MS): Promise<HostClient> {
-  const { wsPort, token } = hostAddress(statePath);
-  const ws = new WebSocket(`ws://127.0.0.1:${wsPort}`);
+  const { host, wsPort, token } = hostAddress(statePath);
+  const ws = new WebSocket(`ws://${authority(host, wsPort)}`);
   const opened = new Promise<void>((done, fail) => {
     ws.once("open", () => done());
     ws.once("error", fail);
@@ -243,7 +245,7 @@ export async function dialHost(statePath: string, deadlineMs = DIAL_MS): Promise
   };
   let timer: NodeJS.Timeout | undefined;
   const deadline = new Promise<never>((_, fail) => {
-    timer = setTimeout(() => fail(new Error(`the host on port ${wsPort} did not answer within ${deadlineMs} ms`)), deadlineMs);
+    timer = setTimeout(() => fail(new Error(`the host at ${authority(host, wsPort)} did not answer within ${deadlineMs} ms`)), deadlineMs);
   });
   // A refusal whose frame carries no kind is classed by the close code that follows it, so a host of an older version
   // that sends the code alone still reads as auth; a frame with a kind is the source when there is one.
@@ -327,7 +329,7 @@ function formatter(io: CliIO, json: boolean): Out {
 }
 
 /** Columns padded to their widest cell, two spaces apart; the last column is never padded. */
-function table(rows: ReadonlyArray<ReadonlyArray<string>>): string[] {
+export function table(rows: ReadonlyArray<ReadonlyArray<string>>): string[] {
   const widths = rows.reduce<number[]>((w, row) => row.map((cell, i) => Math.max(w[i] ?? 0, cell.length)), []);
   return rows.map(row => row.map((cell, i) => (i === row.length - 1 ? cell : cell.padEnd(widths[i]!))).join("  ").trimEnd());
 }

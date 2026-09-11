@@ -8,8 +8,8 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fmtDuration, shellQuote } from "@wsp/protocol";
-import { addressLines, servingHost, type HostLock } from "./host-lock.js";
+import { authority, fmtDuration, shellQuote } from "@wsp/protocol";
+import { addressLines, dialAddress, servingHost, type HostLock } from "./host-lock.js";
 
 export type ServiceKind = "launchd" | "systemd";
 
@@ -291,7 +291,9 @@ export const httpProbe: HostProbe = async lock => {
   const stop = new AbortController();
   const timer = setTimeout(() => stop.abort(), PROBE_MS);
   try {
-    await fetch(`http://127.0.0.1:${lock.port}/`, { signal: stop.signal });
+    // The lock's address, through the same rule the command line dials by: a host bound to one address answers
+    // only there, and probing loopback would report a healthy host as dead.
+    await fetch(`http://${authority(dialAddress(lock), lock.port)}/`, { signal: stop.signal });
     return true;
   } catch {
     return false;

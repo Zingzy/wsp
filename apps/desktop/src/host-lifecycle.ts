@@ -55,8 +55,10 @@ export interface OpenHostOptions {
 }
 
 // The host serves the page with its boot object inlined; nothing else on
-// loopback carries this line, so it is the whole attach test.
-const BOOT_LINE = /<script>window\.__WSP__ = \{"wsPort":\d+,"token":"[^"]+"/;
+// loopback carries this line, so it is the whole attach test. The token is not
+// part of it: a host listening beyond this computer inlines none, and it is
+// still the host this window should attach to rather than start a second of.
+const BOOT_LINE = /<script>window\.__WSP__ = \{"wsPort":\d+,/;
 
 function canListen(port: number): Promise<boolean> {
   return new Promise(resolve => {

@@ -1334,7 +1334,14 @@ export interface LocalFontFace {
 /** What the host writes into the page's one inline script as window.__WSP__ before serving it. */
 export interface BootPayload {
   wsPort: number;
-  token: string;
+  /** The host's own token, inlined only when the page was served on loopback, where reaching it already means being
+   * on the computer. A page served beyond loopback carries none and pairs for a device token of its own. */
+  token?: string;
+  /** The path on this page's own origin the runtime WebSocket answers on, which is the one road a client reaching
+   * the host through an ssh forward or a tunnel hostname has. */
+  wsPath: string;
+  /** False when this page carries no token and has to redeem a pairing code before it can dial anything. */
+  paired: boolean;
   /** The release this host is, which is the release this page is: a desktop shell attached to a host it did not
    * start reads it to tell whether the two halves were built apart. */
   version: string;
@@ -2139,9 +2146,67 @@ export type TicketPurpose = z.infer<typeof TicketPurpose>;
  * has to say what it is here before any socket may redeem it. */
 export const TICKET_ORIGIN: Record<TicketPurpose, WorkspaceOrigin> = { connect: "here", relay: "relayed" };
 
+/** A computer that redeemed a pairing code and holds a token of its own, as devices.list answers and wsp devices
+ * prints it. The token is never here: the host keeps only its hash, so a listing can leak nothing that opens a
+ * socket. */
+export const DeviceView = z.object({
+  id: z.string(),
+  name: z.string(),
+  createdAt: z.string(),
+  /** When this device last authed. Set by the redeem that minted it and moved by every later auth frame, never by
+   * a JSON route reading the same token, so a listing says when the computer last dialled rather than last asked. */
+  lastSeenAt: z.string(),
+});
+export type DeviceView = z.infer<typeof DeviceView>;
+
+/** How long a pairing code stands before the host forgets it: long enough to read off one screen and type into
+ * another, short enough that a code left in a terminal buffer is worth nothing by the time anyone reads it. */
+export const PAIR_CODE_TTL_MS = 10 * 60_000;
+
+/** How many characters a pairing code is, out of the 32 the alphabet holds: 40 bits, single use and ten minutes
+ * long, which no reachable host answers enough guesses of. */
+export const PAIR_CODE_LENGTH = 8;
+
+/** The symbols a pairing code is written in: the digits and the letters, less the four that a person reading one
+ * screen and typing into another confuses (I, L, O, U). Thirty-two of them, so each character is five bits and a
+ * random byte masked to five bits is uniform. */
+export const PAIR_CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+/** The refusal a socket that is not the host's own gets for asking to mint a pairing code: a code lets a stranger
+ * in, so only the process holding the host token, on this computer, may hand one out. */
+export const PAIR_ISSUE_REFUSAL = "only a socket holding this host's own token may mint a pairing code; run wsp pair on the computer the host runs on";
+
+/** The refusal a redeemed code that this host is not holding gets: spent, expired, or never minted read the same,
+ * so guessing tells a caller nothing about which. */
+export const PAIR_CODE_REFUSAL = "that pairing code is not one this host is waiting for; run wsp pair on the host for a fresh one";
+
+/** The refusal a socket that was let in on a single-use ticket gets for reaching the device ops, whether the ticket
+ * was the road a machine's requests arrive by or another client's. Who may drive this host is handed out, read and
+ * taken away at the terminal of the computer it runs on, and nowhere else. */
+export const DEVICES_TICKET_REFUSAL = "a socket let in on a ticket cannot see or change the devices paired with this host; run wsp devices on the computer the host runs on";
+
+/** The refusal a device gets for revoking another device: a paired computer can hand its own token back, and only
+ * the host takes anyone else's away. */
+export const DEVICE_REVOKE_REFUSAL = "a paired device may only revoke itself; run wsp devices revoke on the host to take another one away";
+
+/** The refusal the JSON routes answer with when the host listens beyond this computer and the request carries no
+ * device token. */
+export const API_UNAUTHORIZED = "this host listens beyond the computer it runs on, so this route needs a paired device token in an Authorization header; run wsp pair on the host";
+
 const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("auth"), token: z.string() }),
   z.object({ id: reqId, op: z.literal("ticket.issue"), purpose: TicketPurpose }),
+  /** Mints a one time code another computer redeems for a device token of its own. Answers `{ code, expiresAt }`.
+   * Only on a socket holding the host's own token, and never on one let in by a ticket. */
+  z.object({ id: reqId, op: z.literal("pair.issue") }),
+  /** Spends a code for this computer's own token, as the first frame of a socket nothing has authed. Answers
+   * `{ deviceId, deviceToken }` once, and the socket is authed as that device from then on. */
+  z.object({ id: reqId, op: z.literal("pair.redeem"), code: z.string().max(64), name: z.string().max(200) }),
+  /** Every paired device, for the host token and for a device's own socket alike. */
+  z.object({ id: reqId, op: z.literal("devices.list") }),
+  /** Takes a device's token away and cuts the sockets holding it. A device may name only itself; the host token
+   * names any. */
+  z.object({ id: reqId, op: z.literal("devices.revoke"), deviceId: z.string() }),
   /** Replies with an EventsSubscribeReply, then pushes events on this socket. With `after`, the seq of the last event
    * this client saw, every retained event past it is pushed first, oldest first, before anything live; `stream` is
    * the id that came with that seq, so a runtime that is not the one that issued it answers gap instead. */
