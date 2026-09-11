@@ -52,9 +52,9 @@ export function SetupBuild({ job, onCancel, onRetry, onCode, onOpenWorkspace, on
   const signInStage = rows.find(r => r.id === SIGN_IN_STAGE_ID);
   const slide = building && signInStage !== undefined && (signInStage.state === INIT_ROW_STATES.open || signInStage.state === INIT_ROW_STATES.running);
   // The one row the card keeps in view, as the screen appears and whenever it changes: a sign-in to retry first, else the stage that runs or failed, else a machine still being removed, which is the one row left on a stopped screen that is still costing money; on the slide, the first sign-in waiting on the person.
-  const attention = building && signIns.some(s => s.login === "not-signed-in");
+  const attention = building && signIns.some(s => initRowFailed(s));
   const focusId = attention && signInStage !== undefined ? signInStage.id : (rows.find(r => onIt(r.state) || r.state === INIT_ROW_STATES.failed) ?? rows.find(r => r.state === INIT_ROW_STATES.retrying))?.id;
-  const slideFocusId = (signIns.find(s => s.state === INIT_ROW_STATES.open) ?? signIns.find(s => s.login === "not-signed-in"))?.id;
+  const slideFocusId = (signIns.find(s => s.state === INIT_ROW_STATES.open) ?? signIns.find(s => initRowFailed(s)))?.id;
   // A saved key the provider refused offers the step that fixes it, not another build off the same key.
   const primary: ScreenAction | undefined =
     job.phase === "done" && job.workspace !== undefined ? { word: words.keycap, onPress: onOpenWorkspace } : job.keyRefused === true ? { word: CLOUD_SETUP_WORDS.keys.changeKey, onPress: onChangeKey } : job.phase === "failed" || job.phase === "cancelled" ? { word: words.again, onPress: onAgain } : undefined;
@@ -74,7 +74,7 @@ export function SetupBuild({ job, onCancel, onRetry, onCode, onOpenWorkspace, on
         </p>
         <Card label={words.slideHeadline} cap={false}>
           {signIns.map(s => (
-            <SignInSlideRow key={s.id} row={s} marked={marked(signIns)} focus={s.id === slideFocusId} onRetry={s.login === "not-signed-in" ? () => onRetry(s.tool ?? s.id) : undefined} onCode={s.finish === "code" ? code => onCode({ tool: s.tool ?? s.id, code }) : undefined} />
+            <SignInSlideRow key={s.id} row={s} marked={marked(signIns)} focus={s.id === slideFocusId} onRetry={initRowFailed(s) ? () => onRetry(s.tool ?? s.id) : undefined} onCode={s.finish === "code" ? code => onCode({ tool: s.tool ?? s.id, code }) : undefined} />
           ))}
         </Card>
       </SetupScreen>
@@ -200,7 +200,7 @@ function BuildRow({ row, focus, signIns, onRetry, onCode }: { row: InitRow; focu
   const has = signIns !== undefined ? signIns.length > 0 : lines.length > 0;
   const live = running || waitedOn;
   // A sign-in that ran out while the build goes on has a Retry to show, so its stage opens on its own too.
-  const attention = onRetry !== undefined && signIns?.some(s => s.login === "not-signed-in") === true;
+  const attention = onRetry !== undefined && signIns?.some(s => initRowFailed(s)) === true;
   // A running stage and the sign-ins being waited on are open and stay so; a failed one, or one with a sign-in to retry, opens on its own and folds on a click; a done one opens on a click.
   const canOpen = row.kind === "stage" && has && !live;
   const open = has && (live || (opened ?? (failed || attention)));
@@ -224,7 +224,7 @@ function BuildRow({ row, focus, signIns, onRetry, onCode }: { row: InitRow; focu
       {open && signIns !== undefined ? (
         <ul data-k="sign-ins" className="border-t border-border">
           {signIns.map(s => (
-            <SignInRow key={s.id} row={s} marked={marked(signIns)} onRetry={onRetry !== undefined && s.login === "not-signed-in" ? () => onRetry(s.tool ?? s.id) : undefined} onCode={s.finish === "code" ? code => onCode(s.tool ?? s.id, code) : undefined} />
+            <SignInRow key={s.id} row={s} marked={marked(signIns)} onRetry={onRetry !== undefined && initRowFailed(s) ? () => onRetry(s.tool ?? s.id) : undefined} onCode={s.finish === "code" ? code => onCode(s.tool ?? s.id, code) : undefined} />
           ))}
         </ul>
       ) : null}

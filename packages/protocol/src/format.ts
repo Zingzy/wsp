@@ -1320,7 +1320,8 @@ export const initRowUnrun = (state: string): boolean => ROW_UNRUN.has(state);
 const ROW_UNDONE: ReadonlySet<string> = new Set([INIT_ROW_STATES.failed, ...ROW_UNRUN]);
 
 /** Whether a row is a failure to show as one: the stage that failed, and the sign-in or the stage it folds into whose
- * sign-in ran out, which must never wear a tick. */
+ * sign-in ran out, which must never wear a tick. The one answer to "this sign-in ran out", so the cross, the
+ * attention mark and the Retry keycap all read it and none of them spells it again. */
 export const initRowFailed = (row: Pick<InitRow, "state" | "login">): boolean => row.state === INIT_ROW_STATES.failed || row.login === "not-signed-in";
 
 /** Whether a row has ended: what the progress count and a section's count read. A sign-in answers from its outcome,
@@ -1446,8 +1447,8 @@ function signInStageState(signIns: readonly InitRow[]): Pick<InitRow, "state" | 
   if (signIns.some(r => r.state === SIGN_IN_OPEN_STATE)) return { state: SIGN_IN_OPEN_STATE };
   if (signIns.some(r => r.state === INIT_ROW_STATES.running)) return { state: INIT_ROW_STATES.running };
   if (!signIns.every(r => initRowOver(r))) return { state: signIns.every(r => r.state === INIT_ROW_STATES.waiting) ? INIT_ROW_STATES.waiting : INIT_ROW_STATES.running };
-  const ranOut = signIns.find(r => r.login === "not-signed-in");
-  if (ranOut !== undefined) return { state: ranOut.state, login: "not-signed-in" };
+  const ranOut = signIns.find(r => initRowFailed(r));
+  if (ranOut !== undefined) return { state: ranOut.state, login: ranOut.login };
   // A build that ended before it reached any of them signed none in, so the fold says so rather than done.
   if (signIns.every(r => r.state === INIT_ROW_STATES.skipped)) return { state: INIT_ROW_STATES.skipped };
   return { state: INIT_ROW_STATES.done };

@@ -100,8 +100,10 @@ export const InitRow = z.object({
   /** A sign-in's tool, the catalog's sign-in row id, so a client picks its mark without reading the row id. */
   tool: z.string().optional(),
   label: z.string(),
-  /** The state as a word the row prints, drawn for the computer the run reads: a copy on a Linux computer says
-   * copied from this computer. Nothing compares it. */
+  /** The state as a word the row prints. A sign-in's is drawn for the computer the run reads, so a copy on a Linux
+   * computer says copied from this computer, and nothing compares it: its outcome is the login below. Every other
+   * kind's word comes from the INIT_ROW_STATES table and the predicates compare it against that table, so wording
+   * one of those for a platform would break every count. */
   state: z.string(),
   /** A sign-in's outcome under its own name, which is what every client compares; the stage the sign-ins fold into
    * carries the name of the one that ran out. Absent on a row whose outcome is not in, and on every other kind. */
