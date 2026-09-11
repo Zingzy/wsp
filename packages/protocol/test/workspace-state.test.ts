@@ -228,7 +228,10 @@ describe("what a workspace's kind changes about its words", () => {
     expect(machineWord("cloud")).toBe(MACHINE_WSP_FORKS);
     expect(machineWord("local")).toBe(THIS_COMPUTER);
     expect(machineWord("ssh")).toBe(OVER_SSH);
-    expect(providerCannotRefusal("api", machineWord("cloud"), "be resized")).toBe("api is a machine wsp forks, and the provider it runs on cannot be resized");
+    // The machine is the subject of every action these sentences take, since each action is the machine's own verb
+    // phrase: the provider is where the road is missing, not the thing that would be resized or moved.
+    expect(providerCannotRefusal("api", machineWord("cloud"), "be resized")).toBe("api is a machine wsp forks, and it cannot be resized on the provider it runs on");
+    expect(providerCannotRefusal("api", machineWord("cloud"), "move to a newer image")).toBe("api is a machine wsp forks, and it cannot move to a newer image on the provider it runs on");
     for (const kind of ["cloud", "local", "ssh"] as const) expect(machineWord(kind)).not.toBe("");
     expect(new Set(["cloud", "local", "ssh"].map(k => machineWord(k as "cloud")))).toHaveLength(3);
   });

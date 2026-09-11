@@ -1855,9 +1855,10 @@ export function undrivenRefusal(name: string, machine: string, action: string): 
 /** The one sentence a workspace on a machine wsp does run refuses a verb with when the provider under it has no
  * road for that verb: the machine is wsp's to move, so the refusal names the provider's limit rather than telling a
  * person their fork is their own computer. Each verb reads its own capability, so what is missing is that verb's
- * road and nothing else about the machine. */
+ * road and nothing else about the machine. The machine stays the subject the action was written for, since every
+ * action is the machine's own verb phrase, and where the road is missing comes after it. */
 export function providerCannotRefusal(name: string, machine: string, action: string): string {
-  return `${name} is ${machine}, and the provider it runs on cannot ${action}`;
+  return `${name} is ${machine}, and it cannot ${action} on the provider it runs on`;
 }
 
 /** The row's line when a pause or a wake ran its deadline out, once and once more after the retry: which move, how

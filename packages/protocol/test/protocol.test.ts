@@ -5,7 +5,9 @@ import {
   Recipe,
   RecipeSource,
   Capabilities,
+  namesSize,
   PauseMode,
+  resizesMachines,
   GoldenVersion,
   DAEMON_ROOTS_PATH,
   MACHINE_LACKS_LINES,
@@ -73,6 +75,7 @@ import {
   foldThreads,
   NOTIFY_ME,
   WorkspaceListing,
+  WorkspaceSize,
   WorkspaceStatus,
   WorkspaceView,
 } from "../src/index.js";
@@ -563,6 +566,19 @@ describe("backend capabilities", () => {
     const { sizes: _s, ...noSizes } = full;
     expect(() => Capabilities.parse(noSizes)).toThrow();
     expect(() => Capabilities.parse({ ...full, sizes: [{ cpu: 2, memMb: 4096 }] })).toThrow();
+  });
+
+  it("the two readings a caller makes over these flags have one home each, so no gate and no button holds half a rule", () => {
+    const caps = { replacesMachine: true, resize: true };
+    // A resize is both halves of one road: the machine is replaced by a fresh fork of its image, and that one is
+    // asked for at a size the old was not made at. A provider missing either gives no resize.
+    expect(resizesMachines(caps)).toBe(true);
+    expect(resizesMachines({ ...caps, resize: false })).toBe(false);
+    expect(resizesMachines({ ...caps, replacesMachine: false })).toBe(false);
+    expect(resizesMachines({ replacesMachine: false, resize: false })).toBe(false);
+    // And whether a request asks for a size at all, which both roads that take one read: either half names one.
+    expect([namesSize({ cpu: 4 }), namesSize({ memMb: 8192 }), namesSize({ cpu: 4, memMb: 8192 })]).toEqual([true, true, true]);
+    expect([namesSize({}), namesSize(undefined), namesSize({ envs: { A: "1" } } as Partial<WorkspaceSize>)]).toEqual([false, false, false]);
   });
 
   it("pauseMode is optional and one of memory or disk; a boolean is refused", () => {

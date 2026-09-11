@@ -73,6 +73,18 @@ describe("each verb that moves a machine reads its own capability", () => {
     await rt.close();
   });
 
+  it("a provider offering a new size but standing no machine in refuses the resize: the gate reads the whole road", async () => {
+    // The half a caller cannot read off the size flag alone. The app's Upgrade button reads the same one reading,
+    // so nothing offers a size here that the confirm would refuse.
+    const { rt, backend } = await setup();
+    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    backend.capabilities.replacesMachine = false;
+    expect(backend.capabilities.resize).toBe(true);
+    await expect(rt.workspaces.upgrade(ws.id, { cpu: 4, memMb: 8192 })).rejects.toThrow(providerCannotRefusal("api", MACHINE_WSP_FORKS, "be resized"));
+    expect(backend.machines.map(m => m.killed)).toEqual([false]);
+    await rt.close();
+  });
+
   it("a provider short of one road refuses that verb alone: the other two run", async () => {
     const { rt, backend } = await setup();
     const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });

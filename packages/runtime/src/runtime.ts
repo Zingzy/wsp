@@ -183,7 +183,7 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { GUEST_WSP_BIN, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadWord, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct } from "@wsp/protocol";
-import { mcpServersBlocked, actionRefusal, forksNoMachines, kindWords, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState } from "@wsp/protocol";
+import { mcpServersBlocked, actionRefusal, forksNoMachines, kindWords, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
 import { realClock, type Clock } from "./clock.js";
@@ -1866,17 +1866,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (forksNoMachines(backendFor(kind).capabilities)) return NO_PROVIDER_LINE;
     return providerCannotRefusal(record.name, machineWord(kind), action);
   };
+  /** The one throw every gate below goes through, so a road that reads a pair of capabilities refuses in the same
+   * sentence as one reading a single flag. */
+  const refuseUnless = (entry: LiveWorkspace, able: boolean, action: string): void => {
+    if (!able) throw new Error(cannotLine(entry.record, action));
+  };
   /** The capability a verb reads before it runs: a machine whose capability is false refuses the verb. Each verb
    * names the capability its own move needs and never a neighbour's: a provider that copies a machine's disk but
    * whose forks boot cold takes a snapshot all the same. */
   const refuseCannot = (entry: LiveWorkspace, can: keyof Omit<Capabilities, "sizes" | "pauseMode">, action: string): void => {
-    if (backendFor(entry.record.kind).capabilities[can] !== true) throw new Error(cannotLine(entry.record, action));
+    refuseUnless(entry, backendFor(entry.record.kind).capabilities[can] === true, action);
   };
   /** Whether a kind's machines pause at all, which is all the runtime asks of the pause mode: the nap and the wake
    * refuse where no mode is declared, with the same sentence, and never read which mode it is. */
   const pauses = (kind: WorkspaceKind): boolean => backendFor(kind).capabilities.pauseMode !== undefined;
   const refusePauseless = (entry: LiveWorkspace, action: string): void => {
-    if (!pauses(entry.record.kind)) throw new Error(cannotLine(entry.record, action));
+    refuseUnless(entry, pauses(entry.record.kind), action);
   };
   /** Whether a workspace holds one of the account's machine slots: only a kind whose machines the provider can nap
    * does, the same fact the pause and wake refusals read, so this computer is never counted against the cap nor
@@ -3381,7 +3386,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       ...(spawned === undefined && o.agents !== undefined ? { agents: agentsFrom(undefined, o.agents) } : {}),
     };
     // Only an asked size is checked: the golden's own is what it was built at, whatever the provider offers today.
-    if ((o.cpu !== undefined || o.memMb !== undefined) && !offeredSize(backend.capabilities.sizes, record.size)) {
+    if (namesSize(o) && !offeredSize(backend.capabilities.sizes, record.size)) {
       throw Object.assign(new Error(sizeRefusal(sizeWord(record.size), backend.capabilities.sizes)), { kind: "invalid" });
     }
     const bind = (m: Machine): void => {
@@ -3777,12 +3782,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async upgrade(id, spec, origin) {
       const entry = await entryOf(id, origin);
-      // One verb, two moves, and each reads the road its own needs: a request naming a size is a resize, which needs
-      // the provider to stand a fresh machine in and to give that one a size the old was not made at; one naming
-      // none replaces the machine at the size it has, and needs the stand-in alone.
-      const resizing = spec?.cpu !== undefined || spec?.memMb !== undefined;
-      refuseCannot(entry, "replacesMachine", resizing ? "be resized" : "have its machine replaced");
-      if (resizing) refuseCannot(entry, "resize", "be resized");
+      // One verb, two moves, and each reads the road its own needs: a request naming a size is a resize, and reads
+      // the one thing that says a provider gives a machine a new size, which the button offering the size reads
+      // too; one naming none replaces the machine at the size it has, and needs the stand-in alone.
+      if (namesSize(spec)) refuseUnless(entry, resizesMachines(backendFor(entry.record.kind).capabilities), "be resized");
+      else refuseCannot(entry, "replacesMachine", "have its machine replaced");
       await entry.ws.upgrade(spec);
       followMachine(entry);
       entry.record.spec = {
