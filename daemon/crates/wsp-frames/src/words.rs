@@ -22,8 +22,7 @@ pub const PROC_SAMPLER_STARTED: &str = "proc sampler started";
 pub const PROC_SAMPLER_STOPPED: &str = "proc sampler stopped";
 
 /// The sentence the node daemon used before the road refusal covered the leave op too; no client matches on it now.
-pub const PLACE_LEAVE_ROAD_REFUSAL: &str =
-    "place.leave is answered only on the link this computer opened to its host; run wsp leave here to take this computer out of a wsp";
+/// What an inbound socket gets for the leave op and the machine ops: they are the link's alone.
 pub const NOT_ON_THIS_ROAD: &str = "not on this road";
 pub const NOT_ON_THIS_KIND: &str = "not on this kind";
 /// The link's fallback when a refusal frame carries no error; the host's own sentence rides it otherwise.
