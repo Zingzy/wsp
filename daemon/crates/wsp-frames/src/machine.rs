@@ -446,3 +446,71 @@ impl PreviewReach {
 pub struct MachineReachReply {
     pub reach: PreviewReach,
 }
+
+/// One snapshot as the store lists it: sizeBytes is the snapshot's own layer, never the chain under it, so storage
+/// sums honestly; parent is the snapshot the workspace was made from, null at a root.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotRow {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub size_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    #[serde(default, deserialize_with = "nullable", skip_serializing_if = "Option::is_none")]
+    pub parent: Option<Option<String>>,
+}
+
+/// A field that is absent, null or a value, kept apart: serde reads null as absent unless told otherwise.
+fn nullable<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Option<String>>, D::Error> {
+    Option::<String>::deserialize(d).map(Some)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TemplateStatus {
+    Building,
+    Ready,
+    Failed,
+}
+
+/// One template as the provider reports it; a promoted snapshot reads ready at once.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TemplateRow {
+    pub id: String,
+    pub name: String,
+    pub status: TemplateStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineSnapshotReply {
+    pub snapshot_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MachineSnapshotsReply {
+    pub snapshots: Vec<SnapshotRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachinePromoteReply {
+    pub template_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MachineTemplateReply {
+    pub template: TemplateRow,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MachineTemplatesReply {
+    pub templates: Vec<TemplateRow>,
+}

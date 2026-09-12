@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Verbs beside the daemon: run in the foreground, do one thing, exit. `runtime pull` fills the layer store the
-//! way a machine create will, so the fetch can be timed on a box by itself. `runtime create` and `runtime exec`
-//! are the fresh processes the daemon runs youki's clone in; `runtime init` is a workspace's first process.
+//! way a machine create will, so the fetch can be timed on a box by itself. `runtime ask` answers one machine
+//! frame from the runtime under a root, so a snapshot or a wake can be driven and timed on a box with nothing else
+//! running. `runtime create` and `runtime exec` are the fresh processes the daemon runs youki's clone in;
+//! `runtime init` is a workspace's first process.
 
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -28,6 +30,16 @@ pub(crate) enum RuntimeVerb {
         image: String,
         /// The runtime's root; the store lives under <root>/layers.
         #[arg(long, default_value = wsp_runtime::DEFAULT_ROOT, value_name = "dir")]
+        root: PathBuf,
+    },
+    /// One machine frame answered by the runtime under the root, as the daemon answers it on its link: the frame's
+    /// JSON without its id, the reply printed with the milliseconds the op took. Not for a root a daemon is serving,
+    /// which is why the root has no default: it is named on purpose every time.
+    Ask {
+        /// The frame: {"op":"machine.snapshot","machineId":"wsp-x","name":"v1","life":{"firstLife":true}}
+        frame: String,
+        /// The runtime root the frame is answered under; never the one a running daemon serves.
+        #[arg(long, value_name = "dir")]
         root: PathBuf,
     },
     /// youki's create for the bundle the daemon wrote under <root>/run/<id>; the daemon runs this as a fresh process.
@@ -65,6 +77,7 @@ pub(crate) fn run(verb: Verb) -> i32 {
                 1
             }
         },
+        Verb::Runtime { verb: RuntimeVerb::Ask { frame, root } } => linux::ask(&root, &frame),
         Verb::Runtime { verb: RuntimeVerb::Create { root, id } } => linux::create(&root, &id),
         Verb::Runtime { verb: RuntimeVerb::Exec { root, id, timeout_ms, cmd } } => linux::exec(&root, &id, cmd, timeout_ms),
         Verb::Runtime { verb: RuntimeVerb::Init { cmd } } => linux::init(&cmd),
@@ -77,6 +90,36 @@ mod linux {
     use std::time::Duration;
 
     use wsp_runtime::runtime::{helper_create, helper_exec, helper_failure_line, HELPER_FAILED};
+
+    pub(super) fn ask(root: &Path, frame: &str) -> i32 {
+        match answer(root, frame) {
+            Ok((reply, ms)) => {
+                println!("{reply}");
+                println!("{ms} ms");
+                0
+            }
+            Err(e) => {
+                eprintln!("runtime ask: {e}");
+                1
+            }
+        }
+    }
+
+    /// The frame under a fresh id, answered by the ops on a runtime of this process's own; the network's forwards
+    /// live on that runtime and end with the process.
+    fn answer(root: &Path, frame: &str) -> Result<(String, u128), Box<dyn std::error::Error>> {
+        let mut frame: serde_json::Value = serde_json::from_str(frame)?;
+        frame["id"] = serde_json::Value::from(1);
+        let exe = std::env::current_exe()?;
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+        runtime.block_on(async {
+            let ops = wsp_runtime::ops::Ops::open(root, exe)?;
+            ops.restore().await?;
+            let started = std::time::Instant::now();
+            let reply = ops.answer(Some(wsp_frames::RequestId::from(1)), &frame).await;
+            Ok((reply, started.elapsed().as_millis()))
+        })
+    }
 
     pub(super) fn create(root: &Path, id: &str) -> i32 {
         crate::score::for_workspace();
@@ -110,6 +153,11 @@ mod linux {
     use std::path::Path;
 
     const NOT_HERE: &str = "workspaces run on Linux alone";
+
+    pub(super) fn ask(_root: &Path, _frame: &str) -> i32 {
+        eprintln!("runtime ask: {NOT_HERE}");
+        1
+    }
 
     pub(super) fn create(_root: &Path, _id: &str) -> i32 {
         eprintln!("runtime create: {NOT_HERE}");
