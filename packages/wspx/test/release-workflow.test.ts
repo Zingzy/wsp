@@ -55,6 +55,10 @@ describe("the release workflow", () => {
       expect(job).toContain("needs: [draft, daemon]");
     }
     expect(npmJob).toContain("node packages/wspx/scripts/daemon-binary.mjs --check");
+    // The release is the one place the daemon binaries are required of a build: each job that builds sets the
+    // variable the stage reads, so a missing binary fails there and a checkout without one still builds.
+    for (const job of [macJob, linuxJob, npmJob]) expect(job).toContain('WSP_REQUIRE_DAEMON: "1"');
+    expect(workflow.split('WSP_REQUIRE_DAEMON: "1"').length - 1).toBe(3);
     expect(existsSync(join(repo, "packages/wspx/scripts/daemon-binary.mjs"))).toBe(true);
   });
 
