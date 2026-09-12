@@ -815,6 +815,70 @@ describe("wsp verbs over the host", () => {
     expect(io.errors).toEqual([]);
   });
 
+  it("a turn watched at a terminal shows its reply once: the prose as it streamed, ended on a line of its own, and the finished line under it carries no copy of it", async () => {
+    const held = heldAgent(false);
+    await restartHost({ claude: held.adapter });
+    await run("new", "alpha");
+    const io = captured();
+    io.isTTY = true;
+    io.sameScreen = true;
+    const ended = cli(["thread", "new", "--in", "alpha", "print the kernel version and nothing else", "--state", statePath], io, undefined, env);
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    const [row] = await rt.sessions.list();
+    held.release(0, "25.4.0");
+    expect(await ended).toBe(0);
+    expect(io.screen).toBe(`thread ${row!.threadId}\n25.4.0\ncompleted\n`);
+    expect(io.screen.split("25.4.0")).toHaveLength(2);
+    expect(io.screen.endsWith("\n")).toBe(true);
+    expect(io.lines).toEqual([`thread ${row!.threadId}`]);
+  });
+
+  it("a turn watched at a terminal that streamed no prose prints its reply once under the work it showed, since nothing on the screen carries it yet", async () => {
+    await restartHost({ claude: toolingAgent([{ toolName: "Bash", input: { command: "uname -r" }, output: "25.4.0" }], { status: "completed", text: "the kernel is 25.4.0" }) });
+    await run("new", "alpha");
+    const io = captured();
+    io.isTTY = true;
+    io.sameScreen = true;
+    expect(await cli(["thread", "new", "--in", "alpha", "print the kernel version and nothing else", "--state", statePath], io, undefined, env)).toBe(0);
+    const [row] = await rt.sessions.list();
+    expect(io.screen).toBe(`thread ${row!.threadId}\n$ uname -r\n25.4.0\nthe kernel is 25.4.0\ncompleted\n`);
+    expect(io.lines).toEqual([`thread ${row!.threadId}`, "the kernel is 25.4.0"]);
+  });
+
+  it("a turn whose stdout is a pipe prints the reply once, at the end, with the stream beside it the person's own view of the work", async () => {
+    const held = heldAgent(false);
+    await restartHost({ claude: held.adapter });
+    await run("new", "alpha");
+    const piped = starting("thread", "new", "--in", "alpha", "print the kernel version and nothing else");
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    const [row] = await rt.sessions.list();
+    held.release(0, "25.4.0");
+    expect(await piped.ended).toBe(0);
+    expect(piped.io.sameScreen).toBeUndefined();
+    expect(piped.io.lines).toEqual([`thread ${row!.threadId}`, "25.4.0"]);
+    expect(piped.io.streamed).toBe("25.4.0\ncompleted\n");
+  });
+
+  it("--json prints the turn's events and its one turn value, at a terminal as into a pipe, and writes no stream", async () => {
+    const held = heldAgent(false);
+    await restartHost({ claude: held.adapter });
+    await run("new", "alpha");
+    const io = captured();
+    io.isTTY = true;
+    io.sameScreen = true;
+    const ended = cli(["thread", "new", "--in", "alpha", "print the kernel version and nothing else", "--json", "--state", statePath], io, undefined, env);
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    const [row] = await rt.sessions.list();
+    held.release(0, "25.4.0");
+    expect(await ended).toBe(0);
+    const values = json(io) as { type?: string; kind?: string; result?: { text?: string } }[];
+    expect(values.map(v => v.type)).toEqual(["thread", "session.start", "session.delta", "session.done", undefined]);
+    expect(values[2]).toMatchObject({ kind: "text", text: "25.4.0" });
+    expect(values[3]!.result).toMatchObject({ status: "completed", text: "25.4.0" });
+    expect(values.at(-1)).toEqual({ threadId: row!.threadId, workspaceId: row!.workspaceId, harness: "claude", text: "25.4.0", outcome: "started" });
+    expect(io.streamed).toBe("");
+  });
+
   it("a turn's tool calls stream one muted line each as they land, what each answered behind it, and its end reads as the app's status line", async () => {
     await restartHost({
       claude: toolingAgent(

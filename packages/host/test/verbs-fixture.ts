@@ -20,6 +20,9 @@ export interface Captured extends CliIO {
   lines: string[];
   errors: string[];
   streamed: string;
+  /** Everything the run wrote, in the order it wrote it, the way one terminal shows both streams: the only reading
+   * where a line printed on one stream landing mid-sentence on the other can be seen at all. */
+  screen: string;
 }
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
@@ -28,9 +31,19 @@ export function captured(): Captured {
     lines: [],
     errors: [],
     streamed: "",
-    log: l => io.lines.push(l),
-    error: l => io.errors.push(l),
-    stream: t => (io.streamed += t),
+    screen: "",
+    log: l => {
+      io.lines.push(l);
+      io.screen += `${l}\n`;
+    },
+    error: l => {
+      io.errors.push(l);
+      io.screen += `${l}\n`;
+    },
+    stream: t => {
+      io.streamed += t;
+      io.screen += t;
+    },
     ask: noPrompt,
     askSecret: noPrompt,
   };

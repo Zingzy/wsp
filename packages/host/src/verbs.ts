@@ -1512,12 +1512,16 @@ const JOINED: Record<Exclude<SessionStartOutcome, "started">, (picks: Picks) => 
 /** A turn's stderr as a person watching it reads it: the reply's prose as it arrives, and a quiet line of its own
  * for each tool call, for what the call answered and for the turn's own end, so a turn that runs commands for
  * minutes shows work rather than silence. A line that lands mid-sentence breaks the sentence first; nothing is
- * redrawn, since the stream may be a file. */
-function turnStream(ctx: VerbContext): { text(t: string): void; line(l: string): void } {
+ * redrawn, since the stream may be a file. The reply is one turn's text written once: `reply` hands the stdout
+ * print the finished text only where the stream has not already put it in front of the same person, and closes the
+ * streamed prose on a line of its own either way, so the lines under it start where they read. */
+function turnStream(ctx: VerbContext): { text(t: string): void; line(l: string): void; reply(text: string | undefined): string | undefined } {
   let atLineStart = true;
+  let streamedProse = false;
   return {
     text: t => {
       if (t === "") return;
+      streamedProse = true;
       ctx.out.stream(t);
       atLineStart = t.endsWith("\n");
     },
@@ -1525,15 +1529,23 @@ function turnStream(ctx: VerbContext): { text(t: string): void; line(l: string):
       ctx.out.stream(`${atLineStart ? "" : "\n"}${ctx.io.muted?.(l) ?? l}\n`);
       atLineStart = true;
     },
+    reply: text => {
+      if (!streamedProse || ctx.io.sameScreen !== true) return text;
+      if (!atLineStart) ctx.out.stream("\n");
+      atLineStart = true;
+      return undefined;
+    },
   };
 }
 
-/** The verbs' way through a turn: text, the tool calls behind it and what each answered stream to stderr as they
- * arrive, the last message is printed on stdout when the reply is complete, with --json every event of the turn up
- * to its done is printed instead; a turn that did not complete is the verb's failure, in the harness's words. */
 /** The first line a thread's opening prints: its id, and where it went when no workspace was named. */
 const openedThreadLine = (threadId: string, opened: ((threadId: string) => string) | undefined): string => (opened === undefined ? `thread ${threadId}` : opened(threadId));
 
+/** The verbs' way through a turn: text, the tool calls behind it and what each answered stream to stderr as they
+ * arrive, and the reply is read once. Where the stream is the person's own screen the streamed prose is that copy
+ * and stdout adds only the lines around it; where stdout parts from the stream it carries the finished text whole,
+ * with --json every event of the turn up to its done instead; a turn that did not complete is the verb's failure,
+ * in the harness's words. */
 async function followVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, announce: boolean, picks: Picks = {}, opened?: (threadId: string) => string): Promise<Turn> {
   const stream = turnStream(ctx);
   const turn = await follow(client, start, "cli", {
@@ -1543,7 +1555,7 @@ async function followVerb(ctx: VerbContext, client: HostClient, start: Record<st
       if (t.outcome !== "started") ctx.io.error(JOINED[t.outcome](picks));
     },
     event: e => {
-      ctx.out.emit(e, e.type === "session.done" ? e.result.text : undefined);
+      ctx.out.emit(e, e.type === "session.done" ? stream.reply(e.result.text) : undefined);
       if (e.type === "session.start" && e.afterCut === true) ctx.io.error(AFTER_CUT_LINE);
       // The person's turn as the transcript keeps it: one bracket per image, since a terminal draws no pixels.
       if (e.type === "session.start") for (const image of e.attachments ?? []) stream.line(imageLine(image));
