@@ -78,6 +78,15 @@ async fn a_wrong_flag_prints_the_usage_line_and_exits_2() {
 }
 
 #[tokio::test]
+async fn runtime_ask_names_its_root_on_purpose_or_not_at_all() {
+    // A frame that is not JSON, so nothing past the flags could run whatever the root: the refusal is the flag's.
+    let out = Command::new(BIN).args(["runtime", "ask", "not a frame"]).output().await.unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("--root"), "{stderr}");
+}
+
+#[tokio::test]
 async fn refuses_to_start_without_a_token_file_and_says_so() {
     let dir = tempfile::tempdir().unwrap();
     // Spawned and bounded rather than awaited outright: a daemon that wrongly started would run for good.

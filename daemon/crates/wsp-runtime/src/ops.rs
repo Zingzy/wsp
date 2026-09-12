@@ -2,7 +2,11 @@
 //! Every machine op on the link, answered as the Docker backend on a place answers them, so the host's link
 //! backend needs no change: the same handles, rows and results, and every refusal as `{ ok: false, error, kind,
 //! status }` with `kind: missing` for a workspace nothing here knows. A workspace is a record under the run
-//! directory, a container youki made from the store's layers, its cgroup, and its network.
+//! directory, a container youki made from the store's layers, its cgroup, and its network. Idle means stopped: a
+//! pause kills the processes and takes the network down, its upper directory stays as the saved layer, and the
+//! wake boots from it with the same id, address and forwards; a workspace labelled to keep running is frozen
+//! instead. A snapshot commits the upper directory to the store under a name, and a template is a name over a
+//! snapshot's chain; a fork boots from either as from an image.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -19,18 +23,20 @@ use tokio::sync::Mutex;
 use wsp_frames::{
     BackendFacts, BackendPricing, BaseTemplates, Capabilities, DaemonErrorResponse, DaemonSupervisor, ExecResult, Lifecycle,
     LifecycleBudgets, MachineAnswersReply, MachineCounts, MachineErrorKind, MachineExecReply, MachineHandle, MachineHandleReply,
-    MachineKind, MachineLinkRequest, MachineListReply, MachineListRow, MachineOp, MachineReachReply, MachineRoads, MachineSeen,
-    MachineShape, MachineShapeReply, MachineSizeOffer, MachineSpec, MachineState, MachineStateReply, PauseMode, PlaceCapacity, PlaceImage,
-    PreviewReach, Reply, RequestId, SnapshotStoragePricing, WorkspaceSize,
+    MachineKind, MachineLinkRequest, MachineListReply, MachineListRow, MachineOp, MachinePromoteReply, MachineReachReply, MachineRoads,
+    MachineSeen, MachineShape, MachineShapeReply, MachineSizeOffer, MachineSnapshotReply, MachineSnapshotsReply, MachineSpec, MachineState,
+    MachineStateReply, MachineTemplateReply, MachineTemplatesReply, PauseMode, PlaceCapacity, PlaceImage, PreviewReach, Reply, RequestId,
+    SnapshotRow, SnapshotStoragePricing, TemplateRow, TemplateStatus, WorkspaceSize,
 };
 
 use crate::bundle::{self, Config, Init, Layout, Workspace};
-use crate::fetch::{self, Client, Reference};
+use crate::fetch::{self, Client, Digest, Reference};
 use crate::freeze;
 use crate::net::{self, Net};
 use crate::profile;
 use crate::runtime::{self, Runtime, Status};
-use crate::store::{self, Store, Swept};
+use crate::snapshot;
+use crate::store::{self, Chain, Snapshot, Store, Swept};
 use crate::{answer_machine_op, no_backend_refusal};
 
 /// The id of the offer this computer serves, which the host stamps on every fork made here.
@@ -50,6 +56,13 @@ pub const EXEC_ENV: &str = "export HOME=/root USER=root";
 pub const DAEMON_LISTENING_CHECK: &str = "(exec 3<>/dev/tcp/127.0.0.1/7070) 2>/dev/null";
 /// The label every workspace wears, so a listing is only ours.
 pub const WSP_LABEL: &str = "wsp";
+/// The label and its value on a workspace that must keep what its processes hold: a pause freezes it instead of
+/// stopping it, which is what a pinned port or a service inside asks for.
+pub const IDLE_LABEL: &str = "wsp.idle";
+pub const IDLE_FREEZE: &str = "freeze";
+/// The repository a promoted snapshot's template id sits in, as the Docker backend tags one: `wsp/<name>:template`.
+pub const TEMPLATE_REPO: &str = "wsp";
+pub const TEMPLATE_TAG: &str = "template";
 const SIZES: [(f64, u64); 2] = [(2.0, 4096), (4.0, 8192)];
 const WAKE_ATTEMPTS: u32 = 1;
 const DAEMON_ANSWERS_MS: u64 = 30_000;
@@ -93,6 +106,8 @@ impl fmt::Display for OpError {
         f.write_str(&self.message)
     }
 }
+
+impl std::error::Error for OpError {}
 
 impl From<runtime::Error> for OpError {
     fn from(e: runtime::Error) -> OpError {
@@ -160,7 +175,9 @@ pub struct Ops {
     store: Arc<Store>,
     runtime: Runtime,
     net: Net,
-    /// One pull at a time: two creates of one image would append to the same partial blob.
+    /// One pull, commit or sweep at a time, and a create from the resolve of its chain to the record that holds
+    /// it: two pulls of one image would append to the same partial blob, and a sweep between a resolve and the
+    /// record would take a layer the boot is about to mount.
     pulls: Mutex<()>,
     facts: BoxFacts,
     swept: Swept,
@@ -177,10 +194,11 @@ impl Ops {
     pub fn open(root: &Path, exe: PathBuf) -> Result<Ops, store::Error> {
         let layout = Layout::new(root);
         let store = Store::open(root)?;
-        let swept = store.sweep()?;
         for dir in [layout.run(), layout.state()] {
             fs::create_dir_all(&dir).map_err(|source| store::Error::Io { path: dir.clone(), source })?;
         }
+        let held = held_chains(&layout).map_err(|e| store::Error::Record { path: layout.run(), detail: e.message })?;
+        let swept = store.sweep(&held)?;
         let runtime = Runtime::new(root, exe);
         let stopped = mark_stopped(&layout).map_err(|e| store::Error::Record { path: layout.run(), detail: e.message })?;
         let running = running_ids(&layout).map_err(|e| store::Error::Record { path: layout.run(), detail: e.message })?;
@@ -249,22 +267,33 @@ impl Ops {
             }
             MachineOp::List { labels } => body(MachineListReply { machines: self.list(labels.as_ref())? }),
             MachineOp::Exec { machine_id, cmd, timeout_ms } => {
-                let record = self.record(&machine_id)?;
+                let record = self.running(&machine_id)?;
                 body(MachineExecReply { result: self.exec(&record.id, &cmd, None, deadline(timeout_ms)).await? })
             }
             MachineOp::Pause { machine_id } => {
                 let record = self.record(&machine_id)?;
-                let cgroup = self.live_cgroup(&record)?;
+                if !runtime::alive(&record.init) {
+                    return Err(OpError::plain(format!("workspace {} is already paused", record.id)));
+                }
+                let cgroup = self.layout.cgroup_dir(&record.id);
                 if freeze::frozen(&cgroup)? {
                     return Err(OpError::plain(format!("workspace {} is already paused", record.id)));
                 }
-                freeze::freeze(cgroup).await?;
-                self.runtime.set_status(&record.id, true)?;
+                if record.labels.get(IDLE_LABEL).is_some_and(|v| v == IDLE_FREEZE) {
+                    freeze::freeze(cgroup).await?;
+                    self.runtime.set_status(&record.id, true)?;
+                } else {
+                    self.stop(&record).await?;
+                }
                 body(Empty {})
             }
             MachineOp::Resume { machine_id } => {
                 let record = self.record(&machine_id)?;
-                let cgroup = self.live_cgroup(&record)?;
+                if !runtime::alive(&record.init) {
+                    self.wake(record).await?;
+                    return body(Empty {});
+                }
+                let cgroup = self.layout.cgroup_dir(&record.id);
                 if !freeze::frozen(&cgroup)? {
                     return Err(OpError::plain(format!("workspace {} is not paused", record.id)));
                 }
@@ -285,19 +314,19 @@ impl Ops {
                 })
             }
             MachineOp::Metrics { machine_id } => {
-                let record = self.record(&machine_id)?;
-                let cgroup = self.live_cgroup(&record)?;
+                let record = self.running(&machine_id)?;
+                let cgroup = self.layout.cgroup_dir(&record.id);
                 freeze::memory_current(&cgroup)?;
                 freeze::cpu_usage_usec(&cgroup)?;
                 body(Empty {})
             }
             MachineOp::DaemonAnswers { machine_id, timeout_ms } => {
-                let record = self.record(&machine_id)?;
+                let record = self.running(&machine_id)?;
                 let result = self.exec(&record.id, DAEMON_LISTENING_CHECK, None, deadline(timeout_ms)).await?;
                 body(MachineAnswersReply { answers: result.exit_code == 0 })
             }
             MachineOp::PutBytes { machine_id, path, upload_id, seq, last, data, timeout_ms } => {
-                let record = self.record(&machine_id)?;
+                let record = self.running(&machine_id)?;
                 self.put_bytes(&record.id, &path, &upload_id, seq, last, &data, deadline(timeout_ms)).await?;
                 body(Empty {})
             }
@@ -324,13 +353,46 @@ impl Ops {
                 self.record(&machine_id)?;
                 Err(OpError::plain("a workspace serves no signed upload URL; its files go in through the byte road"))
             }
-            MachineOp::Snapshot { .. } => Err(OpError::plain(no_backend_refusal("machine.snapshot"))),
-            MachineOp::DeleteSnapshot { .. } => Err(OpError::plain(no_backend_refusal("machine.deleteSnapshot"))),
-            MachineOp::ListSnapshots => Err(OpError::plain(no_backend_refusal("machine.listSnapshots"))),
-            MachineOp::PromoteSnapshot { .. } => Err(OpError::plain(no_backend_refusal("machine.promoteSnapshot"))),
-            MachineOp::GetTemplate { .. } => Err(OpError::plain(no_backend_refusal("machine.getTemplate"))),
-            MachineOp::ListTemplates => Err(OpError::plain(no_backend_refusal("machine.listTemplates"))),
-            MachineOp::DeleteTemplate { .. } => Err(OpError::plain(no_backend_refusal("machine.deleteTemplate"))),
+            // The disk is the same copy whatever the workspace has done since it booted, so the life it is handed
+            // changes nothing here, as it changes nothing for the Docker backend.
+            MachineOp::Snapshot { machine_id, name, life: _ } => {
+                let record = self.record(&machine_id)?;
+                let snapshot = self.snapshot(&record, &name).await?;
+                body(MachineSnapshotReply { snapshot_id: snapshot.id.to_string() })
+            }
+            MachineOp::DeleteSnapshot { snapshot_id } => {
+                let id = Digest::parse(&snapshot_id).map_err(|_| OpError::missing(format!("no such snapshot: {snapshot_id}")))?;
+                if !self.remove_and_sweep(move |store| store.remove_snapshot(&id)).await? {
+                    return Err(OpError::missing(format!("no such snapshot: {snapshot_id}")));
+                }
+                body(Empty {})
+            }
+            MachineOp::ListSnapshots => {
+                let snapshots = self.store.snapshots()?.into_iter().map(|s| self.snapshot_row(s)).collect::<Result<_, _>>()?;
+                body(MachineSnapshotsReply { snapshots })
+            }
+            MachineOp::PromoteSnapshot { snapshot_id, name } => {
+                let id = Digest::parse(&snapshot_id).map_err(|_| OpError::missing(format!("no such snapshot: {snapshot_id}")))?;
+                let snapshot = self.store.snapshot(&id)?.ok_or_else(|| OpError::missing(format!("no such snapshot: {snapshot_id}")))?;
+                let template_id = template_id(&name);
+                self.store.record_template(&template_id, &name, &snapshot)?;
+                body(MachinePromoteReply { template_id })
+            }
+            MachineOp::GetTemplate { template_id } => {
+                let template =
+                    self.store.template(&template_id)?.ok_or_else(|| OpError::missing(format!("no such template: {template_id}")))?;
+                body(MachineTemplateReply { template: template_row(&template) })
+            }
+            MachineOp::ListTemplates => {
+                body(MachineTemplatesReply { templates: self.store.templates()?.iter().map(template_row).collect() })
+            }
+            MachineOp::DeleteTemplate { template_id } => {
+                let id = template_id.clone();
+                if !self.remove_and_sweep(move |store| store.remove_template(&id)).await? {
+                    return Err(OpError::missing(format!("no such template: {template_id}")));
+                }
+                body(Empty {})
+            }
         }
     }
 
@@ -403,13 +465,16 @@ impl Ops {
     pub fn capacity(&self) -> Result<PlaceCapacity, OpError> {
         let mut counts = MachineCounts { running: 0, paused: 0 };
         let mut taken_mb = 0;
+        // A frozen workspace keeps every byte it holds and counts at its cap; a stopped one holds nothing.
         for record in self.records()? {
             match self.state_of(&record) {
                 MachineState::Gone => continue,
                 MachineState::Paused => counts.paused += 1,
                 MachineState::Running | MachineState::Starting => counts.running += 1,
             }
-            taken_mb += record.mem_mb.unwrap_or(0);
+            if runtime::alive(&record.init) {
+                taken_mb += record.mem_mb.unwrap_or(0);
+            }
         }
         let machine_mem_mb = self.facts.machine_mem_mb();
         let stat =
@@ -441,7 +506,7 @@ impl Ops {
         let image = spec.from_snapshot.clone().or_else(|| spec.template.clone()).unwrap_or_else(|| BASE_IMAGE.to_owned());
         let id = match &spec.idempotency_key {
             Some(key) => format!("wsp-{}", workspace_word(key)),
-            None => format!("wsp-{}", random_hex()),
+            None => format!("wsp-{}", store::random_word()),
         };
         let dir = self.layout.workspace(&id);
         // The directory is the claim: a second create under the same key answers the workspace the first one made.
@@ -465,66 +530,169 @@ impl Ops {
     }
 
     async fn build(&self, id: &str, image: &str, spec: &MachineSpec) -> Result<Workspace, OpError> {
-        let lowers = self.lowers_of(image).await?;
+        // Held until the record is on disk, which is what makes the sweep keep the chain: a delete of the snapshot
+        // or template the fork boots from waits here instead of taking the layer from under the mount.
+        let _one_at_a_time = self.pulls.lock().await;
+        let chain = self.resolve_chain(image).await?;
         let (cpu, mem_mb) = self.size_on_box(spec.cpu, spec.mem_mb);
         let hostname: String = id.chars().take(HOSTNAME_MAX).collect();
-        for dir in [self.layout.upper(id), self.layout.work(id), self.layout.rootfs(id)] {
-            fs::create_dir_all(&dir).map_err(|e| OpError::plain(format!("{}: {e}", dir.display())))?;
-        }
-        bundle::write_etc(&self.layout.etc(id), &hostname, None)?;
-        bundle::mount_rootfs(&lowers, &self.layout.upper(id), &self.layout.work(id), &self.layout.rootfs(id))?;
-        let mut args = vec![profile::INIT_PATH.to_owned(), "runtime".to_owned(), "init".to_owned(), "--".to_owned()];
-        args.extend(boot_cmd());
-        let envs = spec.envs.clone().unwrap_or_default();
-        let cgroup = self.layout.cgroup_name(id);
-        let config = Config {
-            hostname: &hostname,
-            args: &args,
-            envs: &envs,
-            cpu,
-            mem_mb,
-            cgroup: &cgroup,
-            init: self.runtime.exe(),
-            etc: &self.layout.etc(id),
-        };
-        bundle::write_json(&self.layout.config(id), &bundle::config_json(&config))?;
         let mut labels = BTreeMap::from([(WSP_LABEL.to_owned(), "1".to_owned())]);
         labels.extend(spec.labels.clone().unwrap_or_default());
-        self.runtime.create(id).await?;
-        let pid = self.runtime.init_pid(id)?.ok_or_else(|| OpError::plain(format!("workspace {id} was created without an init")))?;
-        let init = runtime::identity_of(pid)?;
-        let record = Workspace { id: id.to_owned(), hostname, image: image.to_owned(), labels, cpu, mem_mb, created_at: now_iso(), init };
-        bundle::write_json(&self.layout.record(id), &record)?;
-        let network = self.net.up(id, pid).await?;
+        let record = Workspace {
+            id: id.to_owned(),
+            hostname,
+            image: image.to_owned(),
+            chain,
+            labels,
+            envs: spec.envs.clone().unwrap_or_default(),
+            cpu,
+            mem_mb,
+            created_at: store::now_iso(),
+            init: Init { pid: 0, started: 0, boot_id: String::new() },
+        };
+        self.boot(record).await
+    }
+
+    /// The workspace's processes from its record: the overlay over its chain and its own upper directory, the
+    /// bundle, youki's create, the network, the start, and the forwards its record names. A first boot and a wake
+    /// are the same road; a wake finds the upper directory as the stop left it, with everything the workspace wrote.
+    async fn boot(&self, mut record: Workspace) -> Result<Workspace, OpError> {
+        let id = record.id.clone();
+        let lowers = self.lowers_of(&record.chain, &record.image)?;
+        for dir in [self.layout.upper(&id), self.layout.work(&id), self.layout.rootfs(&id)] {
+            fs::create_dir_all(&dir).map_err(|e| OpError::plain(format!("{}: {e}", dir.display())))?;
+        }
+        bundle::write_etc(&self.layout.etc(&id), &record.hostname, None)?;
+        bundle::mount_rootfs(&lowers, &self.layout.upper(&id), &self.layout.work(&id), &self.layout.rootfs(&id))?;
+        let mut args = vec![profile::INIT_PATH.to_owned(), "runtime".to_owned(), "init".to_owned(), "--".to_owned()];
+        args.extend(boot_cmd());
+        let cgroup = self.layout.cgroup_name(&id);
+        let config = Config {
+            hostname: &record.hostname,
+            args: &args,
+            envs: &record.envs,
+            cpu: record.cpu,
+            mem_mb: record.mem_mb,
+            cgroup: &cgroup,
+            init: self.runtime.exe(),
+            etc: &self.layout.etc(&id),
+        };
+        bundle::write_json(&self.layout.config(&id), &bundle::config_json(&config))?;
+        self.runtime.create(&id).await?;
+        let pid = self.runtime.init_pid(&id)?.ok_or_else(|| OpError::plain(format!("workspace {id} was created without an init")))?;
+        record.init = runtime::identity_of(pid)?;
+        bundle::write_json(&self.layout.record(&id), &record)?;
+        let network = self.net.up(&id, pid).await?;
         // The same inode the container has bound, so the line lands inside.
-        bundle::write_etc(&self.layout.etc(id), &record.hostname, Some(network.gateway))?;
-        freeze::forbid_swap(&self.layout.cgroup_dir(id))?;
-        self.runtime.start(id).await?;
+        bundle::write_etc(&self.layout.etc(&id), &record.hostname, Some(network.gateway))?;
+        freeze::forbid_swap(&self.layout.cgroup_dir(&id))?;
+        self.runtime.start(&id).await?;
+        self.net.restore(std::slice::from_ref(&id)).await?;
         Ok(record)
     }
 
-    /// The unpacked layers of the image, pulled into the store first where it lacks them.
-    async fn lowers_of(&self, name: &str) -> Result<Vec<PathBuf>, OpError> {
-        let _one_at_a_time = self.pulls.lock().await;
+    /// Idle means stopped: the processes are killed, youki's state and the cgroup go, the network's link and
+    /// listeners go, the overlay is detached. The upper directory, the record and the network record stay: they are
+    /// the saved layer and what the wake boots it with.
+    async fn stop(&self, record: &Workspace) -> Result<(), OpError> {
+        self.runtime.kill(&record.id, Some(&record.init)).await?;
+        self.net.stop(&record.id).await?;
+        bundle::unmount(&self.layout.rootfs(&record.id))?;
+        Ok(())
+    }
+
+    /// A stopped workspace booted again from its upper directory.
+    async fn wake(&self, record: Workspace) -> Result<Workspace, OpError> {
+        if !self.layout.upper(&record.id).is_dir() {
+            return Err(OpError::plain(format!("workspace {} has no saved layer to boot from", record.id)));
+        }
+        self.boot(record).await
+    }
+
+    /// The chain a name resolves to: an image, a template or a snapshot the store holds, else an image pulled into
+    /// the store under that name. Under the store lock, which the caller holds.
+    async fn resolve_chain(&self, name: &str) -> Result<Chain, OpError> {
         let store = Arc::clone(&self.store);
         let wanted = name.to_owned();
-        let image = tokio::task::spawn_blocking(move || -> Result<store::Image, store::Error> {
-            if let Some(image) = store.image(&wanted)? {
-                return Ok(image);
+        tokio::task::spawn_blocking(move || -> Result<Chain, store::Error> {
+            if let Some(chain) = store.chain_of(&wanted)? {
+                return Ok(chain);
             }
             let source = Reference::parse(&wanted)?;
-            Ok(store.pull(&wanted, &source, &mut Client::new())?.image)
+            Ok(store.pull(&wanted, &source, &mut Client::new())?.image.chain)
         })
         .await
-        .map_err(|e| OpError::plain(e.to_string()))??;
-        image
-            .chain
+        .map_err(|e| OpError::plain(e.to_string()))?
+        .map_err(OpError::from)
+    }
+
+    /// The unpacked layers of a chain, as the overlay takes them.
+    fn lowers_of(&self, chain: &Chain, name: &str) -> Result<Vec<PathBuf>, OpError> {
+        chain
             .layers
             .iter()
             .map(|digest| {
                 self.store.unpacked(digest).ok_or_else(|| OpError::plain(format!("layer {digest} of {name} is not unpacked in the store")))
             })
             .collect()
+    }
+
+    /// The upper directory committed to the store as a layer under the name, over the chain the workspace booted
+    /// from. A running workspace is held still by the freezer while the layer is read; one already frozen or
+    /// stopped is read as it is.
+    async fn snapshot(&self, record: &Workspace, name: &str) -> Result<Snapshot, OpError> {
+        let _one_at_a_time = self.pulls.lock().await;
+        let cgroup = self.layout.cgroup_dir(&record.id);
+        let hold = runtime::alive(&record.init) && !freeze::frozen(&cgroup)?;
+        if hold {
+            freeze::freeze(cgroup.clone()).await?;
+        }
+        let store = Arc::clone(&self.store);
+        let upper = self.layout.upper(&record.id);
+        let (name, workspace, from, base) = (name.to_owned(), record.id.clone(), record.image.clone(), record.chain.clone());
+        let committed = tokio::task::spawn_blocking(move || {
+            store.record_snapshot(&name, &workspace, &from, &base, |out| snapshot::write_layer(&upper, out))
+        })
+        .await
+        .map_err(|e| OpError::plain(e.to_string()));
+        if hold {
+            freeze::thaw(cgroup).await?;
+        }
+        Ok(committed??)
+    }
+
+    /// A record dropped and the store swept of what no record names and no workspace holds, both under the store
+    /// lock so a create resolving that record has finished, or has not begun, when it goes; the sweep runs off the
+    /// runtime thread and never beside a pull or a commit. Answers whether the record was there.
+    async fn remove_and_sweep(&self, remove: impl FnOnce(&Store) -> Result<bool, store::Error> + Send + 'static) -> Result<bool, OpError> {
+        let _one_at_a_time = self.pulls.lock().await;
+        let store = Arc::clone(&self.store);
+        let held = held_chains(&self.layout)?;
+        tokio::task::spawn_blocking(move || -> Result<bool, store::Error> {
+            if !remove(&store)? {
+                return Ok(false);
+            }
+            store.sweep(&held)?;
+            Ok(true)
+        })
+        .await
+        .map_err(|e| OpError::plain(e.to_string()))?
+        .map_err(OpError::from)
+    }
+
+    /// The row a snapshot lists as: its own layer's bytes, and the snapshot it was taken under when it was one.
+    fn snapshot_row(&self, snapshot: Snapshot) -> Result<SnapshotRow, OpError> {
+        let parent = match Digest::parse(&snapshot.from) {
+            Ok(id) => self.store.snapshot(&id)?.map(|_| snapshot.from.clone()),
+            Err(_) => None,
+        };
+        Ok(SnapshotRow {
+            id: snapshot.id.to_string(),
+            name: Some(snapshot.name),
+            size_bytes: snapshot.layer_bytes,
+            created_at: Some(snapshot.created_at),
+            parent: Some(parent),
+        })
     }
 
     async fn exec(&self, id: &str, cmd: &str, stdin: Option<Vec<u8>>, timeout: Duration) -> Result<ExecResult, OpError> {
@@ -606,6 +774,15 @@ impl Ops {
         bundle::read_record(&self.layout.record(id))?.ok_or_else(|| OpError::no_workspace(id))
     }
 
+    /// The record of a workspace whose init is the process it named; a stopped one has nothing to exec into.
+    fn running(&self, id: &str) -> Result<Workspace, OpError> {
+        let record = self.record(id)?;
+        if !runtime::alive(&record.init) {
+            return Err(OpError::plain(format!("workspace {} is stopped", record.id)));
+        }
+        Ok(record)
+    }
+
     fn records(&self) -> Result<Vec<Workspace>, OpError> {
         records_under(&self.layout)
     }
@@ -631,9 +808,9 @@ fn records_under(layout: &Layout) -> Result<Vec<Workspace>, OpError> {
     }
 }
 
-/// Every record whose init is not the process it named any more: its overlay is detached and youki's state
-/// removed, so no read goes through the stale pid; the run directory with its upper stays for the kill, or for the
-/// boot from it once that exists.
+/// Every record whose init is not the process it named any more and whose stop nobody asked for: its overlay is
+/// detached and youki's state removed, so no read goes through the stale pid; the run directory with its upper
+/// stays, and the wake boots from it. A workspace stopped on purpose left no state behind and is not named.
 fn mark_stopped(layout: &Layout) -> Result<Vec<String>, OpError> {
     let mut stopped = Vec::new();
     for record in records_under(layout)? {
@@ -644,10 +821,15 @@ fn mark_stopped(layout: &Layout) -> Result<Vec<String>, OpError> {
         let state = layout.state_of(&record.id);
         if state.exists() {
             fs::remove_dir_all(&state).map_err(|e| OpError::plain(format!("{}: {e}", state.display())))?;
+            stopped.push(record.id);
         }
-        stopped.push(record.id);
     }
     Ok(stopped)
+}
+
+/// The chains every workspace under the root booted from, running or stopped: the sweep keeps their layers.
+fn held_chains(layout: &Layout) -> Result<Vec<Chain>, OpError> {
+    Ok(records_under(layout)?.into_iter().map(|record| record.chain).collect())
 }
 
 /// The workspaces whose init is still the process their record names: created, running or frozen.
@@ -673,21 +855,15 @@ impl Ops {
             .collect())
     }
 
-    /// The workspace's cgroup, while its init is the process the record names; the path is the plain manager's and
-    /// never read off a pid.
-    fn live_cgroup(&self, record: &Workspace) -> Result<PathBuf, OpError> {
-        if !runtime::alive(&record.init) {
-            return Err(OpError::plain(format!("workspace {} has no process", record.id)));
-        }
-        Ok(self.layout.cgroup_dir(&record.id))
-    }
-
-    /// created reads starting, a frozen cgroup reads paused, a stopped workspace reads gone. A record whose init
-    /// is not the process it named reads gone before youki is asked, since youki reads any process on that pid as
-    /// the container.
+    /// created reads starting, a frozen cgroup reads paused, and a stopped workspace reads paused too: under a
+    /// disk pause a stop is a nap, as the Docker backend reads an exited container, and its upper directory is
+    /// what the wake boots. A record whose init is not the process it named is stopped before youki is asked,
+    /// since youki reads any process on that pid as the container; one whose upper directory is gone too is gone.
+    /// A live init whose youki state reads stopped, is missing or does not load is a workspace this daemon can
+    /// neither nap nor wake, and reads gone rather than a nap the resume could not do.
     pub fn state_of(&self, record: &Workspace) -> MachineState {
         if !runtime::alive(&record.init) {
-            return MachineState::Gone;
+            return if self.layout.upper(&record.id).is_dir() { MachineState::Paused } else { MachineState::Gone };
         }
         match self.runtime.status(&record.id) {
             Ok(Status::Creating | Status::Created) => MachineState::Starting,
@@ -728,18 +904,20 @@ pub fn workspace_word(key: &str) -> String {
     word.chars().take(128).collect()
 }
 
-fn random_hex() -> String {
-    let mut bytes = [0u8; 8];
-    let read = fs::File::open("/dev/urandom").and_then(|mut f| io::Read::read_exact(&mut f, &mut bytes));
-    if read.is_err() {
-        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-        bytes.copy_from_slice(&(nanos as u64 ^ u64::from(std::process::id())).to_le_bytes());
-    }
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+/// A template's id from the name it was promoted under, as the Docker backend tags one.
+pub fn template_id(name: &str) -> String {
+    format!("{TEMPLATE_REPO}/{}:{TEMPLATE_TAG}", workspace_word(name))
 }
 
-fn now_iso() -> String {
-    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+/// A promoted snapshot is durable the moment its record exists, so its template reads ready at once.
+fn template_row(template: &store::Template) -> TemplateRow {
+    TemplateRow {
+        id: template.id.clone(),
+        name: template.name.clone(),
+        status: TemplateStatus::Ready,
+        error: None,
+        created_at: Some(template.created_at.clone()),
+    }
 }
 
 /// A word in single quotes for sh.
@@ -871,11 +1049,38 @@ mod tests {
             serde_json::from_str(&ops.answer(Some(RequestId::from(3)), &serde_json::json!({ "id": 3, "op": "machine.list" })).await)
                 .unwrap();
         assert_eq!(listed, serde_json::json!({ "id": 3, "ok": true, "machines": [] }));
-        let later: Value = serde_json::from_str(
+        let none: Value = serde_json::from_str(
             &ops.answer(Some(RequestId::from(4)), &serde_json::json!({ "id": 4, "op": "machine.listSnapshots" })).await,
         )
         .unwrap();
-        assert_eq!(later["error"], "this computer's backend has no machine.listSnapshots");
+        assert_eq!(none, serde_json::json!({ "id": 4, "ok": true, "snapshots": [] }));
+        let none: Value = serde_json::from_str(
+            &ops.answer(Some(RequestId::from(5)), &serde_json::json!({ "id": 5, "op": "machine.listTemplates" })).await,
+        )
+        .unwrap();
+        assert_eq!(none, serde_json::json!({ "id": 5, "ok": true, "templates": [] }));
+        for (op, field, word) in [
+            ("machine.deleteSnapshot", "snapshotId", "snapshot"),
+            ("machine.promoteSnapshot", "snapshotId", "snapshot"),
+            ("machine.getTemplate", "templateId", "template"),
+            ("machine.deleteTemplate", "templateId", "template"),
+        ] {
+            let reply: Value = serde_json::from_str(
+                &ops.answer(Some(RequestId::from(6)), &serde_json::json!({ "id": 6, "op": op, field: "nothing", "name": "x" })).await,
+            )
+            .unwrap();
+            assert_eq!(
+                reply,
+                serde_json::json!({ "id": 6, "ok": false, "error": format!("no such {word}: nothing"), "kind": "missing", "status": 404 }),
+                "{op}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_template_id_is_the_docker_backends_tag_over_the_name() {
+        assert_eq!(template_id("dev"), "wsp/dev:template");
+        assert_eq!(template_id("My Golden/v2"), "wsp/my-golden-v2:template");
     }
 
     #[test]
