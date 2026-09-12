@@ -18,6 +18,10 @@ import { FACT, WHERE_WORDS } from "./format.js";
 import { absentOf, placeCpuWord, placeName } from "./places.js";
 
 const CELL = "font-mono text-xs tabular-nums text-foreground";
+/** The name column is the one that gives: it takes what the three fact columns and the menu leave, and cuts the
+ * name rather than pushing the table past the card it sits in. `max-w-0` is what makes a table cell yield at all,
+ * and the cell hides its own overflow so a state word narrower than its slot is cut rather than painted over Size. */
+const NAME_COLUMN = "w-full max-w-0";
 /** The one column the mock right-aligns, since a disk figure is read against the one above it. */
 const RIGHT = 2;
 
@@ -32,7 +36,7 @@ export function PlaceTable({ children, menu = true, k = "places-table" }: { chil
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             {PLACES_WORDS.columns.map((column, at) => (
-              <TableHead key={column} className={cn(at === RIGHT && "text-right")}>
+              <TableHead key={column} className={cn(at === 0 && NAME_COLUMN, at === RIGHT && "text-right")}>
                 {column}
               </TableHead>
             ))}
@@ -49,20 +53,24 @@ export function PlaceTable({ children, menu = true, k = "places-table" }: { chil
  * computer that is the default and is also away says both and no column moves when either word arrives.
  * The chevron, where the row opens, comes after them. */
 export function PlaceRow({ place, now, here = false, trail, menu, open, onToggle }: { place: PlaceView; now: number; /** Whether this is the computer the host runs on, which the list puts first. */ here?: boolean; /** The chevron after the state word, where the row opens. */ trail?: ReactNode; menu?: ReactNode; open?: boolean; onToggle?: () => void }) {
+  const name = placeName(place, here);
   // The one reading of a computer that is not answering, which the sidebar row, the pane and the composer read
-  // too: the slot beside the name holds the one word and the whole sentence rides its title.
+  // too: the slot beside the name holds the one word.
   const absent = absentOf(place, now, here);
+  // The whole of what the cut cell says, and the sentence the state slot has no room for beside the fact columns.
+  // A computer that is not answering is named by its own sentence, so the row does not say the name twice.
+  const title = [absent?.sentence ?? name, place.default ? WHERE_WORDS.default : ""].filter(word => word !== "").join(" ");
   return (
-    <TableRow data-place-row={place.id} {...(open === undefined ? {} : { "aria-expanded": open })} className={cn(onToggle !== undefined && "cursor-pointer")} onClick={onToggle}>
-      <TableCell>
+    <TableRow data-place-row={place.id} title={title} {...(open === undefined ? {} : { "aria-expanded": open })} className={cn(onToggle !== undefined && "cursor-pointer")} onClick={onToggle}>
+      <TableCell className={cn(NAME_COLUMN, "overflow-hidden")}>
         <span className="flex min-w-0 items-baseline gap-2">
-          <span className="truncate text-[13px] text-foreground">{placeName(place, here)}</span>
+          <span className="truncate text-[13px] text-foreground">{name}</span>
           {place.default ? (
-            <span className={FACT} data-k="place-default">
+            <span className={cn(FACT, "shrink-0")} data-k="place-default">
               {WHERE_WORDS.default}
             </span>
           ) : null}
-          <span className={FACT} data-k="place-state" {...(absent === null ? {} : { title: absent.sentence })}>
+          <span className={cn(FACT, "shrink-0")} data-k="place-state">
             {absent?.away ?? ""}
           </span>
           {trail}

@@ -110,6 +110,27 @@ describe("app shell", () => {
     expect(tabbar()).not.toBeNull();
   });
 
+  it("gives Settings the whole region right of the sidebar, and gives the panel back on the surface it was on", async () => {
+    await mountShell();
+    // On a surface of its own first, so what comes back is a chosen one and not the record's default.
+    act(() => useRightPanelStore.getState().open("ws_a", "machine"));
+    await settle();
+    expect(tabbar()).not.toBeNull();
+    const before = useRightPanelStore.getState().byWorkspaceId["ws_a"];
+    expect(before?.activeSurfaceId).toBeTruthy();
+    act(() => useStore.setState({ settingsOpen: true }));
+    // No panel and no tab strip beside Settings: the centre is the region, and nothing of the panel's is touched.
+    expect(tabbar()).toBeNull();
+    expect(document.querySelector("[data-right-panel-surface-content]")).toBeNull();
+    expect(useRightPanelStore.getState().byWorkspaceId["ws_a"]).toEqual(before);
+    // The toggle is held while Settings stands, so no press can move the panel behind it.
+    expect((screen.getByRole("button", { name: "Toggle right panel" }) as HTMLButtonElement).disabled).toBe(true);
+    act(() => useStore.setState({ settingsOpen: false }));
+    await settle();
+    expect(tabbar()).not.toBeNull();
+    expect(useRightPanelStore.getState().byWorkspaceId["ws_a"]).toEqual(before);
+  });
+
   it("resizes the right panel by its handle and persists the width", async () => {
     // jsdom has no layout, pointer capture or PointerEvent; the hook needs all three to run.
     Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get: () => 1400 });

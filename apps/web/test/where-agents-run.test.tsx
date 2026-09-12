@@ -5,14 +5,15 @@
 // event stream.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CODE_EXPIRED_LINE, CODE_GOOD_LINE, DEFAULT_PREFERENCES, PLACES_WORDS, doorPortHeldLine, type EventUnion, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
-import type { Api, InstallStage, SshLogin } from "../src/protocol/client.js";
+import { CODE_EXPIRED_LINE, CODE_GOOD_LINE, DEFAULT_PREFERENCES, PLACES_WORDS, doorPortHeldLine, placeAddSheetWord, type EventUnion, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
+import { makeApi, ProtocolClient, type Api, type InstallStage, type SshLogin } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { AddComputerSheet } from "../src/settings/AddComputerSheet.js";
 import { ADD_COMPUTER_WORDS, CONNECT_PROVIDER_WORDS } from "../src/settings/format.js";
 import { SettingsPage } from "../src/settings/SettingsPage.js";
 import { WhereAgentsRun } from "../src/settings/WhereAgentsRun.js";
 import { SettingsRow } from "../src/sidebar/SettingsRow.js";
+import { ScriptedSocket, type Frame } from "./scripted-socket.js";
 
 const NOW = Date.parse("2026-09-12T12:00:00.000Z");
 const DOOR: PlaceDoorView = { port: 4420, addresses: ["http://192.168.1.20:4420"] };
@@ -80,7 +81,13 @@ beforeEach(() => {
   useStore.setState({ api: null, places: [], workspaces: [], sessions: {}, addComputerOpen: false, settingsOpen: false, preferences: { ...DEFAULT_PREFERENCES, labs: false } });
 });
 
+/** The client a test built the app's own api from. Closed here however that test ended: one left behind redials
+ * for the rest of the file and answers frames a later test never asked for. */
+let live: ProtocolClient | undefined;
+
 afterEach(() => {
+  live?.close();
+  live = undefined;
   cleanup();
 });
 
@@ -96,14 +103,15 @@ describe("Where agents run", () => {
     expect(cells(rows[0]!)[0]).not.toContain("zingzy-mbp");
     expect(cells(rows[0]!)[0]).toContain("default");
     expect(cells(rows[0]!).slice(1)).toEqual(["8 cores · 16 GB".replace(/ /g, " "), "210 GB", "1 · agents only"]);
-    // One state slot says the silence, in the words every other surface says it in; the Workspaces cell keeps to
-    // what the computer may hold, which is a different question and used to be a second wording of this one.
+    // The table's slot holds the one word for the silence, in the words every other surface says it in; how long
+    // it has been away is on the row's title and in its detail. The Workspaces cell keeps to what the computer may
+    // hold, which is a different question and used to be a second wording of this one.
     expect(cells(rows[1]!)[0]).toContain("no answer");
     expect(cells(rows[1]!)[0]).not.toContain("offline");
     expect(cells(rows[1]!)[0]).not.toContain("2 h");
     expect(cells(rows[1]!).slice(1)).toEqual(["4 cores · 8 GB".replace(/ /g, " "), "91 GB", "1 · agents only"]);
-    // The whole sentence rides the slot, so the table and the sidebar row say one thing.
-    expect(rows[1]!.querySelector("[data-k='place-state']")?.getAttribute("title")).toBe("old-macbook is not answering; it connects on its own when it is on");
+    // The whole sentence rides the row's title, so the table and the sidebar row say one thing.
+    expect(rows[1]!.getAttribute("title")).toBe("old-macbook is not answering; it connects on its own when it is on");
   });
 
   it("keeps the default mark beside the name and the state word in the slot, so a default that is away says both", () => {
@@ -112,6 +120,22 @@ describe("Where agents run", () => {
     const row = screen.getAllByRole("row")[1]!;
     expect(row.querySelector("[data-k='place-default']")?.textContent).toBe("default");
     expect(row.querySelector("[data-k='place-state']")?.textContent).toBe("no answer");
+    expect(row.getAttribute("title")).toBe("This Mac is not answering; it connects on its own when it is on default");
+  });
+
+  it("gives the name column what the fact columns leave and cuts the name there, so the table never scrolls sideways", () => {
+    useStore.setState({ places: [here, laptop] });
+    render(<WhereAgentsRun now={NOW} />);
+    const head = screen.getAllByRole("columnheader");
+    const classes = (el: Element): string[] => el.className.split(" ");
+    expect(classes(head[0]!)).toEqual(expect.arrayContaining(["w-full", "max-w-0"]));
+    // The three fact columns stand at their content's width and never wrap.
+    for (const at of [1, 2, 3]) expect(classes(head[at]!)).not.toEqual(expect.arrayContaining(["w-full"]));
+    const row = screen.getAllByRole("row")[1]!;
+    const cell = within(row).getAllByRole("cell")[0]!;
+    expect(classes(cell)).toEqual(expect.arrayContaining(["w-full", "max-w-0"]));
+    expect(classes(cell.querySelector("span > span")!)).toContain("truncate");
+    for (const at of [1, 2, 3]) expect(classes(within(row).getAllByRole("cell")[at]!)).toContain("whitespace-nowrap");
   });
 
   it("stands a bar in each cell a computer has not reported yet, so nothing moves when it does", () => {
@@ -165,6 +189,22 @@ describe("the Add a computer sheet", () => {
     expect(closed).toBe(true);
   });
 
+  it("stands at the top right, 448 px wide, as tall as what it holds and capped at the window less its inset", async () => {
+    const fake = fakeApi();
+    useStore.setState({ api: fake.api, places: [here] });
+    render(<AddComputerSheet onClose={() => {}} now={() => NOW} />);
+    await waitFor(() => expect(document.querySelector("[data-k='add-computer']")).toBeTruthy());
+    const popup = document.querySelector("[data-k='add-computer']")!;
+    // self-start is what stops the popup stretching to the window's height; max-h-full is the cap it grows to.
+    expect(popup.className.split(" ")).toEqual(expect.arrayContaining(["self-start", "max-h-full", "max-w-md", "flex-col"]));
+    // The 16 px inset comes from the viewport's own padding, which is also what makes the cap the window less 32 px.
+    expect(popup.closest("[data-slot='sheet-viewport']")?.className.split(" ")).toEqual(expect.arrayContaining(["sm:p-4"]));
+    // The body scrolls inside that cap, and the footer sits directly under it with no spacer between.
+    const panel = popup.querySelector("[data-slot='sheet-panel']")!;
+    const scroller = panel.closest("[data-slot='scroll-area-viewport']")!.parentElement!;
+    expect(scroller.nextElementSibling).toBe(popup.querySelector("[data-slot='sheet-footer']"));
+  });
+
   it("says the code expired at its own moment and mints another, and moves nothing else", async () => {
     const fake = fakeApi();
     useStore.setState({ api: fake.api, places: [here] });
@@ -216,6 +256,25 @@ describe("a computer's own row", () => {
     expect(screen.getByText("wsp, your image and its workspace come off old-macbook, which is otherwise left as it is. The workspace's record and 2 threads leave this Mac. It is offline; what is on it is swept the next time it connects.")).toBeTruthy();
   });
 
+  it("hands a computer that is offline the one line to run on it by hand, and names what that line takes off", () => {
+    withWorkspaces();
+    render(<WhereAgentsRun now={NOW} />);
+    fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
+    fireEvent.click(document.querySelector("[data-k='place-detail'] [data-k='remove']")!);
+    expect(document.querySelector("[data-k='leave-line']")?.textContent).toBe(PLACES_WORDS.remove.leaveLine);
+    expect(screen.getByText(PLACES_WORDS.remove.leaveTakes)).toBeTruthy();
+  });
+
+  it("gives a computer that is answering no line to run by hand: the host sweeps it over the link", () => {
+    useStore.setState({ places: [here, { ...laptop, present: true }], workspaces: [], sessions: {} });
+    render(<WhereAgentsRun now={NOW} />);
+    fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
+    fireEvent.click(document.querySelector("[data-k='place-detail'] [data-k='remove']")!);
+    expect(screen.getByText("Remove old-macbook?")).toBeTruthy();
+    expect(document.querySelector("[data-k='leave-line']")).toBeNull();
+    expect(screen.queryByText(PLACES_WORDS.remove.leaveTakes)).toBeNull();
+  });
+
   it("says nothing of a record leaving for a computer that holds none, and takes it out on the host's own road", async () => {
     const removed: string[] = [];
     useStore.setState({ places: [here, laptop], workspaces: [], sessions: {}, api: { subscribe: () => () => {}, removePlace: async (id: string) => (removed.push(id), { removed: true, swept: [], dropped: [] }) } as unknown as Api });
@@ -245,37 +304,75 @@ describe("the ssh road of the sheet", () => {
     return fake;
   };
 
-  it("holds Add until a login is typed", async () => {
+  it("holds Add until a login is typed, drawn as the outline with its reason in the field's own slot", async () => {
     await openSheet({ addComputerOverSsh: async () => box } as unknown as Partial<Api>);
-    expect(document.querySelector("[data-k='ssh-add']")?.hasAttribute("disabled")).toBe(true);
+    const add = (): Element => document.querySelector("[data-k='ssh-add']")!;
+    expect(add().hasAttribute("disabled")).toBe(true);
+    expect(add().hasAttribute("data-held")).toBe(true);
+    expect(document.querySelector("[data-k='ssh-refusal']")?.textContent).toBe(ADD_COMPUTER_WORDS.ssh.loginFirst);
+    // Nothing hovers in a driven browser, so no reason rides a tooltip.
+    expect(document.querySelector("[data-slot='tooltip-trigger']")).toBeNull();
     fireEvent.change(document.querySelector("#add-computer-login")!, { target: { value: "root@65.21.4.12" } });
-    expect(document.querySelector("[data-k='ssh-add']")?.hasAttribute("disabled")).toBe(false);
+    expect(add().hasAttribute("disabled")).toBe(false);
+    expect(add().hasAttribute("data-held")).toBe(false);
+    expect(document.querySelector("[data-k='ssh-refusal']")?.textContent).toBe("");
   });
 
   it("holds Add on a wsp whose host cannot log in over ssh at all", async () => {
     await openSheet();
     fireEvent.change(document.querySelector("#add-computer-login")!, { target: { value: "root@65.21.4.12" } });
     expect(document.querySelector("[data-k='ssh-add']")?.hasAttribute("disabled")).toBe(true);
+    expect(document.querySelector("[data-k='ssh-add']")?.hasAttribute("data-held")).toBe(true);
+    expect(document.querySelector("[data-k='ssh-refusal']")?.textContent).toBe(ADD_COMPUTER_WORDS.ssh.noRoad);
   });
 
-  it("shows the installer's own stages while it runs, and the roads go", async () => {
+  /** The five lines of the plan, as they read at this moment: the words with the fact slot after them, and the
+   * state each line is in. */
+  const plan = (): [string | null, string | null][] => [...document.querySelectorAll("[data-k='plan'] [data-k='line']")].map(l => [l.textContent, l.getAttribute("data-state")]);
+  const WAITING: [string, string][] = [
+    [placeAddSheetWord("connect", "running"), "waiting"],
+    [placeAddSheetWord("node", "running"), "waiting"],
+    [`${placeAddSheetWord("wsp", "running")}${ADD_COMPUTER_WORDS.ssh.folder}`, "waiting"],
+    [placeAddSheetWord("service", "running"), "waiting"],
+    [placeAddSheetWord("join", "running"), "waiting"],
+  ];
+
+  it("stands the plan under the note before Add is pressed, in the sheet's own words with the folder in its slot", async () => {
+    await openSheet({ addComputerOverSsh: async () => box } as unknown as Partial<Api>);
+    expect(plan()).toEqual(WAITING);
+    // The note the plan stands under, and nothing between them.
+    expect(document.querySelector("[data-k='plan']")?.previousElementSibling?.textContent).toBe(ADD_COMPUTER_WORDS.ssh.note);
+  });
+
+  it("fills the same five lines in as the installer reports them, and the ones it has not reached stand waiting", async () => {
     let report: ((stage: InstallStage) => void) | undefined;
     await openSheet({ addComputerOverSsh: (_login: SshLogin, onStage: (stage: InstallStage) => void) => new Promise<PlaceView>(() => (report = onStage)) } as unknown as Partial<Api>);
+    const list = (): Element | null => document.querySelector("[data-k='plan']");
+    const before = list();
     fireEvent.change(document.querySelector("#add-computer-login")!, { target: { value: "root@65.21.4.12" } });
     fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
     await waitFor(() => expect(document.querySelector("[data-k='ssh-login']")).toBeTruthy());
+    // The press takes the fields away and leaves the list standing: the same element, still five lines.
+    expect(list()).toBe(before);
+    expect(plan()).toEqual(WAITING);
     act(() => {
-      report?.({ word: "connected · Ubuntu 24.04", state: "done" });
-      report?.({ word: "installing node 22", state: "done", fact: "18 s" });
-      report?.({ word: "installing wsp 0.2.0", state: "running" });
+      report?.({ step: "connect", word: "connected · Ubuntu 24.04", state: "done" });
+      report?.({ step: "node", word: "installing node 22", state: "done", fact: "18 s" });
+      report?.({ step: "wsp", word: "installing wsp 0.2.0", state: "running" });
     });
     expect(document.querySelector("[data-slot='segmented-control']")).toBeNull();
     expect(document.querySelector("[data-k='ssh-login']")?.textContent).toBe("root@65.21.4.12");
-    expect([...document.querySelectorAll("[data-k='lines'] [data-k='line']")].map(l => [l.textContent, l.getAttribute("data-state")])).toEqual([
+    expect(plan()).toEqual([
       ["connected · Ubuntu 24.04", "done"],
       ["installing node 2218 s", "done"],
       ["installing wsp 0.2.0", "running"],
+      [placeAddSheetWord("service", "running"), "waiting"],
+      [placeAddSheetWord("join", "running"), "waiting"],
     ]);
+    // A step reported again is that line moving on, never a second line for the same step.
+    act(() => report?.({ step: "wsp", word: "installing wsp 0.2.0", state: "done", fact: "9 s" }));
+    expect(plan()[2]).toEqual(["installing wsp 0.2.09 s", "done"]);
+    expect(plan()).toHaveLength(5);
   });
 
   it("reads the box as joined once the installer answers with it, and says it can run copies", async () => {
@@ -284,6 +381,67 @@ describe("the ssh road of the sheet", () => {
     fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
     await waitFor(() => expect(document.querySelector("[data-k='title']")?.textContent).toBe("hetzner joined"));
     expect(document.querySelector("[data-k='description']")?.textContent).toBe(ADD_COMPUTER_WORDS.joinedWithDocker);
+    expect(document.querySelector("[data-k='joined-table']")?.textContent).toContain("38 GB");
+  });
+
+  it("runs the whole road on the client this app builds: Add sends places.add and the stages that ride it draw, ending on the line that says the box is in", async () => {
+    ScriptedSocket.instances.length = 0;
+    ScriptedSocket.reply = (f: Frame) =>
+      f["op"] === "places.door" ? { id: f["id"], ok: true, door: DOOR } : f["op"] === "pair.issue" ? { id: f["id"], ok: true, code: "QW4K7PZ1", expiresAt: NOW + 600_000 } : f["op"] === "places.add" ? undefined : { id: f["id"], ok: true };
+    const client = (live = new ProtocolClient({ url: "ws://test", token: "tok", WebSocketCtor: ScriptedSocket as unknown as typeof WebSocket }));
+    await client.connect();
+    const sock = ScriptedSocket.instances[0]!;
+    useStore.setState({ api: makeApi(client), places: [here] });
+    render(<AddComputerSheet onClose={() => {}} now={() => NOW} />);
+    await waitFor(() => expect(screen.getByText(PLACES_WORDS.sheet.waiting)).toBeTruthy());
+    await toSsh();
+    fireEvent.change(document.querySelector("#add-computer-login")!, { target: { value: "root@65.21.4.12" } });
+    expect(document.querySelector("[data-k='ssh-add']")?.hasAttribute("disabled")).toBe(false);
+    fireEvent.keyDown(document.querySelector("#add-computer-login")!, { key: "Enter" });
+
+    await waitFor(() => expect(sock.frames("places.add").length).toBe(1));
+    const asked = sock.frames("places.add")[0]!;
+    expect(asked).toMatchObject({ address: "root@65.21.4.12", addId: expect.any(String) });
+    const addId = String(asked["addId"]);
+    const stage = (step: string, state: string, note?: string): void => {
+      sock.onmessage?.({ data: JSON.stringify({ type: "place.stage", addId, step, state, ...(note === undefined ? {} : { note }) }) });
+    };
+    await act(async () => {
+      stage("connect", "done", "Ubuntu 24.04");
+      stage("wsp", "done", "0.2.0");
+      stage("service", "done");
+      stage("join", "running");
+      await Promise.resolve();
+    });
+    expect(document.querySelector("[data-slot='segmented-control']")).toBeNull();
+    expect(document.querySelector("[data-k='ssh-login']")?.textContent).toBe("root@65.21.4.12");
+    // The plan's own five lines, the ones the installer has reached filled in and the one it has not standing.
+    expect([...document.querySelectorAll("[data-k='plan'] [data-k='line']")].map(l => [l.textContent, l.getAttribute("data-state")])).toEqual([
+      [`${placeAddSheetWord("connect", "done")}Ubuntu 24.04`, "done"],
+      [placeAddSheetWord("node", "running"), "waiting"],
+      [`${placeAddSheetWord("wsp", "done")}0.2.0`, "done"],
+      [placeAddSheetWord("service", "done"), "done"],
+      [placeAddSheetWord("join", "running"), "running"],
+    ]);
+
+    await act(async () => {
+      // The note the runtime really sends with a done join: the box's size is in the row above, and a line that
+      // carried it too would be cut from the right under its own check.
+      stage("join", "done", "docker yes");
+      sock.onmessage?.({ data: JSON.stringify({ id: asked["id"], ok: true, addId, place: box }) });
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(document.querySelector("[data-k='title']")?.textContent).toBe(PLACES_WORDS.sheet.joinedTitle("hetzner")));
+    const drawn = [...document.querySelectorAll("[data-k='plan'] [data-k='line']")];
+    // Still the five the plan stands at: the join step wears different words once it is over, and the line it was
+    // already on is the one that moves on rather than a second line arriving under it.
+    expect(drawn.map(l => [l.textContent, l.getAttribute("data-state")])).toEqual([
+      [`${placeAddSheetWord("connect", "done")}Ubuntu 24.04`, "done"],
+      [placeAddSheetWord("node", "running"), "waiting"],
+      [`${placeAddSheetWord("wsp", "done")}0.2.0`, "done"],
+      [placeAddSheetWord("service", "done"), "done"],
+      [`${placeAddSheetWord("join", "done")}docker yes`, "done"],
+    ]);
     expect(document.querySelector("[data-k='joined-table']")?.textContent).toContain("38 GB");
   });
 
@@ -302,6 +460,12 @@ describe("the ssh road of the sheet", () => {
     expect(document.querySelector("[data-k='ssh-refusal']")?.textContent).toContain(ADD_COMPUTER_WORDS.ssh.refusedFix);
     expect(document.querySelector("[data-k='pick-key']")).toBeNull();
     expect((document.querySelector("#add-computer-login") as HTMLInputElement).value).toBe("root@65.21.4.12");
+  });
+
+  it("keeps what ssh said and the fix under it inside the slot's two lines, so the note under them does not move", () => {
+    // Two lines of 51 characters at 12 px mono, which is what the 448 px sheet holds; the slot stands 36 px empty
+    // and a third line pushes everything under it down.
+    expect(`ssh refused the login (publickey). ${ADD_COMPUTER_WORDS.ssh.refusedFix}`.length).toBeLessThanOrEqual(102);
   });
 });
 

@@ -54,7 +54,7 @@ describe("Connect a provider", () => {
     expect(screen.getByText("Prices are read from the provider for a 2 vCPU, 4 GB workspace. Your key stays on this Mac.")).toBeTruthy();
   });
 
-  it("asks for a key in the picked provider's own words, and holds Save until one is pasted", async () => {
+  it("asks for a key in the picked provider's own words, and holds Save as the outline until one is pasted", async () => {
     mount(rowsWith(async () => {}));
     await settle();
     fireEvent.click(document.querySelector('[data-k="continue"]')!);
@@ -65,9 +65,16 @@ describe("Connect a provider", () => {
     expect(screen.getByText("API key")).toBeTruthy();
     expect(screen.queryByText("Box API key")).toBeNull();
     expect(document.querySelector('[data-k="where"]')?.textContent).toContain("Get one at ASCII");
-    expect(document.querySelector<HTMLButtonElement>('[data-k="save"]')?.disabled).toBe(true);
+    const save = (): HTMLButtonElement => document.querySelector<HTMLButtonElement>('[data-k="save"]')!;
+    expect(save().disabled).toBe(true);
+    expect(save().hasAttribute("data-held")).toBe(true);
+    // The reason stands in the field's own slot before any click, since nothing hovers a disabled keycap.
+    expect(document.querySelector('[data-k="key-refusal"]')?.textContent).toBe("paste the key first");
+    expect(document.querySelector('[data-slot="tooltip-trigger"]')).toBeNull();
     type("ascii_live_9f3k2mx0");
-    expect(document.querySelector<HTMLButtonElement>('[data-k="save"]')?.disabled).toBe(false);
+    expect(save().disabled).toBe(false);
+    expect(save().hasAttribute("data-held")).toBe(false);
+    expect(document.querySelector('[data-k="key-refusal"]')?.textContent).toBe("");
   });
 
   it("holds Save on a provider whose key has no road on the wire", async () => {

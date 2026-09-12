@@ -38,6 +38,7 @@ const EVERY: DaemonArgs = {
   linkQuietMs: 120,
   linkRefusedRetryMs: 600_000,
   linkBackoffMs: 60_000,
+  runtimeRoot: "/var/lib/wsp",
 };
 
 describe("wsp-daemon argv", () => {

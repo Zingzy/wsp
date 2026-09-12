@@ -16,6 +16,7 @@ import {
   PlaceJoinRequest,
   PlaceReport,
   joinAddressOf,
+  placeAddSheetWord,
   sentPairCode,
   shownPairCode,
   WORKSPACE_KIND_WORDS,
@@ -132,6 +133,17 @@ describe("the steps of an install on a computer over ssh", () => {
   it("has words for every one of them, so a step added is a step a person can read", () => {
     expect(Object.keys(PLACE_ADD_WORDS).sort()).toEqual([...PlaceAddStep.options].sort());
     for (const step of PlaceAddStep.options) expect(PLACE_ADD_WORDS[step].length).toBeGreaterThan(0);
+  });
+
+  it("says a step in the app's sheet as that sheet says it, a done one as the state it reached, and takes the terminal's word for the rest", () => {
+    expect(placeAddSheetWord("connect", "running")).toBe(PLACE_ADD_WORDS.connect);
+    expect(placeAddSheetWord("connect", "done")).toBe(PLACE_ADD_WORDS.connect);
+    expect(placeAddSheetWord("service", "running")).toBe("starting the agent under systemd");
+    expect(placeAddSheetWord("join", "running")).toBe("waiting for it to connect to this Mac");
+    // A line under a check reading as the wait it was in is the wrong word for a step that is over.
+    expect(placeAddSheetWord("join", "done")).toBe("connected to this Mac");
+    // What one line of the sheet's list holds at 12 px mono beside a check: a longer word is cut from the right.
+    for (const step of PlaceAddStep.options) for (const state of ["running", "done"] as const) expect(placeAddSheetWord(step, state).length).toBeLessThanOrEqual(51);
   });
 });
 
