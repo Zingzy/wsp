@@ -6,7 +6,7 @@
 // menus are built from.
 import { PauseIcon, PlayIcon, SquareIcon } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
-import { goneRefusal, machineWord, NO_REBUILD_NEEDED, threadForgetRefusal, undrivenRefusal, type HarnessCatalog, type SessionStatus, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { goneRefusal, machineWord, notAnsweringYet, threadForgetRefusal, undrivenRefusal, workspaceState, workspaceWord, type HarnessCatalog, type SessionStatus, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { fileActions, type FileVerbs } from "../src/actions/fileActions.js";
 import { FILE_WORDS, SIDEBAR_MODE_WORDS, TERMINAL_WORDS, THIS_COMPUTER_HINTS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
 import { NEW_LOCAL_ACTION, SIDEBAR_MODE_ACTION, sidebarActions, type SidebarTarget, type SidebarVerbs } from "../src/actions/sidebarActions.js";
@@ -89,7 +89,7 @@ describe("workspace actions", () => {
     actionById(actions, "theme").run();
     expect(verbs.pickLook).toHaveBeenCalledWith("ws_a", "theme");
     expect(actionById(actions, "fork").refusal).toBe("Running a copy of a workspace is not in the runtime yet; take a project snapshot in the Workspace tab and start a workspace from it");
-    expect(actionById(actions, "rebuild").refusal).toBe("This one answers, so nothing needs rebuilding; the rebuild is offered when a workspace stops answering");
+    expect(actionById(actions, "rebuild").refusal).toBe("This one is running, so nothing needs rebuilding; the rebuild is offered once a workspace is gone");
     expect(actionById(actions, "forget").refusal).toBe("Only a workspace whose computer is gone can be forgotten; this one is running");
   });
 
@@ -127,7 +127,9 @@ describe("workspace actions", () => {
     expect(actionById(gone, "open-browser").refusal).toBe(goneRefusal("preview"));
     const zombie = resolveActions(workspaceActions, workspace("unreachable", { reach: "zombie" }), verbs);
     expect(actionById(zombie, "rebuild").refusal).toBeNull();
-    expect(actionById(zombie, "forget").refusal).toBe("Only a workspace whose computer is gone can be forgotten; this one is unreachable");
+    // A zombie is a machine that answers nothing, so it is refused the forget in the words a machine that answers
+    // nothing is refused every road out of gone with.
+    expect(actionById(zombie, "forget").refusal).toBe(notAnsweringYet("forget"));
     const bare = resolveActions(workspaceActions, workspace("gone"), workspaceVerbs({ rebuild: undefined, forget: undefined }));
     expect(actionById(bare, "rebuild").refusal).toBe("This client cannot rebuild workspaces");
     expect(actionById(bare, "forget").refusal).toBe("This client cannot forget workspaces");
@@ -211,8 +213,42 @@ describe("workspace actions", () => {
     // The wake stands beside it: the fault is the provider's and may pass, so nothing takes the other road away.
     expect(actionById(actions, "phase").refusal).toBeNull();
     expect(actionById(actions, "phase").buttonWord).toBe("Wake");
-    // The same machine before its wake ran out is refused the rebuild, in the sentence every surface refuses with.
-    expect(actionById(resolveActions(workspaceActions, workspace("paused"), workspaceVerbs()), "rebuild").refusal).toBe(NO_REBUILD_NEEDED);
+    // The same machine before its wake ran out is refused the rebuild, in the word its own row shows.
+    expect(actionById(resolveActions(workspaceActions, workspace("paused"), workspaceVerbs()), "rebuild").refusal).toBe(
+      "This one is paused, so nothing needs rebuilding; the rebuild is offered once a workspace is gone",
+    );
+  });
+
+  it("a workspace that is not answering says one thing in the rebuild's reason and the forget's, and the state word its row shows", () => {
+    const actions = resolveActions(workspaceActions, workspace("unreachable"), workspaceVerbs());
+    const rebuild = actionById(actions, "rebuild").refusal;
+    const forget = actionById(actions, "forget").refusal;
+    // A person reads these four rows apart in one list. The rebuild used to call the machine one that answers while
+    // the forget and the row beneath both called it unreachable, and a list that says both is a list nobody
+    // believes.
+    expect(rebuild).toBe("This one is not answering yet; the rebuild is offered once it is gone");
+    expect(forget).toBe("This one is not answering yet; the forget is offered once it is gone");
+    expect(rebuild).not.toContain("answers, so nothing");
+    // The state half is one string for both, and the road each names is the only thing that differs.
+    const half = (line: string) => line.split("; ")[0];
+    expect(half(forget!)).toBe(half(rebuild!));
+    // And it is the state the row shows for the same workspace.
+    expect(workspaceWord(workspaceState(workspace("unreachable")))).toBe("Unreachable");
+    // A machine that does answer says so in the word its row shows, in both rows.
+    expect(actionById(resolveActions(workspaceActions, workspace("running"), workspaceVerbs()), "rebuild").refusal).toBe(
+      "This one is running, so nothing needs rebuilding; the rebuild is offered once a workspace is gone",
+    );
+    expect(actionById(resolveActions(workspaceActions, workspace("running"), workspaceVerbs()), "forget").refusal).toBe(
+      "Only a workspace whose computer is gone can be forgotten; this one is running",
+    );
+    // A paused machine does not answer either. The forget beside it and the row under both read Paused, and the
+    // rebuild was the last row in that list still calling it a machine that answers.
+    const pausedActions = resolveActions(workspaceActions, workspace("paused"), workspaceVerbs());
+    expect(actionById(pausedActions, "rebuild").refusal).toBe(
+      "This one is paused, so nothing needs rebuilding; the rebuild is offered once a workspace is gone",
+    );
+    expect(actionById(pausedActions, "forget").refusal).toBe("Only a workspace whose computer is gone can be forgotten; this one is paused");
+    expect(workspaceWord(workspaceState(workspace("paused")))).toBe("Paused");
   });
 
   it("the row buttons' labels name the workspace, and the keybindings come from the one table", () => {

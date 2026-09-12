@@ -10,7 +10,7 @@ import { PLACE_KIND_WORDS, THIS_COMPUTER_WORD, placeName, placeOf } from "../set
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
 import { formatRelativeTimeLabel } from "../lib/timestampFormat.js";
-import { useStatus, useWorkspace } from "../protocol/store.js";
+import { usePlaces, useStatus, useWorkspace } from "../protocol/store.js";
 import { formatWorkingDurationLabel, type ThreadStatusPill } from "./Sidebar.logic.js";
 
 export const NEW_THREAD_SHORTCUT = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new");
@@ -200,8 +200,20 @@ export function whereWord(project: Pick<SidebarProjectSnapshot, "status" | "work
 export function whereRuns(places: readonly PlaceView[], project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string {
   const at = placeOf(places, project.workspace);
   if (at === undefined) return whereWord(project);
-  if (at === places[0]) return THIS_COMPUTER_WORD;
-  return `${placeName(at)} · ${PLACE_KIND_WORDS[at.kind]}`;
+  const name = nameOfPlace(places, at);
+  return at === places[0] ? name : `${name} · ${PLACE_KIND_WORDS[at.kind]}`;
+}
+
+/** What one row of the places list is called inside a sentence: the computer the host runs on says so in the words
+ * a sentence says it in, and every other row carries the name it reported. */
+const nameOfPlace = (places: readonly PlaceView[], at: PlaceView): string => (at === places[0] ? THIS_COMPUTER_WORD : placeName(at));
+
+/** The same name with nothing after it, for a sentence that has to call the computer something and has no room to
+ * say what kind of row it is: a person waiting on a machine is waiting on the name their own list shows, never on
+ * a machine id or on the kind's word. */
+export function computerName(places: readonly PlaceView[], project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string {
+  const at = placeOf(places, project.workspace);
+  return at === undefined ? whereWord(project) : nameOfPlace(places, at);
 }
 
 /** The same word for a surface that holds the workspace's id and no snapshot: the record and its status off the
@@ -212,6 +224,15 @@ export function useWhereWord(workspaceId: string): string {
   const workspace = useWorkspace(workspaceId);
   const status = useStatus(workspaceId);
   return workspace === null ? workspaceId : whereWord({ workspace, status });
+}
+
+/** The computer's name off the store for the same kind of surface, so the sentence a composer holds names the
+ * machine the row beside it names. */
+export function useComputerName(workspaceId: string): string {
+  const places = usePlaces();
+  const workspace = useWorkspace(workspaceId);
+  const status = useStatus(workspaceId);
+  return workspace === null ? workspaceId : computerName(places, { workspace, status });
 }
 
 /** The words a thread row's meta line carries after the agent's mark, in the order it draws them. A thread a

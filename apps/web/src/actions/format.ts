@@ -4,7 +4,7 @@
 // sentence for why it cannot run right now. Every surface reads these, so a
 // menu, a palette row and a button never say two things about one action.
 import { agentName } from "@wsp/catalog";
-import { actionRefusal, goneRefusal, isBilling, keepsRename, threadForgetRefusal, workspaceWord, type HarnessCatalog, type SessionRenameOutcome, type SidebarMode, type WorkspaceState } from "@wsp/protocol";
+import { actionRefusal, goneRefusal, isBilling, keepsRename, notAnsweringYet, threadForgetRefusal, workspaceWord, type HarnessCatalog, type SessionRenameOutcome, type SidebarMode, type WorkspaceState } from "@wsp/protocol";
 import { MAX_TERMINALS_PER_GROUP } from "../terminal/groups.js";
 
 export const WORKSPACE_WORDS = {
@@ -120,8 +120,17 @@ export const CLIENT_CANNOT_RENAME_WORKSPACE = "This client cannot rename workspa
 export const CLIENT_CANNOT_LOOK = "This client cannot set a workspace's theme or icon";
 export const NO_WORKSPACE_FORK = "Running a copy of a workspace is not in the runtime yet; take a project snapshot in the Workspace tab and start a workspace from it";
 
+/** Why a road that waits on the machine being gone is not offered yet, for the two rows that are such roads: the
+ * rebuild and the forget. They sit in one list, so both read the one state and say it in the one word the row
+ * under them shows; each names its own road in the second half, which is all that differs between them. */
+export function goneRoadRefusal(state: WorkspaceState, road: "rebuild" | "forget"): string {
+  if (state === "unreachable") return notAnsweringYet(road);
+  const word = workspaceWord(state).toLowerCase();
+  return road === "rebuild" ? `This one is ${word}, so nothing needs rebuilding; the rebuild is offered once a workspace is gone` : `Only a workspace whose computer is gone can be forgotten; this one is ${word}`;
+}
+
 export function forgetRefusal(state: WorkspaceState): string | null {
-  return state === "gone" ? null : `Only a workspace whose computer is gone can be forgotten; this one is ${workspaceWord(state).toLowerCase()}`;
+  return state === "gone" ? null : goneRoadRefusal(state, "forget");
 }
 
 export const openTerminalRefusal = (state: WorkspaceState): string | null => (state === "gone" ? goneRefusal("open a terminal") : null);
