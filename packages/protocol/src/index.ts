@@ -416,6 +416,11 @@ export const WorkspaceView = z.object({
    * workspace a person made. The root is what the machine cap counts against. */
   parentThreadId: z.string().optional(),
   rootThreadId: z.string().optional(),
+  /** Which provider this workspace's machine was forked at, by the id that provider's own module carries in the
+   * host's registry (`solari`, `box`, `docker`). The runtime stamps it, since the host is the one that knows which
+   * module it wired; absent on every kind wsp does not fork, whose machine is the person's own. A row names this
+   * where it would otherwise have only the provider's opaque id for the machine. */
+  provider: z.string().optional(),
 });
 export type WorkspaceView = z.infer<typeof WorkspaceView>;
 
@@ -450,7 +455,7 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
 const WORKSPACE_OUT = {
   id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, projects: true, folder: true, home: true,
   claudeSessionId: true, gone: true, theme: true, glyph: true, daemonNote: true, daemonRefusedAt: true, vaultedAt: true, vaultRefused: true, wakeRefused: true,
-  agents: true, parentThreadId: true, rootThreadId: true,
+  agents: true, parentThreadId: true, rootThreadId: true, provider: true,
 } as const;
 
 /** A workspace as every verb answers with it: the view without the display stream a desktop machine carries, which

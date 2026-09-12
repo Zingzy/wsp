@@ -502,14 +502,14 @@ describe("panes on a workspace that is not running", () => {
     await waitFor(() => expect(inputs("drawer")).toHaveLength(1), { timeout: 15_000 });
     act(() => wt.feedStatus("connecting"));
     await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("reconnecting"));
-    expect(overlay()!.textContent).toMatch(/Reconnecting to the machine\s*for \d+s/);
+    expect(overlay()!.textContent).toMatch(/Reconnecting to the workspace\s*for \d+s/);
     expect(within(overlay()!).queryByRole("button", { name: "Wake" })).toBeNull();
     act(() => setPane("running", { reach: { state: "unreachable" } }));
     expect(overlay()?.dataset["terminalOverlay"]).toBe("reconnecting");
     act(() => setPane("running", { reach: { state: "zombie" }, reason: "silent for 3 min; exec probe failed" }));
     await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("not-answering"));
-    expect(overlay()!.textContent).toContain("The machine is not answering");
-    expect(hints()).toEqual(["Rebuild it from the Machine panel"]);
+    expect(overlay()!.textContent).toContain("The workspace is not answering");
+    expect(hints()).toEqual(["Rebuild it from the Workspace panel"]);
     act(() => {
       setPane("running", {});
       wt.feedStatus("live");
@@ -537,18 +537,18 @@ describe("panes on a workspace that is not running", () => {
       getLive(WS).feedStatus("connecting");
     });
     await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("reconnecting"));
-    expect(overlay()!.textContent).toMatch(/Reconnecting to the machine\s*for \d+s/);
+    expect(overlay()!.textContent).toMatch(/Reconnecting to the workspace\s*for \d+s/);
     expect(hints()).toEqual([
-      "Out of memory (3.6 GB of 3.9 GB used, load 6.4) when the machine last answered; the work on it took the memory, not a fault of the machine",
+      "Out of memory (3.6 GB of 3.9 GB used, load 6.4) when the workspace last answered; the work on it took the memory, not a fault of the computer it runs on",
       "A workspace on 2 vCPU · 8 GB ($0.15/hr) fits more; pick it when you make the next one",
     ]);
     act(() => setPane("running", { reach: { state: "zombie" }, reason: "silent for 3 min; exec probe failed" }));
     await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("not-answering"));
-    expect(overlay()!.textContent).not.toContain("The machine is not answering");
+    expect(overlay()!.textContent).not.toContain("The workspace is not answering");
     expect(overlay()!.textContent).toContain("Out of memory (3.6 GB of 3.9 GB used, load 6.4)");
     expect(hints()).toEqual([
       "A workspace on 2 vCPU · 8 GB ($0.15/hr) fits more; pick it when you make the next one",
-      "Rebuild it from the Machine panel",
+      "Rebuild it from the Workspace panel",
     ]);
     act(() => {
       setPane("running", {});
@@ -608,7 +608,7 @@ describe("panes on a workspace that is not running", () => {
     act(() => wt.feedStatus("connecting"));
     act(() => wt.feedStatus("live"));
     await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("shell-gone"));
-    expect(overlay()!.textContent).toContain("This shell ended when the machine was replaced");
+    expect(overlay()!.textContent).toContain("This shell ended when the workspace moved to another computer");
     fireEvent.click(within(overlay()!).getByRole("button", { name: /^New Terminal/ }));
     await waitFor(() => expect(wt.tabs().map(t => t.ptyId)).toEqual(["p1", "p2"]));
     await waitFor(() => expect(overlay()).toBeNull());

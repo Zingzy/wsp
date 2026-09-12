@@ -244,7 +244,7 @@ describe("a workspace row's menu", () => {
     expect(item(WORKSPACE_WORDS.pause).getAttribute("aria-disabled")).toBeNull();
     expect(item(WORKSPACE_WORDS.rename).getAttribute("aria-disabled")).toBeNull();
     expect(refusalOf(WORKSPACE_WORDS.rename)).toBeNull();
-    expect(refusalOf(WORKSPACE_WORDS.forget)).toBe("Only a workspace whose machine is gone can be forgotten; this one is running");
+    expect(refusalOf(WORKSPACE_WORDS.forget)).toBe("Only a workspace whose computer is gone can be forgotten; this one is running");
     expect(refusalOf(WORKSPACE_WORDS.pause)).toBeNull();
     expect(item(WORKSPACE_WORDS.openTerminal).querySelector("kbd")?.textContent).toBe("⌘J");
     // The first row that can run holds focus; arrows walk every row, disabled ones too, so their refusal can be read.
@@ -294,7 +294,7 @@ describe("a workspace row's menu", () => {
     rightClick(rowOf("api"));
     await screen.findByRole("menu");
     fireEvent.click(item(WORKSPACE_WORDS.copyId));
-    await waitFor(() => expect(useStore.getState().toast).toBe("Copy machine id: The clipboard is not available here"));
+    await waitFor(() => expect(useStore.getState().toast).toBe("Copy computer id: The clipboard is not available here"));
     const writeText = clipboard();
     rightClick(rowOf("api"));
     await screen.findByRole("menu");

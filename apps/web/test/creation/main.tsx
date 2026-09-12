@@ -35,7 +35,7 @@ const creation: Creation = {
   workspaceId: "ws_beta",
   lines,
   failed: {
-    title: "The provider refused: machine cap reached",
+    title: "The provider refused: no more workspaces can run there now",
     detail: FAILED,
   },
 };

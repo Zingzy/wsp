@@ -5,7 +5,7 @@
 // Nothing here decides an order or a thread of its own.
 import type { SidebarProjectSnapshot } from "../../adapt/index.js";
 import { topSidebarThread } from "../../sidebar/Sidebar.logic.js";
-import { provenanceLabel } from "../../sidebar/workspaceRows.js";
+import { provenanceLabel, threadMetaWords, whereWord } from "../../sidebar/workspaceRows.js";
 import type { SwitchTarget } from "../../shell/workspaceSwitcher.js";
 
 export interface SwitcherCard {
@@ -37,7 +37,11 @@ export function buildSwitcherCards(input: SwitcherCardsInput): SwitcherCard[] {
     if (project === undefined) return [];
     if (threadId !== null) {
       const thread = project.threads.find(t => t.threadId === threadId);
-      return thread === undefined ? [] : [{ workspaceId, threadId, name: thread.title, threadTitle: provenanceLabel(thread), image: null }];
+      if (thread === undefined) return [];
+      // The card says what the row says under the same thread: the agent, then its project and who opened it, or
+      // the workspace and where it runs on a thread another thread's agent opened.
+      const words = threadMetaWords(thread, { workspace: project.displayName, where: whereWord(project) }, project.displayName);
+      return [{ workspaceId, threadId, name: thread.title, threadTitle: provenanceLabel(thread, words), image: null }];
     }
     const current = workspaceId === input.currentId;
     const pinned = current && input.pinnedThreadId !== null ? project.threads.find(t => t.id === input.pinnedThreadId) : undefined;

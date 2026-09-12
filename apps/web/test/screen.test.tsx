@@ -69,7 +69,7 @@ describe("screen surface", () => {
   it("shows the no-display state when no stream url resolves and never opens a client", () => {
     seedStatus();
     render(<ScreenSurface workspaceId={WS} />);
-    expect(screen.getByText("This machine has no display")).toBeDefined();
+    expect(screen.getByText("This workspace has no display")).toBeDefined();
     expect(FakeRfb.instances.length).toBe(0);
   });
 

@@ -48,7 +48,7 @@ describe.skipIf(renderSkipped !== undefined)("the lineage's project goldens laid
     expect(v11!.y).toBeGreaterThan(p1!.y + p1!.height);
     expect(wsp!.y).toBeGreaterThan(v11!.y + v11!.height);
     expect(await page!.locator("[data-k=pg-snap_project-spoo-2]").textContent()).toBe("spoo");
-    expect(await page!.locator("[data-k=pg-snap_project-spoo-2]").locator("xpath=ancestor::li[1]").locator(":scope > span [data-mark]").allTextContents()).toEqual(["this fork"]);
+    expect(await page!.locator("[data-k=pg-snap_project-spoo-2]").locator("xpath=ancestor::li[1]").locator(":scope > span [data-mark]").allTextContents()).toEqual(["this one"]);
     expect(await page!.locator("[data-k=v12]").textContent()).toBe("v12");
     // The version stands on its snapshot alone, no template recorded, so it wears the volatile word beside head.
     expect(await page!.locator("[data-k=v12]").locator("xpath=ancestor::li[1]").locator(":scope > span [data-mark]").allTextContents()).toEqual(["head", "volatile"]);
