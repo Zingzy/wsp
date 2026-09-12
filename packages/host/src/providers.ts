@@ -8,7 +8,8 @@
 // provider by name.
 
 import { BoxBackend, DockerBackend, FakeBackend, NoProviderBackend, SolariBackend, type MachineBackend } from "@wsp/engine";
-import { PROVIDER_KEY_WORDS } from "@wsp/protocol";
+import { FAKE_AS_ENV, PROVIDER_KEY_WORDS } from "@wsp/protocol";
+import type { PlaceBackends } from "@wsp/runtime";
 import { keyIn } from "./env-keys.js";
 
 /** The environment a provider is picked out of: the host's own, with whatever the command line's provider words put
@@ -36,6 +37,10 @@ export interface ProviderModule {
   keyConsole?: string;
   /** Whether this computer is set up for this provider. */
   selects(env: ProviderEnv): boolean;
+  /** The provider word this row's machines wear where it is not the row's own id; nothing where the row is what it
+   * says it is. A stand-in answers here with the provider it stands in for, so a harness's rows read the cloud they
+   * are serving in place of rather than the stand-in's own name. */
+  standsFor?(env: ProviderEnv): string | undefined;
   build(env: ProviderEnv): MachineBackend;
 }
 
@@ -78,13 +83,19 @@ export const PROVIDER_MODULES: readonly ProviderModule[] = [
     id: "fake",
     // No way of being added, so `wsp add` takes neither the word nor a key for it and `wsp places` shows no row:
     // a provider that answers out of memory is a harness's fixture and never a place somebody owns.
-    envNames: [PROVIDER_ENV],
+    envNames: [PROVIDER_ENV, FAKE_AS_ENV],
     // Named and never guessed: a provider that answers out of memory is what a harness serves a fixture state
     // through, so it is reached by asking for it by name and by nothing else. Two roads beyond a harness reach it,
     // both starting with the word typed: `wsp up --service` copies WSP_PROVIDER out of the installing shell into
     // the unit, and `wsp init --provider fake` would seal a hollow golden, since these machines answer exit 0 to
     // everything and the smoke gate reads an exit code.
     selects: env => env[PROVIDER_ENV] === "fake",
+    // A fixture says which cloud it is standing in for, and its rows carry that word: a tester reading "fake" on
+    // every row learns nothing about the provider the screen is meant to be showing them.
+    standsFor: env => {
+      const said = env[FAKE_AS_ENV];
+      return said !== undefined && said !== "" ? said : undefined;
+    },
     build: () => new FakeBackend(),
   },
   {
@@ -138,8 +149,61 @@ export function providerModule(env: ProviderEnv, modules: readonly ProviderModul
   return modules.find(m => m.selects(env))!;
 }
 
+/** The provider word this computer's own machines are stamped with: the picked row's id, or the word it stands in
+ * for where it is a stand-in. Every reading of where a machine lives goes through here, so nothing compares a
+ * provider id outside this table. */
+export function wiredProviderId(env: ProviderEnv, modules: readonly ProviderModule[] = PROVIDER_MODULES): string {
+  const picked = providerModule(env, modules);
+  return picked.standsFor?.(env) ?? picked.id;
+}
+
 export function providerBackendFor(env: ProviderEnv): MachineBackend {
   return providerModule(env).build(env);
+}
+
+/** Every provider this computer is set up for, in the table's own order: a row a person can add as a place, whose
+ * key, where it reads one, is here. These are the places a copy of the image can be built at beyond the one this
+ * host forks on. A row that is no place at all says so on itself, and a row whose key nobody has typed is one the
+ * provider would only refuse, so neither is offered; nothing here compares an id. */
+export function placeProviders(env: ProviderEnv, modules: readonly ProviderModule[] = PROVIDER_MODULES): ProviderModule[] {
+  return modules.filter(m => addedBy(m) !== undefined && (m.keyEnv === undefined || keyIn(env, m.keyEnv) !== undefined));
+}
+
+/** What a row reads out of the environment, as one string: every variable it declares and its key. A row whose
+ * reading has changed is a different provider to reach, so the backend built on the old reading is not handed out
+ * again; a key rotated while the host serves is the case this is for. */
+const providerReading = (m: ProviderModule, env: ProviderEnv): string =>
+  [...new Set([...m.envNames, ...(m.keyEnv !== undefined ? [m.keyEnv] : [])])].map(name => `${name}=${env[name] ?? ""}`).join("\n");
+
+/** Where this host can build a copy of its image, as one table: the provider it forks on now, under the id of the
+ * module it is wired with, and every other provider this computer is set up for. The wired row answers with the
+ * runtime's own backend, so a key saved while the host serves moves it with everything else; every other row is
+ * built at the first ask and kept while what it reads stands, since a module that holds its machines in memory
+ * would lose them if this handed out a fresh one each time. Only the places a person can name are listed: a host
+ * whose own module is no place lists the others and still answers for its own. */
+export function providerPlaces(wired: () => string, backend: MachineBackend, env: () => ProviderEnv): PlaceBackends {
+  const built = new Map<string, { reading: string; backend: MachineBackend }>();
+  const rows = (): ProviderModule[] => placeProviders(env());
+  return {
+    get wired() {
+      return wired();
+    },
+    backend: place => {
+      if (place === wired()) return backend;
+      const row = rows().find(m => m.id === place);
+      if (row === undefined) return undefined;
+      const reading = providerReading(row, env());
+      const held = built.get(row.id);
+      if (held !== undefined && held.reading === reading) return held.backend;
+      const made = row.build(env());
+      built.set(row.id, { reading, backend: made });
+      return made;
+    },
+    list: () => {
+      const ids = rows().map(m => m.id);
+      return ids.includes(wired()) ? [wired(), ...ids.filter(id => id !== wired())] : ids;
+    },
+  };
 }
 
 /** Stands for any key at all, so a row can be asked which one it would be wired by without one being typed first. */

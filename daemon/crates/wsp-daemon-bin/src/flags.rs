@@ -6,32 +6,13 @@
 use std::path::PathBuf;
 
 use clap::error::ErrorKind;
-use clap::{Parser, ValueEnum};
+use clap::Parser;
 use wsp_daemon::Options;
-use wsp_frames::{numbers, WorkspaceKind};
+use wsp_frames::numbers;
 
 use crate::verbs::Verb;
 
 pub(crate) const USAGE: &str = "usage: wsp-daemon [--host <addr>] [--port <n>] [--token-path <file>] [--root <dir>] [--roots-path <file>] [--kind cloud|local|ssh|place] [--work-folder <dir>] [--inbox <dir>] [--inbox-quiet-ms <n>] [--inbox-poll-ms <n>] [--manifest <file>] [--run-dir <dir>] [--log-dir <dir>] [--open-socket <path>] [--port-file <file>] [--proc-root <dir>] [--passwd <file>] [--ports-interval-ms <n>] [--sys-interval-ms <n>] [--proc-interval-ms <n>] [--mode-interval-ms <n>] [--auth-deadline-ms <n>] [--place-file <file>] [--home <dir>] [--wsp-argv <word>]... [--agents id=bin,...] [--link-connect-ms <n>] [--link-quiet-ms <n>] [--link-refused-retry-ms <n>] [--link-backoff-ms <n>] [--runtime-root <dir>]";
-
-#[derive(Debug, Clone, Copy, ValueEnum)]
-pub(crate) enum Kind {
-    Cloud,
-    Local,
-    Ssh,
-    Place,
-}
-
-impl From<Kind> for WorkspaceKind {
-    fn from(kind: Kind) -> WorkspaceKind {
-        match kind {
-            Kind::Cloud => WorkspaceKind::Cloud,
-            Kind::Local => WorkspaceKind::Local,
-            Kind::Ssh => WorkspaceKind::Ssh,
-            Kind::Place => WorkspaceKind::Place,
-        }
-    }
-}
 
 #[derive(Debug, Parser)]
 #[command(name = "wsp-daemon", disable_version_flag = true, override_usage = USAGE)]
@@ -51,8 +32,9 @@ pub(crate) struct Flags {
     pub(crate) root: Option<PathBuf>,
     #[arg(long, value_name = "file")]
     pub(crate) roots_path: Option<PathBuf>,
-    #[arg(long, value_enum, default_value_t = Kind::Cloud)]
-    pub(crate) kind: Kind,
+    // Any word: a kind the daemon lacks is refused at the watch, in the words the pane prints, not here.
+    #[arg(long, default_value = "cloud", value_name = "cloud|local|ssh|place")]
+    pub(crate) kind: String,
     #[arg(long, value_name = "dir")]
     pub(crate) work_folder: Option<PathBuf>,
     #[arg(long, value_name = "dir")]
@@ -135,7 +117,7 @@ impl Flags {
             token_path: self.token_path,
             root: self.root,
             roots_path: self.roots_path,
-            kind: self.kind.into(),
+            kind: self.kind,
             work_folder: self.work_folder,
             inbox_dir: self.inbox,
             inbox_quiet_ms: self.inbox_quiet_ms,
@@ -178,7 +160,7 @@ mod tests {
         assert_eq!(f.host, "0.0.0.0");
         assert_eq!(f.port, 7070);
         assert_eq!(f.token_path, PathBuf::from("/root/.wsp-daemon-token"));
-        assert!(matches!(f.kind, Kind::Cloud));
+        assert_eq!(f.kind, "cloud");
         assert!(f.root.is_none());
     }
 
@@ -253,7 +235,7 @@ mod tests {
         .unwrap();
         let o = f.into_options();
         assert_eq!((o.host.as_str(), o.port), ("127.0.0.1", 7171));
-        assert_eq!(o.kind, WorkspaceKind::Place);
+        assert_eq!(o.kind, "place");
         assert_eq!(o.wsp_argv, vec!["node", "bin.js"]);
         assert_eq!(o.agents, vec!["one=one-bin", "two=two-bin"]);
         assert_eq!((o.inbox_quiet_ms, o.inbox_poll_ms, o.auth_deadline_ms), (Some(10), Some(20), Some(5)));
@@ -268,7 +250,8 @@ mod tests {
         assert!(parse(&["--port", "abc"]).is_err());
         assert!(parse(&["--port", "70000"]).is_err());
         assert!(parse(&["--token-path"]).is_err());
-        assert!(parse(&["--kind", "moon"]).is_err());
+        // A kind the registry lacks parses; the daemon refuses it at the watch, in the words the pane prints.
+        assert_eq!(parse(&["--kind", "moon"]).unwrap().kind, "moon");
         let e = parse(&["--wat"]).unwrap_err();
         assert!(e.render().to_string().contains("--wat"));
     }

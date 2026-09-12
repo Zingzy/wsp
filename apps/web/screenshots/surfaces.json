@@ -15,7 +15,7 @@
         "390:key:Escape",
         "390:sidebar=trigger"
       ],
-      "wait": "row-id=thread:th_redirect"
+      "wait": "row-id=thread:redirect"
     },
     {
       "name": "workspace",
@@ -34,7 +34,7 @@
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
-        "row-id=thread:th_redirect",
+        "row-id=thread:redirect",
         "390:key:Escape"
       ],
       "wait": "testid=composer-editor"
@@ -45,7 +45,7 @@
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
-        "row-id=thread:th_redirect",
+        "row-id=thread:redirect",
         "390:key:Escape",
         "390:key:Escape",
         "testid=composer-editor",
@@ -60,7 +60,7 @@
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
-        "row-id=thread:th_redirect",
+        "row-id=thread:redirect",
         "390:key:Escape",
         "390:key:Escape",
         "testid=composer-editor",
@@ -97,7 +97,7 @@
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
-        "row-id=thread:th_search",
+        "row-id=thread:search",
         "390:key:Escape"
       ],
       "wait": "testid=composer-editor"
@@ -110,7 +110,7 @@
         "390:key:Escape",
         "390:sidebar=trigger"
       ],
-      "wait": "row-id=thread:th_api-move"
+      "wait": "row-id=thread:api-move"
     },
     {
       "name": "opener-transcript",
@@ -119,7 +119,7 @@
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
-        "row-id=thread:th_migrate",
+        "row-id=thread:migrate",
         "390:key:Escape"
       ],
       "wait": "opened-thread"
@@ -135,6 +135,37 @@
         "offline"
       ],
       "wait": "sidebar-asleep",
+      "settleMs": 700
+    },
+    {
+      "name": "composer-folder",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=ws:ws_web",
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "composer-folder"
+      ],
+      "wait": "k=folder-path",
+      "settleMs": 700
+    },
+    {
+      "name": "composer-folder-refused",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=ws:ws_web",
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "composer-folder",
+        "k=folder-path",
+        "type:/does/not/exist",
+        "key:Enter"
+      ],
+      "wait": "refused",
       "settleMs": 700
     },
     {

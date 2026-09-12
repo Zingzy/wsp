@@ -26,3 +26,13 @@ export const HOST_TOKEN_ENV = "WSP_HOST_TOKEN";
  * login keychain is listed out of $HOME/Library, and the harness moves its own lookup with the home too (measured
  * 2026-09-12). Unset everywhere else, where the process's home is the person's. */
 export const PERSON_HOME_ENV = "WSP_PERSON_HOME";
+
+/** The provider a stand-in serves in place of, for a harness serving a fixture of that cloud's machines: the rows
+ * about those machines read this word rather than the stand-in's own, since a tester reads a row for which cloud
+ * they are paying. Unset everywhere else, where a provider is the one it says it is. */
+export const FAKE_AS_ENV = "WSP_FAKE_AS";
+
+/** The folder a host serves the built app out of, for a harness that serves a copy of it: the lab copies the built
+ * app into its own home and names it here, so a build landing on main mid-run cannot change the app under a tester.
+ * Unset everywhere else, where the host serves the asset built beside it. */
+export const WEB_DIR_ENV = "WSP_WEB_DIR";

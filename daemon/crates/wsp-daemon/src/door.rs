@@ -210,7 +210,8 @@ where
             }
         };
     }
-    // The client is gone; ptys keep running. Only this socket's subscriptions die with it.
+    // The client is gone; the ptys and the watchers keep running. Only this socket's subscriptions and tunnels die
+    // with it.
     ctx.remove_authed(key);
     conn.close();
     let reason = match ended {

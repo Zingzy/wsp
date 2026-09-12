@@ -9,7 +9,7 @@
 // browser tab has the browser's own notifications, asked for on the press that
 // opens the setup and spoken only while the tab is hidden. Nothing is said
 // while the app is in front of the person, and nothing makes a sound.
-import { NEEDS_YOU, initJobBuilding, titleWithNeed, workspaceAwakeLine, type InitNeedsYou } from "@wsp/protocol";
+import { NEEDS_YOU, askingLine, initJobBuilding, titleWithNeed, workspaceAwakeLine, type InitNeedsYou } from "@wsp/protocol";
 import { useCallback, useEffect, useRef } from "react";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { useProtocolEvents, useStore } from "../protocol/store.js";
@@ -93,7 +93,9 @@ export const needsYouRoad = (onOpen: () => void): NeedsYouRoad => ROADS.find(r =
 /** Mounted once under the store: the title carries the mark for as long as the job's need stands, and each need's
  * arrival, which is its own event and so already one per need, is said once on this shell's road. */
 export function useNeedsYouEffect(): void {
-  const needed = useStore(s => s.initJob?.needsYou !== undefined);
+  // A build waiting on a sign-in and a thread stopped on a permission prompt are the same fact to a person who is
+  // looking somewhere else, so the window's own title carries the mark for either.
+  const needed = useStore(s => s.initJob?.needsYou !== undefined || Object.values(s.sessions).some(rows => rows.some(row => row.asking !== undefined)));
   const road = useRef<NeedsYouRoad | null>(null);
   /** What a click on the last thing said opens: the build for a need, the workspace for a machine that came up. One
    * ref rather than one road per kind, since a shell hands a click back for whatever it showed last. */
@@ -116,6 +118,13 @@ export function useNeedsYouEffect(): void {
     if (e.type === "job.needs-you") {
       opens.current = () => useStore.getState().openSetup();
       road.current?.say(e.needsYou);
+    }
+    // A prompt rides the same road: the thread is stopped until somebody picks, and nothing else outside the
+    // thread's own pane says so. Said once, on the event that opens it, as a build's need is.
+    if (e.type === "session.permission") {
+      const { workspaceId, threadId } = e;
+      opens.current = () => useStore.getState().select(workspaceId, threadId);
+      road.current?.say({ what: askingLine(e), since: Date.now() });
     }
     // A machine that came up rides the same road: a wake the provider took minutes to accept lands with the person
     // looking somewhere else, and the road itself is what stays quiet while they are looking at the app.

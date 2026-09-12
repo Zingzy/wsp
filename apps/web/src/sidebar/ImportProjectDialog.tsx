@@ -5,15 +5,17 @@
 // has rows for it; one action starts the import and the runtime's events
 // read in the one slot above the footer that was empty until then. The
 // desktop shell gives the folder as a picker row; a browser tab browses the
-// host's own folders under the path input, and a typed path with Enter
-// reads it either way. The path shows as the person picked it; the plan
+// host's own folders under the app's one folder field, and a typed path with
+// Enter reads it either way. The path shows as the person picked it; the plan
 // speaks in realpaths, so the destination and the events are matched on
-// that. A consent is for the plan the person read: editing the path drops
-// the plan and its ticks until the folder is read again.
+// that. A consent is for the plan the person read: the plan and the refusal
+// are both kept with the path they are about, so editing the path shows
+// neither until that folder is read.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fmtBytes, importDest, importIntoLine, importRequest, repoLine, secretSignalsLine, secretsNote, SESSIONS_NOTE, type ProjectAgent, type ProjectImportEvent, type ProjectImportResult, type ProjectPlan, type ProjectSecret, type WorkspaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
+import { FolderPathField, useFolderPick, type FolderRefusal } from "../files/FolderPathField.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { errorText } from "../lib/utils.js";
 import type { ProtocolEvent } from "../protocol/client.js";
@@ -22,7 +24,7 @@ import { FolderBrowser } from "./FolderBrowser.js";
 import { agentState, canTravel, defaultAgents, defaultConsent, importProgress, isImportOf, landedLine, secretOffer } from "./importProject.js";
 import { useLastFolderParent, useLastFolderStore } from "./lastFolderStore.js";
 import { count, refusalOf, slotWords, type Refusal } from "./projectTrip.js";
-import { CachesRow, ConsentRow, FactRow, FolderField, FolderPickerRow, TripSection, TripStatus } from "./ProjectTripRows.js";
+import { CachesRow, ConsentRow, FactRow, FolderPickerRow, TripSection, TripStatus } from "./ProjectTripRows.js";
 
 type Phase = "idle" | "importing" | "done";
 
@@ -39,22 +41,25 @@ interface Planned {
 }
 
 const PLACEHOLDER = "/Users/you/code/project";
+/** What to do about a folder this computer would not read, the second half of the refusal under the field. */
+const FOLDER_FIX = "Check the path, or pick another folder.";
+
+/** The host's own reason as a refusal's first half; it ends its sentences without a stop and the fix follows it. */
+const stopped = (said: string): string => (said.endsWith(".") ? said : `${said}.`);
 
 export function ImportProjectDialog({ workspace, initialSource, onClose }: { workspace: WorkspaceView; initialSource?: string; onClose: () => void }) {
   const api = useStore(s => s.api);
   const bridge = desktopBridge()?.pickFolder;
   const remember = useLastFolderStore(s => s.remember);
   const lastFolder = useLastFolderParent();
-  const [source, setSource] = useState(initialSource ?? "");
   const [planned, setPlanned] = useState<Planned | null>(null);
-  const plan = planned?.plan ?? null;
-  const [reading, setReading] = useState(false);
   const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set());
   const [tickedAgents, setTickedAgents] = useState<ReadonlySet<string>>(new Set());
   const [events, setEvents] = useState<ProjectImportEvent[]>([]);
   const [phase, setPhase] = useState<Phase>("idle");
   const [result, setResult] = useState<ProjectImportResult | null>(null);
-  const [refusal, setRefusal] = useState<Refusal | null>(null);
+  // The import's own refusal, kept with the path it was raised for so it goes when the path is edited away.
+  const [refused, setRefused] = useState<{ folder: string; refusal: Refusal } | null>(null);
   const sent = useRef<Sent>({ source: "", plan: null });
 
   const onEvent = useCallback(
@@ -66,11 +71,9 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
   useProtocolEvents(onEvent);
 
   const read = useCallback(
-    async (path: string): Promise<void> => {
-      const folder = path.trim();
-      if (folder === "" || api?.planProject === undefined) return;
-      setReading(true);
-      setRefusal(null);
+    async (folder: string): Promise<FolderRefusal | null> => {
+      if (api?.planProject === undefined) return null;
+      setRefused(null);
       setPlanned(null);
       setEvents([]);
       setResult(null);
@@ -80,28 +83,28 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
         setPlanned({ folder, plan: next });
         setTicked(defaultConsent(next.secrets));
         setTickedAgents(defaultAgents(next.agents));
+        return null;
       } catch (e) {
-        setRefusal({ message: errorText(e), exists: false });
-      } finally {
-        setReading(false);
+        return { said: stopped(errorText(e)), fix: FOLDER_FIX };
       }
     },
     [api],
   );
+  const hold = useFolderPick(read);
+  const { submit } = hold;
+  const source = hold.path;
+  // The plan is the one read for the path the field holds; another path shows none until it is read.
+  const plan = planned !== null && planned.folder === source ? planned.plan : null;
+  const refusal = refused !== null && refused.folder === source ? refused.refusal : null;
 
   useEffect(() => {
-    if (initialSource !== undefined) void read(initialSource);
-  }, [initialSource, read]);
-
-  const pick = (picked: string): void => {
-    setSource(picked);
-    void read(picked);
-  };
+    if (initialSource !== undefined) void submit(initialSource);
+  }, [initialSource, submit]);
 
   const pickNative = async (): Promise<void> => {
     if (bridge === undefined) return;
     const picked = await bridge();
-    if (picked !== undefined) pick(picked);
+    if (picked !== undefined) await submit(picked);
   };
 
   const start = async (replace: boolean): Promise<void> => {
@@ -109,25 +112,15 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
     sent.current = { source, plan };
     setPhase("importing");
     setEvents([]);
-    setRefusal(null);
+    setRefused(null);
     try {
       const landed = await api.importProject({ workspaceId: workspace.id, ...importRequest(plan, source, ticked, tickedAgents, replace, workspace) });
       setResult(landed);
       setPhase("done");
-      remember(source.trim());
+      remember(source);
     } catch (e) {
-      setRefusal(refusalOf(e));
+      setRefused({ folder: source, refusal: refusalOf(e) });
       setPhase("idle");
-    }
-  };
-
-  const edit = (next: string): void => {
-    setSource(next);
-    if (planned !== null && next.trim() !== planned.folder) {
-      setPlanned(null);
-      setTicked(new Set());
-      setTickedAgents(new Set());
-      setRefusal(null);
     }
   };
 
@@ -140,10 +133,13 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
   const toggle = (path: string, on: boolean): void => setTicked(prev => toggled(prev, path, on));
   const toggleAgent = (agent: string, on: boolean): void => setTickedAgents(prev => toggled(prev, agent, on));
 
-  const busy = reading || phase === "importing";
+  const busy = hold.reading || phase === "importing";
   const primary = phase === "done" ? "Done" : refusal?.exists ? "Replace and import" : "Import";
   const progress = phase === "idle" ? null : importProgress(events, workspace.name);
-  const said = slotWords({ refusal, landed: result === null ? null : landedLine(result, sent.current.source, workspace.name), progress, idle: reading ? "Reading the folder." : "" });
+  // Where there is no field there is no slot under one, so a read this computer refused keeps the status line, in
+  // the same two halves the slot would have drawn.
+  const readRefusal = bridge !== undefined && hold.refusal !== null ? { message: `${hold.refusal.said} ${hold.refusal.fix}`, exists: false } : null;
+  const said = slotWords({ refusal: refusal ?? readRefusal, landed: result === null ? null : landedLine(result, sent.current.source, workspace.name), progress, idle: hold.reading ? "Reading the folder." : "" });
 
   return (
     <Dialog open onOpenChange={open => { if (!open && phase !== "importing") onClose(); }}>
@@ -157,8 +153,8 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
             <TripSection k="folder" label="Folder on this Mac" {...(bridge === undefined ? { htmlFor: "import-source" } : {})}>
               {bridge === undefined ? (
                 <>
-                  <FolderField id="import-source" placeholder={PLACEHOLDER} value={source} disabled={busy} autoFocus={initialSource === undefined} onChange={edit} onEnter={() => void read(source)} />
-                  <FolderBrowser disabled={busy} start={lastFolder} onPick={pick} />
+                  <FolderPathField id="import-source" placeholder={PLACEHOLDER} hold={hold} disabled={busy} autoFocus={initialSource === undefined} />
+                  <FolderBrowser disabled={busy} start={lastFolder} onPick={dir => void submit(dir)} />
                 </>
               ) : (
                 <FolderPickerRow path={source} placeholder={PLACEHOLDER} disabled={busy} onPick={() => void pickNative()} />

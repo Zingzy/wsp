@@ -2,8 +2,12 @@
 // Where the person is: the settings page by its name while it is open; else
 // a folder glyph, the workspace's name, a slash and the open thread's title;
 // a creation in progress by its name; the words for no selection otherwise.
-// The thread is the one the centre shows.
+// The thread is the one the centre shows. The header carries no state word for
+// a thread that is simply working or settled, since the pane under it already
+// shows that; it carries the one state a person has to act on, so a prompt is
+// never hidden by the header the pane is scrolled under.
 import { FolderIcon } from "lucide-react";
+import { threadState, threadWordOf } from "@wsp/protocol";
 import { useCreation, useOpenThread, useSelectedId, useSelectedWorkspaceId, useSettingsOpen, useWorkspace } from "../protocol/store.js";
 import { SETTINGS_WORDS } from "../settings/format.js";
 
@@ -28,6 +32,11 @@ export function ThreadBreadcrumb() {
             <>
               <span aria-hidden className="text-muted-foreground/50">/</span>
               <span className="truncate font-medium text-foreground">{thread.title}</span>
+              {threadState(thread) === "waiting" ? (
+                <span className="shrink-0 font-mono text-[11px] text-muted-foreground" title={thread.asking}>
+                  {threadWordOf(thread)}
+                </span>
+              ) : null}
             </>
           ) : null}
         </>

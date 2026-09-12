@@ -3,8 +3,10 @@
 // its git branch. Before the first message the folder is the one the runtime's
 // rule will open, the picked project's or the machine's own, and a picker over
 // the daemon's listings, one level at a time, across the same roots the panes
-// browse (its home and every project); a folder picked here is what
-// sessions.start names as cwd, over every project, and where the panes root.
+// browse (its home and every project), with a field at its top for a folder
+// typed or pasted whole and, in the desktop app, the system chooser beside it;
+// a folder picked here is what sessions.start names as cwd, over every
+// project, and where the panes root.
 // Whether the picker is open is the composer's to say, so the project pick in
 // the box's footer opens it for its other folder row. Once a turn exists the row is
 // a label for the harness folder, which a cd in the agent's shell cannot move
@@ -12,16 +14,18 @@
 // offers a new thread with the picker open; the shell's own folder, as the
 // agent's tool calls move it, is what the panes follow. The branch is read,
 // not switched: the daemon has no checkout op.
-import { ArrowLeftIcon, ChevronDownIcon, CheckIcon, FolderGitIcon, FolderIcon, GitBranchIcon, LoaderCircleIcon, MessageSquarePlusIcon } from "lucide-react";
+import { ArrowLeftIcon, ChevronDownIcon, CheckIcon, FolderGitIcon, FolderIcon, FolderSearchIcon, GitBranchIcon, LoaderCircleIcon, MessageSquarePlusIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { REPO_STATE_WORDS, type RepoStateWord } from "@wsp/protocol";
 import { baseName } from "../../files/entries";
+import { FolderPathField, folderGhost, folderPathRefusal, useFolderPick, type FolderRefusal } from "../../files/FolderPathField";
 import { useWorkspaceListing } from "../../files/listing";
 import { parentWithin, rootOf, useRoots, useRootStore, useThreadFolder } from "../../files/root";
 import { useDaemonWire } from "../../files/wire";
 import { repoAbsence } from "../../adapt/git";
+import { desktopBridge } from "../../lib/desktopShell";
 import { cn } from "../../lib/utils";
-import { gitStatus } from "../../terminal/daemon-fs";
+import { DaemonOpError, fsList, gitStatus } from "../../terminal/daemon-fs";
 import type { TerminalWire } from "../../terminal/link";
 import { Button, BUTTON_GLYPH_INSET } from "../ui/button";
 import { Menu, MenuGroup, MenuItem, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "../ui/menu";
@@ -89,6 +93,7 @@ function FolderPath({ path }: { path: string }) {
 
 function FolderMenu({
   workspaceId,
+  wire,
   roots,
   folder,
   open,
@@ -96,6 +101,7 @@ function FolderMenu({
   onPick,
 }: {
   workspaceId: string;
+  wire: TerminalWire;
   roots: readonly string[];
   folder: string;
   open: boolean;
@@ -111,6 +117,28 @@ function FolderMenu({
   const parent = parentWithin(roots, dir);
   const current = rootOf(roots, dir);
   const folders = level?.entries?.filter(entry => entry.kind === "directory") ?? null;
+  const setOpen = (next: boolean): void => {
+    onOpenChange(next);
+    setWalked(null);
+  };
+  // A path typed or chosen is a folder only if the daemon lists it, so the pick asks the same op the walk does and
+  // the answer it refuses with is the daemon's own.
+  const hold = useFolderPick(async (path): Promise<FolderRefusal | null> => {
+    try {
+      await fsList(wire, path, { gitignore: true });
+    } catch (e) {
+      return folderPathRefusal(e instanceof DaemonOpError ? e.code : undefined);
+    }
+    onPick(path);
+    setOpen(false);
+    return null;
+  });
+  // Only a shell with a system chooser has this road; a browser tab walks the daemon's own levels below instead.
+  const chooser = desktopBridge()?.pickFolder;
+  const chooseFolder = async (): Promise<void> => {
+    const picked = await chooser?.();
+    if (picked !== undefined) await hold.submit(picked);
+  };
 
   useEffect(() => {
     if (open) ensure(dir);
@@ -120,8 +148,8 @@ function FolderMenu({
     <Menu
       open={open}
       onOpenChange={next => {
-        onOpenChange(next);
-        if (!next) setWalked(null);
+        setOpen(next);
+        hold.edit("");
       }}
     >
       <MenuTrigger
@@ -135,6 +163,14 @@ function FolderMenu({
         <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
       </MenuTrigger>
       <MenuPopup align="start" side="top" className="w-72">
+        <FolderPathField id="composer-folder-path" label="Path" placeholder={folderGhost(roots[0] ?? folder)} hold={hold} className="px-2 pt-1.5" />
+        {chooser === undefined ? null : (
+          <MenuItem closeOnClick={false} onClick={() => void chooseFolder()} data-composer-folder-choose="">
+            <FolderSearchIcon />
+            <span className="min-w-0 flex-1 truncate">Choose a folder</span>
+          </MenuItem>
+        )}
+        <MenuSeparator />
         {roots.length > 1 ? (
           <>
             <MenuRadioGroup aria-label="Browsable folders" value={current} onValueChange={next => typeof next === "string" && setDir(next)}>
@@ -230,7 +266,7 @@ export function ComposerCheckoutRow({
     <ComposerSurface.ContextStrip data-composer-checkout data-pickable={pickable || undefined}>
       <div className="flex min-w-0 flex-1 items-center gap-1">
         {pickable && canPick ? (
-          <FolderMenu workspaceId={workspaceId} roots={roots} folder={folder} open={pickerOpen} onOpenChange={onPickerOpenChange} onPick={dir => choose(workspaceId, dir)} />
+          <FolderMenu workspaceId={workspaceId} wire={wire} roots={roots} folder={folder} open={pickerOpen} onOpenChange={onPickerOpenChange} onPick={dir => choose(workspaceId, dir)} />
         ) : (
           <>
             <Tooltip>

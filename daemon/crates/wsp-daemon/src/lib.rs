@@ -5,16 +5,27 @@
 
 mod auth;
 mod awake;
+mod clock;
 mod door;
 mod exec;
 mod fs;
 mod git;
+mod inbox;
 mod link;
+mod manifest;
 mod mode;
 mod ops;
 mod paths;
 mod place;
+mod ports;
+mod proc;
+mod proc_local;
 mod pty;
+mod readings;
+mod relay;
+mod sys;
+mod sys_local;
+mod tunnel;
 mod urls;
 
 pub use link::place_backoff_ms;
@@ -27,9 +38,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, UnixListener};
 use tokio::sync::mpsc;
-use wsp_frames::{numbers, DaemonEvent, WorkspaceKind};
+use wsp_frames::{numbers, DaemonEvent};
+
+use crate::paths::OpError;
 
 /// What a daemon is started with: one field per flag the binary takes, so the harness and the deploy scripts spell
 /// one thing. Fields the door does not read yet are held for the modules that will.
@@ -42,7 +55,9 @@ pub struct Options {
     /// The directory every fs and git path resolves inside; HOME when absent.
     pub root: Option<PathBuf>,
     pub roots_path: Option<PathBuf>,
-    pub kind: WorkspaceKind,
+    /// Which kind of machine this daemon serves, which picks the modules its readings come from. A word rather than
+    /// the enum: a kind the registry lacks is refused at the watch, in the words the pane prints, not at start.
+    pub kind: String,
     pub work_folder: Option<PathBuf>,
     pub inbox_dir: Option<PathBuf>,
     pub inbox_quiet_ms: Option<u64>,
@@ -79,7 +94,7 @@ impl Options {
             token_path: token_path.into(),
             root: None,
             roots_path: None,
-            kind: WorkspaceKind::Cloud,
+            kind: "cloud".to_owned(),
             work_folder: None,
             inbox_dir: None,
             inbox_quiet_ms: None,
@@ -148,11 +163,19 @@ impl Outbound {
     }
 }
 
+/// One line of the daemon's log, as the binary prints it on stderr and the suite reads it.
+pub type Log = Box<dyn Fn(&str) + Send + Sync>;
+/// The same log where more than one holder writes to it: the samplers log their start and stop.
+pub(crate) type SharedLog = Arc<dyn Fn(&str) + Send + Sync>;
+
 /// One socket's interest in a pty's data, its exit or its mode; the key is what detaches it when the socket closes.
 pub(crate) struct Listener {
     pub(crate) key: u64,
     pub(crate) out: Outbound,
 }
+
+/// How often the two samplers read the machine when no flag says otherwise, as the node daemon's do.
+const SAMPLER_INTERVAL_MS: u64 = 2000;
 
 /// What every socket's handler reads: the options as given, the root the hello announces, the ptys and their mode
 /// watcher, and every authed unscoped socket for the events the daemon pushes without being asked.
@@ -162,8 +185,15 @@ pub(crate) struct Ctx {
     pub(crate) auth_deadline: Duration,
     pub(crate) ptys: Mutex<pty::PtyManager>,
     pub(crate) modes: Arc<mode::ModeWatcher>,
+    pub(crate) manifest: Mutex<manifest::ProcessManifest>,
+    pub(crate) spotter: Mutex<relay::CallbackSpotter>,
+    pub(crate) ports: ports::PortWatch,
+    pub(crate) inbox: inbox::InboxWatch,
     /// Where the daemon's lines go: stderr in the binary, a test's own list otherwise.
-    log: Log,
+    log: SharedLog,
+    /// The two samplers, built on the first watch so a daemon nobody asks reads nothing; one each for the daemon.
+    sys: Mutex<Option<Arc<sys::SysSampler>>>,
+    procs: Mutex<Option<Arc<proc::ProcSampler>>>,
     /// Told once a leave has been answered, which is what ends the daemon.
     pub(crate) stop: tokio::sync::Notify,
     /// The workspaces a place's daemon runs and answers the machine ops on its link with; none where no place file
@@ -174,35 +204,95 @@ pub(crate) struct Ctx {
     keys: AtomicU64,
 }
 
-/// One line of the daemon's log, as the binary prints it on stderr and the suite reads it.
-pub type Log = Box<dyn Fn(&str) + Send + Sync>;
-
 impl Ctx {
-    pub(crate) fn new(options: Options, log: Log) -> Ctx {
+    /// Reads the manifest file once; a manifest that is there but cannot be read refuses the start, as it does for
+    /// the node daemon.
+    pub(crate) fn new(options: Options, log: Log) -> io::Result<Ctx> {
         let root = resolved_root(options.root.as_deref());
         let auth_deadline = Duration::from_millis(options.auth_deadline_ms.unwrap_or(numbers::AUTH_DEADLINE_MS));
         let proc_root = options.proc_root.clone().unwrap_or_else(|| PathBuf::from("/proc"));
         let interval = options.mode_interval_ms.map_or(mode::DEFAULT_INTERVAL, Duration::from_millis);
         let modes = Arc::new(mode::ModeWatcher::new(mode::linux_mode_probe(&proc_root), interval));
+        let manifest_path = options.manifest_path.clone().unwrap_or_else(|| PathBuf::from(numbers::DEFAULT_MANIFEST_PATH));
+        let manifest = manifest::ProcessManifest::load(Some(manifest_path), options.run_dir.as_deref(), options.log_dir.as_deref())?;
+        let interval = options.ports_interval_ms.map_or(ports::DEFAULT_INTERVAL, Duration::from_millis);
+        let ports = ports::PortWatch::new(ports::source_for(options.proc_root.as_deref()), interval);
         #[cfg(target_os = "linux")]
         let runtime = open_runtime(&options, &log);
-        Ctx {
+        Ok(Ctx {
             options,
             root,
             auth_deadline,
             ptys: Mutex::new(pty::PtyManager::default()),
             modes,
-            log,
+            manifest: Mutex::new(manifest),
+            spotter: Mutex::new(relay::CallbackSpotter::new()),
+            ports,
+            inbox: inbox::InboxWatch::default(),
+            log: Arc::from(log),
+            sys: Mutex::new(None),
+            procs: Mutex::new(None),
             stop: tokio::sync::Notify::new(),
             #[cfg(target_os = "linux")]
             runtime,
             authed: Mutex::new(HashMap::new()),
             keys: AtomicU64::new(1),
-        }
+        })
     }
 
     pub(crate) fn log(&self, line: &str) {
         (self.log)(line);
+    }
+
+    /// What this machine's own two modules are built from; the kind picks which modules those are.
+    fn readings_options(&self) -> readings::ReadingsOptions {
+        readings::ReadingsOptions {
+            root: PathBuf::from(&self.root),
+            work_folder: self.options.work_folder.clone().unwrap_or_else(|| PathBuf::from(&self.root)),
+            proc_root: self.options.proc_root.clone().unwrap_or_else(|| PathBuf::from("/proc")),
+            passwd_path: self.options.passwd_path.clone().unwrap_or_else(|| PathBuf::from("/etc/passwd")),
+            platform: std::env::consts::OS,
+        }
+    }
+
+    /// The load sampler, or the refusal for a kind that reads neither of its readings.
+    pub(crate) fn sys_sampler(&self) -> Result<Arc<sys::SysSampler>, OpError> {
+        let mut held = self.sys.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(sampler) = held.as_ref() {
+            return Ok(Arc::clone(sampler));
+        }
+        let kind = readings::readings_for(&self.options.kind, std::env::consts::OS)?;
+        let interval = Duration::from_millis(self.options.sys_interval_ms.unwrap_or(SAMPLER_INTERVAL_MS));
+        let sampler = sys::SysSampler::new((kind.metrics)(&self.readings_options()), interval, Arc::clone(&self.log));
+        *held = Some(Arc::clone(&sampler));
+        Ok(sampler)
+    }
+
+    /// The processes sampler, or the same refusal.
+    pub(crate) fn proc_sampler(self: &Arc<Self>) -> Result<Arc<proc::ProcSampler>, OpError> {
+        let mut held = self.procs.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(sampler) = held.as_ref() {
+            return Ok(Arc::clone(sampler));
+        }
+        let kind = readings::readings_for(&self.options.kind, std::env::consts::OS)?;
+        // An exited pty's pid can be reused by a stranger; only live shells carry the label. Weak, since the sampler
+        // lives inside the context it reads.
+        let ctx = Arc::downgrade(self);
+        let ptys: proc::PtyPids = Arc::new(move || {
+            ctx.upgrade().map_or_else(Vec::new, |ctx| {
+                ctx.ptys.lock().unwrap_or_else(|e| e.into_inner()).list().into_iter().filter(|p| !p.exited).map(|p| (p.pid, p.id)).collect()
+            })
+        });
+        let opts = proc::ProcSamplerOptions {
+            self_pid: std::process::id(),
+            ptys,
+            interval: Duration::from_millis(self.options.proc_interval_ms.unwrap_or(SAMPLER_INTERVAL_MS)),
+            now: Arc::new(sys::now_ms),
+            log: Arc::clone(&self.log),
+        };
+        let sampler = proc::ProcSampler::new((kind.processes)(&self.readings_options()), opts);
+        *held = Some(Arc::clone(&sampler));
+        Ok(sampler)
     }
 
     /// A number no other socket or listener in this daemon has.
@@ -229,12 +319,14 @@ impl Ctx {
 /// A bound daemon: the listener is open and the address is known, nothing is accepted until run.
 pub struct Daemon {
     listener: TcpListener,
+    open_socket: Option<UnixListener>,
     ctx: Arc<Ctx>,
 }
 
 impl Daemon {
-    /// Binds the address and reads the token file once, so a daemon with no token to check against never starts.
-    /// Lines go to stderr.
+    /// Binds the address and reads the token file once, so a daemon with no token to check against never starts;
+    /// binds the open socket too when one is named, so a shim that cannot be heard is a start that failed. Lines go
+    /// to stderr.
     pub async fn bind(options: Options) -> io::Result<Daemon> {
         Daemon::bind_with(options, Box::new(|line| eprintln!("{line}"))).await
     }
@@ -245,7 +337,11 @@ impl Daemon {
             return Err(io::Error::other(wsp_frames::words::NO_TOKEN_AT_START));
         }
         let listener = TcpListener::bind((options.host.as_str(), options.port)).await?;
-        Ok(Daemon { listener, ctx: Arc::new(Ctx::new(options, log)) })
+        let open_socket = match &options.open_socket_path {
+            Some(path) => Some(relay::listen_open_socket(path)?),
+            None => None,
+        };
+        Ok(Daemon { listener, open_socket, ctx: Arc::new(Ctx::new(options, log)?) })
     }
 
     pub fn local_addr(&self) -> SocketAddr {
@@ -259,6 +355,9 @@ impl Daemon {
             let port = self.local_addr().port();
             tokio::spawn(link::run(Arc::clone(&self.ctx), port));
             tokio::spawn(awake::hold_while_joined(Arc::clone(&self.ctx), file));
+        }
+        if let Some(open_socket) = self.open_socket {
+            tokio::spawn(relay::serve_open_socket(open_socket, Arc::clone(&self.ctx)));
         }
         loop {
             let accepted = tokio::select! {

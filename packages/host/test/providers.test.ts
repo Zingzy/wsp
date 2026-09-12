@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
+import { FAKE_AS_ENV } from "@wsp/protocol";
 import { BoxBackend, DockerBackend, FakeBackend, LocalBackend, NoProviderBackend, SolariBackend, SshBackend, landsBytes, type MachineBackend } from "@wsp/engine";
 import { goldenRecipe, makeRuntime, optsFor, providerSlotOf, swapProvider } from "../src/cli.js";
 import { keysOf } from "../src/env-keys.js";
-import { BOX_KEY_ENV, PROVIDER_MODULES, SOLARI_KEY_ENV, providerBackendFor, providerEnvNames, providerEnvWith, providerEnvWithKey, providerKeyEnvs, providerKeyRow, providerModule, type ProviderModule } from "../src/providers.js";
+import { BOX_KEY_ENV, PROVIDER_MODULES, SOLARI_KEY_ENV, placeProviders, providerBackendFor, providerEnvNames, providerEnvWith, providerEnvWithKey, providerKeyEnvs, providerKeyRow, providerModule, providerPlaces, wiredProviderId, type ProviderModule } from "../src/providers.js";
 
 /** A computer's environment as the rows read it: the provider key rides in it under the row's own variable, which
  * is where every layer a key is read through puts it. */
@@ -121,12 +122,12 @@ describe("provider modules", () => {
   });
 
   it("the variables a service carries are the rows' own, so a provider added brings its variable with it", () => {
-    expect(providerEnvNames()).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST"]);
+    expect(providerEnvNames()).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST", FAKE_AS_ENV]);
     // The row a provider is added as: the list follows it, and nothing else has to be remembered for the unit its
     // host is installed as to be given the variable that selects it. Keys are not among them: a unit file carries
     // no key, and the host reads its own off the same files at every start.
     const fly: ProviderModule = { id: "fly", envNames: ["WSP_PROVIDER", "FLY_REGION"], keyEnv: "FLY_API_TOKEN", selects: env => env["FLY_API_TOKEN"] !== undefined, build: () => new NoProviderBackend() };
-    expect(providerEnvNames([...PROVIDER_MODULES, fly])).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST", "FLY_REGION"]);
+    expect(providerEnvNames([...PROVIDER_MODULES, fly])).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST", FAKE_AS_ENV, "FLY_REGION"]);
     expect(providerEnvNames()).not.toContain(BOX_KEY_ENV);
     // What a row selects on is what it names: a row reading a variable it never listed would be carried by neither.
     for (const m of PROVIDER_MODULES) for (const name of m.envNames) expect(providerEnvNames()).toContain(name);
@@ -157,6 +158,70 @@ describe("provider modules", () => {
     for (const m of PROVIDER_MODULES) expect([m.id, m.keyEnv === undefined]).toEqual([m.id, m.keyName === undefined]);
   });
 
+  it("the places a copy of the image can be built at are the providers this computer is set up for, each once", () => {
+    // Added by its own word and needing no key: always a place, whatever this computer holds.
+    expect(placeProviders({ WSP_PROVIDER: "docker" }).map(m => m.id)).toContain("docker");
+    // A row that is no place at all, and the one that stands for no provider: neither is offered.
+    expect(placeProviders({}).map(m => m.id)).not.toContain("fake");
+    expect(placeProviders({}).map(m => m.id)).not.toContain("none");
+    // A row that reads a key is a place once that key is here, and not before: a row nobody could reach is not one.
+    expect(placeProviders({}).map(m => m.id)).not.toContain("solari");
+    expect(placeProviders({ [SOLARI_KEY_ENV]: "slr_live_fake" }).map(m => m.id)).toContain("solari");
+    expect(placeProviders({}).map(m => m.id)).not.toContain("box");
+    expect(placeProviders({ [BOX_KEY_ENV]: "box_fake" }).map(m => m.id)).toContain("box");
+    // Each row once, in the table's own order.
+    const ids = placeProviders({ [SOLARI_KEY_ENV]: "slr_live_fake", [BOX_KEY_ENV]: "box_fake" }).map(m => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual(PROVIDER_MODULES.filter(m => ids.includes(m.id)).map(m => m.id));
+  });
+
+  it("the table a host builds copies through answers the wired place with the runtime's own backend and every other with its module's", () => {
+    const wired = { id: "docker" };
+    const env: Record<string, string> = { WSP_PROVIDER: "docker", [SOLARI_KEY_ENV]: "slr_live_fake" };
+    const own = new DockerBackend({});
+    const places = providerPlaces(
+      () => wired.id,
+      own,
+      () => env,
+    );
+    expect(places.wired).toBe("docker");
+    expect(places.backend("docker")).toBe(own);
+    expect(places.backend("solari")).toBeInstanceOf(SolariBackend);
+    // One backend per place for the host's life: a module holding machines in memory must not be made afresh.
+    expect(places.backend("solari")).toBe(places.backend("solari"));
+    expect(places.backend("box")).toBeUndefined();
+    expect(places.list()).toEqual(["docker", "solari"]);
+
+    // A key rotated while the host serves is read by the row that holds it: the backend built on the old one is not
+    // handed out again, which is what the swap promises for the wired place and has to promise for the others.
+    const onOldKey = places.backend("solari");
+    env[SOLARI_KEY_ENV] = "slr_live_fake_rotated";
+    const onNewKey = places.backend("solari");
+    expect(onNewKey).not.toBe(onOldKey);
+    expect(onNewKey).toBe(places.backend("solari"));
+
+    // A key saved while the host serves moves the wired place; the runtime's own backend follows it there.
+    wired.id = "solari";
+    expect(places.wired).toBe("solari");
+    expect(places.backend("solari")).toBe(own);
+    expect(places.backend("docker")).toBeInstanceOf(DockerBackend);
+    expect(places.list()).toEqual(["solari", "docker"]);
+  });
+
+  it("lists only the places a person can name, and still answers for a host whose own module is none of them", () => {
+    // The module a host with no key starts on is no place: naming it in a refusal would offer a place to build at
+    // that nobody can add. Its own roads still resolve, since the wired row is answered before the list is read.
+    const own = new NoProviderBackend();
+    const places = providerPlaces(
+      () => "none",
+      own,
+      () => ({}),
+    );
+    expect(places.list()).toEqual(["docker"]);
+    expect(places.backend("none")).toBe(own);
+    expect(places.backend("solari")).toBeUndefined();
+  });
+
   it("the row a key typed here is put to is the picked one, or the one a key alone would wire", () => {
     // Wired to a provider that reads a key: that row's variable, whatever else this computer holds.
     expect(providerKeyRow({ WSP_PROVIDER: "box" })?.keyEnv).toBe(BOX_KEY_ENV);
@@ -166,5 +231,21 @@ describe("provider modules", () => {
     // Wired to a provider that reads no key: nothing to ask for.
     expect(providerKeyRow({ WSP_PROVIDER: "docker" })).toBeUndefined();
     expect(providerKeyRow({ WSP_DOCKER: "1" })).toBeUndefined();
+  });
+
+  it("stamps a stand-in's machines with the provider it stands in for, so no row reads the stand-in's own word", () => {
+    // A harness serving a fixture of one cloud's machines says which cloud, and every row about those machines
+    // reads it: a tester met "fake" where a person reads which provider they are paying.
+    expect(wiredProviderId({ WSP_PROVIDER: "fake", [FAKE_AS_ENV]: "solari" })).toBe("solari");
+    expect(wiredProviderId({ WSP_PROVIDER: "fake", [FAKE_AS_ENV]: "box" })).toBe("box");
+    // The row is still the stand-in: nothing dials that cloud, and the word alone would have.
+    expect(providerModule({ WSP_PROVIDER: "fake", [FAKE_AS_ENV]: "solari" }).id).toBe("fake");
+    expect(providerBackendFor({ WSP_PROVIDER: "fake", [FAKE_AS_ENV]: "solari" })).toBeInstanceOf(FakeBackend);
+    // Every other row is the word it says it is, and a stand-in that stands in for nobody is its own word too.
+    expect(wiredProviderId({ WSP_PROVIDER: "fake" })).toBe("fake");
+    expect(wiredProviderId({ WSP_PROVIDER: "box" })).toBe("box");
+    expect(wiredProviderId({})).toBe("none");
+    // It travels with the row, so a host a service starts carries it the way it carries the provider's own word.
+    expect(providerEnvNames()).toContain(FAKE_AS_ENV);
   });
 });

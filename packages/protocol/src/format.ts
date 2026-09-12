@@ -3,7 +3,7 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { ContextMenuItem, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, PlaceView, ProjectExportEvent, ProjectGolden, ProjectImportEvent, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SessionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnRefusal, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
+import type { ContextMenuItem, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, PlaceView, ProjectExportEvent, ProjectGolden, ProjectImportEvent, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SessionEvent, SessionPermissionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnRefusal, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
 import { DEFAULT_PORT } from "./app-ports.js";
 import { compareVersions } from "./semver.mjs";
@@ -619,6 +619,13 @@ export function sealedCopyLine(image: SealedImage, copy: SealedImageCopy): strin
   const size = copy.sizeBytes === undefined ? [] : [fmtBytes(copy.sizeBytes)];
   const standing = copyStanding(image, copy);
   return [copy.place, `v${copy.version}`, ...size, ...(standing === undefined ? [] : [standing])].join(" · ");
+}
+
+/** What a build at a place came to, as the line a person reads after it: the copy that place now holds, and, when
+ * the place already stood on the record, that nothing was built. */
+export function sealedBuiltLine(image: SealedImage, built: { copy: SealedImageCopy; built: boolean }): string {
+  const line = sealedCopyLine(image, built.copy);
+  return built.built ? line : `${line} · already built from this image; nothing was built`;
 }
 
 /** One project image under the image, as a line: the workspace it was taken off, the projects on that disk and when. */
@@ -2139,6 +2146,13 @@ export function permissionPromptWords(toolName: string, input: string, detail?: 
   return { ...parts, rest, ...(body === undefined ? {} : { body: { label: BODY_LABEL, text: body } }) };
 }
 
+/** That lead taken off the prompt itself, which is what a thread's row says it is waiting on and what the app says
+ * outside the thread's own pane. The one call both make, so the whole prompt is in hand here and reading another of
+ * its fields to word the lead is an edit to this body alone. */
+export function askingLine(ask: Pick<SessionPermissionEvent, "toolName" | "input" | "detail">): string {
+  return permissionAskLine(ask.toolName, ask.input, ask.detail);
+}
+
 /** What an answered prompt row reads once it is closed, one word per outcome. The option's own label rides beside it
  * only where it says something the outcome does not, which is the pick that also changed the access for the rest of
  * the turn: "Allowed: Allow" and "Denied: Deny" name the same fact twice. */
@@ -2177,13 +2191,6 @@ export function permissionModeOptionLabel(modeLabel: string): string {
  * 1200 px viewport), and a line that says when the pick lands is no use cut before the "when". */
 export function accessFromNextMessage(modeLabel: string): string {
   return `${modeLabel} from your next message`;
-}
-
-/** What the harness is told when a prompt nobody answered ran its wait out: the runtime denies it in the person's
- * place rather than let the wait take the turn, and the sentence says so, since the agent reads it as the tool's
- * result and decides what to do next. */
-export function permissionUnansweredLine(waitMs: number): string {
-  return `nobody answered this permission prompt in ${fmtDuration(waitMs)}, so wsp denied it; ask again, or start the thread at an access that does not ask`;
 }
 
 /** The one sentence a second workspace on a machine that already carries one is refused with. wsp forks a machine
