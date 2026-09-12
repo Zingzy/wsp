@@ -558,6 +558,27 @@ describe("store sessions", () => {
     expect(useStore.getState().sessions["ws_a"]![0]!.status).toBe("completed");
   });
 
+  it("a prompt opening or closing refetches that workspace's rows, so a sidebar row that is not the open thread's says what it is waiting on", async () => {
+    const sessions: SessionView[] = [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", claudeSessionId: "c1" }];
+    const { api, emit, listCalls } = fakeApi([view("ws_a")], sessions);
+    useStore.getState().bind(api);
+    await flush();
+    listCalls.length = 0;
+
+    const scope = { workspaceId: "ws_a", sessionId: "c1", turnId: "turn_1", threadId: "thr_1" };
+    sessions[0]!.asking = "Permission for Bash: Check wsp version";
+    emit({ ...scope, type: "session.permission", askId: "ask_1", toolName: "Bash", detail: "Check wsp version", input: "{}", options: [{ id: "allow", label: "Allow", effect: "allow" }] });
+    await flush();
+    expect(listCalls).toEqual(["ws_a"]);
+    expect(useStore.getState().sessions["ws_a"]![0]!.asking).toBe("Permission for Bash: Check wsp version");
+
+    delete sessions[0]!.asking;
+    emit({ ...scope, type: "session.permission.closed", askId: "ask_1", outcome: "allowed", optionId: "allow" });
+    await flush();
+    expect(listCalls).toEqual(["ws_a", "ws_a"]);
+    expect(useStore.getState().sessions["ws_a"]![0]!.asking).toBeUndefined();
+  });
+
   it("renameThread names the session through the runtime and reloads that workspace's rows, so the row shows the new name", async () => {
     const sessions: SessionView[] = [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "completed", claudeSessionId: "c1", prompt: "fix the port list", threadId: "thr_1" }];
     const { api, listCalls } = fakeApi([view("ws_a")], sessions);

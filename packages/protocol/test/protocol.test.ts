@@ -75,6 +75,9 @@ import {
   ThreadView,
   ExecEvent,
   foldThreads,
+  threadState,
+  threadStateWord,
+  threadWordOf,
   threadRan,
   NOTIFY_ME,
   WorkspaceListing,
@@ -341,7 +344,6 @@ describe("a relayed permission prompt on the wire", () => {
       { id: "deny", label: "Deny", effect: "deny" },
       { id: "mode:acceptEdits", label: "Allow, then Accept edits", effect: "mode", mode: "acceptEdits" },
     ],
-    waitMs: 300_000,
   };
   const closed = { type: "session.permission.closed", workspaceId: "ws_1", sessionId: "s1", turnId: "turn_0001", threadId: "thread_0001", at: 1757320005000, askId: ask.askId, outcome: "allowed", optionId: "allow" };
 
@@ -361,7 +363,7 @@ describe("a relayed permission prompt on the wire", () => {
   });
 
   it("a prompt with nothing the harness did not name still parses, and one missing what it must name does not", () => {
-    const { detail: _d, toolUseId: _t, waitMs: _w, ...bare } = ask;
+    const { detail: _d, toolUseId: _t, ...bare } = ask;
     expect(SessionEvent.parse(bare)).toEqual(bare);
     for (const key of ["askId", "toolName", "input", "options"] as const) {
       expect(() => SessionEvent.parse({ ...ask, [key]: undefined })).toThrow();
@@ -1224,6 +1226,34 @@ describe("thread provenance", () => {
     ]);
     expect([worked!.ran, neverAnnounced!.ran, working!.ran, refused!.ran, signedInLater!.ran]).toEqual([true, false, true, false, true]);
     expect(threadRan([])).toBe(false);
+  });
+
+  it("foldThreads carries the latest turn's open prompt, so the word every row reads comes off the fold and nowhere else", () => {
+    const [asked, quiet] = foldThreads([
+      { ...row, id: "s1", threadId: "thr_a", status: "running", prompt: "write it", asking: "Permission for Write: out.txt" },
+      { ...row, id: "s2", threadId: "thr_b", status: "running", prompt: "nothing to ask" },
+    ]);
+    expect(asked!.asking).toBe("Permission for Write: out.txt");
+    expect(quiet).not.toHaveProperty("asking");
+    expect(ThreadView.parse(asked!).asking).toBe("Permission for Write: out.txt");
+    expect([threadState(asked!), threadState(quiet!)]).toEqual(["waiting", "running"]);
+    expect([threadWordOf(asked!), threadWordOf(quiet!)]).toEqual(["Needs you", "Working"]);
+    // A prompt raised on a turn that has since settled says nothing: the fold reads the latest turn alone.
+    const [settled] = foldThreads([
+      { ...row, id: "s3", threadId: "thr_c", status: "running", asking: "Permission for Bash: ls" },
+      { ...row, id: "s4", threadId: "thr_c", status: "completed" },
+    ]);
+    expect(settled).not.toHaveProperty("asking");
+    expect(threadWordOf(settled!)).toBe("Idle");
+  });
+
+  it("every thread state has one word, and a settled turn's is the word it always was", () => {
+    expect(threadStateWord("failed")).toBe("Ended");
+    expect(threadStateWord("interrupted")).toBe("Idle");
+    expect(threadStateWord("waiting")).toBe("Needs you");
+    // Only a running turn is ever waiting on a person: the runtime clears the prompt however the turn ends, on the
+    // harness's own exit and on the roads that cut it, so a settled row carrying one is a row nothing can answer.
+    expect(threadWordOf({ status: "running", asking: "Permission for Write: out.txt" })).toBe("Needs you");
   });
 
   it("foldThreads carries the latest turn's folder, so every director shows where the thread works; a row without one shows none", () => {
