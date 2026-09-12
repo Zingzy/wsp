@@ -45,9 +45,9 @@ import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readF
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fixtureCloud, fixtureFolders, FIXTURE_NAMES, fixtureSnapshots, fixtureState } from "./fixture-state.mjs";
-import { freePort, HOST_BIN, providerFor, sleep, startHost, whatIsNotBuilt } from "./host.mjs";
-import { AGENT_KEYS, binDir, copyApp, keyLayers, keysFound, labHome, standInRoot, treeSha, writeAgentHome, writeKeys, writeShim, writeStandIn, writeWorkFolder } from "./lab-home.mjs";
+import { fixtureCloud, fixtureFleet, fixtureFolders, FIXTURE_NAMES, fixtureState } from "./fixture-state.mjs";
+import { daemonBinaryHere, freePort, HOST_BIN, localReach, providerFor, sleep, startHost, whatIsNotBuilt } from "./host.mjs";
+import { AGENT_KEYS, binDir, copyApp, keyLayers, keysFound, labHome, labLogs, standInRoot, treeSha, writeAgentHome, writeKeys, writeShim, writeStandIn, writeWorkFolder } from "./lab-home.mjs";
 
 const USAGE = `usage: node lab.mjs start <name> [--fixture <fixture>] [--for <folder>]
        node lab.mjs stop <name> [--log <file>]
@@ -172,18 +172,36 @@ export function whyNotOursToRemove(home, holds = () => (existsSync(home) ? readd
 export const labLines = facts => [
   `lab ${facts.name} serving ${facts.url} pid ${facts.pid} home ${facts.home}`,
   `built from ${facts.build.sha}, app ${facts.build.app} built ${facts.build.builtAt}, command ${facts.build.command}, served out of ${facts.build.appDir}`,
+  facts.reach === undefined
+    ? `this fixture has no workspace on this computer; the daemon its machines run is at ${facts.daemon}`
+    : `this computer's workspace reads ${facts.reach}, its daemon out of ${facts.daemon}`,
   facts.signedIn ? "turns run in this lab's own home, signed in with the agents' key, with this lab's own wsp tools and no skill of this computer's" : `turns run in this lab's own home and none of ${AGENT_KEYS.join(", ")} was found, so an agent there answers that it is not logged in`,
   `this lab's log is kept at ${keptLog(facts.name, undefined, facts)} when it is stopped`,
+  NO_FINDER_CHOOSER,
   "a shell whose wsp is this lab's, carrying nothing of the tester's own:",
   `  ${labShell(facts)}`,
 ];
 
+/** The pty wrapper, by its own path: a shell started with nothing in its environment has only the path this lab
+ * hands it to find a command on, and that path leads with the lab's own bin. This is the BSD spelling, where the
+ * file to keep comes before the command; the one on a Linux box takes -c and would read this line as a file name.
+ * A lab is a Mac's, since what it serves is the app a person runs on their own computer. */
+const PTY = "/usr/bin/script -q /dev/null";
+
+/** Said on every lab, since a tester who went looking for it wrote the app off: the folder chooser a Mac opens is
+ * the desktop app's road, and a lab serves the same app in a browser, where a page cannot open one. */
+export const NO_FINDER_CHOOSER = "a lab serves the app in a browser, where a folder is typed: the Finder chooser is the desktop app's road and is not on this screen";
+
 /** The shell a tester runs this lab's verbs from: nothing of their own in it, and this lab's wsp first on the
- * path, so `wsp doctor` is this lab's doctor with no wrapper to write and nothing to paste. */
-const labShell = facts => `env -i HOME=${shellQuote(facts.home)} PATH=${shellQuote(facts.env.PATH)} TERM=xterm-256color /bin/sh`;
+ * path, so `wsp doctor` is this lab's doctor with no wrapper to write and nothing to paste.
+ *
+ * Under a pty, because a pipe is not a terminal: wsp prints a reply once when one screen holds both its streams
+ * and twice when it cannot tell, and a tester whose shell had no tty read the doubling as the product repeating
+ * itself. script is what gives a shell one here; the typescript it would keep goes nowhere. */
+export const labShell = facts => `env -i HOME=${shellQuote(facts.home)} PATH=${shellQuote(facts.env.PATH)} TERM=xterm-256color ${PTY} /bin/sh`;
 
 async function start({ name, fixture, for: keepLogIn }) {
-  const unbuilt = whatIsNotBuilt();
+  const unbuilt = await whatIsNotBuilt();
   if (unbuilt !== undefined) {
     console.error(unbuilt);
     process.exit(1);
@@ -206,10 +224,11 @@ async function start({ name, fixture, for: keepLogIn }) {
   const app = copyApp(home);
   writeAgentHome(home);
   writeWorkFolder(home, fixtureFolders(state));
-  // The stand-in's own folder, holding the snapshots this fixture's image says are already at the provider: a
-  // second host on this state file reads the same machines out of it, and each machine gets a folder there with a
-  // daemon in it, which is what gives a fork a terminal, a process list and live readings.
-  writeStandIn(home, fixtureSnapshots(state));
+  // The stand-in's own folder, holding this fixture's machines in the state it says they are in and the snapshots
+  // its image says are already at the provider: a second host on this state file reads the same machines out of
+  // it, and each machine gets a folder there with a daemon in it, which is what gives a fork a terminal, a process
+  // list and live readings.
+  writeStandIn(home, fixtureFleet(state));
   const keys = keysFound(keyLayers());
   const key = Object.keys(keys).length > 0;
   if (key) writeKeys(home, keys);
@@ -238,7 +257,7 @@ async function start({ name, fixture, for: keepLogIn }) {
     name,
     fixture,
     // Where the stop leaves this lab's log, decided here rather than wherever the stop is run from.
-    for: keepLogIn ?? process.cwd(),
+    for: keepLogIn ?? labLogs(),
     provider: providerFor(state),
     ...(cloud === undefined ? {} : { cloud }),
     url: host.base,
@@ -248,6 +267,10 @@ async function start({ name, fixture, for: keepLogIn }) {
     bin: HOST_BIN,
     env: host.env,
     build: { sha: treeSha(), app: app.hash, command: app.command, appDir: app.dir, builtAt: app.builtAt },
+    daemon: await daemonBinaryHere(),
+    // Asked only where the fixture has one: a fixture of forks alone has no row here to read, and a word about a
+    // workspace that is not in it would be a word about nothing.
+    ...(Object.values(state.workspaces).some(w => w.kind === "local") ? { reach: await localReach(host.base) } : {}),
     signedIn: key,
     startedAt: new Date().toISOString(),
   };
@@ -264,11 +287,12 @@ async function start({ name, fixture, for: keepLogIn }) {
 }
 
 /** Where a stopped lab's log is kept: the file the tester named, else one in the folder the start was told the
- * tester keeps their own log in. The stop is run from wherever the tester happens to be standing, so a folder read
- * there put seven of nine logs of one round in two folders nobody was reading; the folder is decided once, at the
- * start, and travels in the lab's record. The home goes with the lab, and the host's side of a send that died is
- * only in that log. */
-export const keptLog = (name, said, facts) => said ?? resolve(facts?.for ?? process.cwd(), `${name}-lab.log`);
+ * tester keeps their own log in, else the lab root's own logs folder. The stop is run from wherever the tester
+ * happens to be standing, so a folder read there put seven of nine logs of one round in two folders nobody was
+ * reading; the folder is decided once, at the start, and travels in the lab's record, and a start that was told
+ * none still names a folder rather than the one it happened to be run from. The home goes with the lab, and the
+ * host's side of a send that died is only in that log. */
+export const keptLog = (name, said, facts) => said ?? resolve(facts?.for ?? labLogs(), `${name}-lab.log`);
 
 export async function stopLab({ name, log }) {
   const home = homeOf(name);
