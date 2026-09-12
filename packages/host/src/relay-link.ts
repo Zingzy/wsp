@@ -9,7 +9,7 @@
 import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname as thisComputer } from "node:os";
 import { dirname, join } from "node:path";
-import { fmtDuration, relayUrlOf, runForTheList, unknownWordLine, usageRefusal } from "@wsp/protocol";
+import { fmtDuration, relayUrlOf, runForTheList, unknownWordLine, usageRefusal, type AccountView } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
 import { CLOUDFLARED, connectorRunning, ensureCloudflared, startConnector, stopRecordedConnector, type Connector } from "./connector.js";
 import { publicAddressLine } from "./host-lock.js";
@@ -22,6 +22,9 @@ export interface RelayRecord {
   hostId: string;
   token: string;
   name: string;
+  /** The account the approval was signed in under, where the relay named it; a relay that names none leaves it out
+   * and the account is known only as signed in. */
+  login?: string;
   /** Where this box answers from anywhere, once it has a tunnel; a quick tunnel's name changes at every start. */
   hostname?: string;
   linkedAt: string;
@@ -32,6 +35,8 @@ export interface RelayClientRecord {
   relayUrl: string;
   token: string;
   name: string;
+  /** As on a host's record: the account the approval named, where the relay named one. */
+  login?: string;
   linkedAt: string;
 }
 
@@ -115,6 +120,20 @@ export function readRelayClient(home: string): RelayClientRecord | undefined {
   return readJsonFile(clientRecordPath(home), isClientRecord);
 }
 
+/** Who this wsp is signed in to, read off the two records on this computer and nothing else: the relay is never
+ * called for it, so the app's row draws at once and says the same while the relay is down. Either record is a
+ * sign-in, since a person signing this computer in and a person putting this computer on their account from its
+ * own terminal are both on the account; the name is the one the relay gave on approval, which a relay that names
+ * none leaves absent and then signed in is the whole answer. */
+export function accountHere(statePath: string | undefined, home: string): AccountView {
+  const client = readRelayClient(home);
+  // A host serving no state file keeps no record of its own; reading one from a bare path would read whatever
+  // relay.json the working folder happens to hold.
+  const host = statePath === undefined || statePath === "" ? undefined : readRelayRecord(statePath);
+  const login = client?.login ?? host?.login;
+  return { signedIn: client !== undefined || host !== undefined, ...(login === undefined ? {} : { login }) };
+}
+
 /** One call to a relay, with its own sentence when it refuses: the relay's words are the person's words. */
 async function relayCall<T>(deps: RelayDeps, url: string, opts: { method?: string; token?: string; body?: unknown } = {}): Promise<T> {
   let res: Response;
@@ -149,6 +168,8 @@ interface LinkApproved {
   token: string;
   name: string;
   hostId?: string;
+  /** Who approved it, as the relay spells them. Older relays send none. */
+  login?: string;
 }
 
 /** The device code flow, for a box and for a person's own computer alike: a code shown here, a page they open, and
@@ -182,7 +203,7 @@ async function relayClient(io: CliIO, home: string, deps: RelayDeps, url?: strin
   if (relayUrl === "") throw usageRefusal("this computer has signed in to no relay.", "Give the relay's address: wsp host linked <url>.");
   const name = deps.deviceName();
   const approved = await linkThrough(io, deps, relayUrl, "client", name);
-  const record: RelayClientRecord = { relayUrl, token: approved.token, name, linkedAt: new Date(deps.now()).toISOString() };
+  const record: RelayClientRecord = { relayUrl, token: approved.token, name, ...(approved.login === undefined ? {} : { login: approved.login }), linkedAt: new Date(deps.now()).toISOString() };
   writeJsonFile(clientRecordPath(home), record);
   return record;
 }
@@ -308,7 +329,7 @@ async function relayLink(io: CliIO, opts: RelayCommandOpts, address: string | un
   const name = values.name ?? deps.deviceName();
   const approved = await linkThrough(io, deps, relayUrl, "host", name);
   if (approved.hostId === undefined) throw new Error(`the relay at ${relayUrl} approved this computer without naming a host; it runs another version of the relay`);
-  const record: RelayRecord = { relayUrl, hostId: approved.hostId, token: approved.token, name, linkedAt: new Date(deps.now()).toISOString() };
+  const record: RelayRecord = { relayUrl, hostId: approved.hostId, token: approved.token, name, ...(approved.login === undefined ? {} : { login: approved.login }), linkedAt: new Date(deps.now()).toISOString() };
   writeRelayRecord(opts.statePath, record);
   io.log(`relay       ${relayUrl}`);
   io.log(`host        ${name}`);

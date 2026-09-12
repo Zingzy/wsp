@@ -3094,6 +3094,23 @@ export const sentPairCode = (shown: string): string => shown.replace(/-/g, "").t
  * random byte masked to five bits is uniform. */
 export const PAIR_CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
+/** What this wsp knows about the account it is on, read off this computer's own records alone: the relay is never
+ * asked for it, so the row draws at once and draws the same whether or not the relay is up. Signed in is a record
+ * on disk; the name beside it is the one the relay gave when the sign-in was approved, which a relay that names
+ * none leaves absent, and then the state word alone is the answer. */
+export const AccountView = z.object({
+  signedIn: z.boolean(),
+  login: z.string().optional(),
+});
+export type AccountView = z.infer<typeof AccountView>;
+
+/** The refusal a socket let in on a ticket gets for reading the account: who this wsp is signed in to is read at
+ * the terminal of the computer it runs on, as the devices and the places are. */
+export const ACCOUNT_TICKET_REFUSAL = "a socket let in on a ticket cannot see the account this host is signed in to; run wsp relay hosts on the computer the host runs on";
+
+/** The refusal for a host that keeps no records of its own to read an account from, which a bare runtime does not. */
+export const ACCOUNT_UNSERVED = "this host keeps no account records; wsp up serves them";
+
 /** The refusal a socket that is not the host's own gets for asking to mint a pairing code: a code lets a stranger
  * in, so only the process holding the host token, on this computer, may hand one out. */
 export const PAIR_ISSUE_REFUSAL = "only a socket holding this host's own token may mint a pairing code; run wsp host pair on the computer the host runs on";
@@ -3386,6 +3403,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Spends a code for this computer's own token, as the first frame of a socket nothing has authed. Answers
    * `{ deviceId, deviceToken }` once, and the socket is authed as that device from then on. */
   z.object({ id: reqId, op: z.literal("pair.redeem"), code: z.string().max(64), name: z.string().max(200) }),
+  /** What this wsp knows about the account it is signed in to, off this computer's own records. Answers
+   * `{ account }`. Only on the person's own road, never on one let in by a ticket. */
+  z.object({ id: reqId, op: z.literal("account.get") }),
   /** Every paired device, for the host token and for a device's own socket alike. */
   z.object({ id: reqId, op: z.literal("devices.list") }),
   /** Takes a device's token away and cuts the sockets holding it. A device may name only itself; the host token

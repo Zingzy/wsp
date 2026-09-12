@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { connect } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import { DEVICES_TICKET_REFUSAL, DEVICE_REVOKE_REFUSAL, HOST_STOPPING_CLOSE, PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH, PAIR_CODE_REFUSAL, PAIR_ISSUE_REFUSAL, WS_PATH } from "@wsp/protocol";
+import { ACCOUNT_TICKET_REFUSAL, ACCOUNT_UNSERVED, DEVICES_TICKET_REFUSAL, DEVICE_REVOKE_REFUSAL, HOST_STOPPING_CLOSE, PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH, PAIR_CODE_REFUSAL, PAIR_ISSUE_REFUSAL, WS_PATH } from "@wsp/protocol";
 import { createRuntime } from "../src/runtime.js";
 import { makeDevices } from "../src/devices.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
@@ -78,6 +78,25 @@ describe("pairing codes", () => {
     expect(await relayed.request("devices.list")).toMatchObject({ ok: false, error: DEVICES_TICKET_REFUSAL });
     expect(await relayed.request("devices.revoke", { deviceId: "d_1" })).toMatchObject({ ok: false, error: DEVICES_TICKET_REFUSAL });
     relayed.close();
+  });
+
+  it("answers the account on the person's own road, refuses it on a ticket, and refuses it on a host keeping no records", async () => {
+    const runtime = rt();
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, account: { read: async () => ({ signedIn: true, login: "zingzy" }) } });
+    const host = await WsClient.connect(srv.port, { token: "host-token" });
+    expect(await host.request("account.get")).toMatchObject({ ok: true, account: { signedIn: true, login: "zingzy" } });
+    const { ticket } = (await host.request("ticket.issue", { purpose: "relay" })) as { ticket: string };
+    host.close();
+    const relayed = await WsClient.connect(srv.port, { ticket });
+    expect(await relayed.request("account.get")).toMatchObject({ ok: false, error: ACCOUNT_TICKET_REFUSAL });
+    relayed.close();
+    await srv.close();
+
+    const bare = rt();
+    srv = await serveRuntime(bare, { port: 0, authToken: "host-token", devices: bare.devices });
+    const alone = await WsClient.connect(srv.port, { token: "host-token" });
+    expect(await alone.request("account.get")).toMatchObject({ ok: false, error: ACCOUNT_UNSERVED });
+    alone.close();
   });
 
   it("refuses pair.issue on a socket holding a device token: a paired computer cannot pair another", async () => {
