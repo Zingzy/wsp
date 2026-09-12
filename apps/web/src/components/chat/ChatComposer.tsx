@@ -10,9 +10,12 @@
 // answers, and the composer opens when the process exits. not-running means
 // the turn beat the click and is no error; not-found and a refused request
 // show in the line above the box. The editor is disabled with the reason
-// while the runtime or the workspace is not live, and the same line, one
-// muted mono sentence in a slot that is laid out whether or not it holds one,
-// names whatever blocks a send, so Enter never fails silently. A running turn
+// while the runtime or the workspace is not live or the agents here have not
+// answered yet, and one reading of that reason serves the slot above the box,
+// the send button's name and tooltip and the Enter path alike: the block heads
+// the slot as one muted mono sentence, the button is held at the weight every
+// held primary wears, and an Enter leaves the draft where it was typed with
+// that line still standing, so Enter never fails silently. A running turn
 // blocks nothing: Enter then queues the message under the thread's key in the
 // draft store, the rows stack above the box, and when the turn ends the head
 // row starts the next turn; a fresh thread's rows wait under the workspace id
@@ -39,7 +42,8 @@
 // sends nothing: the line names the wsp control that serves it and goes with
 // the next edit, and a block on the send outranks it. A draft that is a slash
 // alone, or a slash and a name nothing announced, is held the way every other
-// held send is held, in the same slot and on the same button: it would reach
+// held send is held, in the same slot and on the same button, with the box
+// still open since the next keystroke is what lifts it: sent, it would reach
 // the agent as a command it does not have, and come back as a question about
 // a stray slash with a turn's price on it. A slash command nobody announced
 // with words after it still goes as text, since the words may be meant.
@@ -52,7 +56,7 @@ import { ImageIcon } from "lucide-react";
 import { HOST_ASLEEP_SEND, IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { hostAsleep } from "../../boot";
-import { useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
+import { useHarnessCatalogs, useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { onComposerFocusRequest } from "../../shell/shellRequests";
 import { useThreadStart } from "../../files/root";
 import { useLinkDownLine } from "../../terminal/paneWords";
@@ -79,12 +83,15 @@ const noop = () => {};
 
 /** What blocks a send right now, or null; the refusal table gives its words. The socket comes first: with it down
  * every other reading is stale, and a state the app has no workspace for at all is one it cannot name. A paused machine
- * is named too, and the composer reads it not as a block but as the wake the send makes first. */
+ * is named too, and the composer reads it not as a block but as the wake the send makes first. The agent catalog is
+ * last and blocks as well: the model, effort, context window and access a start rides are resolved out of it, so a
+ * turn started before it lands carries none of them. */
 export function composerSendBlock(input: {
   conn: ConnStatus;
   hasApi: boolean;
   state: WorkspaceState | null;
   hydrated: boolean;
+  agents: boolean;
 }): SendRefusalKind | null {
   if (!input.hasApi || input.conn === "connecting") return "connecting";
   if (input.conn === "reconnecting") return "reconnecting";
@@ -92,6 +99,7 @@ export function composerSendBlock(input: {
   if (input.state === null) return "not-found";
   if (input.state !== "running") return input.state;
   if (!input.hydrated) return "loading";
+  if (!input.agents) return "no-agents";
   return null;
 }
 
@@ -134,6 +142,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const [folderPicker, setFolderPicker] = useState(false);
   const openFolderPicker = useCallback(() => setFolderPicker(true), []);
   const { harness: harnessId, startOptions, catalog: harnessCatalog } = useComposerPicks(workspaceId, thread);
+  const harnessCatalogs = useHarnessCatalogs(workspaceId);
   const setDraft = useComposerDraftStore(s => s.setDraft);
   const enqueue = useComposerDraftStore(s => s.enqueue);
   const editQueued = useComposerDraftStore(s => s.editQueued);
@@ -164,7 +173,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const linkDown = useLinkDownLine(workspaceId);
   const { harness } = thread.view;
   const catalog = useMemo(() => catalogFromHarness({ id: harnessId, harness, screen: screenCommandsOf(harnessCatalog) }), [harness, harnessCatalog, harnessId]);
-  const blocked = composerSendBlock({ conn, hasApi: api !== null, state, hydrated: thread.hydrated });
+  const blocked = composerSendBlock({ conn, hasApi: api !== null, state, hydrated: thread.hydrated, agents: harnessCatalogs.length > 0 });
   // A send wakes a paused machine by itself, so paused is not a refusal here: the box takes the words and the send
   // button says it wakes first.
   const wakesFirst = blocked === "paused";
@@ -194,31 +203,32 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     () => (stopTarget !== null && runningTurn !== null ? { sessionId: stopTarget, turnId: runningTurn.turnId } : null),
     [runningTurn, stopTarget],
   );
-  const accessPick = useAccessPick(workspaceId, pickTarget);
+  const accessPick = useAccessPick(workspaceId, pickTarget, thread.threadKey);
   const stopAttempt = stop !== null && runningTurn !== null && stop.turnId === runningTurn.turnId ? stop : null;
   const steerAttempt = steered !== null && runningTurn !== null && steered.turnId === runningTurn.turnId ? steered : null;
   const canStop = runningTurn !== null && api?.interruptSession !== undefined;
   // The catalog answers before the click: a harness that steers takes the row into the turn, any other gets the turn stopped.
   const canSteer = canStop && harnessCatalog?.steers === true && api?.steerSession !== undefined;
-  // One line in the slot above the box: the newest failure, else what blocks a send, else the screen command Enter
-  // refused, since a box the block disabled has nothing to edit and the block is the one thing to say, else the turn
+  // One line in the slot above the box, and what blocks a send heads it: every other line here is about a send this
+  // composer could make, so while it can make none the block is the one true thing to say and the slot, the button's
+  // name and an Enter all read it. Under it: the newest failure, then the screen command Enter refused, then the turn
   // that replied but still runs, in the runtime's own words, since a message sent now waits for that process and runs
-  // as the next turn, else an access pick the running turn's harness would not take mid-turn, else the workspace's
+  // as the next turn, then an access pick the running turn's harness would not take mid-turn, then the workspace's
   // link being down, which blocks no send and so comes after everything a person is being stopped by.
   const line =
-    imageRefusal !== null
-      ? imageRefusal
-      : stopAttempt !== null && stopAttempt.error !== null
-      ? stopFailedLine(stopAttempt.error)
-      : steerAttempt !== null && steerAttempt.error !== null
-        ? sendNowFailedLine(steerAttempt.error)
-        : sendHeld !== null
-          ? sendHeld
-          : screenLine !== null
-            ? screenLine
-            : runningTurn?.replied === true
-              ? stillWorkingLine(threadKey)
-              : (accessPick.line ?? linkDown);
+    sendHeld !== null
+      ? sendHeld
+      : imageRefusal !== null
+        ? imageRefusal
+        : stopAttempt !== null && stopAttempt.error !== null
+          ? stopFailedLine(stopAttempt.error)
+          : steerAttempt !== null && steerAttempt.error !== null
+            ? sendNowFailedLine(steerAttempt.error)
+            : screenLine !== null
+              ? screenLine
+              : runningTurn?.replied === true
+                ? stillWorkingLine(threadKey)
+                : (accessPick.line ?? linkDown);
 
   const trigger = useMemo(() => detectComposerTrigger(draft.prompt, draft.cursor), [draft]);
   const searchKey = trigger ? `${trigger.kind}:${trigger.query.trim().toLowerCase()}` : null;
@@ -339,8 +349,8 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   );
 
   const send = useCallback(() => {
-    // The reading the slot and the send button are already wearing; an Enter that lands here leaves the draft where
-    // it was typed with that line still standing.
+    // The same reading the slot and the send button are already wearing: an Enter that lands here leaves the draft
+    // where it was typed and that line standing.
     if (sendHeld !== null) return;
     const snapshot = editorRef.current?.readSnapshot() ?? { value: draft.prompt, cursor: draft.cursor };
     const prompt = snapshot.value.trim();

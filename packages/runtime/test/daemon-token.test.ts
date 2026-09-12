@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_PATH, DAEMON_TOKEN_SET, assertTokenShape, rotateDaemonTokenScript, writeDaemonTokenScript } from "../src/daemon-token.js";
+import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
+import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, assertTokenShape, rotateDaemonTokenScript, writeDaemonTokenScript } from "../src/daemon-token.js";
 
 const TOKEN = "0123456789abcdef".repeat(3);
 

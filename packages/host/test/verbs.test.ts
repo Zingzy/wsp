@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { passphraseCipher } from "@wsp/engine";
-import { agentsKindRefusal, DEFAULT_PREFERENCES, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { runForTheList, agentsKindRefusal, DEFAULT_PREFERENCES, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { copyKey, createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -18,7 +18,7 @@ import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
 import { CLI_VERBS, PLAN_ONLY, deleteQuestion, deletedLine, dialHost, firstEnded, lastTarget, messageTo, threadRows, threadTree, threadsOf, type HostClient } from "../src/verbs.js";
 import { HOST_SIDE_VAULT } from "../src/verbs.js";
-import { hostSideOnlyLine } from "../src/hosts.js";
+import { hostSideOnlyFix, hostSideOnlyLine } from "../src/hosts.js";
 import { writeHost } from "../src/hosts.js";
 import { withRefused } from "../../runtime/test/fs-refusal.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
@@ -93,6 +93,12 @@ describe("wsp verbs over the host", () => {
     const { io, ended } = starting(...argv);
     return { code: await ended, io };
   }
+  /** A line exactly as it was typed, with nothing moved or added: where a shared flag sits is the question here, so
+   * the helpers that put --state at the end are no use. */
+  async function typed(...argv: string[]): Promise<{ code: number; io: Captured }> {
+    const io = captured();
+    return { code: await cli(argv, io, undefined, env), io };
+  }
   const json = (io: Captured): unknown[] => io.lines.map(l => JSON.parse(l) as unknown);
   /** The workspace column of the table wsp workspaces prints, which is the list a person reads names off. */
   const names = (listed: { io: Captured }): string[] => listed.io.lines[0]!.split("\n").slice(1).map(row => row.split(/\s+/)[0]!);
@@ -154,10 +160,10 @@ describe("wsp verbs over the host", () => {
     const list = "the sizes are 2x4 ($0.11/hr), 2x8 ($0.15/hr), 4x8 ($0.22/hr)";
     const odd = await run("new", "odd", "--size", "8x16");
     expect(odd.code).toBe(3);
-    expect(odd.io.errors).toEqual([`wsp new: 8x16 is not a size this provider offers; ${list}`]);
+    expect(odd.io.errors).toEqual([`wsp new: 8x16 is not a size this provider offers; ${list}. Name one of those with --size.`]);
     const word = await run("fork", "big", "--size", "large");
     expect(word.code).toBe(3);
-    expect(word.io.errors).toEqual([`wsp fork: large is not a size this provider offers; ${list}`]);
+    expect(word.io.errors).toEqual([`wsp fork: large is not a size this provider offers; ${list}. Name one of those with --size.`]);
     expect(backend.machines).toHaveLength(2);
     expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["big", "wide"]);
 
@@ -393,7 +399,7 @@ describe("wsp verbs over the host", () => {
     expect(missing.io.errors).toEqual(["wsp rebuild: no workspace nope"]);
     const extra = await run("rebuild", "alpha", "beta");
     expect(extra.code).toBe(EXIT_CODES.usage);
-    expect(extra.io.errors).toEqual(["wsp rebuild: wsp rebuild takes one workspace"]);
+    expect(extra.io.errors).toEqual(["wsp rebuild takes one workspace. usage: wsp rebuild <workspace>"]);
   });
 
   it("wsp image reads the record off the seeded golden's head, says no sign-ins are held, and names the copy at this host's place", async () => {
@@ -476,7 +482,7 @@ describe("wsp verbs over the host", () => {
     env["WSP_HOME"] = join(dir, "home");
     writeHost(join(dir, "home"), "box", { url: "http://box.local:4400", deviceId: "d_box", deviceToken: "tok-box", pairedAt: "2026-09-11T10:00:00.000Z" });
     const dest = join(dir, "elsewhere.wsp");
-    const line = hostSideOnlyLine("image export", "box", HOST_SIDE_VAULT);
+    const line = `${hostSideOnlyLine("image export", "box")} ${hostSideOnlyFix(HOST_SIDE_VAULT)}`;
     // Every way a line is aimed reads the same: the flag, the variable, and the alias wsp hosts marks.
     const flagged = await run("image", "export", dest, "--host", "box");
     expect(flagged.code).toBe(EXIT_CODES.usage);
@@ -547,7 +553,7 @@ describe("wsp verbs over the host", () => {
     expect(again.io.lines).toEqual([`alpha running on ${after.machineId}; ${IMAGE_ALREADY_NEWEST}`]);
     const extra = await run("image", "move", "alpha", "beta");
     expect(extra.code).toBe(EXIT_CODES.usage);
-    expect(extra.io.errors.at(-1)).toBe("wsp image move: wsp image move takes one workspace");
+    expect(extra.io.errors.at(-1)).toBe("wsp image move takes one workspace. usage: wsp image move <workspace>");
   });
 
   it("fork's help says it makes a new machine from the source's golden version, in wsp --help and wsp fork --help", async () => {
@@ -706,7 +712,7 @@ describe("wsp verbs over the host", () => {
     expect(missing.io.errors).toEqual(["wsp rename: no workspace nope"]);
     const short = await run("rename", "gamma");
     expect(short.code).toBe(3);
-    expect(short.io.errors).toEqual(["wsp rename: wsp rename takes a workspace and one name"]);
+    expect(short.io.errors).toEqual(["wsp rename takes a workspace and one name. usage: wsp rename <workspace> \"<name>\""]);
   });
 
   it("forget asks once, naming what goes, drops a workspace whose machine is gone, and is refused with the reason while the machine exists", async () => {
@@ -815,6 +821,70 @@ describe("wsp verbs over the host", () => {
     expect(io.errors).toEqual([]);
   });
 
+  it("a turn watched at a terminal shows its reply once: the prose as it streamed, ended on a line of its own, and the finished line under it carries no copy of it", async () => {
+    const held = heldAgent(false);
+    await restartHost({ claude: held.adapter });
+    await run("new", "alpha");
+    const io = captured();
+    io.isTTY = true;
+    io.sameScreen = true;
+    const ended = cli(["thread", "new", "--in", "alpha", "print the kernel version and nothing else", "--state", statePath], io, undefined, env);
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    const [row] = await rt.sessions.list();
+    held.release(0, "25.4.0");
+    expect(await ended).toBe(0);
+    expect(io.screen).toBe(`thread ${row!.threadId}\n25.4.0\ncompleted\n`);
+    expect(io.screen.split("25.4.0")).toHaveLength(2);
+    expect(io.screen.endsWith("\n")).toBe(true);
+    expect(io.lines).toEqual([`thread ${row!.threadId}`]);
+  });
+
+  it("a turn watched at a terminal that streamed no prose prints its reply once under the work it showed, since nothing on the screen carries it yet", async () => {
+    await restartHost({ claude: toolingAgent([{ toolName: "Bash", input: { command: "uname -r" }, output: "25.4.0" }], { status: "completed", text: "the kernel is 25.4.0" }) });
+    await run("new", "alpha");
+    const io = captured();
+    io.isTTY = true;
+    io.sameScreen = true;
+    expect(await cli(["thread", "new", "--in", "alpha", "print the kernel version and nothing else", "--state", statePath], io, undefined, env)).toBe(0);
+    const [row] = await rt.sessions.list();
+    expect(io.screen).toBe(`thread ${row!.threadId}\n$ uname -r\n25.4.0\nthe kernel is 25.4.0\ncompleted\n`);
+    expect(io.lines).toEqual([`thread ${row!.threadId}`, "the kernel is 25.4.0"]);
+  });
+
+  it("a turn whose stdout is a pipe prints the reply once, at the end, with the stream beside it the person's own view of the work", async () => {
+    const held = heldAgent(false);
+    await restartHost({ claude: held.adapter });
+    await run("new", "alpha");
+    const piped = starting("thread", "new", "--in", "alpha", "print the kernel version and nothing else");
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    const [row] = await rt.sessions.list();
+    held.release(0, "25.4.0");
+    expect(await piped.ended).toBe(0);
+    expect(piped.io.sameScreen).toBeUndefined();
+    expect(piped.io.lines).toEqual([`thread ${row!.threadId}`, "25.4.0"]);
+    expect(piped.io.streamed).toBe("25.4.0\ncompleted\n");
+  });
+
+  it("--json prints the turn's events and its one turn value, at a terminal as into a pipe, and writes no stream", async () => {
+    const held = heldAgent(false);
+    await restartHost({ claude: held.adapter });
+    await run("new", "alpha");
+    const io = captured();
+    io.isTTY = true;
+    io.sameScreen = true;
+    const ended = cli(["thread", "new", "--in", "alpha", "print the kernel version and nothing else", "--json", "--state", statePath], io, undefined, env);
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    const [row] = await rt.sessions.list();
+    held.release(0, "25.4.0");
+    expect(await ended).toBe(0);
+    const values = json(io) as { type?: string; kind?: string; result?: { text?: string } }[];
+    expect(values.map(v => v.type)).toEqual(["thread", "session.start", "session.delta", "session.done", undefined]);
+    expect(values[2]).toMatchObject({ kind: "text", text: "25.4.0" });
+    expect(values[3]!.result).toMatchObject({ status: "completed", text: "25.4.0" });
+    expect(values.at(-1)).toEqual({ threadId: row!.threadId, workspaceId: row!.workspaceId, harness: "claude", text: "25.4.0", outcome: "started" });
+    expect(io.streamed).toBe("");
+  });
+
   it("a turn's tool calls stream one muted line each as they land, what each answered behind it, and its end reads as the app's status line", async () => {
     await restartHost({
       claude: toolingAgent(
@@ -865,7 +935,7 @@ describe("wsp verbs over the host", () => {
     await run("pause", "alpha");
     const refused = await run("thread", "new", "--in", "alpha", "--agent", "gemini", "hello");
     expect(refused.code).toBe(3);
-    expect(refused.io.errors).toEqual(['wsp thread new: no adapter registered for harness "gemini"; agents on this host: claude, codex']);
+    expect(refused.io.errors).toEqual(['wsp thread new: no adapter registered for harness "gemini"; agents on this host: claude, codex. Name one of those with --agent.']);
     expect((await rt.workspaces.list())[0]!.phase).toBe("napping");
     expect(await rt.sessions.list()).toHaveLength(1);
   });
@@ -874,7 +944,7 @@ describe("wsp verbs over the host", () => {
     await run("new", "alpha");
     const refused = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--agent", "gemini");
     expect(refused.code).toBe(3);
-    expect(refused.io.errors).toEqual(['wsp fork: no adapter registered for harness "gemini"; agents on this host: claude, codex']);
+    expect(refused.io.errors).toEqual(['wsp fork: no adapter registered for harness "gemini"; agents on this host: claude, codex. Name one of those with --agent.']);
     expect(refused.io.lines).toEqual([]);
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha"]);
     expect(await rt.sessions.list()).toEqual([]);
@@ -888,13 +958,13 @@ describe("wsp verbs over the host", () => {
     for (const task of ["", "  \n\t"]) {
       const opened = await run("thread", "new", "--in", "alpha", task);
       expect(opened.code).toBe(3);
-      expect(opened.io.errors).toEqual([`wsp thread new: ${EMPTY_TASK_LINE}`]);
+      expect(opened.io.errors).toEqual([`wsp thread new: ${EMPTY_TASK_LINE}. Put it in quotes after the flags.`]);
       const forked = await run("fork", "alpha", "--name", "worker", "--send", task);
       expect(forked.code).toBe(3);
-      expect(forked.io.errors).toEqual([`wsp fork: ${EMPTY_TASK_LINE}`]);
+      expect(forked.io.errors).toEqual([`wsp fork: ${EMPTY_TASK_LINE}. Put it in quotes after the flags.`]);
       const sent = await run("send", row!.threadId!, task);
       expect(sent.code).toBe(3);
-      expect(sent.io.errors).toEqual([`wsp send: ${EMPTY_TASK_LINE}`]);
+      expect(sent.io.errors).toEqual([`wsp send: ${EMPTY_TASK_LINE}. Put it in quotes after the flags.`]);
     }
     expect((await rt.workspaces.list()).map(w => [w.name, w.phase])).toEqual([["alpha", "napping"]]);
     expect(claude.starts).toHaveLength(1);
@@ -1019,7 +1089,7 @@ describe("wsp verbs over the host", () => {
     expect(before.io.errors).toEqual([`wsp thread forget: ${threadWithoutIdRefusal("s_old")}`]);
     const none = await run("thread", "forget");
     expect(none.code).toBe(3);
-    expect(none.io.errors).toEqual(["wsp thread forget: wsp thread forget takes one thread"]);
+    expect(none.io.errors).toEqual(["wsp thread forget takes one thread. usage: wsp thread forget <thread>"]);
   });
 
   it("threads is the sidebar's data: one row per thread with agent, state, who opened it and its folder, filtered by --in", async () => {
@@ -1089,7 +1159,7 @@ describe("wsp verbs over the host", () => {
     const projects = (await rt.workspaces.get(alpha!.id)).projects!;
     const missing = await run("thread", "new", "--in", "alpha", "--project", "nope", "build it");
     expect(missing.code).toBe(3);
-    expect(missing.io.errors).toEqual([`wsp thread new: ${noProjectLine("nope", projects)}`]);
+    expect(missing.io.errors).toEqual([`wsp thread new: ${noProjectLine("nope", projects)}. Run wsp projects <workspace> to read the names it holds.`]);
     expect((await rt.workspaces.get(alpha!.id)).phase).toBe("napping");
     expect(claude.starts).toHaveLength(3);
   });
@@ -1170,7 +1240,7 @@ describe("wsp verbs over the host", () => {
     expect(unknown.io.errors).toEqual(["wsp projects: no workspace nope"]);
     const bare = await run("projects");
     expect(bare.code).toBe(3);
-    expect(bare.io.errors[0]).toMatch(/^wsp projects: wsp projects takes one workspace/);
+    expect(bare.io.errors[0]).toMatch(/^wsp projects takes one workspace/);
   });
 
   it("fork --send --cwd starts the first thread in that folder; without it, in the project folder the fork inherited, else none", async () => {
@@ -1229,10 +1299,10 @@ describe("wsp verbs over the host", () => {
     await run("new", "alpha");
     const model = await run("thread", "new", "--in", "alpha", "--model", "claude-haiku-4-5", "review it");
     expect(model.code).toBe(3);
-    expect(model.io.errors).toEqual(['wsp thread new: model "claude-haiku-4-5" is not one claude takes; one of: Fable 5.1 (claude-fable-5-1), Opus 5 (claude-opus-5), Sonnet 5 (claude-sonnet-5)']);
+    expect(model.io.errors).toEqual(['wsp thread new: model "claude-haiku-4-5" is not one claude takes; one of: Fable 5.1 (claude-fable-5-1), Opus 5 (claude-opus-5), Sonnet 5 (claude-sonnet-5). Drop the flag, or give it a value the agent offers.']);
     const effort = await run("thread", "new", "--in", "alpha", "--effort", "ultra", "review it");
     expect(effort.code).toBe(3);
-    expect(effort.io.errors).toEqual(['wsp thread new: effort "ultra" is not one claude takes; one of: Low (low), Medium (medium), High (high), Extra high (xhigh), Max (max)']);
+    expect(effort.io.errors).toEqual(['wsp thread new: effort "ultra" is not one claude takes; one of: Low (low), Medium (medium), High (high), Extra high (xhigh), Max (max). Drop the flag, or give it a value the agent offers.']);
     const access = await run("fork", "alpha", "--send", "build it", "--access", "yolo");
     expect(access.code).toBe(3);
     expect(access.io.errors[0]).toMatch(/^wsp fork: access mode "yolo" is not one claude takes; one of: Default \(default\), Accept edits \(acceptEdits\), /);
@@ -1240,7 +1310,7 @@ describe("wsp verbs over the host", () => {
     const other = await run("fork", "alpha", "--send", "build it", "--agent", "codex", "--effort", "minimal");
     expect(other.code).toBe(3);
     expect(other.io.errors).toEqual([
-      'wsp fork: effort "minimal" is not one GPT-5.6-Sol takes; one of: Low (low), Medium (medium), High (high), Extra high (xhigh), Max (max), Ultra (ultra)',
+      'wsp fork: effort "minimal" is not one GPT-5.6-Sol takes; one of: Low (low), Medium (medium), High (high), Extra high (xhigh), Max (max), Ultra (ultra). Drop the flag, or give it a value the agent offers.',
     ]);
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha"]);
     expect(claude.starts).toEqual([]);
@@ -1248,7 +1318,7 @@ describe("wsp verbs over the host", () => {
     expect(await rt.sessions.list()).toEqual([]);
     const dangling = await run("fork", "alpha", "--model", "claude-sonnet-5");
     expect(dangling.code).toBe(3);
-    expect(dangling.io.errors).toEqual(["wsp fork: --model needs --send"]);
+    expect(dangling.io.errors).toEqual(['wsp fork: --model says how a thread opens, and this line opens none. Add --send "<task>", or drop --model.']);
   });
 
   it("checks a pick against the workspace's own machine, so a model only that machine knows is taken here as the app takes it", async () => {
@@ -1269,7 +1339,7 @@ describe("wsp verbs over the host", () => {
     // the workspace it forks from, whose golden the new machine comes from.
     const forked = await run("fork", "alpha", "--send", "go", "--agent", "codex", "--model", "gpt-5.5");
     expect(forked.code).toBe(3);
-    expect(forked.io.errors).toEqual(['wsp fork: model "gpt-5.5" is not one codex takes; one of: anthropic/claude-sonnet-4.5 (anthropic/claude-sonnet-4.5)']);
+    expect(forked.io.errors).toEqual(['wsp fork: model "gpt-5.5" is not one codex takes; one of: anthropic/claude-sonnet-4.5 (anthropic/claude-sonnet-4.5). Drop the flag, or give it a value the agent offers.']);
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha"]);
   });
 
@@ -1277,13 +1347,13 @@ describe("wsp verbs over the host", () => {
     await run("new", "alpha");
     const relative = await run("thread", "new", "--in", "alpha", "--cwd", "packages/host", "look here");
     expect(relative.code).toBe(3);
-    expect(relative.io.errors).toEqual(['--cwd is a path on the machine, absolute: got "packages/host"\n\nusage: wsp thread new [--in <workspace>] [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, --title, --image <path>, --detach] "<task>"']);
+    expect(relative.io.errors).toEqual(['--cwd is a path on the machine, absolute, and got "packages/host". Give a path that opens with /, since whoever reads it works in a folder this line cannot see. usage: wsp thread new [--in <workspace>] [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, --title, --image <path>, --detach] "<task>"']);
     const forked = await run("fork", "alpha", "--send", "build it", "--cwd", "packages/host");
     expect(forked.code).toBe(3);
-    expect(forked.io.errors[0]).toMatch(/^--cwd is a path on the machine, absolute: got "packages\/host"\n\nusage: wsp fork /);
+    expect(forked.io.errors[0]).toMatch(/^--cwd is a path on the machine, absolute, and got "packages\/host"\..* usage: wsp fork /);
     const dangling = await run("fork", "alpha", "--cwd", "/root/work");
     expect(dangling.code).toBe(3);
-    expect(dangling.io.errors).toEqual(["wsp fork: --cwd needs --send"]);
+    expect(dangling.io.errors).toEqual(['wsp fork: --cwd says how a thread opens, and this line opens none. Add --send "<task>", or drop --cwd.']);
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha"]);
     expect(await rt.sessions.list()).toEqual([]);
     expect(claude.starts).toEqual([]);
@@ -1464,7 +1534,7 @@ describe("wsp verbs over the host", () => {
     expect(missing.io.errors).toEqual(["wsp thread rename: no thread nope"]);
     const short = await run("thread", "rename", row!.threadId!);
     expect(short.code).toBe(3);
-    expect(short.io.errors).toEqual(["wsp thread rename: wsp thread rename takes a thread and one name"]);
+    expect(short.io.errors).toEqual(["wsp thread rename takes a thread and one name. usage: wsp thread rename <thread> \"<title>\""]);
   });
 
   it("thread rename wakes a napping workspace first, since the name goes into a store on its machine", async () => {
@@ -1742,7 +1812,7 @@ describe("wsp verbs over the host", () => {
     expect(none.io.errors[0]).toContain("wsp threads wait takes one thread or more");
     const soon = await run("threads", "wait", a!.threadId!, "--timeout", "soon");
     expect(soon.code).toBe(3);
-    expect(soon.io.errors[0]).toContain('--timeout takes seconds, a number above zero, not "soon"');
+    expect(soon.io.errors[0]).toContain('--timeout takes seconds, a number above zero, and got "soon".');
     const missing = await run("threads", "wait", a!.threadId!, "nope");
     expect(missing.code).toBe(1);
     expect(missing.io.errors).toEqual(["wsp threads wait: no thread nope"]);
@@ -1952,6 +2022,75 @@ describe("wsp verbs over the host", () => {
     expect(missing.io.errors).toEqual(["wsp thread read: no thread nope"]);
   });
 
+  it("takes --state wherever it sits: before the verb's words, between them and after them", async () => {
+    await run("new", "alpha");
+    await run("thread", "new", "--in", "alpha", "build it");
+    const id = (await rt.sessions.list())[0]!.threadId!;
+
+    const before = await typed("--state", statePath, "thread", "read", id);
+    const between = await typed("thread", "--state", statePath, "read", id);
+    const after = await typed("thread", "read", id, "--state", statePath);
+    expect([before.code, between.code, after.code]).toEqual([0, 0, 0]);
+    expect([before.io.errors, between.io.errors, after.io.errors]).toEqual([[], [], []]);
+    expect(before.io.lines).toEqual(after.io.lines);
+    expect(between.io.lines).toEqual(after.io.lines);
+    expect(after.io.lines[0]).toContain("build it");
+  });
+
+  it("takes --json wherever it sits, so a line that asks for JSON before the verb's words prints JSON", async () => {
+    await run("new", "alpha");
+    await run("thread", "new", "--in", "alpha", "build it");
+    const id = (await rt.sessions.list())[0]!.threadId!;
+    const answer = [{ threadId: id, messages: [{ who: "agent", at: expect.any(Number), text: "re: build it" }] }];
+
+    const before = await typed("--json", "thread", "read", id, "--last", "--state", statePath);
+    const between = await typed("thread", "--json", "read", id, "--last", "--state", statePath);
+    const after = await typed("thread", "read", id, "--last", "--json", "--state", statePath);
+    expect([before.code, between.code, after.code]).toEqual([0, 0, 0]);
+    expect(json(before.io)).toEqual(answer);
+    expect(json(between.io)).toEqual(answer);
+    expect(json(after.io)).toEqual(answer);
+  });
+
+  it("hands the verb the rest of the line in the order it was typed, so its own flags are read beside a shared one", async () => {
+    await run("new", "alpha");
+    await run("thread", "new", "--in", "alpha", "build it");
+    const id = (await rt.sessions.list())[0]!.threadId!;
+
+    // The shared flag between the verb's words, the verb's own flag at the end.
+    const { code, io } = await typed("thread", "--state", statePath, "read", id, "--last");
+    expect(code).toBe(0);
+    expect(io.errors).toEqual([]);
+    expect(io.lines).toEqual([expect.stringContaining("re: build it")]);
+  });
+
+  it("refuses a shared flag left at the end of the line by its own name, never reading the verb's word as its value", async () => {
+    for (const name of ["--state", "--host"]) {
+      const { code, io } = await typed("thread", "read", "th_one", name);
+      const refusal = io.errors.join("\n");
+      expect(code, name).toBe(EXIT_CODES.usage);
+      expect(refusal, name).toContain(`Option '${name} <value>' argument missing`);
+      // The word the verb was given is its own, so nothing about it is read back as the flag's value.
+      expect(refusal, name).not.toContain("th_one");
+    }
+  });
+
+  it("refuses a misspelt shared flag by the word that was typed, in two halves, wherever it sits", async () => {
+    const threads = CLI_VERBS.find(v => v.name === "threads")!;
+    for (const [argv, fix] of [
+      [["--stat", statePath, "threads"], runForTheList("wsp --help")],
+      [["thread", "--stat", statePath, "read", "th_one"], runForTheList("wsp --help")],
+      [["threads", "--stat", statePath], `usage: ${threads.usage}`],
+    ] as [string[], string][]) {
+      const { code, io } = await typed(...argv);
+      const refusal = io.errors.join("\n");
+      expect(code, argv.join(" ")).toBe(EXIT_CODES.usage);
+      // Two halves: the word as it was typed, then what to do about it after it.
+      expect(refusal, argv.join(" ")).toContain("--stat'");
+      expect(refusal.indexOf(fix), argv.join(" ")).toBeGreaterThan(refusal.indexOf("--stat'"));
+    }
+  });
+
   it("thread new, send and fork --send return with the reply on the turn's session.done; a session.end that never comes is not waited for", async () => {
     const agent = doneOnlyAgent(prompt => `re: ${prompt}`);
     await restartHost({ claude: agent.adapter });
@@ -1988,7 +2127,7 @@ describe("wsp verbs over the host", () => {
     ]);
     const bare = await run("exec", "alpha");
     expect(bare.code).toBe(3);
-    expect(bare.io.errors).toEqual(["wsp exec: wsp exec takes a workspace, then -- and the command"]);
+    expect(bare.io.errors).toEqual(["wsp exec takes a workspace, then -- and the command. usage: wsp exec <workspace> [--cwd <dir>] -- <command...>"]);
   });
 
   describe("one list behind every verb", () => {
@@ -2075,7 +2214,7 @@ describe("wsp verbs over the host", () => {
 
     const relative = await run("exec", "alpha", "--cwd", "packages/host", "--", "git", "status");
     expect(relative.code).toBe(3);
-    expect(relative.io.errors).toEqual(['--cwd is a path on the machine, absolute: got "packages/host"\n\nusage: wsp exec <workspace> [--cwd <dir>] -- <command...>']);
+    expect(relative.io.errors).toEqual(['--cwd is a path on the machine, absolute, and got "packages/host". Give a path that opens with /, since whoever reads it works in a folder this line cannot see. usage: wsp exec <workspace> [--cwd <dir>] -- <command...>']);
   });
 
   it("a failing exec says the folder the host ran it in, the machine's home on a fork and the workspace's own on this computer", async () => {
@@ -2386,7 +2525,7 @@ describe("wsp verbs over the host", () => {
     }
     const sepia = await run("terminal", "config", "--scheme", "sepia");
     expect(sepia.code).toBe(3);
-    expect(sepia.io.errors).toEqual(['wsp terminal config: --scheme takes one of light, dark, not "sepia"']);
+    expect(sepia.io.errors).toEqual(['wsp terminal config: --scheme takes one of light, dark, and got "sepia". Name one of those.']);
     const extra = await run("terminal", "config", "now");
     expect(extra.code).toBe(3);
     // No config at all is not a failure: the empty object says the pane keeps its defaults.
@@ -2492,7 +2631,7 @@ describe("wsp verbs over the host", () => {
     const bad = await run("import", proj, "--to", "alpha", "--cut", "src/index.ts", "--replace");
     expect(bad.code).toBe(3);
     expect(bad.io.lines).toEqual([]);
-    expect(bad.io.errors).toEqual(["wsp import: src/index.ts is not a secret-shaped file in the plan; the plan lists .env"]);
+    expect(bad.io.errors).toEqual(["wsp import: src/index.ts is not a secret-shaped file in the plan; the plan lists .env. Name one the plan lists, or drop the flag."]);
     expect(landings()).toHaveLength(1);
   });
 
@@ -2509,7 +2648,7 @@ describe("wsp verbs over the host", () => {
     const noSessions = await run("import", proj, "--to", "alpha", "--yes", "--agents", "claude");
     expect(noSessions.code).toBe(3);
     expect(noSessions.io.lines).toEqual([]);
-    expect(noSessions.io.errors).toEqual(["wsp import: claude has no sessions for this folder"]);
+    expect(noSessions.io.errors).toEqual(["wsp import: claude has no sessions for this folder. Name one the plan lists, or drop the flag and let every agent with sessions come."]);
     const base = backend.execImpl;
     backend.execImpl = (m, cmd) => (cmd.startsWith("test -e ") ? { exitCode: 0, stdout: "yes\n", stderr: "" } : base(m, cmd));
     const taken = await run("import", proj, "--to", "alpha", "--yes");
@@ -2582,7 +2721,7 @@ describe("wsp verbs over the host", () => {
     const typo = await run("export", "alpha", join(dir, "out", "proj"), "--agents", "claude,codx");
     expect(typo.code).toBe(3);
     expect(typo.io.lines).toEqual([]);
-    expect(typo.io.errors).toEqual([`wsp export: ${unknownAgentLine("codx", CATALOG_AGENTS.map(a => a.id))}`]);
+    expect(typo.io.errors).toEqual([`wsp export: ${unknownAgentLine("codx", CATALOG_AGENTS.map(a => a.id))}. Name one of those, or drop the flag.`]);
     expect(guest.sources).toEqual([]);
     expect(existsSync(join(dir, "out"))).toBe(false);
   });
@@ -2601,7 +2740,7 @@ describe("wsp verbs over the host", () => {
     // A flag another verb reads is refused naming that verb, so the caller is told where it lives: thread new's --agent on send, threads' --in on stop.
     const foreign = await run("send", "row_1", "--agent", "claude", "hello");
     expect(foreign.code).toBe(3);
-    expect(foreign.io.errors).toEqual(['--agent belongs to wsp fork and wsp thread new; wsp send does not read it\n\nusage: wsp send <thread> [--model, --effort, --access <value>] [--image <path>] [--detach] "<message>"']);
+    expect(foreign.io.errors).toEqual(['--agent belongs to wsp fork and wsp thread new; wsp send does not read it. usage: wsp send <thread> [--model, --effort, --access <value>] [--image <path>] [--detach] "<message>"']);
     const within = await run("stop", "row_1", "--in", "alpha");
     expect(within.io.errors[0]).toContain("--in belongs to wsp threads and wsp thread new; wsp stop does not read it");
     // A flag spelled like a prototype member is nobody's: the tables are read as own keys, so it gets the parser's line.
@@ -2611,7 +2750,7 @@ describe("wsp verbs over the host", () => {
     expect(proto.io.errors[0]).not.toContain("belongs to");
     const half = await run("thread");
     expect(half.code).toBe(3);
-    expect(half.io.errors).toEqual(['usage: wsp thread new [--in <workspace>] [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, --title, --image <path>, --detach] "<task>"\nusage: wsp thread read <thread> [--last]\nusage: wsp thread rename <thread> "<title>"\nusage: wsp thread forget <thread>']);
+    expect(half.io.errors).toEqual(['wsp thread opens a line rather than being one. usage: wsp thread new [--in <workspace>] [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, --title, --image <path>, --detach] "<task>"\nusage: wsp thread read <thread> [--last]\nusage: wsp thread rename <thread> "<title>"\nusage: wsp thread forget <thread>']);
   });
 
   it("without a host serving the state file every verb refuses in one line before dialling anything", async () => {
@@ -2662,7 +2801,7 @@ describe("wsp verbs over the host", () => {
       await run("new", "alpha");
       const zero = await run("workspaces", "agents", "alpha", "--spawn", "on", "--max-depth", "0");
       expect(zero.code).toBe(EXIT_CODES.usage);
-      expect(zero.io.errors[0]).toBe("wsp workspaces agents: --max-depth takes a whole number of one or more, not \"0\"");
+      expect(zero.io.errors[0]).toBe('wsp workspaces agents: --max-depth takes a whole number of one or more, and got "0". Write it as --max-depth <n>.');
       // Zero machines is a switch that is on and forks nothing, which is a thing a person may mean.
       const none = await run("workspaces", "agents", "alpha", "--spawn", "on", "--max-machines", "0");
       expect(none.code).toBe(0);
@@ -2672,11 +2811,11 @@ describe("wsp verbs over the host", () => {
     it("a workspace whose agents could not drive this host is refused the switch at both doors, in one sentence", async () => {
       const local = await run("new", "--local", "mine", "--spawn", "on");
       expect(local.code).toBe(EXIT_CODES.usage);
-      expect(local.io.errors[0]).toBe(`wsp new: ${agentsKindRefusal("local")}`);
+      expect(local.io.errors[0]).toBe(`wsp new: ${agentsKindRefusal("local")}. Drop --spawn on, or make a cloud workspace instead.`);
       expect(await rt.workspaces.list()).toEqual([]);
       const ssh = await run("new", "--ssh", "maya@box", "--spawn", "on");
       expect(ssh.code).toBe(EXIT_CODES.usage);
-      expect(ssh.io.errors[0]).toBe(`wsp new: ${agentsKindRefusal("ssh")}`);
+      expect(ssh.io.errors[0]).toBe(`wsp new: ${agentsKindRefusal("ssh")}. Drop --spawn on, or make a cloud workspace instead.`);
       // The verb that sets it on a workspace that already exists reads the same rule and says the same thing.
       await run("new", "--local", "mine");
       const set = await run("workspaces", "agents", "mine", "--spawn", "on");
@@ -2773,7 +2912,7 @@ describe("wsp verbs over the host", () => {
       expect(refused.io.errors[0]).not.toContain("ENOENT");
       const opening = await run("thread", "new", "--in", "alpha", "--image", missing, "look");
       expect(opening.code).toBe(EXIT_CODES.usage);
-      expect(opening.io.errors).toEqual([`wsp thread new: there is no file at ${missing} on this computer`]);
+      expect(opening.io.errors).toEqual([`wsp thread new: there is no file at ${missing} on this computer. Name a file that is already here.`]);
       expect(claude.starts).toHaveLength(0);
     });
 
@@ -2781,7 +2920,7 @@ describe("wsp verbs over the host", () => {
       await run("new", "alpha");
       const refused = await run("thread", "new", "--in", "alpha", "--image", dir, "look");
       expect(refused.code).toBe(EXIT_CODES.usage);
-      expect(refused.io.errors).toEqual([`wsp thread new: there is no file at ${dir} on this computer`]);
+      expect(refused.io.errors).toEqual([`wsp thread new: there is no file at ${dir} on this computer. Name a file that is already here.`]);
     });
 
     it("a file that is not one of the four types is refused by name, before anything travels", async () => {
@@ -2790,7 +2929,7 @@ describe("wsp verbs over the host", () => {
       writeFileSync(path, "%PDF-1.7 not an image at all");
       const refused = await run("thread", "new", "--in", "alpha", "--image", path, "look");
       expect(refused.code).toBe(EXIT_CODES.usage);
-      expect(refused.io.errors).toEqual([`wsp thread new: ${path} is not PNG, JPEG, GIF or WebP; a message carries those four`]);
+      expect(refused.io.errors).toEqual([`wsp thread new: ${path} is not PNG, JPEG, GIF or WebP; a message carries those four. Name one of those instead.`]);
       expect(claude.starts).toHaveLength(0);
     });
 
@@ -2799,7 +2938,7 @@ describe("wsp verbs over the host", () => {
       const path = pngFile(dir, "huge.png", 12 * 1024 * 1024);
       const refused = await run("thread", "new", "--in", "alpha", "--image", path, "look");
       expect(refused.code).toBe(EXIT_CODES.usage);
-      expect(refused.io.errors).toEqual(["wsp thread new: huge.png is 12 MB, over the 10 MB an image may be"]);
+      expect(refused.io.errors).toEqual(["wsp thread new: huge.png is 12 MB, over the 10 MB an image may be. Drop that one and send the rest."]);
       expect(claude.starts).toHaveLength(0);
     });
 
@@ -2808,7 +2947,7 @@ describe("wsp verbs over the host", () => {
       const paths = Array.from({ length: 6 }, (_, i) => pngFile(dir, `n${i}.png`, 64));
       const refused = await run("thread", "new", "--in", "alpha", ...paths.flatMap(p => ["--image", p]), "look");
       expect(refused.code).toBe(EXIT_CODES.usage);
-      expect(refused.io.errors).toEqual(["wsp thread new: only 5 images fit one message; this one carries 6"]);
+      expect(refused.io.errors).toEqual(["wsp thread new: only 5 images fit one message; this one carries 6. Drop that one and send the rest."]);
     });
   });
 });

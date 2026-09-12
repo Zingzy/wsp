@@ -204,7 +204,7 @@
         <div class="fields">
           <div class="field">
             <label class="field-label" for="address">Address</label>
-            <input id="address" class="input" type="text" placeholder="192.168.1.20:7788" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
+            <input id="address" class="input" type="text" placeholder="192.168.1.20:4420" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
             <div class="said"><p class="refusal" id="address-said"></p></div>
           </div>
           <div class="field narrow">
@@ -408,12 +408,14 @@
        * and what to do. Each is written to fit the two lines of its own slot, which is 404 px under the address, 140 px
        * under the code, and the column's 560 px in the footer for what is about neither field. None of them carries
        * the address a person typed: it stands in the field 8 px above wearing the refused border, and a sentence that
-       * repeated it would run a third line for every address longer than the ghost's. */
+       * repeated it would run a third line for every address longer than the ghost's. The port in the address one
+       * shows is the port a wsp opens for a computer you own, which is DEFAULT_PLACE_PORT in the protocol; this page
+       * imports nothing, so first-run.test.ts pins this number and the ghost's against it. */
       const JOIN_REFUSALS = {
-        address: { slot: "address-said", field: "address", happened: "That is not an address.", fix: "Type it as the other screen shows it, like 192.168.1.20:7788." },
+        address: { slot: "address-said", field: "address", happened: "That is not an address.", fix: "Type it as the other screen shows it, like 192.168.1.20:4420." },
         answer: { slot: "address-said", field: "address", happened: "Nothing answered at that address.", fix: "Check both Macs are on one network and the address on the other screen." },
         code: { slot: "code-said", field: "code", happened: "Wrong or expired.", fix: "Get a fresh one." },
-        already: { slot: "join-said", happened: "This Mac already runs threads for another wsp.", fix: "Take it out of that one first, with wsp leave in a terminal." },
+        already: { slot: "join-said", happened: "This Mac already runs threads for another wsp.", fix: "Leave it from the sidebar first." },
         shell: { slot: "join-said", happened: "This Mac could not join that wsp.", fix: "Press Join again." },
       };
       /** What the second row of the joined card says about this computer: a computer without Docker runs the agents

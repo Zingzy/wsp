@@ -14,9 +14,9 @@ import { execFile } from "node:child_process";
 import { userInfo } from "node:os";
 import { promisify } from "node:util";
 import { cLocale } from "./host-command.js";
-import { psCpuSeconds, type ProcEntry, type ProcInspectReply } from "@wsp/protocol";
+import { PROC_CAP, PROC_CMDLINE_BYTES, psCpuSeconds, type ProcEntry, type ProcInspectReply } from "@wsp/protocol";
 import type { PortSnapshotSource } from "./ports.js";
-import { CMDLINE_BYTES, PROC_CAP, type ProcScan, type ProcScanInput, type ProcSource } from "./proc.js";
+import { type ProcScan, type ProcScanInput, type ProcSource } from "./proc.js";
 import { OpError } from "./workspace-paths.js";
 
 const run = promisify(execFile);
@@ -74,7 +74,7 @@ export function parsePs(text: string): PsRow[] {
       ppid: Number(m[2]),
       user: m[4]!,
       state: m[3]![0]!,
-      cmdline: bracketed ? "" : Buffer.from(args, "utf8").subarray(0, CMDLINE_BYTES).toString("utf8"),
+      cmdline: bracketed ? "" : Buffer.from(args, "utf8").subarray(0, PROC_CMDLINE_BYTES).toString("utf8"),
       cpuSeconds: psCpuSeconds(m[6]!),
       rss: Number(m[5]) * RSS_UNIT,
       startedAt,

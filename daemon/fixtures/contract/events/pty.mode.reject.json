@@ -11,5 +11,11 @@
     "ptyId": "pty_1",
     "mode": "line",
     "echo": true
+  },
+  {
+    "type": "pty.mode",
+    "ptyId": "pty_1",
+    "mode": "line",
+    "foreground": "bash"
   }
 ]

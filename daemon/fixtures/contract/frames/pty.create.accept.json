@@ -11,7 +11,7 @@
     "shell": "bash",
     "cwd": "/root",
     "env": {
-      "DISPLAY": ":1"
+      "TERM": "xterm-256color"
     }
   }
 ]

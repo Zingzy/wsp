@@ -202,12 +202,12 @@ describe("the agent contract on the command line and the tool door", () => {
 
     const bare = await run("new");
     expect(bare.code).toBe(3);
-    expect(bare.io.errors).toEqual(["wsp new: wsp new takes one name"]);
+    expect(bare.io.errors).toEqual([expect.stringMatching(/^wsp new takes one name\. usage: wsp new <name>/)]);
 
     await run("new", "alpha");
     const unasked = await run("delete", "alpha", "--json");
     expect(unasked.code).toBe(3);
-    expect(failure(unasked.io)).toEqual({ error: "Delete alpha? There is no terminal to answer on; pass --yes to say yes.", class: "usage", exit: 3 });
+    expect(failure(unasked.io)).toEqual({ error: "Delete alpha? There is no terminal to answer on. Pass --yes to say yes.", class: "usage", exit: 3 });
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha"]);
 
     const relative = await run("exec", "alpha", "--cwd", "packages", "--json", "--", "true");
@@ -215,7 +215,7 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(failure(relative.io).class).toBe("usage");
     const dangling = await run("fork", "alpha", "--model", "claude-sonnet-5", "--json");
     expect(dangling.code).toBe(3);
-    expect(failure(dangling.io)).toEqual({ error: "--model needs --send", class: "usage", exit: 3 });
+    expect(failure(dangling.io)).toEqual({ error: '--model says how a thread opens, and this line opens none. Add --send "<task>", or drop --model.', class: "usage", exit: 3 });
   });
 
   it("an auth refusal exits 2: the host refusing the token, or no token file to read", async () => {
@@ -322,7 +322,8 @@ describe("the agent contract on the command line and the tool door", () => {
       expect(await call("pause", { workspace: "nope" })).toEqual({ text: "no workspace nope", structured: { error: "no workspace nope", class: "provider", exit: 1 }, isError: true });
       await call("new", { name: "alpha" });
       const relative = await call("exec", { workspace: "alpha", argv: ["true"], cwd: "packages" });
-      expect(relative).toEqual({ text: '--cwd is a path on the machine, absolute: got "packages"', structured: { error: '--cwd is a path on the machine, absolute: got "packages"', class: "usage", exit: 3 }, isError: true });
+      const cwdRefusal = '--cwd is a path on the machine, absolute, and got "packages". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.';
+      expect(relative).toEqual({ text: cwdRefusal, structured: { error: cwdRefusal, class: "usage", exit: 3 }, isError: true });
       writeFileSync(hostTokenPath(statePath), "not-the-token\n");
       const fresh = mcpServer(statePath, { env: {} });
       const [c2, s2] = InMemoryTransport.createLinkedPair();
