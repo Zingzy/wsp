@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { adoptLoginPath, agentHistories, agentsHere, assetDir, currentHome, installEach, mcpServerSpec, runningWsp, shimPath, wspHome, type CliIO } from "@wsp/host";
+import { adoptLoginPath, agentsHere, assetDir, currentHome, installEach, mcpServerSpec, runningWsp, shimPath, wspHome, type CliIO } from "@wsp/host";
 import { DEFAULT_PORT, DEFAULT_WS_PORT, HOST_WORDS, InitNeedsYou, ThemePreference, hereWord, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
 import type { Runtime } from "@wsp/runtime";
 import { BrowserWindow, Menu, Notification, app, dialog, ipcMain, nativeTheme, shell, type IpcMainInvokeEvent } from "electron";
@@ -27,8 +25,6 @@ const PRELOAD = here("./preload.cjs");
 const ONBOARDING_PAGE = here("./onboarding.html");
 /** The wsp command the shim runs, bundled beside this main. */
 const CLI_SCRIPT = here("./cli.mjs");
-/** The agents' published marks, one svg per catalog id, copied from the web app by stage.mjs. */
-const AGENT_MARKS = here("./agents");
 
 const refuse = (q: string): Promise<string> => Promise.reject(new Error(`no terminal to ask: ${q}`));
 const io: CliIO = { log: l => console.log(l), error: l => console.error(l), ask: refuse, askSecret: refuse };
@@ -271,17 +267,17 @@ async function showApp(located: Located, recorded?: Runtime, hash = ""): Promise
   return true;
 }
 
-const ONBOARDING_CHANNELS = ["onboarding:agents", "onboarding:history", "onboarding:install", "onboarding:finish", "onboarding:connect"] as const;
+const ONBOARDING_CHANNELS = ["onboarding:agents", "onboarding:install", "onboarding:finish", "onboarding:connect"] as const;
 
 /** The ids the page asked to install, as strings and nothing else; the catalog refuses an id it does not know. */
 function agentIds(raw: unknown): string[] {
   return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === "string") : [];
 }
 
-/** The first launch: the welcome, the agents on this computer with the MCP install per agent, then this computer
- * recorded as the workspace and the app opened on it. The onboarding page and the app window share the one preload;
- * only the onboarding page is answered here, and only while it is up. The host starts before the page's window
- * closes so the window count never hits zero. */
+/** The first launch: one screen naming the agents the scan found on this computer, the wsp tools into them, then
+ * this computer recorded as the workspace and the app opened on it. The onboarding page and the app window share the
+ * one preload; only the onboarding page is answered here, and only while it is up. The host starts before the page's
+ * window closes so the window count never hits zero. */
 async function showOnboarding(located: Located): Promise<void> {
   const statePath = statePathIn(located.home, launch());
   const shim = shimPath(wspHome());
@@ -289,13 +285,11 @@ async function showOnboarding(located: Located): Promise<void> {
   const gate = (event: IpcMainInvokeEvent, channel: string): void => {
     if (!fromOnboardingPage(event.senderFrame?.url, ONBOARDING_PAGE)) throw new Error(`${channel}: not the onboarding page`);
   };
-  ipcMain.handle("onboarding:agents", async event => {
+  // No version is asked for: the screen names what is here and nothing else, and a `--version` per catalog agent is
+  // the one slow thing between a launch and the first thing a person reads.
+  ipcMain.handle("onboarding:agents", event => {
     gate(event, "onboarding:agents");
-    return (await agentsHere()).map(a => ({ ...a, glyph: existsSync(join(AGENT_MARKS, `${a.id}.svg`)) }));
-  });
-  ipcMain.handle("onboarding:history", (event, raw: unknown) => {
-    gate(event, "onboarding:history");
-    return agentHistories(agentIds(raw), undefined, statePath);
+    return agentsHere(undefined, { versions: false });
   });
   ipcMain.handle("onboarding:install", (event, raw: unknown) => {
     gate(event, "onboarding:install");
@@ -303,8 +297,8 @@ async function showOnboarding(located: Located): Promise<void> {
     return installEach(agentIds(raw), mcpServerSpec(statePath, { ...runningWsp(), shim }), homedir());
   });
   let finishing: Promise<void> | undefined;
-  // Both ways out record this computer and open the app on it; the second opens the app on the connect sheet, for a
-  // person whose work is on a box, and the app's own host still serves the page the sheet is drawn in.
+  // Both ways out record this computer and open the app on it; the second opens the app on the road that joins this
+  // Mac to another wsp, and the app's own host still serves the page that road is drawn in.
   const finish = (hash: string): Promise<void> =>
     (finishing ??= (async () => {
       const { runtime, workspace } = await recordThisComputer({ statePath });
