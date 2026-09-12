@@ -44,7 +44,7 @@ A thread runs one turn at a time, because two processes on one agent session cor
 
 ## Host
 
-The host is the process on your computer that owns everything: the machines, the keys, the app it serves at `http://127.0.0.1:4400`, and the runtime behind it. `wsp up` starts it, `wsp up --service` keeps it up across logins, and the desktop app is the same host in a window. The command line and the MCP server are thin clients of the host, which is why what an agent does through them shows in your sidebar.
+The host is the process on your computer that owns everything: the machines, the keys, the app it serves at `http://127.0.0.1:4400`, and the runtime behind it. The first command that needs one starts it, `wsp up` serves one you want to watch in a terminal, `wsp up --service` keeps one up across logins, and the desktop app is the same host in a window. The command line and the MCP server are thin clients of the host, which is why what an agent does through them shows in your sidebar.
 
 The host talks to the provider with your key and never through a server of wsp's. There is no account with wsp and no control plane.
 

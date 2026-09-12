@@ -188,8 +188,8 @@ export const ADD_LOOPBACK_REFUSAL =
  * the device, and a remove takes the place alone: the token is still good until somebody hands it back, from the
  * joined computer's own leave or from here. */
 export const deviceLeftLine = (name: string, deviceIds: readonly string[]): string => {
-  // One command per id: wsp devices revoke takes exactly one, so a line joining them would be a line that refuses.
-  const revoke = deviceIds.map(id => `wsp devices revoke ${id}`).join(", ");
+  // One command per id: wsp host devices revoke takes exactly one, so a line joining them would be a line that refuses.
+  const revoke = deviceIds.map(id => `wsp host devices revoke ${id}`).join(", ");
   const one = deviceIds.length === 1;
   return `${name} still holds ${one ? "a token" : `${deviceIds.length} tokens`} for this wsp, which its own window signs in with; ${revoke} take${one ? "s it" : " them"} back.`;
 };
@@ -321,7 +321,7 @@ export interface PlaceOpts extends HostPick {
 }
 
 /** Handing out a join code and taking a place back out happen at the host's own terminal and nowhere else, the same
- * rule wsp pair and wsp devices read. */
+ * rule wsp host pair and wsp host devices read. */
 function aimHere(word: string, opts: PlaceOpts): HostAim {
   const aim = aimedHost(opts.statePath, opts);
   if (aim.kind !== "here") {

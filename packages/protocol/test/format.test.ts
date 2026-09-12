@@ -1025,8 +1025,8 @@ describe("stopFailedLine and sendNowFailedLine", () => {
 
 describe("the shape a refusal takes on a terminal", () => {
   it("is two halves, what happened and then what to do, on one line", () => {
-    expect(refusalLine("wsp thread new takes one task; api reads as a second one.", "Name the workspace with --in api.")).toBe(
-      "wsp thread new takes one task; api reads as a second one. Name the workspace with --in api.",
+    expect(refusalLine("wsp run takes one task; api reads as a second one.", "Name the workspace with --in api.")).toBe(
+      "wsp run takes one task; api reads as a second one. Name the workspace with --in api.",
     );
     expect(refusalLine("a.", "b.").split("\n")).toHaveLength(1);
     // A first half written for the app too, where nothing follows it, closes itself here.
@@ -1037,7 +1037,7 @@ describe("the shape a refusal takes on a terminal", () => {
   });
 
   it("says the command's name once, whether or not the sentence opens with it", () => {
-    expect(sayOnce("wsp thread new: ", "wsp thread new takes one task")).toBe("wsp thread new takes one task");
+    expect(sayOnce("wsp run: ", "wsp run takes one task")).toBe("wsp run takes one task");
     expect(sayOnce("wsp delete: ", "no workspace nope")).toBe("wsp delete: no workspace nope");
     expect(sayOnce("", "no workspace nope")).toBe("no workspace nope");
     // The name is matched whole: a sentence that merely opens with the same letters keeps its prefix.
@@ -1054,7 +1054,7 @@ describe("the shape a refusal takes on a terminal", () => {
 describe("foreignFlagLine", () => {
   it("names the verb or verbs that read the flag, then the one that does not", () => {
     expect(foreignFlagLine("--tick", ["wsp recipe"], "wsp recipe scan")).toBe("--tick belongs to wsp recipe; wsp recipe scan does not read it");
-    expect(foreignFlagLine("--agent", ["wsp fork", "wsp thread new"], "wsp send")).toBe("--agent belongs to wsp fork and wsp thread new; wsp send does not read it");
+    expect(foreignFlagLine("--agent", ["wsp fork", "wsp run"], "wsp send")).toBe("--agent belongs to wsp fork and wsp run; wsp send does not read it");
   });
 });
 
@@ -1534,7 +1534,7 @@ describe("the words a relayed permission prompt shows", () => {
 
   it("words a tool a server lends as the server and the tool, and never the server's own paragraph", () => {
     expect(permissionAskLine("mcp__wsp__workspaces", "{}", "wsp runs cloud machines called workspaces, forked in seconds")).toBe("Use the wsp tools: workspaces");
-    expect(permissionAskLine("mcp__wsp__thread_new", "{}")).toBe("Use the wsp tools: thread new");
+    expect(permissionAskLine("mcp__wsp__run", "{}")).toBe("Use the wsp tools: run");
     expect(permissionPromptWords("mcp__wsp__workspaces", "{}", "wsp runs cloud machines").code).toBeUndefined();
   });
 

@@ -1935,7 +1935,7 @@ export function noKindLine(kind: string): string {
  * from it, and the dial that records a workspace refuses a machine that names none, so a record without one is one
  * to make again rather than one to guess a folder for. */
 export function noMachineHomeLine(name: string): string {
-  return `${name} carries no home folder for its machine; record it again with wsp new --ssh`;
+  return `${name} carries no home folder for its machine; add that computer again with wsp add user@host`;
 }
 
 /** What the roads that need a daemon are refused with on a machine reached over ssh before one is on it: the
@@ -2746,7 +2746,7 @@ export const HOST_WORDS = {
     portPlaceholder: "22",
     keycap: "Connect",
     cancel: "Cancel",
-    directNote: "The app pairs with the host at this address, with the code wsp pair printed on that computer, and opens it.",
+    directNote: "The app pairs with the host at this address, with the code wsp host pair printed on that computer, and opens it.",
     sshNote: "The app logs in over ssh, starts wsp there when nothing serves, forwards its port to this computer and pairs.",
     /** Why Connect is held, as its tooltip. */
     fillFirst: "type the address and the code first",

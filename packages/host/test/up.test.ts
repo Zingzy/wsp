@@ -230,14 +230,21 @@ describe("wsp up", () => {
     await expect(rt.close()).resolves.toBeUndefined();
   });
 
-  it.each([
-    ["wsp up", ["up"]],
-    ["plain wsp", []],
-  ])("%s is the one command, refusing the same flag and starting nothing", async (_, cmd) => {
+  it("wsp up refuses a flag it does not answer in and starts nothing", async () => {
     const errors: string[] = [];
-    const code = await cli([...cmd, "--json", "--port", "0", "--ws-port", "0", "--state", statePath], quietIO([], errors));
+    const code = await cli(["up", "--json", "--port", "0", "--ws-port", "0", "--state", statePath], quietIO([], errors));
     expect(code).toBe(3);
     expect(errors[0]).toContain("Unknown option '--json' for wsp up");
+    expect(existsSync(join(home, "state", "host.lock"))).toBe(false);
+  });
+
+  it("plain wsp prints the help and serves nothing, since typing the program's name asks what it is", async () => {
+    const lines: string[] = [];
+    const errors: string[] = [];
+    expect(await cli(["--state", statePath], quietIO(lines, errors))).toBe(0);
+    expect(errors).toEqual([]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("usage:");
     expect(existsSync(join(home, "state", "host.lock"))).toBe(false);
   });
 

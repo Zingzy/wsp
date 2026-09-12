@@ -2,7 +2,18 @@ import { Callout } from 'scalar-mdx-components'
 
 # The host
 
-The host is the process that owns your machines and your keys. `wsp up` starts it, the desktop app is it in a window, and everything else, the command line, the MCP tools, a browser tab, is a client of it.
+The host is the process that owns your machines and your keys. The first command that needs one starts it, the desktop app is it in a window, and everything else, the command line, the MCP tools, a browser tab, is a client of it.
+
+## The host a command starts
+
+```bash
+wsp threads
+# starting the host for ~/.wsp/state.json; its log is ~/.wsp/host.log, and wsp down stops it
+# {"threads":[]}
+wsp down
+```
+
+A line that needs the host serving this state file and finds none starts one for itself, detached, on free ports, and says so in one line on stderr with the log to read. Free ports because another host, the app's or one under a service manager, often holds the default; every client dials the address the lock records. `wsp down` stops a host started that way, by the pid its lock names.
 
 ## wsp up
 
@@ -12,7 +23,7 @@ wsp up --port 4401 --ws-port 4411
 wsp up --state ~/work/.wsp/state.json
 ```
 
-Loads the keys, refuses in one line when there is no golden yet, takes the host lock and serves. The app is HTTP on `127.0.0.1:4400` and the runtime WebSocket on `127.0.0.1:4410`, both loopback only. Port `0` picks a free one. It serves until you stop it, so the terminal has to stay open; closing it takes the app down with it and cuts every turn running on every workspace. A plain `wsp` does the same as `wsp up`.
+For a host you want to watch in a terminal, or one that serves beyond this computer. Loads the keys, refuses in one line when there is no golden yet, takes the host lock and serves. The app is HTTP on `127.0.0.1:4400` and the runtime WebSocket on `127.0.0.1:4410`, both loopback only. Port `0` picks a free one. It serves until you stop it, so the terminal has to stay open; closing it takes the app down with it and cuts every turn running on every workspace. A plain `wsp` prints the help and serves nothing.
 
 One state file, one host. A second host that finds a live one refuses, naming the pid and both ports. A lock whose process is gone is a crash leftover and gives way.
 

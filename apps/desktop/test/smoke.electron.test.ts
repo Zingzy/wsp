@@ -295,7 +295,7 @@ async function refused(url: string): Promise<boolean> {
   }
 }
 
-/** A pairing code off a host, the way wsp pair gets one: one socket with the host's own token, one pair.issue. */
+/** A pairing code off a host, the way wsp host pair gets one: one socket with the host's own token, one pair.issue. */
 async function pairingCodeOf(host: HostHandle): Promise<string> {
   const ws = new WebSocket(`ws://127.0.0.1:${host.port}${WS_PATH}`);
   await new Promise<void>((done, fail) => {
@@ -728,7 +728,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     await win.waitForSelector("[data-host-foot]");
     const here = hereWord(process.platform === "darwin");
     expect(await win.locator("[data-host-label]").textContent()).toBe(here);
-    // The code as wsp pair mints it, over the second host's own socket with its own token.
+    // The code as wsp host pair mints it, over the second host's own socket with its own token.
     const code = await pairingCodeOf(existing);
     // The menu bar's Hosts menu opens the sheet, the road a person takes.
     await hostsMenu(launched.app, HOST_WORDS.connectMenu);
@@ -746,7 +746,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       { label: HOST_WORDS.connectMenu, checked: false, enabled: true },
       { label: HOST_WORDS.disconnect(`127.0.0.1:${existing.port}`), checked: false, enabled: true },
     ]);
-    // The record is the one wsp connect writes, under the launch's own wsp home, with what the desktop adds.
+    // The record is the one wsp host connect writes, under the launch's own wsp home, with what the desktop adds.
     const record = JSON.parse(readFileSync(join(launched.home, "hosts", "127.0.0.1.json"), "utf8")) as Record<string, unknown>;
     expect(record).toMatchObject({ url: `http://127.0.0.1:${existing.port}`, label: `127.0.0.1:${existing.port}`, road: "direct" });
     expect(typeof record["deviceToken"]).toBe("string");

@@ -6,10 +6,10 @@ Every refusal in wsp is one line on stderr that says what happened and, where th
 
 | line | meaning | do |
 | --- | --- | --- |
-| `no wsp host is serving <path>; run wsp up first` | nothing is serving the state file | `wsp up`, or the desktop app |
+| `no host answered for <path> within 20.0s` | the host the command started could not serve; the log named under it says why | read that log, then run the command again |
 | `no golden yet; run wsp init` | the key is there and the image is not | `wsp init` |
 | `Solari API key: no terminal to ask on; set SOLARI_API_KEY in the environment, ./.env, or ~/.wsp/.env.` | no key, and no terminal to ask on | write `SOLARI_API_KEY=<key>` into `~/.wsp/.env` |
-| `EADDRINUSE` naming 4400 or 4410 | something else holds a port | `wsp up --port 4401 --ws-port 4411`, and use the URL it prints |
+| `EADDRINUSE` naming 4400 or 4410 | something else holds the port `wsp up` was asked for | `wsp up --port 4401 --ws-port 4411`, and use the URL it prints; a host a command starts takes free ports and never meets this |
 | `another wsp host (pid <n>) is already serving <path> on port <port>` | one of yours is up already | use that one; `wsp status` shows it |
 | a refusal naming a host of another version | the host and the command line are different versions | `wsp down`, then `wsp up` |
 

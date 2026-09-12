@@ -117,7 +117,7 @@ export async function linkApprove(ctx: Ctx): Promise<Response> {
   // One name, one box, per account: a client asks for a box by the name on this page, so two of them would be a
   // line that could go to either.
   if (row.kind === "host" && (await hostNamed(ctx.env, who.id, row.name)) !== undefined) {
-    throw refuse(409, `you already have a box called ${row.name}; take it off with wsp relay unlink there, or link this one under another name with wsp relay link <url> --name <name>`);
+    throw refuse(409, `you already have a box called ${row.name}; take it off with wsp host unlink there, or link this one under another name with wsp host link <url> --name <name>`);
   }
   const hostId = row.kind === "host" ? newId("h", ctx.deps.random) : null;
   if (!(await approveLink(ctx.env, code, who.id, hostId))) throw refuse(409, "that code was already approved");

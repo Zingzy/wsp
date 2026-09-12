@@ -8,9 +8,9 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { copyKey, createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
-import { cli, serve, type CliIO } from "../src/cli.js";
+import { cli, localWiring, serve, type CliIO } from "../src/cli.js";
 import { placeWiring } from "../src/places.js";
-import { workspaceLine } from "../src/verbs.js";
+import { createFromHead, workspaceLine } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
 import type { HostHandle } from "../src/server.js";
@@ -51,7 +51,7 @@ beforeEach(async () => {
   vi.stubEnv("WSP_HOME", join(dir, "home"));
   const store = memoryStore();
   await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
-  rt = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: placeWiring(statePath, {}) });
+  rt = createRuntime({ backend: stubBackend(), store, adapters: {}, local: localWiring(join(dir, "user")), placeLinks: placeWiring(statePath, {}) });
   handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
 });
 
@@ -76,17 +76,34 @@ describe("wsp new --on", () => {
     expect(io.errors.join("\n")).toContain(hostname().toLowerCase());
   });
 
-  it("forks on this computer's own provider when the word names this computer", async () => {
+  it("records this computer as its own one workspace when the word names this computer, since it forks nothing", async () => {
     const { code, io } = await run("new", "x", "--on", hostname().toLowerCase());
     expect(code, io.errors.join("\n")).toBe(0);
     const made = (await rt!.workspaces.list()).find(w => w.name === "x")!;
+    expect(made.kind).toBe("local");
     expect(made.place).toBeUndefined();
   });
 
-  it("is refused beside the words that fork nothing", async () => {
-    const local = await run("new", "--local", "here", "--on", "srv");
-    expect(local.code).not.toBe(0);
-    expect(local.io.errors.join("\n")).toContain("forks nothing");
+  it("sends the place on the create frame when the place forks, so the host decides where the machine lands", async () => {
+    const sent: Record<string, unknown>[] = [];
+    const client = {
+      request: async (op: string, params?: Record<string, unknown>) => {
+        if (op === "places.list") return { places: [{ id: "p_1", kind: "computer", name: "srv", default: true, docker: true, present: true, takesForks: true }] };
+        if (op === "golden.get") return { manifest: { name: "default", head: 1, versions: [{ version: 1, snapshotId: "snap_head" }] } };
+        sent.push({ op, ...params });
+        return { workspace: { id: "ws_1", name: "x", machineId: "m1", phase: "running", kind: "cloud", golden: "snap_g", createdAt: "2026-09-12T00:00:00.000Z" } };
+      },
+      events: async () => {},
+      onFrame: () => () => {},
+    } as unknown as Parameters<typeof createFromHead>[0];
+    await createFromHead(client, { emit: () => {}, stream: () => {} }, "x", undefined, undefined, "srv");
+    expect(sent).toEqual([{ op: "workspaces.create", golden: "snap_head", name: "x", on: "srv" }]);
+  });
+
+  it("refuses the words that pick an image or a size on a place that forks nothing", async () => {
+    const sized = await run("new", "here", "--on", hostname().toLowerCase(), "--size", "2x4");
+    expect(sized.code).not.toBe(0);
+    expect(sized.io.errors.join("\n")).toContain("forks nothing");
   });
 });
 

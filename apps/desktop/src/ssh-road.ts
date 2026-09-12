@@ -3,7 +3,7 @@
 // script there: it finds wsp where PATH or npm put it, and reads the lock the
 // way servingHost does, following current-home. When nothing serves, the host
 // is started as that computer's own service; the box's port is forwarded to a
-// free one here; wsp pair over there prints the code the ordinary pairing then
+// free one here; wsp host pair over there prints the code the ordinary pairing then
 // spends. A saved host is reached by reading the lock again, so a service that
 // came back on another port or another address is forwarded there and the
 // forward is remade. Every ssh runs with a recorded pid and all of them go at
@@ -55,7 +55,7 @@ export interface SshRoad {
 
 export const noWspLine = (address: string): string => `wsp is not installed on ${address}: run npm i -g @zingzy/wsp there, then connect again.`;
 export const sshFailedLine = (address: string, why: string): string => `ssh to ${address} failed: ${why}`;
-export const nothingServingLine = (address: string): string => `no wsp host is serving on ${address}; run wsp up there, or disconnect this host and connect again to start one.`;
+export const nothingServingLine = (address: string): string => `no wsp host is serving on ${address}; run wsp up there, or forget this host and connect again to start one.`;
 
 /** One forward per login: the same address and port name the same forward. */
 export const forwardKey = (login: Login): string => (login.port !== undefined ? `${login.address}:${login.port}` : login.address);
@@ -80,7 +80,9 @@ const PROBE = `echo ${Buffer.from(PROBE_SCRIPT).toString("base64")} | base64 -d 
 // Port 0: the box picks a free pair and its lock says which, read on every connection; a unit that spelled the
 // default pair would restart forever on a box where something else holds it.
 const START_WORDS = "up --service --listen 127.0.0.1 --port 0";
-const PAIR_WORDS = "pair";
+// The word on the box, which a box still on an older wsp answers with its unknown-command line; the road turns
+// that into its own "update wsp there" sentence.
+const PAIR_WORDS = "host pair";
 
 const SSH_FAILED = 255;
 const DEFAULT_WAIT_MS = 15_000;

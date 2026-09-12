@@ -16,7 +16,7 @@ wsp fork dev --send "Run the gate." # and open its first thread
 
 `wsp new` forks the golden's head. With `--from`, it forks a project golden by project name or snapshot id, so the machine starts with the project and its installed dependencies in place and nothing to upload. It returns when the machine is booted and reachable, in about twenty seconds.
 
-`wsp fork` makes a sibling from another workspace's golden version. It is a new machine, not a copy of the source's live disk: work on the source's disk is not on the fork. Fork from a project golden when the fork needs the project. With `--send` the fork opens its first thread, and `thread new`'s flags follow. When that first turn fails, the workspace still exists and the error names it; continue with `wsp thread new` on it rather than forking again.
+`wsp fork` makes a sibling from another workspace's golden version. It is a new machine, not a copy of the source's live disk: work on the source's disk is not on the fork. Fork from a project golden when the fork needs the project. With `--send` the fork opens its first thread, and `run`'s flags follow. When that first turn fails, the workspace still exists and the error names it; continue with `wsp run` on it rather than forking again.
 
 `--size` is `<cpu>x<memGb>`. The provider offers `2x4` and `2x8`; a size it does not offer is refused in one line that lists the ones it does with the rate of each. Absent, a workspace takes the golden's size.
 
@@ -25,7 +25,7 @@ The account runs two machines at once. A third `new` or `fork` is refused; the b
 ## Keep a project on it
 
 ```bash
-wsp import ~/code/app --to dev
+wsp import dev ~/code/app
 wsp snapshot dev
 ```
 
@@ -42,7 +42,7 @@ A workspace naps on its own after twenty minutes with no person, thread or comma
 
 Before a nap, wsp saves a vault of the folders that matter, the agents' state, up to 200 MB, so a machine lost during the nap can be rebuilt with them. An export over that cap is refused at the nap, not discovered at the wake.
 
-`wsp pause` naps it now. `wsp wake` wakes it ahead of the next message; `thread new`, `send` and `exec` wake a napping workspace themselves, with one `waking <name>` line on stderr. A wake is done when the machine answers again, not when the provider says resumed, because the provider has handed back machines reporting running whose guest never served. Two attempts, six minutes each, then a fresh fork of the golden carrying the saved vault replaces the machine. A pause takes about seventy-five seconds; a wake usually a few seconds.
+`wsp pause` naps it now. `wsp wake` wakes it ahead of the next message; `run`, `send` and `exec` wake a napping workspace themselves, with one `waking <name>` line on stderr. A wake is done when the machine answers again, not when the provider says resumed, because the provider has handed back machines reporting running whose guest never served. Two attempts, six minutes each, then a fresh fork of the golden carrying the saved vault replaces the machine. A pause takes about seventy-five seconds; a wake usually a few seconds.
 
 <Callout type="info">
   The idle window is fixed when a workspace is created. `wsp new` on the command line takes the default of twenty minutes; the runtime accepts a different window or none per workspace.

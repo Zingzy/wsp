@@ -1660,7 +1660,7 @@ export interface HostsView {
   place?: { hostName: string; awake: boolean };
 }
 
-/** What the connect sheet asks the shell for: an address with the code wsp pair printed there, or an ssh login the
+/** What the connect sheet asks the shell for: an address with the code wsp host pair printed there, or an ssh login the
  * shell starts or finds a host behind and forwards. */
 export type HostConnectAsk = { road: "direct"; url: string; code: string } | { road: "ssh"; address: string; port?: number };
 
@@ -2234,6 +2234,12 @@ export const PlaceView = z.object({
   rateUsdPerHour: z.number().optional(),
   /** How many forks the place holds and how many more it takes, by forkRoom; absent on a place that forks nowhere. */
   forks: z.object({ running: z.number().int(), room: z.number().int() }).optional(),
+  /** Whether a workspace can be forked here at all: a provider, or a computer somebody joined that has Docker of
+   * its own. Absent or false is a computer used directly, which runs the person's agents as its own one workspace;
+   * the computer the host itself runs on is one of those whether or not it has Docker, since a copy of the image
+   * on a Docker here is the provider row's. The one fact wsp new reads to decide which road a place takes, so no
+   * line outside this list switches on a place's kind. */
+  takesForks: z.boolean().optional(),
 });
 export type PlaceView = z.infer<typeof PlaceView>;
 
@@ -2810,6 +2816,12 @@ export const placeHoldsForksRefusal = (place: string, names: readonly string[]):
 export const placeForksNowhereLine = (place: string): string =>
   `${place} runs your agents but has no Docker, so it takes no forks; install Docker on it to fork there`;
 
+/** What a person asking for a workspace on a place that forks nothing is told when that place already runs one: the
+ * place is its own one workspace, so the line names the one there is rather than making a second. The reason is not
+ * Docker, which the computer the host runs on may well have: it is that the person's own agents run there. */
+export const placeRunsOneWorkspaceLine = (place: string, workspace: string): string => `${place} runs your agents as its own one workspace, ${workspace}`;
+export const placeRunsOneWorkspaceFix = (workspace: string): string => `Use ${workspace}, or name a place that forks: wsp places.`;
+
 /** What a word that names no place this host holds is refused with, naming the ones it does. */
 export const noSuchPlaceRefusal = (word: string, held: readonly string[]): string => `no place named ${word}; you have ${held.join(", ")}`;
 
@@ -3044,7 +3056,7 @@ export type TicketPurpose = z.infer<typeof TicketPurpose>;
  * has to say what it is here before any socket may redeem it. */
 export const TICKET_ORIGIN: Record<TicketPurpose, WorkspaceOrigin> = { connect: "here", relay: "relayed" };
 
-/** A computer that redeemed a pairing code and holds a token of its own, as devices.list answers and wsp devices
+/** A computer that redeemed a pairing code and holds a token of its own, as devices.list answers and wsp host devices
  * prints it. The token is never here: the host keeps only its hash, so a listing can leak nothing that opens a
  * socket. */
 export const DeviceView = z.object({
@@ -3099,31 +3111,31 @@ export type AccountView = z.infer<typeof AccountView>;
 
 /** The refusal a socket let in on a ticket gets for reading the account: who this wsp is signed in to is read at
  * the terminal of the computer it runs on, as the devices and the places are. */
-export const ACCOUNT_TICKET_REFUSAL = "a socket let in on a ticket cannot see the account this host is signed in to; run wsp relay hosts on the computer the host runs on";
+export const ACCOUNT_TICKET_REFUSAL = "a socket let in on a ticket cannot see the account this host is signed in to; run wsp host linked on the computer the host runs on";
 
 /** The refusal for a host that keeps no records of its own to read an account from, which a bare runtime does not. */
 export const ACCOUNT_UNSERVED = "this host keeps no account records; wsp up serves them";
 
 /** The refusal a socket that is not the host's own gets for asking to mint a pairing code: a code lets a stranger
  * in, so only the process holding the host token, on this computer, may hand one out. */
-export const PAIR_ISSUE_REFUSAL = "only a socket holding this host's own token may mint a pairing code; run wsp pair on the computer the host runs on";
+export const PAIR_ISSUE_REFUSAL = "only a socket holding this host's own token may mint a pairing code; run wsp host pair on the computer the host runs on";
 
 /** The refusal a redeemed code that this host is not holding gets: spent, expired, or never minted read the same,
  * so guessing tells a caller nothing about which. */
-export const PAIR_CODE_REFUSAL = "that pairing code is not one this host is waiting for; run wsp pair on the host for a fresh one";
+export const PAIR_CODE_REFUSAL = "that pairing code is not one this host is waiting for; run wsp host pair on the host for a fresh one";
 
 /** The refusal a socket that was let in on a single-use ticket gets for reaching the device ops, whether the ticket
  * was the road a machine's requests arrive by or another client's. Who may drive this host is handed out, read and
  * taken away at the terminal of the computer it runs on, and nowhere else. */
-export const DEVICES_TICKET_REFUSAL = "a socket let in on a ticket cannot see or change the devices paired with this host; run wsp devices on the computer the host runs on";
+export const DEVICES_TICKET_REFUSAL = "a socket let in on a ticket cannot see or change the devices paired with this host; run wsp host devices on the computer the host runs on";
 
 /** The refusal a device gets for revoking another device: a paired computer can hand its own token back, and only
  * the host takes anyone else's away. */
-export const DEVICE_REVOKE_REFUSAL = "a paired device may only revoke itself; run wsp devices revoke on the host to take another one away";
+export const DEVICE_REVOKE_REFUSAL = "a paired device may only revoke itself; run wsp host devices revoke on the host to take another one away";
 
 /** The refusal the JSON routes answer with when the host listens beyond this computer and the request carries no
  * device token. */
-export const API_UNAUTHORIZED = "this host listens beyond the computer it runs on, so this route needs a paired device token in an Authorization header; run wsp pair on the host";
+export const API_UNAUTHORIZED = "this host listens beyond the computer it runs on, so this route needs a paired device token in an Authorization header; run wsp host pair on the host";
 
 /** A frame the page sends a daemon through the host: the daemon's own op and params, no id. The host numbers
  * frames on its socket to the daemon and hands the daemon's answer back under the request that carried the frame,
@@ -3245,7 +3257,7 @@ export function placeLinkTranscript(role: "host" | "place", placeId: string, cha
 
 /** The refusal a join whose code this host is not holding gets. Spent, expired and never minted read the same, so
  * guessing tells a caller nothing about which; the words differ from a pairing code's only in naming the verb that
- * mints this one, since a person joining a computer never typed wsp pair. */
+ * mints this one, since a person joining a computer never typed wsp host pair. */
 export const PLACE_CODE_REFUSAL = "that join code is not one this host is waiting for; run wsp add on the host for a fresh one";
 
 /** The refusal a place gets for proving itself with a key the host does not hold for it. A key that moved is a

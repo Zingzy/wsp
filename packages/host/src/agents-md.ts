@@ -16,7 +16,7 @@ export const SECTION_END = "<!-- wsp:end -->";
 
 /** The verbs the section names, in the order an agent reaches for them: what is running, a thread on one of them,
  * the next turn of that thread. Named against the verb table, so the section cannot promise a verb wsp dropped. */
-const FIRST_VERBS = ["threads", "thread new", "send"] as const;
+const FIRST_VERBS = ["threads", "run", "send"] as const;
 
 /** The one text the section carries: what wsp is, the skill by the folder name every agent keeps it under, and the
  * three verbs. One file holds this section and several agents read it, so it names no agent's own skill path. */

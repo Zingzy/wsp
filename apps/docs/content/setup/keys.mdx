@@ -11,7 +11,7 @@ wsp runs on your computer and talks to the machine provider with your key. There
 | `SOLARI_API_KEY` | the environment, then `./.env`, then `~/.wsp/.env` | the host process, for direct calls to the provider |
 | `ANTHROPIC_API_KEY` | beside it, only if you pay Anthropic by the token | set on the machine at create time, for Claude Code |
 
-`wsp up` asks for the Solari key only when none is found, offers the Anthropic key at the same time, and writes them to `~/.wsp/.env` at mode 600 in a directory created 700. Off a terminal a missing key is a refusal with exit code 2, never a prompt on a stream nobody reads.
+A host asks for the Solari key only when none is found, offers the Anthropic key at the same time, and writes them to `~/.wsp/.env` at mode 600 in a directory created 700. Off a terminal a missing key is a refusal with exit code 2, never a prompt on a stream nobody reads.
 
 The service unit `wsp up --service` writes holds no key; it reads the same `.env` a terminal run reads. A key exported only in the shell that installs the service is refused before anything is written, since the service starts without that shell.
 

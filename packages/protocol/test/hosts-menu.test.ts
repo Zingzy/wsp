@@ -87,7 +87,7 @@ describe("the two rows a computer that joined another wsp adds", () => {
 });
 
 describe("what the Where agents run table says about a computer", () => {
-  const view = (over: Partial<PlaceView> = {}): PlaceView => ({ id: "p_1", kind: "computer", name: "old-macbook", default: false, present: true, docker: true, workspaceId: "ws_1", ...over });
+  const view = (over: Partial<PlaceView> = {}): PlaceView => ({ id: "p_1", kind: "computer", name: "old-macbook", default: false, present: true, docker: true, takesForks: true, workspaceId: "ws_1", ...over });
   const now = Date.parse("2026-09-12T12:00:00.000Z");
 
   it("holds one word for the silence in the table's own slot, and dates it only where there is room", () => {

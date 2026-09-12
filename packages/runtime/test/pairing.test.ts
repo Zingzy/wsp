@@ -341,7 +341,7 @@ describe("one writer over the device records", () => {
     const { code } = await door.issue({ now: 1_000, ttlMs: 60_000 });
     const paired = (await door.redeem(code, "laptop", 1_000))!;
 
-    // What a paired client redialing with backoff does while somebody at the host runs wsp devices revoke: both
+    // What a paired client redialing with backoff does while somebody at the host runs wsp host devices revoke: both
     // roads read the record, and without one writer the later write puts the revoked device back.
     const [, revoked] = await Promise.all([door.seen(paired.deviceId, 2_000), door.revoke(paired.deviceId)]);
     expect(revoked).toBe(true);

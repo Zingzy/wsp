@@ -15,7 +15,7 @@ Six screens, every row ticked from what this computer runs. Enter through them, 
 ## 2. Put a project on it
 
 ```bash
-wsp import ~/code/app --to first
+wsp import first ~/code/app
 ```
 
 The plan prints: the repository, the files and their size, the caches left behind, each secret-shaped file with its default. Answer once and the folder lands at the same path on the machine. Then keep that state:
@@ -29,7 +29,7 @@ That is a project golden. `wsp new second --from app` later gives you a machine 
 ## 3. Open a thread
 
 ```bash
-wsp thread new --in first --cwd ~/code/app --notify me "Read the failing test in test/auth.test.ts and fix the cause, not the symptom. Run the whole test file before you reply."
+wsp run first --cwd ~/code/app --notify me "Read the failing test in test/auth.test.ts and fix the cause, not the symptom. Run the whole test file before you reply."
 ```
 
 The first line on stdout is `thread <id>`. The reply streams to stderr as it arrives and lands on stdout when it is complete. `--notify me` puts each later turn's reply in front of you, so nothing polls. The same thread is in the app's sidebar, where you can read and answer it.

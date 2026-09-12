@@ -2303,6 +2303,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       store,
       devices: deviceDoor,
       wiring,
+      // A thunk: the provider table is built below this, and the door reads it only when a line asks where a fork
+      // can land.
+      providers: () => places,
       now: () => clock.now(),
       onStage: event => bus.emit(event),
       ...(opts.placeJoinWaitMs !== undefined ? { joinWaitMs: opts.placeJoinWaitMs } : {}),

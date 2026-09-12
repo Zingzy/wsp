@@ -78,7 +78,7 @@ describe("the address the pair is bound on", () => {
   it("says once, in one line with no em dash, that the page is reachable and pairing is the gate", () => {
     const line = listenBeyondLoopbackLine("0.0.0.0");
     expect(line).toContain("0.0.0.0");
-    expect(line).toContain("wsp pair");
+    expect(line).toContain("wsp host pair");
     expect(line).not.toContain("\u2014");
   });
 
