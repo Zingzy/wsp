@@ -738,9 +738,11 @@ describe("chat tab threads", () => {
   const THIRD = turn({ sessionId: "sess_0003", turnId: "turn_0003", threadId: "thr_c" }, "third", "three.");
   const status = () => screen.queryByRole("status")?.textContent ?? null;
 
-  it("two threads in one history render as the last one, on mount and again after a replay gap", async () => {
+  it("two threads in one history render as the last one, and a replay gap keeps the person in it", async () => {
     const history: Record<string, SessionEvent[]> = { [WS]: [...FIRST, ...SECOND] };
     const { api } = fixtureApi([workspace], history);
+    const fetches = vi.fn(api.sessionHistory);
+    api.sessionHistory = fetches;
     await setup(api);
     await screen.findByText("two.");
     expect(screen.getByText("second")).toBeDefined();
@@ -749,10 +751,14 @@ describe("chat tab threads", () => {
     expect(isEditable(composerEditor())).toBe(true);
     expect(sendButton().getAttribute("aria-label")).toBe("Send message");
 
+    // A thread opened while the socket was down is not what the person is reading, and the rebuild leaves them in
+    // the thread the address names.
     history[WS] = [...FIRST, ...SECOND, ...THIRD];
     act(() => useStore.getState().noteGap());
-    await screen.findByText("three.");
-    expect(screen.queryByText("two.")).toBeNull();
+    await waitFor(() => expect(fetches).toHaveBeenCalledTimes(2));
+    await act(() => new Promise(r => setTimeout(r, 0)));
+    expect(screen.getByText("two.")).toBeDefined();
+    expect(screen.queryByText("three.")).toBeNull();
     expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
   });
 

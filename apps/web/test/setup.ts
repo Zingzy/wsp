@@ -5,6 +5,7 @@
 // exist in jsdom; matchMedia drives DPR and reduced-motion tracking. The
 // libghostty wasm arrives through Vite ?url imports, which resolve to served
 // paths here, so fetch reads those two vendored files from disk instead.
+import { beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -133,3 +134,9 @@ if (typeof globalThis.ClipboardEvent === "undefined") {
   (globalThis as { ClipboardEvent?: unknown }).ClipboardEvent = ClipboardEvent;
   (window as unknown as { ClipboardEvent?: unknown }).ClipboardEvent = ClipboardEvent;
 }
+
+// The app records what a person is reading in the page's address, so a case that opened a thread leaves one behind
+// and the next case would open on it. Every case starts on a page with no address, as a first visit does.
+beforeEach(() => {
+  if (typeof window !== "undefined") window.location.hash = "";
+});

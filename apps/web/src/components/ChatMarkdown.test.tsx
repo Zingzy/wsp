@@ -96,6 +96,22 @@ describe("ChatMarkdown", () => {
     expect(anchor?.textContent).toBe("link");
   });
 
+  it("scrolls to a heading a reply links to and leaves the page's address alone", () => {
+    const scrolled = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
+    window.history.replaceState(null, "", "/#w/ws_a/t/thr_1");
+    const { container } = render(
+      <ChatMarkdown text={'<h2 id="the-plan">The plan</h2>\n\n[jump](#the-plan)'} cwd="/tmp/project" resolvedTheme="light" />,
+    );
+
+    const anchor = container.querySelector("a")!;
+    expect(anchor.getAttribute("href")).toBe("#the-plan");
+    fireEvent.click(anchor);
+    expect(scrolled).toHaveBeenCalled();
+    // The address names the thread the person is reading; a fragment written over it would cost them that on a reload.
+    expect(window.location.hash).toBe("#w/ws_a/t/thr_1");
+    scrolled.mockRestore();
+  });
+
   it("reports task list toggles with the marker offset", () => {
     const onTaskListChange = vi.fn();
     render(

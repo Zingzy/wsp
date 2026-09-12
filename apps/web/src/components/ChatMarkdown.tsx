@@ -1151,9 +1151,8 @@ function handleMarkdownFragmentClick(event: ReactMouseEvent<HTMLAnchorElement>, 
   if (!target) return;
 
   event.preventDefault();
-  const nextUrl = new URL(window.location.href);
-  nextUrl.hash = href.slice(1);
-  window.history.pushState(window.history.state, "", nextUrl);
+  // The page's address is the app's one record of which thread is open, so a heading inside a reply scrolls to
+  // itself and writes nothing: its fragment over that address would cost the person their place on the next load.
   target.scrollIntoView({ block: "nearest" });
 }
 
