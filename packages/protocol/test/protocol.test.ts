@@ -88,7 +88,7 @@ import {
 
 import * as wire from "../src/index.js";
 
-import { COPY_CURRENT, COPY_STALE, copyIsCurrent, copyStanding, sealedCopyLine, type SealedImage, type SealedImageCopy } from "../src/index.js";
+import { COPY_CURRENT, COPY_STALE, buildsImages, copyIsCurrent, copyStanding, sealedBuiltLine, sealedCopyLine, type SealedImage, type SealedImageCopy } from "../src/index.js";
 
 describe("a copy of the image beside the record", () => {
   const image: SealedImage = { name: "default", version: 2, hash: "a".repeat(64), recipeHash: "rh", logins: [], sealedAt: "t", sealedFrom: "h1" };
@@ -111,6 +111,22 @@ describe("a copy of the image beside the record", () => {
     // The line a person reads on the command line is the same rule spelled once: what it says is what the word says.
     expect(sealedCopyLine(sealed, copy({ hash: image.hash }))).toBe(`solari · v1 · ${COPY_CURRENT}`);
     expect(sealedCopyLine(image, copy({ hash: image.hash }))).toBe("solari · v1");
+  });
+
+  it("a build's own line is the copy's, and says when nothing was built", () => {
+    const sealed = { ...image, vault: { sha256: "c".repeat(64), bytes: 10, paths: 2, takenAt: "t" } };
+    const built = copy({ hash: image.hash });
+    expect(sealedBuiltLine(sealed, { copy: built, built: true })).toBe(sealedCopyLine(sealed, built));
+    expect(sealedBuiltLine(sealed, { copy: built, built: false })).toBe(`${sealedCopyLine(sealed, built)} · already built from this image; nothing was built`);
+  });
+
+  it("a place builds a copy only where it both forks a machine and copies its disk", () => {
+    const size = { cpu: 2, memMb: 4096, rateUsdPerHour: 0.1 };
+    expect(buildsImages({ sizes: [size], diskSnapshots: true })).toBe(true);
+    // A computer somebody joined: it runs their agents and forks nothing.
+    expect(buildsImages({ sizes: [], diskSnapshots: false })).toBe(false);
+    // A provider that forks but keeps no disk copy has nothing to seal a version out of.
+    expect(buildsImages({ sizes: [size], diskSnapshots: false })).toBe(false);
   });
 });
 

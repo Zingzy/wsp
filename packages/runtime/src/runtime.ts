@@ -133,6 +133,7 @@ import type {
   Recipe,
   RecipeDigest,
   SealedImage,
+  SealedImageBuilt,
   SealedImageCopy,
   SealedImageView,
   SealedVault,
@@ -192,7 +193,7 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { GUEST_WSP_BIN, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct } from "@wsp/protocol";
-import { DAEMON_TOKEN_PATH, mcpServersBlocked, actionRefusal, copyIsCurrent, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState, placeAbsentLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeWorkspaceGoneLine, workFolderIn } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, mcpServersBlocked, actionRefusal, buildsImages, copyIsCurrent, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState, noSuchPlaceRefusal, placeAbsentLine, placeBuildsNoImageLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeWorkspaceGoneLine, workFolderIn } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { PlaceAbsentError, PlaceBackend, isPlaceAbsent, parsePlaceMachineId, placeMachineId } from "@wsp/engine";
@@ -1297,11 +1298,13 @@ export interface Runtime {
     get(name?: string): Promise<SealedImageView>;
     /** The vault bytes and the record, for the host to seal and write; refused when the record holds no vault. */
     vault(name?: string): Promise<{ image: SealedImage; tar: Buffer }>;
-    /** Prepares a builder at `place` from `recipe` (the host composed it with every login skipped), lands the
-     * record's vault on it and seals; the copy is recorded under that place at the record's hash. Refused when the
-     * place already holds a copy of this record, when the record has no small recipe to build from, and, without
-     * `force`, when it holds no vault. Progress rides golden.stage frames carrying `place`. */
-    build(o: { place: string; name?: string; recipe: GoldenRecipe; force?: boolean; signal?: AbortSignal }): Promise<SealedImageCopy>;
+    /** Prepares a builder at `place` from the recipe the host composes off the record (every login set to skip),
+     * lands the record's vault on it and seals; the copy is recorded under that place at the record's hash. The
+     * recipe is asked for only once every refusal has passed, so the host composes nothing for a build that cannot
+     * run. A place already holding a copy of this record is answered with that copy and builds nothing. Refused
+     * when the place is the wired one, when it builds no copy at all, when the record has no small recipe to build
+     * from, and, without `force`, when it holds no vault. Progress rides golden.stage frames carrying `place`. */
+    build(o: { place: string; name?: string; recipe: (image: SealedImage) => GoldenRecipe | Promise<GoldenRecipe>; force?: boolean; signal?: AbortSignal }): Promise<SealedImageBuilt>;
   };
   /** Enriched status (machine state, daemon reach, size, rate) + cost ticker; its list leaves out the workspaces the
    * caller's origin may not drive, as workspaces.list does. */
@@ -5852,7 +5855,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The backend a place name resolves to, or the refusal naming the places this host has. */
   const backendAt = (place: string): MachineBackend => {
     const at = places.backend(place);
-    if (at === undefined) throw Object.assign(new Error(`this host has no place named ${place}; it has ${places.list().join(", ")}`), { kind: "missing" });
+    if (at === undefined) throw Object.assign(new Error(noSuchPlaceRefusal(place, places.list())), { kind: "missing" });
     return at;
   };
 
@@ -6562,6 +6565,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const name = o.name ?? "default";
       const at = backendAt(o.place);
       if (o.place === places.wired) throw conflict(`${o.place} is the place this host forks on, so its copy is what wsp init builds; name another place`);
+      if (!buildsImages(at.capabilities)) throw conflict(placeBuildsNoImageLine(o.place));
       const record = await recordOf(name);
       if (record === undefined) throw conflict(`this host owns no image named ${name} yet; wsp init seals one`);
       if (record.recipe === undefined) throw conflict(`${name} v${record.version} was sealed before the image record kept the recipe it was built from, so no other place can build it; cut the next version`);
@@ -6569,13 +6573,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         throw conflict(`${name} v${record.version} holds no sign-ins, so a copy at ${o.place} would ask for every one of them again; cut the next version to hold them, or build it anyway with force`);
       }
       const held = goldenHead(await copyOf(o.place, name));
-      // The same rule the line under Settings > Image reads, so a copy is never current in one place and stale in the other.
+      // The same rule the line under Settings > Image reads, so a copy is never current in one place and stale in
+      // the other. A place already standing on the record is answered with what it holds: the road that builds a
+      // copy on first use asks this of every place a fork lands on, and a second ask must cost nothing.
       if (held !== undefined && copyIsCurrent(record, { hash: held.imageHash })) {
-        throw conflict(`${o.place} already holds ${name} v${held.version} built from this image; nothing to build`);
+        const standing = (await copiesOf(name)).find(c => c.place === o.place);
+        if (standing === undefined) throw new Error(`${o.place} holds ${name} v${held.version} and no copy of it was recorded there`);
+        return { copy: standing, built: false };
       }
       const tar = record.vault === undefined ? undefined : await store.getBlob(IMAGE_VAULTS, vaultKey(name, record.version));
       if (record.vault !== undefined && tar === undefined) throw conflict(`the vault of ${name} v${record.version} is not on this computer any more; cut the next version to take it again`);
-      const view = await golden.prepare({ name, place: o.place, recipe: o.recipe, ...(o.signal !== undefined ? { signal: o.signal } : {}) });
+      const recipe = await o.recipe(record);
+      const view = await golden.prepare({ name, place: o.place, recipe, ...(o.signal !== undefined ? { signal: o.signal } : {}) });
       const entry = builders.get(view.id);
       if (entry === undefined) throw new Error(`the builder ${view.id} prepared at ${o.place} left no record here; nothing was sealed`);
       const stage = stageOf(name, o.place);
@@ -6595,7 +6604,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const sealed = await sealEntry(entry, false, record.logins);
       const copy = (await copiesOf(name)).find(c => c.place === o.place);
       if (copy === undefined) throw new Error(`${o.place} sealed ${name} v${sealed.version.version} and no copy of it was recorded there`);
-      return copy;
+      return { copy, built: true };
     },
   };
 

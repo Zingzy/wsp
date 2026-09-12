@@ -447,6 +447,14 @@ export function statOf(abs: string): PathInfo | undefined {
   return { kind: st.isDirectory() ? "dir" : "file", mode: st.mode & 0o7777, size: st.size, mtimeMs: st.mtimeMs, realpath };
 }
 
+/** What the plan asks about a row's path on this computer, the same reading the pack makes: a directory, a file, or
+ * nothing at all where the path is not there or its link dangles. The one home for it, so the run's own lock and a
+ * copy's build judge a row the same way. */
+export const refusedIsDir = (home: string) => (rel: string): boolean | undefined => {
+  const st = statOf(join(home, rel));
+  return st === undefined || st.kind === "dangling" ? undefined : st.kind === "dir";
+};
+
 export const under = (path: string, root: string): boolean => path === root || path.startsWith(`${root}/`);
 
 /** sha256 of what a planned path ships: every entry under it by relative path,

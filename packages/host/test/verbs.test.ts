@@ -8,9 +8,9 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { passphraseCipher } from "@wsp/engine";
-import { runForTheList, agentsKindRefusal, askingLine, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, type HarnessCatalogAnswer } from "@wsp/protocol";
-import { copyKey, createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
+import { NoProviderBackend, passphraseCipher } from "@wsp/engine";
+import { runForTheList, agentsKindRefusal, askingLine, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { copyKey, createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { HELP, cli, localWiring, localWorkFolder, serve } from "../src/cli.js";
@@ -118,10 +118,10 @@ describe("wsp verbs over the host", () => {
   const RECORD = (bytes: number) => ({ name: "default", version: 1, hash: "a".repeat(64), recipeHash: "rh", logins: [{ name: "codex", state: "copied" as const }], sealedAt: "2026-09-12T00:00:00.000Z", sealedFrom: "h1", vault: { sha256: "b".repeat(64), bytes, paths: 2, takenAt: "2026-09-12T00:00:00.000Z" } });
 
   /** The host again on the same state file, over a runtime with these adapters; the verbs still see no key. */
-  async function restartHost(adapters: Parameters<typeof createRuntime>[0]["adapters"], over: Store = store): Promise<void> {
+  async function restartHost(adapters: Parameters<typeof createRuntime>[0]["adapters"], over: Store = store, places?: PlaceBackends): Promise<void> {
     await handle?.close();
     handle = undefined;
-    rt = createRuntime({ backend, store: over, adapters, local: localWiring(join(dir, "user")) });
+    rt = createRuntime({ backend, store: over, adapters, local: localWiring(join(dir, "user")), ...(places !== undefined ? { places } : {}) });
     vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
     vi.stubEnv("SOLARI_API_KEY", "");
@@ -414,6 +414,50 @@ describe("wsp verbs over the host", () => {
     expect(view.image.version).toBe(1);
     expect(view.image.vault).toBeUndefined();
     expect(view.copies.map(c => c.place)).toEqual(["default"]);
+  });
+
+  it("wsp image build refuses in one line for a place this host has not got, the place it forks on, and a place that takes no copy", async () => {
+    // Three places over one host: the one it forks on, one more that could build, and this computer, which forks
+    // nothing and copies no disk.
+    const elsewhere = stubBackend();
+    const here = new NoProviderBackend();
+    await restartHost(
+      {},
+      store,
+      { wired: "default", backend: p => (p === "default" ? backend : p === "elsewhere" ? elsewhere : p === "here" ? here : undefined), list: () => ["default", "elsewhere", "here"] },
+    );
+
+    const nowhere = await run("image", "build", "nowhere");
+    expect(nowhere.code).toBe(1);
+    expect(nowhere.io.errors.join("")).toContain("no place named nowhere");
+
+    const wired = await run("image", "build", "default");
+    expect(wired.code).toBe(1);
+    expect(wired.io.errors.join("")).toContain("is the place this host forks on");
+
+    const cannot = await run("image", "build", "here");
+    expect(cannot.code).toBe(1);
+    expect(cannot.io.errors.join("")).toContain(placeBuildsNoImageLine("here"));
+
+    // Nothing was forked at any of them, and this computer was never read for a recipe.
+    expect(elsewhere.machines).toEqual([]);
+
+    const usage = await run("image", "build");
+    expect(usage.code).toBe(EXIT_CODES.usage);
+    expect(usage.io.errors.join("")).toContain("wsp image build takes one place.");
+  });
+
+  it("wsp image build on a host that has sealed nothing says so, whatever place is named", async () => {
+    const elsewhere = stubBackend();
+    await restartHost({}, memoryStore(), {
+      wired: "default",
+      backend: p => (p === "default" ? backend : p === "elsewhere" ? elsewhere : undefined),
+      list: () => ["default", "elsewhere"],
+    });
+    const none = await run("image", "build", "elsewhere");
+    expect(none.code).toBe(1);
+    expect(none.io.errors.join("")).toContain("this host owns no image named default yet");
+    expect(elsewhere.machines).toEqual([]);
   });
 
   it("wsp image export refuses a record with no sign-ins to export, and says so rather than writing an empty file", async () => {

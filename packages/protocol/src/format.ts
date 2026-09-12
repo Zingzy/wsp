@@ -621,6 +621,13 @@ export function sealedCopyLine(image: SealedImage, copy: SealedImageCopy): strin
   return [copy.place, `v${copy.version}`, ...size, ...(standing === undefined ? [] : [standing])].join(" · ");
 }
 
+/** What a build at a place came to, as the line a person reads after it: the copy that place now holds, and, when
+ * the place already stood on the record, that nothing was built. */
+export function sealedBuiltLine(image: SealedImage, built: { copy: SealedImageCopy; built: boolean }): string {
+  const line = sealedCopyLine(image, built.copy);
+  return built.built ? line : `${line} · already built from this image; nothing was built`;
+}
+
 /** One project image under the image, as a line: the workspace it was taken off, the projects on that disk and when. */
 export function sealedProjectLine(project: ProjectGolden): string {
   return [`project ${project.workspaceName}`, project.projects.map(p => p.name).join(", "), project.createdAt].join(" · ");
