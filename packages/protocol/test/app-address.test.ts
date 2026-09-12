@@ -1,37 +1,51 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The address that opens the app on one workspace, or on one thread of it:
-// wsp init writes the workspace form after its first fork, a thread row's
-// copy-link action writes the thread form, and the app's store reads both.
+// The address that opens the app on one workspace, on one thread of it, or on
+// the screen its next thread is written on: wsp init writes the workspace form
+// after its first fork, the app writes the others as the person moves, and the
+// app's store reads all three back.
 import { describe, expect, it } from "vitest";
-import { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "../src/index.js";
+import { addressFromHash, appHash, workspaceHash } from "../src/index.js";
 
 describe("the workspace a page opens on", () => {
   it("round-trips an id through the hash", () => {
     expect(workspaceHash("ws_a1b2")).toBe("#w/ws_a1b2");
-    expect(workspaceFromHash(workspaceHash("ws_a1b2"))).toBe("ws_a1b2");
+    expect(appHash({ workspaceId: "ws_a1b2" })).toBe("#w/ws_a1b2");
+    expect(addressFromHash(workspaceHash("ws_a1b2"))).toEqual({ workspaceId: "ws_a1b2" });
   });
 
   it("names no workspace for the app's own hashes, an empty one, or no hash at all", () => {
-    expect(workspaceFromHash("#gallery")).toBeUndefined();
-    expect(workspaceFromHash("")).toBeUndefined();
-    expect(workspaceFromHash("#w/")).toBeUndefined();
+    expect(addressFromHash("#gallery")).toBeUndefined();
+    expect(addressFromHash("")).toBeUndefined();
+    expect(addressFromHash("#w/")).toBeUndefined();
   });
 });
 
 describe("the thread a page opens on", () => {
   it("round-trips a workspace and a thread, and the workspace reads out of the same hash", () => {
-    expect(threadHash("ws_a1b2", "thr_9")).toBe("#w/ws_a1b2/t/thr_9");
-    expect(threadFromHash("#w/ws_a1b2/t/thr_9")).toEqual({ workspaceId: "ws_a1b2", threadId: "thr_9" });
-    expect(workspaceFromHash("#w/ws_a1b2/t/thr_9")).toBe("ws_a1b2");
+    expect(appHash({ workspaceId: "ws_a1b2", threadId: "thr_9" })).toBe("#w/ws_a1b2/t/thr_9");
+    expect(addressFromHash("#w/ws_a1b2/t/thr_9")).toEqual({ workspaceId: "ws_a1b2", threadId: "thr_9" });
   });
 
   it("names no thread for a workspace hash, an empty thread, or an unrelated hash", () => {
-    expect(threadFromHash("#w/ws_a1b2")).toBeUndefined();
-    expect(threadFromHash("#w/ws_a1b2/t/")).toBeUndefined();
-    expect(threadFromHash("#gallery")).toBeUndefined();
+    expect(addressFromHash("#w/ws_a1b2")?.threadId).toBeUndefined();
+    expect(addressFromHash("#w/ws_a1b2/t/")).toEqual({ workspaceId: "ws_a1b2" });
+    expect(addressFromHash("#gallery")).toBeUndefined();
   });
 
   it("escapes what an id carries", () => {
-    expect(threadFromHash(threadHash("ws a", "t/1"))).toEqual({ workspaceId: "ws a", threadId: "t/1" });
+    expect(addressFromHash(appHash({ workspaceId: "ws a", threadId: "t/1" }))).toEqual({ workspaceId: "ws a", threadId: "t/1" });
+  });
+});
+
+describe("the screen a workspace's next thread is written on", () => {
+  it("has an address of its own, which names no thread", () => {
+    expect(appHash({ workspaceId: "ws_a1b2", fresh: true })).toBe("#w/ws_a1b2/new");
+    expect(addressFromHash("#w/ws_a1b2/new")).toEqual({ workspaceId: "ws_a1b2", fresh: true });
+  });
+
+  it("is not read into a workspace whose own id ends that way, and a thread address is never fresh", () => {
+    expect(addressFromHash("#w/new")).toEqual({ workspaceId: "new" });
+    expect(addressFromHash(appHash({ workspaceId: "ws/new" }))).toEqual({ workspaceId: "ws/new" });
+    expect(addressFromHash("#w/ws_a1b2/t/thr_9/new")).toEqual({ workspaceId: "ws_a1b2", threadId: "thr_9/new" });
   });
 });

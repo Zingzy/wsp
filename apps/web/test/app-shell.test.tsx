@@ -366,7 +366,10 @@ describe("the header row", () => {
     expect(banner().querySelector("[data-header-row]")!.getAttribute("data-header-row")).toBe("frame");
     const crumb = banner().querySelector("[data-thread-breadcrumb]")!;
     expect(crumb.querySelector("svg")).not.toBeNull();
-    expect(crumb.textContent).toBe("api/add a health route");
+    // The crumb names the thread the centre is on, which is the one the address names, and the workspace alone until one is.
+    expect(crumb.textContent).toBe("api");
+    act(() => useStore.getState().select("ws_a", "thr_2"));
+    expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("api/add a health route");
     act(() => useStore.getState().select("ws_a", "thr_1"));
     expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("api/make me a simple server");
     act(() => useStore.getState().select(null));

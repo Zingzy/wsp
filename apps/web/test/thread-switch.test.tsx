@@ -103,11 +103,12 @@ function shellOf(container: HTMLElement) {
 async function mount(fixture = fixtureApi(), latest = "Checking the keychain.") {
   useStore.getState().bind(fixture.api);
   await whenAgentsAnswered();
-  const view = shellOf(render(<Shell />).container);
+  const { container } = render(<Shell />);
+  const view = shellOf(container);
   // The first paint is polled for: a stale case's open act scope can hold this render's work until it closes.
   await waitFor(() => expect(view.center().getByText(latest)).toBeDefined());
   await waitFor(() => expect(view.sidebar().getByText("make me a simple server")).toBeDefined());
-  return { ...fixture, ...view };
+  return { ...fixture, ...view, container };
 }
 
 describe("switching between idle threads", () => {
@@ -126,6 +127,46 @@ describe("switching between idle threads", () => {
     fireEvent.click(threadRow("do you have access"));
     await center().findByText("Checking the keychain.");
     expect(center().queryByText("Added GET /health.")).toBeNull();
+  });
+});
+
+describe("the header and the body through a settle", () => {
+  it("the header names the thread the body shows, not the newest row, and the address records it", async () => {
+    const A2 = { ...A, turnId: "turn_a2" };
+    // The transcript ends in the older thread's new turn while the rows still end in the other thread: the two
+    // readings of "the latest" disagree, which is what put one thread's name over another's transcript.
+    const transcript: SessionEvent[] = [
+      ...SETTLED_A,
+      ...RUNNING_B,
+      { type: "session.start", ...A2, at: T0 + 90_000, prompt: "add a readiness route too" },
+      { type: "session.delta", ...A2, at: T0 + 90_300, kind: "text", text: "Adding GET /ready." },
+    ];
+    const { center, container } = await mount(fixtureApi(transcript, ROWS), "Adding GET /ready.");
+    const crumb = () => container.querySelector("[data-shell-center] [data-thread-breadcrumb]")!.textContent;
+    await waitFor(() => expect(crumb()).toBe("api/make me a simple server"));
+    expect(center().queryByText("Checking the keychain.")).toBeNull();
+    expect(useStore.getState().selectedThreadId).toBe("thr_a");
+    expect(window.location.hash).toBe(`#w/${WS}/t/thr_a`);
+  });
+});
+
+describe("a new thread's address", () => {
+  it("the screen it is written on has one, and its first turn takes the thread's own", async () => {
+    const { emit, started, center, editor, shell } = await mount();
+    fireEvent.click(shell.getByRole("button", { name: "New thread" }));
+    await waitFor(() => expect(center().getByRole("heading", { level: 1 }).textContent).toBe("What should we build in api?"));
+    expect(window.location.hash).toBe(`#w/${WS}/new`);
+    emit({ type: "session.done", ...B, at: T0 + 100_000, result: { status: "completed", durationMs: 40_000, costUsd: 0.002 } });
+    emit({ type: "session.end", ...B, at: T0 + 100_100, exitCode: 0, sawResult: true });
+    await typeInto(editor(), "third thread");
+    await press(editor(), "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    const C = { workspaceId: WS, sessionId: "sess_c", turnId: "turn_c", threadId: "thr_c" };
+    emit({ type: "session.start", ...C, at: T0 + 120_000, prompt: "third thread" });
+    emit({ type: "session.delta", ...C, at: T0 + 120_300, kind: "text", text: "Third answer." });
+    await center().findByText("Third answer.");
+    expect(window.location.hash).toBe(`#w/${WS}/t/thr_c`);
+    expect(useStore.getState()).toMatchObject({ selectedThreadId: "thr_c", freshThread: false });
   });
 });
 

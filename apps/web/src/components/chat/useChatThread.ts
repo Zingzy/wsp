@@ -487,8 +487,9 @@ export function startedSession(events: ReadonlyArray<SessionEvent>): string | un
   return lastStart(events)?.sessionId;
 }
 
-/** A thread pinned from the sidebar, or the workspace's latest when none is. */
-export function useChatThread(workspaceId: string, threadId: string | null = null): ChatThreadHandle {
+/** A thread pinned from the sidebar, or the workspace's latest when none is; fresh opens the workspace's next
+ * thread, which is what the store says while the centre is on that screen. */
+export function useChatThread(workspaceId: string, threadId: string | null = null, fresh = false): ChatThreadHandle {
   const api = useStore(s => s.api);
   // Moves when a reconnect could not replay what the socket missed: the thread below is rebuilt from history.
   const gaps = useStore(s => s.gaps);
@@ -501,16 +502,38 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
   const [viewed, setViewed] = useState({ workspaceId, threadId });
   const [hydratedFor, setHydratedFor] = useState<string | null>(null);
   const hydratedRef = useRef<string | null>(null);
+  /** The view key a pin named for the transcript already in hand: that reading needs no reply, and asking for one
+   * would drop what the socket pushes between the ask and it. Taken once, so a gap still rebuilds. */
+  const carriedRef = useRef<string | null>(null);
   const previousEntries = useRef<ReadonlyArray<TimelineEntry>>([]);
 
   if (viewed.workspaceId !== workspaceId || viewed.threadId !== threadId) {
     const from = viewed;
     setViewed({ workspaceId, threadId });
-    setState(s => leaveView(s, from, { workspaceId, threadId }));
+    // A pin landing on the thread this view already holds is the same reading under a new name: the transcript
+    // stays, so a view whose own first turn opened the thread it is now pinned to never blinks through loading.
+    if (from.workspaceId === workspaceId && from.threadId === null && threadId !== null && heldThreadId(state) === threadId) {
+      carriedRef.current = viewKey;
+      setHydratedFor(viewKey);
+    } else if (fresh && from.workspaceId === workspaceId && threadId === null) {
+      // The pin left for the workspace's next thread: that screen shows nothing, so it needs no transcript and
+      // waits for no reply.
+      carriedRef.current = viewKey;
+      setHydratedFor(viewKey);
+      setState(s => ({ ...EMPTY, fresh: true, known: knowing(s.known, s.events), stray: s.stray }));
+    } else {
+      carriedRef.current = null;
+      setState(s => leaveView(s, from, { workspaceId, threadId }));
+    }
   }
 
   useEffect(() => {
     if (!api) return;
+    if (carriedRef.current === viewKey) {
+      carriedRef.current = null;
+      hydratedRef.current = viewKey;
+      return;
+    }
     let current = true;
     api.sessionHistory(workspaceId).then(
       events => {
