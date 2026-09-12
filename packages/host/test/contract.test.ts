@@ -26,7 +26,7 @@ import type { HostHandle } from "../src/server.js";
 import { CLI_VERBS, hasTool } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
-import { EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, scriptedAgent, type Captured } from "./verbs-fixture.js";
+import { EXPORT_SOURCE, PAGE, bornDeadAgent, captured, execGuest, exportGuest, scriptedAgent, type Captured } from "./verbs-fixture.js";
 
 const BIN = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
 
@@ -54,7 +54,7 @@ describe("the agent contract on the command line and the tool door", () => {
     const claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`), () => ({ kind: "written" }));
     // The confirming read a gone verdict waits for runs on the same tick: this backend's 404 is the whole truth, so
     // the wait only buys the contract a five second pause on the road to a rebuild.
-    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter }, goneConfirmMs: 0, placeLinks: placeWiring(statePath, {}, {}) });
+    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: bornDeadAgent(prompt => `re: ${prompt}`).adapter }, goneConfirmMs: 0, placeLinks: placeWiring(statePath, {}, {}) });
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
     vi.stubEnv("SOLARI_API_KEY", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "");
@@ -143,6 +143,11 @@ describe("the agent contract on the command line and the tool door", () => {
     await last("thread read", "thread", "read", opened.threadId);
     await last("stop", "stop", opened.threadId);
     await last("thread rename", "thread", "rename", opened.threadId, "the name he typed");
+    // A launch that never started its agent leaves a row with no turn on it, which is the one a forget takes.
+    const dead = await run("thread", "new", "--in", "alpha", "--agent", "codex", "never gets going", "--json");
+    expect(dead.code).toBe(1);
+    const junk = (await rt.sessions.list()).find(v => v.harness === "codex")!.threadId!;
+    expect(await last("thread forget", "thread", "forget", junk)).toEqual({ threadId: junk, workspaceId: alpha });
     await last("export", "export", "alpha", join(dir, "out", "proj"), "--from", EXPORT_SOURCE);
     execGuest(backend, "ok\n", 0);
     // A streamed verb's frames carry the output and its result leaves it out, so no line prints twice.

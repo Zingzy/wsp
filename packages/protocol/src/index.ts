@@ -489,6 +489,12 @@ export type SessionOrigin = z.infer<typeof SessionOrigin>;
 export const TitleSource = z.enum(["seed", "auto", "person"]);
 export type TitleSource = z.infer<typeof TitleSource>;
 
+/** What the agent refused a turn for, where it named a cause wsp knows: the word every door reads to class the
+ * failure, since the sentence is the agent's and no door may read a reason out of its words. Adding a cause is an
+ * entry here and its road on the client that shows one. */
+export const TurnRefusal = z.enum(["sign-in"]);
+export type TurnRefusal = z.infer<typeof TurnRefusal>;
+
 export const SessionView = z.object({
   id: z.string(),
   workspaceId: z.string(),
@@ -521,6 +527,10 @@ export const SessionView = z.object({
    * session runs here whatever folder it asks for, since the CLI keys the session to it; the shell folder the
    * agent's tool calls move rides the delta events instead. */
   cwd: z.string().optional(),
+  /** What the agent refused this turn for, where it named a cause wsp knows, off the turn's own result: a refused
+   * turn did none of the work it was asked for, so a row carrying this is a turn that ran nothing. Absent on every
+   * turn the agent worked on, however it ended. */
+  refusal: TurnRefusal.optional(),
   /** What the session runs with, as the harness's own slugs: the start request's model until the harness announces
    * its own; effort as requested, since the CLI never echoes it, and the permission mode the turn is at, which is
    * the start's until a pick moves a running turn to another one. */
@@ -551,11 +561,22 @@ export const ThreadView = z.object({
   /** The folder the latest turn's harness runs in, as SessionView.cwd; absent when no turn recorded one. */
   cwd: z.string().optional(),
   turns: z.number().int().positive(),
+  /** Whether any turn of this thread ever did work, as threadRan reads the rows: false is a launch that never got
+   * going, the thread a forget removes. */
+  ran: z.boolean(),
   /** The opening turn's parent and root, so a listing draws the tree a root thread spawned without reading rows. */
   parentThreadId: z.string().optional(),
   rootThreadId: z.string().optional(),
 });
 export type ThreadView = z.infer<typeof ThreadView>;
+
+/** Whether a turn of these rows ever did any work: one is still working, or one announced a harness session and
+ * ended for something other than a refusal. Announcing is not enough on its own, since both CLIs announce their
+ * session before they learn they have no sign-in, and a refused turn did none of the work it was asked for. A
+ * thread with no such turn never got going, so nothing of it was written down anywhere and dropping it loses none. */
+export function threadRan(turns: ReadonlyArray<Pick<SessionView, "claudeSessionId" | "status" | "refusal">>): boolean {
+  return turns.some(turn => turn.status === "running" || (turn.claudeSessionId !== undefined && turn.refusal === undefined));
+}
 
 /** Folds the session index into threads, in the order each thread's first turn appears. The one place a row from
  * before provenance was recorded is read as a person's; clients print the answer and never decide it. */
@@ -587,6 +608,7 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.endedAt !== undefined ? { endedAt: latest.endedAt } : {}),
       ...(latest.cwd !== undefined ? { cwd: latest.cwd } : {}),
       turns: turns.length,
+      ran: threadRan(turns),
       ...(first.parentThreadId !== undefined ? { parentThreadId: first.parentThreadId } : {}),
       ...(first.rootThreadId !== undefined ? { rootThreadId: first.rootThreadId } : {}),
     };
@@ -856,12 +878,6 @@ export type DeltaKind = z.infer<typeof DeltaKind>;
 
 export const TurnStatus = z.enum(["completed", "interrupted", "failed"]);
 export type TurnStatus = z.infer<typeof TurnStatus>;
-
-/** What the agent refused a turn for, where it named a cause wsp knows: the word every door reads to class the
- * failure, since the sentence is the agent's and no door may read a reason out of its words. Adding a cause is an
- * entry here and its road on the client that shows one. */
-export const TurnRefusal = z.enum(["sign-in"]);
-export type TurnRefusal = z.infer<typeof TurnRefusal>;
 
 export const TurnResult = z.object({
   status: TurnStatus,
@@ -2943,6 +2959,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Names the session's harness session in the harness's own store and keeps the name on the thread's rows; replies
    * with a SessionRenameResult. Takes the runtime's session id, as sessions.interrupt does. */
   z.object({ id: reqId, op: z.literal("sessions.rename"), sessionId: z.string(), title: z.string() }),
+  /** Drops a thread no turn ever ran on: its rows and its transcript rows go and nothing is asked of the machine.
+   * Takes the runtime's thread id, the one the rows carry, not a session id; refused with threadForgetRefusal's
+   * sentence once a turn reached the agent. */
+  z.object({ id: reqId, op: z.literal("sessions.forget"), threadId: z.string() }),
   z.object({ id: reqId, op: z.literal("golden.get"), name: z.string() }),
   /** Replies with the backend's Capabilities; the UI gates features on these. */
   z.object({ id: reqId, op: z.literal("capabilities.get") }),

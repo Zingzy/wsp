@@ -4,7 +4,7 @@
 // sentence for why it cannot run right now. Every surface reads these, so a
 // menu, a palette row and a button never say two things about one action.
 import { agentName } from "@wsp/catalog";
-import { actionRefusal, goneRefusal, isBilling, keepsRename, workspaceWord, type HarnessCatalog, type SessionRenameOutcome, type SidebarMode, type WorkspaceState } from "@wsp/protocol";
+import { actionRefusal, goneRefusal, isBilling, keepsRename, threadForgetRefusal, workspaceWord, type HarnessCatalog, type SessionRenameOutcome, type SidebarMode, type WorkspaceState } from "@wsp/protocol";
 import { MAX_TERMINALS_PER_GROUP } from "../terminal/groups.js";
 
 export const WORKSPACE_WORDS = {
@@ -37,7 +37,7 @@ export const THREAD_WORDS = {
   stop: "Stop thread",
   rename: "Rename thread",
   copyLink: "Copy thread link",
-  delete: "Delete thread",
+  forget: "Forget thread",
 } as const;
 
 export const FILE_WORDS = {
@@ -127,7 +127,15 @@ export const THREAD_NOT_RUNNING = "Thread is not running";
 export const CLIENT_CANNOT_STOP = "This client cannot stop a turn";
 export const THREAD_HAS_NO_ID = "This thread has no id yet";
 export const CLIENT_CANNOT_RENAME = "This client cannot rename a thread";
-export const NO_THREAD_DELETE = "Deleting a thread is not in the runtime yet";
+export const CLIENT_CANNOT_FORGET_THREAD = "This client cannot forget a thread";
+
+/** Why the forget cannot run, or null when it can. The runtime owns the rule and raises the same sentence; the row
+ * reads it off the fold so the menu says why without asking the host. */
+export function threadForgetRefusalFor(thread: { threadId: string | null; ran: boolean }, hasVerb: boolean): string | null {
+  if (thread.threadId === null) return THREAD_HAS_NO_ID;
+  if (!hasVerb) return CLIENT_CANNOT_FORGET_THREAD;
+  return thread.ran ? threadForgetRefusal(thread.threadId) : null;
+}
 
 /** The one sentence for an agent whose own store keeps no name of a person's: a rename there would be gone at the
  * thread's next turn, so nothing offers one. The refusal and the toast both read it. */

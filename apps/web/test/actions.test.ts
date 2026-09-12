@@ -6,7 +6,7 @@
 // menus are built from.
 import { PauseIcon, PlayIcon, SquareIcon } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
-import { goneRefusal, machineWord, NO_REBUILD_NEEDED, undrivenRefusal, type HarnessCatalog, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { goneRefusal, machineWord, NO_REBUILD_NEEDED, threadForgetRefusal, undrivenRefusal, type HarnessCatalog, type SessionStatus, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { fileActions, type FileVerbs } from "../src/actions/fileActions.js";
 import { FILE_WORDS, SIDEBAR_MODE_WORDS, TERMINAL_WORDS, THIS_COMPUTER_HINTS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
 import { NEW_LOCAL_ACTION, SIDEBAR_MODE_ACTION, sidebarActions, type SidebarTarget, type SidebarVerbs } from "../src/actions/sidebarActions.js";
@@ -246,28 +246,41 @@ describe("thread actions", () => {
     ...over,
   });
   const thread = (
-    status: "running" | "completed",
+    status: SessionStatus,
     threadId: string | null = "thr_1",
     harness = "claude",
     machine: { catalog?: HarnessCatalog | null; state?: WorkspaceState; goneWords?: string } = {},
+    ran = true,
   ): ThreadTarget =>
     threadTarget(
-      { id: "thr_1", sessionId: "s1", threadId, workspaceId: "ws_a", harness, title: "fix the port list", status, startedAt: null, endedAt: null, indicator: null, startedBy: "person", project: null, parentThreadId: null },
+      { id: "thr_1", sessionId: "s1", threadId, workspaceId: "ws_a", harness, title: "fix the port list", status, ran, startedAt: null, endedAt: null, indicator: null, startedBy: "person", project: null, parentThreadId: null },
       { catalog: machine.catalog === undefined ? row(harness) : machine.catalog, state: machine.state ?? "running", ...(machine.goneWords !== undefined ? { goneWords: machine.goneWords } : {}) },
     );
-  const threadVerbs = (over: Partial<ThreadVerbs> = {}): ThreadVerbs => ({ stop: vi.fn(async () => {}), rename: vi.fn(), copyText: vi.fn(async () => {}), ...over });
+  const threadVerbs = (over: Partial<ThreadVerbs> = {}): ThreadVerbs => ({ stop: vi.fn(async () => {}), rename: vi.fn(), forget: vi.fn(), copyText: vi.fn(async () => {}), ...over });
 
-  it("a running thread offers stop, rename and copy link; delete carries its refusal", async () => {
+  it("a running thread offers stop, rename and copy link; forget carries the runtime's own refusal", async () => {
     const verbs = threadVerbs();
     const actions = resolveActions(threadActions, thread("running"), verbs);
-    expect(titles(actions)).toEqual([THREAD_WORDS.stop, THREAD_WORDS.rename, THREAD_WORDS.copyLink, THREAD_WORDS.delete]);
+    expect(titles(actions)).toEqual([THREAD_WORDS.stop, THREAD_WORDS.rename, THREAD_WORDS.copyLink, THREAD_WORDS.forget]);
     expect(enabled(actions)).toEqual(["stop", "rename", "copy-link"]);
-    expect(actionById(actions, "delete").refusal).toBe("Deleting a thread is not in the runtime yet");
+    expect(actionById(actions, "forget").refusal).toBe(threadForgetRefusal("thr_1"));
     await actionById(actions, "stop").run();
     expect(verbs.stop).toHaveBeenCalledWith("s1");
     // The rename opens the name on the row the thread's own key names, which a new turn does not move.
     await actionById(actions, "rename").run();
     expect(verbs.rename).toHaveBeenCalledWith("thr_1");
+  });
+
+  it("a thread no turn ever ran on offers the forget, which names the thread and its workspace; a client without the verb says so", async () => {
+    const verbs = threadVerbs();
+    const never = thread("failed", "thr_1", "claude", {}, false);
+    const actions = resolveActions(threadActions, never, verbs);
+    expect(actionById(actions, "forget").refusal).toBeNull();
+    await actionById(actions, "forget").run();
+    expect(verbs.forget).toHaveBeenCalledWith({ threadId: "thr_1", workspaceId: "ws_a" });
+    expect(actionById(resolveActions(threadActions, never, threadVerbs({ forget: undefined })), "forget").refusal).toBe("This client cannot forget a thread");
+    // A row the runtime stamped no thread id on names nothing to forget.
+    expect(actionById(resolveActions(threadActions, thread("completed", null, "claude", {}, false), threadVerbs()), "forget").refusal).toBe("This thread has no id yet");
   });
 
   it("a settled thread refuses stop; a client without the verb says so; a thread without an id has no link", () => {
