@@ -158,19 +158,26 @@ export function offeredSize(sizes: readonly WorkspaceSize[], size: WorkspaceSize
   return sizes.some(s => s.cpu === size.cpu && s.memMb === size.memMb);
 }
 
-/** An awake rate in dollars an hour, at the precision it is sold at: cents from a dime up, three places below it,
- * since a workspace at $0.018 an hour reads as $0.02 to the cent and that is a fifth of the price. The one rate
- * rule: the size refusal, the provider rows and the pick rows all read it. */
+/** An awake rate in dollars an hour, at the fewest places that do not round the price: cents where cents are the
+ * whole of it, three places where they are not, since a workspace at $0.018 an hour reads as $0.02 to the cent and
+ * that is a fifth of the price. A third place that says nothing is not added: $0.09 is $0.09, not $0.090. The one
+ * rate rule, read by the size refusal, the places table and the provider rows alike. */
 export function fmtRate(usdPerHour: number): string {
-  return `$${usdPerHour < 0.1 ? usdPerHour.toFixed(3) : usdPerHour.toFixed(2)}/hr`;
+  const cents = usdPerHour.toFixed(2);
+  return `$${Number(cents) === usdPerHour ? cents : usdPerHour.toFixed(3)}/hr`;
 }
 
 /** The one refusal every road gives a size the provider does not offer, malformed or merely absent: the word as it
- * was given, then every size that is offered with its rate. */
+ * was given, then every size that is offered with its rate. What happened, alone: each road joins its own fix to it
+ * through refusalLine, since what to do about it is the road's (a flag at a terminal, a pick in the app). */
 export function sizeRefusal(word: string, sizes: readonly MachineSizeOffer[]): string {
   const offered = sizes.map(s => `${sizeWord(s)} (${fmtRate(s.rateUsdPerHour)})`).join(", ");
   return `${word} is not a size this provider offers; the sizes are ${offered}`;
 }
+
+/** What to do about such a size on a road with no flag to name: the app's picker and the wire both ask for one of
+ * the sizes the half above just listed. The command line names its own flag instead. */
+export const SIZE_PICK_FIX = "Ask for one of those instead.";
 
 /** The one refusal a create or a fork gives when the provider is at its machine cap and no builder was left to stop
  * for room: the machines this host knows hold the slots, and the two moves that free one. The provider's own
