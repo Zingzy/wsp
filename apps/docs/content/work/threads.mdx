@@ -7,15 +7,15 @@ A thread is a conversation with one agent on one machine. Claude Code and Codex 
 ## Open one
 
 ```bash
-wsp thread new --in dev "Fix the flaky terminal test."
-wsp thread new --in dev --cwd /root/app --notify me "Read ticket 413 and build it."
-wsp thread new --in dev --agent codex --model gpt-5.2 "Review the branch."
-wsp thread new --in dev --detach --title "413 build" "A long one."
+wsp run dev "Fix the flaky terminal test."
+wsp run dev --cwd /root/app --notify me "Read ticket 413 and build it."
+wsp run dev --agent codex --model gpt-5.2 "Review the branch."
+wsp run dev --detach --title "413 build" "A long one."
 ```
 
-| flag | meaning |
+| word | meaning |
 | --- | --- |
-| `--in <workspace>` | required; the workspace the thread runs on, woken first if it naps |
+| `<workspace>` | the first word; the workspace the thread runs on, woken first if it naps. Left out, wsp reads the workspace off the repo you are standing in |
 | `--agent <id>` | `claude` or `codex`; the default is `claude` |
 | `--model <slug>` | the model, in the agent's own words |
 | `--effort <word>` | the reasoning effort, in the agent's own words |

@@ -39,7 +39,7 @@ Every verb takes `--state <path>`, the state file the host serves. The default i
 
 ## Turns, replies and processes
 
-A turn ends when the agent process exits, not at its reply. `wsp thread new` and `wsp send` return when the reply is complete, and the thread reads running until the process exits, which can be minutes when the agent left a command running.
+A turn ends when the agent process exits, not at its reply. `wsp run` and `wsp send` return when the reply is complete, and the thread reads running until the process exits, which can be minutes when the agent left a command running.
 
 A `send` into a thread whose turn is still running does one of three things, and the command line says which on stderr:
 

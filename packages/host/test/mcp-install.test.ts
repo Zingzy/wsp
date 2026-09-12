@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { mcpServerCommandLine, nextInsideAgentLine } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HELP, JSON_COMMANDS, PROSE_COMMANDS, cli, type CliIO } from "../src/cli.js";
+import { HELP, JSON_COMMANDS, PROSE_COMMANDS, agentPage, cli, type CliIO } from "../src/cli.js";
 import { SECTION_BEGIN, sectionText } from "../src/agents-md.js";
 import { agentsOnPath, installEach, installLines, installMcp, mcpServerSpec, removeLines, runningWsp, type RunningWsp } from "../src/mcp-install.js";
 import { shimPath } from "../src/shim.js";
@@ -213,7 +213,7 @@ describe("installing the MCP server for a local agent", () => {
     expect(report.installed.map(i => i.id)).toEqual(["gemini"]);
     expect(report.failures).toEqual([{ id: "emacs", error: "no agent emacs in the catalog; agents with an MCP config: claude, codex, gemini, opencode" }]);
     expect(readFileSync(join(home, ".gemini", "skills", "wsp", "SKILL.md"), "utf8")).toBe(WSP_SKILL);
-    expect(HELP).toContain("--json");
+    expect(agentPage()).toContain("--json");
   });
 
   it("--agent belongs to mcp install alone, a command with no JSON to print refuses --json, and mcp --help says its own usage", async () => {

@@ -54,7 +54,7 @@ Each tool's inputs are in parentheses. A flag on the command line is the input o
 | `rename` | workspace, name | names the workspace on this computer |
 | `forget` | workspace | drops a workspace whose machine is gone; refused while it exists |
 | `delete` | workspace, confirm | deletes the machine at the provider and drops the record; deletes only with `confirm` true |
-| `thread_new` | workspace, task, agent, model, effort, access, cwd, notify, title, detach | opens a thread and follows its first turn to the reply, or with `detach` returns the id at once |
+| `run` | workspace, task, agent, model, effort, access, cwd, notify, title, detach | opens a thread and follows its first turn to the reply, or with `detach` returns the id at once |
 | `thread_rename` | thread, title | names the thread in the agent's own store on the machine |
 | `thread_read` | thread, last | the thread's messages as the app lists them: who each one is, when the runtime recorded it, the text, and every tool call folded to one line; with `last`, the final reply alone, whole, and a row under it when the thread has started another turn since |
 | `send` | thread, message, model, effort, access, detach | a message into an existing thread |
@@ -67,10 +67,10 @@ Each tool's inputs are in parentheses. A flag on the command line is the input o
 | `recipe_scan` | project | reads this computer and answers with every option, writing nothing |
 | `recipe` | tick, set, signin, add, add_check, why, project, out | writes the recipe for a machine |
 
-`thread_new`, `send` and `exec` wake a paused workspace themselves before running, so a paused one needs no `wake` first.
+`run`, `send` and `exec` wake a paused workspace themselves before running, so a paused one needs no `wake` first.
 
 <Callout type="info">
-  A `thread_new` without `detach` blocks for the whole turn, which can be minutes or hours. An agent whose own conversation nothing can write into starts threads with `detach` true and reads their ends with `threads_wait`, one finished thread per call.
+  A `run` without `detach` blocks for the whole turn, which can be minutes or hours. An agent whose own conversation nothing can write into starts threads with `detach` true and reads their ends with `threads_wait`, one finished thread per call.
 </Callout>
 
 ## Only on the command line

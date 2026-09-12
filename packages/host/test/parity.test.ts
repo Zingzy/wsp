@@ -12,7 +12,10 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_AGENT } from "@wsp/catalog";
 import { COORDINATOR_HANDOFF, EXIT_CODES, EXIT_WORDS, ExitClass, NOTIFY_CALLER, NOTIFY_WORDS, RuntimeRequest, SessionStartOutcome, TURN_END_WORDS, effortsFor, markedDefault, stillWorkingLine, type WorkspaceView } from "@wsp/protocol";
 import { harnessCatalog } from "@wsp/runtime";
-import { cli, COMMAND_LINES, HELP, HOST_FLAG, JSON_COMMANDS, PROSE_COMMANDS, SERVE_FLAGS, type CliIO, type CommandLine } from "../src/cli.js";
+import { agentPage, cli, COMMAND_LINES, commandPage, COMMANDS_FOR_HELP, HELP, HOST_FLAG, JSON_COMMANDS, PROSE_COMMANDS, SERVE_FLAGS, SHARED_FLAGS, type CliIO, type CommandLine } from "../src/cli.js";
+
+/** One command's own help, as `wsp <words> --help` prints it. */
+const commandPageFor = (words: string): string => commandPage(words, COMMANDS_FOR_HELP[words]!);
 import { mcpServer } from "../src/mcp.js";
 import { INSTRUCTIONS, RULES_HEADING, SHELL_HEADING, VERBS_HEADING, WSP_SKILL } from "../src/skill.js";
 import { CLI_VERBS, COMMON, VERBS, flagList, hasTool, openingOf, toolName, type Flags } from "../src/verbs.js";
@@ -250,14 +253,14 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       .map(([code, cls, when]) => ({ code: Number(code), cls: cls!.replaceAll("`", ""), when }));
     expect(rows.map(r => [r.cls, r.code])).toEqual(Object.entries(EXIT_CODES));
     for (const row of rows) expect(row.when, row.cls).toBe(EXIT_WORDS[ExitClass.parse(row.cls)]);
-    const help = HELP.replace(/\s+/g, " ");
+    const help = agentPage().replace(/\s+/g, " ");
     const agents = readFileSync(new URL("../../../AGENTS.md", import.meta.url), "utf8").replace(/\s+/g, " ");
     for (const cls of ExitClass.options) {
       expect(help).toContain(`${EXIT_CODES[cls]} ${cls}`);
       expect(agents).toContain(`${EXIT_CODES[cls]} ${cls}`);
     }
     // One section says it, once: the skill names the codes in the table alone and nowhere as a bare "exit 1".
-    for (const text of [WSP_SKILL, HELP]) expect(text.match(/\bexits? [0-9]\b/g) ?? []).toEqual([]);
+    for (const text of [WSP_SKILL, HELP, agentPage()]) expect(text.match(/\bexits? [0-9]\b/g) ?? []).toEqual([]);
   });
 
   it("every command line has a tool or says why not, every tool has a skill row naming its inputs, and a tool with no command line says why", async () => {
@@ -372,16 +375,13 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     }
   });
 
-  it("the help's --host rule names the two words that take the flag to say where to run, and no word that refuses it", () => {
-    // The block is prose deciding what the declaration decides, which is how it came to promise a refusal to eight
-    // words while calling four of them lines that start or stop something. Its last sentence is held to the table
-    // word by word, so a word that changes what it does with the flag cannot leave the help saying the old thing.
-    const block = HELP.slice(HELP.indexOf("  --host ALIAS"), HELP.indexOf("  --code CODE"));
-    const opener = "lines that read this computer's own files refuse it";
-    expect(block, "the --host block states the rule in the declaration's own words").toContain(opener);
-    const rule = block.slice(block.indexOf(opener)).replace(/\s+/g, " ");
-    for (const [word, flag] of Object.entries(HOST_FLAG)) {
-      expect(rule.includes(`wsp ${word}`), `wsp ${word} named in the --host rule`).toBe(flag === "hostSide");
+  it("each command's own help says what it does with --host, so no page can promise a flag a line refuses", () => {
+    // Prose deciding what the declaration decides is how the old block came to promise a refusal to eight words
+    // while calling four of them lines that start or stop something. Each line's own help reads the declaration.
+    for (const [words, flag] of Object.entries(HOST_FLAG)) {
+      const page = commandPageFor(words);
+      expect(page.includes("--host"), `wsp ${words} advertises --host`).toBe(flag !== "refused");
+      expect(page.includes("runs at its own host's terminal"), `wsp ${words} says it runs over there`).toBe(flag === "hostSide");
     }
   });
 
@@ -389,7 +389,9 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     // The table drives the parse and the unit wsp up --service writes, so a row added is read and travels; without
     // this, it would do both and be named nowhere a person or an agent looks.
     for (const flag of SERVE_FLAGS) {
-      expect(HELP, `--${flag.name} in wsp --help`).toMatch(new RegExp(`--${flag.name}\\b`));
+      const readers = SHARED_FLAGS.filter(f => f.name === flag.name).flatMap(f => f.on);
+      expect(readers, `--${flag.name} is read by some command`).not.toEqual([]);
+      for (const words of readers) expect(commandPageFor(words), `--${flag.name} in wsp ${words} --help`).toMatch(new RegExp(`--${flag.name}\\b`));
       expect(WSP_SKILL, `--${flag.name} in the skill`).toMatch(new RegExp(`--${flag.name}\\b`));
     }
   });
@@ -522,8 +524,8 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       expect(text).toContain(TURN_END_WORDS);
       expect(text).toContain(NOTIFY_WORDS);
     }
-    // The help wraps the sentence at 80 columns, so it is read with its line breaks folded.
-    const help = HELP.replace(/\s+/g, " ");
+    // The page wraps the sentence at 80 columns, so it is read with its line breaks folded.
+    const help = agentPage().replace(/\s+/g, " ");
     expect(help).toContain(TURN_END_WORDS);
     for (const text of [tool, WSP_SKILL, help]) expect(text).not.toMatch(/when the (first )?turn ends/);
   });

@@ -13,7 +13,7 @@ import { runForTheList, agentsKindRefusal, askingLine, type PermissionAsk, DEFAU
 import { copyKey, createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
-import { HELP, cli, localWiring, localWorkFolder, serve } from "../src/cli.js";
+import { HELP, agentPage, cli, commandPage, COMMANDS_FOR_HELP, localWiring, localWorkFolder, serve } from "../src/cli.js";
 import { placeWiring } from "../src/places.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
@@ -631,17 +631,17 @@ describe("wsp verbs over the host", () => {
     expect(extra.io.errors.at(-1)).toBe("wsp image move takes one workspace. usage: wsp image move <workspace>");
   });
 
-  it("fork's help says it makes a new machine from the source's golden version, in wsp --help and wsp fork --help", async () => {
+  it("fork's help says it makes a new machine from the source's golden version, on the agent page and in wsp fork --help", async () => {
     const line = "a new machine from the source's golden version";
-    expect(HELP).toContain(line);
+    expect(agentPage()).toContain(line);
     const { code, io } = await run("fork", "--help");
     expect(code).toBe(0);
     expect(io.lines[0]).toContain(line);
   });
 
-  it("wsp --help names the screens of wsp init in order, as the wizard draws them, with no count since a screen with nothing to pick is not shown", () => {
-    expect(HELP).not.toMatch(/(three|five|six) screens/);
-    const init = HELP.slice(HELP.indexOf("  wsp init "), HELP.indexOf("  wsp doctor ")).replace(/\s+/g, " ");
+  it("wsp init --help names the screens of the wizard in order, as it draws them, with no count since a screen with nothing to pick is not shown", () => {
+    const init = commandPage("init", COMMANDS_FOR_HELP["init"]!).replace(/\s+/g, " ");
+    expect(init).not.toMatch(/(three|five|six) screens/);
     expect(init).toContain("one screen at a time: Agents, Tools, Also on this computer, Sign-ins, wsp for your agents on this computer, each shown when it has a row to pick, then Build");
   });
 

@@ -20,14 +20,17 @@ const help = (args) => {
 
 const version = help(["--version"]).trim();
 const main = help(["--help"]).trimEnd();
-const verbs = ["up", "init", "recipe", "workspaces", "threads", "new", "fork", "snapshot", "pause", "wake", "rename", "forget", "delete", "thread", "send", "stop", "exec", "folders", "import", "export", "terminal", "mcp"];
+const pages = [
+  ["wsp --help agent", ["--help", "agent"]],
+  ["wsp host --help", ["host", "--help"]],
+  ["wsp --help dev", ["--help", "dev"]],
+];
+const verbs = ["init", "add", "places", "remove", "new", "import", "run", "pause", "wake", "delete", "workspaces", "threads", "send", "stop", "status", "mcp", "up", "down", "recipe", "fork", "snapshot", "rename", "forget", "thread read", "exec", "folders", "export", "image", "join", "leave", "doctor"];
 
-const sections = verbs
-  .map(verb => {
-    const text = help([verb, "--help"]).trimEnd();
-    return `## wsp ${verb}\n\n\`\`\`text\n${text}\n\`\`\``;
-  })
-  .join("\n\n");
+const sections = [
+  ...pages.map(([title, args]) => `## ${title}\n\n\`\`\`text\n${help(args).trimEnd()}\n\`\`\``),
+  ...verbs.map(verb => `## wsp ${verb}\n\n\`\`\`text\n${help([...verb.split(" "), "--help"]).trimEnd()}\n\`\`\``),
+].join("\n\n");
 
 const page = `# Command line
 

@@ -45,9 +45,9 @@ Every step ends in what to expect. The agent runs the command, reads that line, 
 
 8. **First workspace.** The first seal forks one, named `first`. `wsp wake first` answers with its state and `wsp new dev` makes another. A refusal naming the account's machine cap means two are already up; the builder stays up ten minutes after a seal and counts as one.
 
-9. **Import the project.** `wsp import <folder> --to first` prints the plan and moves nothing: the repository, the files and their size, the caches left behind, each secret-shaped file with its default, and the agents with sessions for the folder. The agent puts the secret-shaped rows to you, then runs it again with `--yes` or `--keep <path>`. Then `wsp snapshot first`, so the next workspace starts from a project golden with the project in place.
+9. **Import the project.** `wsp import first` <folder> prints the plan and moves nothing: the repository, the files and their size, the caches left behind, each secret-shaped file with its default, and the agents with sessions for the folder. The agent puts the secret-shaped rows to you, then runs it again with `--yes` or `--keep <path>`. Then `wsp snapshot first`, so the next workspace starts from a project golden with the project in place.
 
-10. **First thread.** `wsp thread new --in first --cwd <the project folder on the machine> --notify me "<the task>"`. Expect `thread <id>` first on stdout, the reply when it is complete, and the same thread in your sidebar.
+10. **First thread.** `wsp run first --cwd <the project folder on the machine> --notify me "<the task>"`. Expect `thread <id>` first on stdout, the reply when it is complete, and the same thread in your sidebar.
 
 <Callout type="info">
   `wsp doctor` is not the health check. It forks a live machine to prove the whole reach path, bills while it runs, and does not speak JSON.

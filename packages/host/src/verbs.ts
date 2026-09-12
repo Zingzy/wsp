@@ -517,12 +517,19 @@ function tool<In extends z.ZodRawShape, Out extends z.ZodRawShape>(spec: {
   return spec;
 }
 
+/** Which page a line prints on. `front` is the sixteen words a person meets; `agent` the verbs an agent reaches
+ * for, behind `wsp --help agent`; `host` the plumbing under `wsp host`; `dev` the doctor, behind `wsp --help dev`;
+ * `app` a line the app's own screens stand on, printed on no page, still parsed and still served as a tool. Every
+ * line declares one, so a line added prints somewhere or says in the table that it prints nowhere. */
+export type Page = "front" | "agent" | "host" | "dev" | "app";
+
 /** A verb on both doors: the words that select it on the command line, its usage and one phrase on what it does in
- * every help, the flags it reads beside COMMON, its run, and its tool. */
+ * every help, the page it prints on, the flags it reads beside COMMON, its run, and its tool. */
 export interface CliVerb {
   name: string;
   usage: string;
   about: string;
+  page: Page;
   options: NonNullable<ParseArgsConfig["options"]>;
   run(ctx: VerbContext): Promise<number>;
   tool: Tool;
@@ -2052,6 +2059,7 @@ export const VERBS: readonly Verb[] = [
     name: "places",
     usage: "wsp places",
     about: "every place this host holds: this computer, the computers joined to it and the provider it forks on, with what each has and whether it is connected",
+    page: "front",
     options: {},
     run: async ctx => {
       if (ctx.args.length !== 0) throw usageRefusal("wsp places takes no positional arguments.", usageIs(ctx));
@@ -2071,6 +2079,7 @@ export const VERBS: readonly Verb[] = [
     name: "workspaces",
     usage: "wsp workspaces",
     about: "every workspace this host runs: what its machine is, its state as the sidebar shows it (running, paused, waking or unreachable, off the phase with the provider's word for the machine and the daemon reach beside it) where the kind has one, and how many projects it holds",
+    page: "front",
     options: {},
     run: async ctx => {
       if (ctx.args.length !== 0) throw usageRefusal("wsp workspaces takes no positional arguments.", usageIs(ctx));
@@ -2092,6 +2101,7 @@ export const VERBS: readonly Verb[] = [
     name: "projects",
     usage: "wsp projects <workspace>",
     about: "the projects on the workspace, oldest import first: name, folder on the machine, size and when it landed; the name is what wsp run --project takes",
+    page: "agent",
     options: {},
     run: async ctx => {
       const [ref] = ctx.args;
@@ -2113,6 +2123,7 @@ export const VERBS: readonly Verb[] = [
     name: "threads",
     usage: "wsp threads [<workspace>] [--tree]",
     about: "who is working, and in which workspace: every thread as the sidebar lists it, with the agent, the state, who opened it and the folder it works in; --tree indents the threads an agent spawned under the one that spawned them",
+    page: "front",
     options: { tree: { type: "boolean" } },
     run: async ctx => {
       if (ctx.args.length > 1) throw usageRefusal("wsp threads takes at most one workspace; wsp threads wait is its one subcommand.", usageIs(ctx));
@@ -2132,6 +2143,7 @@ export const VERBS: readonly Verb[] = [
     name: "threads wait",
     usage: "wsp threads wait <thread>... [--timeout <s>]",
     about: "blocks until one of the threads leaves running and prints its finished line, the one a notify sends; --timeout gives up after so many seconds and says so on stderr",
+    page: "agent",
     options: { timeout: { type: "string" } },
     run: async ctx => {
       if (ctx.args.length === 0) throw usageRefusal("wsp threads wait takes one thread or more.", usageIs(ctx));
@@ -2165,6 +2177,7 @@ export const VERBS: readonly Verb[] = [
     usage: "wsp recipe scan [--project <folder>]",
     about:
       "read this computer and print every option, writing nothing: the agents, the tools with why and size, what else a package manager here has that the image could take, the commands your agents ran, and the sign-ins, each with what to do about it and one line of why; --project weighs the histories by a folder and --json prints it as one object",
+    page: "agent",
     options: { project: { type: "string", multiple: true } },
     run: async ctx => {
       if (ctx.args.length !== 0) throw usageRefusal("wsp recipe scan takes no positional arguments.", usageIs(ctx));
@@ -2194,6 +2207,7 @@ export const VERBS: readonly Verb[] = [
     usage: `wsp recipe [--tick ${RECIPE_TICKS.join("|")}] [--set <id>=on|off] [--signin <id>=${LOGIN_CHOICES.join("|")}] [--add <id>=<command>] [--add-check <id>=<command>] [--project <folder>] [--out <path>]`,
     about:
       "write the recipe and print it as a table: every catalog agent and tool with its tick, why it has it and what it costs on the machine, then the commands your agents ran that no catalog row carries. --tick used|installed|default names the rule that decides every tick (used, the default, ticks what your agents actually ran here); --set <id>=on|off flips a row by its catalog id, or a package this computer's own package managers have by the id wsp recipe scan gives it, which the build installs by that package's own road; --signin <id>=copy|machine|key|skip answers a sign-in by catalog id, key bringing the key files beside a login and nothing else of it; --add <id>=<command> carries a tool neither the catalog nor this computer has, installed by that command on the machine, with --add-check <id>=<command> saying it is there; --project reads a folder's own manifests for what it takes to build and weighs the histories by it, --out says where the file goes and --json prints the table as one object. Naming --tick or --project decides every tick again; without either, what the file says stands and the flags flip rows on top of it. A sign-in answer stands either way: no rule decides one. All of them repeat. Review it, then wsp init --recipe",
+    page: "agent",
     options: {
       out: { type: "string" },
       tick: { type: "string" },
@@ -2260,6 +2274,7 @@ export const VERBS: readonly Verb[] = [
     name: "new",
     usage: "wsp new <name> [--on <place>] [--from <project golden>] [--size <cpu>x<memGb>] [--spawn on|off] [--max-machines <n>] [--max-depth <n>]",
     about: "a workspace from your image; --on <place> says where, and you meet it only once you have more than one place",
+    page: "front",
     options: { from: { type: "string" }, size: { type: "string" }, on: { type: "string" }, spawn: { type: "string" }, "max-machines": { type: "string" }, "max-depth": { type: "string" } },
     run: async ctx => {
       const [name] = ctx.args;
@@ -2309,6 +2324,7 @@ export const VERBS: readonly Verb[] = [
     name: "workspaces agents",
     usage: "wsp workspaces agents <workspace> --spawn on|off [--max-machines <n>] [--max-depth <n>]",
     about: "what the agents inside the workspace may ask of this host: off, or threads and machines under the thread they run in, capped",
+    page: "agent",
     options: { spawn: { type: "string" }, "max-machines": { type: "string" }, "max-depth": { type: "string" } },
     run: async ctx => {
       const [ref] = ctx.args;
@@ -2334,6 +2350,7 @@ export const VERBS: readonly Verb[] = [
     name: "rename",
     usage: 'wsp rename <workspace> "<name>"',
     about: "names the workspace on this computer; the name is unique here, so one another workspace holds is refused",
+    page: "agent",
     options: {},
     run: async ctx => {
       const [ref, name] = ctx.args;
@@ -2357,6 +2374,7 @@ export const VERBS: readonly Verb[] = [
     name: "snapshot",
     usage: "wsp snapshot <workspace>",
     about: "a project golden of the workspace: its golden plus the project as it is now, ready to fork",
+    page: "agent",
     options: {},
     run: async ctx => {
       const [ref] = ctx.args;
@@ -2374,8 +2392,9 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "fork",
-    usage: 'wsp fork <workspace> [--name <n>] [--size <cpu>x<memGb>] [--send "<task>" [thread new\'s flags]]',
+    usage: 'wsp fork <workspace> [--name <n>] [--size <cpu>x<memGb>] [--send "<task>" [run\'s flags]]',
     about: "a new machine from the source's golden version, not a copy of its live disk; --size as new's",
+    page: "agent",
     options: { name: { type: "string" }, size: { type: "string" }, send: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, cwd: { type: "string" }, notify: { type: "string", multiple: true }, spawn: { type: "string" }, "max-machines": { type: "string" }, "max-depth": { type: "string" } },
     run: async ctx => {
       const [ref] = ctx.args;
@@ -2426,6 +2445,7 @@ export const VERBS: readonly Verb[] = [
     name: "pause",
     usage: "wsp pause <workspace>",
     about: "naps the workspace's machine",
+    page: "front",
     options: {},
     run: async ctx => {
       const [ref] = ctx.args;
@@ -2445,6 +2465,7 @@ export const VERBS: readonly Verb[] = [
     name: "wake",
     usage: "wsp wake <workspace>",
     about: "wakes the workspace's machine and prints its state once the runtime has answered",
+    page: "front",
     options: {},
     run: async ctx => {
       const [ref] = ctx.args;
@@ -2468,6 +2489,7 @@ export const VERBS: readonly Verb[] = [
     name: "rebuild",
     usage: "wsp rebuild <workspace>",
     about: "replaces a gone workspace's machine from its image and prints the state of the new one",
+    page: "app",
     options: {},
     run: async ctx => {
       const [ref] = ctx.args;
@@ -2491,6 +2513,7 @@ export const VERBS: readonly Verb[] = [
     name: "image",
     usage: "wsp image",
     about: "the image this host owns: its version, its hash, whether it holds your sign-ins, and the copy each place has built of it",
+    page: "agent",
     options: {},
     run: async ctx => {
       if (ctx.args.length !== 0) throw usageRefusal("wsp image takes no positional arguments.", usageIs(ctx));
@@ -2513,6 +2536,7 @@ export const VERBS: readonly Verb[] = [
     name: "image build",
     usage: "wsp image build <place> [--force]",
     about: "builds this host's image at a place from the record, its sign-ins coming from the vault and no sign-in run again",
+    page: "agent",
     options: { force: { type: "boolean" } },
     run: async ctx => {
       const [place] = ctx.args;
@@ -2536,6 +2560,7 @@ export const VERBS: readonly Verb[] = [
     name: "image export",
     usage: "wsp image export <file>",
     about: "writes the image record and your sign-ins to one encrypted file, sealed to a passphrase you type",
+    page: "agent",
     options: {},
     cliOnly: "the vault leaves the host only at a person's hand, with a passphrase they type",
     hostSide: HOST_SIDE_VAULT,
@@ -2552,6 +2577,7 @@ export const VERBS: readonly Verb[] = [
     name: "image move",
     usage: "wsp image move <workspace>",
     about: "moves the workspace onto the newest version of its image and prints what of the image's own files it kept",
+    page: "app",
     options: {},
     run: async ctx => {
       const [ref] = ctx.args;
@@ -2580,6 +2606,7 @@ export const VERBS: readonly Verb[] = [
     name: "forget",
     usage: "wsp forget <workspace> [--yes]",
     about: "drops a gone workspace and its threads from this computer; refused while its machine exists",
+    page: "agent",
     options: { yes: { type: "boolean" } },
     run: async ctx => {
       const [ref] = ctx.args;
@@ -2608,6 +2635,7 @@ export const VERBS: readonly Verb[] = [
     name: "delete",
     usage: "wsp delete <workspace> [--yes]",
     about: "deletes the machine at the provider, then drops the record and threads from this computer",
+    page: "front",
     options: { yes: { type: "boolean" } },
     run: async ctx => {
       const [ref] = ctx.args;
@@ -2642,6 +2670,7 @@ export const VERBS: readonly Verb[] = [
     name: "run",
     usage: 'wsp run [<workspace>] [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, --title, --image <path>, --detach] "<task>"',
     about: "an agent works in the workspace and you read its reply: a thread with the agent, model, effort and access the app offers, in the project named or the one the app's pick would take; with no workspace, run from inside a registered repo, on the workspace that project last ran on; follows its first turn, or with --detach prints the id and returns",
+    page: "front",
     options: { agent: { type: "string" }, ...PICK_OPTIONS, project: { type: "string" }, cwd: { type: "string" }, notify: { type: "string", multiple: true }, title: { type: "string" }, image: { type: "string", multiple: true }, detach: { type: "boolean" } },
     run: async ctx => {
       if (ctx.args.length === 0) throw usageRefusal("wsp run takes a task and got none.", 'Put the task in quotes: wsp run <workspace> "say hi".');
@@ -2686,6 +2715,7 @@ export const VERBS: readonly Verb[] = [
     usage: "wsp thread read <thread> [--last]",
     about:
       "the thread's messages as the app lists them, oldest first: who each one is, when the runtime recorded it and the text, with every tool call folded to the one line the app's row reads; --last prints the final reply alone, the whole message its finished line carries. A tool's output and the agent's reasoning are no rows of it",
+    page: "agent",
     options: { last: { type: "boolean" } },
     run: async ctx => {
       const [ref] = ctx.args;
@@ -2715,6 +2745,7 @@ export const VERBS: readonly Verb[] = [
     name: "thread rename",
     usage: 'wsp thread rename <thread> "<title>"',
     about: "names the thread inside the agent's own store, so the agent shows the same name",
+    page: "app",
     options: {},
     run: async ctx => {
       const [ref, title] = ctx.args;
@@ -2744,6 +2775,7 @@ export const VERBS: readonly Verb[] = [
     name: "thread forget",
     usage: "wsp thread forget <thread>",
     about: "drops a thread no turn ever ran on, the row a launch that never got going leaves behind; refused once a turn of it did work",
+    page: "agent",
     options: {},
     run: async ctx => {
       const [ref] = ctx.args;
@@ -2771,6 +2803,7 @@ export const VERBS: readonly Verb[] = [
     name: "send",
     usage: 'wsp send <thread> [--model, --effort, --access <value>] [--image <path>] [--detach] "<message>"',
     about: "a message to the thread, on a named model, effort or access, with images; a running turn keeps its own; --detach prints the id and returns",
+    page: "front",
     options: { ...PICK_OPTIONS, image: { type: "string", multiple: true }, detach: { type: "boolean" } },
     run: async ctx => {
       const [ref, message] = ctx.args;
@@ -2804,6 +2837,7 @@ export const VERBS: readonly Verb[] = [
     name: "stop",
     usage: "wsp stop <thread>",
     about: "stops the thread's running turn, as the app's stop does; the machine stays up",
+    page: "front",
     options: {},
     run: async ctx => {
       const [ref] = ctx.args;
@@ -2826,6 +2860,7 @@ export const VERBS: readonly Verb[] = [
     name: "exec",
     usage: "wsp exec <workspace> [--cwd <dir>] -- <command...>",
     about: "runs the command on the machine, each word as given, in --cwd or the folder a thread would start in",
+    page: "agent",
     options: { cwd: { type: "string" } },
     run: async ctx => {
       const [ref, ...words] = ctx.args;
@@ -2863,6 +2898,7 @@ export const VERBS: readonly Verb[] = [
     name: "folders",
     usage: "wsp folders [<folder>] [--hidden]",
     about: "the folders inside one folder on this computer, for naming one to import; the home folder and every imported project are the roots and nothing outside them is listed",
+    page: "app",
     options: { hidden: { type: "boolean" } },
     run: async ctx => {
       const [folder] = ctx.args;
@@ -2889,6 +2925,7 @@ export const VERBS: readonly Verb[] = [
     name: "import",
     usage: "wsp import [<workspace>] <folder> [--yes] [--keep, --cut <path>] [--agents <ids>] [--replace]",
     about: "puts a folder in the workspace, at its path here; the plan first, then --yes or one question; on this computer it registers the path and copies nothing; with no workspace, the one the last thread started on",
+    page: "front",
     options: { yes: { type: "boolean" }, keep: { type: "string", multiple: true }, cut: { type: "string", multiple: true }, agents: { type: "string" }, replace: { type: "boolean" } },
     run: async ctx => {
       if (ctx.args.length === 0 || ctx.args.length > 2) throw usageRefusal("wsp import takes a workspace and a folder on this computer.", usageIs(ctx));
@@ -2974,6 +3011,7 @@ export const VERBS: readonly Verb[] = [
     name: "setup",
     usage: "wsp setup",
     about: "the cloud setup on this host as the app's Set up cloud machines modal reads it: which keys are held (never their values), the agents here, what a machine costs, and the init job's phase, rows and progress when one runs or ran",
+    page: "app",
     options: {},
     run: async ctx => {
       if (ctx.args.length !== 0) throw usageRefusal("wsp setup takes no positional arguments.", usageIs(ctx));
@@ -2994,6 +3032,7 @@ export const VERBS: readonly Verb[] = [
     usage: `wsp terminal config [--scheme ${TerminalScheme.options.join("|")}]`,
     about:
       "the Ghostty config on this computer as the app's terminal pane applies it, read from ~/.config/ghostty and Application Support with its includes and theme resolved: the font and its fallbacks, the size, the colors, the cursor, the padding, the background opacity, and the blur, which is read but not applied; --scheme picks the side of a light:...,dark:... theme",
+    page: "app",
     options: { scheme: { type: "string" } },
     run: async ctx => {
       if (ctx.args.length !== 0) throw usageRefusal("wsp terminal config takes no positional arguments.", usageIs(ctx));
@@ -3016,6 +3055,7 @@ export const VERBS: readonly Verb[] = [
     name: "export",
     usage: "wsp export <workspace> <folder> [--from <path on the machine>] [--replace] [--agents <ids>]",
     about: "brings a project folder and the agent sessions keyed to it home from the machine",
+    page: "agent",
     options: { from: { type: "string" }, replace: { type: "boolean" }, agents: { type: "string" } },
     run: async ctx => {
       const [ref, folder] = ctx.args;
@@ -3074,14 +3114,14 @@ export function findVerb(argv: ReadonlyArray<string>): CliVerb | CliOnlyVerb | u
 }
 
 /** Every line of help fits this many columns. */
-const HELP_WIDTH = 80;
+export const HELP_WIDTH = 80;
 
 /** The verb's about behind the indent, wrapped to the help's width. */
 const aboutLines = (verb: CliVerb | CliOnlyVerb, indent: string): string[] => wrap(`${indent}${verb.about}`, HELP_WIDTH, indent);
 
 /** The usage wrapped at the gaps between its groups and never inside a bracket, so a flag stays on the line with its
  * value. */
-function usageLines(usage: string, indent: string): string[] {
+export function usageLines(usage: string, indent: string): string[] {
   let depth = 0;
   const grouped = [...usage]
     .map(c => {
@@ -3093,9 +3133,11 @@ function usageLines(usage: string, indent: string): string[] {
   return wrap(`  ${grouped}`, HELP_WIDTH, indent).map(line => line.replaceAll("\u00a0", " "));
 }
 
-/** Each verb for the top-level help: its usage, then what it does indented under it, so no line runs wide. */
-export function verbHelp(): string {
-  return CLI_VERBS.map(v => [...usageLines(v.usage, "    "), ...aboutLines(v, "      ")].join("\n")).join("\n");
+/** The lines of one page: each usage, then what it does indented under it, so no line runs wide. */
+export function verbHelp(page?: Page): string {
+  return CLI_VERBS.filter(v => page === undefined || v.page === page)
+    .map(v => [...usageLines(v.usage, "    "), ...aboutLines(v, "      ")].join("\n"))
+    .join("\n");
 }
 
 /** The usage of every verb that opens with this word, for a command that stopped short of one; none when no verb does. */

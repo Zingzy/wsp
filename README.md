@@ -60,7 +60,7 @@ wsp up
 
 serves the app at `http://127.0.0.1:4400` and the runtime behind it. `wsp up --service` keeps it up across logins. The desktop app is the same host and app in one window; bundles for macOS and Linux are on the [releases page](https://github.com/Zingzy/wsp/releases).
 
-The command line and the MCP tools are the same verbs: `new`, `fork`, `snapshot`, `pause`, `threads`, `thread new`, `send`, `exec`, `import`, `export`, `rename`. `wsp --help` lists them; the app's palette runs them too.
+The command line and the MCP tools are the same verbs: `new`, `fork`, `snapshot`, `pause`, `threads`, `run`, `send`, `exec`, `import`, `export`, `rename`. `wsp --help` lists them; the app's palette runs them too.
 
 <!-- bundles:start -->
 ### Opening a downloaded bundle

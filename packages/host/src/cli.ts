@@ -26,7 +26,7 @@ import {
   type SshWiring,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portsAsked, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, unknownWordLine, usageRefusal, WS_PORT_OFFSET } from "@wsp/protocol";
+import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portsAsked, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, unknownWordLine, usageRefusal, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, parseSshAddress, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshIdentity, sshMachineName, sshReachOf, type SshReach } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerModule, providerPlaces, type ProviderEnv } from "./providers.js";
 import { assetDir } from "./assets.js";
@@ -88,7 +88,7 @@ import { addCommand, addFlags, joinCommand, leaveCommand, placeWiring, removeCom
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, registeredLine, removeEach, removeLines, runningWsp, type RunningWsp } from "./mcp-install.js";
-import { CLI_VERBS, COMMON, type DialOpts, dialHost, failed, findVerb, type HostClient, jsonAsked, renamedWords, runVerb, takeCommon, toolName, verbHelp, verbUsage, type VerbDeps } from "./verbs.js";
+import { CLI_VERBS, COMMON, type DialOpts, dialHost, failed, findVerb, HELP_WIDTH, type HostClient, jsonAsked, type Page, renamedWords, runVerb, takeCommon, toolName, usageLines, verbUsage, type VerbDeps } from "./verbs.js";
 import { VERSION } from "./version.js";
 
 /** The computer every screen and every reader here is told it is on; the one reading, so a run, its hand-off and
@@ -98,216 +98,44 @@ export const hostPlatform = (): Platform => (platform() === "darwin" ? "darwin" 
 /** One line per exit class, the code first, wrapped to the help's width. */
 const exitCodeHelp = (): string => ExitClass.options.map(cls => wrap(`  ${EXIT_CODES[cls]} ${cls.padEnd(8)}  ${EXIT_WORDS[cls]}`, 80, " ".repeat(14)).join("\n")).join("\n");
 
+/** The front page, word for word: sixteen words on five nouns, the three rules, and the two pages and the flag
+ * help behind them. It is a literal rather than a table of usages because the whole of it is what a person meets
+ * first, and its right hand column is written for that reading; the parity test holds its sixteen words to the
+ * entries that declare the front page, so a verb cannot be added to one and not the other. */
 export const HELP = `wsp - ${TAGLINE}
 
-usage:
-  wsp up             start the app and the runtime over the golden you sealed
-                     (plain wsp does the same). It serves until you stop it, so
-                     closing that terminal takes the app down with it; --service
-                     hands the same line to this computer's own service manager
-                     instead, which starts it now and again at every login
-  wsp down           stop the service and take it away, so nothing brings the
-                     host back at the next login
-  wsp add            a computer you own joins this wsp: with no argument it
-                     prints the wsp join line and the code to type on that
-                     computer, wsp add <provider> takes that provider's key,
-                     and wsp add user@host puts the agent on a box over ssh
-  wsp remove PLACE   takes a computer back out: the agent, its files and the
-                     workspaces standing on it go, and the computer is left
-                     as wsp found it
-  wsp join URL       on the computer you are sitting at: joins it to the wsp at
-                     that address with --code, then holds the link open under
-                     this computer's own service manager. wsp join --serve is
-                     what that service runs
-  wsp leave          on that computer: takes wsp off it, for a computer whose
-                     host is gone and cannot run wsp remove
-  wsp host           the roads to a host on a computer that is not the one you
-                     are sitting at, all under one word. wsp host pair prints a
-                     one time code another computer redeems for a token of its
-                     own and wsp host devices lists and revokes the computers
-                     that took one, both at the host's own terminal; wsp host
-                     connect <url> --code <code> --name <alias> spends such a
-                     code here, wsp host list names the hosts this computer
-                     holds with the default marked, wsp host default <alias>
-                     moves that mark and wsp host forget <alias> hands a token
-                     back; wsp host link <url> puts this computer on your relay
-                     account so it is reachable with no port open to the world,
-                     wsp host unlink takes it off, wsp host linked lists the
-                     boxes on the account and wsp host clients, with wsp host
-                     clients revoke <id>, says which computers hold a token for
-                     it. Run wsp host for the lines
-  wsp status         whether a host is serving this state file, on which ports,
-                     and what keeps it there, with a non-zero exit code when
-                     none does
-  wsp init           set up your first golden image one screen at a time:
-                     Agents, Tools, Also on this computer, Sign-ins, wsp for
-                     your agents on this computer, each shown when it has a
-                     row to pick, then Build, then the browser. With no
-                     provider key it seals nothing and makes this computer
-                     your workspace instead. Beside a host already serving
-                     this state file the screens are the same and the build
-                     runs in that host, so a box whose host is a service
-                     needs nothing stopped
-  wsp doctor         run the reach loop end to end against one live machine
-                     (--yes also deletes the snapshots this host left behind);
-                     --local proves the other half instead, a thread on this
-                     computer and its reply, with no machine and no key
-  wsp mcp            serve the verbs as MCP tools over stdio to an agent on this
-                     computer; wsp mcp install --agent <id> puts the server in
-                     that agent's own MCP config (${MCP_AGENT_IDS}),
-                     the wsp skill in its skills folder, and wsp's own section
-                     in this folder's AGENTS.md, which --remove takes back out.
-                     --agent repeats and off a terminal every agent on your PATH
-                     takes it; --json prints one line holding what each agent
-                     took and a failures array for the ones that took nothing;
-                     all three are read by mcp install alone
-  wsp --version      print the version
+usage: wsp <verb> <workspace> ...
 
-verbs; every one takes --json for its raw values. The recipe verbs read this
-computer and write beside the state file; the rest speak to the host wsp up
-started:
-${verbHelp()}
+  wsp init                        seal this computer into your image, once
+  wsp add                         a place: user@host for a computer over ssh,
+                                  <provider> for a provider, nothing for the
+                                  join line another computer types
+  wsp places                      your places, the default marked
+  wsp remove <place>              take a place out; the computer is left as
+                                  wsp found it
+  wsp new <name>                  a workspace from your image; --on <place>
+                                  says where, once you have more than one
+  wsp import <workspace> <folder> put a folder in it; again for the next one
+  wsp run <workspace> "<task>"    an agent works in it and you read its reply
+  wsp pause <workspace>           sleep it now; an idle one sleeps by itself
+  wsp wake <workspace>            wake it now; run, send and exec wake it anyway
+  wsp delete <workspace>          gone; the image stays
+  wsp workspaces                  what you have, and where each one runs
+  wsp threads [<workspace>]       who is working, and in which workspace
+  wsp send <thread> "<message>"   the thread's next message
+  wsp stop <thread>               end the thread's running turn
+  wsp status                      whether a host serves, and where
+  wsp mcp                         the same verbs as tools for the agents on this
+                                  computer; mcp install --agent <id> wires one
 
-  wsp send streams the reply to stderr as it arrives and prints the last message
-  on stdout when the reply is complete.
-${wrap(`  ${TURN_END_WORDS}.`, 80).join("\n")}
-  wsp exec streams the command's output and exits with its code. run, send and
-  exec wake a paused workspace first, with one line on stderr saying so.
+The workspace comes first on every line. The one flag you meet is --on <place>
+on new, and only once you have more than one place. Sleeping is automatic;
+pause and wake are for now.
 
-exit codes; every failure is one line on stderr, the failure object with --json:
-${exitCodeHelp()}
-
-options:
-  --port N           app port (default ${DEFAULT_PORT}); the runtime websocket
-                     port follows ${WS_PORT_OFFSET} above it
-  --ws-port N        runtime websocket port on its own (default
-                     ${DEFAULT_WS_PORT}); --port alone moves both
-  --advertise URL    up: the address every machine dials this host at,
-                     whatever kind it is (default: what each kind answers
-                     for its own machines; nothing on loopback)
-  --listen ADDR      up: the address to bind (default ${LOOPBACK}, this
-                     computer alone). On any other address the page is served
-                     without the host token and every client pairs for a device
-                     token of its own: wsp host pair prints a code, wsp host devices
-                     lists and revokes them
-  --state PATH       state file: this word first, else WSP_HOME's state.json,
-                     else ./.wsp/state.json when the current directory has a
-                     .env, else state.json in the home the running host serves,
-                     which is ~/.wsp unless current-home names another
-  --host ALIAS       on any verb, and on wsp status: run the line against a
-                     host on another computer, by the name wsp host connect gave it.
-                     WSP_HOST names one for a whole shell. That host serves its
-                     own state, so --state is not read beside it and a line that
-                     gives both says so. With neither, a line goes to the host
-                     serving the state file here, and only when none does to the
-                     default alias wsp host list marks. wsp status beside it, or
-                     WSP_HOST, reads that host rather than this computer: where
-                     it answers and whether it did, the service holding it up
-                     being that computer's own to read. Naming one is the only
-                     thing that moves that line: with neither word it answers
-                     for this computer whatever alias wsp host list marks, since it
-                     is the question whether the host here is serving. The
-                     lines that read this computer's own files refuse it, and
-                     wsp add, wsp remove, wsp host pair and wsp host devices take it only
-                     to answer that they run at that host's own terminal
-  --code CODE        connect: the code wsp host pair printed on the other computer;
-                     join: the code wsp add printed on the host
-  --code-file PATH   join: read the code off this file and delete the file
-                     before dialing, so a code never sits on a disk
-  --awake            join: hold this computer out of idle sleep while it is
-                     joined, for as long as the agent runs
-  --serve            join: hold the link open in this terminal, which is what
-                     the service installed by a join runs
-  --name ALIAS       connect: the name to call that host here (default what its
-                     address calls it); relay link: the name the approval page
-                     shows for this computer (default what it calls itself);
-                     add, join: the name the wsp calls the computer being
-                     joined (default its own name lowercased)
-  --ssh-port PORT    add: the port ssh dials that computer on
-                     (default 22)
-  --ssh-key PATH     add: the key file ssh logs in with (default
-                     whatever your own ssh config and agent already use)
-  --relay HOST       connect: reach that host through your relay by the name it
-                     has there, instead of giving an address. The code is still
-                     the one wsp host pair printed on it: the relay never carries one
-  --no-relay         up: serve without the tunnel, on a computer that is linked
-                     to a relay
-  --yes              init: take every default and ask nothing (required off a
-                     terminal); a login with a browser or device sign-in, or one
-                     held in the Keychain, defaults to sign in on the machine
-                     unless a saved recipe answered copy, so macOS has nothing
-                     to ask either and the sign-ins wait for the app's terminal.
-                     doctor: also delete the snapshots and templates this host
-                     left behind, which is not reversible
-  --recipe PATH      init: tick the agents and tools from this recipe (wsp recipe
-                     writes it; init writes <state dir>/recipe.json too) and go
-                     straight to the sign-ins; this machine is still read for
-                     what travels
-  --project PATH     init: the project folder you are bringing first. Its own
-                     files (package.json, the lockfiles, pyproject, go.mod,
-                     Cargo.toml, the compose files, .tool-versions, the CI
-                     workflows) say what it needs, and those rows are ticked
-                     first, each saying which file asked. Without it, init asks
-                     for one before the first screen
-  --first-workspace NAME
-                     init: fork the first workspace under this name once the
-                     golden seals, without asking (default first). A run with
-                     nobody at a terminal forks nothing unless this or --import
-                     asks for it
-  --import FOLDER    init: import this folder's project onto that first
-                     workspace, with the consent the app's import starts from:
-                     caches left behind, secret-shaped files cut unless a
-                     rewrite drops their credentials, and the sessions your
-                     agents have for the folder travelling with it
-  --no-local         init: leave this computer alone. The workspace step ticks
-                     it by default, since a workspace here forks nothing and
-                     bills nothing; this is the one way to end an init without
-                     one. Refused on a run with no provider key, where it is
-                     the only workspace there is
-  --provider NAME    up, init: which machine provider this computer forks on.
-                     docker forks containers on a Docker daemon, yours or one
-                     on a box; box forks Box by ASCII machines. Without this,
-                     a key saved under a provider's own variable wires that
-                     provider, and no key at all leaves this computer as the
-                     only workspace
-  --docker-host URL  up, init: the Docker daemon to dial, as DOCKER_HOST words
-                     it (unix:///var/run/docker.sock, ssh://you@box); this
-                     computer's own socket without it
-  --local            doctor: prove a thread on this computer and its reply
-                     instead of the reach loop, which needs no provider key,
-                     forks nothing and bills nothing
-  --non-interactive  init: ask nothing, but still run the sign-ins on the
-                     machine: each one prints the page to open on this computer,
-                     the code when the flow shows one, and the command that
-                     opens it, then waits for you (this is what a run off a
-                     terminal does anyway). The run ends with the golden
-                     recorded and never serves the app; wsp up does that
-  --service          up: install the host as a launchd agent on a Mac, or a
-                     systemd user unit on Linux, and wait for it to answer on
-                     its port. The keys are not written into it: the service
-                     reads the same .env a terminal run reads, so they have to
-                     be in a file rather than exported in the shell that
-                     installs it. It does pin the node and the wsp it was run
-                     from by path, so a node that goes away later (an nvm
-                     switch, a brew upgrade) stops the service at the next
-                     login, with its log the only place that says why
-  --json             init: print each build stage frame (with the install step
-                     it belongs to, the command that step runs and its seconds
-                     so far), each sign-in hand-off and its outcome as one JSON
-                     object on stdout, then one last object naming the golden,
-                     the recipe, the wsp up to run next and, unless
-                     --first-workspace or --import asked for one, the wsp new
-                     that forks a workspace; everything else on stderr. Implies
-                     --non-interactive, and is refused beside --yes, which skips
-                     the sign-ins
-
-keys are read from the environment, then ./.env, then ~/.wsp/.env (WSP_HOME
-overrides ~/.wsp). The prompt runs only when the wired provider's key is not
-found, and asks for it by the variable that provider reads; it asks for the
-optional Anthropic key at the same time and can save both to that file. With
-the provider key present, a missing Anthropic key is only noted at start.
-Without one, init and up take the local road: this computer is the workspace,
-nothing is forked and nothing is sealed.
+wsp <verb> --help      the verb's own flags
+wsp --help agent       the verbs your agents use, and up and down
+wsp host --help        a host on another computer: pair, connect, link
+wsp --version
 `;
 
 /** Where a key is read from, as a line says it: one wording for the screen that asks for one and for every refusal
@@ -1605,6 +1433,12 @@ interface SharedFlags {
 export type HostFlag = "aimed" | "refused" | "hostSide";
 
 interface Command {
+  /** Which page it prints on, as every verb declares one. */
+  page: Page;
+  /** The shape of the line, as its own help prints it. */
+  usage: string;
+  /** One phrase on what it does, as every page prints it under the usage. */
+  about: string;
   /** Whether stdout is objects under --json; a command without it refuses the flag rather than hand prose to whoever reads them. */
   json: boolean;
   /** What --host means for this word. One parse reads the flag for every word, so this is what keeps the ones that
@@ -1627,6 +1461,9 @@ function aimPick(opts: SharedOpts, values: SharedFlags): { statePath: string } &
  * dispatch of its own. */
 const COMMANDS: Readonly<Record<string, Command>> = {
   up: {
+    page: "agent",
+    usage: "wsp up [--port <n>] [--ws-port <n>] [--listen <addr>] [--advertise <url>] [--provider <name>] [--docker-host <url>] [--no-relay] [--service]",
+    about: "serve the host in this terminal, for a host you want to watch or one that serves beyond this computer; --service hands the same line to this computer's own service manager, which starts it now and again at every login. Every other line starts a host for itself when none serves",
     json: false,
     host: "refused",
     cliOnly: "starts the host on the person's computer; a tool runs against a host that is already up",
@@ -1637,12 +1474,18 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     },
   },
   down: {
+    page: "agent",
+    usage: "wsp down",
+    about: "stop the host: the service and its unit where one holds it up, and the host a verb started otherwise",
     json: false,
     host: "refused",
     cliOnly: "stops the service holding the host up on the person's computer, which a tool would be cutting the ground from under",
     run: (io, opts) => downCommand(io, opts, systemService()),
   },
   status: {
+    page: "front",
+    usage: "wsp status",
+    about: "whether a host serves this state file, on which ports and what keeps it there, with a non-zero exit code when none does; --host reads a host on another computer instead",
     json: false,
     host: "aimed",
     cliOnly: "reads this computer's lock and service manager, or dials the host named beside it; a tool that answers at all is proof a host is up",
@@ -1650,66 +1493,99 @@ const COMMANDS: Readonly<Record<string, Command>> = {
       statusCommand(io, { ...aimPick(opts, values), ...(values.state !== undefined ? { state: values.state } : {}) }, systemService()),
   },
   "host pair": {
+    page: "host",
+    usage: "wsp host pair",
+    about: "a one time code another computer redeems for a token of its own, when the host listens beyond this computer",
     json: false,
     host: "hostSide",
     cliOnly: "hands out a code that lets another computer drive this host; only a person at the host's own terminal gives that away",
     run: (io, opts, values, args) => pairCommand(io, aimPick(opts, values), args),
   },
   "host devices": {
+    page: "host",
+    usage: "wsp host devices [revoke <id>]",
+    about: "the computers paired with this host; revoke takes one back out",
     json: false,
     host: "hostSide",
     cliOnly: "lists and takes away the computers that may drive this host, which belongs with the terminal that handed them the code",
     run: (io, opts, values, args) => devicesCommand(io, aimPick(opts, values), args),
   },
   "host connect": {
+    page: "host",
+    usage: "wsp host connect <url> --code <code> [--name <alias>] [--relay <host>]",
+    about: "redeem a code from a host on another computer for a token of this one's own; --name is what every later line calls that host, and --relay reaches it through your relay by the name it has there",
     json: false,
     host: "refused",
     cliOnly: "spends a pairing code and keeps the token it buys in this person's own files; where their wsp points is theirs to say",
     run: (io, opts, values, args) => connectCommand(io, opts, values, args),
   },
   "host list": {
+    page: "host",
+    usage: "wsp host list",
+    about: "the hosts on other computers this computer holds, the default marked",
     json: false,
     host: "refused",
     cliOnly: "reads which host every line on this computer runs against, which no thread decides for the person",
     run: (io, opts, _values, args) => hostsCommand(io, opts, args),
   },
   "host default": {
+    page: "host",
+    usage: "wsp host default <alias>",
+    about: "move which host every line on this computer runs against",
     json: false,
     host: "refused",
     cliOnly: "moves which host every line on this computer runs against, which no thread decides for the person",
     run: (io, opts, _values, args) => hostsCommand(io, opts, ["default", ...args]),
   },
   "host forget": {
+    page: "host",
+    usage: "wsp host forget <alias>",
+    about: "hand that host its token back and forget it here",
     json: false,
     host: "refused",
     cliOnly: "hands a host back the token this computer drives it by, which belongs with the terminal that took it",
     run: (io, opts, _values, args) => disconnectCommand(io, opts, args),
   },
   "host link": {
+    page: "host",
+    usage: "wsp host link <url> [--name <name>]",
+    about: "put this computer on your relay account, so it is reachable from anywhere with no port open to the world; it prints a code and a page to approve it on",
     json: false,
     host: "refused",
     cliOnly: "puts this computer on a person's relay account, which is theirs to give away",
     run: (io, opts, values, args) => relayCommand(io, opts, ["link", ...args], values),
   },
   "host unlink": {
+    page: "host",
+    usage: "wsp host unlink",
+    about: "take this computer off the relay account and stop its tunnel",
     json: false,
     host: "refused",
     cliOnly: "takes this computer off a person's relay account and stops the tunnel, which belongs with the terminal that put it there",
     run: (io, opts, values, args) => relayCommand(io, opts, ["unlink", ...args], values),
   },
   "host linked": {
+    page: "host",
+    usage: "wsp host linked [<url>]",
+    about: "the boxes on your relay account, from whichever computer you are at",
     json: false,
     host: "refused",
     cliOnly: "signs this person in to their relay and lists the boxes on their account, which no thread does for them",
     run: (io, opts, values, args) => relayCommand(io, opts, ["linked", ...args], values),
   },
   "host clients": {
+    page: "host",
+    usage: "wsp host clients [revoke <id>]",
+    about: "which computers hold a token for your relay account; revoke signs one out",
     json: false,
     host: "refused",
     cliOnly: "reads and takes away the computers holding a token for this person's relay account, which belongs with the person whose account it is",
     run: (io, opts, values, args) => relayCommand(io, opts, ["clients", ...args], values),
   },
   init: {
+    page: "front",
+    usage: "wsp init [--recipe <path>] [--project <path>] [--first-workspace <name>] [--import <folder>] [--no-local] [--yes] [--non-interactive] [--json]",
+    about: "seal this computer into your image, one screen at a time: Agents, Tools, Also on this computer, Sign-ins, wsp for your agents on this computer, each shown when it has a row to pick, then Build. With no provider key it seals nothing and makes this computer your workspace instead. Beside a host already serving this state file the screens are the same and the build runs in that host",
     json: true,
     host: "refused",
     cliOnly: "builds the golden and serves for hours; an agent runs it from a shell and relays the sign-ins it prints",
@@ -1729,6 +1605,9 @@ const COMMANDS: Readonly<Record<string, Command>> = {
       }),
   },
   add: {
+    page: "front",
+    usage: "wsp add [<provider>|user@host] [--name <name>] [--ssh-port <port>] [--ssh-key <path>]",
+    about: "a place: user@host for a computer over ssh, <provider> for a provider, nothing for the join line another computer types",
     json: false,
     host: "hostSide",
     cliOnly: "hands out a code that lets another computer join this wsp, or takes a provider's key into this person's own files; both belong with the terminal the host runs at",
@@ -1736,12 +1615,18 @@ const COMMANDS: Readonly<Record<string, Command>> = {
       addCommand(io, { ...aimPick(opts, values), providerEnv: opts.providerEnv }, args, addFlags(values.name, values["ssh-port"], values["ssh-key"])),
   },
   remove: {
+    page: "front",
+    usage: "wsp remove <place>",
+    about: "take a place out; the agent, its files and the workspaces standing on it go, and the computer is left as wsp found it",
     json: false,
     host: "hostSide",
     cliOnly: "takes a computer out of this wsp and sweeps wsp off it, which belongs with the terminal that joined it",
     run: (io, opts, values, args) => removeCommand(io, aimPick(opts, values), args),
   },
   join: {
+    page: "agent",
+    usage: "wsp join <url>... --code <code> [--code-file <path>] [--name <name>] [--awake] [--serve]",
+    about: "on the computer you are sitting at: join it to the wsp at that address, then hold the link open under this computer's own service manager. wsp join --serve is what that service runs",
     json: false,
     host: "refused",
     cliOnly: "joins the computer it is typed on to somebody's wsp and keeps the key it proves itself with in this person's own files; where their computer belongs is theirs to say",
@@ -1755,12 +1640,18 @@ const COMMANDS: Readonly<Record<string, Command>> = {
       }),
   },
   leave: {
+    page: "agent",
+    usage: "wsp leave",
+    about: "on that computer: take wsp off it, for a computer whose host is gone and cannot run wsp remove",
     json: false,
     host: "refused",
     cliOnly: "sweeps wsp off the computer it is typed on, which belongs with the terminal that joined it",
     run: (io, _opts, _values, args) => leaveCommand(io, args),
   },
   doctor: {
+    page: "dev",
+    usage: "wsp doctor [--local] [--yes]",
+    about: "run the reach loop end to end against one live machine; --local proves the other half instead, a thread on this computer and its reply, with no machine and no key",
     json: false,
     host: "refused",
     cliOnly: "forks a live machine and bills while it runs, or with --local runs a thread on this computer; a person decides that at a terminal",
@@ -1795,6 +1686,12 @@ export const HOST_FLAG: Readonly<Record<string, HostFlag>> = Object.fromEntries(
  * that take the flag only to say they run at that host's own terminal are not among them: a person told to read
  * this list wants the words that answer for a host over there. */
 export const HOST_COMMANDS: readonly string[] = Object.keys(HOST_FLAG).filter(w => HOST_FLAG[w] === "aimed");
+
+/** Every line the shared parse serves, by its words: what a flag row names when it is read by all of them. */
+export const SHARED_WORDS: readonly string[] = Object.keys(COMMANDS);
+
+/** The table itself, for whatever reads a line's own help without running it. */
+export const COMMANDS_FOR_HELP: Readonly<Record<string, Command>> = COMMANDS;
 
 /** The word the plumbing folds under, and the lines it opens: one reading for the dispatch, the help and the
  * refusal that meets somebody who typed the word on its own. */
@@ -1942,19 +1839,135 @@ function optionsFor(words: string): Options {
   return without(SHARED_OPTIONS, [...(command.json ? [] : ["json"]), ...(command.host === "refused" ? ["host"] : [])]);
 }
 
-/** A line `wsp` answers: the words after `wsp` that select it, every flag it parses (anything else is a usage error),
- * and its other door: the MCP tool it is served as, or why it has none. */
-export type CommandLine = { words: string; options: Options } & ({ tool: string } | { cliOnly: string });
+/** A line `wsp` answers: the words after `wsp` that select it, the shape of the line and one phrase on what it
+ * does, the page it prints on, every flag it parses (anything else is a usage error), and its other door: the MCP
+ * tool it is served as, or why it has none. */
+export type CommandLine = { words: string; options: Options; page: Page; usage: string; about: string } & ({ tool: string } | { cliOnly: string });
 
-/** Every line `wsp` answers, with the flags it takes: what the skill's examples and the MCP tools are held to. */
+/** Every line `wsp` answers, with the flags it takes and the page it prints on: what the pages, the skill's
+ * examples and the MCP tools are all held to. */
 export const COMMAND_LINES: readonly CommandLine[] = [
-  ...CLI_VERBS.map(v => ({ words: v.name, options: { ...COMMON, ...v.options }, ...("cliOnly" in v ? { cliOnly: v.cliOnly } : { tool: toolName(v.name) }) })),
-  { words: MCP_COMMAND, options: MCP_OPTIONS, cliOnly: "is the tool server itself" },
-  { words: `${MCP_COMMAND} install`, options: MCP_OPTIONS, cliOnly: "writes an agent's own config and skills folder, which is done once from a shell" },
-  { words: "host devices revoke", options: optionsFor("host devices revoke"), cliOnly: "takes away a computer's token, which belongs with the terminal that handed it the code" },
-  { words: "host clients revoke", options: optionsFor("host clients revoke"), cliOnly: "signs another of this person's computers out of their relay, which no thread decides for them" },
-  ...Object.entries(COMMANDS).map(([words, command]) => ({ words, options: optionsFor(words), cliOnly: command.cliOnly })),
+  ...CLI_VERBS.map(v => ({ words: v.name, usage: v.usage, about: v.about, page: v.page, options: { ...COMMON, ...v.options }, ...("cliOnly" in v ? { cliOnly: v.cliOnly } : { tool: toolName(v.name) }) })),
+  { words: MCP_COMMAND, options: MCP_OPTIONS, page: "front" as const, usage: mcpUsage().replace(/^usage: /, ""), about: "serve the verbs as tools over stdio to an agent on this computer", cliOnly: "is the tool server itself" },
+  {
+    words: `${MCP_COMMAND} install`,
+    options: MCP_OPTIONS,
+    page: "agent" as const,
+    usage: mcpInstallUsage(),
+    about: `put the wsp tools, this skill and wsp's own section of this folder's AGENTS.md into that agent (${MCP_AGENT_IDS}); --agent repeats, --remove takes it back out, and --json prints what each agent took`,
+    cliOnly: "writes an agent's own config and skills folder, which is done once from a shell",
+  },
+  ...Object.entries(COMMANDS).map(([words, command]) => ({ words, usage: command.usage, about: command.about, page: command.page, options: optionsFor(words), cliOnly: command.cliOnly })),
+  // The two lines a word of the host page opens: they print inside their parent's usage, so they carry no page of
+  // their own to print on, and they are here for the parity table and for the flags they take.
+  { words: "host devices revoke", options: optionsFor("host devices revoke"), page: "host" as const, usage: "wsp host devices revoke <id>", about: "take one computer's token away", cliOnly: "takes away a computer's token, which belongs with the terminal that handed it the code" },
+  { words: "host clients revoke", options: optionsFor("host clients revoke"), page: "host" as const, usage: "wsp host clients revoke <id>", about: "sign one computer out of your relay account", cliOnly: "signs another of this person's computers out of their relay, which no thread decides for them" },
 ];
+
+/** What a caller reads after `wsp --help`: the page it names, or the front page when it names none. */
+export const HELP_PAGES = ["agent", "dev"] as const;
+
+/** The verbs an agent reaches for, one page in: every line whose entry says so, then the flags every verb takes,
+ * the exit codes and the notes on how a turn ends. */
+export function agentPage(): string {
+  return [
+    "the verbs your agents use, and the two lines that serve a host by hand:",
+    pageLines("agent"),
+    "",
+    "  wsp send streams the reply to stderr as it arrives and prints the last message",
+    "  on stdout when the reply is complete.",
+    wrap(`  ${TURN_END_WORDS}.`, 80).join("\n"),
+    "  wsp exec streams the command's output and exits with its code. run, send and",
+    "  exec wake a paused workspace first, with one line on stderr saying so.",
+    "",
+    "every verb takes:",
+    `  --json         print the raw protocol values, one JSON object per line`,
+    `  --state PATH   the state file the host serves`,
+    `  --host NAME    run the line against a host on another computer, by the name`,
+    `                 wsp host connect gave it; WSP_HOST names one for a whole shell`,
+    "",
+    "exit codes; every failure is one line on stderr, the failure object with --json:",
+    exitCodeHelp(),
+  ].join("\n");
+}
+
+/** The plumbing for a host on a computer you are not sitting at, and the one paragraph on when a person needs it. */
+export function hostPage(): string {
+  return [
+    pageLines("host"),
+    "",
+    ...wrap(
+      "You need these only for a host serving on a computer that is not the one you are sitting at, or for one outside your own account: pair and devices hand out and take back the codes that let another computer drive a host, and they run at that host's own terminal; connect, list, default and forget hold the hosts this computer drives; link, unlink, linked and clients put a computer on your relay, so it is reachable with no port open to the world.",
+      HELP_WIDTH,
+      "",
+    ),
+  ].join("\n");
+}
+
+/** The line a builder reaches for and nobody else, so the front page does not carry it. */
+export function devPage(): string {
+  return pageLines("dev");
+}
+
+/** Every line of one page: its usage, then what it does indented under it, so no line runs wide. */
+function pageLines(page: Page): string {
+  return COMMAND_LINES.filter(line => line.page === page)
+    .map(line => [...usageLines(line.usage, "    "), ...wrap(`      ${line.about}`, HELP_WIDTH, "      ")].join("\n"))
+    .join("\n");
+}
+
+/** A shared flag: the word, the commands that read it, and the sentence its own command's help prints. One parse
+ * reads the union of them, and a flag typed on a command whose row does not name it is refused naming the ones
+ * that do, so the sentences live beside the rule rather than in a page nobody reads to the end. */
+export interface SharedFlag {
+  name: Extract<keyof SharedFlags, string>;
+  /** The words of every command that reads it. */
+  on: readonly string[];
+  says: string;
+}
+
+export const SHARED_FLAGS: readonly SharedFlag[] = [
+  { name: "state", on: SHARED_WORDS, says: `the state file: this word first, else WSP_HOME's state.json, else ./.wsp/state.json when the current directory has a .env, else state.json in the home the running host serves` },
+  { name: "port", on: ["up"], says: `the app port (default ${DEFAULT_PORT}); the runtime websocket port follows ${WS_PORT_OFFSET} above it` },
+  { name: "ws-port", on: ["up"], says: `the runtime websocket port on its own (default ${DEFAULT_WS_PORT}); --port alone moves both` },
+  { name: "listen", on: ["up"], says: `the address to bind (default ${LOOPBACK}, this computer alone). On any other address the page is served without the host token and every client pairs for a device token of its own` },
+  { name: "advertise", on: ["up"], says: "the address every machine dials this host at, whatever kind it is; each kind answers for its own machines without it" },
+  { name: "no-relay", on: ["up"], says: "serve without the tunnel, on a computer that is linked to a relay" },
+  { name: "service", on: ["up"], says: "install the host as a launchd agent on a Mac or a systemd user unit on Linux, which serves now and again at every login. The keys are not written into it: it reads the same .env a terminal run reads, so they have to be in a file" },
+  { name: "provider", on: ["up", "init"], says: "which machine provider this computer forks on; without it, a key saved under a provider's own variable wires that provider" },
+  { name: "docker-host", on: ["up", "init"], says: "the Docker daemon to dial, as DOCKER_HOST words it; this computer's own socket without it" },
+  { name: "code", on: ["host connect", "join"], says: "the code the other computer printed: wsp host pair for a host, wsp add for a place" },
+  { name: "code-file", on: ["join"], says: "read the code off this file and delete the file before dialing, so a code never sits on a disk" },
+  { name: "awake", on: ["join"], says: "hold this computer out of idle sleep while it is joined, for as long as the agent runs" },
+  { name: "serve", on: ["join"], says: "hold the link open in this terminal, which is what the service installed by a join runs" },
+  { name: "name", on: ["host connect", "host link", "add", "join"], says: "the name to call the computer by here; what its address calls it without one" },
+  { name: "relay", on: ["host connect"], says: "reach that host through your relay by the name it has there, instead of giving an address" },
+  { name: "ssh-port", on: ["add"], says: "the port ssh dials that computer on (default 22)" },
+  { name: "ssh-key", on: ["add"], says: "the key file ssh logs in with; whatever your own ssh config and agent already use without it" },
+  { name: "yes", on: ["init", "doctor"], says: "init: take every default and ask nothing, which a run off a terminal needs; a login with a browser or device sign-in, or one held in the Keychain, defaults to sign in on the machine unless a saved recipe answered copy, so macOS has nothing to ask either and the sign-ins wait for the app's terminal. doctor: also delete the snapshots and templates this host left behind, which is not reversible" },
+  { name: "recipe", on: ["init"], says: "tick the agents and tools from this recipe (wsp recipe writes it) and go straight to the sign-ins" },
+  { name: "project", on: ["init"], says: "the project folder you are bringing first; its own files say what it needs, and those rows are ticked first" },
+  { name: "first-workspace", on: ["init"], says: "fork the first workspace under this name once the image seals, without asking (default first)" },
+  { name: "import", on: ["init"], says: "import this folder's project onto that first workspace, with the consent the app's import starts from" },
+  { name: "no-local", on: ["init"], says: "leave this computer alone; the workspace step ticks it by default, since a workspace here forks nothing and bills nothing" },
+  { name: "non-interactive", on: ["init"], says: "ask nothing, but still run the sign-ins on the machine: each prints the page to open on this computer, the code when the flow shows one, and the command that opens it, then waits for you" },
+  { name: "local", on: ["doctor"], says: "prove a thread on this computer and its reply instead of the reach loop, which needs no provider key, forks nothing and bills nothing" },
+];
+
+/** What one command's own `--help` prints: its usage, what it does, and its own flags, one line each. */
+export function commandPage(words: string, command: Command): string {
+  const rows = [
+    ...SHARED_FLAGS.filter(f => f.on.includes(words)).map(f => [`--${f.name}`, f.says] as const),
+    ...(command.json ? [["--json", "print the raw values, one JSON object per line, with everything else on stderr"] as const] : []),
+    ...(command.host === "refused" ? [] : [["--host", command.host === "hostSide" ? "read to say this line runs at its own host's terminal; it dials no other" : "run the line against a host on another computer, by the name wsp host connect gave it"] as const]),
+  ];
+  const width = Math.max(...rows.map(([flag]) => flag.length), 0) + 4;
+  return [
+    ...usageLines(command.usage, "       ").map((line, at) => (at === 0 ? `usage: ${line.trimStart()}` : line)),
+    ...wrap(`  ${command.about}`, HELP_WIDTH, "  "),
+    ...(rows.length === 0 ? [] : ["", ...rows.flatMap(([flag, says]) => wrap(`  ${flag.padEnd(width)}${says}`, HELP_WIDTH, " ".repeat(width + 2)))]),
+  ].join("\n");
+}
 
 /** `run` is how this process was started, which the MCP install writes into an agent's config as the way to start it
  * again; the desktop's bundled command hands in its shim, the npm command the default reading. `env` is the
@@ -1993,16 +2006,54 @@ export async function cli(
     return 0;
   }
   const word = positionals[0];
+  // The word the plumbing folds under prints its own page, by itself or with the flag every other line answers to.
+  if (word === HOST_WORD && positionals.length === 1) {
+    io.log(hostPage());
+    return 0;
+  }
   // `help` is the word for the flag: a person reaching for it types one as readily as the other, and answering the
   // word with a typo's refusal is the tool arguing about punctuation. A line with no word at all is the same
-  // question: typing the program's name asks what it is, and answering by serving made a second host of it.
+  // question: typing the program's name asks what it is, and answering by serving made a second host of it. A page
+  // named after either of them is that page; a command asking for its own help falls through to the parse below.
   if (values.help === true || word === undefined || word === "help") {
-    io.log(HELP);
-    return 0;
+    const asked = word === "help" ? positionals.slice(1) : positionals;
+    const named = asked[0];
+    if (named === undefined) {
+      io.log(HELP);
+      return 0;
+    }
+    // A command asking for its own help falls through to the parse below; only a word no command answers to is
+    // read as the name of a page.
+    if (findCommand(asked) === undefined) {
+      const page = HELP_PAGES.find(p => p === named);
+      if (page !== undefined) {
+        io.log(page === "agent" ? agentPage() : devPage());
+        return 0;
+      }
+      if (named === HOST_WORD) {
+        io.log(hostPage());
+        return 0;
+      }
+      // A word that opens lines rather than being one answers with the lines it opens, as it does without the flag.
+      const opens = commandUsage(named);
+      if (opens !== undefined) {
+        io.log(opens);
+        return 0;
+      }
+      return failed(io, values.json === true, usageRefusal(`wsp --help takes a page, and got ${named}.`, `The pages are ${HELP_PAGES.map(p => `wsp --help ${p}`).join(", ")} and wsp host --help.`));
+    }
   }
   const opts = optsFor(values, env, line => io.error(line));
   const found = findCommand(positionals);
   const json = values.json === true;
+  // The word the plumbing folds under prints its own page, whether it is asked for by the word alone or with the
+  // flag every other line answers it with.
+  if (word === HOST_WORD && (found === undefined || positionals.length === 1) && values.help !== false) {
+    if (positionals.length === 1) {
+      io.log(hostPage());
+      return 0;
+    }
+  }
   if (found === undefined) {
     // A word wsp used to answer to is met with the word it is now, so nobody who knew the old page is left on a
     // blank one; only then does an unknown word get the pointer.
@@ -2010,16 +2061,27 @@ export async function cli(
     if (renamed !== undefined) return failed(io, json, usageRefusal(renamed.said, renamed.fix));
     // A word that opens a line but is no line of its own gets the lines it opens; one no command answers to gets
     // the pointer, since the help behind it runs to hundreds of rows.
-    const usage = commandUsage(word);
-    const refusal = usage === undefined ? usageRefusal(unknownWordLine(word), runForTheList("wsp --help")) : usageRefusal(`wsp ${word} opens a line rather than being one.`, usage);
+    const usage = commandUsage(word!);
+    const refusal = usage === undefined ? usageRefusal(unknownWordLine(word!), runForTheList("wsp --help")) : usageRefusal(`wsp ${word!} opens a line rather than being one.`, usage);
     return failed(io, json, refusal);
   }
   const { words, command } = found;
+  // The line's own help, in place of the whole front page: its usage, what it does and its own flags.
+  if (values.help === true) {
+    io.log(commandPage(words, command));
+    return 0;
+  }
   if (json && !command.json) {
     return failed(io, json, usageRefusal(`Unknown option '--json' for wsp ${words}: it answers in prose.`, `That flag belongs to ${JSON_COMMANDS.map(w => `wsp ${w}`).join(", ")}, and to every verb.`));
   }
   if (values.host !== undefined && command.host === "refused") {
     return failed(io, json, usageRefusal(`Unknown option '--host' for wsp ${words}: it runs on this computer.`, `That flag belongs to ${HOST_COMMANDS.map(w => `wsp ${w}`).join(", ")}, and to every verb.`));
+  }
+  // A flag another command of the shared parse reads: the union is one parse, so the line that does not read it is
+  // told which lines do rather than taking it and doing nothing with it.
+  const foreign = SHARED_FLAGS.find(f => values[f.name] !== undefined && !f.on.includes(words));
+  if (foreign !== undefined) {
+    return failed(io, json, usageRefusal(foreignFlagLine(`--${foreign.name}`, foreign.on.map(w => `wsp ${w}`), `wsp ${words}`), `usage: ${command.usage}`));
   }
   try {
     return await command.run(io, opts, values, positionals.slice(words.split(" ").length));
