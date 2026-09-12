@@ -125,6 +125,25 @@ function installSkill(agent: AgentEntry, home: string): string {
   return file.tilde;
 }
 
+/** Brings every skill copy already on this computer up to this wsp's, and writes none where there is none: a copy
+ * an install wrote once falls behind the binary at the next release, and an agent reading the old words calls a
+ * verb that is gone. Answers the files it rewrote, `~/`-relative. An agent that never took the skill is left alone,
+ * since writing one uninvited puts wsp in a folder nobody asked it into. */
+export function refreshSkills(home: string): string[] {
+  const written: string[] = [];
+  for (const agent of CATALOG_AGENTS) {
+    const file = skillFile(agent, home);
+    try {
+      if (readFileSync(file.abs, "utf8") === WSP_SKILL) continue;
+    } catch {
+      continue;
+    }
+    writeFileSync(file.abs, WSP_SKILL);
+    written.push(file.tilde);
+  }
+  return written;
+}
+
 /** The catalog's agent under this id; an id it does not know is refused with the ids that do have an MCP config. */
 function agentEntry(agentId: string): AgentEntry {
   const entry = CATALOG_AGENTS.find(a => a.id === agentId);

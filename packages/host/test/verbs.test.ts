@@ -2840,10 +2840,11 @@ describe("wsp verbs over the host", () => {
     expect(foreign.io.errors).toEqual(['--agent belongs to wsp fork and wsp run; wsp send does not read it. usage: wsp send <thread> [--model, --effort, --access <value>] [--image <path>] [--detach] "<message>"']);
     const within = await run("stop", "row_1", "--tree");
     expect(within.io.errors[0]).toContain("--tree belongs to wsp threads; wsp stop does not read it");
-    // A flag wsp used to read is met with the words it is now, rather than with the parser's bare unknown option.
+    // A flag wsp used to read is nobody's now: the parser's own line, with the verb's usage under it.
     const old = await run("threads", "--in", "alpha");
     expect(old.code).toBe(3);
-    expect(old.io.errors[0]).toBe('wsp run and wsp threads take the workspace as their first word, so there is no --in. Run wsp run <workspace> "<task>", or wsp threads <workspace>.');
+    expect(old.io.errors[0]).toContain("Unknown option '--in'");
+    expect(old.io.errors[0]).toContain("usage: wsp threads");
     // A flag spelled like a prototype member is nobody's: the tables are read as own keys, so it gets the parser's line.
     const proto = await run("threads", "--constructor");
     expect(proto.code).toBe(3);

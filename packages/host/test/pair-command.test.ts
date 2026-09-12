@@ -189,7 +189,7 @@ describe("a host side command aimed at a host on another computer", () => {
   it("the plumbing answers under wsp host alone: the old top level word is no command, and the folded line still runs at the host's own terminal", async () => {
     const gone: string[] = [];
     expect(await cli(["pair"], io([], gone), undefined, { WSP_HOME: homeWithBox(false) })).toBe(EXIT_CODES.usage);
-    expect(gone).toEqual(["wsp pair is now wsp host pair. Run wsp host --help for the manual road."]);
+    expect(gone).toEqual(["unknown command: pair. Run wsp --help for the list."]);
     expect(HOST_FLAG["host pair"]).toBe("hostSide");
     expect(HOST_FLAG["host devices"]).toBe("hostSide");
     // The words select the command; wsp host devices revoke reaches it as the two words plus what follows.

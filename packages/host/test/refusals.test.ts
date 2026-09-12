@@ -73,46 +73,31 @@ describe("what wsp says when it will not run a line", () => {
     expect(io.errors[0]!.startsWith("wsp run: wsp run")).toBe(false);
   });
 
-  it("answers every word wsp used to have with the word it is now, in two halves, and dials nothing", async () => {
-    const rows: [string[], string][] = [
-      [["thread", "new", "x", "t"], "wsp thread new is now wsp run, with the workspace first."],
-      [["pair"], "wsp pair is now wsp host pair."],
-      [["devices"], "wsp devices is now wsp host devices."],
-      [["connect", "http://box:4400"], "wsp connect is now wsp host connect."],
-      [["hosts"], "wsp hosts is now wsp host list."],
-      [["hosts", "default", "box"], "wsp hosts default is now wsp host default."],
-      [["disconnect", "box"], "wsp disconnect is now wsp host forget."],
-      [["relay", "link", "http://relay"], "wsp relay link is now wsp host link."],
-      [["relay", "unlink"], "wsp relay unlink is now wsp host unlink."],
-      [["relay", "hosts"], "wsp relay hosts is now wsp host linked."],
-      [["relay", "clients"], "wsp relay clients is now wsp host clients."],
-    ];
-    for (const [argv, said] of rows) {
+  it("answers a word wsp used to have as it answers any other word nothing knows: one line and the pointer, with nothing dialled", async () => {
+    // No old word is kept as a road, hidden or otherwise: the release note says what moved, once, and the command
+    // line carries none of it.
+    for (const argv of [["pair"], ["devices"], ["connect", "http://box:4400"], ["hosts"], ["disconnect", "box"]]) {
       const { code, io } = await run(...argv);
       const line = argv.join(" ");
       expect(code, line).toBe(EXIT_CODES.usage);
       expect(io.lines, line).toEqual([]);
-      expect(io.errors, line).toHaveLength(1);
-      expect(io.errors[0], line).toContain(said);
-      // Both halves: what happened, then what to type instead.
-      expect(io.errors[0], line).toMatch(/\. (Run|Put) /);
+      expect(io.errors, line).toEqual([`unknown command: ${argv[0]!}. Run wsp --help for the list.`]);
     }
-    // A flag wsp used to read is answered the same way, by the parse of the verb that no longer reads it.
-    const flags: [string[], string][] = [
-      [["import", "/tmp/x", "--to", "alpha"], "so there is no --to"],
-      [["threads", "--in", "alpha"], "so there is no --in"],
-      [["new", "x", "--local"], "so wsp new --local is now --on"],
-      [["new", "x", "--ssh", "maya@box"], "wsp new --ssh is gone"],
-    ];
-    for (const [argv, said] of flags) {
+    // A word that still opens lines answers with the lines it opens, whatever it used to open.
+    const thread = await run("thread", "new", "x", "t");
+    expect(thread.code).toBe(EXIT_CODES.usage);
+    expect(thread.io.errors[0]).toContain("wsp thread opens a line rather than being one.");
+    const relay = await run("relay", "link", "http://relay");
+    expect(relay.code).toBe(EXIT_CODES.usage);
+    expect(relay.io.errors).toEqual(["unknown command: relay. Run wsp --help for the list."]);
+    // A flag wsp used to read is the parser's own unknown option, with the line's usage under it.
+    for (const argv of [["import", "/tmp/x", "--to", "alpha"], ["threads", "--in", "alpha"], ["new", "x", "--local"], ["new", "x", "--ssh", "maya@box"]]) {
       const { code, io } = await run(...argv);
       const line = argv.join(" ");
       expect(code, line).toBe(EXIT_CODES.usage);
-      expect(io.errors[0], line).toContain(said);
+      expect(io.errors[0], line).toContain("Unknown option");
+      expect(io.errors[0], line).toContain("usage: wsp ");
     }
-    // A word that was never a verb still gets the unknown line and the pointer.
-    const never = await run("ls");
-    expect(never.io.errors).toEqual(["unknown command: ls. Run wsp --help for the list."]);
   });
 
   it("says a thread opened on no words at all what to put in quotes", async () => {

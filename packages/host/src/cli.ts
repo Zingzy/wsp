@@ -87,8 +87,8 @@ import { advertiseWord, devicesCommand, hostReach, pairCommand } from "./pairing
 import { addCommand, addFlags, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
-import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, registeredLine, removeEach, removeLines, runningWsp, type RunningWsp } from "./mcp-install.js";
-import { CLI_VERBS, COMMON, type DialOpts, dialHost, failed, findVerb, HELP_WIDTH, type HostClient, jsonAsked, type Page, renamedWords, runVerb, takeCommon, toolName, usageLines, verbUsage, type VerbDeps } from "./verbs.js";
+import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, refreshSkills, registeredLine, removeEach, removeLines, runningWsp, type RunningWsp } from "./mcp-install.js";
+import { CLI_VERBS, COMMON, type DialOpts, dialHost, failed, findVerb, HELP_WIDTH, type HostClient, jsonAsked, type Page, runVerb, takeCommon, toolName, usageLines, verbUsage, type VerbDeps } from "./verbs.js";
 import { VERSION } from "./version.js";
 
 /** The computer every screen and every reader here is told it is on; the one reading, so a run, its hand-off and
@@ -1162,6 +1162,10 @@ async function hostFor(
     const pointer = currentHomePointer();
     mkdirSync(dirname(pointer), { recursive: true });
     writeFileSync(pointer, `${home}\n`);
+    // A skill copy an install wrote once falls behind the binary at the next release, and the agent reading it
+    // calls verbs that are gone. Every start brings the copies that are there up to this wsp's, and writes none
+    // where there is none.
+    for (const file of refreshSkills(homedir())) io.log(`The wsp skill in ${file} now matches this wsp`);
 
     for (const line of addressLines(opts.statePath, { ...handle, address })) io.log(line);
     if (!isLoopback(address)) io.log(listenBeyondLoopbackLine(address));
@@ -2055,10 +2059,6 @@ export async function cli(
     }
   }
   if (found === undefined) {
-    // A word wsp used to answer to is met with the word it is now, so nobody who knew the old page is left on a
-    // blank one; only then does an unknown word get the pointer.
-    const renamed = renamedWords(positionals);
-    if (renamed !== undefined) return failed(io, json, usageRefusal(renamed.said, renamed.fix));
     // A word that opens a line but is no line of its own gets the lines it opens; one no command answers to gets
     // the pointer, since the help behind it runs to hundreds of rows.
     const usage = commandUsage(word!);

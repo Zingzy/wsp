@@ -558,45 +558,6 @@ export function hasTool<V extends Verb>(verb: V): verb is Extract<V, { tool: Too
   return "tool" in verb;
 }
 
-/** What a person typed that wsp used to answer to, and what it is now. One row per rename: the two parses read it,
- * the command's words from the front and a flag by its dashes, so an old word is met with the new one rather than
- * with a bare unknown. The rows go at the release after the one that renamed them. */
-export interface Rename {
-  /** What was typed: a command's words, or a flag with its leading dashes. */
-  was: string;
-  /** The first half, what happened. */
-  said: string;
-  /** The second half, what to type instead. */
-  fix: string;
-}
-
-export const RENAMES: readonly Rename[] = [
-  { was: "thread new", said: "wsp thread new is now wsp run, with the workspace first", fix: 'Run wsp run <workspace> "<task>".' },
-  { was: "pair", said: "wsp pair is now wsp host pair", fix: "Run wsp host --help for the manual road." },
-  { was: "devices", said: "wsp devices is now wsp host devices", fix: "Run wsp host --help for the manual road." },
-  { was: "connect", said: "wsp connect is now wsp host connect", fix: "Run wsp host --help for the manual road." },
-  { was: "hosts default", said: "wsp hosts default is now wsp host default", fix: "Run wsp host --help for the manual road." },
-  { was: "hosts", said: "wsp hosts is now wsp host list", fix: "Run wsp host --help for the manual road." },
-  { was: "disconnect", said: "wsp disconnect is now wsp host forget", fix: "Run wsp host --help for the manual road." },
-  { was: "relay link", said: "wsp relay link is now wsp host link", fix: "Run wsp host --help for the manual road." },
-  { was: "relay unlink", said: "wsp relay unlink is now wsp host unlink", fix: "Run wsp host --help for the manual road." },
-  { was: "relay hosts", said: "wsp relay hosts is now wsp host linked", fix: "Run wsp host --help for the manual road." },
-  { was: "relay clients", said: "wsp relay clients is now wsp host clients", fix: "Run wsp host --help for the manual road." },
-  { was: "relay", said: "the relay lines are now wsp host link, wsp host unlink, wsp host linked and wsp host clients", fix: "Run wsp host --help for the manual road." },
-  { was: "--in", said: "wsp run and wsp threads take the workspace as their first word, so there is no --in", fix: 'Run wsp run <workspace> "<task>", or wsp threads <workspace>.' },
-  { was: "--to", said: "wsp import takes the workspace as its first word, so there is no --to", fix: "Run wsp import <workspace> <folder>." },
-  { was: "--local", said: "this computer is a place like any other, so wsp new --local is now --on", fix: "Run wsp places for their names, then wsp new <name> --on <place>." },
-  { was: "--ssh", said: "a computer of your own joins with wsp add user@host, and wsp new --ssh is gone", fix: "Run wsp add user@host, then wsp new <name> --on <that place>." },
-  { was: "--ssh-port", said: "a computer of your own joins with wsp add user@host, which is what reads --ssh-port", fix: "Run wsp add user@host --ssh-port <port>." },
-  { was: "--ssh-key", said: "a computer of your own joins with wsp add user@host, which is what reads --ssh-key", fix: "Run wsp add user@host --ssh-key <path>." },
-];
-
-/** The row a line of words opens, for the parse that meets a command nobody answers to any more. */
-export const renamedWords = (words: readonly string[]): Rename | undefined =>
-  RENAMES.filter(r => !r.was.startsWith("-"))
-    .filter(r => r.was.split(" ").every((w, i) => words[i] === w))
-    .sort((a, b) => b.was.length - a.was.length)[0];
-
 /** The one rule that names a verb's tool: its words joined by underscores, so `thread read` is `thread_read`. */
 export function toolName(words: string): string {
   return words.replace(/ /g, "_");
@@ -3146,17 +3107,15 @@ export function verbUsage(word: string): string | undefined {
   return usages.length > 0 ? usages.join("\n") : undefined;
 }
 
-/** The refusal a verb's own parse leaves: the line naming the verbs that read a flag this one does not, the rename
- * row for a flag wsp used to read and no longer does, or the parser's own words behind the verb's usage. */
+/** The refusal a verb's own parse leaves: the line naming the verbs that read a flag this one does not, or the
+ * parser's own words behind the verb's usage. */
 function parseRefusal(verb: CliVerb | CliOnlyVerb, e: unknown): Error {
   const message = e instanceof Error ? e.message : String(e);
   const usage = `usage: ${verb.usage}`;
   const named = (e as { code?: unknown }).code === "ERR_PARSE_ARGS_UNKNOWN_OPTION" ? /^Unknown option '--([^']+)'/.exec(message)?.[1] : undefined;
   if (named === undefined) return usageRefusal(message, usage);
   const readers = CLI_VERBS.filter(v => v !== verb && Object.hasOwn(v.options, named)).map(v => `wsp ${v.name}`);
-  if (readers.length > 0) return usageRefusal(foreignFlagLine(`--${named}`, readers, `wsp ${verb.name}`), usage);
-  const renamed = RENAMES.find(r => r.was === `--${named}`);
-  return renamed === undefined ? usageRefusal(message, usage) : usageRefusal(renamed.said, renamed.fix);
+  return readers.length === 0 ? usageRefusal(message, usage) : usageRefusal(foreignFlagLine(`--${named}`, readers, `wsp ${verb.name}`), usage);
 }
 
 /** The one line a refusal or a failure leaves on stderr, the failure object under --json and the prose behind its

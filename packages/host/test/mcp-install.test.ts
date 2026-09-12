@@ -5,13 +5,13 @@
 // own section in the instructions the folder the command ran in keeps.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { mcpServerCommandLine, nextInsideAgentLine } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HELP, JSON_COMMANDS, PROSE_COMMANDS, agentPage, cli, type CliIO } from "../src/cli.js";
 import { SECTION_BEGIN, sectionText } from "../src/agents-md.js";
-import { agentsOnPath, installEach, installLines, installMcp, mcpServerSpec, removeLines, runningWsp, type RunningWsp } from "../src/mcp-install.js";
+import { agentsOnPath, installEach, installLines, installMcp, mcpServerSpec, refreshSkills, removeLines, runningWsp, type RunningWsp } from "../src/mcp-install.js";
 import { shimPath } from "../src/shim.js";
 import { SKILL_NAME, WSP_SKILL } from "../src/skill.js";
 import { VERSION } from "../src/version.js";
@@ -288,6 +288,18 @@ describe("installing the MCP server for a local agent", () => {
     const nonsense = io();
     expect(await cli(["--state", statePath, "nope"], nonsense)).toBe(3);
     expect(nonsense.errors[0]).toContain("unknown command: nope");
+  });
+
+  it("a host start brings the skill copies already on this computer up to its own, and writes none where there is none", () => {
+    const claude = join(home, ".claude", "skills", "wsp", "SKILL.md");
+    mkdirSync(dirname(claude), { recursive: true });
+    writeFileSync(claude, "the words of an older wsp\n");
+    // The copy that is there is rewritten; the agent that never took one is left alone.
+    expect(refreshSkills(home)).toEqual(["~/.claude/skills/wsp/SKILL.md"]);
+    expect(readFileSync(claude, "utf8")).toBe(WSP_SKILL);
+    expect(existsSync(join(home, ".codex", "skills", "wsp", "SKILL.md"))).toBe(false);
+    // A copy that already matches is not rewritten, so a start says nothing about it.
+    expect(refreshSkills(home)).toEqual([]);
   });
 
   it("what an install says: the agent and its file, the dropped-comments line when the rewrite lost them, the by-hand line when the server was not written, and where the skill went", () => {
