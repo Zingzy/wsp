@@ -224,7 +224,7 @@ function openThreadOf(
   // the thread being gone would move the person off the pick they are holding and write the loss into the address.
   // Only a list that answered can say a thread is not there, which is what a pick nobody is holding meets.
   if (pinned === own.threadId) return { threadId: pinned, fresh: false };
-  return { threadId: null, fresh: false, toast: noSuchThreadLine(own.threadId) };
+  return { threadId: null, fresh: false, toast: noSuchThreadLine() };
 }
 
 /** The workspace the person had open last, when the list still has it. */
