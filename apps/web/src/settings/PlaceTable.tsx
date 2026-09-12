@@ -6,16 +6,16 @@
 // reported yet holds a bar, so the table keeps its shape while it reports.
 //
 // Every column word and every cell rule is the protocol's: PLACES_WORDS.columns,
-// fmtSize, fmtBytes, placeStateWord and placeWorkspacesCell, so the app and the
+// fmtSize, fmtBytes, absentOf and placeWorkspacesCell, so the app and the
 // command line read one table. The head is the shipped TableHead's own style,
 // which is a tier above the zone label over the section.
 import type { ReactNode } from "react";
-import { PLACES_WORDS, fmtBytes, fmtSize, placeAwayWord, placeStateWord, placeWorkspacesCell, type PlaceView } from "@wsp/protocol";
+import { PLACES_WORDS, fmtBytes, fmtSize, placeWorkspacesCell, type PlaceView } from "@wsp/protocol";
 import { Skeleton } from "../components/ui/skeleton.js";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table.js";
 import { cn } from "../lib/utils.js";
 import { FACT, WHERE_WORDS } from "./format.js";
-import { placeCpuWord, placeName } from "./places.js";
+import { absentOf, placeCpuWord, placeName } from "./places.js";
 
 const CELL = "font-mono text-xs tabular-nums text-foreground";
 /** The name column is the one that gives: it takes what the three fact columns and the menu leave, and cuts the
@@ -54,8 +54,12 @@ export function PlaceTable({ children, menu = true, k = "places-table" }: { chil
  * The chevron, where the row opens, comes after them. */
 export function PlaceRow({ place, now, here = false, trail, menu, open, onToggle }: { place: PlaceView; now: number; /** Whether this is the computer the host runs on, which the list puts first. */ here?: boolean; /** The chevron after the state word, where the row opens. */ trail?: ReactNode; menu?: ReactNode; open?: boolean; onToggle?: () => void }) {
   const name = placeName(place, here);
-  // The whole of what the cut cell says, and the figure the state slot has no room for beside the fact columns.
-  const title = [name, place.default ? WHERE_WORDS.default : "", placeAwayWord(place, now)].filter(word => word !== "").join(" ");
+  // The one reading of a computer that is not answering, which the sidebar row, the pane and the composer read
+  // too: the slot beside the name holds the one word.
+  const absent = absentOf(place, now, here);
+  // The whole of what the cut cell says, and the sentence the state slot has no room for beside the fact columns.
+  // A computer that is not answering is named by its own sentence, so the row does not say the name twice.
+  const title = [absent?.sentence ?? name, place.default ? WHERE_WORDS.default : ""].filter(word => word !== "").join(" ");
   return (
     <TableRow data-place-row={place.id} title={title} {...(open === undefined ? {} : { "aria-expanded": open })} className={cn(onToggle !== undefined && "cursor-pointer")} onClick={onToggle}>
       <TableCell className={cn(NAME_COLUMN, "overflow-hidden")}>
@@ -67,7 +71,7 @@ export function PlaceRow({ place, now, here = false, trail, menu, open, onToggle
             </span>
           ) : null}
           <span className={cn(FACT, "shrink-0")} data-k="place-state">
-            {placeStateWord(place)}
+            {absent?.away ?? ""}
           </span>
           {trail}
         </span>

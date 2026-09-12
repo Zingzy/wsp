@@ -3,8 +3,8 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EXEC_ENV, INLINE_EXEC_MS, MachineUnreached, type ExecResult, type Machine } from "@wsp/engine";
-import { EXEC_BODY_MAX, machineUnreachedLine, TURN_IDLE_MS, shellQuote, workScoreLine } from "@wsp/protocol";
+import { EXEC_ENV, INLINE_EXEC_MS, MachineUnreached, PlaceAbsentError, type ExecResult, type Machine } from "@wsp/engine";
+import { EXEC_BODY_MAX, absentComputer, machineUnreachedLine, TURN_IDLE_MS, shellQuote, workScoreLine } from "@wsp/protocol";
 import type { ExecStream } from "@wsp/protocol";
 import { GROUP_WORK_AWK, machineExecStream } from "../src/machine-exec.js";
 import { stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
@@ -703,6 +703,26 @@ describe("machineExecStream", () => {
     expect(g.launches()).toBe(1);
     expect(g.backoffs()).toEqual([]);
     expect(await stream.exited).toBeNull();
+  });
+
+  it("a launch on a computer that is not connected keeps that computer's own sentence, with no machine id wrapped round it", async () => {
+    const { backend, machine } = await makeMachine();
+    const sentence = absentComputer("old-laptop", null).sentence;
+    const g = unreachedGuest(backend, 99, () => new PlaceAbsentError(sentence));
+    const stream = machineExecStream(machine, g.opts)("claude -p hi", { env: {} });
+    const thrown = await (async () => {
+      try {
+        for await (const l of stream.lines) void l;
+      } catch (e) {
+        return e as Error;
+      }
+      return null;
+    })();
+    // The sentence the app holds the send with, word for word: a wrapper naming the machine put place:p_oldlaptop
+    // in front of the one line that says what to do.
+    expect(thrown?.message).toBe(sentence);
+    expect(thrown?.message).not.toContain(machine.id);
+    expect(thrown?.message).not.toContain("remote launch failed");
   });
 
   it("a gateway status the edge answered is not retried by the launch: the backend already retried it, and the turn keeps the provider's words", async () => {
