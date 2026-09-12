@@ -27,11 +27,14 @@ export interface PermissionAsk {
   askId: string;
   toolName: string;
   toolUseId?: string;
+  /** The tool call that launched the subagent this prompt came from; absent on the thread's own agent's prompts. */
+  parentToolUseId?: string;
   /** The tool's input as the CLI sent it, JSON, the same text a tool_use delta carries. */
   input: string;
   /** The CLI's own one phrase for the call; absent where it named none. */
   detail?: string;
-  /** Allow and deny always, plus whatever else the CLI suggested for this call. */
+  /** Allow and deny, plus whatever else the CLI suggested for this call; a call that only asks the person something
+   * carries its own answers instead, since there is no consent in it to give. */
   options: readonly PermissionOption[];
 }
 
@@ -52,6 +55,8 @@ export type AdapterEvent =
       toolName?: string;
       toolUseId?: string;
       isError?: boolean;
+      /** The tool call that launched the subagent this line came from; absent on the thread's own agent's lines. */
+      parentToolUseId?: string;
       /** The agent's tool shell folder after this tool_use, present only when the call moved it. */
       cwd?: string;
     }
@@ -103,6 +108,9 @@ export interface ExecStream {
   /** What a later host process attaches to this run by, on a factory whose runs outlive the process that launched
    * them; absent where they do not, and a turn on such a factory dies with its host. */
   readonly run?: string;
+  /** The process this run leads on the computer the host runs on, where the factory starts one here; absent on a
+   * factory whose run is on another machine, whose pids say nothing about this one. */
+  readonly pid?: number;
   /** Graceful stop: SIGTERM to the process and to everything it started. A harness leaves its own children behind
    * when it goes (MCP servers under npx were seen holding 90 MB each for the machine's life), so a signal that
    * reaches the leader alone is not a stop. */

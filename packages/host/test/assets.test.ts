@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ASSETS_DIR, ASSET_KINDS, assetDir, assetProof, packedAsset, stageAsset, stagedAsset, webDirFor, workspaceAsset, type AssetKind } from "../src/assets.js";
+import { ASSETS_DIR, ASSET_KINDS, REQUIRE_DAEMON_ENV, assetDir, assetProof, packedAsset, stageAsset, stageAssetOrSkip, stagedAsset, webDirFor, workspaceAsset, type AssetKind } from "../src/assets.js";
 
 const KINDS = ASSET_KINDS;
 const made: string[] = [];
@@ -82,11 +82,34 @@ describe("staging an asset", () => {
   });
 });
 
+describe("staging an asset that may be missing", () => {
+  it("skips the daemon folder outside the release with a line naming the file, stages it where it is there, and requires it where the release runs", () => {
+    const { root, dist } = packed();
+    const empty = mkdtempSync(join(tmpdir(), "wsp-unfilled-"));
+    made.push(empty);
+    expect(stageAssetOrSkip(empty, root, "daemon", {})).toBe(`wsp-daemon binary not staged: ${join(empty, assetProof("daemon"))} is missing, so the command carries none; packages/wspx/scripts/daemon-binary.mjs places one`);
+    expect(packedAsset(dist, "daemon")).toBeUndefined();
+    expect(() => stageAssetOrSkip(empty, root, "daemon", { [REQUIRE_DAEMON_ENV]: "1" })).toThrow(new RegExp(`missing: .*${assetProof("daemon").replace(".", "\\.")}$`));
+    expect(stageAssetOrSkip(builtSource("daemon"), root, "daemon", {})).toBeUndefined();
+    expect(packedAsset(dist, "daemon")).toBe(stagedAsset(root, "daemon"));
+  });
+
+  it("never skips an asset a node build makes: the web app and the command are refused when unbuilt, release or not", () => {
+    const { root } = packed();
+    const empty = mkdtempSync(join(tmpdir(), "wsp-unbuilt-"));
+    made.push(empty);
+    for (const kind of ["web", "cli"] as const) expect(() => stageAssetOrSkip(empty, root, kind, {})).toThrow(/missing: /);
+  });
+});
+
 describe("workspace assets", () => {
   it("names the package that builds each one in this checkout", () => {
     expect(workspaceAsset("web").endsWith(join("web", "dist"))).toBe(true);
     expect(existsSync(join(workspaceAsset("web"), ".."))).toBe(true);
-    expect(existsSync(join(workspaceAsset("daemon"), "package.json"))).toBe(true);
+    // The binaries sit in a folder of the command line package's, filled by its daemon-binary script; nothing builds
+    // them in a node build, so the folder is what is named, not a build output.
+    expect(workspaceAsset("daemon").endsWith(join("wspx", "daemon"))).toBe(true);
+    expect(existsSync(join(workspaceAsset("daemon"), "..", "package.json"))).toBe(true);
   });
 });
 

@@ -7,7 +7,7 @@ import { stripVTControlCharacters } from "node:util";
 import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { exitClassOf, keyRefusedLine, LOOPBACK, savedKeyRefusedLine } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HELP, SERVE_FLAGS, cli, forkCommandFor, jsonCliIO, keySources, loadKeys, saveQuestion, terminalIO, upCommandFor, type CliIO, type KeySources, type LoadedKeys, type NoProviderKey } from "../src/cli.js";
+import { SERVE_FLAGS, SHARED_FLAGS, cli, forkCommandFor, jsonCliIO, keySources, loadKeys, saveQuestion, terminalIO, upCommandFor, type CliIO, type KeySources, type LoadedKeys, type NoProviderKey } from "../src/cli.js";
 import { BOX_API_URL, BoxBackend, type KeyCheck } from "@wsp/engine";
 import { AGENT_KEY_VARIABLES, agentKeyEnvs, agentKeysIn, keysOf, savedEnv } from "../src/env-keys.js";
 import { BOX_KEY_ENV, SOLARI_KEY_ENV, providerBackendFor } from "../src/providers.js";
@@ -27,7 +27,10 @@ const SOLARI = "slr_live_fake_solari_key";
 describe("help", () => {
   it("--yes says a browser or device login, or one held in the Keychain, signs in on the machine, so macOS has nothing to ask either", () => {
     setup();
-    expect(HELP.replace(/\s+/g, " ")).toContain("--yes init: take every default and ask nothing (required off a terminal); a login with a browser or device sign-in, or one held in the Keychain, defaults to sign in on the machine unless a saved recipe answered copy, so macOS has nothing to ask either and the sign-ins wait for the app's terminal");
+    // The sentence lives on the flag's own row, which is what wsp init --help prints, not on the front page.
+    expect(SHARED_FLAGS.find(f => f.name === "yes")!.says).toContain(
+      "a login with a browser or device sign-in, or one held in the Keychain, defaults to sign in on the machine unless a saved recipe answered copy, so macOS has nothing to ask either and the sign-ins wait for the app's terminal",
+    );
   });
 });
 

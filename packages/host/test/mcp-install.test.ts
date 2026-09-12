@@ -5,13 +5,13 @@
 // own section in the instructions the folder the command ran in keeps.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { mcpServerCommandLine, nextInsideAgentLine } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HELP, JSON_COMMANDS, PROSE_COMMANDS, cli, type CliIO } from "../src/cli.js";
+import { HELP, JSON_COMMANDS, PROSE_COMMANDS, agentPage, cli, type CliIO } from "../src/cli.js";
 import { SECTION_BEGIN, sectionText } from "../src/agents-md.js";
-import { agentsOnPath, installEach, installLines, installMcp, mcpServerSpec, removeLines, runningWsp, type RunningWsp } from "../src/mcp-install.js";
+import { agentsOnPath, installEach, installLines, installMcp, mcpServerSpec, refreshSkills, removeLines, runningWsp, type RunningWsp } from "../src/mcp-install.js";
 import { shimPath } from "../src/shim.js";
 import { SKILL_NAME, WSP_SKILL } from "../src/skill.js";
 import { VERSION } from "../src/version.js";
@@ -213,24 +213,43 @@ describe("installing the MCP server for a local agent", () => {
     expect(report.installed.map(i => i.id)).toEqual(["gemini"]);
     expect(report.failures).toEqual([{ id: "emacs", error: "no agent emacs in the catalog; agents with an MCP config: claude, codex, gemini, opencode" }]);
     expect(readFileSync(join(home, ".gemini", "skills", "wsp", "SKILL.md"), "utf8")).toBe(WSP_SKILL);
-    expect(HELP).toContain("--json");
+    expect(agentPage()).toContain("--json");
   });
 
   it("--agent belongs to mcp install alone, a command with no JSON to print refuses --json, and mcp --help says its own usage", async () => {
     // Which shared-parse commands print JSON is the command table's fact: init prints each sign-in hand-off as one
     // object per line and takes the flag; recipe parses its own flags and prints its table as one object.
-    expect(PROSE_COMMANDS).toEqual(["up", "down", "status", "pair", "devices", "connect", "relay", "hosts", "disconnect", "add", "remove", "join", "leave", "doctor"]);
+    expect(PROSE_COMMANDS).toEqual([
+      "up",
+      "down",
+      "status",
+      "host pair",
+      "host devices",
+      "host connect",
+      "host list",
+      "host default",
+      "host forget",
+      "host link",
+      "host unlink",
+      "host linked",
+      "host clients",
+      "add",
+      "remove",
+      "join",
+      "leave",
+      "doctor",
+    ]);
     expect(JSON_COMMANDS).toEqual(["init"]);
     for (const cmd of PROSE_COMMANDS) {
       const out = io();
-      expect(await cli([cmd, "--json", "--state", statePath], out), cmd).toBe(3);
+      expect(await cli([...cmd.split(" "), "--json", "--state", statePath], out), cmd).toBe(3);
       expect(out.errors[0], cmd).toContain("Unknown option '--json'");
       expect(out.lines, cmd).toEqual([]);
     }
     for (const cmd of JSON_COMMANDS) {
       // --yes beside --json is init's own refusal, so the flag reached the command instead of the parse turning it away.
       const out = io();
-      expect(await cli([cmd, "--json", "--yes", "--state", statePath], out), cmd).toBe(3);
+      expect(await cli([...cmd.split(" "), "--json", "--yes", "--state", statePath], out), cmd).toBe(3);
       expect(out.errors[0], cmd).not.toContain("Unknown option");
       // The refusal of a --json line is the failure object, the same line an agent parses on every verb.
       expect(JSON.parse(out.errors[0]!), cmd).toMatchObject({ error: expect.stringContaining("--json"), class: "usage", exit: 3 });
@@ -247,7 +266,7 @@ describe("installing the MCP server for a local agent", () => {
     // recipe is a verb with its own flags, so --json reaches it and --agent is refused naming the verbs that read it.
     const recipeAgent = io();
     expect(await cli(["recipe", "--agent", "claude", "--state", statePath], recipeAgent)).toBe(3);
-    expect(recipeAgent.errors[0]).toContain("--agent belongs to wsp fork and wsp thread new; wsp recipe does not read it");
+    expect(recipeAgent.errors[0]).toContain("--agent belongs to wsp fork and wsp run; wsp recipe does not read it");
     expect(recipeAgent.errors[0]).toContain("usage: wsp recipe");
     const recipeHelp = io();
     expect(await cli(["recipe", "--help", "--state", statePath], recipeHelp)).toBe(0);
@@ -261,13 +280,26 @@ describe("installing the MCP server for a local agent", () => {
     const stray = io();
     expect(await cli(["--state", statePath, "mcp", "install", "--nope"], stray)).toBe(3);
     expect(stray.errors[0]).toContain("Unknown option '--nope'");
-    // The verb runs rather than printing its usage: nothing serves this state file, which is the line's own answer.
+    // The verb runs rather than printing its usage: nothing serves this state file, which is the line's own answer
+    // when it is handed nothing to start one with.
     const verbLine = io();
-    expect(await cli(["--state", statePath, "threads"], verbLine)).toBe(1);
+    expect(await cli(["--state", statePath, "threads"], verbLine, undefined, process.env, false)).toBe(1);
     expect(verbLine.errors[0]).toContain(`no wsp host is serving ${statePath}`);
     const nonsense = io();
     expect(await cli(["--state", statePath, "nope"], nonsense)).toBe(3);
     expect(nonsense.errors[0]).toContain("unknown command: nope");
+  });
+
+  it("a host start brings the skill copies already on this computer up to its own, and writes none where there is none", () => {
+    const claude = join(home, ".claude", "skills", "wsp", "SKILL.md");
+    mkdirSync(dirname(claude), { recursive: true });
+    writeFileSync(claude, "the words of an older wsp\n");
+    // The copy that is there is rewritten; the agent that never took one is left alone.
+    expect(refreshSkills(home)).toEqual(["~/.claude/skills/wsp/SKILL.md"]);
+    expect(readFileSync(claude, "utf8")).toBe(WSP_SKILL);
+    expect(existsSync(join(home, ".codex", "skills", "wsp", "SKILL.md"))).toBe(false);
+    // A copy that already matches is not rewritten, so a start says nothing about it.
+    expect(refreshSkills(home)).toEqual([]);
   });
 
   it("what an install says: the agent and its file, the dropped-comments line when the rewrite lost them, the by-hand line when the server was not written, and where the skill went", () => {

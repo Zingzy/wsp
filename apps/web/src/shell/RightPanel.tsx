@@ -20,7 +20,8 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/
 import { DiffSurface } from "../diffs/DiffSurface.js";
 import { FilePreviewSurface } from "../files/FilePreviewSurface.js";
 import { FilesSurface } from "../files/FilesSurface.js";
-import { useStatus, useWorkspace } from "../protocol/store.js";
+import { useAbsentComputer, useStatus, useWorkspace } from "../protocol/store.js";
+import { useAppDark } from "../settings/theme.js";
 import { useRightPanelStore, type WorkspaceRightPanelState } from "../rightPanelStore.js";
 import { ScreenSurface } from "../screen/ScreenSurface.js";
 import { openPanelTerminal } from "./shellCommands.js";
@@ -29,8 +30,6 @@ import { useTerminalSurfaces, WorkspaceTerminalPanel } from "../components/Works
 const NO_PENDING: ReadonlySet<string> = new Set();
 /** The kind the card's sentence reads before a workspace is selected, when the card is greyed out anyway. */
 const LOCAL_UNTIL_KNOWN = { kind: "local" } as const;
-/** index.html pins the dark theme; the code views take it as a prop. */
-const THEME = "dark";
 
 export function RightPanel({
   workspaceId,
@@ -44,7 +43,11 @@ export function RightPanel({
   layoutControls?: ReactNode;
 }) {
   const workspace = useWorkspace(workspaceId);
+  const absent = useAbsentComputer(workspaceId);
   const status = useStatus(workspaceId);
+  // The code views take a side as a prop and colour their tokens from it. It has to be the side the page is
+  // drawing: a diff themed for the other side draws its lines in an ink the row tints were never measured against.
+  const theme = useAppDark() ? "dark" : "light";
   const open = useRightPanelStore(s => s.open);
   const activateSurface = useRightPanelStore(s => s.activateSurface);
   const closeSurface = useRightPanelStore(s => s.closeSurface);
@@ -82,12 +85,13 @@ export function RightPanel({
       onAddProcesses={() => open(workspaceId, "processes")}
       onAddScreen={() => open(workspaceId, "screen")}
       browserAvailable={workspace?.phase === "running"}
-      terminalAvailable={workspace?.phase === "running"}
+      terminalAvailable={workspace?.phase === "running" && absent === null}
       diffAvailable={workspace?.phase === "running"}
       filesAvailable={workspace?.phase === "running"}
       machineAvailable={workspace !== null}
       machinePanelWords={kindWords(workspaceKind(workspace ?? LOCAL_UNTIL_KNOWN)).panel}
-      processesAvailable={workspace?.phase === "running"}
+      processesAvailable={workspace?.phase === "running" && absent === null}
+      {...(absent === null ? {} : { unavailableReasons: { terminal: absent.sentence, processes: absent.sentence } })}
       screenAvailable={status?.screen !== undefined}
     >
       {active?.kind === "terminal" ? (
@@ -101,13 +105,13 @@ export function RightPanel({
       ) : active?.kind === "screen" ? (
         <ScreenSurface workspaceId={workspaceId} />
       ) : active?.kind === "files" || active?.kind === "file" || active?.kind === "diff" ? (
-        <DiffWorkerPoolProvider theme={THEME}>
+        <DiffWorkerPoolProvider theme={theme}>
           {active.kind === "files" ? (
-            <FilesSurface workspaceId={workspaceId} theme={THEME} />
+            <FilesSurface workspaceId={workspaceId} theme={theme} />
           ) : active.kind === "file" ? (
-            <FilePreviewSurface key={active.id} workspaceId={workspaceId} surface={active} theme={THEME} />
+            <FilePreviewSurface key={active.id} workspaceId={workspaceId} surface={active} theme={theme} />
           ) : (
-            <DiffSurface workspaceId={workspaceId} theme={THEME} />
+            <DiffSurface workspaceId={workspaceId} theme={theme} />
           )}
         </DiffWorkerPoolProvider>
       ) : (

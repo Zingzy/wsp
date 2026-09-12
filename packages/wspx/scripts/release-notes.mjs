@@ -15,6 +15,9 @@ import { isReleaseTag, versionFromTag } from "./tag-version.mjs";
 // The README owns this text so the page a stranger reads and the notes they get
 // with the download cannot drift apart; the markers are how it is lifted out.
 const BUNDLES = /<!-- bundles:start -->\n([\s\S]*?)<!-- bundles:end -->/;
+// A release that renames things says what moved once, in the README, where a stranger reading the page and a person
+// reading the notes get the same words. The block is deleted at the release after the one that wrote it.
+const RENAMES = /<!-- renames:start -->\n([\s\S]*?)<!-- renames:end -->/;
 const UNSIGNED = /<!-- unsigned:start -->\n([\s\S]*?)<!-- unsigned:end -->\n?/;
 const RENUMBER = /^chore: v\d/;
 // The name on npm has one home, the manifest of the package that is published under it.
@@ -56,16 +59,27 @@ export function bundleNote(readme, signed) {
     .trim();
 }
 
+/** The README's block on what this release renamed, or nothing when it has none: the notes are built from commit
+ * subjects, and a table of renames does not fit one. */
+export function renameNote(readme) {
+  const found = RENAMES.exec(readme);
+  return found === null ? undefined : found[1].trim();
+}
+
 /** The command line: the tag, and --signed when an identity signs the bundles the notes describe. */
 export function cliArgs(argv) {
   return { tag: argv.find(arg => arg !== "--signed") ?? "", signed: argv.includes("--signed") };
 }
 
-export function releaseNotes({ version, previous, changes, bundles }) {
+/**
+ * @param {{ version: string, previous?: string, changes: string[], bundles: string, renames?: string }} notes
+ */
+export function releaseNotes({ version, previous, changes, bundles, renames }) {
   const names = bundleNames(version);
   return [
     previous === undefined ? "## What changed" : `## What changed since ${previous}`,
     "",
+    ...(renames === undefined ? [] : [renames, ""]),
     ...(changes.length > 0 ? changes.map(line => `- ${line}`) : ["- The first release."]),
     "",
     "## Downloads",
@@ -83,11 +97,14 @@ function notesFor(repo, tag, signed) {
   const git = args => execFileSync("git", args, { cwd: repo, encoding: "utf8" });
   const previous = previousTag(git(["tag", "--list", "v*"]).split("\n"), tag);
   const subjects = previous === undefined ? [] : git(["log", "--no-merges", "--pretty=format:%s", `${previous}..${tag}`]).split("\n");
+  const readme = readFileSync(join(repo, "README.md"), "utf8");
+  const renames = renameNote(readme);
   return releaseNotes({
     version: versionFromTag(tag),
     previous,
     changes: changeLines(subjects),
-    bundles: bundleNote(readFileSync(join(repo, "README.md"), "utf8"), signed),
+    bundles: bundleNote(readme, signed),
+    ...(renames === undefined ? {} : { renames }),
   });
 }
 

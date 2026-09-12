@@ -4,7 +4,7 @@
 // one row per workspace to switch to, recent threads at rest and every thread
 // whose title holds the typed query. Pure apart from the callbacks it is
 // handed, so the list is testable without the dialog.
-import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, ChevronUpIcon, MessageSquareIcon, MonitorIcon, PanelLeftIcon, PanelRightIcon, PlusIcon, SettingsIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, ChevronUpIcon, CloudIcon, MessageSquareIcon, MonitorIcon, PanelLeftIcon, PanelRightIcon, PlusIcon, SettingsIcon } from "lucide-react";
 import { PLACES_WORDS, type SidebarMode } from "@wsp/protocol";
 import { resolveActions, type ResolvedAction } from "../../actions/registry.js";
 import { sidebarActions } from "../../actions/sidebarActions.js";
@@ -37,6 +37,7 @@ export interface PaletteHandlers {
   readonly newLocalWorkspace: () => void;
   readonly openSettings: () => void;
   readonly openAddComputer: () => void;
+  readonly openConnectProvider: () => void;
 }
 
 export interface PaletteItemsInput {
@@ -172,6 +173,16 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
       title: PLACES_WORDS.addComputer,
       description: `${SETTINGS_WORDS.title} · ${PLACES_WORDS.section}`,
       run: sync(handlers.openAddComputer),
+    },
+    {
+      kind: "action",
+      value: "action:connect-provider",
+      // What a person hunts this row down by is what it costs them and what it is for, not the word provider.
+      searchTerms: ["connect a provider", "provider", "cloud", "api key", "cost", "price", "billing", "image", "where agents run"],
+      icon: <CloudIcon className={ITEM_ICON_CLASS} />,
+      title: PLACES_WORDS.connectProvider,
+      description: `${SETTINGS_WORDS.title} · ${PLACES_WORDS.section}`,
+      run: sync(handlers.openConnectProvider),
     },
     ...(input.labs
       ? [

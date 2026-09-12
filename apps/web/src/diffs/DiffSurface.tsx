@@ -19,7 +19,7 @@ import {
   RefreshCwIcon,
   Rows3Icon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { REPO_STATE_WORDS, type GitDiffReply, type GitStatusReply, type RepoStateWord } from "@wsp/protocol";
 import { ChangedFilesTree } from "../components/chat/ChangedFilesTree.js";
 import { DiffStatLabel } from "../components/chat/DiffStatLabel.js";
@@ -44,7 +44,7 @@ import { repoAbsence } from "../adapt/git.js";
 import { gitDiff, gitStatus } from "../terminal/daemon-fs.js";
 import { SCOPE_LABELS, SCOPES, toDiffModel } from "./model.js";
 import { useDiffRevealStore } from "./reveal.js";
-import { DEFAULT_SCOPE, useDiffStore } from "./store.js";
+import { DEFAULT_SCOPE, useDiffStore, type DiffRenderMode } from "./store.js";
 
 /** The diff read for one folder: in flight or failed with the last reply it may keep showing, or the reply itself. */
 type LoadState =
@@ -67,6 +67,23 @@ function lastReply(state: LoadState): GitDiffReply | null {
 
 function repoOf(status: GitStatusReply): RepoState {
   return { kind: "repo", root: status.root, branch: status.branch.head };
+}
+
+/** What the pane draws its code view with. Its own export so a render test measures the settings the pane ships
+ * rather than a copy of them. Two of them are what makes a change readable: the side, which has to be the side the
+ * page is drawing, since the tints are mixed from the page's own tokens and the tokens are coloured from the side;
+ * and the wrap, since the panel is narrower than a line of prose and the platform's own sideways scrollbar is an
+ * overlay a person who never scrolled never sees. */
+export function diffPanelOptions(theme: "light" | "dark", renderMode: DiffRenderMode): ComponentProps<typeof AnnotatableCodeView>["options"] {
+  return {
+    diffStyle: renderMode === "split" ? "split" : "unified",
+    lineDiffType: "none",
+    overflow: "wrap",
+    theme: resolveDiffThemeName(theme),
+    preferredHighlighter: PREFERRED_HIGHLIGHTER,
+    themeType: theme,
+    stickyHeaders: true,
+  };
 }
 
 export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme: "light" | "dark" }) {
@@ -424,15 +441,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
                       </Tooltip>
                     );
                   }}
-                  options={{
-                    diffStyle: renderMode === "split" ? "split" : "unified",
-                    lineDiffType: "none",
-                    overflow: "scroll",
-                    theme: resolveDiffThemeName(theme),
-                    preferredHighlighter: PREFERRED_HIGHLIGHTER,
-                    themeType: theme,
-                    stickyHeaders: true,
-                  }}
+                  options={diffPanelOptions(theme, renderMode)}
                 />
               </div>
             ) : (

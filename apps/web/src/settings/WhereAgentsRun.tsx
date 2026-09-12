@@ -5,9 +5,9 @@
 // it stand; the row menu holds the same three, for a hand that never opened the
 // row. Under the table the two roads to another one.
 //
-// The list, the door and the events behind it are the store's (places,
-// openAddComputer): the sheet that adds a computer is mounted once by the
-// settings page, so this section opens it rather than holding a second copy.
+// The list, the doors and the events behind them are the store's (places,
+// openAddComputer, openConnectProvider): both sheets are opened from the store,
+// so the palette's rows and these buttons take one road to each.
 //
 // The detail opens on a row carrying aria-expanded rather than on the
 // collapsible component: a collapsible panel animates its height and needs a
@@ -24,7 +24,7 @@ import { useStore } from "../protocol/store.js";
 import { ConnectProviderSheet } from "./ConnectProviderSheet.js";
 import { WHERE_WORDS } from "./format.js";
 import { copyOn } from "./image.js";
-import { NOTHING_HELD, placeOf, threadWord, type PlaceHolding } from "./places.js";
+import { NOTHING_HELD, placeOf, placeWorkspaceCounts, threadWord, type PlaceHolding } from "./places.js";
 import { PlaceRow, PlaceTable } from "./PlaceTable.js";
 import { RemoveComputerDialog } from "./RemoveComputerDialog.js";
 
@@ -53,10 +53,12 @@ export function WhereAgentsRun({ now = Date.now() }: { now?: number }) {
   const statuses = useStore(s => s.statuses);
   const api = useStore(s => s.api);
   const openAddComputer = useStore(s => s.openAddComputer);
+  const openConnectProvider = useStore(s => s.openConnectProvider);
+  const connecting = useStore(s => s.connectProviderOpen);
+  const closeConnectProvider = useStore(s => s.closeConnectProvider);
   /** Every built copy of this host's image by the computer it sits on, so Remove can say what comes off that one. */
   const [copies, setCopies] = useState<readonly SealedImageCopy[]>([]);
   const [open, setOpen] = useState<string | null>(null);
-  const [connecting, setConnecting] = useState(false);
   const [removing, setRemoving] = useState<PlaceView | null>(null);
 
   const readCopies = useCallback((): void => {
@@ -66,6 +68,7 @@ export function WhereAgentsRun({ now = Date.now() }: { now?: number }) {
 
   const threadsOf = (workspaceId: string): number => sessions[workspaceId]?.length ?? 0;
   const holdings = holdingsFor(places, workspaces, threadsOf, id => statuses[id] ?? null);
+  const counts = placeWorkspaceCounts(places, workspaces);
   /** What that computer's own copy of the image weighs, where the provider's listing gave a size for it. */
   const imageBytesOn = (place: PlaceView): number | undefined => copyOn(copies, place)?.sizeBytes;
   const holdingOf = (place: PlaceView): PlaceHolding => holdings[place.id] ?? NOTHING_HELD;
@@ -82,6 +85,7 @@ export function WhereAgentsRun({ now = Date.now() }: { now?: number }) {
               <PlaceRow
                 place={place}
                 now={now}
+                workspaces={counts[place.id] ?? 0}
                 here={own}
                 {...(own
                   ? {}
@@ -110,11 +114,11 @@ export function WhereAgentsRun({ now = Date.now() }: { now?: number }) {
         <Button size="xs" variant="outline" data-k="add-computer-button" onClick={openAddComputer}>
           {PLACES_WORDS.addComputer}
         </Button>
-        <Button size="xs" variant="outline" data-k="connect-provider" onClick={() => setConnecting(true)}>
+        <Button size="xs" variant="outline" data-k="connect-provider" onClick={openConnectProvider}>
           {PLACES_WORDS.connectProvider}
         </Button>
       </div>
-      <ConnectProviderSheet open={connecting} onOpenChange={setConnecting} />
+      <ConnectProviderSheet open={connecting} onOpenChange={next => (next ? openConnectProvider() : closeConnectProvider())} />
       {removing === null ? null : (
         <RemoveComputerDialog
           place={removing}

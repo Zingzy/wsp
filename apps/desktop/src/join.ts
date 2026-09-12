@@ -10,7 +10,7 @@
 // One join buys two things with one code: the place the other wsp keeps for
 // this computer, and the device token this computer's own window holds. The
 // second is written here as a host record, so the window opens on the wsp it
-// joined the way it would have after wsp connect, and leaving hands that token
+// joined the way it would have after wsp host connect, and leaving hands that token
 // back before the place goes.
 import {
   JoinRefused,
@@ -24,6 +24,7 @@ import {
   placeStanding,
   readHost,
   removeHost,
+  runningWsp,
   setDefaultHost,
   writeHost,
   writePlaceAwake,
@@ -65,8 +66,8 @@ export interface JoinRoadDeps {
   wspHome: string;
   /** This computer's own state file, which a dial to the wsp over there names and never reads. */
   statePath: string;
-  /** The wsp command this app writes on every launch: what the service manager starts the agent with, so an update
-   * that moves the bundle costs the agent one launch rather than the join. */
+  /** The wsp command this app writes on every launch: the line the daemon reports as this computer's wsp, so an
+   * agent's tools run the shim that follows the app wherever it moves. */
   shim: string;
   log(line: string): void;
   join?: typeof joinPlace;
@@ -142,7 +143,7 @@ export function joinRoad(deps: JoinRoadDeps): JoinRoad {
           // The same code buys the token this window holds: the person meant one thing, and a second code typed on
           // the other screen would be the same intent asked for twice.
           client: true,
-          serviceArgv: [deps.shim, "join", "--serve"],
+          wsp: { ...runningWsp(), shim: deps.shim },
         });
       } catch (e) {
         // The host's two words are about a field; the screen's five are about a sentence, and two of them are about

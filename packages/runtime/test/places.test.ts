@@ -18,7 +18,8 @@ import {
   PLACE_LINK_NONCE_BYTES,
   THREAD_OPS,
   placeDaemonPaths,
-  placeAbsentLine,
+  absentComputer,
+  workspaceState,
   placeLinkTranscript,
   placeNoDaemonPortLine,
   placeNoLinkLine,
@@ -27,7 +28,8 @@ import {
   type PlaceReport,
   type PlaceView,
 } from "@wsp/protocol";
-import { createRuntime, wiredPlace, type Runtime } from "../src/runtime.js";
+import { createRuntime, wiredPlace, type PlaceBackends, type Runtime } from "../src/runtime.js";
+import type { MachineBackend } from "@wsp/engine";
 import { newPlaceKeyPair, type PlaceInstallRequest, type PlaceKeyPair, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -525,8 +527,23 @@ describe("a workspace on a place", () => {
     await expect(runtime!.workspaces.daemonReach(ws.id)).rejects.toThrow(/old-macbook/);
     client.close();
     await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
-    await expect(runtime!.workspaces.exec(ws.id, "hostname")).rejects.toThrow(/is not connected right now/);
+    await expect(runtime!.workspaces.exec(ws.id, "hostname")).rejects.toThrow(/is not answering; it connects on its own when it is on/);
     expect(placeDaemonPaths("/home/maya").runDir).toBe("/home/maya/.wsp/run");
+  });
+
+  it("reads unreachable with the computer's own sentence once that computer stops answering, as a fork on it does", async () => {
+    const { hostKey } = await serving();
+    const { client, placeId } = await join(hostKey, { code: await code() });
+    sockets.push(client.ws);
+    const ws = (await runtime!.workspaces.list()).find(w => w.kind === "place")!;
+    client.close();
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
+    const away = (await runtime!.status.list()).find(r => r.id === ws.id)!;
+    // The workspace a joined computer is carries that computer in its machine id rather than on a place field, and
+    // a status that read it off the field alone left this one reading running with no daemon road at all.
+    expect(away.reach.state).toBe("unreachable");
+    expect(away.reason).toBe(absentComputer("old-macbook", null).sentence);
+    expect(workspaceState({ phase: away.phase, machineState: away.machineState, reach: away.reach.state })).toBe("unreachable");
   });
 });
 
@@ -614,7 +631,7 @@ describe("putting the agent on a computer over ssh", () => {
         ...wiring(hostKey),
         install: async (req, stage) => {
           minted = req.code;
-          stage("node", "running");
+          stage("wsp", "running");
           throw new Error("ssh refused the login (publickey)");
         },
       },
@@ -622,7 +639,7 @@ describe("putting the agent on a computer over ssh", () => {
     srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
     runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
     await expect(runtime.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now())).rejects.toThrow("publickey");
-    expect(stages.map(s => `${s.step} ${s.state}`)).toEqual(["node running", "node failed"]);
+    expect(stages.map(s => `${s.step} ${s.state}`)).toEqual(["wsp running", "wsp failed"]);
     expect(stages.at(-1)?.note).toContain("publickey");
     // An install that never reached a join leaves its code unspent, and the person's next add mints another.
     expect(await runtime.devices.spend(minted, 1)).toBe(true);
@@ -650,7 +667,7 @@ describe("the road a pane takes to a place", () => {
     const { client, placeId } = await join(hostKey, { code: await code(), name: "box" });
     client.close();
     await until(async () => (await placesOf()).some(p => p.id === placeId && p.present === false));
-    await expect(runtime!.places!.road(placeId)).rejects.toThrow(placeAbsentLine("box"));
+    await expect(runtime!.places!.road(placeId)).rejects.toThrow(absentComputer("box", null).sentence);
   });
 
   it("is refused with its own sentence while that computer has not said which port its daemon bound", async () => {
@@ -942,6 +959,68 @@ function forks(
   return seen;
 }
 
+describe("a fork at a provider this host is not wired to", () => {
+  /** Two providers over two backends, as the host's own table hands them down: the wired one and one more whose key
+   * this computer holds. */
+  const twoProviders = (wired: string, at: Record<string, MachineBackend>): PlaceBackends => ({
+    get wired() {
+      return wired;
+    },
+    backend: place => at[place],
+    list: () => Object.keys(at),
+  });
+
+  it("lists every provider whose key this host holds and forks at the one the line names, through that provider's own backend", async () => {
+    const solari = stubBackend();
+    const box = stubBackend();
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({
+      backend: solari,
+      store: memoryStore(),
+      adapters: {},
+      places: twoProviders("solari", { solari, box }),
+      placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }),
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    const rows = await placesOf();
+    expect(rows.filter(p => p.kind === "provider").map(p => p.id)).toEqual(["solari", "box"]);
+    for (const row of rows.filter(p => p.kind === "provider")) expect(row.takesForks, row.id).toBe(true);
+
+    // Named on the line: the machine is minted by that provider and the record says where it stands.
+    const there = await runtime.workspaces.create({ golden: "snap_g", name: "x", on: "box" });
+    expect(box.machines).toHaveLength(1);
+    expect(solari.machines).toHaveLength(0);
+    expect(there.place).toBe("box");
+    expect(await runtime.workspaces.get(there.id)).toMatchObject({ place: "box" });
+    // The place the last fork landed on is where the next one lands when nobody says.
+    expect((await placesOf()).find(p => p.default)!.id).toBe("box");
+    const again = await runtime.workspaces.create({ golden: "snap_g", name: "y" });
+    expect(box.machines).toHaveLength(2);
+    expect(again.place).toBe("box");
+
+    // The wired provider named on the line is the road a record with no place word already takes.
+    await runtime.places!.markUsed(undefined);
+    const here = await runtime.workspaces.create({ golden: "snap_g", name: "z", on: "solari" });
+    expect(solari.machines).toHaveLength(1);
+    expect(here.place).toBeUndefined();
+  });
+
+  it("names every provider it holds when a word names none of them", async () => {
+    const solari = stubBackend();
+    const box = stubBackend();
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({
+      backend: solari,
+      store: memoryStore(),
+      adapters: {},
+      places: twoProviders("solari", { solari, box }),
+      placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }),
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    await expect(runtime.workspaces.create({ golden: "snap_g", name: "x", on: "nowhere" })).rejects.toThrow(/no place named nowhere; you have .*solari.*box/);
+  });
+});
+
 describe("a fork on a computer you joined", () => {
   it("lands on that computer's backend and not on this host's, and the record and the view say where", async () => {
     const backend = stubBackend();
@@ -999,6 +1078,31 @@ describe("a fork on a computer you joined", () => {
     expect(backend.machines).toHaveLength(1);
     expect(second.place).toBeUndefined();
     expect(place.created).toHaveLength(1);
+  });
+
+  it("says on the row whether a place takes forks at all, off the list the verbs read, and forks where it says yes", async () => {
+    const backend = stubBackend();
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    let place!: ForkingPlace;
+    const withDocker = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
+    sockets.push(withDocker.client.ws);
+    const without = await join(hostKey, { code: await code(), name: "laptop", report: report("laptop", { docker: false }) });
+    sockets.push(without.client.ws);
+    const rows = await placesOf();
+    // The computer the host runs on is where the person's own agents run, never something the host forks into.
+    expect(rows.find(p => p.id === "here")!.takesForks).toBe(false);
+    expect(rows.find(p => p.id === withDocker.placeId)!.takesForks).toBe(true);
+    expect(rows.find(p => p.id === without.placeId)!.takesForks).toBe(false);
+    expect(rows.find(p => p.id === "solari")!.takesForks).toBe(true);
+    // What the row promises is what the create does: the fork lands on that computer's own backend.
+    const made = await runtime.workspaces.create({ golden: "snap_g", name: "x", on: "srv" });
+    expect(place.created).toHaveLength(1);
+    expect(backend.machines).toHaveLength(0);
+    expect(made.place).toBe(withDocker.placeId);
+    // And a row that says no forks nowhere: the refusal is that computer's, not a fork nobody asked for.
+    await expect(runtime.workspaces.create({ golden: "snap_g", name: "y", on: "laptop" })).rejects.toThrow(/laptop runs your agents but has no Docker/);
   });
 
   it("refuses a word that names no place, and names what this host holds", async () => {
@@ -1096,7 +1200,7 @@ describe("a fork on a computer you joined", () => {
     await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
     const away = (await runtime!.status.list()).find(r => r.id === made.id)!;
     expect(away.reach.state).toBe("unreachable");
-    expect(away.reason).toContain("srv is not connected right now");
+    expect(away.reason).toBe(absentComputer("srv", null).sentence);
     expect(away.machineState).toBe("running");
     const back = await relink(hostKey, placeId, key, report("srv"), c => forks(c));
     sockets.push(back.client.ws);

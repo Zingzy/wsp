@@ -102,7 +102,7 @@ describe("the recipe verb's flags", () => {
 
   it("names both flags in the help, and in the recipe verb's own usage", async () => {
     const lines: string[] = [];
-    expect(await cli(["--help"], io(lines, []))).toBe(0);
+    expect(await cli(["--help", "agent"], io(lines, []), undefined, process.env, false)).toBe(0);
     // recipe parses its own flags, so its words sit with the verb rather than in the shared options block.
     expect(lines.join("\n")).toContain("--add <id>=<command> carries");
     expect(lines.join("\n")).toContain("--add-check <id>=<command> saying it is");

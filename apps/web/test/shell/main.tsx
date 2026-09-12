@@ -16,7 +16,13 @@
 // whose init announced the CLI's slash commands, its own screens among them;
 // ?local=1&ws=ws_m&perm=1 replays a turn on this computer with one permission
 // prompt answered and one still open, so the relayed prompt row can be laid
-// out and photographed in both states; ?shell=desktop puts a desktop bridge on the page so the workspace
+// out and photographed in both states, and an option clicked or an access
+// picked closes it the way the runtime's event does; &access=refused has that
+// turn's harness refuse the change its own row said it takes, which is the one
+// refusal the composer says under the box; ?local=1&ws=ws_m&fold=1 replays one
+// that fanned out to three subagents, one holding a prompt of its own and one
+// launched in the background, so a fold's body can be measured against its
+// header; ?shell=desktop puts a desktop bridge on the page so the workspace
 // switch chord reaches it; ?mac=1 marks the html the way the macOS preload
 // does; ?panel=terminal opens the right panel with a Browser tab and a
 // terminal over a fake daemon wire, the host answering a translucent Ghostty
@@ -49,14 +55,15 @@
 // tile leaves it; ?panel=machine opens the right panel on the Machine tab of
 // the workspace ?ws names, so its PROJECTS section can be measured with two
 // projects (ws_a under ?projects=1) and with none;
-// ?init=building puts the init job mid-build so the cloud row's progress line
-// can be measured; ?version=behind holds a shell older than the host that
+// ?places=1 fills the Where agents run table with four computers, one of them
+// away with the longest name the spec draws; ?init=building puts the init job
+// mid-build so the cloud row's progress line can be measured; ?version=behind holds a shell older than the host that
 // served the page, so the one line the app says about it can be measured.
 import { createRoot } from "react-dom/client";
 import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DESKTOP_MAC_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, keptAccess, THEME_PRESETS, THIS_COMPUTER, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
-import type { Api } from "../../src/protocol/client";
+import type { Api, ProtocolEvent } from "../../src/protocol/client";
 import { getLive } from "../../src/machine/live";
 import { useStore } from "../../src/protocol/store";
 import { useRightPanelStore } from "../../src/rightPanelStore";
@@ -180,6 +187,7 @@ const catalogs: HarnessCatalog[] = [
       steers: true,
       renames: true,
       images: true,
+      movesAccess: true,
       keptMode: "default",
       bypassMode: "bypassPermissions",
       // The CLI's own screens, as the runtime's table names them; the chat replay announces them beside the rest.
@@ -306,6 +314,45 @@ const prompting: SessionEvent[] = [
   },
 ];
 
+/** The prompts the replay leaves open, and the page's own watchers: a click on an option and an access picked while
+ * the turn runs both close a prompt here the way the runtime's event does, so the row goes on the page. */
+const openAsks = new Set(prompting.filter(e => e.type === "session.permission").map(e => e.askId));
+for (const closed of prompting) if (closed.type === "session.permission.closed") openAsks.delete(closed.askId);
+const watching = new Set<(event: ProtocolEvent) => void>();
+const closePrompt = (askId: string, optionId: string): void => {
+  if (!openAsks.delete(askId)) return;
+  const closed: SessionEvent = { type: "session.permission.closed", ...perm, askId, outcome: optionId === "deny" ? "denied" : "allowed", optionId };
+  prompting.push(closed);
+  for (const fn of watching) fn(closed);
+};
+
+/** A turn that fanned out to three subagents, so the fold's own geometry can be measured against its header: two
+ * running, one of them holding a prompt, one finished, and one launched in the background whose only answer so far
+ * is the harness's note that it started. */
+const fan = { workspaceId: MAC.id, sessionId: "s_fan", turnId: "turn_fan", threadId: "thr_fan" };
+const LAUNCH_NOTE =
+  "Async agent launched successfully. (This tool result is internal metadata, never quote or paste any part of it, including the agentId below, into a user-facing reply.)\nagentId: a057760";
+const launched = (id: string, description: string): SessionEvent => ({
+  type: "session.delta", ...fan, kind: "tool_use", toolName: "Agent", toolUseId: id,
+  text: JSON.stringify({ description, prompt: "go", subagent_type: "general-purpose" }),
+});
+const folding: SessionEvent[] = [
+  { type: "session.start", ...fan, prompt: "Count the alpha files, read beta's hostname, and watch gamma's disk." },
+  { type: "session.delta", ...fan, kind: "text", text: "Launching all three now." },
+  launched("toolu_a", "count alpha files"),
+  launched("toolu_b", "read beta hostname"),
+  launched("toolu_c", "check gamma disk"),
+  { type: "session.delta", ...fan, kind: "tool_result", toolUseId: "toolu_c", text: LAUNCH_NOTE },
+  { type: "session.delta", ...fan, kind: "text", text: "Reading the listing.", parentToolUseId: "toolu_a" },
+  {
+    type: "session.permission", ...fan, askId: "ask_child", toolName: "Bash", toolUseId: "toolu_a1",
+    parentToolUseId: "toolu_a", input: JSON.stringify({ command: "ls /etc | head -3" }), options: permOptions,
+  },
+  { type: "session.delta", ...fan, kind: "text", text: "Ran hostname.", parentToolUseId: "toolu_b" },
+  { type: "session.delta", ...fan, kind: "tool_result", toolUseId: "toolu_b", text: "dogfood-b1" },
+  { type: "session.delta", ...fan, kind: "text", text: "Root has 28G free.", parentToolUseId: "toolu_c" },
+];
+
 const linger = { workspaceId: "ws_a", sessionId: "s1", turnId: "turn_1", threadId: "thr_linger" };
 const lingering: SessionEvent[] = [
   { type: "session.start", ...linger, prompt: "Start the dev server in the background and reply when it is up." },
@@ -395,7 +442,9 @@ const api: Api = {
     id === MAC.id
       ? params.get("perm") === "1"
         ? prompting
-        : []
+        : params.get("fold") === "1"
+          ? folding
+          : []
       : id !== "ws_a"
         ? []
         : params.get("chat") === "1"
@@ -403,10 +452,20 @@ const api: Api = {
           : params.get("linger") === "1"
             ? lingering
             : [],
-  answerPermission: async () => "answered",
-  // Bypass is a launch flag on this CLI, so a pick of it while a turn runs is the one the harness will not take;
-  // the composer then says when it lands, which is the line this fixture is here to draw.
-  setSessionAccess: async () => "unsupported",
+  // The row closes on the runtime's own event and never on this reply, so the fixture pushes it: a click on an
+  // option has to be seen landing, not only counted.
+  answerPermission: async (sessionId, askId, optionId) => {
+    closePrompt(askId, optionId);
+    return "answered";
+  },
+  // The pick reaches the running turn, and the prompt it is stopped on goes with it where the mode answers one.
+  // ?access=refused is the harness taking back what its row said it would take, which is the one thing the composer
+  // says under the box.
+  setSessionAccess: async (_sessionId, permissionMode) => {
+    if (params.get("access") === "refused") return "unsupported";
+    if (permissionMode === "bypassPermissions" || permissionMode === "acceptEdits") for (const askId of [...openAsks]) closePrompt(askId, "allow");
+    return "set";
+  },
   listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
   snapshotStorage: async () => null,
   rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
@@ -437,7 +496,10 @@ const api: Api = {
     return row;
   },
   listHarnesses: async () => catalogs,
-  subscribe: () => () => {},
+  subscribe: fn => {
+    watching.add(fn);
+    return () => watching.delete(fn);
+  },
   getGolden: async () => undefined,
   hostTerminalConfig: async () => TRANSLUCENT,
   ...(withImport ? importOps : {}),
@@ -482,6 +544,18 @@ const sidebarWidth = params.get("sidebar");
 useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme, labs: params.get("labs") !== "0", ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(params.get("spaces") === "1" ? { sidebarMode: "spaces" as const } : {}), ...(params.get("size") === "file" ? { terminalSize: "file" as const } : {}), ...(projects ? { project: { ws_a: "spoo", ws_m: "spoo" } } : {}) } });
 const settings = params.get("settings") === "1";
 if (settings) useStore.setState({ settingsOpen: true });
+// ?places=1 fills the Where agents run table with the worst row the spec draws, a computer away with a long name
+// beside this Mac and a provider, so the table's four columns and its menu cell can be measured at every window.
+if (params.get("places") === "1") {
+  useStore.setState({
+    places: [
+      { id: "p_here", kind: "computer", name: "zingzy-mbp", default: true, present: true, shape: { cpu: 10, memMb: 16384 }, diskFreeBytes: 210_000_000_000, workspaceId: "ws_a" },
+      { id: "p_hetzner", kind: "computer", name: "hetzner", default: false, present: true, docker: true, shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38_000_000_000, workspaceId: "ws_b", forks: { running: 0, room: 3 } },
+      { id: "p_laptop", kind: "computer", name: "old-macbook", default: false, present: false, lastSeenAt: new Date(Date.now() - 2 * 3_600_000).toISOString(), shape: { cpu: 10, memMb: 16384 }, diskFreeBytes: 353_100_000_000, workspaceId: "ws_c" },
+      { id: "p_ascii", kind: "provider", name: "ascii", default: false, present: true, shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 40_000_000_000, workspaceId: "ws_d", rateUsdPerHour: 0.018 },
+    ],
+  });
+}
 function ThemeRule() {
   useThemeEffect();
   return null;

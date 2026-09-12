@@ -6,18 +6,24 @@
 // reported yet holds a bar, so the table keeps its shape while it reports.
 //
 // Every column word and every cell rule is the protocol's: PLACES_WORDS.columns,
-// fmtSize, fmtBytes, placeStateWord and placeWorkspacesCell, so the app and the
-// command line read one table. The head is the shipped TableHead's own style,
-// which is a tier above the zone label over the section.
+// fmtSize, fmtBytes, absentOf and placeWorkspacesCell, so the app and the
+// command line read one table. How many workspaces stand on a row is the
+// caller's to count, since only the app holds the workspace list a count is read
+// off. The head is the shipped TableHead's own style, which is a tier above the
+// zone label over the section.
 import type { ReactNode } from "react";
-import { PLACES_WORDS, fmtBytes, fmtSize, placeStateWord, placeWorkspacesCell, type PlaceView } from "@wsp/protocol";
+import { PLACES_WORDS, fmtBytes, fmtSize, placeWorkspacesCell, type PlaceView } from "@wsp/protocol";
 import { Skeleton } from "../components/ui/skeleton.js";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table.js";
 import { cn } from "../lib/utils.js";
 import { FACT, WHERE_WORDS } from "./format.js";
-import { placeCpuWord, placeName } from "./places.js";
+import { absentOf, placeCpuWord, placeName } from "./places.js";
 
 const CELL = "font-mono text-xs tabular-nums text-foreground";
+/** The name column is the one that gives: it takes what the three fact columns and the menu leave, and cuts the
+ * name rather than pushing the table past the card it sits in. `max-w-0` is what makes a table cell yield at all,
+ * and the cell hides its own overflow so a state word narrower than its slot is cut rather than painted over Size. */
+const NAME_COLUMN = "w-full max-w-0";
 /** The one column the mock right-aligns, since a disk figure is read against the one above it. */
 const RIGHT = 2;
 
@@ -32,7 +38,7 @@ export function PlaceTable({ children, menu = true, k = "places-table" }: { chil
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             {PLACES_WORDS.columns.map((column, at) => (
-              <TableHead key={column} className={cn(at === RIGHT && "text-right")}>
+              <TableHead key={column} className={cn(at === 0 && NAME_COLUMN, at === RIGHT && "text-right")}>
                 {column}
               </TableHead>
             ))}
@@ -48,26 +54,33 @@ export function PlaceTable({ children, menu = true, k = "places-table" }: { chil
 /** One computer or provider. The default mark rides beside the name and the state slot is the state's, so a
  * computer that is the default and is also away says both and no column moves when either word arrives.
  * The chevron, where the row opens, comes after them. */
-export function PlaceRow({ place, now, here = false, trail, menu, open, onToggle }: { place: PlaceView; now: number; /** Whether this is the computer the host runs on, which the list puts first. */ here?: boolean; /** The chevron after the state word, where the row opens. */ trail?: ReactNode; menu?: ReactNode; open?: boolean; onToggle?: () => void }) {
+export function PlaceRow({ place, now, workspaces = 0, here = false, trail, menu, open, onToggle }: { place: PlaceView; now: number; /** How many workspaces stand on this row, counted off the app's own list by placeWorkspaceCounts. */ workspaces?: number; /** Whether this is the computer the host runs on, which the list puts first. */ here?: boolean; /** The chevron after the state word, where the row opens. */ trail?: ReactNode; menu?: ReactNode; open?: boolean; onToggle?: () => void }) {
+  const name = placeName(place, here);
+  // The one reading of a computer that is not answering, which the sidebar row, the pane and the composer read
+  // too: the slot beside the name holds the one word.
+  const absent = absentOf(place, now, here);
+  // The whole of what the cut cell says, and the sentence the state slot has no room for beside the fact columns.
+  // A computer that is not answering is named by its own sentence, so the row does not say the name twice.
+  const title = [absent?.sentence ?? name, place.default ? WHERE_WORDS.default : ""].filter(word => word !== "").join(" ");
   return (
-    <TableRow data-place-row={place.id} {...(open === undefined ? {} : { "aria-expanded": open })} className={cn(onToggle !== undefined && "cursor-pointer")} onClick={onToggle}>
-      <TableCell>
+    <TableRow data-place-row={place.id} title={title} {...(open === undefined ? {} : { "aria-expanded": open })} className={cn(onToggle !== undefined && "cursor-pointer")} onClick={onToggle}>
+      <TableCell className={cn(NAME_COLUMN, "overflow-hidden")}>
         <span className="flex min-w-0 items-baseline gap-2">
-          <span className="truncate text-[13px] text-foreground">{placeName(place, here)}</span>
+          <span className="truncate text-[13px] text-foreground">{name}</span>
           {place.default ? (
-            <span className={FACT} data-k="place-default">
+            <span className={cn(FACT, "shrink-0")} data-k="place-default">
               {WHERE_WORDS.default}
             </span>
           ) : null}
-          <span className={FACT} data-k="place-state">
-            {placeStateWord(place, now)}
+          <span className={cn(FACT, "shrink-0")} data-k="place-state">
+            {absent?.away ?? ""}
           </span>
           {trail}
         </span>
       </TableCell>
       <TableCell className={CELL}>{place.shape === undefined ? <Waiting /> : fmtSize(place.shape, placeCpuWord(place))}</TableCell>
       <TableCell className={cn(CELL, "text-right")}>{place.diskFreeBytes === undefined ? <Waiting right /> : fmtBytes(place.diskFreeBytes)}</TableCell>
-      <TableCell className={CELL}>{place.shape === undefined ? <Waiting /> : placeWorkspacesCell(place)}</TableCell>
+      <TableCell className={CELL}>{place.shape === undefined ? <Waiting /> : placeWorkspacesCell(place, workspaces)}</TableCell>
       {menu === undefined ? null : <TableCell className="text-right">{menu}</TableCell>}
     </TableRow>
   );

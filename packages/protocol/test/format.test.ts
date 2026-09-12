@@ -11,12 +11,23 @@ import {
   whoPaysLines,
   THIS_COMPUTER,
   PERMISSION_DENIED_LINE,
-  accessFromNextMessage,
+  ACCESS_REFUSED_LINE,
+  ACCESS_REFUSED_WORDS,
+  accessReachLine,
   askingLine,
   permissionAskLine,
   permissionPromptWords,
   permissionModeOptionLabel,
   permissionOutcomeLine,
+  QUESTION_TOOL,
+  askedQuestions,
+  questionOptions,
+  questionAnswerInput,
+  pickedOptions,
+  pickedOptionId,
+  internalToolResult,
+  subagentTaskLine,
+  subagentAskerLine,
   noModelsLine,
   type HarnessCatalog,
   MEMORY_NEAR_FULL,
@@ -133,6 +144,7 @@ import {
   TURN_WALL_MS,
   turnCutLine,
   turnEndLine,
+  LIST_PRICE_WORD,
   openedSpendPart,
   turnSpendPart,
   turnSettledLine,
@@ -430,8 +442,8 @@ describe("fmtDuration, fmtElapsed and fmtCost", () => {
     expect([0, 999, 1000, 3_400, 9_999, 10_458, 59_600, 60_000, 73_000, 314_200, -5, NaN].map(fmtElapsed)).toEqual(["0s", "0s", "1s", "3s", "9s", "10s", "59s", "1m", "1m 13s", "5m 14s", "0s", "0s"]);
   });
 
-  it("fmtCost reads cents, and four places under a cent", () => {
-    expect([1.94, 0.22, 0.01, 0.0042, 0].map(fmtCost)).toEqual(["$1.94", "$0.22", "$0.01", "$0.0042", "$0.0000"]);
+  it("fmtCost reads cents at every size, so two figures in one thread are never in two shapes", () => {
+    expect([1.94, 0.22, 0.01, 0.0042, 0].map(fmtCost)).toEqual(["$1.94", "$0.22", "$0.01", "$0.00", "$0.00"]);
   });
 });
 
@@ -541,6 +553,11 @@ describe("a turn's activity in one line each", () => {
     // Nothing opened anything, so there is no second figure to weigh the first against and the cost stands bare.
     expect(turnSettledParts({ durationMs: 72_000, costUsd: 1.14 })).toEqual(["Worked for 1m 12s", "$1.14"]);
     expect(turnSettledParts({ durationMs: 72_000, costUsd: 1.14 }, 0)).toEqual(["Worked for 1m 12s", "$1.14"]);
+  });
+
+  it("a surface whose turns cost the person nothing puts the word on the turn's own figure and on no other", () => {
+    expect(turnSettledParts({ durationMs: 72_000, costUsd: 0.13 }, null, LIST_PRICE_WORD)).toEqual(["Worked for 1m 12s", "$0.13 list price"]);
+    expect(turnSettledParts({ durationMs: 72_000, costUsd: 1.14 }, 2.3, LIST_PRICE_WORD)).toEqual(["Worked for 1m 12s", "$1.14 list price this turn", "$2.30 in threads it opened"]);
     // The line a stream with no footer prints never carries a second figure, so it is untouched.
     expect(turnSettledLine({ status: "completed", durationMs: 72_000, costUsd: 1.14 })).toBe("completed · Worked for 1m 12s · $1.14");
   });
@@ -799,7 +816,7 @@ describe("refusedTurn", () => {
       error: "Not logged in · Please run /login; sign in from a terminal on this computer, then send again",
       refusal: "sign-in",
     });
-    expect(turnEndLine(refused)).toBe(`failed · Worked for 88ms · $0.0000: ${refused.error!}`);
+    expect(turnEndLine(refused)).toBe(`failed · Worked for 88ms · $0.00: ${refused.error!}`);
     expect(notifyTail(refused)).toBe(refused.error);
   });
 
@@ -1023,8 +1040,8 @@ describe("stopFailedLine and sendNowFailedLine", () => {
 
 describe("the shape a refusal takes on a terminal", () => {
   it("is two halves, what happened and then what to do, on one line", () => {
-    expect(refusalLine("wsp thread new takes one task; api reads as a second one.", "Name the workspace with --in api.")).toBe(
-      "wsp thread new takes one task; api reads as a second one. Name the workspace with --in api.",
+    expect(refusalLine("wsp run takes one task; api reads as a second one.", "Name the workspace with --in api.")).toBe(
+      "wsp run takes one task; api reads as a second one. Name the workspace with --in api.",
     );
     expect(refusalLine("a.", "b.").split("\n")).toHaveLength(1);
     // A first half written for the app too, where nothing follows it, closes itself here.
@@ -1035,7 +1052,7 @@ describe("the shape a refusal takes on a terminal", () => {
   });
 
   it("says the command's name once, whether or not the sentence opens with it", () => {
-    expect(sayOnce("wsp thread new: ", "wsp thread new takes one task")).toBe("wsp thread new takes one task");
+    expect(sayOnce("wsp run: ", "wsp run takes one task")).toBe("wsp run takes one task");
     expect(sayOnce("wsp delete: ", "no workspace nope")).toBe("wsp delete: no workspace nope");
     expect(sayOnce("", "no workspace nope")).toBe("no workspace nope");
     // The name is matched whole: a sentence that merely opens with the same letters keeps its prefix.
@@ -1052,7 +1069,7 @@ describe("the shape a refusal takes on a terminal", () => {
 describe("foreignFlagLine", () => {
   it("names the verb or verbs that read the flag, then the one that does not", () => {
     expect(foreignFlagLine("--tick", ["wsp recipe"], "wsp recipe scan")).toBe("--tick belongs to wsp recipe; wsp recipe scan does not read it");
-    expect(foreignFlagLine("--agent", ["wsp fork", "wsp thread new"], "wsp send")).toBe("--agent belongs to wsp fork and wsp thread new; wsp send does not read it");
+    expect(foreignFlagLine("--agent", ["wsp fork", "wsp run"], "wsp send")).toBe("--agent belongs to wsp fork and wsp run; wsp send does not read it");
   });
 });
 
@@ -1532,7 +1549,7 @@ describe("the words a relayed permission prompt shows", () => {
 
   it("words a tool a server lends as the server and the tool, and never the server's own paragraph", () => {
     expect(permissionAskLine("mcp__wsp__workspaces", "{}", "wsp runs cloud machines called workspaces, forked in seconds")).toBe("Use the wsp tools: workspaces");
-    expect(permissionAskLine("mcp__wsp__thread_new", "{}")).toBe("Use the wsp tools: thread new");
+    expect(permissionAskLine("mcp__wsp__run", "{}")).toBe("Use the wsp tools: run");
     expect(permissionPromptWords("mcp__wsp__workspaces", "{}", "wsp runs cloud machines").code).toBeUndefined();
   });
 
@@ -1589,6 +1606,101 @@ describe("the words a relayed permission prompt shows", () => {
     expect(permissionOutcomeLine("cancelled", mode)).toBe("Cancelled with the turn");
   });
 
+  it("reads a call that asks the person as the question it is, with one answer per choice and no consent to give", () => {
+    const input = JSON.stringify({
+      questions: [
+        {
+          question: "This working directory is not a repository. What should I do?",
+          header: "Directory",
+          options: [
+            { label: "Clone it", description: "Fetch the remote into this folder." },
+            { label: "Start fresh", description: "Run git init here." },
+            { label: "Stop", description: "Do nothing and wait." },
+          ],
+          multiSelect: false,
+        },
+      ],
+    });
+    const asked = askedQuestions(QUESTION_TOOL, input)!;
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.header).toBe("Directory");
+    expect(asked[0]!.question).toBe("This working directory is not a repository. What should I do?");
+    expect(asked[0]!.multiSelect).toBe(false);
+    expect(asked[0]!.options.map(o => [o.label, o.description])).toEqual([
+      ["Clone it", "Fetch the remote into this folder."],
+      ["Start fresh", "Run git init here."],
+      ["Stop", "Do nothing and wait."],
+    ]);
+    // Three choices, three options on the wire, every one an answer: nothing here offers to allow or refuse a call
+    // that only asks.
+    const options = questionOptions(QUESTION_TOOL, input);
+    expect(options).toHaveLength(3);
+    expect(options.map(o => o.label)).toEqual(["Clone it", "Start fresh", "Stop"]);
+    expect(new Set(options.map(o => o.effect))).toEqual(new Set(["answer"]));
+    expect(options.map(o => o.id)).toEqual([...new Set(options.map(o => o.id))]);
+    // The whole prompt is the question; no raw input is left anywhere on it.
+    const words = permissionPromptWords(QUESTION_TOOL, input);
+    expect(words.questions).toEqual(asked);
+    expect(words.rest).toBe("");
+    expect(words.body).toBeUndefined();
+    expect(words.lead).toBe("This working directory is not a repository. What should I do?");
+    // The call itself reads as the question too: the tool's own name is no word a person knows.
+    expect(toolActivityLine(QUESTION_TOOL, input)).toBe("asked: This working directory is not a repository. What should I do?");
+    expect(toolActivityLine(QUESTION_TOOL, input)).not.toContain(QUESTION_TOOL);
+    // And the transcript's own row for it reads the same way: words a person knows, then the question under them.
+    const facts = toolCallFacts(QUESTION_TOOL, input);
+    expect(facts.title).toBe("Asked you");
+    // The prompt under that row is the question, whole, so the row itself repeats none of it.
+    expect(facts.detail).toBeUndefined();
+    // Every tool a person already knows the word for keeps the harness's own name.
+    expect(toolCallFacts("Bash", JSON.stringify({ command: "ls" })).title).toBeUndefined();
+    for (const raw of ["multiSelect", "questions:", "{", "}"]) expect(words.lead).not.toContain(raw);
+    // Every other kind of call keeps its own words and carries no questions.
+    expect(permissionPromptWords("Bash", JSON.stringify({ command: "ls" })).questions).toBeUndefined();
+    expect(askedQuestions("Bash", JSON.stringify({ command: "ls" }))).toBeUndefined();
+    expect(questionOptions("Bash", JSON.stringify({ command: "ls" }))).toEqual([]);
+  });
+
+  it("turns a pick into the answer the harness reads off the call's own input, one label or the several ticked", () => {
+    const one = JSON.stringify({
+      questions: [{ question: "Tabs or spaces?", header: "Indent", options: [{ label: "Tabs" }, { label: "Spaces" }], multiSelect: false }],
+    });
+    const options = questionOptions(QUESTION_TOOL, one);
+    const spaces = options[1]!.id;
+    expect(questionAnswerInput(QUESTION_TOOL, one, [spaces])).toMatchObject({ answers: { "Tabs or spaces?": "Spaces" } });
+    // The call's own fields ride back with it: the harness matches the answer to the question it asked.
+    expect(questionAnswerInput(QUESTION_TOOL, one, [spaces])!["questions"]).toEqual(JSON.parse(one).questions);
+    // One pick closes one prompt, so a question that takes several answers sends them as one id.
+    const many = JSON.stringify({
+      questions: [{ question: "Which checks?", header: "Checks", options: [{ label: "Types" }, { label: "Tests" }, { label: "Lint" }], multiSelect: true }],
+    });
+    const picks = questionOptions(QUESTION_TOOL, many);
+    const both = pickedOptionId([picks[0]!.id, picks[2]!.id]);
+    expect(pickedOptions(picks, both)!.map(o => o.label)).toEqual(["Types", "Lint"]);
+    expect(questionAnswerInput(QUESTION_TOOL, many, [picks[0]!.id, picks[2]!.id])).toMatchObject({ answers: { "Which checks?": ["Types", "Lint"] } });
+    // A pick naming anything this prompt does not carry names nothing at all.
+    expect(pickedOptions(picks, "q9:o9")).toBeUndefined();
+    expect(pickedOptions(picks, pickedOptionId([picks[0]!.id, "q9:o9"]))).toBeUndefined();
+    // An ordinary prompt's own ids still resolve through the one road every pick takes.
+    const plain = [{ id: "allow", label: "Allow", effect: "allow" as const }];
+    expect(pickedOptions(plain, "allow")!.map(o => o.id)).toEqual(["allow"]);
+    // A closed question says what was picked, since "Allowed" says nothing about an answer.
+    expect(permissionOutcomeLine("allowed", { label: "Types, Lint", effect: "answer" })).toBe("You answered: Types, Lint");
+  });
+
+  it("shows nobody a tool result the harness marked its own note to the agent, and titles a launch by its task", () => {
+    const note = "Async agent launched successfully. (This tool result is internal metadata, never quote or paste any part of it, including the agentId below, into a user-facing reply.)\nagentId: a057760";
+    expect(internalToolResult(note)).toBe(true);
+    expect(toolResultLine(note)).toBeUndefined();
+    // What a person may read is untouched.
+    expect(internalToolResult("acpi\nadduser.conf")).toBe(false);
+    expect(toolResultLine("acpi\nadduser.conf")).toBe("acpi");
+    // The fold's own line says what was launched, off the call that launched it.
+    expect(subagentTaskLine(JSON.stringify({ description: "count alpha files", prompt: "run ls" }))).toBe("count alpha files");
+    expect(subagentTaskLine(JSON.stringify({ prompt: "run ls" }))).toBeUndefined();
+    expect(subagentAskerLine("count alpha files")).toBe("count alpha files asks");
+  });
+
   it("has one deny line, the person's own, and it points the agent at no other access mode", () => {
     expect(PERMISSION_DENIED_LINE).toBe("the person denied this in the chat");
     for (const word of ["access", "bypass", "mode", "start the thread"]) expect(PERMISSION_DENIED_LINE).not.toContain(word);
@@ -1607,14 +1719,22 @@ describe("the words a relayed permission prompt shows", () => {
     expect(permissionModeOptionLabel("Accept edits")).toBe("Allow, then Accept edits");
   });
 
-  it("a pick the running turn's harness would not take says when it lands, in the picker's own words for the mode", () => {
-    const line = accessFromNextMessage("Bypass on this computer");
-    expect(line).toBe("Bypass on this computer from your next message");
-    // It says what happens, not that something failed: the pick is kept either way.
-    expect(line).not.toMatch(/could not|failed|unsupported/);
-    // The slot is one line that truncates from the right, and the longest label this can carry is the one that
-    // names the machine; the render test measures the paint, this holds the budget the measurement was against.
-    expect(line.length).toBeLessThan(54);
+  it("the access menu says what a pick does to the turn running now, before the pick is made", () => {
+    expect(accessReachLine(true)).toBe("Applies to the turn running now");
+    expect(accessReachLine(false)).toBe("Applies from your next message");
+    // Said of the pick, not of a failure: the line stands over the list before anything has been picked.
+    for (const moves of [true, false]) expect(accessReachLine(moves)).not.toMatch(/could not|failed|unsupported/);
+  });
+
+  it("a pick a harness said it would take and then refused is a refusal in two halves, inside the slot's one line", () => {
+    expect(ACCESS_REFUSED_WORDS.said).toBe("The turn refused it.");
+    expect(ACCESS_REFUSED_WORDS.fix).toBe("Your next message carries it.");
+    expect(ACCESS_REFUSED_LINE).toBe(`${ACCESS_REFUSED_WORDS.said} ${ACCESS_REFUSED_WORDS.fix}`);
+    // Both halves: what happened, then what to do about it, which is the shape every refusal in this app has.
+    expect(ACCESS_REFUSED_WORDS.fix).toMatch(/next message/);
+    // The slot is one line that truncates from the right; the render test measures the paint, this holds the budget
+    // the measurement was against, so the half carrying the answer is never the half that is cut.
+    expect(ACCESS_REFUSED_LINE.length).toBeLessThan(54);
   });
 });
 

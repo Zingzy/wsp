@@ -3,7 +3,7 @@
 // app's own computer first, every saved host with the current one marked, the
 // connect row, and the disconnect row for the host the window is on.
 import { describe, expect, it } from "vitest";
-import { HOST_WORDS, hereWord, hostMenuAction, hostsMenuItems, placeStateWord, placeWorkspacesCell, shellVersionNotice, type HostsView, type PlaceView } from "../src/index.js";
+import { HOST_WORDS, absentComputer, awayMsOf, hereWord, hostMenuAction, hostsMenuItems, placeWorkspacesCell, shellVersionNotice, type HostsView, type PlaceView } from "../src/index.js";
 
 const VIEW: HostsView = {
   here: "This Mac",
@@ -87,21 +87,35 @@ describe("the two rows a computer that joined another wsp adds", () => {
 });
 
 describe("what the Where agents run table says about a computer", () => {
-  const view = (over: Partial<PlaceView> = {}): PlaceView => ({ id: "p_1", kind: "computer", name: "old-macbook", default: false, present: true, docker: true, workspaceId: "ws_1", ...over });
+  const view = (over: Partial<PlaceView> = {}): PlaceView => ({ id: "p_1", kind: "computer", name: "old-macbook", default: false, present: true, docker: true, takesForks: true, workspaceId: "ws_1", ...over });
   const now = Date.parse("2026-09-12T12:00:00.000Z");
 
-  it("says nothing while the computer holds its link, and how long it has been away when it does not", () => {
-    expect(placeStateWord(view(), now)).toBe("");
-    expect(placeStateWord(view({ present: false, lastSeenAt: "2026-09-12T10:00:00.000Z" }), now)).toBe("offline · 2 h");
-    expect(placeStateWord(view({ present: false, lastSeenAt: "2026-09-12T11:48:00.000Z" }), now)).toBe("offline · 12 min");
-    expect(placeStateWord(view({ present: false }), now)).toBe("offline");
+  it("holds one word for the silence in the table's own slot, and dates it only where there is room", () => {
+    const reading = (over: Partial<PlaceView>) => absentComputer("old-macbook", awayMsOf(view(over), now));
+    // The slot stands beside three fact columns, so it takes the word alone; the figure is on the row's title,
+    // in the detail's Answered row, and on the sidebar row's third line, which has room for it.
+    for (const over of [{ lastSeenAt: "2026-09-12T10:00:00.000Z" }, { lastSeenAt: "2026-09-12T11:48:00.000Z" }, {}]) {
+      expect(reading(over).away).toBe("no answer");
+    }
+    expect(reading({ lastSeenAt: "2026-09-12T10:00:00.000Z" }).line).toBe("no answer 2 h · is it on?");
+    expect(reading({ lastSeenAt: "2026-09-12T11:48:00.000Z" }).line).toBe("no answer 12 min · is it on?");
+    expect(reading({}).line).toBe("no answer · is it on?");
   });
 
-  it("counts the workspaces on it and names the one thing that changes what may go there", () => {
-    expect(placeWorkspacesCell(view())).toBe("1");
-    expect(placeWorkspacesCell(view({ docker: false }))).toBe("1 · agents only");
-    expect(placeWorkspacesCell(view({ present: false }))).toBe("1 · not answering");
-    expect(placeWorkspacesCell(view({ workspaceId: undefined }))).toBe("0");
+  it("says the count it is given and names the one thing that changes what may go there, never a second word for the silence", () => {
+    expect(placeWorkspacesCell(view(), 1)).toBe("1");
+    expect(placeWorkspacesCell(view({ docker: false }), 1)).toBe("1 · agents only");
+    expect(placeWorkspacesCell(view({ present: false }), 1)).toBe("1");
+    expect(placeWorkspacesCell(view({ present: false, docker: false }), 1)).toBe("1 · agents only");
+    expect(placeWorkspacesCell(view({ docker: false }), 0)).toBe("0 · agents only");
+  });
+
+  it("reads the count off the list it is handed, never off the workspace a join recorded on the row", () => {
+    // This computer's own workspace and a provider's forks are on no row, so a cell read off the row said 0 for
+    // both: the count is the caller's and the row only says what kind of place it is about.
+    expect(placeWorkspacesCell({ id: "here", kind: "computer", name: "here", default: true, docker: true }, 1)).toBe("1");
+    expect(placeWorkspacesCell({ id: "box", kind: "provider", name: "box", default: false }, 2)).toBe("2");
+    expect(placeWorkspacesCell(view({ workspaceId: undefined }), 1)).toBe("1");
   });
 });
 

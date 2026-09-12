@@ -30,7 +30,6 @@ import { Label } from "../components/ui/label.js";
 import { Radio, RadioGroup } from "../components/ui/radio-group.js";
 import { Select, SelectButton, SelectItem, SelectPopup, SelectValue } from "../components/ui/select.js";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { cn } from "../lib/utils.js";
 import { FACT } from "../settings/format.js";
 
@@ -57,7 +56,7 @@ export function NewWorkspaceDialog({
   sizes: readonly MachineSizeOffer[];
   /** The image's own size, the row checked until the person picks; null while unknown or when no image says. */
   goldenSize: WorkspaceSize | null;
-  /** Why there is nothing to fork yet, which holds the keycap and rides its tooltip; null when the fork can go ahead. */
+  /** Why there is nothing to fork yet, which holds the keycap and stands in the caption; null when the fork can go ahead. */
   refusal: string | null;
   /** `where` is the row the person picked, by its id; `size` is the row they picked under it. */
   onCreate: (name: string, where?: string, size?: WorkspaceSize) => void;
@@ -74,12 +73,14 @@ export function NewWorkspaceDialog({
   const offers = where !== undefined && isProviderPlace(where) ? sizes : [];
   const checked = picked ?? (goldenSize !== null && offeredSize(offers, goldenSize) ? goldenSize : null);
   const caption = where === undefined ? null : whereCaption(where, copyOn(copies, where));
-  // In the order a person meets them: nowhere to put one at all, then the image that is not built, then the name
-  // they have not typed, then the row that is full. Each is the reason Create is held and its tooltip.
-  const held =
-    where === undefined ? WHERE_PICK_WORDS.nowhere : refusal !== null ? refusal : trimmed.length === 0 ? WHERE_PICK_WORDS.nameFirst : placeIsFull(where) ? caption : null;
+  // In the order a person meets them: the image that is not built, then the name they have not typed, then the row
+  // that is full. Each is read in the caption under Where, since this dialog waits on a field with no slot of its
+  // own. With nowhere to put a workspace there is no caption to write in and no row to create on: the two notes
+  // under the label are the reason, and Create is held on that alone.
+  const reason = refusal !== null ? refusal : trimmed.length === 0 ? WHERE_PICK_WORDS.nameFirst : where !== undefined && placeIsFull(where) ? caption : null;
+  const held = where === undefined || reason !== null;
   const submit = (): void => {
-    if (held !== null || where === undefined) return;
+    if (held || where === undefined) return;
     // Only a row that offers sizes carries one: a size picked for the provider and then a pick of a computer would
     // otherwise ask that computer for a shape it never offered.
     onCreate(trimmed, where.id, offers.length === 0 ? undefined : (picked ?? undefined));
@@ -127,7 +128,7 @@ export function NewWorkspaceDialog({
               {where === undefined ? (
                 <>
                   <p className="text-[13px] text-muted-foreground" data-k="nowhere-here">
-                    {WHERE_PICK_WORDS.hereIsTheOne}
+                    {WHERE_PICK_WORDS.nowhereYet}
                   </p>
                   <p className="text-[13px] text-muted-foreground" data-k="nowhere-add">
                     {WHERE_PICK_WORDS.addOne}
@@ -137,7 +138,7 @@ export function NewWorkspaceDialog({
                 <>
                   <WherePick segments={segments} checked={where} onPick={setPickedWhere} />
                   <span className={cn(FACT, "min-h-4")} data-k="where-caption">
-                    {caption}
+                    {reason ?? caption}
                   </span>
                   {offers.length > 0 && (
                     <RadioGroup
@@ -166,28 +167,16 @@ export function NewWorkspaceDialog({
             <Button type="button" variant="outline" onClick={onCancel}>
               Cancel
             </Button>
+            {/* With nowhere to put a workspace, Add a computer is the one road forward, so it is the loud one and
+                Create stands held beside it. */}
             {where === undefined && (
-              <Button type="button" variant="outline" data-k="add-computer" onClick={onAddComputer}>
+              <Button type="button" data-k="add-computer" onClick={onAddComputer}>
                 {PLACES_WORDS.addComputer}
               </Button>
             )}
-            {held === null ? (
-              <Button type="submit" data-k="create">
-                Create
-              </Button>
-            ) : (
-              // A disabled control cannot be hovered, so its reason rides on a wrapper the tooltip reads. The
-              // wrapper is a flex item of the footer, which stacks its controls full width on a phone, so both it
-              // and the button inside it take that width: a held keycap stands where the live one stands.
-              <Tooltip>
-                <TooltipTrigger data-k="create-reason" render={<span className="flex w-full sm:w-auto" />}>
-                  <Button type="submit" data-k="create" className="w-full sm:w-auto" disabled>
-                    Create
-                  </Button>
-                </TooltipTrigger>
-                <TooltipPopup side="top">{held}</TooltipPopup>
-              </Tooltip>
-            )}
+            <Button type="submit" data-k="create" held={held}>
+              Create
+            </Button>
           </DialogFooter>
         </form>
       </DialogPopup>

@@ -19,7 +19,9 @@
 // a turn already running keeps its flags and shows them meanwhile. The access pick is
 // the exception: it is remembered on the host's own record, so the next thread
 // here starts at it whichever client or CLI opens it, and where the harness
-// takes a mode change mid-turn it reaches the turn in front of the person too.
+// takes a mode change mid-turn it reaches the turn in front of the person too,
+// the prompt it is stopped on included; the menu says which of the two a pick
+// will do while a turn runs, over the list, before the pick is made.
 // The project pick exists only on a workspace holding projects and only while
 // the thread is still to be opened: it reads the runtime's default folder rule
 // off the record, its menu is the workspace's projects and other folder, which
@@ -28,7 +30,7 @@
 import { BrainIcon, ChevronDownIcon, CircleSlashIcon, FolderIcon, FolderOpenIcon, HandIcon, LockIcon, LockOpenIcon, PenLineIcon, PencilRulerIcon, ShieldIcon, SparklesIcon, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DEFAULT_AGENT } from "@wsp/catalog";
-import { accessFromNextMessage, contextWindowsFor, effortsFor, type HarnessCatalog, type HarnessModel, type HarnessOption, type WorkspaceProject } from "@wsp/protocol";
+import { ACCESS_REFUSED_LINE, accessReachLine, contextWindowsFor, effortsFor, movesRunningAccess, type HarnessCatalog, type HarnessModel, type HarnessOption, type WorkspaceProject } from "@wsp/protocol";
 import { baseName } from "../../files/entries";
 import { useChosenFolder, useDefaultProject, useProjects, useRootStore } from "../../files/root";
 import { useHarnessCatalog, useHarnessCatalogs, useLatestSession, useStore, useThreadSessions, useWorkspace } from "../../protocol/store";
@@ -197,37 +199,45 @@ export interface RunningTurn {
 }
 
 /** The one road an access pick takes. It goes onto the host's record, where the next thread in this workspace reads
- * it whoever opens it, and into the turn in front of the person when one runs: Claude Code moves a running turn to
- * another mode over its control channel, and a harness that takes no such change answers unsupported. `line` is what
- * the composer says then, and it stands only while the turn the pick missed is still the running one. */
-export function useAccessPick(workspaceId: string, running: RunningTurn | null, threadKey: string): { pick: (mode: string, label: string) => void; line: string | null } {
+ * it whoever opens it, and into the turn in front of the person when one runs, where the harness's own row says it
+ * takes a mode change mid-turn (`movesAccess`, which is what the menu says over its list before the pick). `line`
+ * is the refusal that stands under the box when a row saying so came back refused all the same: nothing is said for
+ * a harness whose row already said the pick waits, since the person read that before they picked, and nothing for a
+ * turn that simply ended. It stands only while the turn it is about is still the running one. */
+export function useAccessPick(workspaceId: string, running: RunningTurn | null, threadKey: string, movesRunningTurn: boolean): { pick: (mode: string) => void; line: string | null } {
   const api = useStore(s => s.api);
   const setPreferences = useStore(s => s.setPreferences);
   const stamp = useComposerOptionsStore(s => s.pick);
-  const [note, setNote] = useState<{ turnId: string; line: string } | null>(null);
+  const [note, setNote] = useState<{ turnId: string } | null>(null);
   const pick = useCallback(
-    (mode: string, label: string) => {
+    (mode: string) => {
       setNote(null);
       void setPreferences({ access: { [workspaceId]: mode } });
       // The mode itself lives on the host's record, which holds one per workspace; the thread it was picked on is
       // kept in the browser beside the other picks, so it paints this thread rather than every thread here.
       stamp(workspaceId, "permissionMode", mode, threadKey);
-      if (running === null) return;
-      const missed = (): void => setNote({ turnId: running.turnId, line: accessFromNextMessage(label) });
-      if (api?.setSessionAccess === undefined) {
-        missed();
-        return;
-      }
+      if (running === null || !movesRunningTurn || api?.setSessionAccess === undefined) return;
       void api.setSessionAccess(running.sessionId, mode).then(outcome => {
-        if (outcome !== "set") missed();
-      }, missed);
+        if (outcome === "unsupported") setNote({ turnId: running.turnId });
+      }, () => {});
     },
-    [api, running, setPreferences, stamp, threadKey, workspaceId],
+    [api, movesRunningTurn, running, setPreferences, stamp, threadKey, workspaceId],
   );
-  return { pick, line: note !== null && note.turnId === running?.turnId ? note.line : null };
+  return { pick, line: note !== null && note.turnId === running?.turnId ? ACCESS_REFUSED_LINE : null };
 }
 
-function AccessPicker({ modes, value, onPick }: { modes: ReadonlyArray<HarnessOption>; value: string | null; onPick: (mode: string, label: string) => void }) {
+function AccessPicker({
+  modes,
+  value,
+  note,
+  onPick,
+}: {
+  modes: ReadonlyArray<HarnessOption>;
+  value: string | null;
+  /** What a pick does to the turn running now, over the list; nothing while no turn runs and the pick only starts one. */
+  note: string | null;
+  onPick: (mode: string) => void;
+}) {
   const current = modes.find(o => o.value === value);
   const Icon = (value !== null ? ACCESS_ICONS[value] : undefined) ?? ShieldIcon;
   const label = current?.label ?? "Access";
@@ -245,15 +255,18 @@ function AccessPicker({ modes, value, onPick }: { modes: ReadonlyArray<HarnessOp
         <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
       </MenuTrigger>
       <MenuPopup align="start" side="top" className="w-72">
-        <MenuRadioGroup
-          value={value}
-          onValueChange={next => {
-            const mode = modes.find(o => o.value === next);
-            if (mode !== undefined) onPick(mode.value, mode.label);
-          }}
-        >
-          <OptionRows options={modes} />
-        </MenuRadioGroup>
+        <MenuGroup>
+          {note !== null ? <MenuGroupLabel data-composer-access-reach>{note}</MenuGroupLabel> : null}
+          <MenuRadioGroup
+            value={value}
+            onValueChange={next => {
+              const mode = modes.find(o => o.value === next);
+              if (mode !== undefined) onPick(mode.value);
+            }}
+          >
+            <OptionRows options={modes} />
+          </MenuRadioGroup>
+        </MenuGroup>
       </MenuPopup>
     </Menu>
   );
@@ -326,7 +339,7 @@ export function ComposerOptionPickers({
 }: {
   workspaceId: string;
   thread: ChatThreadHandle;
-  onPickAccess: (mode: string, label: string) => void;
+  onPickAccess: (mode: string) => void;
   /** Opens the folder picker under the box, where the project menu's other folder row sends the pick. */
   onOtherFolder: () => void;
 }) {
@@ -354,7 +367,9 @@ export function ComposerOptionPickers({
         }}
       />
       {efforts.length > 0 || contextWindows.length > 0 ? <EffortPicker workspaceId={workspaceId} threadKey={thread.threadKey} efforts={efforts} contextWindows={contextWindows} picks={picks} /> : null}
-      {catalog.permissionModes.length > 0 ? <AccessPicker modes={catalog.permissionModes} value={picks.permissionMode} onPick={onPickAccess} /> : null}
+      {catalog.permissionModes.length > 0 ? (
+        <AccessPicker modes={catalog.permissionModes} value={picks.permissionMode} note={thread.view.running ? accessReachLine(movesRunningAccess(catalog)) : null} onPick={onPickAccess} />
+      ) : null}
       {projects.length > 0 && canPickFolder(thread) ? <ProjectPicker workspaceId={workspaceId} projects={projects} onOtherFolder={onOtherFolder} /> : null}
     </>
   );

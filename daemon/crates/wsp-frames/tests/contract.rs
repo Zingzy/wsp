@@ -12,8 +12,8 @@ use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
     numbers, words, BackendFacts, DaemonAuthRequest, DaemonErrorResponse, DaemonEvent, DaemonRequest, MachineAnswersReply,
-    MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachineShapeReply, MachineStateReply, PlaceAuthRequest,
-    PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
+    MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply, MachineShapeReply, MachineStateReply,
+    PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
 };
 
 fn fixtures() -> PathBuf {
@@ -186,6 +186,9 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
                 "MachineAnswersReply" => {
                     round_trip::<MachineAnswersReply>(&sample, &at);
                 }
+                "MachineReachReply" => {
+                    round_trip::<MachineReachReply>(&sample, &at);
+                }
                 "DaemonErrorResponse" => {
                     round_trip::<DaemonErrorResponse>(&sample, &at);
                 }
@@ -203,6 +206,7 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
         "MachineExecReply",
         "MachineHandleReply",
         "MachineListReply",
+        "MachineReachReply",
         "MachineShapeReply",
         "MachineStateReply",
     ];

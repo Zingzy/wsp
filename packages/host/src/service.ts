@@ -307,6 +307,10 @@ export async function serviceReading(manager: ServiceManager | undefined, at: Se
 
 const POLL_MS = 200;
 
+/** A load, a stop or a start is a process coming up or going down on this computer, not a network call. One number
+ * for every road that waits on one, so a service and a verb's own child are given the same patience. */
+export const SERVICE_WAIT_MS = 20_000;
+
 const wait = (ms: number): Promise<void> => new Promise(done => void setTimeout(done, ms));
 
 /** Whether the host a lock names is answering where the lock says it is. The lock is taken before the host binds

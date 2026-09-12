@@ -4,7 +4,7 @@
 // background, dashed grid, mono ticks on both axes, the newest point dotted.
 // Hovering reads one instant under the box.
 import { useId, useState, type MouseEvent as ReactMouseEvent } from "react";
-import type { WorkspaceCostEvent } from "@wsp/protocol";
+import { fmtCost, type WorkspaceCostEvent } from "@wsp/protocol";
 import { cn } from "../../lib/utils.js";
 import { money } from "./format.js";
 import { accruedAt, plotPoints, rateAt, smoothPath, timeLabel, USAGE_RANGES, usageSpan, xTicks, yAxis, type UsageRange } from "./usage.js";
@@ -59,7 +59,7 @@ export function UsageChart({ series, range }: { series: WorkspaceCostEvent[]; ra
   const overRate = hover !== null ? rateAt(series, hover) : null;
   const life = { start: Date.parse(first.at), end: span.end };
   const readout =
-    hover !== null && overUsd !== null && overRate !== null ? `${money(overUsd)} · ${money(overRate, 3)}/hr · ${timeLabel(hover, span)}` : `tracked since ${timeLabel(life.start, life)}`;
+    hover !== null && overUsd !== null && overRate !== null ? `${fmtCost(overUsd)} · ${money(overRate, 3)}/hr · ${timeLabel(hover, span)}` : `tracked since ${timeLabel(life.start, life)}`;
   const ticks = xTicks(span);
 
   const track = (e: ReactMouseEvent<SVGSVGElement>): void => {

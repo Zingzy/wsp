@@ -426,3 +426,23 @@ pub struct MachineShapeReply {
 pub struct MachineAnswersReply {
     pub answers: bool,
 }
+
+/// Where a host dials one port of a machine: a URL, the token the route wants and when it expires. A route on a
+/// place's own loopback carries no token and never expires, which the two empty values say.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewReach {
+    pub url: String,
+    pub token: String,
+    pub expires_at: u64,
+}
+
+impl PreviewReach {
+    /// What a reach that never expires carries, node's Number.MAX_SAFE_INTEGER, as the Docker backend answers it.
+    pub const NEVER: u64 = 9_007_199_254_740_991;
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MachineReachReply {
+    pub reach: PreviewReach,
+}

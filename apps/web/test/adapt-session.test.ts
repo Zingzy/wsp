@@ -633,3 +633,162 @@ describe("deriveSession: a turn refused before it reached a machine", () => {
     ]);
   });
 });
+
+describe("subagents an agent launched inside its own turn", () => {
+  const sc = { workspaceId: "ws_t", sessionId: "sess_sub", turnId: "turn_sub" };
+  const launch = (id: string, description: string): SessionEvent => ({
+    type: "session.delta", ...sc, at: 1_000, kind: "tool_use", toolName: "Agent", toolUseId: id,
+    text: JSON.stringify({ description, prompt: "go", subagent_type: "general-purpose" }),
+  });
+  const child = (parent: string, text: string, at: number): SessionEvent => ({
+    type: "session.delta", ...sc, at, kind: "text", text, parentToolUseId: parent,
+  });
+  const opening: SessionEvent[] = [{ type: "session.start", ...sc, at: 0, prompt: "fan out" }];
+
+  it("gathers two subagents' interleaved lines into two folds, titled by their tasks, and never onto one line", () => {
+    const model = deriveSession([
+      ...opening,
+      { type: "session.delta", ...sc, at: 500, kind: "text", text: "Launching two." },
+      launch("toolu_a", "count alpha files"),
+      launch("toolu_b", "read beta hostname"),
+      // The harness streams both runs on the parent's session, one line from each in turn.
+      child("toolu_a", "I'll verify the repo contents myself first.", 1_100),
+      child("toolu_b", "Let me check history and search for anything API-shaped.", 1_200),
+      child("toolu_a", " Now the listing.", 1_300),
+      {
+        type: "session.delta", ...sc, at: 1_400, kind: "tool_use", toolName: "Bash", toolUseId: "toolu_a1",
+        parentToolUseId: "toolu_a", text: JSON.stringify({ command: "ls /etc" }),
+      },
+      { type: "session.delta", ...sc, at: 1_500, kind: "tool_result", toolUseId: "toolu_a1", parentToolUseId: "toolu_a", text: "acpi" },
+    ]);
+
+    const folds = model.timeline.filter(e => e.kind === "subagent");
+    expect(folds).toHaveLength(2);
+    const runs = folds.map(f => (f.kind === "subagent" ? f.subagent : null)!);
+    expect(runs.map(r => r.title)).toEqual(["count alpha files", "read beta hostname"]);
+    expect(runs.map(r => r.parentToolUseId)).toEqual(["toolu_a", "toolu_b"]);
+    // Each fold holds only its own agent's lines; nothing from one is glued to the other.
+    expect(runs[0]!.lines.map(l => l.label)).toEqual(["I'll verify the repo contents myself first.", " Now the listing.", "$ ls /etc"]);
+    expect(runs[1]!.lines.map(l => l.label)).toEqual(["Let me check history and search for anything API-shaped."]);
+    // The subagent's own tool call carries what it answered, on the one line that call owns.
+    expect(runs[0]!.lines[2]).toMatchObject({ kind: "tool", status: "completed", detail: "acpi" });
+    // The parent said one thing, and no child's sentence reached it.
+    const said = model.messages.filter(m => m.role === "assistant").map(m => m.text);
+    expect(said).toEqual(["Launching two."]);
+    for (const text of said) expect(text).not.toContain("I'll verify");
+    // Two folds, drawn as two rows in the order they were launched.
+    const rows = deriveMessagesTimelineRows({ timelineEntries: model.timeline, turns: model.turns, isWorking: true, activeTurnStartedAt: null });
+    expect(rows.filter(r => r.kind === "subagent").map(r => r.id)).toEqual(["subagent:toolu_a", "subagent:toolu_b"]);
+  });
+
+  it("shows nobody the note the harness wrote for the agent, and does not end the fold on it", () => {
+    const note = "Async agent launched successfully. (This tool result is internal metadata, never quote or paste any part of it, including the agentId below, into a user-facing reply.)\nagentId: a057760";
+    const model = deriveSession([
+      ...opening,
+      launch("toolu_a", "count alpha files"),
+      child("toolu_a", "done", 1_100),
+      { type: "session.delta", ...sc, at: 2_000, kind: "tool_result", toolUseId: "toolu_a", text: note },
+    ]);
+    const run = model.timeline.flatMap(e => (e.kind === "subagent" ? [e.subagent] : []));
+    expect(run).toHaveLength(1);
+    // The note says the agent was launched, not that it finished, so the fold is still the run's own.
+    expect(run[0]!.state).toBe("running");
+    expect(run[0]!.endedAt).toBeNull();
+    // The note is not a line of the run; a subagent's own answer would have been.
+    expect(run[0]!.lines.map(l => l.label)).toEqual(["done"]);
+    // The fold's own line says what was launched; the harness's note is nowhere on the screen.
+    expect(run[0]!.title).toBe("count alpha files");
+    for (const row of [...model.workEntries, ...run[0]!.lines]) {
+      expect(JSON.stringify(row)).not.toContain("internal metadata");
+      expect(JSON.stringify(row)).not.toContain("agentId");
+    }
+    expect(JSON.stringify(model.timeline)).not.toContain("internal metadata");
+  });
+
+  it("puts a subagent's own answer inside its fold as the run's last line", () => {
+    const model = deriveSession([
+      ...opening,
+      launch("toolu_a", "count alpha files"),
+      child("toolu_a", "listing now", 1_100),
+      { type: "session.delta", ...sc, at: 2_000, kind: "tool_result", toolUseId: "toolu_a", text: "acpi, adduser.conf, alsa" },
+    ]);
+    const run = model.timeline.flatMap(e => (e.kind === "subagent" ? [e.subagent] : []))[0]!;
+    expect(run.lines.map(l => l.label)).toEqual(["listing now", "acpi, adduser.conf, alsa"]);
+    expect(run.state).toBe("done");
+    // The answer stays inside the fold; it is no row of the parent's.
+    expect(model.workEntries.some(w => (w.detail ?? "").includes("adduser.conf"))).toBe(false);
+  });
+
+  it("ends the fold whatever order the frames come in: a launch answered before its first line still reads done", () => {
+    // A capped transcript can start with the answer already on the wire, before the agent's own first line.
+    const model = deriveSession([
+      ...opening,
+      launch("toolu_a", "count alpha files"),
+      { type: "session.delta", ...sc, at: 1_050, kind: "tool_result", toolUseId: "toolu_a", text: "18 files under alpha." },
+      child("toolu_a", "listing now", 1_100),
+      { type: "session.done", ...sc, at: 3_000, result: { status: "completed", durationMs: 3_000 } },
+      { type: "session.end", ...sc, at: 3_100, exitCode: 0, sawResult: true },
+    ]);
+    const run = model.timeline.flatMap(e => (e.kind === "subagent" ? [e.subagent] : []))[0]!;
+    expect(run.state).toBe("done");
+    expect(run.endedAt).toBe(new Date(1_050).toISOString());
+    expect(run.lines.map(l => l.label)).toEqual(["listing now"]);
+  });
+
+  it("keeps a background launch running while its agent writes: the note it answered with is not a finish", () => {
+    const note = "Async agent launched successfully. (This tool result is internal metadata, never quote or paste any part of it, including the agentId below, into a user-facing reply.)\nagentId: a057760";
+    // A background launch is answered by the harness's note 80 ms in, and the agent writes for another eight seconds.
+    const running: SessionEvent[] = [
+      ...opening,
+      launch("toolu_a", "check gamma disk"),
+      { type: "session.delta", ...sc, at: 1_080, kind: "tool_result", toolUseId: "toolu_a", text: note },
+      child("toolu_a", "Reading the mounts.", 4_000),
+      child("toolu_a", " Root has 28G free.", 9_000),
+    ];
+    const mid = deriveSession(running).timeline.flatMap(e => (e.kind === "subagent" ? [e.subagent] : []))[0]!;
+    expect(mid.state).toBe("running");
+    expect(mid.endedAt).toBeNull();
+    expect(mid.lines.map(l => l.label)).toEqual(["Reading the mounts.", " Root has 28G free."]);
+    expect(JSON.stringify(mid)).not.toContain("internal metadata");
+    // The turn's own end is what settles it, the way it settles a launch that never answered at all.
+    const ended = deriveSession([
+      ...running,
+      { type: "session.done", ...sc, at: 12_000, result: { status: "completed", durationMs: 12_000 } },
+      { type: "session.end", ...sc, at: 12_100, exitCode: 0, sawResult: true },
+    ]).timeline.flatMap(e => (e.kind === "subagent" ? [e.subagent] : []))[0]!;
+    expect(ended.state).toBe("stopped");
+    expect(ended.endedAt).toBe(new Date(12_000).toISOString());
+  });
+
+  it("settles a fold the turn ended under, so a subagent cut off with its turn leaves no slot reading nothing", () => {
+    const model = deriveSession([
+      ...opening,
+      launch("toolu_a", "count alpha files"),
+      child("toolu_a", "still going", 1_100),
+      { type: "session.done", ...sc, at: 3_000, result: { status: "completed", durationMs: 3_000 } },
+      { type: "session.end", ...sc, at: 3_100, exitCode: 0, sawResult: true },
+    ]);
+    const run = model.timeline.flatMap(e => (e.kind === "subagent" ? [e.subagent] : []))[0]!;
+    expect(run.state).toBe("stopped");
+    expect(run.endedAt).not.toBeNull();
+  });
+
+  it("keeps a subagent's own prompt inside that subagent's fold, and closes it there", () => {
+    const ask: SessionEvent = {
+      type: "session.permission", ...sc, at: 1_200, askId: "ask_child", toolName: "Bash",
+      toolUseId: "toolu_a1", parentToolUseId: "toolu_a", input: '{"command":"ls /etc"}',
+      options: [{ id: "allow", label: "Allow", effect: "allow" }, { id: "deny", label: "Deny", effect: "deny" }],
+    };
+    const events: SessionEvent[] = [...opening, launch("toolu_a", "count alpha files"), child("toolu_a", "checking", 1_100), ask];
+    const open = deriveSession(events);
+    // Not a row of its own in the flat stream: it belongs to the agent that raised it.
+    expect(open.timeline.filter(e => e.kind === "permission")).toEqual([]);
+    const run = open.timeline.flatMap(e => (e.kind === "subagent" ? [e.subagent] : []))[0]!;
+    expect(run.prompts.map(p => p.askId)).toEqual(["ask_child"]);
+    expect(run.prompts[0]!.outcome).toBeNull();
+
+    const closed = deriveSession([...events, { type: "session.permission.closed", ...sc, at: 1_300, askId: "ask_child", outcome: "allowed", optionId: "allow" }]);
+    const after = closed.timeline.flatMap(e => (e.kind === "subagent" ? [e.subagent] : []))[0]!;
+    expect(after.prompts[0]).toMatchObject({ outcome: "allowed", optionId: "allow" });
+  });
+});

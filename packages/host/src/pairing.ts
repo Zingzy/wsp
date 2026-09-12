@@ -76,7 +76,7 @@ export function hostReach(
   };
 }
 
-/** What wsp pair prints: the code, how long it stands, and the addresses to hand the person at the other computer.
+/** What wsp host pair prints: the code, how long it stands, and the addresses to hand the person at the other computer.
  * A host behind a relay leads with the address that works from anywhere, since that is the one to hand over. */
 export function pairLines(code: string, expiresAt: number, now: number, addresses: readonly string[], port: number, publicAt?: string): string[] {
   return [
@@ -84,20 +84,20 @@ export function pairLines(code: string, expiresAt: number, now: number, addresse
     `expires     in ${fmtDuration(Math.max(0, expiresAt - now))}, at ${new Date(expiresAt).toISOString()}`,
     ...(publicAt !== undefined ? [`open        ${relayUrlOf(publicAt)}`] : []),
     ...addresses.map(at => `open        http://${authority(at, port)}`),
-    "The code is spent by the first client that redeems it; wsp devices lists what took one.",
+    "The code is spent by the first client that redeems it; wsp host devices lists what took one.",
   ];
 }
 
-/** The rows wsp devices prints, oldest pairing first. */
+/** The rows wsp host devices prints, oldest pairing first. */
 export function deviceLines(devices: readonly DeviceView[]): string[] {
-  if (devices.length === 0) return ["No computer is paired with this host. Run wsp pair for a code."];
+  if (devices.length === 0) return ["No computer is paired with this host. Run wsp host pair for a code."];
   return table([["DEVICE", "ID", "PAIRED", "LAST SEEN"], ...devices.map(d => [d.name, d.id, d.createdAt, d.lastSeenAt])]);
 }
 
-/** The line a host that binds this computer alone answers wsp pair with: nothing outside can reach it, so a code
+/** The line a host that binds this computer alone answers wsp host pair with: nothing outside can reach it, so a code
  * would open nothing. */
 export function pairOnLoopbackLine(address: string): string {
-  return `wsp pair: this host listens on ${address}, which no other computer can reach, so a pairing code would open nothing. Start it with wsp up --listen <address> first.`;
+  return `wsp host pair: this host listens on ${address}, which no other computer can reach, so a pairing code would open nothing. Start it with wsp up --listen <address> first.`;
 }
 
 interface PairDeps {
@@ -122,8 +122,8 @@ function aimHere(word: string, opts: PairOpts): HostAim {
 }
 
 export async function pairCommand(io: CliIO, opts: PairOpts, args: readonly string[], deps: PairDeps = systemDeps): Promise<number> {
-  if (args.length !== 0) throw usageRefusal("wsp pair takes no positional arguments.", "Run wsp pair on its own; it prints the code and the line to type on the other computer.");
-  const aim = aimHere("pair", opts);
+  if (args.length !== 0) throw usageRefusal("wsp host pair takes no positional arguments.", "Run wsp host pair on its own; it prints the code and the line to type on the other computer.");
+  const aim = aimHere("host pair", opts);
   const lock = servingHost(opts.statePath);
   const address = lock?.address ?? LOOPBACK;
   const client = await deps.dial(opts.statePath, { aim });
@@ -142,15 +142,15 @@ export async function pairCommand(io: CliIO, opts: PairOpts, args: readonly stri
 export async function devicesCommand(io: CliIO, opts: PairOpts, args: readonly string[], deps: PairDeps = systemDeps): Promise<number> {
   const [word, id] = args;
   if (word !== undefined && (word !== "revoke" || id === undefined || args.length !== 2)) {
-    throw usageRefusal("wsp devices takes nothing, or revoke and one device id.", "usage: wsp devices\n       wsp devices revoke <id>");
+    throw usageRefusal("wsp host devices takes nothing, or revoke and one device id.", "usage: wsp host devices\n       wsp host devices revoke <id>");
   }
-  const aim = aimHere("devices", opts);
+  const aim = aimHere("host devices", opts);
   const client = await deps.dial(opts.statePath, { aim });
   try {
     if (word === "revoke") {
       const { revoked } = await client.request<{ revoked: boolean }>("devices.revoke", { deviceId: id });
       if (!revoked) {
-        io.error(`wsp devices revoke: no device ${id!} is paired with this host.`);
+        io.error(`wsp host devices revoke: no device ${id!} is paired with this host.`);
         return 1;
       }
       io.log(`device ${id!} revoked; its token opens nothing and the sockets it held are cut`);

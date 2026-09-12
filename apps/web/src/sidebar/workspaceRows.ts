@@ -4,7 +4,7 @@
 // but for the one hook beside the where word, which reads that word off the
 // store for the surfaces that hold a workspace's id and no snapshot.
 import { agentName } from "@wsp/catalog";
-import { FREE_WORD, fmtSize, isBilling, isLocalWorkspace, kindWords, machineLacksShort, outOfMemoryRowLine, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspaceStateOf, type MemoryReading, type ReachState, type SessionOrigin, type PlaceView, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
+import { FREE_WORD, fmtCost, fmtSize, isBilling, isLocalWorkspace, kindWords, machineLacksShort, outOfMemoryRowLine, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspaceStateOf, type AbsentComputer, type MemoryReading, type ReachState, type SessionOrigin, type PlaceView, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
 import { PLACE_KIND_WORDS, THIS_COMPUTER_WORD, placeName, placeOf } from "../settings/places.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
@@ -44,25 +44,28 @@ export function wakeAskNote(status: WorkspaceStatus | null): string | null {
  * reach, and nothing at all on a kind whose machines serve no daemon, which has none to miss. A daemon that died
  * is said on every kind that has one, since a driven kind's state word reads Unreachable for it, which is also
  * what a machine gone dark reads, and only one of the two is a helper wsp puts back by itself while the machine is
- * fine. A machine with no road to a daemon is said only where the row has no state word to spend on it: nothing
- * wsp drives is built without the road, so a driven row saying it would be saying something that cannot be true. */
+ * fine. A machine with no road to a daemon says only what that machine said it lacks, which is the one thing on
+ * the row a person can act on; the bare fact of a missing daemon is not a line, having no verb in it and naming a
+ * thing a person never installed. */
 export function daemonGoneLine(reach: ReachState | null, kind: WorkspaceKindWords, lacks?: string): string | undefined {
   if (!kind.daemon) return undefined;
   if (reach === "no-daemon") return "no daemon answering";
-  if (reach !== "unsupported" || kind.driven) return undefined;
-  // Why, where the machine said why. It is the one thing on this row a person can act on, and the whole sentence
-  // is on the Machine tab, since the instruction is at the end of it and this line cuts from the right.
-  return lacks === undefined ? "no daemon on it" : machineLacksShort(lacks);
+  if (reach !== "unsupported" || kind.driven || lacks === undefined) return undefined;
+  // The whole sentence is on the Workspace panel, since the instruction is at the end of it and this line cuts
+  // from the right.
+  return machineLacksShort(lacks);
 }
 
-/** The sentences a meta line can carry in place of its counts, in the order a surface draws them: a thread of this
- * workspace stopped on a question first, then what the runtime is doing to the machine's daemon, then a drop with
+/** The sentences a meta line can carry in place of its counts, in the order a surface draws them: the
+ * computer that is not answering first, since nothing else on the row is known while it is, then a thread of this
+ * workspace stopped on a question, then what the runtime is doing to the machine's daemon, then a drop with
  * memory near full, then a daemon that is not there at all, then a nap whose vault was refused. Written once
  * because two surfaces draw them and both have to tell them from a figure: prose takes the ink that reads at AA,
  * the counts beside it keep the whisper. The vault comes last of them: the others are what a person is waiting on
  * now, and this one holds until the next nap. */
-export function metaSentences({ project, outOfMemory }: Pick<WorkspaceMetaInput, "project" | "outOfMemory">): string[] {
+export function metaSentences({ project, absent, outOfMemory }: Pick<WorkspaceMetaInput, "project" | "absent" | "outOfMemory">): string[] {
   return [
+    absent?.line,
     askingNote(project),
     daemonNote(project),
     outOfMemory === undefined ? undefined : outOfMemoryRowLine(outOfMemory),
@@ -73,6 +76,9 @@ export function metaSentences({ project, outOfMemory }: Pick<WorkspaceMetaInput,
 
 export interface WorkspaceMetaInput {
   readonly project: Pick<SidebarProjectSnapshot, "state" | "status" | "workspace" | "reach" | "threads">;
+  /** The one reading of a computer that is not answering; the row's third line is then its own. Absent on a
+   * caller that holds no places list. */
+  readonly absent?: AbsentComputer | null | undefined;
   /** The meter's last tick for this workspace; null before the first. */
   readonly cost: { readonly rateUsdPerHour: number; readonly accruedUsd: number } | null;
   /** The last memory sample from a machine whose link then dropped. */
@@ -81,13 +87,14 @@ export interface WorkspaceMetaInput {
 }
 
 /** The workspace row's third line, one string in one order: what it cost today, the edge note, the nap countdown
- * last. The cost always leads, an honest zero before the meter's first tick, so no row draws
- * a blank line. The row cuts it at its own cap; nothing here decides what to leave out. What the runtime is doing
- * to the machine's daemon, a drop with memory near full, or a daemon that is not there at all takes the whole line
- * while it lasts: it is the one thing on the row a person may be waiting on, and it reads in the ink prose gets. A
+ * last. The cost leads once the meter has ticked; before that the row says nothing about spend rather than a
+ * $0.00 it changes into a real figure a second later. The row cuts it at its own cap; nothing here decides what to
+ * leave out. What the runtime is doing to the machine's daemon, a drop with memory near full, or a daemon that is
+ * not there at all takes the whole line while it lasts, and a computer that is not answering takes it over all of
+ * them: it is the one thing on the row a person may be waiting on, and it reads in the ink prose gets. A
  * machine wsp does not drive spends nothing and naps never, so its line says so in one word. */
-export function workspaceMetaLine({ project, cost, outOfMemory, nowMs }: WorkspaceMetaInput): string {
-  const [sentence] = metaSentences({ project, outOfMemory });
+export function workspaceMetaLine({ project, absent, cost, outOfMemory, nowMs }: WorkspaceMetaInput): string {
+  const [sentence] = metaSentences({ project, absent, outOfMemory });
   if (sentence !== undefined) return sentence;
   return costLine({ project, cost, nowMs });
 }
@@ -98,18 +105,17 @@ export function workspaceMetaLine({ project, cost, outOfMemory, nowMs }: Workspa
  * Rate row rather than crowding out what a person is waiting on. */
 function costLine({ project, cost, nowMs }: Omit<WorkspaceMetaInput, "outOfMemory">): string {
   if (!kindWords(workspaceKind(project.workspace)).driven) return FREE_WORD;
-  return [accruedTodayLabel(cost?.accruedUsd ?? 0), wakeAskNote(project.status), reachNote(project.reach), idleCountdownLabel(project.status, nowMs)]
+  return [accruedTodayLabel(cost?.accruedUsd ?? null), wakeAskNote(project.status), reachNote(project.reach), idleCountdownLabel(project.status, nowMs)]
     .filter((part): part is string => part !== null)
     .join(" · ");
 }
 
 /** What the machine costs, as the row's line and the Spaces header both lead with: free for a machine wsp does not
- * pay for, else what it cost today with the rate while it bills. */
-function spendLine({ project, cost }: Pick<WorkspaceMetaInput, "project" | "cost">): string {
+ * pay for, else what it cost today with the rate while it bills, and nothing at all before the meter has ticked. */
+function spendLine({ project, cost }: Pick<WorkspaceMetaInput, "project" | "cost">): string | null {
   if (!kindWords(workspaceKind(project.workspace)).driven) return FREE_WORD;
-  return [accruedTodayLabel(cost?.accruedUsd ?? 0), isBilling(project.state) ? rateLabel(cost?.rateUsdPerHour ?? project.status?.rateUsdPerHour ?? null) : null]
-    .filter((part): part is string => part !== null)
-    .join(" · ");
+  const parts = [accruedTodayLabel(cost?.accruedUsd ?? null), isBilling(project.state) ? rateLabel(cost?.rateUsdPerHour ?? project.status?.rateUsdPerHour ?? null) : null].filter((part): part is string => part !== null);
+  return parts.length === 0 ? null : parts.join(" · ");
 }
 
 /** What the machine is, the row's second line and one of the Spaces header's: the size its status carries in the
@@ -135,9 +141,11 @@ export function daemonNote(project: Pick<SidebarProjectSnapshot, "status" | "wor
   return project.status !== null ? project.status.daemonNote : project.workspace.daemonNote;
 }
 
-/** What a workspace has cost since the meter's midnight, in cents; the sidebar row and the switcher card read the one rule. */
+/** What a workspace has cost since the meter's midnight, in the one shape every spend figure reads in; the sidebar
+ * row and the switcher card read the one rule. Null before the meter's first tick: a row that paints $0.00 and
+ * changes it a second later has told the person something that was never true. */
 export function accruedTodayLabel(accruedUsd: number | null): string | null {
-  return accruedUsd === null ? null : `$${accruedUsd.toFixed(2)} today`;
+  return accruedUsd === null ? null : `${fmtCost(accruedUsd)} today`;
 }
 
 /** The awake rate as every sidebar surface prints it, to the tenth of a cent; null before the meter's first tick. */
@@ -147,17 +155,20 @@ export const rateLabel = (rateUsdPerHour: number | null): string | null => (rate
  * screen is where a person waits on them: what the runtime is doing to the daemon, a drop with memory near full,
  * then a daemon that is not there at all. Then what the machine is, what it costs, and when it naps. A line nothing
  * is known for is left out rather than drawn half: no size yet means no machine line, as no nap scheduled means no
- * nap line. The cost line leads with the same honest zero the row's does and carries the rate only while the machine
- * bills; a machine wsp does not drive reads free there, as its row does, and naps never. */
-export function spaceHeaderLines({ project, cost, outOfMemory, nowMs }: WorkspaceMetaInput): string[] {
+ * nap line. The cost line waits for the meter's first tick as the row's does and carries the rate only while the
+ * machine bills; a machine wsp does not drive reads free there, as its row does, and naps never. */
+export function spaceHeaderLines({ project, absent, cost, outOfMemory, nowMs }: WorkspaceMetaInput): string[] {
   const nap = kindWords(workspaceKind(project.workspace)).driven ? idleCountdownLabel(project.status, nowMs) : null;
-  const lines: (string | null)[] = [...metaSentences({ project, outOfMemory }), machineLine(project), spendLine({ project, cost }), nap === NO_NAP_SCHEDULED ? null : nap];
+  const lines: (string | null)[] = [...metaSentences({ project, absent, outOfMemory }), machineLine(project), spendLine({ project, cost }), nap === NO_NAP_SCHEDULED ? null : nap];
   return lines.filter((line): line is string => line !== null);
 }
 
 /** The word in the row's state slot: nothing while running, since the dot says it; the state's word otherwise. A
- * machine wsp does not drive has no state of its own to name, so its slot stays empty whatever the reach says. */
-export function stateSlotWord(project: Pick<SidebarProjectSnapshot, "state" | "indicator" | "workspace">): string {
+ * machine wsp does not drive has no state of its own to name, since wsp neither pauses nor wakes it. The one
+ * exception is the computer under it not answering, which is a state of that computer rather than of wsp's
+ * handling of it: a slot that stayed blank there was the row that read nothing beside readings of unreachable. */
+export function stateSlotWord(project: Pick<SidebarProjectSnapshot, "state" | "indicator" | "workspace">, absent?: AbsentComputer | null): string {
+  if (absent != null) return absent.word;
   if (!kindWords(workspaceKind(project.workspace)).driven) return "";
   return project.state === "running" ? "" : project.indicator.label;
 }

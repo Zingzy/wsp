@@ -37,6 +37,7 @@ import {
   fmtDuration,
   fmtSize,
   placeDaemonPaths,
+  workFolderIn,
   hostKeyRefusal,
   isLoopback,
   joinAddressOf,
@@ -48,19 +49,21 @@ import {
 } from "@wsp/protocol";
 import { SshBackend, checkProviderKey, keyCheckLine, parseSshAddress, sshDialsThisComputer, sshMachineName, type KeyCheck, type MachineBackend } from "@wsp/engine";
 import { newPlaceKeyPair, signPlaceBytes, verifyPlaceBytes, type HerePlace, type PlaceInstaller, type PlaceKeyPair, type PlaceWiring } from "@wsp/runtime";
-import { PLACE_JOINED_LINE, WSP_READY_LINE, deployDaemon, joinedPlace } from "./doctor.js";
+import { CATALOG_AGENTS } from "@wsp/catalog";
+import { PLACE_JOINED_LINE, WSP_READY_LINE, daemonFlags, deployDaemon, joinedPlace, sshDaemonPlace } from "./doctor.js";
+import { daemonBinaryHere } from "./assets.js";
+import { runningWsp, type RunningWsp } from "./mcp-install.js";
 import { randomBytes } from "node:crypto";
 import WebSocket from "ws";
 import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
 import { aimName, aimedHost, wspHome, type HostAim, type HostPick } from "./hosts.js";
-import { joinedAlready, placeFilePath, placeKeyPath, placeLogPath, placeReport, readPlaceFile, stopPlaceService, sweepPlace, writePlaceFile } from "./place-report.js";
-import { PROVIDER_ENV, addedBy, addedProviders, providerBackendFor, providerModule, type ProviderEnv } from "./providers.js";
+import { joinedAlready, placeFilePath, placeKeyPath, placeLogPath, placeLogin, placeReport, readPlaceFile, stopPlaceService, sweepPlace, writePlaceFile, wspArgvOf } from "./place-report.js";
+import { PROVIDER_ENV, addedBy, addedProviders, isPlace, placeIdOf, providerBackendFor, providerModule, type ProviderEnv } from "./providers.js";
 import { publicHostname } from "./relay-link.js";
 import { pairOnLoopbackLine, reachAddresses } from "./pairing.js";
 import {
   installService,
-  noManagerLine,
   runFailureLine,
   serviceEnv,
   serviceManagerFor,
@@ -117,10 +120,11 @@ export function placeWiring(statePath: string, env: ProviderEnv): PlaceWiring {
     install: placeInstaller(),
     provider: () => {
       const module = providerModule(env);
-      // A row that answers for no way of being added is no place to show: a host set up to fork nowhere has none.
-      if (addedBy(module) === undefined) return undefined;
+      // A row that is nowhere work can stand is no place to show: a host set up to fork nowhere has none. The row
+      // wears the word its own machines wear, so a stand-in serving a fixture shows the cloud it is standing in for.
+      if (!isPlace(module, env)) return undefined;
       const { pricing } = providerBackendFor(env);
-      return { id: module.id, rateUsdPerHour: pricing.rateUsdPerHour(pricing.defaultSize) };
+      return { id: placeIdOf(module, env), rateUsdPerHour: pricing.rateUsdPerHour(pricing.defaultSize) };
     },
     hostName: hostNameHere,
     // This computer under the name a person would type for it, and what it is off the same read a place sends about
@@ -184,8 +188,8 @@ export const ADD_LOOPBACK_REFUSAL =
  * the device, and a remove takes the place alone: the token is still good until somebody hands it back, from the
  * joined computer's own leave or from here. */
 export const deviceLeftLine = (name: string, deviceIds: readonly string[]): string => {
-  // One command per id: wsp devices revoke takes exactly one, so a line joining them would be a line that refuses.
-  const revoke = deviceIds.map(id => `wsp devices revoke ${id}`).join(", ");
+  // One command per id: wsp host devices revoke takes exactly one, so a line joining them would be a line that refuses.
+  const revoke = deviceIds.map(id => `wsp host devices revoke ${id}`).join(", ");
   const one = deviceIds.length === 1;
   return `${name} still holds ${one ? "a token" : `${deviceIds.length} tokens`} for this wsp, which its own window signs in with; ${revoke} take${one ? "s it" : " them"} back.`;
 };
@@ -213,8 +217,9 @@ export const noPlaceLine = (ref: string, names: readonly string[]): string =>
 /** The line a join prints once the computer is in. */
 export const joinedLine = (name: string, url: string): string => `${name} joined the wsp at ${url}; it dials that host on its own from now on.`;
 
-/** The refusal wsp join --serve gets on a computer that is no place. */
-export const NOT_A_PLACE_LINE = "this computer is not a place in any wsp; wsp join <address> --code <code> makes it one";
+/** The refusal a join gets on a computer whose manager wsp writes no unit for: nothing there would keep the daemon
+ * up, so nothing is written. */
+export const noPlaceManagerLine = (platform: string): string => `wsp writes no service on ${platform}, so this computer cannot stay joined as a place`;
 
 /** The refusal wsp leave gets on the same computer. */
 export const NOTHING_TO_LEAVE_LINE = "this computer is not a place in any wsp, so there is nothing to leave";
@@ -238,10 +243,11 @@ export function addFlags(name?: string, port?: string, keyPath?: string): AddFla
   };
 }
 
-/** How the agent is put on a computer over ssh, for the host that wires the runtime: the ssh road the workspace
- * kind already had, reused as one function. The dial and the login read are one call (`adopt`), the bundle, the
- * node and the join code go over the same connection, and the join itself is run on that computer by the deploy,
- * so wsp never writes a unit of its own there.
+/** How the daemon is put on a computer over ssh, for the host that wires the runtime: the ssh road the workspace
+ * kind already had, reused as one function. The dial and the login read are one call (`adopt`), the bundle and
+ * the join code go over the same connection, and the join itself is run on that computer by the deploy, so wsp
+ * never writes a unit of its own there. The steps are marked off the lines that deploy prints: WSP_READY once the
+ * bundle is on the computer, PLACE_JOINED once its own join has written the place file and the unit.
  *
  * Nothing waits here for the link: the computer dials this host on its own, and the place door is what knows when
  * it has. */
@@ -262,18 +268,14 @@ export function placeInstaller(deps: { backend?: SshBackend; daemonDir?: string;
     const at = placeDaemonPaths(login.HOME);
     const place = joinedPlace({ home: login.HOME, path: login.PATH }, { hostUrls, codeFile: `${at.wsp}/join-code`, name });
     stage("connect", "done", await osSaid(machine));
-    stage("node", "running");
+    stage("wsp", "running");
     await deployDaemon(machine, {
       place,
       // The code goes over the byte road and never into a command: what sits in a command line sits in a world
       // readable /proc/<pid>/cmdline for as long as it runs, and this one buys a place in somebody's wsp.
       land: [{ path: place.join!.codeFile, bytes: new TextEncoder().encode(`${req.code}\n`) }],
       onLine: line => {
-        const node = /NODE_VERSION (v\S+)/.exec(line)?.[1];
-        if (node !== undefined) {
-          stage("node", "done", node);
-          stage("wsp", "running");
-        } else if (line.includes(WSP_READY_LINE)) {
+        if (line.includes(WSP_READY_LINE)) {
           stage("wsp", "done");
           stage("service", "running");
         } else if (line.includes(PLACE_JOINED_LINE)) {
@@ -319,7 +321,7 @@ export interface PlaceOpts extends HostPick {
 }
 
 /** Handing out a join code and taking a place back out happen at the host's own terminal and nowhere else, the same
- * rule wsp pair and wsp devices read. */
+ * rule wsp host pair and wsp host devices read. */
 function aimHere(word: string, opts: PlaceOpts): HostAim {
   const aim = aimedHost(opts.statePath, opts);
   if (aim.kind !== "here") {
@@ -487,7 +489,7 @@ export async function removeCommand(io: CliIO, opts: PlaceOpts, args: readonly s
 }
 
 /** The two lines wsp join answers to, in one place, since both its refusals print them. */
-const JOIN_USAGE = "usage: wsp join <address>... --code <code> [--name <name>]\n       wsp join --serve";
+const JOIN_USAGE = "usage: wsp join <address>... --code <code> [--name <name>]";
 
 /** Which of the two things a person typed a join refusal is about, where it is about one of them: an address
  * nothing answered at, or a code the host would not take. A refusal about neither (a host that would not prove its
@@ -511,7 +513,6 @@ export interface JoinFlags {
   code?: string;
   codeFile?: string;
   name?: string;
-  serve?: boolean;
   /** Hold this computer out of idle sleep while it is joined, from the moment it joins. */
   awake?: boolean;
 }
@@ -522,8 +523,6 @@ export interface JoinDeps {
   run: ServiceRunner;
   platform: string;
   home: string;
-  /** The line the service runs, word by word. */
-  argv(): string[];
   now(): number;
 }
 
@@ -532,13 +531,38 @@ const joinDeps = (): JoinDeps => ({
   run: systemRunner,
   platform: platform(),
   home: process.env["HOME"] ?? "",
-  argv: () => {
-    const bin = process.argv[1];
-    if (bin === undefined) throw new Error("wsp join needs the path wsp was started from, and this process has none");
-    return [process.execPath, resolve(bin), "join", "--serve"];
-  },
   now: Date.now,
 });
+
+/** The daemon's line on a computer joined as a place: the flags every daemon under a login takes, told the place
+ * kind, then the place file it dials its host off, the home it keeps its files under and sweeps on a leave, the
+ * folder its turns start in, the line that runs wsp here word by word, and the agents to look for on PATH at each
+ * dial, as catalog id and command. Only the list of ids is fixed at the join; PATH is read at every dial. */
+export function placeDaemonFlags(home: string, file: string, run: RunningWsp = runningWsp()): string[] {
+  return [
+    ...daemonFlags({ ...sshDaemonPlace({ home, path: "" }), kind: "place" }),
+    "--home",
+    home,
+    "--work-folder",
+    workFolderIn(home),
+    "--place-file",
+    file,
+    ...wspArgvOf(run).flatMap(word => ["--wsp-argv", word]),
+    "--agents",
+    CATALOG_AGENTS.map(a => `${a.id}=${a.bin}`).join(","),
+  ];
+}
+
+/** What the daemon on a place needs on disk before it starts: wsp's own folder, the inbox and the work folder, and
+ * a token file, minted fresh here; the host replaces it through the ordinary rotation on its first reach, which is
+ * the road every other daemon's token takes. */
+export function preparePlaceHome(home: string): void {
+  const at = placeDaemonPaths(home);
+  mkdirSync(at.wsp, { recursive: true, mode: 0o700 });
+  mkdirSync(at.inbox, { recursive: true, mode: 0o700 });
+  mkdirSync(workFolderIn(home), { recursive: true });
+  writeFileSync(at.tokenPath, `${randomBytes(24).toString("hex")}\n`, { mode: 0o600 });
+}
 
 /** The join code, off the flag or off the file the installer landed it in, which is deleted before the dial: a code
  * left on a computer's disk is a code somebody else could spend. */
@@ -659,8 +683,8 @@ async function handshake(
   }
 }
 
-/** What one join needs, whoever asked for it: the app's shell hands the shim it writes, the command line hands the
- * node binary and its own entry. The road below is the whole of a join, so both callers take the same one. */
+/** What one join needs, whoever asked for it. The road below is the whole of a join, so the command line and the
+ * app's shell take the same one; the app hands the shim it writes as the wsp this computer runs. */
 export interface JoinPlaceOptions {
   /** The home holding place.json and the key beside it. */
   home: string;
@@ -676,8 +700,9 @@ export interface JoinPlaceOptions {
    * cannot be two words. An ask rather than a name, so no caller can pass a second one. */
   client?: boolean;
   awake?: boolean;
-  /** The line the unit runs, word for word. */
-  serviceArgv: readonly string[];
+  /** The wsp this computer runs, which the daemon reports as the line a turn's agent is given: this process's own
+   * unless the caller runs behind a shim, as the app does. */
+  wsp?: RunningWsp;
   /** Which computer this is, for the manager that holds the unit and the line said where there is none; this
    * process's own unless a caller names another. */
   platform?: string;
@@ -707,6 +732,11 @@ export async function joinPlace(io: CliIO, opts: JoinPlaceOptions): Promise<Join
   if (home === "") throw new Error("a join needs this login's home folder, and this process has none");
   const file = placeFilePath(home);
   if (joinedAlready(home)) throw new Error(ALREADY_JOINED_LINE);
+  // Before the handshake: a computer nothing would keep the daemon up on is refused with nothing written on it.
+  const on = opts.platform ?? platform();
+  const manager = "manager" in opts ? opts.manager : serviceManagerFor(on);
+  if (manager === undefined) throw new Error(noPlaceManagerLine(on));
+  const bin = daemonBinaryHere();
   const name = opts.name?.trim() !== undefined && opts.name.trim() !== "" ? opts.name.trim() : placeNameHere();
   const now = opts.now ?? Date.now;
   const dial = opts.dial ?? ((url: string) => new WebSocket(wsUrlOf(url)));
@@ -736,19 +766,15 @@ export async function joinPlace(io: CliIO, opts: JoinPlaceOptions): Promise<Join
     report: joined.report,
     ...(joined.device === undefined ? {} : { device: joined.device }),
   };
-  const on = opts.platform ?? platform();
-  const manager = "manager" in opts ? opts.manager : serviceManagerFor(on);
-  if (manager === undefined) {
-    io.error(noManagerLine(on));
-    io.log("Run wsp join --serve in a terminal that stays open instead.");
-    return answer;
-  }
   const at: ServiceAddress = { role: "place", statePath: file, home, uid: process.getuid?.() ?? 0 };
   const logPath = placeLogPath(home);
-  // HOME is stated rather than inherited: the agent keeps every file it has under the home its place file sits in,
-  // and a manager that hands it the login's own default would put them somewhere else entirely.
-  const env = { ...serviceEnv(process.env), HOME: home };
-  const { unit, installed, failure } = await installService(manager, { ...at, argv: [...opts.serviceArgv], cwd: home, env, logPath }, opts.run ?? systemRunner);
+  // HOME is stated rather than inherited: the daemon keeps every file it has under the home its place file sits in,
+  // and a manager that hands it the login's own default would put them somewhere else entirely. PATH is the one a
+  // login shell here gives, which is what the daemon reports and what a turn on this computer finds: a service
+  // starts with almost none, and the app that asked for this join may hold a bare one itself.
+  const env = { ...serviceEnv(process.env), HOME: home, PATH: placeLogin(process.env, home)["PATH"]! };
+  preparePlaceHome(home);
+  const { unit, installed, failure } = await installService(manager, { ...at, argv: [bin, ...placeDaemonFlags(home, file, opts.wsp)], cwd: home, env, logPath }, opts.run ?? systemRunner);
   if (failure !== undefined) {
     if (installed) io.error(`the ${manager.words} ${unit.name} is still there at ${unit.path}; wsp leave takes it away.`);
     throw new Error(runFailureLine(failure));
@@ -793,21 +819,6 @@ export async function joinCommand(io: CliIO, args: readonly string[], flags: Joi
   const deps: JoinDeps = { ...joinDeps(), ...given };
   const home = deps.home;
   if (home === "") throw new Error("wsp join needs this login's home folder, and this process has none");
-  const file = placeFilePath(home);
-  if (flags.serve === true) {
-    if (args.length !== 0) throw usageRefusal("wsp join --serve takes no address.", "The address is the one the join already recorded; run wsp join --serve on its own.");
-    const held = readPlaceFile(file);
-    if (held === undefined) {
-      io.error(NOT_A_PLACE_LINE);
-      return 1;
-    }
-    const { startPlaceAgent } = await import("./place-agent.js");
-    const agent = await startPlaceAgent({ file, name: held.name, home, log: line => io.log(line) });
-    io.log(`serving ${held.name} as a place of the wsp at ${held.hostUrls.join(", ")}; the daemon is on ${authority(LOOPBACK, agent.port)}`);
-    // The agent is the process: it holds the link and redials for as long as this runs.
-    await new Promise<void>(() => {});
-    return 0;
-  }
   if (args.length === 0) throw usageRefusal("wsp join takes one address or more.", JOIN_USAGE);
   // One host answers on several addresses, and the one an installer picked may be the one this computer cannot
   // route to: every word is read, and the join tries them in the order they were given.
@@ -827,7 +838,6 @@ export async function joinCommand(io: CliIO, args: readonly string[], flags: Joi
     code,
     ...(flags.name !== undefined ? { name: flags.name } : {}),
     ...(flags.awake === true ? { awake: true } : {}),
-    serviceArgv: deps.argv(),
     platform: deps.platform,
     run: deps.run,
     dial: deps.dial,

@@ -12,7 +12,7 @@ import { connectDaemon, createRuntime, memoryStore, serveRuntime, type Runtime, 
 import { afterAll, describe, expect, it } from "vitest";
 import { LIVE, liveEnv } from "../../engine/test/live.js";
 import { WsClient } from "../../runtime/test/ws-client.js";
-import { GUEST_ENVS, deployDaemon } from "../src/doctor.js";
+import { DAEMON_DEPLOYED_LINE, GUEST_ENVS, deployDaemon } from "../src/doctor.js";
 import { startCallbackRelay, type CallbackRelay } from "../src/relay.js";
 
 const execFileAsync = promisify(execFile);
@@ -54,8 +54,8 @@ describe.runIf(LIVE)("localhost forwards (live)", () => {
     const t0 = Date.now();
     const machine = await backend.create({ kind: "sandbox", template: "base", cpu: 2, memMb: 4096, envs: GUEST_ENVS, labels: { ...LABEL, createdAt: new Date().toISOString() } });
     machineId = machine.id;
-    const { token, node } = await deployDaemon(machine);
-    const notes: string[] = [`machine ${machine.id} created and daemon deployed (node ${node}) at ${Date.now() - t0}ms`];
+    const { token } = await deployDaemon(machine);
+    const notes: string[] = [`machine ${machine.id} created and ${DAEMON_DEPLOYED_LINE} deployed at ${Date.now() - t0}ms`];
     const builder: GoldenBuilderView = { id: machine.id, name: "forwards-live", kind: "sandbox", createdAt: new Date().toISOString(), size: { cpu: 2, memMb: 4096 } };
     let minted: PreviewReach | undefined;
     const base = createRuntime({ backend, store: memoryStore(), adapters: {} });

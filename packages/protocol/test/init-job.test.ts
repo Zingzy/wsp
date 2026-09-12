@@ -298,15 +298,17 @@ describe("the words the clients print for the job", () => {
   });
 
   it("wsp setup prints the keys as held or not, the agents with their tools, the price, and the job's rows with the page a sign-in waits on", () => {
-    const setup = { keys: { solari: true }, home: "/Users/me", agents: [{ id: "claude", name: "Claude Code", configured: true, takesTools: true }, { id: "codex", name: "Codex", configured: false, takesTools: false }], pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 }, job: null };
+    const setup = { keys: { box: false, solari: true }, home: "/Users/me", agents: [{ id: "claude", name: "Claude Code", configured: true, takesTools: true }, { id: "codex", name: "Codex", configured: false, takesTools: false }], pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 }, job: null };
+    // One line per provider this computer can hold a key for, each in that provider's own words for its key.
     expect(initSetupLines(setup)).toEqual([
-      "Solari key: saved",
+      "Box API key: not set",
+      "Solari API key: saved",
       "Agents here: Claude Code (MCP added), Codex",
       "A 2 vCPU · 4 GB workspace costs about $0.11 an hour while it runs and naps when idle",
-      "No setup is running; the app's sidebar row starts one.",
+      "No setup is running; the app's Image section starts one.",
     ]);
     const waiting = { ...JOB, phase: "signing-in" as const, rows: [row(), row({ id: "sign-in/gh", kind: "sign-in", label: "GitHub CLI login", state: INIT_ROW_STATES.open, page: "https://github.com/login/device", code: "8F4A-C21B" })] };
-    expect(initSetupLines({ ...setup, job: waiting }).slice(3)).toEqual(["Setup on the manual road: sign in to GitHub CLI login", "  Creating the machine: done", "  GitHub CLI login: waiting for you https://github.com/login/device code 8F4A-C21B"]);
+    expect(initSetupLines({ ...setup, job: waiting }).slice(4)).toEqual(["Setup on the manual road: sign in to GitHub CLI login", "  Creating the machine: done", "  GitHub CLI login: waiting for you https://github.com/login/device code 8F4A-C21B"]);
     expect(JSON.stringify(initSetupLines(setup))).not.toMatch(/slr_live|sk-ant/);
   });
 
@@ -499,10 +501,14 @@ describe("the words the clients print for the job", () => {
     expect(InitRow.parse({ id: "stage/snapshotting", kind: "stage", label: "Taking the snapshot", state: "running", since: 1_760_000_000_000 }).since).toBe(1_760_000_000_000);
   });
 
-  it("the row's words never ask the person to run a command", () => {
+  it("the screens' words never ask the person to run a command, and never say cloud machines", () => {
     const text = JSON.stringify(CLOUD_SETUP_WORDS);
     expect(text).not.toMatch(/wsp init|terminal/i);
-    expect(CLOUD_SETUP_WORDS.row).toBe("Set up cloud machines");
+    // These screens are about the image; a computer and a provider are PLACES_WORDS and are said nowhere here.
+    expect(text).not.toMatch(/cloud machines/i);
+    // And the word table's own rule: setup is never the noun for what is built here.
+    expect(text).not.toMatch(/\bsetup\b/i);
+    expect(CLOUD_SETUP_WORDS.choice.headline).toBe("What goes on your image");
   });
 
   it("holds a new cloud workspace back while there is no image to fork, in the app's own words", () => {
@@ -520,8 +526,8 @@ describe("the words the clients print for the job", () => {
     for (const phase of ["signing-in", "sealing", "finishing"] as const) {
       expect(cloudCreateRefusal({ hasGolden: false, job: { ...building, phase } })?.line).toMatch(/^the image is still building/);
     }
-    // No build to point at: the answers, a job that stopped, and no job at all all send the person to the setup.
-    const setup = { line: "set up cloud machines first", word: CLOUD_SETUP_WORDS.row };
+    // No build to point at: the answers, a job that stopped, and no job at all all send the person to the image.
+    const setup = { line: "build your image first", word: CLOUD_SETUP_WORDS.create.build };
     expect(cloudCreateRefusal({ hasGolden: false, job: null })).toEqual(setup);
     expect(cloudCreateRefusal({ hasGolden: false, job: { ...building, phase: "answering" } })).toEqual(setup);
     expect(cloudCreateRefusal({ hasGolden: false, job: { ...building, phase: "failed" } })).toEqual(setup);

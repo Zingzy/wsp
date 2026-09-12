@@ -6,8 +6,9 @@
 // though a section may put one sentence of its own in a row of the same shape.
 // Every pick goes to the host's preferences record and paints at once, so a
 // browser tab on the same host follows. Image, Where agents run and About take
-// no pick: they say what this computer has sealed, where its agents run, and
-// the release each half of the app is on.
+// no pick, and neither do Account and Agents: they say what this computer has
+// sealed, where its agents run, whether it is on an account, which agents are
+// here, and the release each half of the app is on.
 import { PLACES_WORDS, SidebarMode, TerminalSizeSource, ThemePreference, fmtPx, type TerminalConfig } from "@wsp/protocol";
 import { useEffect, useState } from "react";
 import { SIDEBAR_MODE_WORDS } from "../actions/format.js";
@@ -22,7 +23,9 @@ import { appTerminalFontSize } from "../terminal/ghostty/surface.js";
 import { appScheme } from "../terminal/ghosttyConfig.js";
 import { shellVersions } from "../shell/shellVersion.js";
 import { FACT, SETTINGS_WORDS, TERMINAL_SIZE_FACT, TERMINAL_SIZE_WORDS, THEME_WORDS, versionFact } from "./format.js";
+import { AccountSection } from "./AccountSection.js";
 import { AddComputerSheet } from "./AddComputerSheet.js";
+import { AgentsSection } from "./AgentsSection.js";
 import { ImageSection } from "./ImageSection.js";
 import { Row, Section } from "./rows.js";
 import { WhereAgentsRun } from "./WhereAgentsRun.js";
@@ -111,6 +114,8 @@ export function SettingsPage() {
         <Section id="settings-where" title={PLACES_WORDS.section}>
           <WhereAgentsRun />
         </Section>
+        <AccountSection />
+        <AgentsSection />
         <Section id="settings-about" title={SETTINGS_WORDS.about}>
           <Row id="settings-version" label={SETTINGS_WORDS.version}>
             {/* A row with no control still stands as tall as one, so the rhythm down the column never breaks. */}

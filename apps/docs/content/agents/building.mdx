@@ -6,15 +6,15 @@ This is how wsp gets built: tickets go out as threads on workspaces, opened by a
 
 ## The loop
 
-1. **One workspace with the repo imported.** `wsp import <folder> --to <workspace>` on a fresh workspace, the app's import dialog, or `wsp new <name> --from <project golden>` from a snapshot taken after an import. `wsp threads --in <workspace>` shows what is on it.
+1. **One workspace with the repo imported.** `wsp import <workspace> <folder>` on a fresh workspace, the app's import dialog, or `wsp new <name> --from <project golden>` from a snapshot taken after an import. `wsp threads <workspace>` shows what is on it.
 
 2. **One thread per ticket, each in its own worktree.** The brief opens with `git worktree add -b ticket/<n>-<slug> <folder> origin/main`, and `--cwd` points at the repo. Two threads writing in one checkout collide.
 
 3. **A brief that can be built.** It names the ticket, the files to read whole, the laws the repo's review skill holds, the exact test commands, and the proof required. It says to run every command in the foreground and wait for it. A reply that lands with a command still running in the background reads failed, with the reason `ended with 1 background task running`, and the thread takes no send until that process exits. A brief that says "fix the bug" comes back with a guess.
 
-4. **Start detached, then wait.** `wsp thread new --in dev --detach --title "413 build" "<brief>"` prints each thread's id and returns. Then `wsp threads wait <id>...` blocks until one of them finishes and prints its finished line, one thread per call; drop each returned id from the list and call again. Never poll `wsp threads` for a state change. A thread on a machine that wants its builders' ends as messages starts them with `--notify <its thread>`; a person uses `--notify me`.
+4. **Start detached, then wait.** `wsp run dev --detach --title "413 build" "<brief>"` prints each thread's id and returns. Then `wsp threads wait <id>...` blocks until one of them finishes and prints its finished line, one thread per call; drop each returned id from the list and call again. Never poll `wsp threads` for a state change. A thread on a machine that wants its builders' ends as messages starts them with `--notify <its thread>`; a person uses `--notify me`.
 
-5. **Review in its own thread.** On the same workspace, with the branch name and the review skill. The builder fixes in its own thread through `wsp send`. A review runs well on a cheaper model, `--model` on `thread new`.
+5. **Review in its own thread.** On the same workspace, with the branch name and the review skill. The builder fixes in its own thread through `wsp send`. A review runs well on a cheaper model, `--model` on `run`.
 
 6. **Work leaves the machine** by `git push` from the thread, when the golden signed in to GitHub during `wsp init`, or by `wsp export` to your computer.
 
@@ -36,11 +36,11 @@ Each of these cost a day once. They are in the code now, and they are here so no
 
 - A send into a running thread steers it or waits behind it, never a second concurrent turn.
 - A thread's end reaches its parent thread or the person only when its start said `--notify`; nothing polls.
-- An agent on the person's computer starts threads with `--detach` and reads their ends with `threads wait`, one per call. `thread_new` without it blocks for the whole turn.
+- An agent on the person's computer starts threads with `--detach` and reads their ends with `threads wait`, one per call. `run` without it blocks for the whole turn.
 - A thread works in `--cwd` or the workspace's project folder; a relative `--cwd` is refused before anything starts.
 - A turn ends on 10 minutes of silence, not a 15 minute wall clock, and at 6 hours in all. Long steps must print.
 - A turn's process group dies with the turn. A server that must outlive it starts with `setsid nohup ... &`.
-- `thread new` and `send` return when the reply is complete, not when the process exits minutes later. A send that meets that gap is refused in words naming the thread.
+- `run` and `send` return when the reply is complete, not when the process exits minutes later. A send that meets that gap is refused in words naming the thread.
 - Snapshot only a running machine with a project loaded, on a provider that copies a disk; on the cloud provider a woken machine is refused, on a container fork it is not.
 - Export refuses an existing folder; `--replace` overwrites it on purpose.
 - A resumed thread runs in the folder its session started in, whatever folder is followed in the app.

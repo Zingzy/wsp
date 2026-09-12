@@ -6,6 +6,7 @@ dist/
 docs/plans/
 artifacts/
 .wsp/
+packages/wspx/daemon/
 
 .claude/worktrees/
 .DS_Store

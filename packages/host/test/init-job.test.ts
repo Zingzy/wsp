@@ -100,7 +100,7 @@ interface Fake {
   settled(): Promise<void>;
 }
 
-function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string>; provider?: MachineBackend; configured?: boolean; read?: Partial<InitJobDeps["read"]>; now?: () => number; agent?: { adapter: HarnessAdapterFactory; starts: HarnessStartOptions[] }; writesRecipe?: boolean; agents?: AgentHere[]; adapters?: Record<string, HarnessAdapterFactory>; deployDaemon?: () => Promise<string> } = {}): Fake {
+function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string>; provider?: MachineBackend; configured?: boolean; read?: Partial<InitJobDeps["read"]>; now?: () => number; agent?: { adapter: HarnessAdapterFactory; starts: HarnessStartOptions[] }; writesRecipe?: boolean; agents?: AgentHere[]; adapters?: Record<string, HarnessAdapterFactory>; deployDaemon?: () => Promise<string>; /** The provider whose key this host's own step asks for; absent from the object leaves it Solari's. */ keyProvider?: string } = {}): Fake {
   const dir = mkdtempSync(join(tmpdir(), "wsp-init-job-"));
   dirs.push(dir);
   const home = mkdtempSync(join(tmpdir(), "wsp-init-job-home-"));
@@ -141,8 +141,16 @@ function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string
       env = { ...env, ...set };
     },
     provider: k => void swapped.push(k),
-    // The provider module the typed key would name is this test's stub, so the check the keys step runs is its own.
-    keyEnv: () => "SOLARI_API_KEY",
+    // The provider table this test stands in for: the two rows the host has, each with the variable it reads, and
+    // the stub backend behind the check, so the check the keys step runs is this test's own.
+    keysHeld: held => ({ box: held["BOX_API_KEY"] !== undefined, solari: held["SOLARI_API_KEY"] !== undefined }),
+    keyProvider: () => ("keyProvider" in over ? over.keyProvider : "solari"),
+    keySet: (key, provider): Record<string, string> | undefined => {
+      const names: Record<string, string> = { box: "BOX_API_KEY", solari: "SOLARI_API_KEY" };
+      if (provider === undefined) return { SOLARI_API_KEY: key };
+      const name = names[provider];
+      return name === undefined ? undefined : { [name]: key };
+    },
     checkKey: () => checkProviderKey(backend),
     pricing: () => PRICING,
     agents: async () =>
@@ -224,7 +232,8 @@ describe("the init job, manual road", () => {
     const f = fake();
     const setup = await f.jobs.get();
     expect(setup).toEqual({
-      keys: { solari: true },
+      keys: { box: false, solari: true },
+      keyProvider: "solari",
       home: f.home,
       agents: [{ id: "claude", name: "Claude Code", configured: false, takesTools: true }],
       pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: expect.closeTo(0.11, 5) as unknown as number, builderDiskGb: BUILDER_DISK_GB },
@@ -234,11 +243,11 @@ describe("the init job, manual road", () => {
 
   it("saving the provider key writes it to the wsp home's .env through the one writer and wires the provider; the view says held, never the key", async () => {
     const f = fake({ env: {} });
-    expect((await f.jobs.get()).keys).toEqual({ solari: false });
-    const setup = await f.jobs.keys({ solari: "slr_live_typed" });
+    expect((await f.jobs.get()).keys).toEqual({ box: false, solari: false });
+    const setup = await f.jobs.keys({ key: "slr_live_typed" });
     expect(f.saved).toEqual([{ SOLARI_API_KEY: "slr_live_typed" }]);
     expect(f.swapped).toEqual([{ SOLARI_API_KEY: "slr_live_typed" }]);
-    expect(setup.keys).toEqual({ solari: true });
+    expect(setup.keys).toEqual({ box: false, solari: true });
     expect(JSON.stringify(setup)).not.toMatch(/slr_live_typed/);
     // Nothing typed: nothing written, nothing swapped.
     await f.jobs.keys({});
@@ -1010,27 +1019,46 @@ describe("the init job, manual road", () => {
   it("Save puts the key to the provider first: a refused key is not written, nothing is wired, and the refusal carries the provider's own word", async () => {
     const f = fake({ env: {} });
     f.backend.keyRefusal = Object.assign(new Error("Unauthorized"), { kind: "auth", status: 401 });
-    await expect(f.jobs.keys({ solari: "slr_live_wrong" })).rejects.toThrow(keyRefusedLine("401 Unauthorized"));
+    await expect(f.jobs.keys({ key: "slr_live_wrong" })).rejects.toThrow(keyRefusedLine("401 Unauthorized"));
     expect(f.backend.keyChecks).toBe(1);
     // Nothing was written and no provider module was swapped in, so the setup cannot move on with a refused key.
     expect(f.saved).toEqual([]);
     expect(f.swapped).toEqual([]);
-    expect((await f.jobs.get()).keys).toEqual({ solari: false });
+    expect((await f.jobs.get()).keys).toEqual({ box: false, solari: false });
     // The refusal's kind says the key is the person's to change, not something to press again.
-    await expect(f.jobs.keys({ solari: "slr_live_wrong" })).rejects.toMatchObject({ kind: KEY_REFUSED });
+    await expect(f.jobs.keys({ key: "slr_live_wrong" })).rejects.toMatchObject({ kind: KEY_REFUSED });
     // A key the provider takes goes through the one writer as before.
     f.backend.keyRefusal = undefined;
-    expect((await f.jobs.keys({ solari: "slr_live_right" })).keys).toEqual({ solari: true });
+    expect((await f.jobs.keys({ key: "slr_live_right" })).keys).toEqual({ box: false, solari: true });
     expect(f.saved).toEqual([{ SOLARI_API_KEY: "slr_live_right" }]);
     expect(f.backend.keyChecks).toBe(3);
+  });
+
+  it("a key saved for a provider by name goes under that provider's own variable and moves nothing else", async () => {
+    const f = fake({ env: {} });
+    const setup = await f.jobs.keys({ provider: "box", key: "ascii_live_9f3k2mx0" });
+    // Its own variable and nothing beside it: saving a key opens that provider as a place and leaves the provider
+    // this computer forks on where it was.
+    expect(f.saved).toEqual([{ BOX_API_KEY: "ascii_live_9f3k2mx0" }]);
+    expect(setup.keys).toEqual({ box: true, solari: false });
+    expect(JSON.stringify(setup)).not.toMatch(/ascii_live/);
+    // A provider nothing in the table takes a key for is refused before anything is checked or written.
+    await expect(f.jobs.keys({ provider: "nowhere", key: "x" })).rejects.toThrow(/nowhere/);
+    expect(f.saved).toHaveLength(1);
+  });
+
+  it("says which provider's key its own step asks for, so a step reads what is held by that word", async () => {
+    expect((await fake({ env: {} }).jobs.get()).keyProvider).toBe("solari");
+    expect((await fake({ env: { BOX_API_KEY: "ascii_live_9f3k2mx0" }, keyProvider: "box" }).jobs.get()).keyProvider).toBe("box");
+    expect((await fake({ env: {}, keyProvider: undefined }).jobs.get()).keyProvider).toBeUndefined();
   });
 
   it("a check nothing answered says so instead of blaming the key, and its kind marks it worth pressing again", async () => {
     const f = fake({ env: {} });
     f.backend.keyRefusal = Object.assign(new TypeError("fetch failed"), { cause: { code: "ENOTFOUND" } });
-    await expect(f.jobs.keys({ solari: "slr_live_maybe" })).rejects.toMatchObject({ message: keyUncheckedLine("fetch failed"), kind: KEY_UNCHECKED });
+    await expect(f.jobs.keys({ key: "slr_live_maybe" })).rejects.toMatchObject({ message: keyUncheckedLine("fetch failed"), kind: KEY_UNCHECKED });
     expect(f.saved).toEqual([]);
-    expect((await f.jobs.get()).keys).toEqual({ solari: false });
+    expect((await f.jobs.get()).keys).toEqual({ box: false, solari: false });
   });
 
   it("a saved key the provider refuses stops the build before its first stage, in the provider's words, with the keys step as the way on", async () => {
@@ -1293,7 +1321,7 @@ describe("the init job, terminal road", () => {
     // A box whose host forks Docker containers: no provider key anywhere, and the build is still its to run.
     const keyless = fake({ env: {} });
     saveSmallRecipe(smallRecipePath(keyless.statePath), RECIPE);
-    expect((await keyless.jobs.get()).keys).toEqual({ solari: false });
+    expect((await keyless.jobs.get()).keys).toEqual({ box: false, solari: false });
     await keyless.jobs.start({ road: "terminal" });
     await keyless.settled();
     await keyless.jobs.build({});

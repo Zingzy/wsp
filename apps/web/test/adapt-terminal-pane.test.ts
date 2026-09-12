@@ -2,7 +2,7 @@
 // The terminal pane's state from (phase, reach, socket): what it says over the frame, in the empty state, and to a key.
 import { describe, expect, it } from "vitest";
 import type { DaemonLinkStatus, MachineState, ReachState, WorkspacePhase } from "@wsp/protocol";
-import { workspaceState } from "@wsp/protocol";
+import { absentComputer, awayMsOf, workspaceState } from "@wsp/protocol";
 import { terminalEmptyLine, terminalInputRefusal, terminalPaneHints, terminalPaneState, terminalPaneTitle, type TerminalPaneState } from "../src/adapt/index.js";
 
 const pane = (phase: WorkspacePhase, machineState: MachineState | null, reach: ReachState | null, socket: DaemonLinkStatus): TerminalPaneState =>
@@ -26,6 +26,27 @@ describe("terminalPaneState", () => {
     ["running", "gone", "gone", "connecting", { kind: "gone" }],
   ])("phase %s, machine %s, reach %s, socket %s", (phase, machineState, reach, socket, expected) => {
     expect(pane(phase, machineState, reach, socket)).toEqual(expected);
+  });
+
+  it("a computer that is not answering refuses in the pane itself, in two halves, whatever the socket is doing", () => {
+    const now = Date.parse("2026-09-12T13:30:00.000Z");
+    const absent = absentComputer("old-laptop", awayMsOf({ lastSeenAt: "2026-09-12T12:52:00.000Z" }, now));
+    // Ahead of every reading the socket could give: nothing is reconnecting, and a pane that promised a link back
+    // was a pane promising what nobody is opening.
+    for (const socket of ["opening", "connecting", "live", "unanswered", "reauth-needed"] as const) {
+      expect(terminalPaneState({ state: "running", reach: "unsupported", socket, absent })).toEqual({ kind: "absent", absent });
+      expect(terminalPaneState({ state: "unreachable", reach: "unreachable", socket, absent })).toEqual({ kind: "absent", absent });
+    }
+    const pane = { kind: "absent", absent } as const;
+    // Two halves: what happened, then what happens next. Neither says daemon and neither names a machine id.
+    expect(terminalPaneTitle(pane)).toBe("old-laptop is not answering");
+    expect(terminalPaneHints(pane, null, null)).toEqual(["it connects on its own when it is on"]);
+    expect(terminalEmptyLine(pane)).toBe("old-laptop is not answering; it connects on its own when it is on, and a terminal opens then");
+    expect(terminalInputRefusal(pane)).toBe("Typing is refused: old-laptop is not answering");
+    for (const line of [terminalPaneTitle(pane), ...terminalPaneHints(pane, null, null), terminalEmptyLine(pane), terminalInputRefusal(pane)]) {
+      expect(line).not.toContain("daemon");
+      expect(line).not.toContain("place:");
+    }
   });
 
   it("says one thing per state over the frame, in the empty pane and to a refused key; nothing while live", () => {

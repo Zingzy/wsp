@@ -21,6 +21,7 @@ import { glyphStateClass, leadDimClass } from "../src/sidebar/workspaceRows.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
+import { WorkspaceTerminals, provideTerminals } from "../src/terminal/link.js";
 
 // The triggers keep their elements, and no popup mounts: this file focuses and
 // clicks the search row, and Base UI's positioning against jsdom's zero-size
@@ -528,11 +529,12 @@ describe("rows from the fixture wire", () => {
       ),
       "api",
     );
-    // The cost leads before the meter's first tick too: a paused row is never a blank line.
-    await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("$0.00 today · edge slow…"));
+    // Before the meter's first tick the line says nothing about spend: a $0.00 that becomes a real figure a
+    // second later told the person something that was never true.
+    await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("edge slow · naps in 14m"));
     expect(stateSlot(rowOf("api")).textContent).toBe("");
     expect(stateSlot(rowOf("web")).textContent).toBe("Paused");
-    expect(metaOf(rowOf("web")).textContent).toBe("$0.00 today");
+    expect(metaOf(rowOf("web")).textContent).toBe("");
     act(() =>
       useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 120_000, accruedUsd: 0.29, at: new Date(NOW).toISOString() }),
     );
@@ -587,7 +589,7 @@ describe("rows from the fixture wire", () => {
     expect(metaOf(rowOf("zingzy-mac")).textContent).toBe(FREE_WORD);
     expect(stateSlot(rowOf("zingzy-mac")).textContent).toBe("");
     // The cloud rows beside it: the spend, the countdown and the paused word all read in their own slots.
-    expect(metaOf(rowOf("api")).textContent).toBe("$0.00 today · naps in 14m");
+    expect(metaOf(rowOf("api")).textContent).toBe("naps in 14m");
     expect(stateSlot(rowOf("web")).textContent).toBe("Paused");
     for (const name of ["zingzy-mac", "api", "web", "old"]) {
       expect(machineOf(rowOf(name)).className).toContain("font-mono");
@@ -1302,6 +1304,28 @@ describe("Solari out of reach from this computer", () => {
     await waitFor(() => expect(screen.queryByText(PROVIDER_UNREACHED_LINE)).toBeNull());
   });
 
+  it("keeps the slot under the search row for the host's own two lines, never a workspace's link", async () => {
+    await mount(fakeApi([API, WEB], [status(API), status(WEB)]), "api");
+    await waitFor(() => expect(rowOf("api")).toBeDefined());
+    // The workspace on screen has a link that nothing has answered on. Its sentence belongs to the pane that
+    // asked and to the composer under the box, both of which sit beside the workspace they name; drawn here, in
+    // the opposite corner, it read as a line about nothing and named no workspace.
+    const wt = new WorkspaceTerminals({ request: async () => ({ ok: true }) });
+    act(() => {
+      wt.feedStatus("unanswered");
+      provideTerminals(API.id, wt);
+    });
+    await waitFor(() => expect(rowOf("api")).toBeDefined());
+    const slot = document.querySelector("[data-sidebar-search]")!;
+    expect(slot.querySelector("[data-sidebar-link-down]")).toBeNull();
+    expect(slot.textContent).not.toContain("Nothing has answered");
+    provideTerminals(API.id, null);
+    // The two the slot does carry stay: this computer asleep, and a poll that never left it.
+    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { reach: { state: "reachable", offline: true } }) }));
+    expect((await screen.findByText(PROVIDER_UNREACHED_LINE)).closest("[data-sidebar-search]")).not.toBeNull();
+    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API) }));
+  });
+
   it("a row that was Unreachable stays Unreachable through the computer's offline spell", async () => {
     await mount(fakeApi([API], [status(API, { reach: { state: "unreachable" } })]), "api");
     await waitFor(() => expect(stateSlot(rowOf("api")).textContent).toBe("Unreachable"));
@@ -1481,7 +1505,7 @@ describe("Spaces mode", () => {
 
   it("the header's lines are the machine, what it cost today with its rate, and the nap countdown only when one is set", async () => {
     await mountSpaces(fakeApi(THREE, statuses()));
-    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.00 today · $0.110/hr", "naps in 15m"]));
+    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.110/hr", "naps in 15m"]));
     act(() =>
       useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 120_000, accruedUsd: 0.29, at: new Date(NOW).toISOString() }),
     );
@@ -1503,7 +1527,7 @@ describe("Spaces mode", () => {
     useStore.setState({ selectedId: "ws_b" });
     await mountSpaces(fakeApi(THREE, statuses()));
     await waitFor(() => expect(within(spaceHeader()!).getByText("web")).toBeDefined());
-    expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.00 today"]);
+    expect(headerLines()).toEqual(["2 vCPU · 4 GB"]);
     expect(spaceHeader()!.querySelector("[data-space-state]")!.textContent).toBe("Paused");
   });
 
@@ -1533,7 +1557,7 @@ describe("Spaces mode", () => {
     // header while one travels out, so the lines are read once the body asked for is there alone.
     fireEvent.click(icons()[0]!);
     await waitFor(() => expect(within(spaceHeader()!).getByText("api")).toBeDefined());
-    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.00 today · $0.110/hr"]));
+    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.110/hr"]));
   });
 
   it("a space asked for while the body is still travelling turns it around and never draws one workspace twice", async () => {
@@ -1625,14 +1649,14 @@ describe("Spaces mode", () => {
 
   it("before the first status the header carries no machine line: nothing draws a size it does not have", async () => {
     await mountSpaces(fakeApi([API], []));
-    await waitFor(() => expect(headerLines()).toEqual(["$0.00 today"]));
+    await waitFor(() => expect(headerLines()).toEqual([]));
   });
 
   it("the two lines the row gives a whole line to lead the header's, and the rest stay under them", async () => {
     await mountSpaces(fakeApi(THREE, statuses()));
     await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB"));
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: { ...status(API, { idleAt: iso(15.5 * 60_000) }), daemonNote: DAEMON_UPDATING } }));
-    await waitFor(() => expect(headerLines()).toEqual([DAEMON_UPDATING, "2 vCPU · 4 GB", "$0.00 today · $0.110/hr", "naps in 15m"]));
+    await waitFor(() => expect(headerLines()).toEqual([DAEMON_UPDATING, "2 vCPU · 4 GB", "$0.110/hr", "naps in 15m"]));
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { idleAt: iso(15.5 * 60_000) }) }));
     await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB"));
   });

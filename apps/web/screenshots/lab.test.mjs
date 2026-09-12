@@ -2,19 +2,19 @@
 // What a lab is made of, checked without a host, a build or a browser: the
 // fixtures a tester picks between, the provider and the environment each one
 // needs, the lines a lab prints, and the rules the driver reads a page with.
-import { FAKE_AS_ENV, HOST_ASLEEP_SEND, PERSON_HOME_ENV, SEND_BLOCK_WORDS, WEB_DIR_ENV } from "@wsp/protocol";
+import { FAKE_AS_ENV, FAKE_ROOT_ENV, HOST_ASLEEP_SEND, PERSON_HOME_ENV, SEND_BLOCK_WORDS, WEB_DIR_ENV } from "@wsp/protocol";
 import { COMPOSER_STATE_WORDS } from "../src/composer-state-words.js";
 import { TRANSCRIPT_LOADING } from "../src/transcript-words.js";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { PRESS_NEEDS_FOCUS, READ_PAGE, SAID_ON_THE_PAGE, attrWord, diffLines, parseArgs, typedField } from "./drive.mjs";
-import { FIXTURE_NAMES, fixtureCloud, fixtureFolders, fixtureState, threadId } from "./fixture-state.mjs";
-import { agentStores, hostEnv, providerFor } from "./host.mjs";
-import { AGENT_KEYS, binDir, folderHash, keysFound, labHome, labRoot, shimText, writeAgentHome, writeKeys, writeWorkFolder } from "./lab-home.mjs";
+import { GHOST_IS_NOT_A_CONTROL, PRESS_NEEDS_FOCUS, READ_PAGE, SAID_ON_THE_PAGE, attrWord, diffLines, findByWords, findField, parseArgs, typedField } from "./drive.mjs";
+import { FIXTURE_NAMES, fixtureCloud, fixtureFolders, fixtureSnapshots, fixtureState, threadId } from "./fixture-state.mjs";
+import { agentStoreRows, hostEnv, providerFor } from "./host.mjs";
+import { AGENT_KEYS, binDir, builtAt, copyApp, folderHash, keysFound, labHome, labRoot, shimText, standInRoot, writeAgentHome, writeKeys, writeStandIn, writeWorkFolder } from "./lab-home.mjs";
 import { A_MESSAGE, APP_UP, NOT_READY_NAMES, PROMPT_ECHOES, READY_ON_THE_PAGE } from "./ready.mjs";
-import { homeOf, keptLog, labLines, pointerPath, whyNotOursToRemove } from "./lab.mjs";
+import { homeOf, keptLog, labLines, parseArgs as parseLabArgs, pointerPath, stopLab, whyNotOursToRemove } from "./lab.mjs";
 
 describe("the fixtures a lab serves", () => {
   it("has one per kind of person the testers play", () => {
@@ -139,6 +139,44 @@ describe("the fixtures a lab serves", () => {
     for (const name of ["mac-in-use", "orchestrator"]) expect([name, Object.keys(fixtureState(name).sessions).length > 0]).toEqual([name, true]);
   });
 
+  it("puts no two workspaces on one machine, since that is a sidebar wsp refuses to make", () => {
+    // The runtime refuses a second workspace on a machine that already carries one (`alreadyRecorded`), and this
+    // computer is one machine, so four local rows is a state nobody can reach. A tester read three rows and could
+    // not say which computer two of them were on.
+    for (const name of FIXTURE_NAMES) {
+      const machines = Object.values(fixtureState(name).workspaces).map(w => w.machineId);
+      expect([name, machines.length]).toEqual([name, new Set(machines).size]);
+    }
+  });
+
+  it("gives the two personas who joined a second computer one row for this Mac, since one workspace stands on one machine", () => {
+    // A tester read "the only one it can be" beside three rows and could not tell which computer two of them were
+    // on; both were this Mac, which wsp records as one machine and refuses a second workspace on.
+    for (const name of ["mac-and-laptop", "mac-and-vps"]) {
+      const local = Object.values(fixtureState(name).workspaces).filter(w => w.kind === "local");
+      expect([name, local.map(w => w.name)]).toEqual([name, [hostname()]]);
+    }
+  });
+
+  it("names a fork's project after the fork, so an image taken on it is not named after a folder nobody imported", () => {
+    // The note a snapshot leaves names the projects it holds, so a fork called api holding a project called spoo
+    // answered "Image of spoo taken" on a screen headed api, to a persona who had never heard of spoo.
+    for (const name of FIXTURE_NAMES) {
+      for (const w of Object.values(fixtureState(name).workspaces).filter(w => w.kind === "cloud")) {
+        for (const p of w.projects ?? []) expect([name, w.name, p.name]).toEqual([name, w.name, w.name]);
+      }
+    }
+  });
+
+  it("leaves the persona who came to paste a key with nothing awake and nothing spending", () => {
+    const state = fixtureState("ascii-only");
+    // Two forks awake and $2.44 gone read as money spent on a cloud nobody had given a key to, and the meter
+    // moving a cent read as the product contradicting the line beside it that said naps cost nothing.
+    const forks = Object.values(state.workspaces);
+    expect(forks.map(w => `${w.name} ${w.phase}`)).toEqual(["api napping"]);
+    expect(state["cost-histories"]["ws_api"].points.at(-1).rateUsdPerHour).toBe(0);
+  });
+
   it("makes a joined computer a place with its own shape, never a local workspace wearing this Mac's", () => {
     for (const [name, workspaceId, placeId, cores] of [["mac-and-laptop", "ws_laptop", "p_oldlaptop", 4], ["mac-and-vps", "ws_build", "p_vps", 2]]) {
       const state = fixtureState(name);
@@ -183,6 +221,17 @@ describe("the fixtures a lab serves", () => {
     for (const name of FIXTURE_NAMES) {
       const forks = Object.values(fixtureState(name).workspaces).some(w => w.kind === "cloud");
       expect([name, fixtureCloud(name) !== undefined]).toEqual([name, forks]);
+    }
+  });
+
+  it("says which snapshots the provider behind a fixture is already holding, one per version of its image", () => {
+    for (const name of FIXTURE_NAMES) {
+      const state = fixtureState(name);
+      const versions = Object.values(state.goldens ?? {}).flatMap(m => m.versions);
+      const rows = fixtureSnapshots(state);
+      expect([name, rows.map(r => r.id).sort()]).toEqual([name, versions.map(v => v.snapshotId).sort()]);
+      // A size and a day each, since the line that prices an account's storage reads both off the listing.
+      for (const row of rows) expect([name, row.id, row.sizeBytes > 0, typeof row.createdAt]).toEqual([name, row.id, true, "string"]);
     }
   });
 
@@ -321,6 +370,28 @@ describe("what the driver reads and aims at", () => {
     expect(parseArgs(["sam", "quit"]).steps).toEqual([{ verb: "quit", words: [] }]);
   });
 
+  it("never takes a field's ghost as something to click, and still finds a field by it to type into", async () => {
+    // A page where the only thing reading those words is a field's own example of what to type.
+    const reading = held => {
+      const asked = [];
+      const guess = how => {
+        asked.push(how);
+        return { count: async () => (held === how ? 1 : 0), first: () => ({ how }) };
+      };
+      return { asked, getByRole: role => guess(`role:${role}`), getByLabel: () => guess("label"), getByPlaceholder: () => guess("placeholder"), getByText: () => guess("text") };
+    };
+    const clicking = reading("placeholder");
+    // A tester clicked the example path in the folder picker's field three times and wrote the picker off as
+    // broken: an example is not a control, and a click that lands on one does nothing a person can see.
+    expect(await findByWords(clicking, "~/code/spoo")).toBeUndefined();
+    expect(clicking.asked).not.toContain("placeholder");
+    // Typing is the one thing a ghost means, and that road still reads it.
+    expect(await findField(reading("placeholder"), "~/code/spoo")).toEqual({ how: "placeholder" });
+    const said = GHOST_IS_NOT_A_CONTROL("~/code/spoo");
+    expect(said).toContain("field's own example");
+    expect(said).toContain("type");
+  });
+
   it("aims a word at a data attribute only when it says so", () => {
     expect(attrWord("attr=row-id=ws:ws_api")).toBe('[data-row-id="ws:ws_api"]');
     expect(attrWord("attr=cloud-setup-row")).toBe("[data-cloud-setup-row]");
@@ -341,9 +412,16 @@ describe("what a lab tells the tester who starts it", () => {
     node: "/usr/local/bin/node",
     bin: "/repo/packages/host/dist/bin.js",
     env: { PATH: `${home}/bin:/usr/bin`, HOME: home, WSP_HOME: `${home}/.wsp`, WSP_PROVIDER: "none", [PERSON_HOME_ENV]: home },
-    build: { sha: "34f2429839f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0", app: "a1b2c3d4e5f60718", command: "0f1e2d3c4b5a6978", appDir: `${home}/app` },
+    build: { sha: "34f2429839f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0", app: "a1b2c3d4e5f60718", command: "0f1e2d3c4b5a6978", appDir: `${home}/app`, builtAt: "2026-09-12T09:05:00Z" },
     signedIn: true,
+    for: "/notes/priya",
   };
+
+  it("says when the app it is serving was built, so a tester's run is pinned to a build and not only to a commit", () => {
+    expect(labLines(facts)[1]).toContain("built 2026-09-12T09:05:00Z");
+    // Where the log will be, on the screen the tester is reading, so nobody has to work it out at the stop.
+    expect(labLines(facts)[3]).toContain(join("/notes/priya", "priya-lab.log"));
+  });
 
   it("says where the app is, which build it is serving, and the shell whose wsp is this lab's", () => {
     const lines = labLines(facts);
@@ -363,14 +441,27 @@ describe("what a lab tells the tester who starts it", () => {
     expect(shell).toContain(`PATH='${home}/bin:/usr/bin'`);
   });
 
+  it("says the turn there has this lab's own wsp tools, since a tester's agent asks what it can reach", () => {
+    expect(labLines(facts).join("\n")).toContain("this lab's own wsp tools");
+  });
+
   it("says plainly when no key was found, since a turn there will answer that it is not logged in", () => {
     expect(labLines({ ...facts, signedIn: true }).join("\n")).toContain("signed in with the agents' key");
     for (const name of AGENT_KEYS) expect(labLines({ ...facts, signedIn: false }).join("\n")).toContain(name);
   });
 
-  it("keeps a stopped lab's log beside the tester unless they name somewhere else", () => {
-    expect(keptLog("priya", "/notes/priya/lab.log")).toBe("/notes/priya/lab.log");
-    expect(keptLog("priya", undefined)).toBe(join(process.cwd(), "priya-lab.log"));
+  it("keeps a stopped lab's log in the folder the start was told about, not the one the stop was run from", () => {
+    expect(keptLog("priya", "/notes/priya/lab.log", { for: "/somewhere/else" })).toBe("/notes/priya/lab.log");
+    // Seven logs of one round of nine landed in two folders nobody was reading, because the stop reads the folder
+    // a tester happens to be standing in and they stand wherever the shell left them.
+    expect(keptLog("priya", undefined, { for: "/notes/priya" })).toBe("/notes/priya/priya-lab.log");
+    expect(keptLog("priya", undefined, undefined)).toBe(join(process.cwd(), "priya-lab.log"));
+  });
+
+  it("takes that folder at the start, since by the stop there is nobody to ask", () => {
+    expect(parseLabArgs(["start", "priya", "--fixture", "mac-only", "--for", "/notes/priya"])).toEqual({ verb: "start", name: "priya", fixture: "mac-only", for: "/notes/priya" });
+    // A start that names none still records one, so both ends of a lab read the same folder.
+    expect(parseLabArgs(["start", "priya", "--fixture", "mac-only"]).for).toBeUndefined();
   });
 });
 
@@ -398,17 +489,25 @@ describe("a lab's own home", () => {
   it("fills every agent store where that agent reads it, with the sign-in and nothing else", () => {
     const home = throwaway();
     const written = writeAgentHome(home);
-    const stores = Object.values(agentStores(home));
-    expect(stores.length).toBeGreaterThan(0);
+    const rows = agentStoreRows(home);
+    expect(rows.length).toBeGreaterThan(0);
     // The store is the folder the host points the agent at, not the home: a file written beside the home is a
     // file no agent opens, and one written there read as isolation that nothing was keeping.
-    for (const store of stores) {
-      const path = join(store, ".claude.json");
+    for (const { agent, store } of rows) {
+      const path = join(store, agent.mcp.files[0].replace(/^~\//, "").split("/").at(-1));
       expect([path, written.includes(path)]).toEqual([path, true]);
       const config = JSON.parse(readFileSync(path, "utf8"));
-      // An agent's own configuration on this Mac carries the person's MCP servers, one of which is their own host:
-      // a tester's agent reached it through that entry and wrote a workspace record there.
-      expect(config.mcpServers).toBeUndefined();
+      // This lab's own wsp and nothing else. An agent's own configuration on this Mac carries the person's MCP
+      // servers, one of which is their own host: a tester's agent reached it through that entry and wrote a
+      // workspace record there. With none at all a tester's agent does not know it is inside wsp: one wrote
+      // JSON-RPC by hand for twelve minutes to find its own threads, and an orchestrator never opened one.
+      // The file under the store is the catalog's own path for it with the home taken off, and the agent's own
+      // folder too where that path goes through it: the store is that folder, so a second one under it is a file
+      // no agent opens.
+      expect(path.startsWith(`${store}/`)).toBe(true);
+      expect(path.slice(store.length + 1).startsWith(`${agent.stateHome}/`)).toBe(false);
+      expect(Object.keys(config.mcpServers)).toEqual(["wsp"]);
+      expect(config.mcpServers.wsp).toEqual({ command: join(binDir(home), "wsp"), args: ["mcp"] });
       expect(config.projects).toBeUndefined();
       // Onboarding already answered, so a turn opens on the task rather than on a wizard.
       expect(config.hasCompletedOnboarding).toBe(true);
@@ -488,6 +587,8 @@ describe("a lab's own home", () => {
     const home = throwaway();
     // A folder holding somebody's files and no record of this harness is not this start's to delete.
     expect(whyNotOursToRemove(home, () => ["spoo", "notes"])).toContain("not a lab of this harness");
+    // Both verbs read it, so it names neither of them.
+    expect(whyNotOursToRemove(home, () => ["spoo", "notes"])).not.toContain("start");
     // A lab's own home, and a folder that is not there or holds nothing, are.
     expect(whyNotOursToRemove(home, () => ["lab.json", "app", "wsp-work"])).toBeUndefined();
     expect(whyNotOursToRemove(home, () => [])).toBeUndefined();
@@ -506,6 +607,72 @@ describe("a lab's own home", () => {
     for (const [name, value] of Object.entries(env)) expect(text).toContain(`${name}='${value}'`);
     expect(text).toContain('"$@"');
     expect(binDir(home)).toBe(`${home}/bin`);
+  });
+
+  it("refuses to start on an app it could not copy whole, since a build landing mid-copy serves a page nobody can name", () => {
+    const from = throwaway();
+    writeFileSync(join(from, "index.html"), "<!doctype html>one");
+    // The three readings a copy takes: the source before it, the copy, then the source again. One run of nine
+    // served an app hashing to something no other run served, and what it was cannot be recovered.
+    // The command's own hash comes in as a reader too, so this case asks nothing of a checkout that has not been
+    // built: every other case in this file runs without one.
+    const command = () => "0f1e2d3c4b5a6978";
+    const moved = answers => () => copyApp(throwaway(), { from, command, hash: () => answers.shift() });
+    expect(moved(["aaaaaaaaaaaaaaaa", "aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"])).toThrow(/changed while it was being copied/);
+    expect(moved(["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "aaaaaaaaaaaaaaaa"])).toThrow(/changed while it was being copied/);
+    // A folder nobody is writing copies whole, and the record says which build it was.
+    const copied = copyApp(throwaway(), { from, command });
+    expect(copied.command).toBe(command());
+    expect(copied.hash).toBe(folderHash(from));
+    expect(copied.builtAt).toBe(builtAt(from));
+    expect(copied.builtAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  });
+
+  it("hands the stand-in a folder of the lab's own, holding the snapshots the fixture's image says are at the provider", () => {
+    const home = throwaway();
+    const rows = fixtureSnapshots(fixtureState("solari-only"));
+    const path = writeStandIn(home, rows);
+    expect(path.startsWith(`${standInRoot(home)}/`)).toBe(true);
+    // A stand-in listing none answered "0 snapshots" on the line pricing the account's storage while the versions
+    // table above it showed two.
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ machines: {}, snapshots: rows });
+  });
+
+  it("keeps a lab's log and takes its home away even when no pid was written down, since the host may already be gone", async () => {
+    const home = throwaway();
+    const kept = throwaway();
+    const name = `test-${home.split("-").at(-1).toLowerCase()}`;
+    writeFileSync(join(home, "lab.json"), `${JSON.stringify({ name, home, for: kept })}\n`);
+    writeFileSync(join(home, "lab.log"), "the host said the send failed\n");
+    writeFileSync(pointerPath(name), `${JSON.stringify({ home })}\n`);
+    try {
+      await stopLab({ name });
+    } finally {
+      rmSync(pointerPath(name), { force: true });
+    }
+    expect(readFileSync(join(kept, `${name}-lab.log`), "utf8")).toContain("the host said the send failed");
+    expect(existsSync(home)).toBe(false);
+  });
+
+  it("leaves a folder that is not a lab's where it is, since a stop no longer returns before it removes anything", async () => {
+    // A root named in a shell and a name typed wrongly point the stop at a folder that is somebody's. It used to
+    // return at the missing pid file and remove nothing; now it goes on to keep the log, so it reads the folder
+    // the way the start does before it takes anything away.
+    const root = throwaway();
+    const name = `test-${root.split("-").at(-1).toLowerCase()}`;
+    const home = join(root, name);
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "the-only-copy.md"), "somebody's file\n");
+    const was = process.env["WSP_LAB_ROOT"];
+    process.env["WSP_LAB_ROOT"] = root;
+    try {
+      expect(homeOf(name)).toBe(home);
+      await stopLab({ name });
+    } finally {
+      if (was === undefined) delete process.env["WSP_LAB_ROOT"];
+      else process.env["WSP_LAB_ROOT"] = was;
+    }
+    expect(existsSync(join(home, "the-only-copy.md"))).toBe(true);
   });
 
   it("hashes the app it copied, so two runs can be told apart by what they served", () => {
@@ -559,6 +726,17 @@ describe("the environment a fixture's host is started with", () => {
 
   it("leads the path with this lab's own wsp, so a turn that shells out to one reaches this host", () => {
     expect(hostEnv({ home, state: { workspaces: {} }, binDir: `${home}/bin` }).PATH.startsWith(`${home}/bin:`)).toBe(true);
+  });
+
+  it("gives the stand-in a folder of the lab's own where the caller asks for one, and none where it does not", () => {
+    const forks = fixtureState("solari-only");
+    // A fork whose machine has a folder has a daemon, which is what answers its terminal, its process list and its
+    // live readings; without one every one of those rows read unreachable to three testers in a row.
+    expect(hostEnv({ home, state: forks, standIn: `${home}/stand-in` })[FAKE_ROOT_ENV]).toBe(`${home}/stand-in`);
+    // The screenshot run photographs screens rather than driving machines, so it asks for none and starts none.
+    expect(hostEnv({ home, state: forks })[FAKE_ROOT_ENV]).toBeUndefined();
+    // A fixture of this computer's own machines runs under no stand-in at all.
+    expect(hostEnv({ home, state: fixtureState("mac-only"), standIn: `${home}/stand-in` })[FAKE_ROOT_ENV]).toBeUndefined();
   });
 
   it("tells the stand-in which cloud it is standing in for, and only where a stand-in is serving", () => {

@@ -3,7 +3,7 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { ContextMenuItem, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, PlaceView, ProjectExportEvent, ProjectGolden, ProjectImportEvent, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SessionEvent, SessionPermissionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnRefusal, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
+import type { ContextMenuItem, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOption, PermissionOutcome, PlaceView, ProjectExportEvent, ProjectGolden, ProjectImportEvent, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SessionEvent, SessionPermissionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnRefusal, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
 import { DEFAULT_PORT } from "./app-ports.js";
 import { compareVersions } from "./semver.mjs";
@@ -243,10 +243,20 @@ export function fmtElapsed(ms: number): string {
   return seconds < 60 ? `${seconds}s` : fmtDuration(seconds * 1_000);
 }
 
-/** A turn's cost in dollars: cents, or four places under a cent so a short turn does not read as free. */
+/** Every spend figure a person reads, in one shape: cents, whatever the size. Three figures in one thread used to
+ * read $0.51, $0.22 and $0.0000, and a reader cannot tell at a glance that the third is the smallest of them. A
+ * turn under a cent reads $0.00, which is what it costs to the cent. */
 export function fmtCost(usd: number): string {
-  return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
+  return `$${usd.toFixed(2)}`;
 }
+
+/** The word beside a figure nobody is billed for: what the agent's own table lists for the tokens a turn spent, on
+ * a computer whose turns run on the person's own sign-in. The composer's model menu says the whole of it in
+ * whoPaysLines; this is the word the figure itself carries, where a person meets the figure long before the menu. */
+export const LIST_PRICE_WORD = "list price";
+
+/** A spend figure with the word that says what it is, where the surface has one to give it. */
+const spendFigure = (usd: number, word: string | undefined): string => (word === undefined ? fmtCost(usd) : `${fmtCost(usd)} ${word}`);
 
 /** How much of the reply a finished line carries: `tail`, its last line, which is what a person reads in a sidebar
  * row and what a wait answers with; `whole`, the final message entire, which is what a thread woken by the line acts
@@ -297,18 +307,18 @@ export function openedSpendPart(costUsd: number): string {
 
 /** The turn's own cost where a second figure stands beside it. The two count different things, one turn against
  * whole threads, so where both are shown each says which spend it is and neither can be read as the other. */
-export function turnSpendPart(costUsd: number): string {
-  return `${fmtCost(costUsd)} this turn`;
+export function turnSpendPart(costUsd: number, word?: string): string {
+  return `${spendFigure(costUsd, word)} this turn`;
 }
 
 /** What a settled turn says beside its outcome word, in the order every client shows it: how long it worked, what
  * it cost, and what the threads it opened cost where it opened any. The app's chat footer and the command line's
  * last line read from this one list. */
-export function turnSettledParts(turn: { durationMs?: number | null; costUsd?: number | null }, openedCostUsd?: number | null): string[] {
+export function turnSettledParts(turn: { durationMs?: number | null; costUsd?: number | null }, openedCostUsd?: number | null, spendWord?: string): string[] {
   const opened = typeof openedCostUsd === "number" && openedCostUsd > 0;
   const parts: string[] = [];
   if (typeof turn.durationMs === "number") parts.push(`Worked for ${fmtDuration(turn.durationMs)}`);
-  if (typeof turn.costUsd === "number") parts.push(opened ? turnSpendPart(turn.costUsd) : fmtCost(turn.costUsd));
+  if (typeof turn.costUsd === "number") parts.push(opened ? turnSpendPart(turn.costUsd, spendWord) : spendFigure(turn.costUsd, spendWord));
   if (opened) parts.push(openedSpendPart(openedCostUsd));
   return parts;
 }
@@ -391,6 +401,11 @@ export type ToolRequestKind = "command" | "file-read" | "file-change";
 interface ToolRow {
   readonly line: ToolLine;
   readonly shows: readonly string[];
+  /** The words a person reads for this kind of call, where the harness's own name for it is none: a row that names
+   * no title is drawn by that name, which is what every tool a person already knows the word for wants. */
+  readonly title?: string;
+  /** What the row shows under the title, where the field it is in is not a plain string; `shows` covers the rest. */
+  readonly detail?: (input: ToolInput) => string | undefined;
   readonly itemType?: ToolItemType;
   readonly requestKind?: ToolRequestKind;
   readonly paths?: (input: ToolInput) => readonly string[];
@@ -465,6 +480,130 @@ const changeRow: ToolRow = {
   paths: changedPaths,
 };
 
+/** The harness's question tool, which asks the person and runs nothing. Its prompt is the question itself: the
+ * options a person picks from are the tool's own, the pick rides back as the call's input, and there is no consent
+ * in it to give. The name is the harness's; the rest of this file reads the shape, never the name. */
+export const QUESTION_TOOL = "AskUserQuestion";
+
+/** One choice on a question, as a row draws it: the words on its button and the sentence under them. */
+export interface AskedOption {
+  /** What the pick is named by on the wire; the label alone is what the harness reads back. */
+  readonly id: string;
+  readonly label: string;
+  readonly description: string;
+}
+
+/** One question the harness put to the person: the two or three words it heads it with, the sentence itself, the
+ * choices, and whether it takes more than one of them. */
+export interface AskedQuestion {
+  /** What the harness keys the answer by: the question's own text. */
+  readonly key: string;
+  readonly header: string;
+  readonly question: string;
+  readonly options: readonly AskedOption[];
+  readonly multiSelect: boolean;
+}
+
+/** Several picks travel as one option id, since one pick closes one prompt: a multi-select question's Answer button
+ * names every box that is ticked, and a prompt carrying more than one question names one pick per question. */
+const PICK_JOIN = "|";
+
+const optionId = (question: number, option: number): string => `q${question}:o${option}`;
+
+function askedOptions(raw: unknown, question: number): AskedOption[] {
+  if (!Array.isArray(raw)) return [];
+  const options: AskedOption[] = [];
+  for (const entry of raw) {
+    const fields = typeof entry === "object" && entry !== null && !Array.isArray(entry) ? (entry as ToolInput) : undefined;
+    const label = fields === undefined ? undefined : toolField(fields, "label");
+    if (label === undefined) continue;
+    options.push({ id: optionId(question, options.length), label, description: (fields === undefined ? undefined : toolField(fields, "description")) ?? "" });
+  }
+  return options;
+}
+
+/** The questions a call to the question tool carries, in the order it asked them; nothing for every other call and
+ * for a question whose input has not finished arriving. A question with no choices is left out: there is no button
+ * to draw for it and no pick to send back. */
+export function askedQuestions(toolName: string, input: string): readonly AskedQuestion[] | undefined {
+  const fields = toolInput(input);
+  return fields === undefined ? undefined : permissionWords(toolName).questions?.(fields);
+}
+
+function questionsIn(fields: ToolInput): readonly AskedQuestion[] | undefined {
+  const raw = fields["questions"];
+  if (!Array.isArray(raw)) return undefined;
+  const questions: AskedQuestion[] = [];
+  for (const [at, entry] of raw.entries()) {
+    const q = typeof entry === "object" && entry !== null && !Array.isArray(entry) ? (entry as ToolInput) : undefined;
+    const text = q === undefined ? undefined : toolField(q, "question");
+    if (q === undefined || text === undefined) continue;
+    const options = askedOptions(q["options"], at);
+    if (options.length === 0) continue;
+    questions.push({ key: text, header: toolField(q, "header") ?? "", question: text, options, multiSelect: q["multiSelect"] === true });
+  }
+  return questions.length === 0 ? undefined : questions;
+}
+
+/** The options a question's prompt carries on the wire: one per choice, each an answer rather than a consent, so
+ * nothing offers to allow or refuse a call that only asks. Empty for every other kind of call, which keeps its
+ * harness's own options. */
+export function questionOptions(toolName: string, input: string): PermissionOption[] {
+  const questions = askedQuestions(toolName, input) ?? [];
+  return questions.flatMap(q => q.options.map(o => ({ id: o.id, label: o.label, effect: "answer" as const })));
+}
+
+/** One pick as the several options it names, or nothing when any of them is not on this prompt. Every reader of a
+ * pick goes through here, so the rule that a multi-select answer is one id holding several lives in one place. */
+export function pickedOptions(options: readonly PermissionOption[], picked: string): PermissionOption[] | undefined {
+  const named = picked.split(PICK_JOIN).map(id => options.find(o => o.id === id));
+  return named.length > 0 && named.every((o): o is PermissionOption => o !== undefined) ? named : undefined;
+}
+
+/** The one id a set of ticked boxes travels as. */
+export const pickedOptionId = (ids: readonly string[]): string => ids.join(PICK_JOIN);
+
+/** The call's input with the person's answer written into it, which is how the harness reads a pick: every question
+ * keyed by its own text, a single-select question answered by the one label and a multi-select one by the labels it
+ * took. Undefined when the picks name no question on this call. */
+export function questionAnswerInput(toolName: string, input: string, picked: readonly string[]): Record<string, unknown> | undefined {
+  const fields = toolInput(input);
+  const questions = askedQuestions(toolName, input);
+  if (questions === undefined || fields === undefined) return undefined;
+  const answers: Record<string, string | string[]> = {};
+  for (const question of questions) {
+    const labels = question.options.filter(o => picked.includes(o.id)).map(o => o.label);
+    if (labels.length === 0) continue;
+    answers[question.key] = question.multiSelect ? labels : labels[0]!;
+  }
+  return Object.keys(answers).length === 0 ? undefined : { ...fields, answers };
+}
+
+/** What the call itself reads as while it waits: the question, never the tool's own name, which is no word a
+ * person knows. Registered in the tool table below by the same key the prompt's words are. */
+const questionRow: ToolRow = {
+  line: input => {
+    const first = questionsIn(input)?.[0];
+    return first === undefined ? undefined : `asked: ${first.question}`;
+  },
+  // No detail: the prompt under this row is the question, whole, and a row that repeated it would put the same
+  // sentence on the screen twice.
+  title: "Asked you",
+  shows: [],
+};
+
+const questionAsk: PermissionWords = {
+  lead: input => {
+    const first = questionsIn(input)?.[0];
+    return first === undefined ? undefined : { says: first.question };
+  },
+  questions: questionsIn,
+  named: ["questions"],
+};
+
+/** Launching a subagent, under either name the harness gives that call. */
+const agentRow: ToolRow = aboutRow("agent:", "description", { itemType: "collab_agent_tool_call" });
+
 /** Every tool a harness reports, one row per name, Claude's and Codex's alike: what the command line writes for the
  * call and what the app's transcript makes of it come from the same row, so a new tool is a row here and nothing
  * else. A name with no row reads as itself, by the fields below. */
@@ -482,7 +621,9 @@ const TOOL_ROWS: ReadonlyMap<string, ToolRow> = new Map<string, ToolRow>([
   ["WebSearch", aboutRow("searched the web for", "query", { itemType: "web_search" })],
   ["web_search", aboutRow("searched the web for", "query", { itemType: "web_search" })],
   ["WebFetch", aboutRow("fetched", "url", { itemType: "web_search" })],
-  ["Task", aboutRow("agent:", "description", { itemType: "collab_agent_tool_call" })],
+  ["Task", agentRow],
+  ["Agent", agentRow],
+  [QUESTION_TOOL, questionRow],
 ]);
 
 /** The fields a call's row shows when its own row names none, most particular first. */
@@ -514,6 +655,8 @@ export function toolActivityLine(toolName: string | undefined, input: string): s
  * what it was for, the paths the call changed, and the kinds a client groups by. Input that is not an object yet is
  * shown as it stands, since a call streams in and a row is drawn before it is whole. */
 export interface ToolCallFacts {
+  /** The words for this kind of call, where its row names them; absent leaves the harness's own name to stand. */
+  readonly title?: string;
   readonly detail?: string;
   readonly command?: string;
   readonly description?: string;
@@ -529,15 +672,17 @@ export function toolCallFacts(toolName: string, input: string): ToolCallFacts {
     ...(itemType !== undefined ? { itemType } : {}),
     ...(row?.requestKind !== undefined ? { requestKind: row.requestKind } : {}),
   };
+  const titled = row?.title === undefined ? {} : { title: row.title };
   const fields = toolInput(input);
-  if (fields === undefined) return { ...kinds, ...(input.length > 0 ? { detail: input } : {}) };
-  const detail = firstField(fields, [...(row?.shows ?? []), ...SHOWN_FIELDS]);
+  if (fields === undefined) return { ...kinds, ...titled, ...(input.length > 0 ? { detail: input } : {}) };
+  const detail = row?.detail?.(fields) ?? firstField(fields, [...(row?.shows ?? []), ...SHOWN_FIELDS]);
   const shell = row?.requestKind === "command";
   const command = shell ? toolField(fields, "command") : undefined;
   const description = shell ? toolField(fields, "description") : undefined;
   const changedFiles = row?.paths?.(fields) ?? [];
   return {
     ...kinds,
+    ...titled,
     ...(detail !== undefined ? { detail } : {}),
     ...(command !== undefined ? { command } : {}),
     ...(description !== undefined ? { description } : {}),
@@ -550,14 +695,38 @@ export function isCodeSearchTool(toolName: string | undefined): boolean {
   return toolName !== undefined && TOOL_ROWS.get(toolName)?.codeSearch === true;
 }
 
+/** The sentence a harness stamps on a result it wrote for the agent and not for the person; it carries handles the
+ * agent needs and reads as an instruction to a model, and it is cut by every row that shows it. Matched on the
+ * stamp rather than on the whole sentence, which differs per kind of thing launched. */
+const INTERNAL_RESULT_MARK = "This tool result is internal metadata";
+
+/** Whether the harness marked this result its own note to the agent, so nothing draws it. The one test, read by the
+ * line a call's row shows and by the transcript that folds a call's result. */
+export function internalToolResult(text: string): boolean {
+  return text.includes(INTERNAL_RESULT_MARK);
+}
+
 /** What one tool call answered, as the line under the call: its first line by the rule the call's own line is cut
  * by, with the word ahead of it when the harness marked the call failed. Nothing when a call that worked answered
  * with nothing, since a blank line says less than no line. */
 export function toolResultLine(text: string, isError = false): string | undefined {
+  if (internalToolResult(text)) return undefined;
   const first = titleLine(text);
   if (!isError) return first === "" ? undefined : first;
   return first === "" ? "failed" : `failed: ${first}`;
 }
+
+/** What a call that launched a subagent said the task was, from the call's own input: the title of the fold that
+ * subagent's lines sit under. Nothing where the call named no task, and the fold then reads the call. */
+export function subagentTaskLine(input: string): string | undefined {
+  const fields = toolInput(input);
+  const described = fields === undefined ? undefined : toolField(fields, "description");
+  return described === undefined ? undefined : titleLine(described);
+}
+
+/** What a prompt raised inside a subagent's own run says above it, so a person answering knows which of them is
+ * asking rather than reading one unowned question. */
+export const subagentAskerLine = (task: string): string => `${task} asks`;
 
 /** A count with its noun, the noun pluralised by an s: the one rule every line that counts rows, sessions, calls,
  * threads or a plan's files reads, so none of them says "1 sessions". A noun that does not take an s is spelled by
@@ -677,6 +846,12 @@ export function openingTitle(text: string): string {
   const line = titleLine(text);
   return cutLine(/^.*?[.!?](?=\s|$)/.exec(line)?.[0] ?? line, OPENING_TITLE_MAX);
 }
+
+/** The most characters the third line of a workspace row holds: the row leaves 201 px for text at the sidebar's
+ * default 256 px and 11 px mono fits 30 of them there, so a longer line is cut by the width with no say in where.
+ * Here rather than in the app because the lines written for that slot are written here too, and the cut is what
+ * takes the half that says what to do off a line nobody measured. */
+export const ROW_LINE_MAX = 30;
 
 /** Text cut to at most room characters, at a word boundary where one fits, with the ellipsis counted inside the
  * room and drawn only where something was taken off. One rule for every line a surface cuts itself: a thread's
@@ -839,7 +1014,7 @@ export function nextInsideAgentLine(open: string, first: string): string {
 }
 
 /** One level of this computer's own folders in words, the same on the command line and in the app's folder browser:
- * how many folders the level holds, where it sits, and how many of it are dot-named, whether or not those are listed. */
+ * how many folders the level holds, where it sits, and how many of it are hidden, whether or not those are listed. */
 export function folderLevelLine(listing: { dir: string; folders: readonly unknown[]; hidden: number }): string {
   const held = listing.hidden === 0 ? "" : `, ${listing.hidden} hidden`;
   return listing.folders.length === 0 ? `No folders in ${listing.dir}${held}.` : `${plural(listing.folders.length, "folder")} in ${listing.dir}${held}.`;
@@ -1221,15 +1396,14 @@ export const PROVIDER_KEY_WORDS: Record<string, { keyName: string; keyConsole?: 
   solari: { keyName: "Solari API key", keyConsole: SOLARI_CONSOLE },
 };
 
-/** The quiet row at the sidebar's bottom while no golden is sealed, and every word of the modal it opens: the init
- * job drawn in the app. Micro-labels are the caps mono words over a screen, headlines the one sentence under them,
- * keycaps the one primary button each screen has. Nothing here asks the person to run a command. */
+/** Every word of the six screens that build the image, opened from Settings under the title the image section
+ * gives them. Micro-labels are the caps mono words over a screen, headlines the one sentence under them, keycaps
+ * the one primary button each screen has. Nothing here asks the person to run a command, and nothing here is a
+ * word for a computer or a provider: those are PLACES_WORDS. */
 export const CLOUD_SETUP_WORDS = {
-  row: "Set up cloud machines",
-  title: "Cloud machines",
   choice: {
-    headline: "Set up cloud machines",
-    top: "Your setup goes on one image, built once and copied for every workspace",
+    headline: "What goes on your image",
+    top: "What your agents need goes on one image, built once and copied for every workspace",
     manual: "Choose what goes on the image",
     agent: "Let an agent choose from your usage",
     agentWith: "with",
@@ -1320,7 +1494,8 @@ export const CLOUD_SETUP_WORDS = {
   agent: {
     headline: "Reading what your agents used",
     top: "Your agent reads this computer and writes the recipe the next screens start from",
-    title: "Set up cloud machines",
+    /** What the thread this road opens is called, which is what the sidebar's row for it reads. */
+    title: "Build your image",
     /** The link to the thread doing the work, which the sidebar focuses. */
     open: "Open the thread",
     /** The headline once the turn ended without the recipe, and the two ways on from there. */
@@ -1345,8 +1520,10 @@ export const CLOUD_SETUP_WORDS = {
   create: {
     /** Why a new cloud workspace is held back while the image is still being built; the stage count follows it. */
     building: "the image is still building",
-    /** The same where no image is sealed and no build runs, which is a computer the setup has not run on. */
-    none: "set up cloud machines first",
+    /** The same where no image is sealed and no build runs, which is a computer nothing has been built on. */
+    none: "build your image first",
+    /** The word beside that sentence, which opens the screens that build it. */
+    build: "Build your image",
     /** The word beside the building sentence, which opens the build the count is of. */
     open: "Open the build",
   },
@@ -1710,7 +1887,7 @@ export interface CloudCreateRefusal {
 export function cloudCreateRefusal(state: { hasGolden: boolean | null; job: Pick<InitJob, "phase" | "rows"> | null }): CloudCreateRefusal | null {
   if (state.hasGolden !== false) return null;
   const words = CLOUD_SETUP_WORDS.create;
-  if (state.job === null || !initJobBuilding(state.job.phase)) return { line: words.none, word: CLOUD_SETUP_WORDS.row };
+  if (state.job === null || !initJobBuilding(state.job.phase)) return { line: words.none, word: words.build };
   return { line: `${words.building} · ${initStageCountLine(initStageCount(initBuildRows(state.job.rows).rows))}`, word: words.open };
 }
 
@@ -1755,11 +1932,12 @@ export function initCostLine(size: WorkspaceSize, rateUsdPerHour: number): strin
 export function initSetupLines(setup: InitSetup): string[] {
   const held = (yes: boolean): string => (yes ? CLOUD_SETUP_WORDS.keys.saved : CLOUD_SETUP_WORDS.keys.unset);
   const agents = setup.agents.length === 0 ? "none found" : setup.agents.map(a => (a.configured ? `${a.name} (${MCP_ADDED_WORD})` : a.name)).join(", ");
-  const lines = [`Solari key: ${held(setup.keys.solari)}`, `Agents here: ${agents}`];
+  const keys = Object.entries(setup.keys).map(([provider, yes]) => `${PROVIDER_KEY_WORDS[provider]?.keyName ?? provider}: ${held(yes)}`);
+  const lines = [...keys, `Agents here: ${agents}`];
   if (setup.pricing !== null) lines.push(initCostLine(setup.pricing.size, setup.pricing.rateUsdPerHour));
   const job = setup.job;
   if (job === null) {
-    lines.push("No setup is running; the app's sidebar row starts one.");
+    lines.push("No setup is running; the app's Image section starts one.");
     return lines;
   }
   lines.push(`Setup on the ${job.road} road: ${initProgressLine(job)}${job.error !== undefined ? ` (${job.error})` : ""}`);
@@ -1926,7 +2104,7 @@ export function noKindLine(kind: string): string {
  * from it, and the dial that records a workspace refuses a machine that names none, so a record without one is one
  * to make again rather than one to guess a folder for. */
 export function noMachineHomeLine(name: string): string {
-  return `${name} carries no home folder for its machine; record it again with wsp new --ssh`;
+  return `${name} carries no home folder for its machine; add that computer again with wsp add user@host`;
 }
 
 /** What the roads that need a daemon are refused with on a machine reached over ssh before one is on it: the
@@ -1945,12 +2123,12 @@ export function noImportRoadLine(name: string, machine: string): string {
   return `${name} is ${machine}, which lands no folder yet; import to a fork, or register the folder on this computer`;
 }
 
-/** What a machine that cannot build the daemon is refused with. node-pty ships prebuilt binaries for macOS and
- * Windows only, so the terminal's native part is compiled where the daemon runs; a machine wsp builds carries the
- * floor's toolchain, and a machine somebody already owns may carry none. Said before the install rather than
- * after, since a daemon that installed half of itself restarts forever under its unit. */
-export const NO_BUILD_TOOLS_LINE =
-  "this machine has no C compiler, so the daemon's terminal cannot be built on it; install a build toolchain (on Debian or Ubuntu: sudo apt-get install build-essential) and deploy the daemon again";
+/** What a machine without a node the wsp command runs on is refused with. The daemon itself is one static binary
+ * and asks nothing of the machine; the wsp command that rides beside it, which every turn's agent drives the host
+ * through, still runs on node. A machine wsp builds carries the floor's; a machine somebody already owns may carry
+ * none, or one too old. Said before the install rather than after, so nothing lands on a machine that refuses. */
+export const NO_NODE_LINE =
+  "this machine has no Node 22, which the wsp command beside the daemon runs on; install Node 22 or newer on it and deploy the daemon again";
 
 /** What a machine whose login does not linger is refused with. Its own systemd stops when its last session ends
  * and takes the daemon with it, so a daemon deployed there is gone the moment the host's connection closes; the
@@ -1961,7 +2139,7 @@ export const NO_LINGER_LINE =
 /** Every sentence a machine's own checks refuse with, in one place beside them. Read by the rule that keeps each
  * one's first clause short enough for a row, so a refusal added later takes that rule without anyone remembering
  * where it is checked. Nothing decides anything by searching this: which ending a throw is comes off its mark. */
-export const MACHINE_LACKS_LINES: readonly string[] = [NO_BUILD_TOOLS_LINE, NO_LINGER_LINE];
+export const MACHINE_LACKS_LINES: readonly string[] = [NO_NODE_LINE, NO_LINGER_LINE];
 
 /** The marks the checks a machine takes before a daemon is put on it end with, put on where the throw happens
  * rather than matched against text: a check added to a place's preflight is then one shell line and one sentence,
@@ -2033,6 +2211,9 @@ interface AskLead {
  * the input fields that lead already carries, and the field holding a file's body. */
 interface PermissionWords {
   readonly lead: (input: ToolInput, toolName: string) => AskLead | undefined;
+  /** The questions this kind of call puts to the person, on the one kind that asks rather than does; absent on
+   * every other kind, which is what tells a prompt that asks from a prompt that wants consent. */
+  readonly questions?: (input: ToolInput) => readonly AskedQuestion[] | undefined;
   /** Fields the lead says itself, left out of the values shown under it so nothing is read twice. */
   readonly named: readonly string[];
   readonly body?: string;
@@ -2085,6 +2266,7 @@ const PERMISSION_ASKS: ReadonlyMap<string, PermissionWords> = new Map<string, Pe
   ["Write", writeAsk],
   ["Bash", commandAsk],
   ["Skill", skillAsk],
+  [QUESTION_TOOL, questionAsk],
 ]);
 
 function permissionWords(toolName: string): PermissionWords {
@@ -2129,11 +2311,16 @@ export interface PermissionPromptWords {
   readonly code?: string;
   readonly rest: string;
   readonly body?: { readonly label: string; readonly text: string };
+  /** Set only on a call that asks the person something: the row draws these and nothing else, since a question's
+   * whole input is the question. */
+  readonly questions?: readonly AskedQuestion[];
 }
 
 export function permissionPromptWords(toolName: string, input: string, detail?: string): PermissionPromptWords {
   const lead = askLead(toolName, input, detail);
   const parts = { lead: leadLine(lead), says: lead.says, ...(lead.code === undefined ? {} : { code: lead.code }) };
+  const questions = askedQuestions(toolName, input);
+  if (questions !== undefined) return { ...parts, rest: "", questions };
   const fields = toolInput(input);
   if (fields === undefined) return { ...parts, rest: input };
   const words = permissionWords(toolName);
@@ -2160,7 +2347,7 @@ export function permissionOutcomeLine(outcome: PermissionOutcome, picked?: { lab
   const named = picked?.effect === "mode" ? `: ${picked.label}` : "";
   switch (outcome) {
     case "allowed":
-      return `Allowed${named}`;
+      return picked?.effect === "answer" ? `You answered: ${picked.label}` : `Allowed${named}`;
     case "denied":
       return `Denied${named}`;
     case "unanswered":
@@ -2184,14 +2371,23 @@ export function permissionModeOptionLabel(modeLabel: string): string {
   return `Allow, then ${modeLabel}`;
 }
 
-/** What the composer says under the box when a person picked an access while a turn was running and that harness
- * takes no such change mid-turn: the pick is kept and it reaches the agent with the next thing they send. Short
- * because that slot is one line the width of the box and it truncates from the right: a longer sentence lost the
- * half that carries the answer at the window this app is smallest in (measured 2026-09-08, 364 px of slot at a
- * 1200 px viewport), and a line that says when the pick lands is no use cut before the "when". */
-export function accessFromNextMessage(modeLabel: string): string {
-  return `${modeLabel} from your next message`;
+/** What the access picker says over its list while a turn is running: what a pick does to that turn, read before the
+ * pick rather than under the box after it. A harness that takes a mode change mid-turn puts the pick to the turn in
+ * front of the person, the prompt it is stopped on included; one that does not keeps the pick for the next message. */
+export function accessReachLine(movesRunningTurn: boolean): string {
+  return movesRunningTurn ? "Applies to the turn running now" : "Applies from your next message";
 }
+
+/** What the composer says under the box when an access pick the harness's own row said would reach the running turn
+ * came back refused: the two halves every refusal in this app has, what happened and then what to do about it. It
+ * stands only for a refusal the harness actually answered with, never for one the menu said before the pick, so
+ * nobody reads the same sentence twice. Short because that slot is one line the width of the box and it truncates
+ * from the right: 54 characters is what fits at the window this app is smallest in (measured 2026-09-08, 364 px of
+ * slot at a 1200 px viewport), and a refusal cut before its second half is no use. */
+export const ACCESS_REFUSED_WORDS = { said: "The turn refused it.", fix: "Your next message carries it." } as const;
+
+/** Those two halves as the one line that slot holds. */
+export const ACCESS_REFUSED_LINE = `${ACCESS_REFUSED_WORDS.said} ${ACCESS_REFUSED_WORDS.fix}`;
 
 /** The one sentence a second workspace on a machine that already carries one is refused with. wsp forks a machine
  * for every workspace it makes and records one for every machine it does not, so one record stands on one machine
@@ -2728,7 +2924,7 @@ export const HOST_WORDS = {
     portPlaceholder: "22",
     keycap: "Connect",
     cancel: "Cancel",
-    directNote: "The app pairs with the host at this address, with the code wsp pair printed on that computer, and opens it.",
+    directNote: "The app pairs with the host at this address, with the code wsp host pair printed on that computer, and opens it.",
     sshNote: "The app logs in over ssh, starts wsp there when nothing serves, forwards its port to this computer and pairs.",
     /** Why Connect is held, as its tooltip. */
     fillFirst: "type the address and the code first",
@@ -2744,22 +2940,13 @@ export function offlineFor(ms: number): string {
   return hours < 24 ? `${hours} h` : `${Math.floor(hours / 24)} d`;
 }
 
-/** The mono word after a computer's name in the Where agents run table: nothing while it holds its link, and how
- * long it has been away when it does not. The slot stands either way, so the word arriving moves no column. */
-export function placeStateWord(view: PlaceView, now: number): string {
-  if (view.present !== false) return "";
-  const since = view.lastSeenAt === undefined ? NaN : Date.parse(view.lastSeenAt);
-  return Number.isNaN(since) ? "offline" : `offline · ${offlineFor(now - since)}`;
-}
-
 /** The Workspaces cell of that table: how many stand on the computer, and the one thing about it that changes what
- * a person may put there. A computer that is not answering says so ahead of what it cannot run, since the second
- * fact is about a computer this wsp is not talking to. */
-export function placeWorkspacesCell(view: PlaceView): string {
-  const count = view.workspaceId === undefined ? 0 : 1;
-  if (count === 0) return "0";
-  if (view.present === false) return `${count} · not answering`;
-  return view.docker === true ? `${count}` : `${count} · agents only`;
+ * a person may put there. Whether the computer is answering is not one of them: the state slot beside its name
+ * carries that, and a row that said it twice was a row that said it in two wordings. The count is what the caller
+ * reads off the workspace list, never off the row: a row carries at most the one workspace its join recorded, so
+ * this computer's own workspace and a provider's forks are on neither. */
+export function placeWorkspacesCell(view: PlaceView, count: number): string {
+  return view.docker === true || view.kind === "provider" ? `${count}` : `${count} · agents only`;
 }
 
 /** The one line that takes wsp off a computer it is typed on. */
@@ -2771,12 +2958,10 @@ export const PLACES_WORDS = {
   columns: ["Computer", "Size", "Disk free", "Workspaces"],
   addComputer: "Add a computer",
   connectProvider: "Connect a provider",
-  /** Why Connect a provider is held: the sheet behind it belongs to the image and provider work. */
-  connectProviderHeld: "arrives with the provider sheet",
   sheet: {
     title: "Add a computer",
     description: "A computer you own runs threads for your wsp. It connects to this Mac over your network. You open nothing on it.",
-    appRoad: "On that computer, open wsp and press This Mac joins another wsp. Type these.",
+    appRoad: 'On that computer, open wsp and press "This Mac joins another wsp". Type these.',
     address: "Address",
     code: "Code",
     waiting: "waiting for it to connect",

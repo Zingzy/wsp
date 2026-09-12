@@ -54,6 +54,20 @@ export const RUN_EXIT_MS = 10_000;
 /** How long a turn's process gets to go on the graceful signal before its group is killed, on either road: what the
  * guest's reap waits between its TERM and its KILL, and what a host gives the turns on this computer as it stops. */
 export const RUN_STOP_MS = 2_000;
+/** How long a road to a machine keeps being dialled while nothing answers before it is called down. The one rule
+ * every link this project holds reads, which is why it lives here: the host's dial of a machine's daemon and its
+ * re-dial after a drop, the post that launches or re-opens a turn's run, and the browser's link to a workspace.
+ * Measured 2026-09-12: one resolver dropped the name of a machine's edge for about three minutes at a time while
+ * the machines behind it went on running and their processes went on working, so a name that will not resolve is
+ * worth a minute of asking. */
+export const LINK_RETRY_WINDOW_MS = 60_000;
+
+/** The wait before dial `attempt`, half a second doubling to ten, with up to a quarter second of jitter so the
+ * turns of one machine do not all come back at the same instant after a blip. */
+export function linkBackoffMs(attempt: number): number {
+  return Math.min(10_000, 500 * 2 ** Math.max(0, attempt - 1)) + Math.floor(Math.random() * 250);
+}
+
 /** The close code a host sends the clients on its own socket as it stops: the socket did not break under them, the
  * host let it go, so a command waiting on a turn says the host is restarting rather than that the turn failed. */
 export const HOST_STOPPING_CLOSE = 4001;
@@ -130,6 +144,11 @@ export type WorkspaceSize = z.infer<typeof WorkspaceSize>;
  * or over. */
 export const InitSetup = z.object({
   keys: InitKeys,
+  /** The provider whose key the setup's own key step asks for, by the word WSP_PROVIDER holds: the one this host
+   * forks on where it reads a key, else the one a key alone would wire. Absent where no key would wire anything,
+   * which is a host set up for a provider that reads none. The step reads its held state out of `keys` by this
+   * word rather than by a provider's name. */
+  keyProvider: z.string().optional(),
   /** This computer's home directory, so a field can show a real path of the person's as its example. */
   home: z.string(),
   agents: z.array(InitAgent),
@@ -439,6 +458,14 @@ export type WorkspaceView = z.infer<typeof WorkspaceView>;
 export const MachineFacts = z.object({ os: z.string(), uptimeMs: z.number(), folder: z.string() });
 export type MachineFacts = z.infer<typeof MachineFacts>;
 
+/** Whether the machine that reported this system name is a Mac: the name its maker gives it, and the kernel's own
+ * word where the machine answered nothing better, which is what a machine on this computer falls back to. The
+ * folder browsers read it beside the home to know whether that home keeps a Library. Absent is not a Mac: what
+ * reads this hides a folder, and a machine that said nothing has said nothing to hide. */
+export function isMacMachine(osName: string | null | undefined): boolean {
+  return /^(?:macOS|Darwin)\b/.test(osName ?? "");
+}
+
 /** WorkspaceView enriched with what the rail and meta panel render live. */
 export const WorkspaceStatus = WorkspaceView.extend({
   machineState: MachineState,
@@ -560,6 +587,11 @@ export const SessionView = z.object({
    * absent on a turn waiting on nobody. The harness is stopped on the question while it stands, so this is the one
    * fact that says a thread is waiting on the person rather than working. */
   asking: z.string().optional(),
+  /** The process this turn leads on the computer the host runs on, where the turn runs there: the pid the Processes
+   * pane heads this thread's tree with. Absent on a turn running on another machine, whose pids are not this
+   * computer's, and on a turn that is over. It is never written down: a pid outlives nothing, and the computer is
+   * free to hand it to a stranger the moment the turn ends. */
+  pid: z.number().int().optional(),
 });
 export type SessionView = z.infer<typeof SessionView>;
 
@@ -593,6 +625,8 @@ export const ThreadView = z.object({
   asking: z.string().optional(),
   /** What this thread has cost: its rows' figures added up. Absent where no row of it carries one. */
   costUsd: z.number().optional(),
+  /** The latest turn's process on the computer the host runs on, as SessionView.pid carries it. */
+  pid: z.number().int().optional(),
 });
 export type ThreadView = z.infer<typeof ThreadView>;
 
@@ -639,6 +673,7 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.endedAt !== undefined ? { endedAt: latest.endedAt } : {}),
       ...(latest.cwd !== undefined ? { cwd: latest.cwd } : {}),
       ...(latest.asking !== undefined ? { asking: latest.asking } : {}),
+      ...(latest.pid !== undefined ? { pid: latest.pid } : {}),
       turns: turns.length,
       ran: threadRan(turns),
       ...(first.parentThreadId !== undefined ? { parentThreadId: first.parentThreadId } : {}),
@@ -725,6 +760,10 @@ export const HarnessCatalog = z.object({
    * mcpServers this is the adapter's own declaration and no binary's, so a table row is the answer and a client reads
    * it before any machine exists; absent is none. The composer lists none of them and sends nothing for one. */
   screenCommands: z.array(ScreenCommand).optional(),
+  /** Whether an access picked while a turn of this harness runs reaches that turn. The adapter in this host declares
+   * it, as with mcpServers, so the picker says what a pick does to the turn in front of the person before the pick
+   * rather than under the box after it. Read it through movesRunningAccess: absent is a no. */
+  movesAccess: z.boolean().optional(),
   /** Set on the harness a start without one runs, so a client can pick its list without the catalog package. */
   isDefault: z.boolean().optional(),
   /** Why the binary described nothing, in its own adapter's words, when it ran and refused for a reason it can name
@@ -808,6 +847,13 @@ export function readsImages(catalog: HarnessCatalog | null | undefined): boolean
  * machine exists. Absent is a no, which is a catalog from before the field was declared. */
 export function takesMcpServers(catalog: Pick<HarnessCatalog, "mcpServers"> | null | undefined): boolean {
   return catalog?.mcpServers === true;
+}
+
+/** Whether an access picked while a turn runs reaches that turn on this harness. The adapter's own declaration, like
+ * takesMcpServers; absent is a no, which is a catalog from before the field was declared, and a pick then waits for
+ * the person's next message. */
+export function movesRunningAccess(catalog: Pick<HarnessCatalog, "movesAccess"> | null | undefined): boolean {
+  return catalog?.movesAccess === true;
 }
 
 /** Whatever carries a harness's screen-only commands: the catalog itself, or a caller that holds the list alone. */
@@ -989,6 +1035,10 @@ export const SessionDeltaEvent = z.object({
   toolName: z.string().optional(),
   toolUseId: z.string().optional(),
   isError: z.boolean().optional(),
+  /** The tool call of this turn that launched the agent this line came from; absent on every line the thread's own
+   * agent wrote. A harness runs its subagents on the session that spawned them, so their lines arrive among the
+   * parent's and this is the only thing that tells them apart. */
+  parentToolUseId: z.string().optional(),
   /** The agent's tool shell folder after this tool_use, present only when the call moved it (a cd, or a file written
    * in a folder beside the one followed so far); the panes follow it while the harness folder stays put. */
   cwd: z.string().optional(),
@@ -1011,7 +1061,7 @@ export const SessionEndEvent = z.object({
   ...sessionScope,
   exitCode: z.number().nullable(),
   sawResult: z.boolean(),
-  /** Set when the runtime ended the session itself (a nap, a delete, a machine that stopped answering) rather than the harness exiting. */
+  /** Set when the runtime ended the session itself (a nap, a delete, a machine gone at the provider) rather than the harness exiting. */
   reason: z.string().optional(),
 });
 
@@ -1086,8 +1136,10 @@ export type SessionNotifyEvent = z.infer<typeof SessionNotifyEvent>;
 
 /** What picking one option on a permission prompt does to the tool call in front of it: run it, refuse it, or run it
  * and leave the rest of the turn in another access mode, which is how a harness offers "and stop asking about
- * edits". The runtime hands the option's id back to the adapter, which turns it into whatever its CLI takes. */
-export const PermissionEffect = z.enum(["allow", "deny", "mode"]);
+ * edits". answer is none of the three: the call in front of it only asks the person something, and the pick is what
+ * it answers with. The runtime hands the option's id back to the adapter, which turns it into whatever its CLI
+ * takes. */
+export const PermissionEffect = z.enum(["allow", "deny", "mode", "answer"]);
 export type PermissionEffect = z.infer<typeof PermissionEffect>;
 
 export const PermissionOption = z.object({
@@ -1117,6 +1169,9 @@ export const SessionPermissionEvent = z.object({
   /** The tool_use this prompt is about, so the row sits with the call it belongs to; absent where the harness
    * named none. */
   toolUseId: z.string().optional(),
+  /** The tool call that launched the agent this prompt came from; absent on every prompt the thread's own agent
+   * raised. The row sits inside that agent's own fold and says which of them is asking. */
+  parentToolUseId: z.string().optional(),
   /** The tool's input as the harness sent it, JSON, the same text a tool_use delta carries. */
   input: z.string(),
   /** The harness's own one phrase for the call (a file name, a command); absent where it named none. */
@@ -1614,7 +1669,7 @@ export interface HostsView {
   place?: { hostName: string; awake: boolean };
 }
 
-/** What the connect sheet asks the shell for: an address with the code wsp pair printed there, or an ssh login the
+/** What the connect sheet asks the shell for: an address with the code wsp host pair printed there, or an ssh login the
  * shell starts or finds a host behind and forwards. */
 export type HostConnectAsk = { road: "direct"; url: string; code: string } | { road: "ssh"; address: string; port?: number };
 
@@ -2124,14 +2179,13 @@ export type ForwardEvent = z.infer<typeof ForwardOpenEvent> | z.infer<typeof For
 /** What a computer joining this host passes through when the host installs the agent on it over ssh, in order.
  * One list for the line a terminal prints and the rows the app draws, so neither invents a step the other has not
  * got. */
-export const PlaceAddStep = z.enum(["connect", "node", "wsp", "service", "join"]);
+export const PlaceAddStep = z.enum(["connect", "wsp", "service", "join"]);
 export type PlaceAddStep = z.infer<typeof PlaceAddStep>;
 
 /** What each step reads as while it runs. The note beside it carries what the computer answered (its system, the
  * node it got), which is the step's own to say and never a second sentence about it. */
 export const PLACE_ADD_WORDS: Record<PlaceAddStep, string> = {
   connect: "connecting over ssh",
-  node: "installing node",
   wsp: "installing wsp",
   service: "starting the agent",
   join: "waiting for it to connect to this computer",
@@ -2189,6 +2243,12 @@ export const PlaceView = z.object({
   rateUsdPerHour: z.number().optional(),
   /** How many forks the place holds and how many more it takes, by forkRoom; absent on a place that forks nowhere. */
   forks: z.object({ running: z.number().int(), room: z.number().int() }).optional(),
+  /** Whether a workspace can be forked here at all: a provider, or a computer somebody joined that has Docker of
+   * its own. Absent or false is a computer used directly, which runs the person's agents as its own one workspace;
+   * the computer the host itself runs on is one of those whether or not it has Docker, since a copy of the image
+   * on a Docker here is the provider row's. The one fact wsp new reads to decide which road a place takes, so no
+   * line outside this list switches on a place's kind. */
+  takesForks: z.boolean().optional(),
 });
 export type PlaceView = z.infer<typeof PlaceView>;
 
@@ -2205,6 +2265,15 @@ export const placeMachineId = (placeId: string): string => `place:${placeId}`;
 export function parsePlaceMachineId(id: string): string | undefined {
   const placeId = id.startsWith("place:") ? id.slice("place:".length) : "";
   return placeId === "" ? undefined : placeId;
+}
+
+/** Which computer a workspace stands on, by place id, however it got there: a workspace made on a joined computer
+ * carries that computer's id on its record, and the workspace a joined computer itself is carries it in the
+ * machine id, since its machine is the link. Undefined for everything on this computer or at a provider. Written
+ * once because the host asks it to know whether anything can be asked of the machine, and the app asks it to know
+ * which row of the places table a workspace belongs to. */
+export function workspacePlace(view: Pick<WorkspaceView, "place" | "machineId">): string | undefined {
+  return view.place ?? parsePlaceMachineId(view.machineId ?? "");
 }
 
 /** A computer you own finished its join, with the address it dialled from as `ws` reported it. The view carries
@@ -2756,6 +2825,12 @@ export const placeHoldsForksRefusal = (place: string, names: readonly string[]):
 export const placeForksNowhereLine = (place: string): string =>
   `${place} runs your agents but has no Docker, so it takes no forks; install Docker on it to fork there`;
 
+/** What a person asking for a workspace on a place that forks nothing is told when that place already runs one: the
+ * place is its own one workspace, so the line names the one there is rather than making a second. The reason is not
+ * Docker, which the computer the host runs on may well have: it is that the person's own agents run there. */
+export const placeRunsOneWorkspaceLine = (place: string, workspace: string): string => `${place} runs your agents as its own one workspace, ${workspace}`;
+export const placeRunsOneWorkspaceFix = (workspace: string): string => `Use ${workspace}, or name a place that forks: wsp places.`;
+
 /** What a word that names no place this host holds is refused with, naming the ones it does. */
 export const noSuchPlaceRefusal = (word: string, held: readonly string[]): string => `no place named ${word}; you have ${held.join(", ")}`;
 
@@ -2851,6 +2926,7 @@ const DAEMON_CONTENTS = [
   "a6ae68d8af502a8a5ecf9795ca11ca0b9b12cda2792e45eee3376c7e4d57917b",
   "055dcf11b2a17e8959ab3a6246c2d17f89eb3837c59b31d3a8138c6dc7b6c322",
   "09e441a435678290871e210158d5f8fef3b43b307c5ec917086a201583c037a5",
+  "386b54104e2a8abf8f45f9a35fe767971b72d5d00da68c4d8ae0aa9630b7cc6d",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -2892,16 +2968,23 @@ const DAEMON_CONTENTS = [
  * one per option, reads its ports, load, processes and pty modes off one /proc root, logs its samplers' starts and
  * stops, and builds a place's report and sweep off the home it is pointed at, so a test suite drives it as a binary
  * and the words and numbers it answers with are the protocol's, held in one fixture set. Version 21 takes
- * --runtime-root, where a place's daemon keeps the layers and the workspaces it runs itself. */
+ * --runtime-root, where a place's daemon keeps the layers and the workspaces it runs itself. Version 22 is one
+ * static binary, built from the Rust sources under daemon/ for each chip a machine can be: the deploy lands the two
+ * Linux builds and keeps the one uname names, the unit and the supervisor start it by its path with one set of
+ * flags, a computer joined as a place runs the same binary under its login's own manager, this computer's
+ * workspace spawns it, and the guest keeps no node, no npm install and no native module for the daemon; the wsp
+ * command beside it still runs on the node the machine carries. The binary also answers a plain HTTP request 426,
+ * as the host's status probe reads a daemon by. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
-/** sha256 of what a deploy installs on a guest and this record can hold: the daemon's sources, the dependency
- * pins its bundle carries, the scripts the host writes beside them, and DAEMON_ROOTS_PATH. The host's
+/** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
+ * is built from, the lock that pins its dependencies, the C library the Linux builds link and its pinned release,
+ * the contract fixtures its words and numbers are held to (the version itself left out of them, since it is this
+ * record), the scripts the host writes beside it, DAEMON_ROOTS_PATH and the work-score line. The host's
  * daemon-content test recomputes it and fails when that content moved and this record did not, so changed content
- * cannot reach nobody: a start script gained a PATH line under an unchanged version once and every machine
- * already running kept the old one. Left out, and on the guest anyway because the daemon's dist bundles them: the
- * rest of this file, the DaemonAuthRequest schema the daemon reads, and zod. Hashing the protocol whole would
- * turn every edit to it into a redeploy of every machine. */
+ * cannot reach nobody: a start script gained a PATH line under an unchanged version once and every machine already
+ * running kept the old one. Left out: the rest of this file, which the binary reads only through the fixtures;
+ * hashing the protocol whole would turn every edit to it into a redeploy of every machine. */
 export const DAEMON_CONTENT_SHA = DAEMON_CONTENTS[DAEMON_CONTENTS.length - 1]!;
 
 /** The file on the guest naming the imported project folders, one absolute path per line: the runtime writes it
@@ -2982,7 +3065,7 @@ export type TicketPurpose = z.infer<typeof TicketPurpose>;
  * has to say what it is here before any socket may redeem it. */
 export const TICKET_ORIGIN: Record<TicketPurpose, WorkspaceOrigin> = { connect: "here", relay: "relayed" };
 
-/** A computer that redeemed a pairing code and holds a token of its own, as devices.list answers and wsp devices
+/** A computer that redeemed a pairing code and holds a token of its own, as devices.list answers and wsp host devices
  * prints it. The token is never here: the host keeps only its hash, so a listing can leak nothing that opens a
  * socket. */
 export const DeviceView = z.object({
@@ -3025,26 +3108,43 @@ export const sentPairCode = (shown: string): string => shown.replace(/-/g, "").t
  * random byte masked to five bits is uniform. */
 export const PAIR_CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
+/** What this wsp knows about the account it is on, read off this computer's own records alone: the relay is never
+ * asked for it, so the row draws at once and draws the same whether or not the relay is up. Signed in is a record
+ * on disk; the name beside it is the one the relay gave when the sign-in was approved, which a relay that names
+ * none leaves absent, and then the state word alone is the answer. */
+export const AccountView = z.object({
+  signedIn: z.boolean(),
+  login: z.string().optional(),
+});
+export type AccountView = z.infer<typeof AccountView>;
+
+/** The refusal a socket let in on a ticket gets for reading the account: who this wsp is signed in to is read at
+ * the terminal of the computer it runs on, as the devices and the places are. */
+export const ACCOUNT_TICKET_REFUSAL = "a socket let in on a ticket cannot see the account this host is signed in to; run wsp host linked on the computer the host runs on";
+
+/** The refusal for a host that keeps no records of its own to read an account from, which a bare runtime does not. */
+export const ACCOUNT_UNSERVED = "this host keeps no account records; wsp up serves them";
+
 /** The refusal a socket that is not the host's own gets for asking to mint a pairing code: a code lets a stranger
  * in, so only the process holding the host token, on this computer, may hand one out. */
-export const PAIR_ISSUE_REFUSAL = "only a socket holding this host's own token may mint a pairing code; run wsp pair on the computer the host runs on";
+export const PAIR_ISSUE_REFUSAL = "only a socket holding this host's own token may mint a pairing code; run wsp host pair on the computer the host runs on";
 
 /** The refusal a redeemed code that this host is not holding gets: spent, expired, or never minted read the same,
  * so guessing tells a caller nothing about which. */
-export const PAIR_CODE_REFUSAL = "that pairing code is not one this host is waiting for; run wsp pair on the host for a fresh one";
+export const PAIR_CODE_REFUSAL = "that pairing code is not one this host is waiting for; run wsp host pair on the host for a fresh one";
 
 /** The refusal a socket that was let in on a single-use ticket gets for reaching the device ops, whether the ticket
  * was the road a machine's requests arrive by or another client's. Who may drive this host is handed out, read and
  * taken away at the terminal of the computer it runs on, and nowhere else. */
-export const DEVICES_TICKET_REFUSAL = "a socket let in on a ticket cannot see or change the devices paired with this host; run wsp devices on the computer the host runs on";
+export const DEVICES_TICKET_REFUSAL = "a socket let in on a ticket cannot see or change the devices paired with this host; run wsp host devices on the computer the host runs on";
 
 /** The refusal a device gets for revoking another device: a paired computer can hand its own token back, and only
  * the host takes anyone else's away. */
-export const DEVICE_REVOKE_REFUSAL = "a paired device may only revoke itself; run wsp devices revoke on the host to take another one away";
+export const DEVICE_REVOKE_REFUSAL = "a paired device may only revoke itself; run wsp host devices revoke on the host to take another one away";
 
 /** The refusal the JSON routes answer with when the host listens beyond this computer and the request carries no
  * device token. */
-export const API_UNAUTHORIZED = "this host listens beyond the computer it runs on, so this route needs a paired device token in an Authorization header; run wsp pair on the host";
+export const API_UNAUTHORIZED = "this host listens beyond the computer it runs on, so this route needs a paired device token in an Authorization header; run wsp host pair on the host";
 
 /** A frame the page sends a daemon through the host: the daemon's own op and params, no id. The host numbers
  * frames on its socket to the daemon and hands the daemon's answer back under the request that carried the frame,
@@ -3166,7 +3266,7 @@ export function placeLinkTranscript(role: "host" | "place", placeId: string, cha
 
 /** The refusal a join whose code this host is not holding gets. Spent, expired and never minted read the same, so
  * guessing tells a caller nothing about which; the words differ from a pairing code's only in naming the verb that
- * mints this one, since a person joining a computer never typed wsp pair. */
+ * mints this one, since a person joining a computer never typed wsp host pair. */
 export const PLACE_CODE_REFUSAL = "that join code is not one this host is waiting for; run wsp add on the host for a fresh one";
 
 /** The refusal a place gets for proving itself with a key the host does not hold for it. A key that moved is a
@@ -3180,10 +3280,6 @@ export const PLACE_UNKNOWN_REFUSAL = "this host holds no place by that id; join 
 /** The refusal a joining computer prints when the host at that address could not prove the key this computer
  * learned at join, so nothing of this computer's went to it. */
 export const hostKeyRefusal = (url: string): string => `the host at ${url} did not prove the key this computer learned at join; nothing was sent to it`;
-
-/** What a row says about a place that is not holding its link right now. Nothing is wrong: the computer dials on
- * its own whenever it is on and can reach this host. */
-export const placeAbsentLine = (name: string): string => `${name} is not connected right now; it dials this host on its own when it is on and can reach it`;
 
 /** What a remove says about a place that was not linked when it ran: the records here are gone and the agent on
  * that computer is not, since nothing could reach it to sweep. */
@@ -3321,6 +3417,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Spends a code for this computer's own token, as the first frame of a socket nothing has authed. Answers
    * `{ deviceId, deviceToken }` once, and the socket is authed as that device from then on. */
   z.object({ id: reqId, op: z.literal("pair.redeem"), code: z.string().max(64), name: z.string().max(200) }),
+  /** What this wsp knows about the account it is signed in to, off this computer's own records. Answers
+   * `{ account }`. Only on the person's own road, never on one let in by a ticket. */
+  z.object({ id: reqId, op: z.literal("account.get") }),
   /** Every paired device, for the host token and for a device's own socket alike. */
   z.object({ id: reqId, op: z.literal("devices.list") }),
   /** Takes a device's token away and cuts the sockets holding it. A device may name only itself; the host token
@@ -3594,7 +3693,7 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("workspaces.exec"), workspaceId: z.string(), argv: z.array(z.string()).min(1), cwd: z.string().optional() }),
   /** Replies with { listing: HostFolderListing }: one level of this computer's own folders, for the picker a browser
    * tab has instead of the desktop shell's dialog. `dir` absent lists the first root and a folder inside the roots
-   * that is gone does the same; a path outside them is refused. `hidden` lists the dot-named folders too, which are
+   * that is gone does the same; a path outside them is refused. `hidden` lists the hidden folders too, which are
    * otherwise only counted. */
   z.object({ id: reqId, op: z.literal("host.folders"), dir: z.string().optional(), hidden: z.boolean().optional() }),
   /** Replies with { config: TerminalConfig }: the person's Ghostty config on the computer running the host, read
@@ -3603,10 +3702,13 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("host.terminalConfig"), scheme: TerminalScheme.optional() }),
   /** Replies with { setup: InitSetup }: the cloud setup as the modal opens on it, the init job included when one runs. */
   z.object({ id: reqId, op: z.literal("init.get") }),
-  /** Saves keys into the wsp home's .env on the computer running the host: the provider key, which wires the
-   * provider it names, and an agent's API key by the sign-in row it answers, saved under the variable that agent's
-   * sign-in declares. Replies with { setup: InitSetup }, which says a key is held and never says what it is. */
-  z.object({ id: reqId, op: z.literal("init.keys"), solari: z.string().optional(), rows: z.record(z.string()).optional() }),
+  /** Saves keys into the wsp home's .env on the computer running the host: the provider key, put to that provider
+   * before anything is written and saved under the variable its own module reads, and an agent's API key by the
+   * sign-in row it answers, saved under the variable that agent's sign-in declares. `provider` is the word
+   * WSP_PROVIDER holds for the provider the key belongs to, and naming one picks it; absent, the key goes to the
+   * provider this host already forks on. Replies with { setup: InitSetup }, which says a key is held and never says
+   * what it is. */
+  z.object({ id: reqId, op: z.literal("init.keys"), provider: z.string().max(64).optional(), key: z.string().optional(), rows: z.record(z.string()).optional() }),
   /** Starts the init job on the road named, an agent's harness on the agent road; replies with { job: InitJob } and
    * every change after rides init.job events. One job runs at a time; a second start while one runs is refused. The
    * terminal road takes its answers from the recipe beside the state, which wsp init wrote from its own screens, and
@@ -3804,11 +3906,12 @@ export type SessionSteerResult = z.infer<typeof SessionSteerResult>;
 
 // --- session access (what a pick made while a turn runs gets back) ---------------------
 
-/** set: the harness took the mode and this turn's next tool call runs at it. unsupported: the harness takes no
- * access change on a turn already under way (Claude Code's bypass, which is a launch flag on that CLI), so the pick
- * waits for the person's next message. not-running: the turn ended, or its process is gone, before the pick reached
- * it. not-found: this runtime holds no such session. None is an error reply, as a mode the harness's own list does
- * not carry is. */
+/** set: the turn is at the mode, from its next tool call and on the prompt it was stopped on where that mode
+ * answers one; a harness whose CLI takes the change only at launch is set too, where its adapter stands in for it
+ * by answering that turn's prompts itself. unsupported: the harness takes no access change on a turn already under
+ * way and nothing could stand in for it, so the pick is kept and the person's next message carries it.
+ * not-running: the turn ended, or its process is gone, before the pick reached it. not-found: this runtime holds no
+ * such session. None is an error reply, as a mode the harness's own list does not carry is. */
 export const SessionAccessOutcome = z.enum(["set", "not-running", "unsupported", "not-found"]);
 export type SessionAccessOutcome = z.infer<typeof SessionAccessOutcome>;
 export const SessionAccessResult = z.object({ outcome: SessionAccessOutcome });
@@ -3928,7 +4031,7 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { threadState, threadStateWord, threadWordOf, type ThreadState } from "./thread-state.js";
-export { actionRefusal, agentsKindRefusal, agentsMayDrive, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
+export { type AbsentComputer, absentComputer, actionRefusal, agentsKindRefusal, agentsMayDrive, awayMsOf, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";
@@ -3977,7 +4080,7 @@ export {
   type Rgb,
   type ThemePreset,
 } from "./workspace-look.js";
-export { folderName, parentFolderName, placeDaemonPaths, placeOwnedPaths, rootsPathIn, sshDaemonPaths, underProject, workFolderIn } from "./project-path.js";
+export { folderName, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, rootsPathIn, sshDaemonPaths, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importDest, importRequest, registerRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
@@ -3985,5 +4088,5 @@ export { addressFromHash, appHash, workspaceHash, type AppAddress } from "./app-
 export * from "./app-ports.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";
-export { FAKE_AS_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, TURN_TOKEN_ENV, WEB_DIR_ENV } from "./env.js";
+export { FAKE_AS_ENV, FAKE_ROOT_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, TURN_TOKEN_ENV, WEB_DIR_ENV } from "./env.js";
 export type { AdapterAttachOptions, AdapterEvent, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";

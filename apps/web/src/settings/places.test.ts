@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { placeMachineId, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
 import { copyOn } from "./image.js";
-import { NOTHING_HELD, placeIsFull, placeName, placeOf, removeSentence, removeTitle, whereCaption, whereSegments } from "./places.js";
+import { NOTHING_HELD, placeIsFull, placeName, placeOf, placeWorkspaceCounts, removeSentence, removeTitle, whereCaption, whereSegments } from "./places.js";
 
 const NOW = Date.parse("2026-09-12T12:00:00.000Z");
 const ago = (ms: number): string => new Date(NOW - ms).toISOString();
@@ -126,5 +126,16 @@ describe("which row a workspace stands on", () => {
   it("places nothing where the list holds no row for it", () => {
     expect(placeOf([here], on("ws_d", "cloud", "fk_1"))).toBeUndefined();
     expect(placeOf([here, ascii], on("ws_e", "place", placeMachineId("p_gone")))).toBeUndefined();
+  });
+
+  it("counts what stands on each row off the workspace list: this computer's own, the forks at a provider, the one on a joined computer", () => {
+    const places = [here, hetzner, ascii];
+    const workspaces = [on("ws_a", "local", "local"), on("ws_b", "cloud", "fk_1"), on("ws_c", "cloud", "fk_2"), on("ws_d", "place", placeMachineId("p_1"))];
+    expect(placeWorkspaceCounts(places, workspaces)).toEqual({ here: 1, box: 2, p_1: 1 });
+  });
+
+  it("leaves a row nothing stands on out, and counts nothing for a workspace no row holds", () => {
+    expect(placeWorkspaceCounts([here, hetzner], [on("ws_a", "local", "local")])).toEqual({ here: 1 });
+    expect(placeWorkspaceCounts([here], [on("ws_b", "place", placeMachineId("p_gone"))])).toEqual({});
   });
 });

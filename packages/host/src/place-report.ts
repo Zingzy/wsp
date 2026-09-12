@@ -1,16 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // What a computer joined as a place says about itself, where it keeps the two
 // files that say which wsp it belongs to, and the sweep that takes wsp off it.
-// It sits apart from the agent that holds the link because the agent reaches
-// @wsp/daemon, which dlopens node-pty at import: nothing that merely imports
-// @wsp/host may load that, and these three readings are wanted on the host
-// side too, where the places list reads this computer's own row.
+// The daemon on the place builds its own report at every dial; this is the
+// host's side, where the join's first frame and the places list read this
+// computer's own row.
 
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statfsSync, writeFileSync } from "node:fs";
 import { homedir, arch as osArch, platform, release, type as osType, userInfo } from "node:os";
-import type { PlaceSelfReport } from "@wsp/daemon";
-import { PLACE_FILE_MODE, parsePlaceFile, placeFileText, type PlaceFile } from "@wsp/protocol";
+import { PLACE_FILE_MODE, parsePlaceFile, placeFileText, type PlaceFile, type PlaceReport } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LOGIN_READ, SSH_STORE_VARS, isPlainPath, localShape, plainPath, readValues } from "@wsp/engine";
 import { DAEMON_VERSION, placeDaemonPaths, placeOwnedPaths, workFolderIn } from "@wsp/protocol";
@@ -26,13 +24,12 @@ export const placeFilePath = (home: string): string => placeDaemonPaths(home).pl
 export const placeKeyPath = (home: string): string => placeDaemonPaths(home).placeKey;
 export const placeLogPath = (home: string): string => placeDaemonPaths(home).placeLog;
 
+/** What a computer says about itself when it joins, before the host has named which address it dialed and which
+ * port its daemon bound: the daemon fills those two in on every link. */
+export type PlaceSelfReport = Omit<PlaceReport, "dialed" | "daemonPort">;
+
 /** The place file as it stands, or nothing when this computer is no place. The shape, the parse and the mode are
- * the protocol's; this is the read on the host's side of the wire.
- *
- * The other copy of these two lines is `readPlaceFile` and `writePlaceFile` in `packages/daemon/src/link.ts`, which
- * is the agent's own. The boundary that forces it: nothing here may import that package eagerly, because its module
- * scope dlopens a native pty, and the protocol, which both sides do import, is bundled into the browser and can
- * hold no fs call. What could drift is in the protocol; what is copied is the read and the write of a file. */
+ * the protocol's; this is the read on the host's side of the wire. */
 export function readPlaceFile(path: string): PlaceFile | undefined {
   try {
     return parsePlaceFile(readFileSync(path, "utf8"));

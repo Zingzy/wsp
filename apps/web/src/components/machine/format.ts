@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Words the machine surface puts next to wire values; the state word itself is
 // the protocol's, read from the same fold every other surface reads.
+import type { WorkspaceState } from "@wsp/protocol";
 
+/** The rate rows and the chart's own axis ticks, which need places a spend figure does not: what a person reads as
+ * a spend goes through the protocol's fmtCost, the one shape every surface shows a figure in. */
 export const money = (n: number, digits = 4): string => `$${n.toFixed(digits)}`;
 
 /** A tick's wall-clock time in the person's zone, hours and minutes. */
@@ -15,8 +18,12 @@ export function durationLabel(ms: number): string {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
-/** idleAt is absent while napping, while a session holds the machine awake, or with auto-nap off; the wire does not say which. */
-export function idleLabel(idleAt: number | undefined, now: number): string {
+/** idleAt is absent while napping, while a session holds the machine awake, or with auto-nap off; the wire does not
+ * say which. A paused workspace is the one case the wire does settle, and the row says what the nap will do rather
+ * than that none is scheduled: a pane that read Paused, not scheduled and napping was a pane saying one state in
+ * three words. */
+export function idleLabel(idleAt: number | undefined, now: number, state?: WorkspaceState): string {
+  if (state === "paused" || state === "pausing") return "not until it wakes";
   if (idleAt === undefined) return "not scheduled";
   const left = idleAt - now;
   return left <= 0 ? "napping now" : `naps in ${durationLabel(left)}`;

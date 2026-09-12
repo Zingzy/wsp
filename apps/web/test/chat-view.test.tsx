@@ -6,7 +6,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { installFakeLayout } from "./fake-layout.js";
-import type { EventUnion, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
+import type { EventUnion, HarnessCatalog, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
+import { LIST_PRICE_WORD, QUESTION_TOOL, THIS_COMPUTER, pickedOptionId, questionOptions, whoPaysLines } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { ChatView } from "../src/components/chat/ChatView.js";
@@ -28,6 +29,10 @@ beforeAll(async () => {
 afterAll(() => restoreLayout());
 
 const WS = CHAT_WS;
+
+/** The agent's own model table as the composer's menu reads it: enough of one for the foot's two sentences. */
+const CATALOG: HarnessCatalog = { harness: "claude", label: "Claude Code", source: "table", version: null, images: false, steers: false, renames: false, models: [{ value: "opus", label: "Opus" }], efforts: [], contextWindows: [], permissionModes: [] };
+
 const scope = { workspaceId: WS, sessionId: "sess_0001", turnId: CHAT_TURN };
 const T0 = CHAT_T0;
 
@@ -128,7 +133,8 @@ describe("ChatView", () => {
     const footer = screen.getByTestId("settled-footer");
     expect(footer.textContent).toContain("completed");
     expect(footer.textContent).toContain("Worked for 900ms");
-    expect(footer.textContent).toContain("$0.0010");
+    // Every spend figure a person reads is in cents, whatever its size: a tenth of one reads $0.00, not $0.0010.
+    expect(footer.textContent).toContain("$0.00");
   });
 
   it("renders the live fixture stream: grouped tool calls, collapsed thinking, highlighted code", async () => {
@@ -173,6 +179,55 @@ describe("ChatView", () => {
     const footer = screen.getByTestId("settled-footer");
     expect(footer.textContent).toContain("Worked for 10s");
     expect(footer.textContent).toContain("$0.02");
+  });
+
+  it("draws a fenced block in the side the page is drawing, and follows it when the computer's side changes", async () => {
+    // index.html opens on the dark side and the preference flips it after the first paint. A side read once while
+    // the transcript mounted stays wrong for as long as nothing else repaints, and a block highlighted for the
+    // other side draws its line in the ink the box's own ground is.
+    document.documentElement.classList.add("dark");
+    try {
+      const { api, emit } = fixtureApi([workspace]);
+      await setup(api);
+      for (const e of FIXTURE) emit(e);
+      const shiki = () => document.querySelector(".chat-markdown-shiki .shiki")?.className ?? "";
+      await waitFor(() => expect(shiki()).toContain("pierre-dark"));
+      await act(async () => { document.documentElement.classList.remove("dark"); });
+      await waitFor(() => expect(shiki()).toContain("pierre-light"));
+      expect(document.querySelector(".chat-markdown-shiki .line")?.textContent).toContain("const port: number = 3000;");
+    } finally {
+      document.documentElement.classList.remove("dark");
+    }
+  });
+
+  it("says a figure on this computer is a list price, and carries the model menu's own sentence on it", async () => {
+    const here: WorkspaceView = { ...workspace, id: "ws_here", name: "this computer", kind: "local", provider: undefined };
+    const { api } = fixtureApi([here], { ws_here: settledTurn("ws_here", "add a health route", "Added GET /health.") });
+    await setup(api, "ws_here");
+    const figureNow = () => [...screen.getByTestId("settled-footer").querySelectorAll("span")].find(el => el.textContent?.includes(LIST_PRICE_WORD));
+
+    // The word rides the figure from the first paint, off the workspace record alone: the catalog is not in the
+    // store yet here, and a figure that stood bare and gained its word a moment later would be the change this
+    // ticket took off the sidebar's cost line.
+    const bare = await waitFor(() => {
+      const found = figureNow();
+      expect(found).toBeDefined();
+      return found!;
+    });
+    expect(bare.textContent).toContain(`$0.00 ${LIST_PRICE_WORD}`);
+    expect(bare.getAttribute("title")).toBeNull();
+
+    // The model menu's own foot rides the title once the catalog that holds the agent's name has arrived, since
+    // nobody opens that menu before sending.
+    act(() => useStore.setState({ harnesses: [CATALOG] }));
+    const figure = await waitFor(() => {
+      const found = figureNow();
+      expect(found?.getAttribute("title")).not.toBeNull();
+      return found!;
+    });
+    expect(figure.textContent).toContain(`$0.00 ${LIST_PRICE_WORD}`);
+    expect(figure.getAttribute("title")).toBe(whoPaysLines(CATALOG, THIS_COMPUTER).join(" "));
+    expect(figure.getAttribute("title")).toContain("costs this wsp nothing");
   });
 
   it("shows the working row while a turn runs and an error when it exits without a result", async () => {
@@ -442,6 +497,237 @@ describe("ChatView", () => {
     // The option's name is left off where it repeats the outcome; a mode pick is the one that adds to it.
     expect(within(closed).getByText("Allowed")).toBeDefined();
     expect(closed.querySelector("[data-permission-outcome]")!.getAttribute("data-permission-outcome")).toBe("allowed");
+  });
+
+  it("draws a harness question as the question it is, one button per option, and the pick answers the prompt", async () => {
+    const sc = { workspaceId: WS, sessionId: "sess_q", turnId: "turn_q" };
+    const input = JSON.stringify({
+      questions: [
+        {
+          question: "This working directory is not a repository. What should I do?",
+          header: "Directory",
+          options: [
+            { label: "Clone it", description: "Fetch the remote into this folder." },
+            { label: "Start fresh", description: "Run git init here." },
+            { label: "Stop", description: "Do nothing and wait." },
+          ],
+          multiSelect: false,
+        },
+      ],
+    });
+    const options = questionOptions(QUESTION_TOOL, input);
+    const ask = {
+      type: "session.permission" as const,
+      ...sc,
+      at: T0 + 500,
+      askId: "ask_q",
+      toolName: QUESTION_TOOL,
+      toolUseId: "toolu_q",
+      input,
+      options,
+    };
+    const history: SessionEvent[] = [{ type: "session.start", ...sc, at: T0, model: "claude-sonnet-5", prompt: "set it up" }, ask];
+    const { api, emit } = fixtureApi([workspace], { [WS]: history });
+    const answered: { sessionId: string; askId: string; optionId: string }[] = [];
+    api.answerPermission = async (sessionId, askId, optionId) => {
+      answered.push({ sessionId, askId, optionId });
+      return "answered";
+    };
+    await setup(api);
+
+    const row = await waitFor(() => document.querySelector<HTMLElement>('[data-permission-prompt="ask_q"]')!);
+    // The question's own header and sentence, and not a word of the harness's code name for the tool.
+    expect(row.querySelector("[data-question-header]")!.textContent).toBe("Directory");
+    expect(row.querySelector("[data-question-text]")!.textContent).toBe("This working directory is not a repository. What should I do?");
+    expect(row.textContent).not.toContain(QUESTION_TOOL);
+    expect(row.textContent).not.toContain("Permission for");
+    // Nor does the call's own row above it: the harness's name for the tool is nowhere on the screen.
+    expect(document.body.textContent).not.toContain(QUESTION_TOOL);
+    // No raw input anywhere on it: no JSON punctuation, no field names.
+    for (const raw of ["multiSelect", '"questions"', "[{", "}]"]) expect(row.textContent).not.toContain(raw);
+    // One button per option, each with its own sentence under it, and no allow step in front of them.
+    const buttons = [...row.querySelectorAll<HTMLElement>("[data-question-option]")];
+    expect(buttons).toHaveLength(3);
+    expect(buttons.map(b => b.querySelector("[data-question-description]")!.textContent)).toEqual([
+      "Fetch the remote into this folder.",
+      "Run git init here.",
+      "Do nothing and wait.",
+    ]);
+    expect(row.querySelectorAll("[data-permission-option]")).toHaveLength(0);
+    expect(row.textContent).not.toContain("Allow");
+    expect(row.textContent).not.toContain("Deny");
+
+    // The button keeps the one shape every button here has; its sentence sits under it.
+    expect(buttons.map(b => b.querySelector("button")!.textContent)).toEqual(["Clone it", "Start fresh", "Stop"]);
+    fireEvent.click(buttons[1]!.querySelector("button")!);
+    await waitFor(() => expect(answered).toEqual([{ sessionId: "sess_q", askId: "ask_q", optionId: options[1]!.id }]));
+
+    emit({ type: "session.permission.closed", ...sc, at: T0 + 900, askId: "ask_q", outcome: "allowed", optionId: options[1]!.id });
+    const closed = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>('[data-permission-prompt="ask_q"]')!;
+      expect(el.getAttribute("data-permission-open")).toBe("false");
+      return el;
+    });
+    // A closed question says what the person answered; "Allowed" says nothing about an answer.
+    expect(within(closed).getByText("You answered: Start fresh")).toBeDefined();
+  });
+
+  it("a question that takes several answers draws boxes and one Answer button, and sends every tick as one pick", async () => {
+    const sc = { workspaceId: WS, sessionId: "sess_qm", turnId: "turn_qm" };
+    const input = JSON.stringify({
+      questions: [
+        {
+          question: "Which checks should the gate run?",
+          header: "Checks",
+          options: [{ label: "Types" }, { label: "Tests" }, { label: "Lint" }],
+          multiSelect: true,
+        },
+      ],
+    });
+    const options = questionOptions(QUESTION_TOOL, input);
+    const history: SessionEvent[] = [
+      { type: "session.start", ...sc, at: T0, model: "claude-sonnet-5", prompt: "gate it" },
+      { type: "session.permission", ...sc, at: T0 + 500, askId: "ask_qm", toolName: QUESTION_TOOL, input, options },
+    ];
+    const { api } = fixtureApi([workspace], { [WS]: history });
+    const answered: string[] = [];
+    api.answerPermission = async (_sessionId, _askId, optionId) => {
+      answered.push(optionId);
+      return "answered";
+    };
+    await setup(api);
+
+    const row = await waitFor(() => document.querySelector<HTMLElement>('[data-permission-prompt="ask_qm"]')!);
+    const boxes = [...row.querySelectorAll<HTMLElement>('[data-question-option] [data-slot="checkbox"]')];
+    expect(boxes).toHaveLength(3);
+    const answer = row.querySelector<HTMLButtonElement>("[data-question-answer]")!;
+    // Nothing is ticked, so there is nothing to answer with yet.
+    expect(answer.disabled).toBe(true);
+
+    fireEvent.click(boxes[0]!);
+    fireEvent.click(boxes[2]!);
+    await waitFor(() => expect(row.querySelector<HTMLButtonElement>("[data-question-answer]")!.disabled).toBe(false));
+    fireEvent.click(row.querySelector<HTMLElement>("[data-question-answer]")!);
+    // One pick closes one prompt, so both ticks travel as one id the protocol reads back as two options.
+    await waitFor(() => expect(answered).toEqual([pickedOptionId([options[0]!.id, options[2]!.id])]));
+  });
+
+  it("draws two subagents under two folds titled by their tasks, with each one's prompt inside its own fold", async () => {
+    const sc = { workspaceId: WS, sessionId: "sess_sub", turnId: "turn_sub" };
+    const launch = (id: string, description: string, at: number): SessionEvent => ({
+      type: "session.delta", ...sc, at, kind: "tool_use", toolName: "Agent", toolUseId: id,
+      text: JSON.stringify({ description, prompt: "go" }),
+    });
+    const said = (parent: string, text: string, at: number): SessionEvent => ({
+      type: "session.delta", ...sc, at, kind: "text", text, parentToolUseId: parent,
+    });
+    const history: SessionEvent[] = [
+      { type: "session.start", ...sc, at: T0, model: "claude-sonnet-5", prompt: "fan out" },
+      { type: "session.delta", ...sc, at: T0 + 100, kind: "text", text: "Launching two." },
+      launch("toolu_a", "count alpha files", T0 + 200),
+      launch("toolu_b", "read beta hostname", T0 + 300),
+      said("toolu_a", "I'll verify the repo contents myself first.", T0 + 400),
+      said("toolu_b", "I'll verify the repo contents myself first.", T0 + 500),
+      {
+        type: "session.permission", ...sc, at: T0 + 600, askId: "ask_a", toolName: "Bash",
+        toolUseId: "toolu_a1", parentToolUseId: "toolu_a", input: '{"command":"ls /etc"}',
+        options: [{ id: "allow", label: "Allow", effect: "allow" }, { id: "deny", label: "Deny", effect: "deny" }],
+      },
+    ];
+    const { api } = fixtureApi([workspace], { [WS]: history });
+    const answered: { askId: string; optionId: string }[] = [];
+    api.answerPermission = async (_sessionId, askId, optionId) => {
+      answered.push({ askId, optionId });
+      return "answered";
+    };
+    await setup(api);
+
+    const folds = await waitFor(() => {
+      const found = [...document.querySelectorAll<HTMLElement>("[data-subagent]")];
+      expect(found).toHaveLength(2);
+      return found;
+    });
+    // One fold per subagent, in the order they were launched, each titled by its own task.
+    expect(folds.map(f => f.getAttribute("data-subagent"))).toEqual(["toolu_a", "toolu_b"]);
+    expect(folds.map(f => f.querySelector("[data-subagent-title]")!.textContent)).toEqual(["count alpha files", "read beta hostname"]);
+    // The parent's own sentence is its own row; neither child's is glued to it.
+    const parentSaid = [...document.querySelectorAll('[data-message-role="assistant"]')].map(n => n.textContent ?? "");
+    expect(parentSaid.some(text => text.includes("Launching two."))).toBe(true);
+    for (const text of parentSaid) expect(text).not.toContain("I'll verify the repo contents myself first.");
+    // The prompt sits inside the agent that raised it, under that agent's name, and nowhere in the flat stream.
+    const inside = within(folds[0]!).getByText("count alpha files asks");
+    expect(inside).toBeDefined();
+    expect(folds[1]!.querySelector("[data-permission-prompt]")).toBeNull();
+    const prompt = folds[0]!.querySelector<HTMLElement>('[data-permission-prompt="ask_a"]')!;
+    fireEvent.click(prompt.querySelector('[data-permission-option="allow"]')!);
+    await waitFor(() => expect(answered).toEqual([{ askId: "ask_a", optionId: "allow" }]));
+  });
+
+  it("opens a subagent's fold when its prompt arrives after the fold is already on the screen", async () => {
+    const sc = { workspaceId: WS, sessionId: "sess_late", turnId: "turn_late" };
+    const history: SessionEvent[] = [
+      { type: "session.start", ...sc, at: T0, model: "claude-sonnet-5", prompt: "fan out" },
+      {
+        type: "session.delta", ...sc, at: T0 + 100, kind: "tool_use", toolName: "Agent", toolUseId: "toolu_a",
+        text: JSON.stringify({ description: "count alpha files", prompt: "go" }),
+      },
+      { type: "session.delta", ...sc, at: T0 + 200, kind: "text", text: "checking", parentToolUseId: "toolu_a" },
+    ];
+    const { api, emit } = fixtureApi([workspace], { [WS]: history });
+    const answered: { askId: string; optionId: string }[] = [];
+    api.answerPermission = async (_sessionId, askId, optionId) => {
+      answered.push({ askId, optionId });
+      return "answered";
+    };
+    await setup(api);
+
+    // The fold is drawn first, with nothing waiting on it: a person may leave it shut.
+    const fold = await waitFor(() => document.querySelector<HTMLElement>('[data-subagent="toolu_a"]')!);
+    expect(fold.querySelector("[data-permission-prompt]")).toBeNull();
+
+    // The question arrives while that fold stands. A shut fold would hide it and the turn would wait forever.
+    emit({
+      type: "session.permission", ...sc, at: T0 + 300, askId: "ask_late", toolName: "Bash",
+      toolUseId: "toolu_a1", parentToolUseId: "toolu_a", input: '{"command":"ls /etc"}',
+      options: [{ id: "allow", label: "Allow", effect: "allow" }, { id: "deny", label: "Deny", effect: "deny" }],
+    });
+    const prompt = await waitFor(() => {
+      // A shut fold unmounts its panel, so the prompt is not merely hidden: it is not in the page at all.
+      const el = document.querySelector<HTMLElement>('[data-subagent="toolu_a"] [data-permission-prompt="ask_late"]');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    expect(within(document.querySelector<HTMLElement>('[data-subagent="toolu_a"]')!).getByText("count alpha files asks")).toBeDefined();
+    fireEvent.click(prompt.querySelector('[data-permission-option="allow"]')!);
+    await waitFor(() => expect(answered).toEqual([{ askId: "ask_late", optionId: "allow" }]));
+  });
+
+  it("lets a person shut a subagent's fold again once nothing is waiting on it", async () => {
+    const sc = { workspaceId: WS, sessionId: "sess_shut", turnId: "turn_shut" };
+    const history: SessionEvent[] = [
+      { type: "session.start", ...sc, at: T0, model: "claude-sonnet-5", prompt: "fan out" },
+      {
+        type: "session.delta", ...sc, at: T0 + 100, kind: "tool_use", toolName: "Agent", toolUseId: "toolu_a",
+        text: JSON.stringify({ description: "count alpha files", prompt: "go" }),
+      },
+      { type: "session.delta", ...sc, at: T0 + 200, kind: "text", text: "checking", parentToolUseId: "toolu_a" },
+      {
+        type: "session.permission", ...sc, at: T0 + 300, askId: "ask_shut", toolName: "Bash",
+        toolUseId: "toolu_a1", parentToolUseId: "toolu_a", input: '{"command":"ls /etc"}',
+        options: [{ id: "allow", label: "Allow", effect: "allow" }],
+      },
+      { type: "session.permission.closed", ...sc, at: T0 + 400, askId: "ask_shut", outcome: "allowed", optionId: "allow" },
+    ];
+    const { api, emit } = fixtureApi([workspace], { [WS]: history });
+    await setup(api);
+
+    const trigger = await waitFor(() => document.querySelector<HTMLElement>('[data-subagent="toolu_a"] [data-subagent-trigger]')!);
+    fireEvent.click(trigger);
+    await waitFor(() => expect(document.querySelector('[data-subagent="toolu_a"] [data-subagent-title]')).not.toBeNull());
+    // Nothing is waiting, so the person's own toggle stands and a later line of the agent's does not reopen it.
+    const shut = document.querySelector<HTMLElement>('[data-subagent="toolu_a"] [data-subagent-trigger]')!.getAttribute("aria-expanded");
+    emit({ type: "session.delta", ...sc, at: T0 + 500, kind: "text", text: " and again", parentToolUseId: "toolu_a" });
+    await waitFor(() => expect(document.querySelector<HTMLElement>('[data-subagent="toolu_a"] [data-subagent-trigger]')!.getAttribute("aria-expanded")).toBe(shut));
   });
 
   it("a prompt nobody answered reads as denied by wsp, and one that went with its turn as cancelled", async () => {
