@@ -172,6 +172,7 @@ import {
   registerRequest,
   registerTakesNoConsentLine,
   shellQuote,
+  fmtRate,
   threadOpenedLine,
   threadWithoutIdRefusal,
   threadWord,
@@ -407,7 +408,7 @@ export function placeLines(places: readonly PlaceView[]): string[] {
     p.shape === undefined ? "" : fmtBytes(p.shape.memMb * 1024 * 1024),
     p.diskFreeBytes === undefined ? "" : fmtBytes(p.diskFreeBytes),
     p.docker === undefined ? "" : p.docker ? "yes" : "no",
-    p.kind === "provider" ? `$${(p.rateUsdPerHour ?? 0).toFixed(3)}/h` : p.present === true ? "yes" : "no",
+    p.kind === "provider" ? fmtRate(p.rateUsdPerHour ?? 0) : p.present === true ? "yes" : "no",
     p.forks === undefined ? "" : `${p.forks.running} of ${p.forks.running + p.forks.room}`,
     p.kind === "provider" ? "" : (p.lastSeenAt ?? ""),
     p.default ? "default" : "",
@@ -554,6 +555,41 @@ export const COMMON: NonNullable<ParseArgsConfig["options"]> = {
   json: { type: "boolean" },
   help: { type: "boolean", short: "h" },
 };
+
+/** The letter each shared flag also answers to. */
+const COMMON_SHORTS: Readonly<Record<string, string>> = Object.fromEntries(Object.entries(COMMON).flatMap(([name, option]) => (typeof option.short === "string" ? [[option.short, name]] : [])));
+
+/** The shared flags read off a whole line, each with the value it carries, and the rest of the words in the order
+ * they were typed. This runs before the verb's words select it, so a shared flag sits as readily in front of them as
+ * behind, and whatever is left is the verb's to parse: a word this pass does not know stays where it was typed, for
+ * the parse that does know the line to refuse by name. From `--` on the words are the line's own, never flags. */
+export function takeCommon(argv: ReadonlyArray<string>): { common: string[]; rest: string[] } {
+  const common: string[] = [];
+  const rest: string[] = [];
+  for (let at = 0; at < argv.length; at++) {
+    const word = argv[at]!;
+    if (word === "--") {
+      rest.push(...argv.slice(at));
+      break;
+    }
+    const name = word.startsWith("--") ? word.slice(2).split("=")[0]! : word.startsWith("-") ? COMMON_SHORTS[word.slice(1)] : undefined;
+    const option = name === undefined ? undefined : COMMON[name];
+    if (option === undefined) {
+      rest.push(word);
+      continue;
+    }
+    const value = option.type === "string" && !word.includes("=") ? argv[at + 1] : undefined;
+    // A flag needing a value and given none by the end of the line stays where it was typed: moved in front of the
+    // words that follow it, the parse would read one of them as its value instead of refusing the flag by name.
+    if (option.type === "string" && !word.includes("=") && value === undefined) {
+      rest.push(word);
+      continue;
+    }
+    common.push(word);
+    if (value !== undefined) common.push(argv[++at]!);
+  }
+  return { common, rest };
+}
 
 /** The model, effort and access mode flags, on every verb that starts a turn. */
 const PICK_FLAGS = ["model", "effort", "access"] as const;

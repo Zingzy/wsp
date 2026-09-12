@@ -52,7 +52,7 @@ describe("runtime", () => {
 
     await expect(rt.workspaces.create({ golden: "snap_g", name: "odd", cpu: 8, memMb: 16384 })).rejects.toMatchObject({
       kind: "invalid",
-      message: "8x16 is not a size this provider offers; the sizes are 2x2 ($0.09/hr), 2x4 ($0.11/hr), 2x8 ($0.15/hr), 4x8 ($0.22/hr)",
+      message: "8x16 is not a size this provider offers; the sizes are 2x2 ($0.09/hr), 2x4 ($0.11/hr), 2x8 ($0.15/hr), 4x8 ($0.22/hr). Ask for one of those instead.",
     });
     expect(backend.machines).toHaveLength(1);
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["big"]);
@@ -736,11 +736,11 @@ describe("runtime session history", () => {
     it("a binary that named why it described nothing keeps that harness's table and lends the footer its words", async () => {
       const backend = stubBackend();
       backend.execImpl = () => ({ exitCode: 0, stdout: "", stderr: "" });
-      const refusing: HarnessAdapterFactory = ctx => ({ ...threaded()(ctx), probeCatalog: exec => exec("codex --describe").then(() => ({ refused: "Codex is not signed in on this machine; run codex login there" })) });
+      const refusing: HarnessAdapterFactory = ctx => ({ ...threaded()(ctx), probeCatalog: exec => exec("codex --describe").then(() => ({ refused: "Codex is not signed in where this workspace runs; run codex login there" })) });
       const rt = createRuntime({ backend, store: memoryStore(), adapters: { codex: refusing } });
       const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
       const codex = (await rt.harnesses.list(ws.id)).find(c => c.harness === "codex")!;
-      expect(codex).toMatchObject({ source: "table", version: harnessCatalog("codex")!.version, refusal: "Codex is not signed in on this machine; run codex login there" });
+      expect(codex).toMatchObject({ source: "table", version: harnessCatalog("codex")!.version, refusal: "Codex is not signed in where this workspace runs; run codex login there" });
       expect(codex.models.map(m => m.value)).toEqual(harnessCatalog("codex")!.models.map(m => m.value));
       expect(codex.models.length).toBeGreaterThan(0);
       await rt.close();
