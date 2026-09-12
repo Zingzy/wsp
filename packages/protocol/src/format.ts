@@ -2744,12 +2744,20 @@ export function offlineFor(ms: number): string {
   return hours < 24 ? `${hours} h` : `${Math.floor(hours / 24)} d`;
 }
 
-/** The mono word after a computer's name in the Where agents run table: nothing while it holds its link, and how
- * long it has been away when it does not. The slot stands either way, so the word arriving moves no column. */
-export function placeStateWord(view: PlaceView, now: number): string {
-  if (view.present !== false) return "";
+/** The mono word after a computer's name in the Where agents run table: nothing while it holds its link, one word
+ * when it does not. The slot stands either way, so the word arriving moves no column, and one word is all the
+ * column can hold beside the three facts the table never shrinks. */
+export function placeStateWord(view: PlaceView): string {
+  return view.present === false ? "offline" : "";
+}
+
+/** The same state with how long the computer has been away, for the row's title and anywhere else with room for
+ * the figure. The table's own slot takes the word alone. */
+export function placeAwayWord(view: PlaceView, now: number): string {
+  const word = placeStateWord(view);
+  if (word === "") return "";
   const since = view.lastSeenAt === undefined ? NaN : Date.parse(view.lastSeenAt);
-  return Number.isNaN(since) ? "offline" : `offline · ${offlineFor(now - since)}`;
+  return Number.isNaN(since) ? word : `${word} · ${offlineFor(now - since)}`;
 }
 
 /** The Workspaces cell of that table: how many stand on the computer, and the one thing about it that changes what

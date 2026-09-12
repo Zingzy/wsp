@@ -13,7 +13,7 @@
 // stages off the installer as it reports them.
 import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useState, type KeyboardEvent } from "react";
-import { CODE_EXPIRED_LINE, CODE_GOOD_LINE, PLACES_WORDS, joinAddressWord, shownPairCode, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
+import { CODE_EXPIRED_LINE, CODE_GOOD_LINE, PLACES_WORDS, PlaceAddStep, joinAddressWord, placeAddSheetWord, shownPairCode, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../components/ui/collapsible.js";
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "../components/ui/input-group.js";
@@ -21,7 +21,6 @@ import { Input } from "../components/ui/input.js";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
 import { Kbd } from "../components/ui/kbd.js";
 import { Sheet, SheetDescription, SheetFooter, SheetHeader, SheetPanel, SheetPopup, SheetTitle } from "../components/ui/sheet.js";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { cn, errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
 import type { InstallStage } from "../protocol/client.js";
@@ -37,6 +36,27 @@ const ROADS = [
   { value: "ssh", label: MINE.ssh.road },
 ] as const;
 type Road = (typeof ROADS)[number]["value"];
+
+/** What a step of the plan carries in its fact slot before it has run: where the install puts wsp on the box,
+ * which the step's own words leave out. A step that is running or done carries what the installer answered there
+ * instead. Nothing else needs one: the sheet's words say what the agent is started under. */
+const PLAN_FACTS: Partial<Record<PlaceAddStep, string>> = { wsp: ADD_COMPUTER_WORDS.ssh.folder };
+
+/** The ssh road's five lines, one per step of the installer: the stage reported for that step where one has
+ * arrived, and the step's own line, in the words the sheet gives it, where none has. One list for the plan a
+ * person reads before Add and for the run after it, so pressing Add fills the lines in rather than taking them
+ * away, and a line's words are the step's in both. */
+function planLines(stages: readonly InstallStage[]): RoadLine[] {
+  return PlaceAddStep.options.map(step => {
+    const reported = stages.find(stage => stage.step === step);
+    const fact = reported === undefined ? PLAN_FACTS[step] : reported.fact;
+    return {
+      word: reported?.word ?? placeAddSheetWord(step, "running"),
+      state: reported?.state ?? "waiting",
+      ...(fact === undefined ? {} : { fact }),
+    };
+  });
+}
 
 export function AddComputerSheet({ onClose, now = () => Date.now() }: { onClose: () => void; now?: () => number }) {
   const api = useStore(s => s.api);
@@ -156,12 +176,16 @@ export function AddComputerSheet({ onClose, now = () => Date.now() }: { onClose:
             />
           ) : null}
           {road === "ssh" && (stages !== null || installed !== null) ? (
-            <SshRun place={installed} stages={stages ?? []} login={login} port={port} now={now()} />
+            <SshRun place={installed} login={login} port={port} now={now()} />
           ) : road === "ssh" ? (
-            <SshFields login={login} port={port} refusal={refusal} onLogin={setLogin} onPort={setPort} onEnter={add} />
+            <SshFields login={login} port={port} refusal={refusal} {...(sshHeld === undefined ? {} : { held: sshHeld })} onLogin={setLogin} onPort={setPort} onEnter={add} />
           ) : (
             <AppRoad place={joined} address={address} code={code} said={codeSaid} expired={expired} arrived={arrived} reported={reported} relay={door?.relay} now={now()} onNewCode={newCode} />
           )}
+          {/* The plan and the run are one list in one place, so Add fills the lines in under the hand rather than
+              swapping them for another list. */}
+          {road === "ssh" ? <RoadLines lines={planLines(stages ?? [])} k="plan" /> : null}
+          {road === "ssh" && installed !== null ? <p className="text-[13px] text-muted-foreground">{MINE.ssh.named}</p> : null}
         </SheetPanel>
         <SheetFooter className="items-center sm:justify-between">
           <span data-k="foot-note" className={cn(FACT, "mr-auto")}>
@@ -187,10 +211,11 @@ export function AddComputerSheet({ onClose, now = () => Date.now() }: { onClose:
             </Button>
           ) : null}
           {sshTyping ? (
-            <Tooltip>
-              <TooltipTrigger render={<Button data-k="ssh-add" disabled={sshHeld !== undefined} onClick={add} />}>{MINE.ssh.add}</TooltipTrigger>
-              {sshHeld === undefined ? null : <TooltipPopup side="top">{sshHeld}</TooltipPopup>}
-            </Tooltip>
+            // The reason it is held stands in the slot under the field it waits on; the keycap's own drawing is
+            // the button's.
+            <Button data-k="ssh-add" held={sshHeld !== undefined} onClick={add}>
+              {MINE.ssh.add}
+            </Button>
           ) : null}
         </SheetFooter>
       </SheetPopup>
@@ -260,7 +285,7 @@ function AppRoad({ place, address, code, said, expired, arrived, reported, relay
 
 /** The ssh road while it is being typed: two fields and one refusal slot the width of both. Only the login is ever
  * refused, so the two fields share one slot. */
-function SshFields({ login, port, refusal, onLogin, onPort, onEnter }: { login: string; port: string; refusal: string | null; onLogin: (v: string) => void; onPort: (v: string) => void; onEnter: () => void }) {
+function SshFields({ login, port, refusal, held, onLogin, onPort, onEnter }: { login: string; port: string; refusal: string | null; /** Why Add is held, which stands in the slot until the login is typed. */ held?: string; onLogin: (v: string) => void; onPort: (v: string) => void; onEnter: () => void }) {
   const key = (event: KeyboardEvent): void => {
     if (event.key === "Enter") onEnter();
   };
@@ -310,28 +335,24 @@ function SshFields({ login, port, refusal, onLogin, onPort, onEnter }: { login: 
           />
         </div>
       </div>
-      <RefusalSlot k="ssh-refusal" {...(refusal === null ? {} : { said: refusal, fix: MINE.ssh.refusedFix })} />
+      <RefusalSlot k="ssh-refusal" {...(refusal === null ? (held === undefined ? {} : { waiting: held }) : { said: refusal, fix: MINE.ssh.refusedFix })} />
       <p className="text-[13px] text-muted-foreground">{MINE.ssh.note}</p>
     </>
   );
 }
 
-/** The ssh road once Add is pressed: the login it is using, then the installer's own stages, and the box's row
- * once it has joined. */
-function SshRun({ place, stages, login, port, now }: { place: PlaceView | null; stages: readonly InstallStage[]; login: string; port: string; now: number }) {
+/** The ssh road once Add is pressed: the login it is using, or the box's row once it has joined. The lines under
+ * it are the plan's, drawn by the sheet, which is what keeps them standing across the press. */
+function SshRun({ place, login, port, now }: { place: PlaceView | null; login: string; port: string; now: number }) {
+  if (place !== null)
+    return (
+      <PlaceTable menu={false} k="joined-table">
+        <PlaceRow place={place} now={now} />
+      </PlaceTable>
+    );
   return (
-    <>
-      {place === null ? (
-        <CopyRow k="ssh-login" label={MINE.ssh.addon} value={login}>
-          <span className={cn(FACT, "shrink-0")}>{`${MINE.ssh.portWord} ${port.trim() === "" ? MINE.ssh.portPlaceholder : port.trim()}`}</span>
-        </CopyRow>
-      ) : (
-        <PlaceTable menu={false} k="joined-table">
-          <PlaceRow place={place} now={now} />
-        </PlaceTable>
-      )}
-      <RoadLines lines={stages.map(s => ({ word: s.word, state: s.state, ...(s.fact === undefined ? {} : { fact: s.fact }) }))} />
-      {place === null ? null : <p className="text-[13px] text-muted-foreground">{MINE.ssh.named}</p>}
-    </>
+    <CopyRow k="ssh-login" label={MINE.ssh.addon} value={login}>
+      <span className={cn(FACT, "shrink-0")}>{`${MINE.ssh.portWord} ${port.trim() === "" ? MINE.ssh.portPlaceholder : port.trim()}`}</span>
+    </CopyRow>
   );
 }

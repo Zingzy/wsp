@@ -20,7 +20,6 @@ import { Input } from "../components/ui/input.js";
 import { Kbd } from "../components/ui/kbd.js";
 import { Radio, RadioGroup } from "../components/ui/radio-group.js";
 import { Sheet, SheetDescription, SheetFooter, SheetHeader, SheetPanel, SheetPopup, SheetTitle } from "../components/ui/sheet.js";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { cn, errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
 import { requestNewWorkspace } from "../shell/shellRequests.js";
@@ -117,7 +116,7 @@ export function ConnectProviderSheet({ open, onOpenChange, rows = providerRows()
         </SheetHeader>
         <SheetPanel className="flex flex-col gap-5">
           {at === "pick" ? <Pick rows={rows} pickedId={pickedId} onPick={setPickedId} /> : null}
-          {at === "key" ? <KeyStep row={picked} value={key} said={said} kept={kept} onChange={setKey} onChange0={() => setChanging(true)} onEnter={save} /> : null}
+          {at === "key" ? <KeyStep row={picked} value={key} said={said} kept={kept} {...(held === undefined ? {} : { held })} onChange={setKey} onChange0={() => setChanging(true)} onEnter={save} /> : null}
           {at === "connected" ? <Connected row={picked} offers={offers} /> : null}
         </SheetPanel>
         <SheetFooter className="items-center sm:justify-between">
@@ -147,10 +146,11 @@ export function ConnectProviderSheet({ open, onOpenChange, rows = providerRows()
                 <Button variant="outline" onClick={() => setAt("pick")}>
                   {WORDS.back}
                 </Button>
-                <Tooltip>
-                  <TooltipTrigger render={<Button data-k="save" disabled={held !== undefined || busy} onClick={save} />}>{kept ? WORDS.continueWord : said?.retry === true ? WORDS.tryAgain : WORDS.save}</TooltipTrigger>
-                  {held === undefined ? null : <TooltipPopup side="top">{held}</TooltipPopup>}
-                </Tooltip>
+                {/* A key being saved is busy rather than held, so the keycap keeps its accent while the provider
+                    answers; its reason, where it has one, is in the field's own slot. */}
+                <Button data-k="save" held={held !== undefined} disabled={busy} onClick={save}>
+                  {kept ? WORDS.continueWord : said?.retry === true ? WORDS.tryAgain : WORDS.save}
+                </Button>
               </>
             ) : null}
             {at === "connected" ? (
@@ -198,7 +198,7 @@ function Pick({ rows, pickedId, onPick }: { rows: readonly ProviderRow[]; picked
 /** The key step: one field on its own, the two-line slot under it, and the link to where a key comes from, which
  * does not move when the slot fills. A key this computer already holds reads as dots with `saved` in the field's
  * own slot, and the quiet Change under it empties the field for a new one. */
-function KeyStep({ row, value, said, kept, onChange, onChange0, onEnter }: { row: ProviderRow; value: string; said: KeySaid | null; kept: boolean; onChange: (v: string) => void; /** Change pressed on a key this computer holds. */ onChange0: () => void; onEnter: () => void }) {
+function KeyStep({ row, value, said, kept, held, onChange, onChange0, onEnter }: { row: ProviderRow; value: string; said: KeySaid | null; kept: boolean; /** Why Save is held, which stands in the slot until a key is pasted. */ held?: string; onChange: (v: string) => void; /** Change pressed on a key this computer holds. */ onChange0: () => void; onEnter: () => void }) {
   const id = "connect-provider-key";
   const consoleAt = keyConsoleOf(row);
   return (
@@ -232,7 +232,7 @@ function KeyStep({ row, value, said, kept, onChange, onChange0, onEnter }: { row
             </span>
           ) : null}
         </div>
-        <RefusalSlot k="key-refusal" {...(said === null ? {} : { said: said.said, fix: said.fix })} />
+        <RefusalSlot k="key-refusal" {...(said === null ? (held === undefined ? {} : { waiting: held }) : { said: said.said, fix: said.fix })} />
       </div>
       {kept ? (
         <Button data-k="change" variant="link" className="h-auto self-start p-0 text-[13px] text-muted-foreground hover:text-foreground sm:text-[13px]" onClick={onChange0}>
