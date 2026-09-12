@@ -18,7 +18,8 @@ import {
   PLACE_LINK_NONCE_BYTES,
   THREAD_OPS,
   placeDaemonPaths,
-  placeAbsentLine,
+  absentComputer,
+  workspaceState,
   placeLinkTranscript,
   placeNoDaemonPortLine,
   placeNoLinkLine,
@@ -525,8 +526,23 @@ describe("a workspace on a place", () => {
     await expect(runtime!.workspaces.daemonReach(ws.id)).rejects.toThrow(/old-macbook/);
     client.close();
     await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
-    await expect(runtime!.workspaces.exec(ws.id, "hostname")).rejects.toThrow(/is not connected right now/);
+    await expect(runtime!.workspaces.exec(ws.id, "hostname")).rejects.toThrow(/is not answering; it connects on its own when it is on/);
     expect(placeDaemonPaths("/home/maya").runDir).toBe("/home/maya/.wsp/run");
+  });
+
+  it("reads unreachable with the computer's own sentence once that computer stops answering, as a fork on it does", async () => {
+    const { hostKey } = await serving();
+    const { client, placeId } = await join(hostKey, { code: await code() });
+    sockets.push(client.ws);
+    const ws = (await runtime!.workspaces.list()).find(w => w.kind === "place")!;
+    client.close();
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
+    const away = (await runtime!.status.list()).find(r => r.id === ws.id)!;
+    // The workspace a joined computer is carries that computer in its machine id rather than on a place field, and
+    // a status that read it off the field alone left this one reading running with no daemon road at all.
+    expect(away.reach.state).toBe("unreachable");
+    expect(away.reason).toBe(absentComputer("old-macbook", null).sentence);
+    expect(workspaceState({ phase: away.phase, machineState: away.machineState, reach: away.reach.state })).toBe("unreachable");
   });
 });
 
@@ -650,7 +666,7 @@ describe("the road a pane takes to a place", () => {
     const { client, placeId } = await join(hostKey, { code: await code(), name: "box" });
     client.close();
     await until(async () => (await placesOf()).some(p => p.id === placeId && p.present === false));
-    await expect(runtime!.places!.road(placeId)).rejects.toThrow(placeAbsentLine("box"));
+    await expect(runtime!.places!.road(placeId)).rejects.toThrow(absentComputer("box", null).sentence);
   });
 
   it("is refused with its own sentence while that computer has not said which port its daemon bound", async () => {
@@ -1096,7 +1112,7 @@ describe("a fork on a computer you joined", () => {
     await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
     const away = (await runtime!.status.list()).find(r => r.id === made.id)!;
     expect(away.reach.state).toBe("unreachable");
-    expect(away.reason).toContain("srv is not connected right now");
+    expect(away.reason).toBe(absentComputer("srv", null).sentence);
     expect(away.machineState).toBe("running");
     const back = await relink(hostKey, placeId, key, report("srv"), c => forks(c));
     sockets.push(back.client.ws);

@@ -2247,6 +2247,15 @@ export function parsePlaceMachineId(id: string): string | undefined {
   return placeId === "" ? undefined : placeId;
 }
 
+/** Which computer a workspace stands on, by place id, however it got there: a workspace made on a joined computer
+ * carries that computer's id on its record, and the workspace a joined computer itself is carries it in the
+ * machine id, since its machine is the link. Undefined for everything on this computer or at a provider. Written
+ * once because the host asks it to know whether anything can be asked of the machine, and the app asks it to know
+ * which row of the places table a workspace belongs to. */
+export function workspacePlace(view: Pick<WorkspaceView, "place" | "machineId">): string | undefined {
+  return view.place ?? parsePlaceMachineId(view.machineId ?? "");
+}
+
 /** A computer you own finished its join, with the address it dialled from as `ws` reported it. The view carries
  * what it said about itself, so the sheet fills its row off this one event. */
 export const PlaceJoinedEvent = z.object({ type: z.literal("place.joined"), place: PlaceView, from: z.string() });
@@ -3229,10 +3238,6 @@ export const PLACE_UNKNOWN_REFUSAL = "this host holds no place by that id; join 
  * learned at join, so nothing of this computer's went to it. */
 export const hostKeyRefusal = (url: string): string => `the host at ${url} did not prove the key this computer learned at join; nothing was sent to it`;
 
-/** What a row says about a place that is not holding its link right now. Nothing is wrong: the computer dials on
- * its own whenever it is on and can reach this host. */
-export const placeAbsentLine = (name: string): string => `${name} is not connected right now; it dials this host on its own when it is on and can reach it`;
-
 /** What a remove says about a place that was not linked when it ran: the records here are gone and the agent on
  * that computer is not, since nothing could reach it to sweep. */
 export const placeStillInstalledLine = (name: string): string => `${name} is off this host, but the agent on it is still installed; run ${PLACE_LEAVE_LINE} on that computer when it is back`;
@@ -3977,7 +3982,7 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { threadState, threadStateWord, threadWordOf, type ThreadState } from "./thread-state.js";
-export { actionRefusal, agentsKindRefusal, agentsMayDrive, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
+export { type AbsentComputer, absentComputer, actionRefusal, agentsKindRefusal, agentsMayDrive, awayMsOf, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";

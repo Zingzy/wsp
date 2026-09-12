@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ASSET_KINDS, assetDir, assetProof, daemonTargetHere, stagedAsset, workspaceAsset } from "@wsp/host";
+import { ASSET_KINDS, REQUIRE_DAEMON_ENV, assetDir, assetProof, daemonTargetHere, stagedAsset, workspaceAsset } from "@wsp/host";
 import { stageAssets, stagePaths } from "../scripts/stage.mjs";
 
 const made: string[] = [];
@@ -86,23 +86,43 @@ describe("staging the published package", () => {
     expect(existsSync(stale)).toBe(false);
   });
 
-  it("names any asset that was never built instead of packing a broken command", () => {
+  it("names any asset that was never built instead of packing a broken command, where the release requires them all", () => {
     for (const kind of ASSET_KINDS) {
       const paths = sources();
       rmSync(join(paths.from[kind]!, assetProof(kind)));
-      expect(() => stageAssets(paths)).toThrow(new RegExp(`missing: .*${assetProof(kind).replace(".", "\\.")}$`));
+      expect(() => stageAssets(paths, { [REQUIRE_DAEMON_ENV]: "1" })).toThrow(new RegExp(`missing: .*${assetProof(kind).replace(".", "\\.")}$`));
     }
   });
 
   // The binary this machine runs is what proves the daemon folder: without it the host on this machine could
-  // serve no local workspace, however many other targets' binaries are there.
-  it("refuses a daemon folder without this machine's own binary, whatever else is in it", () => {
+  // serve no local workspace, however many other targets' binaries are there. The release is where the folder is
+  // filled before the build, so the release is where a missing one fails it.
+  it("where the release stages the package, refuses a daemon folder without this machine's own binary, whatever else is in it", () => {
     const paths = sources();
     expect(assetProof("daemon")).toBe(`${daemonTargetHere()!.triple}/wsp-daemon`);
     rmSync(join(paths.from["daemon"]!, assetProof("daemon")));
     mkdirSync(join(paths.from["daemon"]!, "some-other-triple"), { recursive: true });
     writeFileSync(join(paths.from["daemon"]!, "some-other-triple", "wsp-daemon"), "");
-    expect(() => stageAssets(paths)).toThrow(/wsp-daemon binary missing/);
+    expect(() => stageAssets(paths, { [REQUIRE_DAEMON_ENV]: "1" })).toThrow(/wsp-daemon binary missing/);
+    expect(existsSync(stagedAsset(paths.pkg, "daemon"))).toBe(false);
+  });
+
+  // No node build fills the daemon folder: a cargo build or a release's artifacts do. A checkout without either is a
+  // developer's or a gate's, and the command it builds carries no daemon rather than not building at all.
+  it("anywhere else, skips a daemon folder that was never filled, says so once, and stages everything else", () => {
+    const paths = sources();
+    rmSync(join(paths.from["daemon"]!, assetProof("daemon")));
+    const said: string[] = [];
+    stageAssets(paths, {}, line => said.push(line));
+    expect(said).toEqual([`wsp-daemon binary not staged: ${join(paths.from["daemon"]!, assetProof("daemon"))} is missing, so the command carries none; packages/wspx/scripts/daemon-binary.mjs places one`]);
+    expect(existsSync(stagedAsset(paths.pkg, "daemon"))).toBe(false);
+    for (const kind of ASSET_KINDS.filter(k => k !== "daemon")) expect(existsSync(join(stagedAsset(paths.pkg, kind), assetProof(kind)))).toBe(true);
+    // With the binary there, the same stage takes it and says nothing.
+    const filled = sources();
+    const quiet: string[] = [];
+    stageAssets(filled, {}, line => quiet.push(line));
+    expect(quiet).toEqual([]);
+    expect(existsSync(join(stagedAsset(filled.pkg, "daemon"), assetProof("daemon")))).toBe(true);
   });
 
   it("takes every asset's source from the table rather than resolving its own", () => {

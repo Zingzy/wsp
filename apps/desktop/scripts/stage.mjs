@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 // The table of shipped assets lives in @wsp/host's build output, and build:app
 // runs on its own from `start`, so a tree that has not built it is named here
 // instead of in a resolver stack trace.
-const { ASSETS_DIR, ASSET_KINDS, stageAsset, workspaceAsset } = await import("@wsp/host").catch(e => {
+const { ASSETS_DIR, ASSET_KINDS, stageAssetOrSkip, workspaceAsset } = await import("@wsp/host").catch(e => {
   if (e.code !== "ERR_MODULE_NOT_FOUND") throw e;
   throw new Error("@wsp/host is not built: run pnpm --filter @wsp/desktop build:deps first");
 });
@@ -25,7 +25,10 @@ if (!existsSync(join(app, "main", "main.mjs"))) throw new Error(`main bundle not
 if (!existsSync(join(app, "main", "cli.mjs"))) throw new Error(`command bundle not built: ${join(app, "main", "cli.mjs")} is missing`);
 
 rmSync(join(app, ASSETS_DIR), { recursive: true, force: true });
-for (const kind of ASSET_KINDS) stageAsset(workspaceAsset(kind), app, kind);
+for (const kind of ASSET_KINDS) {
+  const said = stageAssetOrSkip(workspaceAsset(kind), app, kind);
+  if (said !== undefined) console.log(said);
+}
 
 // The onboarding page draws with the web app's own stylesheet, whose built name carries a hash, so the page is
 // written with that name.
