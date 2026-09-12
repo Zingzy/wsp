@@ -61,14 +61,18 @@ export const ADD_COMPUTER_WORDS = {
     portPlaceholder: "22",
     addon: "ssh",
     note: "Your ssh agent and config are used as they stand. Nothing is asked for a key unless ssh refuses.",
+    /** The folder the install makes on the box, in that line's fact slot, since the step's own words leave it out. */
+    folder: "~/.wsp",
     add: "Add",
     adds: "adds",
     loginFirst: "type the login first",
     /** Why Add is held on a wsp whose host cannot log in over ssh yet. */
     noRoad: "this wsp cannot log in over ssh yet",
-    /** What to do about a login ssh would not take. There is no file picker on this road: the host reads the ssh
-     * agent and config as they stand, so the key a box wants is named where every other ssh client reads it. */
-    refusedFix: "Check the user and the address, or name a key for that host in your ssh config.",
+    /** What to do about a login ssh would not take, short enough that what ssh said and this together stand on the
+     * slot's two lines: a third line moves the note under them. There is no file picker on this road: the host
+     * reads the ssh agent and config as they stand, so the key a box wants is named where every other ssh client
+     * reads it. */
+    refusedFix: "Check the user and the address, or name a key in your ssh config.",
     running: "closing keeps it going",
     named: "Named after its hostname. Rename it from its row.",
   },
@@ -95,8 +99,9 @@ export const CONNECT_PROVIDER_WORDS = {
   refusedFix: (name: string): string => `Paste one from your ${name} account, or make a new one there.`,
   unreached: (name: string): string => `${name} could not be reached to check the key.`,
   unreachedFix: "Check the network and try again.",
-  /** Why Save is held on a provider whose key has no road on the wire yet. */
-  noRoad: (name: string): string => `this wsp cannot save a ${name} key yet`,
+  /** Why Save is held on a provider whose key has no road on the wire yet. The provider's name follows a word
+   * rather than an article, since a and an cannot both be spelled here for a name read off the provider table. */
+  noRoad: (name: string): string => `this wsp cannot save a key for ${name} yet`,
   /** The already connected state, opened again on a provider whose key this computer holds. */
   savedWord: "saved",
   change: "Change",

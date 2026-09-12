@@ -3,7 +3,7 @@
 // pill rollup over wsp thread snapshots, plus our row labels and the
 // new-workspace helpers.
 import { describe, expect, it } from "vitest";
-import { FREE_WORD, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, OVER_SSH, THIS_COMPUTER, THREAD_ARCHIVE_MS, kindWords, machineLacksShort, wakeAskingAgainLine, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, NO_LINGER_LINE, NO_NODE_LINE, OVER_SSH, THIS_COMPUTER, THREAD_ARCHIVE_MS, kindWords, machineLacksShort, wakeAskingAgainLine, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../src/adapt/index.js";
 import { RequestError } from "../src/protocol/client.js";
 import { threadTree, threadsOpenedBy, workspaceOf } from "../src/sidebar/threadTree.js";
@@ -347,7 +347,7 @@ describe("workspace row labels", () => {
       workspaceMetaLine({ project: project({ reach: { state: "unsupported" }, daemonRefusedAt: { machineId: "ssh://dev@box:22", at: "2026-09-11T14:04:50.380Z", why } }, { kind: "ssh" }), cost: tick(0.29), outOfMemory: undefined, nowMs: now });
     // Why, rather than the bare fact that none is there: the row cuts from the right, so it takes the head of the
     // sentence, which is what the machine has not got. Both refusals are written to fit it.
-    expect(said(NO_BUILD_TOOLS_LINE)).toBe("this machine has no C compiler");
+    expect(said(NO_NODE_LINE)).toBe("this machine has no Node 22");
     expect(said(NO_LINGER_LINE)).toBe("this login does not linger");
     // The whole sentence carries the command to type, which is at the end of it and no row would show; the
     // Machine tab is where it goes, and that is proved where that surface is rendered.

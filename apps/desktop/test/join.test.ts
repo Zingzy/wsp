@@ -27,7 +27,6 @@ afterEach(() => {
 });
 
 const SHIM = "/Users/someone/.wsp/bin/wsp";
-const ARGV = [SHIM, "join", "--serve"];
 
 /** What this computer told the host about itself on the join frame, which is what the joined screen then reads. */
 const REPORT = {
@@ -142,7 +141,7 @@ describe("the road a computer that joined another wsp runs on", () => {
     const road = shell({ join: fake.join });
     const answer = await road.road.join({ address: " 192.168.1.20:4420 ", code: "qw4k-7pzx" });
     expect(fake.asks).toHaveLength(1);
-    expect(fake.asks[0]).toMatchObject({ home: road.home, addresses: ["http://192.168.1.20:4420"], code: "QW4K7PZX", client: true, serviceArgv: ARGV });
+    expect(fake.asks[0]).toMatchObject({ home: road.home, addresses: ["http://192.168.1.20:4420"], code: "QW4K7PZX", client: true, wsp: expect.objectContaining({ shim: SHIM }) });
     // The joined screen's card: this computer's name, its shape and disk in the app's own words, and whether it
     // forks, all off the report the join frame carried rather than a second read of this computer.
     expect(answer).toEqual({ ok: true, here: { name: "old-macbook", facts: "4 cores · 8 GB · 91 GB free".replace(/ /g, "\u00a0"), docker: false } });

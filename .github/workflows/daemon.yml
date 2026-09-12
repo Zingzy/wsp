@@ -2,19 +2,25 @@
 name: daemon
 
 # The Rust daemon under daemon/ has its own gate, run on every pull request
-# and every push to main that touches it: format, lints as errors, the tests,
-# the release build and the static musl build. It sits in its own workflow so
-# the paths filter leaves the node jobs in ci.yml exactly as they are.
+# and every push to main that touches it or the wire it is held to: format,
+# lints as errors, the tests, the release build, the static musl build, and
+# the node wire suite driven against the built binary, which is the contract
+# every daemon speaking the protocol is held to. It sits in its own workflow
+# so the paths filter leaves the node jobs in ci.yml exactly as they are.
 on:
   pull_request:
     paths:
       - "daemon/**"
+      - "packages/daemon/**"
+      - "packages/protocol/**"
       - ".github/workflows/daemon.yml"
   push:
     branches:
       - main
     paths:
       - "daemon/**"
+      - "packages/daemon/**"
+      - "packages/protocol/**"
       - ".github/workflows/daemon.yml"
 
 permissions:
@@ -24,9 +30,13 @@ concurrency:
   group: daemon-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "11.9.0"
+
 jobs:
   daemon-rust:
-    name: Format, lint, test, build
+    name: Format, lint, test, build, wire suite
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -48,6 +58,12 @@ jobs:
           key: daemon-rust-${{ runner.os }}-${{ hashFiles('daemon/Cargo.lock', 'daemon/rust-toolchain.toml') }}
           restore-keys: |
             daemon-rust-${{ runner.os }}-
+      - name: The one C library the daemon links
+        # libcontainer applies the seccomp filter through libseccomp; the build links its archive statically,
+        # from a directory of its own so the musl link never sees glibc's libc.a beside it.
+        run: |
+          sudo apt-get install -y --no-install-recommends libseccomp-dev
+          ./scripts/libseccomp-archive.sh
       - name: Format
         run: cargo fmt --check
       - name: Lints
@@ -56,8 +72,26 @@ jobs:
         run: cargo test
       - name: Release build
         run: cargo build --release
-      - name: C compiler for the musl target
-        # ring carries C, and its build looks for x86_64-linux-musl-gcc, which musl-tools provides.
-        run: sudo apt-get install -y --no-install-recommends musl-tools
+      - name: C compiler for the musl target, and libseccomp built against musl
+        # ring carries C, and its build looks for x86_64-linux-musl-gcc, which musl-tools provides. The static
+        # binary links a libseccomp built against musl, since the distribution's archive is glibc's.
+        run: |
+          sudo apt-get install -y --no-install-recommends musl-tools gperf
+          ./scripts/libseccomp-archive.sh musl
       - name: Static musl build
-        run: cargo build --release --target x86_64-unknown-linux-musl
+        run: LIBSECCOMP_LIB_PATH=$PWD/target/libseccomp/musl cargo build --release --target x86_64-unknown-linux-musl
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        working-directory: .
+      # The wire suite as the contract: the same files that drive the node daemon in the ci gate drive this binary.
+      - name: Wire suite against the binary
+        working-directory: .
+        env:
+          WSP_DAEMON_BIN: daemon/target/release/wsp-daemon
+        run: pnpm exec vitest run --minWorkers=1 --maxWorkers=1 packages/daemon/test/daemon-ws.test.ts packages/daemon/test/daemon-ops.test.ts packages/daemon/test/exec.test.ts packages/daemon/test/fs-git-ops.test.ts packages/daemon/test/relay.test.ts packages/daemon/test/place-link.test.ts packages/daemon/test/local-urls.test.ts packages/daemon/test/harness.test.ts

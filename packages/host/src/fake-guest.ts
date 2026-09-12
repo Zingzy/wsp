@@ -20,9 +20,9 @@
 // and a machine's folder is the one thing two of them share.
 //
 // Every daemon started here is held so the command that started it can take it
-// away again: a listening socket is a reason a process stays, and a command
-// whose work was done printed its whole report and never returned to the
-// prompt. The host serving the app is held up by its own ports, so closing
+// away again: a child whose pipes this process reads is a reason it stays, and
+// a command whose work was done printed its whole report and never returned to
+// the prompt. The host serving the app is held up by its own ports, so closing
 // these when a command ends costs it nothing.
 
 import { mkdirSync } from "node:fs";
@@ -30,9 +30,7 @@ import { join } from "node:path";
 import type { FakeGuest } from "@wsp/engine";
 import { DAEMON_PORT } from "@wsp/engine";
 import { standInMachinePath, type PreviewReach } from "@wsp/protocol";
-// Loaded at the first machine reached and not at this import: the daemon package loads a native terminal module
-// in its own module scope, and a host that never opens a pane must not pay for it (there is a test).
-import type { LocalDaemon } from "./local-daemon.js";
+import { LocalDaemon } from "./local-daemon.js";
 
 /** A loopback road has no edge token and no expiry; the field is the shape every reach arrives in. */
 const NO_EDGE_TOKEN = "";
@@ -69,7 +67,6 @@ export function fakeGuestAt(root: string): FakeGuest {
     const starting = (async () => {
       const at = folder(machineId);
       mkdirSync(at, { recursive: true });
-      const { LocalDaemon } = await import("./local-daemon.js");
       return LocalDaemon.start({ root: at, workFolder: at, tokenPath: tokenPath(machineId) });
     })();
     started.set(machineId, starting);

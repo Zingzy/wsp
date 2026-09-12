@@ -45,6 +45,9 @@ export interface DaemonArgs {
   linkQuietMs?: number;
   linkRefusedRetryMs?: number;
   linkBackoffMs?: number;
+  /** Where a place's daemon keeps the layers and the workspaces it runs. The node daemon runs none and carries the
+   * word for the binary that does, so the two are started by one argv. */
+  runtimeRoot?: string;
 }
 
 export interface AgentBin {
@@ -87,6 +90,7 @@ const FLAGS: readonly Flag[] = [
   { flag: "--link-quiet-ms", key: "linkQuietMs", takes: "int" },
   { flag: "--link-refused-retry-ms", key: "linkRefusedRetryMs", takes: "int" },
   { flag: "--link-backoff-ms", key: "linkBackoffMs", takes: "int" },
+  { flag: "--runtime-root", key: "runtimeRoot", takes: "word" },
 ];
 
 const usageOf = (f: Flag): string => {

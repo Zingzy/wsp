@@ -536,18 +536,25 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's screen laid out
       mono: true,
       tracking: "0.52px",
     });
-    // Held: the same primary at 64 per cent, never another variant or colour, with the reason on hover.
-    const held = await page!.$eval("#go", el => ({ disabled: (el as HTMLButtonElement).disabled, opacity: getComputedStyle(el).opacity, fill: getComputedStyle(el).backgroundColor }));
+    // Held: the outline variant, disabled, at the size and in the slot the live one has, with its reason standing
+    // in the Address slot before any pointer has touched the screen.
+    // The fill is read off the border rather than the background: the keycap's background transitions over 150 ms
+    // and this page's animations are held at their start, so the background right after a fill is still the old one.
+    const keycap = async () => page!.$eval("#go", el => ({ disabled: (el as HTMLButtonElement).disabled, held: el.classList.contains("outline"), edge: getComputedStyle(el).borderColor, ...(({ width, height, x }) => ({ w: Math.round(width), h: Math.round(height), x: Math.round(x) }))(el.getBoundingClientRect()) }));
+    const held = await keycap();
     expect(held.disabled).toBe(true);
-    expect(held.opacity).toBe("0.64");
-    expect(await page!.getAttribute("#why", "title")).toBe("type the address and the code first");
-    // Filled, it is the same fill at full weight: one loud thing, and it never changed hue to say it was held.
+    expect(held.held).toBe(true);
+    expect(await page!.textContent("#address-said")).toBe("type the address and the code first");
+    // Filled, the accent arrives and nothing moves: the same box, a different fill.
     await page!.fill("#address", "192.168.1.20:4420");
     await page!.fill("#code", "QW4K-7PZX");
-    const live = await page!.$eval("#go", el => ({ disabled: (el as HTMLButtonElement).disabled, opacity: getComputedStyle(el).opacity, fill: getComputedStyle(el).backgroundColor }));
-    expect(live).toEqual({ disabled: false, opacity: "1", fill: held.fill });
+    const live = await keycap();
+    expect({ w: live.w, h: live.h, x: live.x }).toEqual({ w: held.w, h: held.h, x: held.x });
+    expect(live.disabled).toBe(false);
+    expect(live.held).toBe(false);
+    expect(live.edge).not.toBe(held.edge);
     expect(await page!.$$eval("#joining button.primary", els => els.length)).toBe(1);
-    expect(await page!.getAttribute("#why", "title")).toBeNull();
+    expect(await page!.textContent("#address-said")).toBe("");
     expect(await page!.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
   });
 

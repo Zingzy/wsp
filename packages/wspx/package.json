@@ -37,7 +37,6 @@
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
-    "@wsp/daemon": "workspace:*",
     "@wsp/host": "workspace:*",
     "@wsp/web": "workspace:*"
   },

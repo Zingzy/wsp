@@ -2,6 +2,7 @@
 // The guest a stand-in provider's machines get: where one process keeps a
 // machine's daemon token, and that everything it started goes when its command
 // is done.
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -43,6 +44,19 @@ describe("a stand-in machine's guest", () => {
     expect((await fetch(reach.url)).status).toBe(426);
     expect(existsSync(guest.tokenPath("fk_c0ffee"))).toBe(true);
     await closeStandInGuests();
+    await expect(fetch(reach.url)).rejects.toThrow();
+  }, 20_000);
+
+  it("leaves no daemon behind when the host that spawned it is stopped", async () => {
+    const root = throwaway();
+    const guest = fakeGuestAt(root);
+    const reach = await guest.reach("fk_c0ffee", 7070);
+    const argv = execFileSync("ps", ["-ax", "-o", "args="], { encoding: "utf8" });
+    expect(argv).toContain(guest.tokenPath("fk_c0ffee"));
+    // The daemon is a child process now, and a child outlives the parent that spawned it: a lab whose host was
+    // stopped left one of these running on the person's computer per machine a tester had opened.
+    await closeStandInGuests();
+    expect(execFileSync("ps", ["-ax", "-o", "args="], { encoding: "utf8" })).not.toContain(guest.tokenPath("fk_c0ffee"));
     await expect(fetch(reach.url)).rejects.toThrow();
   }, 20_000);
 

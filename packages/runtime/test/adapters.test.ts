@@ -2,9 +2,10 @@
 // Which agents wsp can open a thread on: one list, the adapter registry keyed
 // by exactly it, and every id a catalog agent.
 import { CATALOG_AGENTS, THREAD_AGENTS } from "@wsp/catalog";
-import { screenCommandsOf, signInRefusalLine, takesMcpServers } from "@wsp/protocol";
+import { movesRunningAccess, screenCommandsOf, signInRefusalLine, takesMcpServers } from "@wsp/protocol";
 import type { Machine } from "@wsp/engine";
 import { describe, expect, it } from "vitest";
+import { SKIP_PROMPTS_MODE } from "@wsp/adapter-claude";
 import { HARNESS_ADAPTERS } from "../src/adapters.js";
 import { HARNESS_CATALOGS } from "../src/harness-catalog.js";
 import { machineExecStream } from "../src/machine-exec.js";
@@ -25,9 +26,14 @@ describe("the agents wsp can open a thread on", () => {
       // The row carries the adapter's own table of screen-only commands, so the composer reads it off the table before
       // a machine answers and a command added to the adapter's table needs no second edit.
       expect(screenCommandsOf(row), id).toEqual(adapter.screenCommands ?? []);
+      // And whether a pick made while a turn runs reaches that turn, which the access picker says before the pick.
+      expect(movesRunningAccess(row), id).toBe(adapter.movesAccess === true);
     }
     expect(screenCommandsOf(HARNESS_CATALOGS.find(c => c.harness === "claude")).map(c => c.name)).toContain("login");
     expect(screenCommandsOf(HARNESS_CATALOGS.find(c => c.harness === "codex"))).toEqual([]);
+    // The mode a row calls its bypass is the one its adapter knows as a launch flag: one slug, pinned to the module
+    // that owns it, so the table and the launch cannot drift apart.
+    expect(HARNESS_CATALOGS.find(c => c.harness === "claude")?.bypassMode).toBe(SKIP_PROMPTS_MODE);
     // Where the two stand today: Claude Code takes the servers on its launch, Codex has no per-launch road yet.
     expect(takesMcpServers(HARNESS_CATALOGS.find(c => c.harness === "claude"))).toBe(true);
     expect(takesMcpServers(HARNESS_CATALOGS.find(c => c.harness === "codex"))).toBe(false);

@@ -11,10 +11,10 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, accessFromNextMessage, applyPreferencesPatch, codexNotSignedInLine, keptAccess, THIS_COMPUTER, type HarnessCatalog, type PreferencesPatch, type SessionAccessOutcome, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { ACCESS_REFUSED_LINE, DEFAULT_PREFERENCES, accessReachLine, applyPreferencesPatch, codexNotSignedInLine, keptAccess, THIS_COMPUTER, type HarnessCatalog, type PreferencesPatch, type SessionAccessOutcome, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../src/components/ui/menu.js", () => {
   const Ctx = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
@@ -36,27 +36,36 @@ vi.mock("../src/components/ui/menu.js", () => {
     );
   };
   const MenuPopup = ({ children }: { children: ReactNode }) => (useContext(Ctx).open ? <div role="menu">{children}</div> : null);
-  const MenuItem = ({ children, onClick, ...props }: { children: ReactNode; onClick?: () => void; [key: string]: unknown }) => (
+  const MenuItem = ({ children, onClick, closeOnClick: _close, ...props }: { children: ReactNode; onClick?: () => void; closeOnClick?: boolean; [key: string]: unknown }) => (
     <div role="menuitem" onClick={onClick} {...(props as Record<string, unknown>)}>{children}</div>
   );
-  const MenuRadioGroup = ({ children, value, onValueChange }: { children: ReactNode; value: string | null; onValueChange: (value: string) => void }) => {
-    const ctx = useContext(Ctx);
-    return (
-      <Radio.Provider value={{ value, pick: next => { onValueChange(next); ctx.set(false); } }}>
-        <div role="group">{children}</div>
-      </Radio.Provider>
-    );
-  };
-  const MenuRadioItem = ({ children, value, className: _c, ...props }: { children: ReactNode; value: string; className?: string; [key: string]: unknown }) => {
+  const MenuRadioGroup = ({ children, value, onValueChange }: { children: ReactNode; value: string | null; onValueChange: (value: string) => void }) => (
+    <Radio.Provider value={{ value, pick: onValueChange }}>
+      <div role="group">{children}</div>
+    </Radio.Provider>
+  );
+  // The app's kit closes the menu on a pick unless the caller says otherwise; the stand-in does the same.
+  const MenuRadioItem = ({ children, value, className: _c, closeOnClick = true, ...props }: { children: ReactNode; value: string; className?: string; closeOnClick?: boolean; [key: string]: unknown }) => {
     const radio = useContext(Radio);
+    const menu = useContext(Ctx);
     return (
-      <div role="menuitemradio" aria-checked={radio.value === value} onClick={() => radio.pick(value)} {...(props as Record<string, unknown>)}>
+      <div
+        role="menuitemradio"
+        aria-checked={radio.value === value}
+        onClick={() => {
+          radio.pick(value);
+          if (closeOnClick) menu.set(false);
+        }}
+        {...(props as Record<string, unknown>)}
+      >
         {children}
       </div>
     );
   };
   const MenuGroup = ({ children }: { children: ReactNode }) => <div role="group">{children}</div>;
-  const MenuGroupLabel = ({ children }: { children: ReactNode }) => <div data-menu-label>{children}</div>;
+  const MenuGroupLabel = ({ children, ...props }: { children: ReactNode; [key: string]: unknown }) => (
+    <div data-menu-label {...(props as Record<string, unknown>)}>{children}</div>
+  );
   const MenuSeparator = () => <hr />;
   return { Menu, MenuTrigger, MenuPopup, MenuItem, MenuGroup, MenuGroupLabel, MenuRadioGroup, MenuRadioItem, MenuSeparator };
 });
@@ -233,6 +242,8 @@ async function setup(api: Api) {
 const picker = (kind: string) => document.querySelector<HTMLElement>(`[data-composer-picker="${kind}"]`);
 const pickerValue = (kind: string) => picker(kind)?.dataset["value"];
 const option = (value: string) => document.querySelector<HTMLElement>(`[data-composer-option="${value}"]`);
+/** What the access menu says about the turn running now, over its list. */
+const reachNote = () => document.querySelector<HTMLElement>("[data-composer-access-reach]");
 const modelMenu = () => document.querySelector<HTMLElement>("[data-composer-model-menu]");
 const openModelMenu = async () => {
   fireEvent.click(picker("model")!);
@@ -595,9 +606,37 @@ describe("composer pickers", () => {
     expect(picker("permissionMode")?.getAttribute("aria-label")).toBe(`Access: Bypass on ${THIS_COMPUTER}`);
   });
 
-  it("a pick made while a turn runs reaches that turn, and says when it lands where the harness will not take it", async () => {
+  it("says what a pick does to the turn running now, over the list, while a turn runs and not before", async () => {
     const running: SessionView = { id: "s9", workspaceId: WS, harness: "claude", status: "running", claudeSessionId: "sess_0001", model: "claude-opus-5", permissionMode: "bypassPermissions" };
-    const took = fixtureApi({ table: [CLAUDE], history: CHAT_STREAM.slice(0, 2), sessions: [running], access: "set" });
+    const moves = fixtureApi({ table: [{ ...CLAUDE, movesAccess: true }], history: CHAT_STREAM.slice(0, 2), sessions: [running], access: "set" });
+    await setup(moves.api);
+    await waitFor(() => expect(picker("permissionMode")).not.toBeNull());
+    fireEvent.click(picker("permissionMode")!);
+    await waitFor(() => expect(reachNote()).not.toBeNull());
+    expect(reachNote()?.textContent).toBe(accessReachLine(true));
+
+    // A harness whose turns take no mode change says so on the same line, before anything is picked.
+    cleanup();
+    const waits = fixtureApi({ table: [CLAUDE], history: CHAT_STREAM.slice(0, 2), sessions: [running], access: "unsupported" });
+    await setup(waits.api);
+    await waitFor(() => expect(picker("permissionMode")).not.toBeNull());
+    fireEvent.click(picker("permissionMode")!);
+    await waitFor(() => expect(reachNote()?.textContent).toBe(accessReachLine(false)));
+
+    // Nothing to say where no turn is running: the pick only decides what the next one starts at.
+    cleanup();
+    const idle = fixtureApi({ table: [{ ...CLAUDE, movesAccess: true }] });
+    await setup(idle.api);
+    await waitFor(() => expect(picker("permissionMode")).not.toBeNull());
+    fireEvent.click(picker("permissionMode")!);
+    await waitFor(() => expect(option("plan")).not.toBeNull());
+    expect(reachNote()).toBeNull();
+  });
+
+  it("a pick made while a turn runs reaches that turn, and a refusal the harness answered with is the only line under the box", async () => {
+    const running: SessionView = { id: "s9", workspaceId: WS, harness: "claude", status: "running", claudeSessionId: "sess_0001", model: "claude-opus-5", permissionMode: "bypassPermissions" };
+    const moves = [{ ...CLAUDE, movesAccess: true }];
+    const took = fixtureApi({ table: moves, history: CHAT_STREAM.slice(0, 2), sessions: [running], access: "set" });
     await setup(took.api);
     await waitFor(() => expect(pickerValue("permissionMode")).toBe("bypassPermissions"));
     fireEvent.click(picker("permissionMode")!);
@@ -607,15 +646,30 @@ describe("composer pickers", () => {
     await waitFor(() => expect(pickerValue("permissionMode")).toBe("plan"));
     expect(document.querySelector("[data-composer-refusal]")?.textContent).toBe("");
 
-    const missed = fixtureApi({ table: [CLAUDE], history: CHAT_STREAM.slice(0, 2), sessions: [running], access: "unsupported" });
-    await setup(missed.api);
+    // A harness whose row says it takes the change and then refuses it: that refusal is the person's news, in the
+    // two halves every refusal here has.
+    cleanup();
+    const refused = fixtureApi({ table: moves, history: CHAT_STREAM.slice(0, 2), sessions: [running], access: "unsupported" });
+    await setup(refused.api);
     await waitFor(() => expect(pickerValue("permissionMode")).toBe("bypassPermissions"));
     fireEvent.click(picker("permissionMode")!);
     fireEvent.click(option("plan")!);
-    await waitFor(() => expect(document.querySelector("[data-composer-refusal]")?.textContent).toBe(accessFromNextMessage("Plan")));
-    // The pick is kept either way: the line says when it lands, not that it was dropped.
+    await waitFor(() => expect(document.querySelector("[data-composer-refusal]")?.textContent).toBe(ACCESS_REFUSED_LINE));
+    // The pick is kept either way: the refusal says where it lands instead, not that it was dropped.
     expect(useStore.getState().preferences.access).toEqual({ [WS]: "plan" });
     expect(pickerValue("permissionMode")).toBe("plan");
+
+    // A harness whose row says a pick waits for the next message said so over the list before the pick, so nothing
+    // is said again under the box, and the turn is not asked to take what it does not take.
+    cleanup();
+    const waits = fixtureApi({ table: [CLAUDE], history: CHAT_STREAM.slice(0, 2), sessions: [running], access: "unsupported" });
+    await setup(waits.api);
+    await waitFor(() => expect(pickerValue("permissionMode")).toBe("bypassPermissions"));
+    fireEvent.click(picker("permissionMode")!);
+    fireEvent.click(option("plan")!);
+    await waitFor(() => expect(pickerValue("permissionMode")).toBe("plan"));
+    expect(document.querySelector("[data-composer-refusal]")?.textContent).toBe("");
+    expect(waits.moved).toEqual([]);
   });
 
   const SPOO = { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z" };

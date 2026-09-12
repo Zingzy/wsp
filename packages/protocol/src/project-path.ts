@@ -8,9 +8,6 @@
 // joined here rather than through node:path: this package is bundled into the
 // browser and imports nothing outside itself.
 
-/** A folder without the slashes somebody typed at the end of it. */
-const at = (folder: string): string => folder.replace(/\/+$/, "");
-
 /** Whether path is the folder itself or sits inside it; a sibling that shares the prefix is not. */
 export function underProject(path: string, root: string): boolean {
   return path === root || path.startsWith(`${root}/`);
@@ -19,6 +16,25 @@ export function underProject(path: string, root: string): boolean {
 /** A folder's own name, its last segment: what a project is called, what the import dialog and the register line
  * call the folder, and what a permission prompt names a file by. */
 export const folderName = (path: string): string => path.replace(/\/+$/, "").split("/").at(-1) ?? path;
+
+/** The machine a folder browser is walking, as far as the hidden rule cares: the home that machine reports, and
+ * whether it is a Mac. Absent either way, the dot rule stands alone, which is every machine wsp forks. */
+export interface FolderMachine {
+  readonly home?: string | null;
+  readonly mac?: boolean;
+}
+
+/** Whether a folder browser hides this folder: a dot-named one on any machine, and the Library a Mac keeps in the
+ * home itself, which the Finder hides there too. The home decides and not the path's shape, since a Mac home sits
+ * wherever the login puts it (a lab account under /Users/Shared holds one), and a Library somebody made inside
+ * their own work is theirs. A home holds twenty of these and none is what somebody browsing for their work is
+ * looking for; they are folders like any other to everything else, so a path typed or pasted whole still opens one. */
+export function hiddenFolder(path: string, machine: FolderMachine = {}): boolean {
+  const at = path.replace(/\/+$/, "");
+  if (folderName(at).startsWith(".")) return true;
+  const home = machine.home?.replace(/\/+$/, "");
+  return machine.mac === true && home !== undefined && home !== "" && at === `${home}/Library`;
+}
 
 /** The name of the folder a path sits in, empty where it sits at the root or is a bare name. */
 export const parentFolderName = (path: string): string => {
@@ -30,7 +46,7 @@ export const parentFolderName = (path: string): string => {
  * home of whichever daemon reads it: DAEMON_ROOTS_PATH is this answered for a guest, whose home is /root, and this
  * computer's own daemon answers it for the person's home. */
 export function rootsPathIn(home: string): string {
-  return `${at(home)}/.wsp/roots`;
+  return `${home.replace(/\/+$/, "")}/.wsp/roots`;
 }
 
 /** The folder every turn and every exec starts in on a computer somebody owns, wsp's own under their home. Not the
@@ -38,7 +54,7 @@ export function rootsPathIn(home: string): string {
  * thread run on a local workspace committed inside the person's own repo from there (measured 2026-09-08). One rule
  * for this computer and for a computer joined as a place, since both are somebody's own. */
 export function workFolderIn(home: string): string {
-  return `${at(home)}/wsp-work`;
+  return `${home.replace(/\/+$/, "")}/wsp-work`;
 }
 
 /** Everywhere the daemon on a computer the person owns keeps something, whether wsp put it there over ssh or the
@@ -63,7 +79,6 @@ export function placeDaemonPaths(home: string): {
   openSocket: string;
   manifestPath: string;
   profileFile: string;
-  nodeDir: string;
   unitDir: string;
   binDir: string;
   rootsPath: string;
@@ -74,8 +89,8 @@ export function placeDaemonPaths(home: string): {
   placeKey: string;
   placeLog: string;
 } {
-  const under = at(home);
-  const wsp = `${under}/.wsp`;
+  const at = home.replace(/\/+$/, "");
+  const wsp = `${at}/.wsp`;
   return {
     wsp,
     dir: `${wsp}/daemon`,
@@ -88,10 +103,9 @@ export function placeDaemonPaths(home: string): {
     openSocket: `${wsp}/open.sock`,
     manifestPath: `${wsp}/manifest.json`,
     profileFile: `${wsp}/profile.sh`,
-    nodeDir: `${wsp}/node`,
-    unitDir: `${under}/.config/systemd/user`,
-    binDir: `${under}/.local/bin`,
-    rootsPath: rootsPathIn(under),
+    unitDir: `${at}/.config/systemd/user`,
+    binDir: `${at}/.local/bin`,
+    rootsPath: rootsPathIn(at),
     placeFile: `${wsp}/place.json`,
     placeKey: `${wsp}/place-key.pem`,
     placeLog: `${wsp}/place.log`,
@@ -104,7 +118,7 @@ export function placeDaemonPaths(home: string): {
  * daemon sweeps by this list when its host asks over the link and wsp leave sweeps by it at the terminal. */
 export function placeOwnedPaths(home: string): string[] {
   const at = placeDaemonPaths(home);
-  return [at.placeFile, at.placeKey, at.placeLog, at.dir, at.bundle, at.inbox, at.tokenPath, at.rootsPath, at.nodeDir, at.profileFile, at.openSocket, at.runDir, `${at.wsp}/wsp-npm.log`, at.portFile, `${at.binDir}/wsp-open`, `${at.binDir}/xdg-open`];
+  return [at.placeFile, at.placeKey, at.placeLog, at.dir, at.bundle, at.inbox, at.tokenPath, at.rootsPath, at.profileFile, at.openSocket, at.runDir, at.portFile, `${at.binDir}/wsp-open`, `${at.binDir}/xdg-open`];
 }
 
 /** The same paths under the name the ssh road has always called them. One function, two names, so nothing keeps a
@@ -115,5 +129,5 @@ export const sshDaemonPaths = placeDaemonPaths;
  * reads, so two of them see one fleet, and a folder per machine standing in for that machine's disk. The layout is
  * written here because the harness that seeds the records and the host that answers out of them both name it and
  * neither may guess. */
-export const standInRecordsPath = (root: string): string => `${at(root)}/records.json`;
-export const standInMachinePath = (root: string, machineId: string): string => `${at(root)}/machines/${machineId}`;
+export const standInRecordsPath = (root: string): string => `${root.replace(/\/+$/, "")}/records.json`;
+export const standInMachinePath = (root: string, machineId: string): string => `${root.replace(/\/+$/, "")}/machines/${machineId}`;
