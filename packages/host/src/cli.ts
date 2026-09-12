@@ -27,7 +27,7 @@ import {
   type SshWiring,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, portsAsked, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, usageRefusal, WS_PORT_OFFSET, type WorkspaceCreatingEvent } from "@wsp/protocol";
+import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portsAsked, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, usageRefusal, WS_PORT_OFFSET, type WorkspaceCreatingEvent } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, parseSshAddress, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshIdentity, sshMachineName, sshReachOf, type SshReach } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerModule, type ProviderEnv } from "./providers.js";
 import { assetDir } from "./assets.js";
@@ -592,6 +592,9 @@ export const localWorkFolder = (home: string): string => join(home, "wsp-work");
  * made is the one a turn uses, and the work folder is the workspace's own. */
 export function localWiring(home = homedir(), env: Readonly<Record<string, string | undefined>> = process.env): LocalWiring {
   const root = localWorkFolder(home);
+  // The person whose sign-ins a turn here reads. Their login home, except under a harness serving a fixture out of
+  // a home of its own: that home holds this host's files, and a turn started under it finds no sign-in at all.
+  const person = homeNamed(env[PERSON_HOME_ENV]) ?? home;
   // Started on the first dial and kept: a host nobody opens a pane on never binds a port on this computer, and
   // never dlopens the native module @wsp/daemon's import of node-pty loads. The desktop package ships that module
   // beside its bundle, so the deferred edge is about the port and the load, not about a missing file.
@@ -601,9 +604,9 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
   return {
     backend,
     execStream: o => localExecStream({ root: backend.workFolder(), ...o }),
-    home: id => agentHome(home, id, env),
+    home: id => agentHome(person, id, env),
     homeDir: home,
-    env: () => Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined)),
+    env: () => ({ ...Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined)), HOME: person }),
     daemonRoad: async () => {
       // The panes stay on the person's home: the files and terminal tabs are theirs to look around in, where a
       // turn's own folder is the workspace's.

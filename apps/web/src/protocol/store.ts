@@ -161,6 +161,10 @@ interface State {
    * reloaded so the sidebar shows it. True once the store took the name; an answer that named nothing and a failure
    * are false and a toast, so the caller can leave the name where a person can still see it. */
   renameThread(opts: { sessionId: string; workspaceId: string; harness: string; title: string }): Promise<boolean>;
+  /** Drops a thread no turn ever ran on through the runtime, then reloads the workspace's rows so the row leaves
+   * the sidebar. True once the runtime dropped it; its refusal for a thread whose turn reached its agent is false
+   * and a toast. */
+  forgetThread(opts: { threadId: string; workspaceId: string }): Promise<boolean>;
   /** Names the workspace through the runtime, which holds the name on this computer, and puts the record it answers
    * with in place of the row. True once the runtime took the name; a refusal (a name another workspace holds, a blank
    * one) is false and a toast, so the caller can leave the name where a person can still see it. */
@@ -480,6 +484,18 @@ export const useStore = create<State>((set, get) => {
         return true;
       } catch (e: unknown) {
         if (!(e instanceof DisconnectedError)) set({ toast: `${title}: ${e instanceof Error ? e.message : String(e)}` });
+        return false;
+      }
+    },
+    async forgetThread({ threadId, workspaceId }) {
+      const api = get().api;
+      if (!api?.forgetThread) return false;
+      try {
+        await api.forgetThread(threadId);
+        await get().reloadSessions(workspaceId);
+        return true;
+      } catch (e: unknown) {
+        if (!(e instanceof DisconnectedError)) set({ toast: e instanceof Error ? e.message : String(e) });
         return false;
       }
     },

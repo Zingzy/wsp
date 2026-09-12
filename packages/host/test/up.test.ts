@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRuntime, jsonFileStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { thisComputerLine, type ExecStream } from "@wsp/protocol";
+import { PERSON_HOME_ENV, thisComputerLine, type ExecStream } from "@wsp/protocol";
 import { cli, localWiring, localWorkFolder, noClaudeKeyNote, optsFor, statesHere, up, type CliIO } from "../src/cli.js";
 import type { HostHandle } from "../src/server.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
@@ -163,6 +163,22 @@ describe("wsp up", () => {
     expect(wiring.home("claude").startsWith(work)).toBe(false);
     expect(localWiring(home, { HOME: home }).home("claude")).toBe(join(home, ".claude"));
     await rt.close();
+  });
+
+  it("runs a turn under the person's own home when the host serves a home that is not theirs", () => {
+    const lab = join(dir, "lab");
+    const person = join(dir, "person");
+    const wiring = localWiring(lab, { HOME: lab, [PERSON_HOME_ENV]: person });
+    // The stores a turn reads are the person's, so the sign-in they made is the one the agent finds, and so is the
+    // home the turn runs under: a sign-in on this kind of computer is keyed to the home a person logs in to.
+    expect(wiring.home("claude")).toBe(join(person, ".claude"));
+    expect(wiring.env()["HOME"]).toBe(person);
+    // What is the host's own stays in the home it serves: the folder turns run in and the folder its panes browse.
+    expect(wiring.homeDir).toBe(lab);
+    expect(wiring.backend.folder.startsWith(lab)).toBe(true);
+    // Unnamed, the process's home is the person's, which is every host but a harness's.
+    const plain = localWiring(lab, { HOME: lab });
+    expect([plain.home("claude"), plain.env()["HOME"]]).toEqual([join(lab, ".claude"), lab]);
   });
 
   it("the wiring answers this computer's environment as it is when it is asked, not as it was when the wiring was made", async () => {
