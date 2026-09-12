@@ -16,7 +16,10 @@
 // whose init announced the CLI's slash commands, its own screens among them;
 // ?local=1&ws=ws_m&perm=1 replays a turn on this computer with one permission
 // prompt answered and one still open, so the relayed prompt row can be laid
-// out and photographed in both states; ?shell=desktop puts a desktop bridge on the page so the workspace
+// out and photographed in both states, and an option clicked or an access
+// picked closes it the way the runtime's event does; &access=refused has that
+// turn's harness refuse the change its own row said it takes, which is the one
+// refusal the composer says under the box; ?shell=desktop puts a desktop bridge on the page so the workspace
 // switch chord reaches it; ?mac=1 marks the html the way the macOS preload
 // does; ?panel=terminal opens the right panel with a Browser tab and a
 // terminal over a fake daemon wire, the host answering a translucent Ghostty
@@ -56,7 +59,7 @@ import { createRoot } from "react-dom/client";
 import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DESKTOP_MAC_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, keptAccess, THEME_PRESETS, THIS_COMPUTER, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
-import type { Api } from "../../src/protocol/client";
+import type { Api, ProtocolEvent } from "../../src/protocol/client";
 import { getLive } from "../../src/machine/live";
 import { useStore } from "../../src/protocol/store";
 import { useRightPanelStore } from "../../src/rightPanelStore";
@@ -180,6 +183,7 @@ const catalogs: HarnessCatalog[] = [
       steers: true,
       renames: true,
       images: true,
+      movesAccess: true,
       keptMode: "default",
       bypassMode: "bypassPermissions",
       // The CLI's own screens, as the runtime's table names them; the chat replay announces them beside the rest.
@@ -306,6 +310,18 @@ const prompting: SessionEvent[] = [
   },
 ];
 
+/** The prompts the replay leaves open, and the page's own watchers: a click on an option and an access picked while
+ * the turn runs both close a prompt here the way the runtime's event does, so the row goes on the page. */
+const openAsks = new Set(prompting.filter(e => e.type === "session.permission").map(e => e.askId));
+for (const closed of prompting) if (closed.type === "session.permission.closed") openAsks.delete(closed.askId);
+const watching = new Set<(event: ProtocolEvent) => void>();
+const closePrompt = (askId: string, optionId: string): void => {
+  if (!openAsks.delete(askId)) return;
+  const closed: SessionEvent = { type: "session.permission.closed", ...perm, askId, outcome: optionId === "deny" ? "denied" : "allowed", optionId };
+  prompting.push(closed);
+  for (const fn of watching) fn(closed);
+};
+
 const linger = { workspaceId: "ws_a", sessionId: "s1", turnId: "turn_1", threadId: "thr_linger" };
 const lingering: SessionEvent[] = [
   { type: "session.start", ...linger, prompt: "Start the dev server in the background and reply when it is up." },
@@ -403,10 +419,20 @@ const api: Api = {
           : params.get("linger") === "1"
             ? lingering
             : [],
-  answerPermission: async () => "answered",
-  // Bypass is a launch flag on this CLI, so a pick of it while a turn runs is the one the harness will not take;
-  // the composer then says when it lands, which is the line this fixture is here to draw.
-  setSessionAccess: async () => "unsupported",
+  // The row closes on the runtime's own event and never on this reply, so the fixture pushes it: a click on an
+  // option has to be seen landing, not only counted.
+  answerPermission: async (sessionId, askId, optionId) => {
+    closePrompt(askId, optionId);
+    return "answered";
+  },
+  // The pick reaches the running turn, and the prompt it is stopped on goes with it where the mode answers one.
+  // ?access=refused is the harness taking back what its row said it would take, which is the one thing the composer
+  // says under the box.
+  setSessionAccess: async (_sessionId, permissionMode) => {
+    if (params.get("access") === "refused") return "unsupported";
+    if (permissionMode === "bypassPermissions" || permissionMode === "acceptEdits") for (const askId of [...openAsks]) closePrompt(askId, "allow");
+    return "set";
+  },
   listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
   snapshotStorage: async () => null,
   rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
@@ -437,7 +463,10 @@ const api: Api = {
     return row;
   },
   listHarnesses: async () => catalogs,
-  subscribe: () => () => {},
+  subscribe: fn => {
+    watching.add(fn);
+    return () => watching.delete(fn);
+  },
   getGolden: async () => undefined,
   hostTerminalConfig: async () => TRANSLUCENT,
   ...(withImport ? importOps : {}),
