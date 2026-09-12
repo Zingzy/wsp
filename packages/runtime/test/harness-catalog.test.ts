@@ -24,7 +24,7 @@ describe("harness catalogs", () => {
       // The bug this walks: a tab whose binary never answered showed no model and another agent's pin.
       expect(table.models.length).toBeGreaterThan(0);
       expect(table.version).toMatch(/^\S+ \d+\.\d+\.\d+, \d{4}-\d{2}-\d{2}$/);
-      const line = catalogSourceLine(table);
+      const line = catalogSourceLine(table, THIS_COMPUTER);
       expect(line).toBe(`${id} table · ${table.version!}`);
       // One line at the popup's width: 48 characters of the 10px mono the footer draws in (measured in Chromium).
       expect(line.length).toBeLessThanOrEqual(48);
@@ -38,10 +38,10 @@ describe("harness catalogs", () => {
   it("the pin is what was run on the row's own binary, and a row written from a CLI's docs claims none", () => {
     expect(harnessCatalog("claude")!.version).toBe("--help 2.1.257, 2026-09-05");
     expect(harnessCatalog("codex")!.version).toBe("app-server 0.153.0, 2026-09-07");
-    expect(catalogSourceLine(harnessCatalog("codex")!)).toBe("codex table · app-server 0.153.0, 2026-09-07");
+    expect(catalogSourceLine(harnessCatalog("codex")!, THIS_COMPUTER)).toBe("codex table · app-server 0.153.0, 2026-09-07");
     for (const id of ["gemini", "opencode", "pi", "hermes"]) {
       expect(harnessCatalog(id)!.version, id).toBeNull();
-      expect(catalogSourceLine(harnessCatalog(id)!)).toBe(`${id} table`);
+      expect(catalogSourceLine(harnessCatalog(id)!, THIS_COMPUTER)).toBe(`${id} table`);
     }
   });
 
@@ -116,6 +116,31 @@ describe("the default effort of a pick", () => {
   it("marks nothing when the model names a default its own list does not carry", () => {
     const odd = { ...codex, models: [{ value: "gpt-5.5", label: "GPT-5.5", efforts: ["low", "high"], defaultEffort: "medium" }] };
     expect(effortsFor(odd, odd.models[0]!).some(o => o.isDefault)).toBe(false);
+  });
+});
+
+describe("what an access mode says it does", () => {
+  // This menu is where a person decides what an agent may do on their computer, so every sentence is about that and
+  // not about the binary behind it: no word from an agent's own documentation, no name of an agent, one sentence each.
+  const INTERNALS = [/classifier/i, /\bCLIs?\b/, /print mode/i, /\bmachines?\b/i];
+  const AGENT_NAMES = HARNESS_CATALOGS.flatMap(c => [new RegExp(`\\b${c.harness}\\b`, "i"), new RegExp(`\\b${c.label}\\b`, "i")]);
+
+  it("says what the agent may do, naming no agent and nothing inside one", () => {
+    const modes = HARNESS_CATALOGS.flatMap(c => c.permissionModes.map(o => [`${c.harness} ${o.value}`, o.description] as const));
+    expect(modes.length).toBeGreaterThan(15);
+    for (const [where, description] of modes) {
+      expect(description, where).toBeDefined();
+      for (const word of [...INTERNALS, ...AGENT_NAMES]) expect(description!, `${where} against ${word.source}`).not.toMatch(word);
+      // One sentence: the semicolon joins two halves of the same one, a full stop would start another.
+      expect(description!, where).not.toContain(".");
+    }
+  });
+
+  it("the two a person could not read now read as a person would say them", () => {
+    const claude = harnessCatalog("claude")!;
+    const mode = (value: string) => claude.permissionModes.find(o => o.value === value)?.description;
+    expect(mode("auto")).toBe("The agent decides which actions to ask about; where the account has no such mode it asks as Default does");
+    expect(mode("manual")).toBe("Asks before every action");
   });
 });
 
@@ -273,7 +298,7 @@ describe("catalogFromProbe", () => {
     expect(catalogFromProbe(harnessCatalog("claude")!, { ...probe, efforts: ["low", "turbo"] }).efforts.some(o => o.isDefault)).toBe(false);
     expect(catalog.contextWindows).toEqual(harnessCatalog("claude")!.contextWindows);
     expect(catalog.permissionModes.map(o => o.value)).toEqual(["default", "plan", "yolo"]);
-    expect(catalog.permissionModes[1]?.description).toBe("Read and plan only; no changes");
+    expect(catalog.permissionModes[1]?.description).toBe("Reads and plans only; changes nothing");
     // A mode the table has no words for still shows, named as the CLI spells it.
     expect(catalog.permissionModes[2]).toEqual({ value: "yolo", label: "yolo" });
     // The table's bypass default is not among the binary's modes here, so nothing is default.
@@ -282,8 +307,8 @@ describe("catalogFromProbe", () => {
 
   it("a probe without a version says so instead of pretending to the table's pin", () => {
     expect(catalogFromProbe(harnessCatalog("claude")!, { ...probe, version: null }).version).toBeNull();
-    expect(catalogSourceLine(catalogFromProbe(harnessCatalog("claude")!, { ...probe, version: null }))).toBe("Claude Code on this machine");
-    expect(catalogSourceLine(catalogFromProbe(harnessCatalog("claude")!, probe))).toBe("Claude Code 2.1.257 on this machine");
+    expect(catalogSourceLine(catalogFromProbe(harnessCatalog("claude")!, { ...probe, version: null }), THIS_COMPUTER)).toBe("Claude Code on this computer");
+    expect(catalogSourceLine(catalogFromProbe(harnessCatalog("claude")!, probe), "hetzner")).toBe("Claude Code 2.1.257 on hetzner");
   });
 
   it("a model whose efforts the binary did not name keeps none of its own, so every effort the catalog lists stays open to it", () => {

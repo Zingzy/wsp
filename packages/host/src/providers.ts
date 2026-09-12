@@ -8,7 +8,7 @@
 // provider by name.
 
 import { BoxBackend, DockerBackend, FakeBackend, NoProviderBackend, SolariBackend, type MachineBackend } from "@wsp/engine";
-import { SOLARI_CONSOLE } from "@wsp/protocol";
+import { PROVIDER_KEY_WORDS } from "@wsp/protocol";
 import { keyIn } from "./env-keys.js";
 
 /** The environment a provider is picked out of: the host's own, with whatever the command line's provider words put
@@ -67,7 +67,8 @@ export const PROVIDER_MODULES: readonly ProviderModule[] = [
     id: "box",
     envNames: [PROVIDER_ENV],
     keyEnv: BOX_KEY_ENV,
-    keyName: "Box API key",
+    keyName: PROVIDER_KEY_WORDS["box"]!.keyName,
+    keyConsole: PROVIDER_KEY_WORDS["box"]!.keyConsole,
     // Named alone: the word says which cloud this computer forks on, and a missing key is asked for by its own
     // variable on the key screen rather than guessed at here.
     selects: env => env[PROVIDER_ENV] === "box",
@@ -90,8 +91,8 @@ export const PROVIDER_MODULES: readonly ProviderModule[] = [
     id: "solari",
     envNames: [PROVIDER_ENV],
     keyEnv: SOLARI_KEY_ENV,
-    keyName: "Solari API key",
-    keyConsole: SOLARI_CONSOLE,
+    keyName: PROVIDER_KEY_WORDS["solari"]!.keyName,
+    keyConsole: PROVIDER_KEY_WORDS["solari"]!.keyConsole,
     // Named, or taken by its key alone: this is the cloud a computer that names no provider is offered, so a key
     // saved on its own is the whole answer.
     selects: env => env[PROVIDER_ENV] === "solari" || keyIn(env, SOLARI_KEY_ENV) !== undefined,
