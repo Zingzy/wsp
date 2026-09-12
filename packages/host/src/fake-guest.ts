@@ -14,10 +14,10 @@
 //
 // The daemon reads its token from a file in that folder rather than holding one
 // this process minted, because the runtime rotates a machine's token by writing
-// it through the machine's own exec, and that exec is a shell in this folder:
-// nothing here can write the path a real fork's guest keeps it at. One file per
-// process, since every process that dials a machine writes its own token there
-// and a machine's folder is the one thing two of them share.
+// it to the path that machine names, and a stand-in machine has no root of a
+// Linux guest to keep it under. One file per process, since every process that
+// dials a machine writes its own token there and a machine's folder is the one
+// thing two of them share.
 //
 // Every daemon started here is held so the command that started it can take it
 // away again: a child whose pipes this process reads is a reason it stays, and
@@ -25,8 +25,8 @@
 // the prompt. The host serving the app is held up by its own ports, so closing
 // these when a command ends costs it nothing.
 
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { FakeGuest } from "@wsp/engine";
 import { DAEMON_PORT } from "@wsp/engine";
 import { standInMachinePath, type PreviewReach } from "@wsp/protocol";
@@ -47,6 +47,52 @@ const STARTED: Promise<LocalDaemon>[] = [];
  * and two of them on one file left the host serving the app holding a token its own daemon had stopped reading, so
  * a tester who typed a second verb watched the terminal, the files and the live rows go dark until it restarted. */
 export const standInTokenPath = (root: string, machineId: string, of: number): string => join(standInMachinePath(root, machineId), `.wsp-daemon-token-${of}`);
+
+/** The folders of a Linux guest that a stand-in machine answers for inside its own folder: the home a fork's
+ * scripts write, the files its boot writes, and the two it stages bytes through. A path under one of them becomes
+ * that machine's folder with the path under it, so a script written for a guest writes the stand-in's copy of it
+ * rather than the root of the computer running it, where it either refuses or is the person's own. Nothing else
+ * moves: /usr and /bin are where the commands themselves live, and a shell whose own binaries moved has nothing
+ * left to run. */
+const GUEST_FOLDERS = ["root", "etc", "tmp", "var"];
+
+/** The guest's home, which is the folder its commands start in and where a path written under ~ lands. */
+const guestHome = (at: string): string => join(at, "root");
+
+/** Where this guest keeps the handful of commands a Linux guest has and a Mac spells differently or will not run;
+ * first on the path every command here runs under. Hidden, since the folder is also the disk a tester browses. */
+const guestBin = (at: string): string => join(at, ".wsp-guest-bin");
+
+/** The commands that folder holds. A fork names itself at birth, a Mac refuses the call, and the line it prints
+ * reads as a fork that failed; the transfer that writes a machine's own context hashes its archive by the name
+ * coreutils gives that command, which a Mac spells shasum. */
+const GUEST_COMMANDS: Record<string, string> = {
+  hostname: '#!/bin/sh\n[ $# -eq 0 ] && cat "$(dirname "$0")/../etc/hostname" 2>/dev/null\nexit 0\n',
+  sha256sum: '#!/bin/sh\nexec shasum -a 256 "$@"\n',
+};
+
+/** One path of the guest's inside the folder standing in for its disk; every other path as it was written. */
+export const guestPath = (at: string, path: string): string =>
+  path === "/" || GUEST_FOLDERS.some(folder => path === `/${folder}` || path.startsWith(`/${folder}/`)) ? join(at, path) : path;
+
+/** Every path of the guest's in one command line, read as the words of a shell line: a word that is `/` alone or
+ * begins with one of the guest's own folders. Built off the same table as the reading above, so a folder added
+ * there is answered on both roads. */
+const GUEST_PATH = new RegExp(`(^|[\\s"'=(])/(?=$|[\\s"')]|(?:${GUEST_FOLDERS.join("|")})(?:$|[\\s"'/)]))`, "g");
+
+export const inGuestRoot = (at: string, cmd: string): string => cmd.replace(GUEST_PATH, (_, before: string) => `${before}${at}/`);
+
+/** Makes that folder tree and the commands in it, at every call: a machine's folder is a throwaway one and may
+ * have been taken away between two. */
+function layGuestRoot(at: string): void {
+  for (const folder of GUEST_FOLDERS) mkdirSync(join(at, folder), { recursive: true });
+  mkdirSync(guestBin(at), { recursive: true });
+  for (const [name, text] of Object.entries(GUEST_COMMANDS)) {
+    const path = join(guestBin(at), name);
+    writeFileSync(path, text);
+    chmodSync(path, 0o755);
+  }
+}
 
 /** What a road asking for any other port of a stand-in machine is told: nothing of the person's is behind it, and
  * answering with this computer's own loopback at that port would frame whatever they happen to be running. */
@@ -80,6 +126,22 @@ export function fakeGuestAt(root: string): FakeGuest {
       if (port !== DAEMON_PORT) throw new Error(fakeNoPortLine(machineId, port));
       const daemon = await daemonOn(machineId);
       return { url: daemon.road.url, token: NO_EDGE_TOKEN, expiresAt: NEVER };
+    },
+    shell: (machineId: string, cmd: string) => {
+      const at = folder(machineId);
+      layGuestRoot(at);
+      return {
+        cmd: inGuestRoot(at, cmd),
+        cwd: guestHome(at),
+        env: { HOME: guestHome(at), PATH: `${guestBin(at)}:${process.env["PATH"] ?? "/usr/bin:/bin"}` },
+      };
+    },
+    putBytes: async (machineId: string, path: string, bytes: Uint8Array): Promise<void> => {
+      const at = folder(machineId);
+      layGuestRoot(at);
+      const to = guestPath(at, path);
+      mkdirSync(dirname(to), { recursive: true });
+      writeFileSync(to, bytes);
     },
   };
   GUESTS.set(root, guest);

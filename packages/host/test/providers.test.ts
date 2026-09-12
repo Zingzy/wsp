@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { FAKE_AS_ENV, FAKE_ROOT_ENV } from "@wsp/protocol";
+import { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV } from "@wsp/protocol";
 import { BoxBackend, DockerBackend, FakeBackend, LocalBackend, NoProviderBackend, SolariBackend, SshBackend, landsBytes, type MachineBackend } from "@wsp/engine";
 import { goldenRecipe, makeRuntime, optsFor, providerSlotOf, swapProvider } from "../src/cli.js";
 import { keysOf } from "../src/env-keys.js";
@@ -53,12 +56,26 @@ describe("provider modules", () => {
     const backend = providerBackendFor(pick({}, { WSP_PROVIDER: "fake" }));
     expect(backend).toBeInstanceOf(FakeBackend);
     // A fixture names its machines before any process has held them, so a machine this backend never minted is
-    // answered for rather than refused, and the id is where a fixture says one is asleep.
-    const [awake, asleep] = [await backend.get("fk_c0ffee"), await backend.get("fk_c0ffee.paused")];
+    // answered for rather than refused. Which state it comes up in is the records file's to say, below.
+    const awake = await backend.get("fk_c0ffee");
     expect([awake.id, await awake.state()]).toEqual(["fk_c0ffee", "running"]);
-    expect(await asleep.state()).toBe("paused");
     // Nothing lands on it, which is what keeps the daemon deploy off a machine that has no guest behind it.
     expect(landsBytes(backend.capabilities, awake)).toBe(false);
+  });
+
+  it("seeds its fleet from a records file a harness names, and gives those machines no guest", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-standin-records-"));
+    const records = join(dir, "records.json");
+    // A harness that photographs screens rather than driving them seeds the fleet and wires no folder: a fixture's
+    // sleeping fork used to say so in its machine's id, which is the word `wsp workspaces` prints in its own
+    // MACHINE column, and a tester read fk_slr_2.paused there beside a STATE column saying Running.
+    writeFileSync(records, JSON.stringify({ machines: { fk_asleep: { state: "paused", shape: { cpu: 2, memMb: 4096, diskGb: 20 }, labels: {} } }, snapshots: [] }));
+    const backend = providerBackendFor(pick({}, { WSP_PROVIDER: "fake", [FAKE_RECORDS_ENV]: records }));
+    expect(await (await backend.get("fk_asleep")).state()).toBe("paused");
+    // No folder, so no guest, and nothing runs on any of them.
+    expect(backend.capabilities.previewUrls).toBe(false);
+    expect(landsBytes(backend.capabilities, await backend.get("fk_asleep"))).toBe(false);
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it("every row is reachable and the last one answers for any computer", () => {
@@ -145,12 +162,12 @@ describe("provider modules", () => {
   });
 
   it("the variables a service carries are the rows' own, so a provider added brings its variable with it", () => {
-    expect(providerEnvNames()).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST", FAKE_AS_ENV, FAKE_ROOT_ENV]);
+    expect(providerEnvNames()).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST", FAKE_AS_ENV, FAKE_ROOT_ENV, FAKE_RECORDS_ENV]);
     // The row a provider is added as: the list follows it, and nothing else has to be remembered for the unit its
     // host is installed as to be given the variable that selects it. Keys are not among them: a unit file carries
     // no key, and the host reads its own off the same files at every start.
     const fly: ProviderModule = { id: "fly", envNames: ["WSP_PROVIDER", "FLY_REGION"], keyEnv: "FLY_API_TOKEN", selects: env => env["FLY_API_TOKEN"] !== undefined, build: () => new NoProviderBackend() };
-    expect(providerEnvNames([...PROVIDER_MODULES, fly])).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST", FAKE_AS_ENV, FAKE_ROOT_ENV, "FLY_REGION"]);
+    expect(providerEnvNames([...PROVIDER_MODULES, fly])).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST", FAKE_AS_ENV, FAKE_ROOT_ENV, FAKE_RECORDS_ENV, "FLY_REGION"]);
     expect(providerEnvNames()).not.toContain(BOX_KEY_ENV);
     // What a row selects on is what it names: a row reading a variable it never listed would be carried by neither.
     for (const m of PROVIDER_MODULES) for (const name of m.envNames) expect(providerEnvNames()).toContain(name);
