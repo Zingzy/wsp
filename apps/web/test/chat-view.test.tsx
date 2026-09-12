@@ -417,11 +417,17 @@ describe("ChatView", () => {
 
     const row = await waitFor(() => document.querySelector<HTMLElement>('[data-permission-prompt="ask_1"]')!);
     expect(row.getAttribute("data-permission-open")).toBe("true");
-    expect(within(row).getByText("Permission for Write: out.txt")).toBeDefined();
-    // The tool's own input reads as the muted mono every tool row wears, values not braces.
-    const input = within(row).getByText("file_path: /root/out.txt content: hi");
-    expect(input.className).toContain("font-mono");
-    expect(input.className).toContain("text-muted-foreground");
+    // A sentence, not the tool's code name and not the file: what is being written, where, and how much of it.
+    expect(within(row).getByText("Write out.txt in root (2 B)")).toBeDefined();
+    // The file's own text is behind a fold, so the question and the buttons are what the row opens with.
+    expect(row.querySelector("[data-permission-body]")).toBeNull();
+    const fold = row.querySelector<HTMLElement>("[data-permission-body-trigger]")!;
+    expect(fold.textContent).toBe("show the file");
+    fireEvent.click(fold);
+    const body = await waitFor(() => row.querySelector<HTMLElement>("[data-permission-body]")!);
+    expect(body.textContent).toBe("hi");
+    expect(body.className).toContain("font-mono");
+    expect(body.className).toContain("text-muted-foreground");
     // Every option the harness offered, as buttons: nothing here is a chip or a badge.
     expect([...row.querySelectorAll("[data-permission-option]")].map(b => b.textContent)).toEqual(["Allow", "Deny", "Allow, then Accept edits"]);
 
@@ -465,8 +471,14 @@ describe("ChatView", () => {
     await setup(api);
     const waited = await waitFor(() => document.querySelector<HTMLElement>('[data-permission-prompt="ask_wait"]')!);
     expect(within(waited).getByText("Nobody answered; denied")).toBeDefined();
-    // A prompt with no detail leads on the tool alone.
-    expect(within(waited).getByText("Permission for Bash")).toBeDefined();
+    // A command is the whole command on the lead, with no code name in front of it, and it is drawn as code beside
+    // the words rather than inside them, so the sentence face never closes two hyphens into one dash.
+    expect(waited.querySelector("[data-permission-says]")!.textContent).toBe("Run:");
+    const command = waited.querySelector<HTMLElement>("[data-permission-code]")!;
+    expect(command.textContent).toBe("rm -rf build");
+    expect(command.className).toContain("font-mono");
+    expect(command.className).toContain("break-normal");
+    expect(command.className).toContain("overflow-x-auto");
     const stopped = document.querySelector<HTMLElement>('[data-permission-prompt="ask_stop"]')!;
     expect(within(stopped).getByText("Cancelled with the turn")).toBeDefined();
     // Neither offers an option any more: there is nothing left to pick.
