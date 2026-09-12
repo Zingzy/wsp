@@ -165,10 +165,10 @@ describe("with nowhere to put a workspace", () => {
 });
 
 describe("why Create is held", () => {
-  it("with nothing to fork yet the keycap is held and the caption says why, and neither road creates anything", async () => {
+  it("with nothing to fork yet the provider row holds the keycap and the caption says why, and neither road creates anything", async () => {
     const onCreate = vi.fn();
     const line = "the image is still building · 5 of 13";
-    const dialog = await open({ refusal: line, onCreate });
+    const dialog = await open({ places: [HERE, ASCII], refusal: line, onCreate });
     expect(create(dialog).disabled).toBe(true);
     expect(isHeld(create(dialog))).toBe(true);
     expect(caption(dialog)).toBe(line);
@@ -180,8 +180,31 @@ describe("why Create is held", () => {
     expect(dialog.querySelector("[data-k=create-reason]")).toBeNull();
   });
 
+  it("a computer of the person's own is held in its own plain words, which name no provider and no setup", async () => {
+    const onCreate = vi.fn();
+    const dialog = await open({ places: [HERE, HETZNER], refusal: "the image is still building · 5 of 13", onCreate });
+    // The copy that would be built there comes off the image this computer owns, and there is none; the sentence
+    // is the fact and nothing else, since the road that seals one is not this row's.
+    expect(caption(dialog)).toBe("your image is not built yet");
+    expect(caption(dialog)).not.toMatch(/solari|ascii|provider|set up|wizard/i);
+    expect(create(dialog).disabled).toBe(true);
+    expect(isHeld(create(dialog))).toBe(true);
+    fireEvent.click(create(dialog));
+    fireEvent.keyDown(within(dialog).getByLabelText("Name"), { key: "Enter" });
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  it("with the image built, that row says what it will do and Create is live", async () => {
+    const onCreate = vi.fn();
+    const dialog = await open({ places: [HERE, HETZNER], onCreate });
+    expect(caption(dialog)).toBe("free · room for 3 workspaces · builds your image there first, about 4 min");
+    expect(create(dialog).disabled).toBe(false);
+    fireEvent.click(create(dialog));
+    expect(onCreate).toHaveBeenCalledWith("workspace-1", "p_1", undefined);
+  });
+
   it("the held keycap and the live one stand in the same slot at the same size, and only the variant differs", async () => {
-    const held = create(await open({ refusal: "the image is still building" }));
+    const held = create(await open({ places: [HERE, ASCII], refusal: "the image is still building" }));
     const spot = { tag: held.tagName, type: held.getAttribute("type"), word: held.textContent, size: held.className.split(" ").filter(c => c.startsWith("h-") || c.startsWith("px-")) };
     cleanup();
     const live = create(await open());

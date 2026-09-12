@@ -37,7 +37,7 @@ export const answerOf = (draft: Draft, item: InitScreenItem): string | undefined
 /** The API key the row's choice is: the one answer that opens a field under the row. */
 const KEY_CHOICE = "key";
 
-export function SetupAnswers({ screen, counter, draft, onDraft, primary, secondary, refusal, image }: { screen: InitScreen; counter: string; draft: Draft; onDraft: (next: Draft) => void; primary: ScreenAction; secondary: ScreenAction; refusal: string | null; /** The image so far, the protocol's one estimate, against the machine's disk where the provider reports one. */ image: { used: number; total?: number } }) {
+export function SetupAnswers({ screen, counter, draft, onDraft, primary, secondary, refusal, image, note }: { screen: InitScreen; counter: string; draft: Draft; onDraft: (next: Draft) => void; primary: ScreenAction; secondary: ScreenAction; refusal: string | null; /** The image so far, the protocol's one estimate, against the machine's disk where the provider reports one. */ image: { used: number; total?: number }; /** One line over the footer: what the sheet's caller says Continue will do, where the screen itself does not say it. */ note?: string }) {
   const groups = [...new Set(screen.items.map(i => i.group ?? ""))];
   const grouped = groups.some(g => g !== "");
   const tick = (id: string, on: boolean): void => {
@@ -104,7 +104,7 @@ export function SetupAnswers({ screen, counter, draft, onDraft, primary, seconda
       );
     });
   return (
-    <SetupScreen k={`screen-${screen.id}`} counter={counter} headline={screen.top} refusal={refusal} primary={primary} secondary={secondary}>
+    <SetupScreen k={`screen-${screen.id}`} counter={counter} headline={screen.top} refusal={refusal} primary={primary} secondary={secondary} {...(note !== undefined ? { note } : {})}>
       <Card label={screen.title}>
         {grouped
           ? groups.map(group => (

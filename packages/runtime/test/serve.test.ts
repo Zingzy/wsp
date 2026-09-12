@@ -844,6 +844,10 @@ describe("serveRuntime init door (the host's init job, read and driven from the 
         calls.push(["build", o]);
         return { ...JOB, phase: "building" as const };
       },
+      save: async () => {
+        calls.push(["save"]);
+        return { ...JOB, phase: "done" as const };
+      },
       signInCode: async o => {
         calls.push(["signInCode", o]);
         return { ...JOB, phase: "signing-in" as const };

@@ -101,7 +101,9 @@ export function ImageSection() {
           </Table>
         </div>
       )}
-      {editing ? <CloudSetupDialog onClose={() => setEditing(false)} /> : null}
+      {/* Edit's Save writes the recipe beside the state and nothing else: it boots no builder, seals nothing and
+          cuts no version, so its foot says that whether or not an image has been built here. */}
+      {editing ? <CloudSetupDialog onClose={() => setEditing(false)} edit={{ note: IMAGE_WORDS.savesRecipe }} /> : null}
     </Section>
   );
 }

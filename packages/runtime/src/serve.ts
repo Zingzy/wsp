@@ -49,7 +49,7 @@ import {
 import { openDaemonChannel, type DaemonChannel } from "./daemon-channel.js";
 import { NO_DEVICE_DOOR, safeEqual, type DeviceDoor } from "./devices.js";
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
-import type { GoldenRecipe, HostFolders, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
+import type { HostFolders, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
 
 /** The port forwards a host holds, as the app lists and stops them. The
  * runtime keeps none itself: the host that owns the daemon links supplies this. */
@@ -101,10 +101,6 @@ export interface ServeOptions {
   /** How an export of the image is sealed and written on this computer; without it image.export is refused. The
    * runtime hands over the record and the vault's bytes and never touches a file or a passphrase itself. */
   imageExport?: ImageExporter;
-  /** The recipe a copy at a place builds from, composed by the host from the record with every login set to skip;
-   * without it image.build is refused, since the runtime writes no recipe of its own. It reads this computer, so it
-   * answers when the read is done. */
-  copyRecipe?: (image: SealedImage) => Promise<GoldenRecipe>;
 }
 
 /** How the runtime asks the host who this wsp is signed in to. The host owns the records; the runtime owns who may
@@ -175,13 +171,6 @@ function imageExportFrom(opts: ServeOptions): () => ImageExporter {
   };
 }
 
-function copyRecipeFrom(opts: ServeOptions): (image: SealedImage) => Promise<GoldenRecipe> {
-  return async image => {
-    if (opts.copyRecipe === undefined) throw new Error("this runtime cannot compose the recipe a copy builds from; the host that serves the app wires one");
-    return opts.copyRecipe(image);
-  };
-}
-
 function initFrom(opts: ServeOptions): () => InitDoor {
   return () => {
     if (opts.init === undefined) throw new Error("this runtime has no init job; the host that serves the app wires one");
@@ -208,7 +197,6 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
   const terminalConfig = terminalConfigFrom(opts);
   const init = initFrom(opts);
   const imageExport = imageExportFrom(opts);
-  const copyRecipe = copyRecipeFrom(opts);
   if (!opts.authToken) throw new Error("serveRuntime refuses to start without an auth token");
   const now = opts.now ?? Date.now;
   const ticketTtlMs = opts.ticketTtlMs ?? 300_000;
@@ -836,8 +824,6 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, view: await rt.image.get(msg.name) });
               return;
             case "image.build":
-              // Every refusal is the runtime's own; this door hands it the one thing it cannot write, which is the
-              // recipe read off this computer, and the runtime asks for it only once the build is going to run.
               send({
                 id: msg.id,
                 ok: true,
@@ -845,7 +831,6 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                   place: msg.place,
                   ...(msg.name !== undefined ? { name: msg.name } : {}),
                   ...(msg.force !== undefined ? { force: msg.force } : {}),
-                  recipe: image => copyRecipe(image),
                 }),
               });
               return;
@@ -931,6 +916,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             case "init.signInCode":
               send({ id: msg.id, ok: true, job: await init().signInCode({ tool: msg.tool, code: msg.code }) });
+              return;
+            case "init.save":
+              send({ id: msg.id, ok: true, job: await init().save() });
               return;
             case "init.cancel":
               send({ id: msg.id, ok: true, job: await init().cancel() });

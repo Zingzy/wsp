@@ -134,28 +134,34 @@ export function SetupScreen({
           {children}
         </div>
       </div>
-      <div data-k="foot" className="relative flex w-full shrink-0 flex-col items-center pt-14">
+      <div data-k="foot" className="flex w-full shrink-0 flex-col items-center pt-14">
         {note !== undefined ? (
           <p data-k="note" className="mb-4 w-full text-center text-[13px] leading-[1.5] text-muted-foreground">
             {note}
           </p>
         ) : null}
-        {refusal !== null ? (
-          <p data-k="refusal" className={cn("max-w-[440px] break-words text-center font-mono text-xs text-destructive-foreground", note === undefined ? "absolute top-[18px] left-1/2 w-max -translate-x-1/2" : "mb-4")}>
-            {refusal}
-          </p>
-        ) : null}
-        {primary !== undefined || secondary !== undefined ? (
-          <div data-k="footer" className="flex flex-col items-center">
-            {withReason("primary-reason", keycapButton, held ? primary.title : undefined)}
-            {secondaryLink !== null || asideLink !== null ? (
-              <div data-k="links" className={cn("flex items-center gap-3", primary !== undefined && "mt-3")}>
-                {withReason("secondary-reason", secondaryLink, secondaryHeld ? secondary.title : undefined)}
-                {asideLink}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
+        {/* The refusal hangs off the top of the footer rather than sitting at a fixed offset under the content:
+            it takes the height it needs upward into the gap the footer already keeps, so a sentence longer than
+            its two lines can never be drawn over the keycap. Where a note stands it takes its place in the
+            column above the footer instead, since the note is already there to move. */}
+        <div className="relative flex w-full flex-col items-center">
+          {refusal !== null ? (
+            <p data-k="refusal" className={cn("max-w-[440px] break-words text-center font-mono text-xs text-destructive-foreground", note === undefined ? "absolute bottom-full left-1/2 mb-2 w-max -translate-x-1/2" : "mb-4")}>
+              {refusal}
+            </p>
+          ) : null}
+          {primary !== undefined || secondary !== undefined ? (
+            <div data-k="footer" className="flex flex-col items-center">
+              {withReason("primary-reason", keycapButton, held ? primary.title : undefined)}
+              {secondaryLink !== null || asideLink !== null ? (
+                <div data-k="links" className={cn("flex items-center gap-3", primary !== undefined && "mt-3")}>
+                  {withReason("secondary-reason", secondaryLink, secondaryHeld ? secondary.title : undefined)}
+                  {asideLink}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
       </div>
       <div data-k="bottom" aria-hidden className="w-full" style={{ flex: "1 1 0", minHeight: BOTTOM_MARGIN_MIN }} />
     </div>

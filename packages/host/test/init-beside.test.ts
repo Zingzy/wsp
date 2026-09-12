@@ -54,6 +54,10 @@ class ScriptedDoor implements InitDoor {
     this.calls.push({ op: "build", args: o });
     return this.job;
   }
+  async save(): Promise<InitJob> {
+    this.calls.push({ op: "save" });
+    return this.job;
+  }
   async signInCode(o: { tool: string; code: string }): Promise<InitJob> {
     this.calls.push({ op: "signInCode", args: o });
     return this.job;

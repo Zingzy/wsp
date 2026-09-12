@@ -2927,6 +2927,7 @@ const DAEMON_CONTENTS = [
   "055dcf11b2a17e8959ab3a6246c2d17f89eb3837c59b31d3a8138c6dc7b6c322",
   "09e441a435678290871e210158d5f8fef3b43b307c5ec917086a201583c037a5",
   "386b54104e2a8abf8f45f9a35fe767971b72d5d00da68c4d8ae0aa9630b7cc6d",
+  "9ff538bbfca0ac4e03ca8c822afd47b630dd21cec17ec929192ddc6ae6f10ce6",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -2974,7 +2975,9 @@ const DAEMON_CONTENTS = [
  * flags, a computer joined as a place runs the same binary under its login's own manager, this computer's
  * workspace spawns it, and the guest keeps no node, no npm install and no native module for the daemon; the wsp
  * command beside it still runs on the node the machine carries. The binary also answers a plain HTTP request 426,
- * as the host's status probe reads a daemon by. */
+ * as the host's status probe reads a daemon by. Version 23 commits a workspace's upper directory to the layer store
+ * as a snapshot, names a snapshot's chain as a template, and naps a workspace by stopping it: the processes go,
+ * the upper directory stays as the saved layer, and the wake boots it again on the same address and forwards. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -3732,6 +3735,11 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * that terminal; replies with { job: InitJob }. The code is never logged, kept or carried on the view. Refused when
    * no sign-in for that tool is waiting for one. */
   z.object({ id: reqId, op: z.literal("init.signInCode"), tool: z.string(), code: z.string().min(1).max(SIGN_IN_CODE_MAX) }),
+  /** Writes the recipe as the screens answered it beside the state, where the image road and wsp init --recipe read
+   * it back, and ends the job without building; replies with { job: InitJob }. What goes on the image is the whole
+   * of what the image road asks. A copy at a computer or a provider is planned off the record and not off this
+   * file, so what is written here reaches a copy through the next seal. */
+  z.object({ id: reqId, op: z.literal("init.save") }),
   /** Stops the job where it is: a thread interrupted, a builder killed; replies with { job: InitJob }. */
   z.object({ id: reqId, op: z.literal("init.cancel") }),
   /** Replies with { preferences: Preferences }: the record on this host's state, the defaults until a client set something. */
@@ -4088,5 +4096,5 @@ export { addressFromHash, appHash, workspaceHash, type AppAddress } from "./app-
 export * from "./app-ports.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";
-export { FAKE_AS_ENV, FAKE_ROOT_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, TURN_TOKEN_ENV, WEB_DIR_ENV } from "./env.js";
+export { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, TURN_TOKEN_ENV, WEB_DIR_ENV } from "./env.js";
 export type { AdapterAttachOptions, AdapterEvent, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";
