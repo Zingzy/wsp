@@ -29,6 +29,7 @@ import {
   type InitRoad,
   PlaceDoorView,
   PlaceView,
+  type PlaceAddStep,
   type InitScreenId,
   type ImageAttachment,
   TerminalConfig,
@@ -333,9 +334,11 @@ export interface SshLogin {
   port?: number;
 }
 
-/** One line of the installer's progress as the sheet draws it: the words, whether it is running, and the figure at
- * its right end where the stage carries one. */
+/** One line of the installer's progress as the sheet draws it: the step it belongs to, the words, whether it is
+ * running, and the figure at its right end where the stage carries one. The step is what a line is: a line's words
+ * change as it runs, so a list keyed by them would draw the finished step as a second line. */
 export interface InstallStage {
+  step: PlaceAddStep;
   word: string;
   state: "running" | "done";
   fact?: string;

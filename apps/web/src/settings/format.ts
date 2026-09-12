@@ -61,6 +61,10 @@ export const ADD_COMPUTER_WORDS = {
     portPlaceholder: "22",
     addon: "ssh",
     note: "Your ssh agent and config are used as they stand. Nothing is asked for a key unless ssh refuses.",
+    /** The folder the install makes on the box and what it starts the agent under, in those lines' fact slots,
+     * since the steps' own words leave both out. */
+    folder: "~/.wsp",
+    service: "systemd",
     add: "Add",
     adds: "adds",
     loginFirst: "type the login first",
@@ -95,8 +99,9 @@ export const CONNECT_PROVIDER_WORDS = {
   refusedFix: (name: string): string => `Paste one from your ${name} account, or make a new one there.`,
   unreached: (name: string): string => `${name} could not be reached to check the key.`,
   unreachedFix: "Check the network and try again.",
-  /** Why Save is held on a provider whose key has no road on the wire yet. */
-  noRoad: (name: string): string => `this wsp cannot save a ${name} key yet`,
+  /** Why Save is held on a provider whose key has no road on the wire yet. The provider's name follows a word
+   * rather than an article, since a and an cannot both be spelled here for a name read off the provider table. */
+  noRoad: (name: string): string => `this wsp cannot save a key for ${name} yet`,
   /** The already connected state, opened again on a provider whose key this computer holds. */
   savedWord: "saved",
   change: "Change",

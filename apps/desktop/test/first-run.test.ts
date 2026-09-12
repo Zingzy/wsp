@@ -203,13 +203,15 @@ describe("the first launch's screen", () => {
     expect(already.text("#join-said")).toBe(`This Mac already runs threads for another wsp. ${JOIN_ALREADY.fix}`);
   });
 
-  it("holds the Join keycap until both fields are filled, and says why while it is held", async () => {
+  it("holds the Join keycap as the outline until both fields are filled, with the reason in the Address slot", async () => {
     const screen = await open();
     await screen.press("#join");
     const go = screen.at("#go") as HTMLButtonElement;
     expect(go.disabled).toBe(true);
-    expect(go.className).toBe("primary");
-    expect(screen.at("#why").getAttribute("title")).toBe("type the address and the code first");
+    // Held is the outline variant, disabled, and its reason stands in the slot before any press rather than on a
+    // hover: nothing hovers a keycap before it has failed, and a driven browser never hovers at all.
+    expect(go.className).toBe("primary outline");
+    expect(screen.text("#address-said")).toBe("type the address and the code first");
     // An address alone is not enough, and neither is a code with a letter missing.
     await screen.type("#address", "192.168.1.20:7788");
     expect(go.disabled).toBe(true);
@@ -219,7 +221,8 @@ describe("the first launch's screen", () => {
     await screen.type("#code", "qw4k-7pzx");
     expect((screen.at("#code") as HTMLInputElement).value).toBe("QW4K-7PZX");
     expect(go.disabled).toBe(false);
-    expect(screen.at("#why").hasAttribute("title")).toBe(false);
+    expect(go.className).toBe("primary");
+    expect(screen.text("#address-said")).toBe("");
     // A press now reaches the shell with the address as typed and the code without its dash.
     await screen.press("#go");
     expect(screen.asks.join).toEqual([{ address: "192.168.1.20:7788", code: "QW4K7PZX" }]);
