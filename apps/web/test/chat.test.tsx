@@ -133,8 +133,10 @@ describe("chat tab: a turn whose process lives past its reply", () => {
   const thread = { ...scope, threadId: "thr_linger" };
   const noteText = () => document.querySelector("[data-composer-refusal]")?.textContent ?? null;
 
-  it("holds the composer with the runtime's words from the reply until the process exits, then opens", async () => {
-    const { api, emit } = fixtureApi([workspace]);
+  it("holds the composer with the runtime's words from the reply until the process exits, naming the thread by its title, then opens", async () => {
+    const { api, emit } = fixtureApi([workspace], {}, [
+      { id: "sess_linger", workspaceId: WS, harness: "claude", status: "running", threadId: "thr_linger", harnessTitle: "Serve the port list" },
+    ]);
     await setup(api);
     emit({ type: "session.start", ...thread });
     emit({ type: "session.delta", ...thread, kind: "text", text: "Server is live at :3000." });
@@ -145,7 +147,7 @@ describe("chat tab: a turn whose process lives past its reply", () => {
     emit({ type: "session.done", ...thread, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
     // The reply renders at once, but the process still runs: the row stays working, says so, and offers no send.
     expect(screen.getByText("Server is live at :3000.")).toBeDefined();
-    expect(noteText()).toBe(stillWorkingLine("thr_linger"));
+    expect(noteText()).toBe(stillWorkingLine("Serve the port list"));
     // The slot is centred with the queue and the box, not laid across the page.
     expect(document.querySelector("[data-composer-refusal]")?.className).toContain("max-w-3xl");
     expect(stopButton()).toBeDefined();
@@ -738,9 +740,11 @@ describe("chat tab threads", () => {
   const THIRD = turn({ sessionId: "sess_0003", turnId: "turn_0003", threadId: "thr_c" }, "third", "three.");
   const status = () => screen.queryByRole("status")?.textContent ?? null;
 
-  it("two threads in one history render as the last one, on mount and again after a replay gap", async () => {
+  it("two threads in one history render as the last one, and a replay gap keeps the person in it", async () => {
     const history: Record<string, SessionEvent[]> = { [WS]: [...FIRST, ...SECOND] };
     const { api } = fixtureApi([workspace], history);
+    const fetches = vi.fn(api.sessionHistory);
+    api.sessionHistory = fetches;
     await setup(api);
     await screen.findByText("two.");
     expect(screen.getByText("second")).toBeDefined();
@@ -749,10 +753,14 @@ describe("chat tab threads", () => {
     expect(isEditable(composerEditor())).toBe(true);
     expect(sendButton().getAttribute("aria-label")).toBe("Send message");
 
+    // A thread opened while the socket was down is not what the person is reading, and the rebuild leaves them in
+    // the thread the address names.
     history[WS] = [...FIRST, ...SECOND, ...THIRD];
     act(() => useStore.getState().noteGap());
-    await screen.findByText("three.");
-    expect(screen.queryByText("two.")).toBeNull();
+    await waitFor(() => expect(fetches).toHaveBeenCalledTimes(2));
+    await act(() => new Promise(r => setTimeout(r, 0)));
+    expect(screen.getByText("two.")).toBeDefined();
+    expect(screen.queryByText("three.")).toBeNull();
     expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();
   });
 

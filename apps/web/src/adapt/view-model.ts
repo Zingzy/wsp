@@ -269,6 +269,12 @@ export interface SidebarThreadSnapshot {
   /** The thread whose own agent opened this one; null on every thread a person or the command line opened. The row
    * is drawn one step in under it. */
   readonly parentThreadId: string | null;
+  /** The lead of the permission prompt the thread is stopped on, as the protocol's fold reads it; null while it is
+   * waiting on nobody. */
+  readonly asking: string | null;
+  /** What the thread has spent, as the protocol's fold adds its rows up; null where no turn of it reported a
+   * figure, which is not the same as nothing spent. */
+  readonly costUsd: number | null;
 }
 
 /** One wsp workspace (a machine) as a sidebar project; its sessions are the threads. */
@@ -312,6 +318,10 @@ export interface ProviderSlashCommand {
   readonly name: string;
   readonly description?: string;
   readonly input?: { readonly hint: string };
+  /** Where the announcement says this command came from, as the CLI spells it in the name itself; absent where the
+   * name says nothing about it. The menu groups on this and on nothing else, so a CLI that names no source is drawn
+   * in one list rather than under headings the client made up. */
+  readonly source?: string;
 }
 
 export interface HarnessCatalog {

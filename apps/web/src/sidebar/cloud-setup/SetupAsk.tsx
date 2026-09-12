@@ -10,6 +10,7 @@ import { type DragEvent } from "react";
 import { CLOUD_SETUP_WORDS, initForkLine, type InitSetup } from "@wsp/protocol";
 import { Button } from "../../components/ui/button.js";
 import { Input } from "../../components/ui/input.js";
+import { folderGhost } from "../../files/FolderPathField.js";
 import { desktopBridge } from "../../lib/desktopShell.js";
 import { cn } from "../../lib/utils.js";
 import { carriesFiles, droppedFolder } from "../folderDrag.js";
@@ -53,7 +54,7 @@ export function SetupAsk({ setup, counter, name, folder, onType, onKeep, onBuild
           <span className={cn(STATE_WORD, "ml-2")}>{words.optional}</span>
         </label>
         <div className="relative w-full">
-          <Input id="setup-first-folder" size="compact" value={folder} placeholder={`${setup.home}/code/project`} spellCheck={false} onChange={e => setFolder(e.target.value)} onBlur={() => onKeep({ name, folder })} onKeyDown={e => (e.key === "Enter" && ready ? build() : undefined)} className={cn(LONE_FIELD, "min-w-0", canChoose && "[&_input]:pr-[96px]")} />
+          <Input id="setup-first-folder" size="compact" value={folder} placeholder={folderGhost(setup.home)} spellCheck={false} onChange={e => setFolder(e.target.value)} onBlur={() => onKeep({ name, folder })} onKeyDown={e => (e.key === "Enter" && ready ? build() : undefined)} className={cn(LONE_FIELD, "min-w-0", canChoose && "[&_input]:pr-[96px]")} />
           {canChoose ? (
             <Button data-k="choose" size="sm" variant="outline" className="absolute top-2 right-2 h-8 font-mono text-xs sm:h-8 sm:text-xs" onClick={() => void choose()}>
               {words.choose}

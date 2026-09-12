@@ -4,8 +4,9 @@
 // sessions.interrupt is keyed by; the rename opens the name for editing on
 // the row by the thread's own key, and the row sends it.
 import { LinkIcon, PencilIcon, SquareIcon, Trash2Icon } from "lucide-react";
-import { threadHash, type HarnessCatalog, type SessionStatus, type WorkspaceState } from "@wsp/protocol";
+import type { HarnessCatalog, SessionStatus, WorkspaceState } from "@wsp/protocol";
 import type { SidebarThreadSnapshot } from "../adapt/index.js";
+import { addressLink } from "../protocol/address.js";
 import { CLIENT_CANNOT_STOP, THREAD_HAS_NO_ID, THREAD_NOT_RUNNING, THREAD_WORDS, threadForgetRefusalFor, threadRenameRefusal } from "./format.js";
 import type { ActionEntry } from "./registry.js";
 
@@ -63,8 +64,9 @@ export interface ThreadVerbs {
   readonly copyText: (text: string) => Promise<void>;
 }
 
-/** The page's own address for one thread, the link a person pastes elsewhere. */
-export const threadLink = (target: ThreadTarget, threadId: string): string => `${window.location.origin}${window.location.pathname}${threadHash(target.workspaceId, threadId)}`;
+/** The page's own address for one thread: the link a person pastes elsewhere, and the href a row that points at
+ * another thread carries. One shape for both, so an address written in the app never differs from one copied out. */
+export const threadLink = (target: Pick<ThreadTarget, "workspaceId">, threadId: string): string => addressLink({ workspaceId: target.workspaceId, threadId });
 
 export const threadActions: ReadonlyArray<ActionEntry<ThreadTarget, ThreadVerbs>> = [
   {

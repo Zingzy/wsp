@@ -8,9 +8,9 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { passphraseCipher } from "@wsp/engine";
-import { runForTheList, agentsKindRefusal, DEFAULT_PREFERENCES, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, type HarnessCatalogAnswer } from "@wsp/protocol";
-import { copyKey, createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
+import { NoProviderBackend, passphraseCipher } from "@wsp/engine";
+import { runForTheList, agentsKindRefusal, askingLine, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { copyKey, createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { HELP, cli, localWiring, localWorkFolder, serve } from "../src/cli.js";
@@ -118,10 +118,10 @@ describe("wsp verbs over the host", () => {
   const RECORD = (bytes: number) => ({ name: "default", version: 1, hash: "a".repeat(64), recipeHash: "rh", logins: [{ name: "codex", state: "copied" as const }], sealedAt: "2026-09-12T00:00:00.000Z", sealedFrom: "h1", vault: { sha256: "b".repeat(64), bytes, paths: 2, takenAt: "2026-09-12T00:00:00.000Z" } });
 
   /** The host again on the same state file, over a runtime with these adapters; the verbs still see no key. */
-  async function restartHost(adapters: Parameters<typeof createRuntime>[0]["adapters"], over: Store = store): Promise<void> {
+  async function restartHost(adapters: Parameters<typeof createRuntime>[0]["adapters"], over: Store = store, places?: PlaceBackends): Promise<void> {
     await handle?.close();
     handle = undefined;
-    rt = createRuntime({ backend, store: over, adapters, local: localWiring(join(dir, "user")) });
+    rt = createRuntime({ backend, store: over, adapters, local: localWiring(join(dir, "user")), ...(places !== undefined ? { places } : {}) });
     vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
     vi.stubEnv("SOLARI_API_KEY", "");
@@ -369,7 +369,7 @@ describe("wsp verbs over the host", () => {
     const [alpha] = await rt.workspaces.list();
     const refused = await run("rebuild", "alpha");
     expect(refused.code).toBe(1);
-    expect(refused.io.errors).toEqual(["wsp rebuild: Rebuild replaces a machine wsp cannot get back; this one answers"]);
+    expect(refused.io.errors).toEqual(["wsp rebuild: This one answers, so nothing needs rebuilding; the rebuild is offered when a workspace stops answering"]);
     expect(backend.machines).toHaveLength(1);
 
     await handle!.close();
@@ -393,7 +393,7 @@ describe("wsp verbs over the host", () => {
     const asJson = await run("rebuild", "alpha", "--json");
     expect(asJson.code).toBe(1);
     expect(asJson.io.lines).toEqual([]);
-    expect(asJson.io.errors.map(l => JSON.parse(l) as unknown)).toEqual([{ error: "Rebuild replaces a machine wsp cannot get back; this one answers", class: "provider", exit: EXIT_CODES.provider }]);
+    expect(asJson.io.errors.map(l => JSON.parse(l) as unknown)).toEqual([{ error: "This one answers, so nothing needs rebuilding; the rebuild is offered when a workspace stops answering", class: "provider", exit: EXIT_CODES.provider }]);
     const missing = await run("rebuild", "nope");
     expect(missing.code).toBe(1);
     expect(missing.io.errors).toEqual(["wsp rebuild: no workspace nope"]);
@@ -414,6 +414,50 @@ describe("wsp verbs over the host", () => {
     expect(view.image.version).toBe(1);
     expect(view.image.vault).toBeUndefined();
     expect(view.copies.map(c => c.place)).toEqual(["default"]);
+  });
+
+  it("wsp image build refuses in one line for a place this host has not got, the place it forks on, and a place that takes no copy", async () => {
+    // Three places over one host: the one it forks on, one more that could build, and this computer, which forks
+    // nothing and copies no disk.
+    const elsewhere = stubBackend();
+    const here = new NoProviderBackend();
+    await restartHost(
+      {},
+      store,
+      { wired: "default", backend: p => (p === "default" ? backend : p === "elsewhere" ? elsewhere : p === "here" ? here : undefined), list: () => ["default", "elsewhere", "here"] },
+    );
+
+    const nowhere = await run("image", "build", "nowhere");
+    expect(nowhere.code).toBe(1);
+    expect(nowhere.io.errors.join("")).toContain("no place named nowhere");
+
+    const wired = await run("image", "build", "default");
+    expect(wired.code).toBe(1);
+    expect(wired.io.errors.join("")).toContain("is the place this host forks on");
+
+    const cannot = await run("image", "build", "here");
+    expect(cannot.code).toBe(1);
+    expect(cannot.io.errors.join("")).toContain(placeBuildsNoImageLine("here"));
+
+    // Nothing was forked at any of them, and this computer was never read for a recipe.
+    expect(elsewhere.machines).toEqual([]);
+
+    const usage = await run("image", "build");
+    expect(usage.code).toBe(EXIT_CODES.usage);
+    expect(usage.io.errors.join("")).toContain("wsp image build takes one place.");
+  });
+
+  it("wsp image build on a host that has sealed nothing says so, whatever place is named", async () => {
+    const elsewhere = stubBackend();
+    await restartHost({}, memoryStore(), {
+      wired: "default",
+      backend: p => (p === "default" ? backend : p === "elsewhere" ? elsewhere : undefined),
+      list: () => ["default", "elsewhere"],
+    });
+    const none = await run("image", "build", "elsewhere");
+    expect(none.code).toBe(1);
+    expect(none.io.errors.join("")).toContain("this host owns no image named default yet");
+    expect(elsewhere.machines).toEqual([]);
   });
 
   it("wsp image export refuses a record with no sign-ins to export, and says so rather than writing an empty file", async () => {
@@ -1106,8 +1150,8 @@ describe("wsp verbs over the host", () => {
     const [a] = await rt.sessions.list(alpha!.id);
     const [b] = await rt.sessions.list(beta!.id);
     expect(rows.slice(1)).toEqual([
-      `${a!.threadId}  alpha      claude  completed  cli     /root/work/proj  first task`,
-      `${b!.threadId}  beta       codex   completed  person                   from the app`,
+      `${a!.threadId}  alpha      claude  Idle   cli     /root/work/proj  first task`,
+      `${b!.threadId}  beta       codex   Idle   person                   from the app`,
     ]);
 
     const scoped = await run("threads", "--in", "beta", "--json");
@@ -1116,6 +1160,27 @@ describe("wsp verbs over the host", () => {
     // The rows the tool answers with: the sidebar's view plus the workspace's name, as the table shows it.
     expect(threads.map(({ workspaceName: _name, ...t }) => ThreadView.parse(t))).toEqual(threads.map(({ workspaceName: _name, ...t }) => t));
     expect(threads).toEqual([expect.objectContaining({ id: b!.threadId, workspaceId: beta!.id, workspaceName: "beta", harness: "codex", startedBy: "person", turns: 1 })]);
+  });
+
+  it("threads reads a thread stopped on a permission prompt as needing the person, and as working again once it is answered", async () => {
+    const ASKED: PermissionAsk = { askId: "ask_1", toolName: "Write", detail: "out.txt", input: '{"file_path":"/root/out.txt"}', options: [{ id: PERMISSION_ALLOW, label: "Allow", effect: "allow" }] };
+    const held = heldAgent(false);
+    await restartHost({ claude: held.adapter });
+    await run("new", "alpha");
+    const started = starting("thread", "new", "--in", "alpha", "write the file");
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    const working = await run("threads");
+    expect(working.io.lines[0]!.split("\n")[1]).toContain("Working");
+
+    held.ask(0, ASKED);
+    await vi.waitFor(async () => expect((await rt.sessions.list())[0]!.asking).toBe(askingLine(ASKED)));
+    const waiting = await run("threads");
+    expect(waiting.io.lines[0]!.split("\n")[1]).toContain("Needs you");
+
+    held.release(0, "written");
+    expect(await started.ended).toBe(0);
+    const after = await run("threads");
+    expect(after.io.lines[0]!.split("\n")[1]).toContain("Idle");
   });
 
   it("thread new --cwd is the folder the turn starts in, the same field the app's composer sends; without it the workspace's project folder, else none and the harness starts in its own home", async () => {

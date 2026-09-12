@@ -6,6 +6,8 @@
 // name the fixture it is served from, since one state file cannot hold both a
 // person whose image is built and one whose image never was.
 
+import { threadId } from "./fixture-state.mjs";
+
 /** The widths every list is shot at when it names none: a desktop window and a phone. */
 const DEFAULT_WIDTHS = [1440, 390];
 /** The window height each width gets, so a shot is a window rather than a full-page scroll. The desktop app opens
@@ -23,6 +25,9 @@ const AT_WIDTH = /^(\d+):(.+)$/;
 /** A step that presses a key rather than clicking. The narrow window opens with the right panel over the
  * whole shell and no control of its own on top, so Escape is the only way to the sidebar under it. */
 const KEY = /^key:(.+)$/;
+/** A step that types into whatever the step before it left focused, which is how a surface reaches a state a
+ * person only gets to by writing something: a path in a field, and the refusal the app answers it with. */
+const TYPE = /^type:(.+)$/;
 /** The one step that is neither: the network under the window goes, which is what a window on another computer
  * sees the moment the computer running wsp falls asleep. The rows stay as they were last known. */
 const OFFLINE = "offline";
@@ -31,7 +36,7 @@ const fail = message => {
   throw new Error(`surfaces list: ${message}`);
 };
 
-/** The CSS selector a data attribute word means. `row-id=thread:th_a` is that attribute at that value,
+/** The CSS selector a data attribute word means. `row-id=ws:ws_api` is that attribute at that value,
  * `cloud-setup-row` is the attribute being there at all; nothing here reaches past a data attribute, so a
  * list cannot point the harness at a class name the next restyle moves. */
 export function selectorFor(word) {
@@ -43,6 +48,11 @@ export function selectorFor(word) {
   return `[data-${attr}="${word.slice(split + 1).replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"]`;
 }
 
+/** A thread of a fixture, as a list names it: the word the fixture calls that thread, turned into the id the
+ * fixture mints for it. The ids are UUIDs, since the harness refuses a session id of any other shape, so a list
+ * written with the ids themselves in it would be rewritten every time one is minted. */
+const withThreadId = word => (typeof word === "string" ? word.replace(/thread:([a-z][a-z0-9-]*)$/, (_, name) => `thread:${threadId(name)}`) : word);
+
 /** A step as the driver takes it: a click on a data attribute or a key press, and the width it belongs to
  * where the word named one. The narrow window keeps the sidebar behind a toggle and the wide one does not,
  * so the step that opens it is a step for one width rather than a second surface with its own file names. */
@@ -52,19 +62,21 @@ export function stepFor(word, widths) {
   if (width !== undefined && !widths.includes(width)) fail(`a step is kept for width ${width}, which the list does not shoot`);
   const bare = kept === null ? word : kept[2];
   const key = KEY.exec(typeof bare === "string" ? bare : "");
-  const step = bare === OFFLINE ? { offline: true } : key === null ? { click: selectorFor(bare) } : { key: key[1] };
+  const typed = TYPE.exec(typeof bare === "string" ? bare : "");
+  const step = bare === OFFLINE ? { offline: true } : typed !== null ? { type: typed[1] } : key === null ? { click: selectorFor(withThreadId(bare)) } : { key: key[1] };
   return width === undefined ? step : { width, ...step };
 }
 
 /** What the index says a step was. */
-const stepWords = step => (step.offline === true ? "the network going" : step.key === undefined ? `\`${step.click}\`` : `the ${step.key} key`);
+const stepWords = step =>
+  step.offline === true ? "the network going" : step.type !== undefined ? `typing \`${step.type}\`` : step.key !== undefined ? `the ${step.key} key` : `\`${step.click}\``;
 
 const surfaceFrom = (raw, index, widths) => {
   if (raw === null || typeof raw !== "object") fail(`surface ${index} is not an object`);
   const { name, at, steps, wait, settleMs, fixture, remote } = raw;
   if (typeof name !== "string" || !NAME.test(name)) fail(`surface ${index} needs a name of lowercase words and dashes, got ${JSON.stringify(name)}`);
   if (typeof at !== "string" || !at.startsWith("/")) fail(`${name}: "at" is the route or hash the page opens, starting with /`);
-  if (steps !== undefined && !Array.isArray(steps)) fail(`${name}: "steps" is an array of data attribute words and key presses`);
+  if (steps !== undefined && !Array.isArray(steps)) fail(`${name}: "steps" is an array of data attribute words, key presses and typed words`);
   if (settleMs !== undefined && (typeof settleMs !== "number" || settleMs < 0)) fail(`${name}: "settleMs" is a count of milliseconds`);
   if (remote !== undefined && typeof remote !== "boolean") fail(`${name}: "remote" says whether the page is served to another computer`);
   const own = raw.widths;
@@ -74,7 +86,7 @@ const surfaceFrom = (raw, index, widths) => {
     name,
     at,
     steps: (steps ?? []).map(word => stepFor(word, widths)),
-    ...(wait !== undefined ? { wait: selectorFor(wait) } : {}),
+    ...(wait !== undefined ? { wait: selectorFor(withThreadId(wait)) } : {}),
     ...(fixture !== undefined ? { fixture } : {}),
     settleMs: settleMs ?? DEFAULT_SETTLE_MS,
     widths: own ?? widths,

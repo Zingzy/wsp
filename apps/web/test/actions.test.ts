@@ -89,7 +89,7 @@ describe("workspace actions", () => {
     actionById(actions, "theme").run();
     expect(verbs.pickLook).toHaveBeenCalledWith("ws_a", "theme");
     expect(actionById(actions, "fork").refusal).toBe("Running a copy of a workspace is not in the runtime yet; take a project snapshot in the Workspace tab and start a workspace from it");
-    expect(actionById(actions, "rebuild").refusal).toBe("Rebuild replaces a machine wsp cannot get back; this one answers");
+    expect(actionById(actions, "rebuild").refusal).toBe("This one answers, so nothing needs rebuilding; the rebuild is offered when a workspace stops answering");
     expect(actionById(actions, "forget").refusal).toBe("Only a workspace whose computer is gone can be forgotten; this one is running");
   });
 
@@ -185,7 +185,7 @@ describe("workspace actions", () => {
     expect(actionById(gone, "forget").hint).toBe("Its computer is gone; forget the workspace to drop it from this computer");
     expect(actionById(gone, "rebuild").buttonWord).toBe("Rebuild");
     expect(actionById(gone, "rebuild").hint).toBe("machine m_a is gone at the provider: Not found");
-    expect(actionById(resolveActions(workspaceActions, workspace("unreachable", { reach: "zombie" }), verbs), "rebuild").hint).toBe("The workspace answers nothing; rebuild it from the golden image");
+    expect(actionById(resolveActions(workspaceActions, workspace("unreachable", { reach: "zombie" }), verbs), "rebuild").hint).toBe("The workspace answers nothing; rebuild it from your image");
     expect(actionById(gone, "copy-id").buttonWord).toBeNull();
     expect(actionById(gone, "copy-id").hint).toBeNull();
   });
@@ -253,7 +253,7 @@ describe("thread actions", () => {
     ran = true,
   ): ThreadTarget =>
     threadTarget(
-      { id: "thr_1", sessionId: "s1", threadId, workspaceId: "ws_a", harness, title: "fix the port list", status, ran, startedAt: null, endedAt: null, indicator: null, startedBy: "person", project: null, parentThreadId: null },
+      { id: "thr_1", sessionId: "s1", threadId, workspaceId: "ws_a", harness, title: "fix the port list", status, ran, startedAt: null, endedAt: null, indicator: null, startedBy: "person", project: null, parentThreadId: null, asking: null, costUsd: null },
       { catalog: machine.catalog === undefined ? row(harness) : machine.catalog, state: machine.state ?? "running", ...(machine.goneWords !== undefined ? { goneWords: machine.goneWords } : {}) },
     );
   const threadVerbs = (over: Partial<ThreadVerbs> = {}): ThreadVerbs => ({ stop: vi.fn(async () => {}), rename: vi.fn(), forget: vi.fn(), copyText: vi.fn(async () => {}), ...over });

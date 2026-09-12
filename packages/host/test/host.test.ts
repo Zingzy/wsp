@@ -367,6 +367,25 @@ describe("host serves the app", () => {
     expect((await fetch(`${base}/assets/`)).status).toBe(404);
   });
 
+  it("answers a path it has no route for with the app, which reads the address it opened on", async () => {
+    const { rt } = testRuntime();
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir() });
+    const base = `http://127.0.0.1:${handle.port}`;
+
+    const typed = await fetch(`${base}/new`);
+    expect(typed.status).toBe(200);
+    expect(typed.headers.get("content-type")).toContain("text/html");
+    expect(inlineScripts(await typed.text())[0]).toContain('"wsPath":"/ws"');
+    expect((await fetch(`${base}/w/ws_a1b2/t/thr_9`)).status).toBe(200);
+
+    // A file of the bundle that is not there is still a miss: a script answering as a page breaks silently.
+    expect((await fetch(`${base}/assets/missing.js`)).status).toBe(404);
+    const api = await fetch(`${base}/api/nothing`);
+    expect(api.status).toBe(404);
+    expect(((await api.json()) as { error: string }).error).toBe("no route: GET /api/nothing");
+    expect((await fetch(`${base}/new`, { method: "POST" })).status).toBe(404);
+  });
+
   it("refuses to start without a built page or without the boot line to replace", async () => {
     const { rt } = testRuntime();
     await expect(startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(null) })).rejects.toThrow(

@@ -7,7 +7,7 @@ import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe } from "@wsp/adapter-claude";
-import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, type AdapterEvent, type EventUnion, type RecipeDigest, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
+import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, PERMISSION_ALLOW, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, threadWordOf, type AdapterEvent, type EventUnion, type RecipeDigest, type SessionView, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, GuestUnusableError, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
@@ -1767,6 +1767,23 @@ describe("a turn the host comes back to", () => {
     // its own asked-set is empty and the row is still on its seed, and the start row is what stands in for both.
     expect(h.asked()).toEqual(["build it"]);
     expect((await rt2.sessions.list(workspaceId))[0]!.harnessTitle).toBeUndefined();
+    await rt2.close();
+  });
+
+  it("a turn cut on the way back takes its open prompt with it, so no settled thread is left reading as waiting on a person", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { workspaceId, run } = await hostWentDown(h, store, backend);
+    h.emit(run, { type: "permission.ask", sessionId: "sess-1", ask: { askId: "ask_1", toolName: "Write", detail: "out.txt", input: '{"file_path":"/root/out.txt"}', options: [{ id: PERMISSION_ALLOW, label: "Allow", effect: "allow" }] } });
+    await until(async () => ((await store.get("sessions", workspaceId)) as { sessions: SessionView[] }).sessions[0]!.asking !== undefined);
+
+    // The host comes back with no adapter for the harness, so the run cannot be re-opened and the turn is cut.
+    const rt2 = createRuntime({ backend, store, adapters: {} });
+    await until(async () => (await rt2.sessions.list(workspaceId))[0]!.status === "failed");
+    const [row] = await rt2.sessions.list(workspaceId);
+    expect(row!.asking).toBeUndefined();
+    expect(threadWordOf(foldThreads([row!])[0]!)).toBe("Ended");
     await rt2.close();
   });
 
@@ -3766,7 +3783,7 @@ describe("runtime verified wake", () => {
       expect(await store.getBlob("vaults", ws.id)).toEqual(Buffer.from("tarbytes"));
       expect(vaultWarnings()).toEqual([`nap vault for ${ws.id} not stored, previous kept: the export was 6 KB, over the 5 KB cap`]);
       expect((await rt.workspaces.get(ws.id)).phase).toBe("napping");
-      expect(napReason()).toBe("nap kept the previous vault; the export was 6 KB, over the 5 KB cap");
+      expect(napReason()).toBe("the nap kept what was saved before it; the export was 6 KB, over the 5 KB cap");
       // The status says it once; the record says it until a nap stores one, which is what the row and the tab read.
       const refused = await rt.workspaces.get(ws.id);
       expect(refused.vaultRefused).toBe("the export was 6 KB, over the 5 KB cap");
@@ -4078,7 +4095,7 @@ describe("nap vault against the stub backend", () => {
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn.mock.calls[0]![0]).toBe(`nap vault for ${ws.id} not stored, previous kept: fetch failed`);
       expect(await store.getBlob("vaults", ws.id)).toEqual(first);
-      expect((events.filter(e => e.type === "workspace.status").at(-1) as { status: { phase: string; reason?: string } }).status).toMatchObject({ phase: "napping", reason: "nap kept the previous vault; fetch failed" });
+      expect((events.filter(e => e.type === "workspace.status").at(-1) as { status: { phase: string; reason?: string } }).status).toMatchObject({ phase: "napping", reason: "the nap kept what was saved before it; fetch failed" });
     } finally {
       warn.mockRestore();
     }
@@ -6189,6 +6206,36 @@ describe("a start on a thread whose turn is running", () => {
   });
 });
 
+describe("what a turn cost, on the row it ran on", () => {
+  it("is kept on the row the listing answers with, and adds up over the turns that ran there, so a reader of the list needs no transcript to say what a thread spent", async () => {
+    const h = held(false);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const one = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
+    h.end(0, "done", { durationMs: 1_000, costUsd: 0.75 });
+    await one.finished;
+    expect(one.view().costUsd).toBeCloseTo(0.75, 10);
+    // A second turn on the same row: what the row says is what the turns on it have cost together.
+    const two = await rt.sessions.start(ws.id, { prompt: "and again", thread: one.view().threadId });
+    h.end(1, "done again", { durationMs: 1_000, costUsd: 0.39 });
+    await two.finished;
+    const rows = await rt.sessions.list(ws.id);
+    expect(rows.map(r => r.costUsd).filter(c => c !== undefined).reduce((a, b) => a + b, 0)).toBeCloseTo(1.14, 10);
+    await rt.close();
+  });
+
+  it("is absent on a row whose harness reported no figure, so nothing reads a missing number as nothing spent", async () => {
+    const h = held(false);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const turn = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
+    h.end(0, "done", { durationMs: 1_000 });
+    await turn.finished;
+    expect((await rt.sessions.list(ws.id))[0]!.costUsd).toBeUndefined();
+    await rt.close();
+  });
+});
+
 describe("a thread whose start named who to tell", () => {
   it("a running parent that steers is told by one steer: the line, with the outcome, duration, cost and the reply whole, and the child's transcript holds a session.notify naming the parent", async () => {
     const h = held(true);
@@ -6937,7 +6984,7 @@ describe("a workspace behind the golden's head", () => {
   it("one forked from a snapshot no golden of this host knows is refused by name", async () => {
     const { rt } = await seeded();
     const ws = await rt.workspaces.create({ golden: "snap_elsewhere", name: "api" });
-    await expect(rt.workspaces.updateImage(ws.id)).rejects.toThrow("api's image is not a version of any golden this host knows");
+    await expect(rt.workspaces.updateImage(ws.id)).rejects.toThrow("api's image is not one of the versions this host knows");
   });
 });
 

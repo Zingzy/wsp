@@ -15,7 +15,8 @@ import { cn } from "../../lib/utils.js";
 import { SETTINGS_WORDS } from "../../settings/format.js";
 import { threadWalk } from "../../shell/shellCommands.js";
 import { searchSidebarThreadsByTitle } from "../../sidebar/Sidebar.logic.js";
-import { compactTimeLabel, dotClassForTone } from "../../sidebar/workspaceRows.js";
+import { threadTree, workspaceOf } from "../../sidebar/threadTree.js";
+import { compactTimeLabel, dotClassForTone, whereWord } from "../../sidebar/workspaceRows.js";
 import { type CommandPaletteActionItem, ITEM_ICON_CLASS, RECENT_THREAD_LIMIT } from "./CommandPalette.logic.js";
 
 export interface PaletteHandlers {
@@ -205,8 +206,9 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
 
 function workspaceItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
   return input.projects.map((project, index) => {
-    const machineId = project.status?.machineId ?? project.workspace.machineId;
-    const parts = [project.indicator.label, machineId];
+    // Where it runs, in the one word the sidebar row reads for it: a person picks a workspace by its state and the
+    // computer it is on, never by the id wsp holds the machine under.
+    const parts = [project.indicator.label, whereWord(project)];
     if (project.id === input.selectedId) parts.push("Current workspace");
     // The projects arrive in sidebar order, so a row's index is the slot its chord jumps to.
     const slot = WORKSPACE_SELECT_SLOTS[index];
@@ -235,21 +237,26 @@ function threadItem(thread: SidebarThreadSnapshot, project: SidebarProjectSnapsh
     searchTerms: [thread.title],
     icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
     title: thread.title,
-    description: project.displayName,
+    // The workspace it runs on and where that runs, the pair the sidebar's own row carries: a thread an agent
+    // opened somewhere else is told apart from its opener by these two words and nothing else.
+    description: [project.displayName, whereWord(project)].join(" · "),
     timestamp: compactTimeLabel(thread.startedAt),
     run: sync(() => handlers.selectThread(thread.workspaceId, thread.threadId)),
   };
 }
 
 export function buildPaletteItems(input: PaletteItemsInput): PaletteItems {
-  const threads = input.projects
-    .flatMap(project => project.threads.map(thread => ({ ...thread, workspace: project })))
-    .sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
+  // The same tree the sidebar draws, read through the one rule for which thread opened which: every thread is
+  // listed once, under the workspace whose rows it is drawn among, and each still names the workspace it runs on.
+  const threads = threadTree(input.projects).flatMap(group =>
+    group.threads.map(thread => ({ ...thread, workspace: workspaceOf(input.projects, thread) ?? group.project })),
+  );
   const item = (thread: (typeof threads)[number]) => threadItem(thread, thread.workspace, input.handlers);
+  const latest = [...threads].sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
   return {
     actionItems: actionItems(input),
     workspaceItems: workspaceItems(input),
-    recentThreadItems: threads.slice(0, RECENT_THREAD_LIMIT).map(item),
+    recentThreadItems: latest.slice(0, RECENT_THREAD_LIMIT).map(item),
     threadSearchItems: searchSidebarThreadsByTitle(threads, input.query).map(item),
   };
 }

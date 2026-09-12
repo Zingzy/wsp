@@ -18,7 +18,7 @@ import { homeOf, keptLog, labLines, pointerPath, whyNotOursToRemove } from "./la
 
 describe("the fixtures a lab serves", () => {
   it("has one per kind of person the testers play", () => {
-    expect(FIXTURE_NAMES).toEqual(["mac-in-use", "mac-only", "mac-and-laptop", "mac-and-vps", "ascii-only", "solari-only", "both-providers", "no-sign-in", "orchestrator", "image-built"]);
+    expect(FIXTURE_NAMES).toEqual(["mac-in-use", "mac-only", "mac-and-laptop", "mac-and-vps", "ascii-only", "solari-only", "both-providers", "no-sign-in", "mac-and-boxes", "orchestrator", "image-built"]);
   });
 
   it("gives the two personas who have this computer and nothing else an empty window named after it", () => {
@@ -175,6 +175,7 @@ describe("the fixtures a lab serves", () => {
       "solari-only": "solari",
       "both-providers": "solari",
       "no-sign-in": "no cloud",
+      "mac-and-boxes": "no cloud",
       orchestrator: "box",
       "image-built": "no cloud",
     });
@@ -203,6 +204,7 @@ describe("the provider a fixture's host runs under", () => {
       "solari-only": "fake",
       "both-providers": "fake",
       "no-sign-in": "none",
+      "mac-and-boxes": "fake",
       orchestrator: "fake",
       "image-built": "fake",
     });

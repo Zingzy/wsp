@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { threadId } from "./fixture-state.mjs";
 import { indexMarkdown, readSurfaces, selectorFor, shotName, shotPlan, stepFor } from "./plan.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -15,6 +16,12 @@ describe("a click or wait word", () => {
 
   it("keeps a value with a colon in it whole", () => {
     expect(selectorFor("row-id=thread:th_redirect")).toBe('[data-row-id="thread:th_redirect"]');
+  });
+
+  it("names a fixture's thread by the word that fixture calls it, since the id itself is a minted UUID", () => {
+    expect(stepFor("row-id=thread:redirect", [1440])).toEqual({ click: `[data-row-id="thread:${threadId("redirect")}"]` });
+    // A word that is not a thread is left whole, the way a workspace's row is.
+    expect(stepFor("row-id=ws:ws_api", [1440])).toEqual({ click: '[data-row-id="ws:ws_api"]' });
   });
 
   it("escapes a quote rather than ending the selector's string", () => {
@@ -37,6 +44,11 @@ describe("a click or wait word", () => {
   it("reads a key: word as a press, kept for a width like any other step", () => {
     expect(stepFor("key:Escape", [1440, 390])).toEqual({ key: "Escape" });
     expect(stepFor("390:key:Escape", [1440, 390])).toEqual({ width: 390, key: "Escape" });
+  });
+
+  it("reads a type: word as typing into whatever the step before it focused", () => {
+    expect(stepFor("type:/does/not/exist", [1440, 390])).toEqual({ type: "/does/not/exist" });
+    expect(stepFor("390:type:/tmp", [1440, 390])).toEqual({ width: 390, type: "/tmp" });
   });
 
   it("refuses a width the list never shoots, which would silently never run", () => {
@@ -126,10 +138,16 @@ describe("the surfaces list this repo ships", () => {
       "sidebar",
       "workspace",
       "composer-thread",
+      "composer-slash-menu",
+      "composer-slash-filtered",
       "machine",
       "cloud-setup",
       "spawned-thread",
+      "threads-across-workspaces",
+      "opener-transcript",
       "host-asleep",
+      "composer-folder",
+      "composer-folder-refused",
       "settings-where",
       "add-computer",
       "settings-image-fresh",
@@ -141,13 +159,21 @@ describe("the surfaces list this repo ships", () => {
       "add-computer-ssh",
       "connect-provider-pick",
       "connect-provider-key",
+      "new-workspace",
+      "new-workspace-nowhere",
+      "creating-workspace",
+      "workspace-projects",
     ]);
     // The one surface shot as a window on another computer, which is the only state the asleep line is drawn in.
     expect(read.surfaces.filter(s => s.remote).map(s => s.name)).toEqual(["host-asleep"]);
-    // The two served from a state of their own, since an image that is built cannot stand in the same state file
-    // as one that never was.
-    expect(read.surfaces.filter(s => s.fixture !== undefined).map(s => s.fixture)).toEqual(["image-built", "image-built"]);
-    expect(shotPlan(read)).toHaveLength(read.surfaces.length * read.widths.length * 2);
+    // Those served from a state of their own: an image that is built cannot stand in the same state file as one
+    // that never was, a thread whose agent opened threads elsewhere needs the workspaces those threads run on, and
+    // a person with nowhere to put a workspace has neither computer nor provider.
+    expect(read.surfaces.filter(s => s.fixture !== undefined).map(s => s.fixture)).toEqual(["orchestrator", "orchestrator", "image-built", "image-built", "mac-and-boxes", "mac-only", "mac-and-boxes"]);
+    // Four are shot at the two widths a design reading is held to; the rest take every width the list shoots.
+    const narrowed = read.surfaces.filter(s => s.widths.length < read.widths.length);
+    expect(narrowed.map(s => s.name)).toEqual(["new-workspace", "new-workspace-nowhere", "creating-workspace", "workspace-projects"]);
+    expect(shotPlan(read)).toHaveLength((read.surfaces.length * read.widths.length - narrowed.length) * 2);
     // The app's own default window is one of them, so a row that only breaks at 1280 is photographed.
     expect(read.widths).toContain(1280);
     expect(read.heights[1280]).toBe(800);

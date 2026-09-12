@@ -80,7 +80,7 @@ ipcMain.handle("preview:read", (event, workspaceId: unknown) => {
 ipcMain.handle("folder:pick", async event => {
   if (session === undefined || !fromAppPage(event.senderFrame?.url, session.url)) throw new Error("folder:pick: not the app's page");
   const win = BrowserWindow.fromWebContents(event.sender);
-  const options = { properties: ["openDirectory" as const], title: "Import a project" };
+  const options = { properties: ["openDirectory" as const], title: "Choose a folder" };
   const picked = await (win === null ? dialog.showOpenDialog(options) : dialog.showOpenDialog(win, options));
   return picked.canceled ? undefined : picked.filePaths[0];
 });

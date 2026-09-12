@@ -90,6 +90,9 @@ const turn = (thread, minutes, workspaceId = "ws_api") => ({
   cwd: thread.cwd ?? projectDest("spoo"),
   model: "opus",
   permissionMode: "default",
+  // What the turn on this row cost, as the runtime stamps it: a thread's opener reads its own figure beside what
+  // the threads it opened spent, and a row without one would leave that second figure unsaid.
+  costUsd: thread.costUsd,
   ...(thread.parent === undefined ? {} : { parentThreadId: threadId(thread.parent), rootThreadId: threadId(thread.root) }),
 });
 
@@ -98,7 +101,7 @@ const event = (thread, rest, workspaceId = "ws_api") => ({ workspaceId, sessionI
 /** A whole turn as the transcript holds it: the person's words, a thought, one tool call and its result,
  * the reply, and the two events that close it. */
 const replay = (thread, minutes, workspaceId = "ws_api") => [
-  event(thread, { type: "session.start", at: ago(minutes), prompt: thread.prompt, model: "opus", cwd: thread.cwd ?? projectDest("spoo") }, workspaceId),
+  event(thread, { type: "session.start", at: ago(minutes), prompt: thread.prompt, model: "opus", cwd: thread.cwd ?? projectDest("spoo"), ...(thread.harness === undefined ? {} : { harness: thread.harness }) }, workspaceId),
   event(thread, { type: "session.delta", at: ago(minutes - 1), kind: "thinking", text: thread.thought }, workspaceId),
   event(thread, { type: "session.delta", at: ago(minutes - 1), kind: "tool_use", toolName: thread.tool.name, toolUseId: `tu_${thread.id}`, text: thread.tool.input }, workspaceId),
   event(thread, { type: "session.delta", at: ago(minutes - 2), kind: "tool_result", toolName: thread.tool.name, toolUseId: `tu_${thread.id}`, text: thread.tool.result }, workspaceId),
@@ -107,8 +110,13 @@ const replay = (thread, minutes, workspaceId = "ws_api") => [
   event(thread, { type: "session.end", at: ago(minutes - 3), exitCode: 0, sawResult: true }, workspaceId),
 ];
 
+/** What a real init announces, cut to what fits a shot: a run of bare names, the CLI's own screens among them,
+ * and the commands two plugins named themselves in. The menu groups on the source those names carry. */
+const ANNOUNCED_COMMANDS = ["compact", "context", "cost", "init", "review", "login", "model", "unslop", "why", "wizard", "code-review:code-review", "ralph-loop:ralph-loop", "ralph-loop:cancel-ralph"];
+
 const REDIRECT = {
   id: "redirect",
+  harness: { slashCommands: ANNOUNCED_COMMANDS },
   prompt: "the short links are 302ing twice, find out why",
   title: "Double redirect on short links",
   thought: "Both forms of the path answer, so the rewrite and the canonical host check are probably fighting each other. Read the middleware order before anything else.",
@@ -532,6 +540,19 @@ const orchestrator = () => {
   });
 };
 
+/** This computer with an image sealed and two computers of the person's own joined to it, both running Docker, and
+ * no workspace on either yet: the person the New workspace dialog is written for, who has somewhere to put one and
+ * has to pick. What the dialog and the creation log are photographed from. */
+const macAndBoxes = () =>
+  store({
+    workspaces: [workspace("ws_here", THIS_COMPUTER, { projects: [project("spoo", 48_200_000, 60 * 20)] })],
+    goldens: sealed(),
+    places: {
+      p_hetzner: place("p_hetzner", "hetzner", 1, { platform: "linux", os: "Ubuntu 24.04", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, docker: true, login: { HOME: "/root", USER: "root", PATH: "/usr/bin" } }),
+      p_studio: place("p_studio", "old-macbook", 4, { docker: true }),
+    },
+  });
+
 /** A person whose image is sealed and built in two places: what Settings > Image reads when there is a record to
  * read. One copy stands on the record as it is now and one was built from the record before it, so the table shows
  * both standing words. */
@@ -558,6 +579,7 @@ const FIXTURES = {
   "solari-only": { build: solariOnly, cloud: "solari" },
   "both-providers": { build: bothProviders, cloud: "solari" },
   "no-sign-in": { build: thisComputer },
+  "mac-and-boxes": { build: macAndBoxes },
   orchestrator: { build: orchestrator, cloud: "box" },
   "image-built": { build: imageBuilt },
 };

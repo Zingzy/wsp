@@ -19,10 +19,11 @@ import { useStore } from "../protocol/store.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
 import { sidebarThreadOrder } from "../sidebar/Sidebar.logic.js";
 import { spaceWorkspaceId } from "../sidebar/sidebarMode.js";
+import { threadTree } from "../sidebar/threadTree.js";
 import { useTerminalDrawerStore } from "../terminal/drawerStore.js";
 import { resetTerminalZoom, stepTerminalZoom } from "../terminal/fontSetting.js";
 import { getTerminals, type WorkspaceTerminals } from "../terminal/link.js";
-import { requestComposerFocus, requestNewThread } from "./shellRequests.js";
+import { requestComposerFocus } from "./shellRequests.js";
 import { recentThreads, useThreadHistory } from "./threadHistory.js";
 import { highlightedTarget, stepSwitcherAt, useWorkspaceSwitcher } from "./workspaceSwitcher.js";
 
@@ -111,9 +112,9 @@ export type WalkableThread = SidebarThreadSnapshot & { readonly threadId: string
     on it could never step off it. */
 export function threadWalk(projects: ReadonlyArray<SidebarProjectSnapshot>, selectedId: string | null): WalkableThread[] {
   const spaceId = spaceWorkspaceId(projects.map(project => project.id), selectedId);
-  const project = projects.find(candidate => candidate.id === spaceId);
-  if (project === undefined) return [];
-  return sidebarThreadOrder(project.threads).filter((thread): thread is WalkableThread => thread.threadId !== null);
+  const group = threadTree(projects).find(candidate => candidate.project.id === spaceId);
+  if (group === undefined) return [];
+  return sidebarThreadOrder(group.threads).filter((thread): thread is WalkableThread => thread.threadId !== null);
 }
 
 /** One step along an order that wraps at both ends, or null where there is nowhere else to go, which is what
@@ -247,7 +248,7 @@ export function runShellCommand(command: KeybindingCommand, target: ShellCommand
       if (workspaceId) resetTerminalZoom(workspaceId);
       return;
     case "chat.new":
-      if (workspaceId) requestNewThread({ workspaceId });
+      if (workspaceId) useStore.getState().newThread(workspaceId);
       return;
     case "workspace.next":
       cycleWorkspaceSwitcher(1, hold);

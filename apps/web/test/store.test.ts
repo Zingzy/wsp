@@ -2,12 +2,13 @@
 // The store's session folding: rows come from the sessions.list op, the
 // session.* events decide when to refetch and what to patch in between.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLOUD_SETUP_WORDS, DEFAULT_THEME, type GoldenManifest, type InitJob, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, DEFAULT_THEME, type GoldenManifest, type InitJob, type PlaceView, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api, type ProtocolEvent } from "../src/protocol/client.js";
 import { LAST_WORKSPACE_KEY } from "../src/protocol/lastWorkspace.js";
 import { useStore } from "../src/protocol/store.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
+import { onNewThreadRequest } from "../src/shell/shellRequests.js";
 
 const view = (id: string): WorkspaceView => ({
   id,
@@ -72,7 +73,7 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
 const flush = () => new Promise(r => setTimeout(r, 0));
 
 beforeEach(() => {
-  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, creations: [], sessions: {}, ready: false, gaps: 0 });
+  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, selectedThreadId: null, freshThread: false, creations: [], sessions: {}, ready: false, gaps: 0 });
 });
 
 // The address is a global the store reads: a #w/<id> left behind would pick the workspace for every test after it.
@@ -139,10 +140,13 @@ describe("the workspace the address opens on", () => {
     hash("");
     window.localStorage.setItem(LAST_WORKSPACE_KEY, JSON.stringify({ "/Users/dev/.wsp/state.json": "ws_a", "": "ws_a" }));
     expect(await refreshed(rows())).toBe("ws_a");
+    // Each step is its own load: the refresh before it wrote where it landed into the address, which a new page has not got.
     useStore.setState({ selectedId: null });
+    hash("");
     window.localStorage.setItem(LAST_WORKSPACE_KEY, JSON.stringify({ "": "ws_gone" }));
     expect(await refreshed(rows())).toBe("ws_b");
     useStore.setState({ selectedId: null });
+    hash("");
     window.localStorage.setItem(LAST_WORKSPACE_KEY, "not json");
     expect(await refreshed(rows())).toBe("ws_b");
   });
@@ -160,7 +164,7 @@ describe("the workspace the address opens on", () => {
     expect(JSON.parse(window.localStorage.getItem(LAST_WORKSPACE_KEY)!)).toEqual({ "/Users/dev/.wsp/state.json": "ws_b" });
     useStore.getState().select("ws_a", "thr_1");
     expect(JSON.parse(window.localStorage.getItem(LAST_WORKSPACE_KEY)!)).toEqual({ "/Users/dev/.wsp/state.json": "ws_a" });
-    useStore.setState({ creations: [{ key: "c1", name: "new", workspaceId: null, lines: [], failed: null }], selectedId: "c1" });
+    useStore.setState({ creations: [{ key: "c1", name: "new", askedAt: Date.now(), workspaceId: null, lines: [], failed: null }], selectedId: "c1" });
     expect(JSON.parse(window.localStorage.getItem(LAST_WORKSPACE_KEY)!)).toEqual({ "/Users/dev/.wsp/state.json": "ws_a" });
     useStore.setState({ selectedId: null });
     expect(await refreshed(rows())).toBe("ws_a");
@@ -178,11 +182,79 @@ describe("the workspace the address opens on", () => {
     hash("#w/ws_b/t/thr_nope");
     await useStore.getState().refresh();
     expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_b", null]);
-    expect(useStore.getState().toast).toBe("No thread thr_nope in this workspace; opened the workspace instead");
+    expect(useStore.getState().toast).toBe("That thread is not in this workspace; opened the workspace instead");
+  });
+});
+
+describe("the address is the one record of what the person is reading", () => {
+  const row = (threadId: string, workspaceId = "ws_b"): SessionView => ({ id: `s_${threadId}`, workspaceId, harness: "claude", status: "completed", threadId, prompt: threadId });
+  /** The store as a reload leaves it: nothing selected, the runtime's list and rows still to come. */
+  const reloaded = (rows: SessionView[]) => {
+    const { api } = fakeApi([view("ws_a"), view("ws_b")], rows);
+    useStore.setState({ api, selectedId: null, selectedThreadId: null, freshThread: false });
+  };
+
+  it("a pick writes the address, and the refresh after a reload reads it back", async () => {
+    useStore.getState().select("ws_b", "thr_1");
+    expect(window.location.hash).toBe("#w/ws_b/t/thr_1");
+    reloaded([row("thr_1"), row("thr_2")]);
+    await useStore.getState().refresh();
+    expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_b", "thr_1"]);
+  });
+
+  it("a thread an agent opened next does not take the centre from the thread the address names", async () => {
+    useStore.getState().select("ws_b", "thr_1");
+    reloaded([row("thr_1"), { ...row("thr_child"), parentThreadId: "thr_1", startedBy: "agent" }]);
+    await useStore.getState().refresh();
+    expect(useStore.getState().selectedThreadId).toBe("thr_1");
+    // The refresh a reconnect runs reads the address again, not only the first one: the host restarting leaves the
+    // workspace selected and the pick to be found again.
+    useStore.setState({ selectedThreadId: null });
+    await useStore.getState().refresh();
+    expect(useStore.getState().selectedThreadId).toBe("thr_1");
+  });
+
+  it("a refresh whose session list was refused keeps the pick and the address it was written with", async () => {
+    useStore.getState().select("ws_b", "thr_1");
+    const { api } = fakeApi([view("ws_a"), view("ws_b")], [row("thr_1")]);
+    // A list is best-effort, and a refused one carries no rows: the thread is not gone, it is unread.
+    api.listSessions = async () => {
+      throw new Error("sessions unavailable");
+    };
+    useStore.setState({ api });
+    await useStore.getState().refresh();
+    expect([useStore.getState().selectedThreadId, window.location.hash, useStore.getState().toast]).toEqual(["thr_1", "#w/ws_b/t/thr_1", null]);
+  });
+
+  it("the screen a next thread is written on has an address of its own, and a reload opens it again", async () => {
+    const asked: string[] = [];
+    const off = onNewThreadRequest(d => asked.push(d.workspaceId));
+    useStore.getState().newThread("ws_b");
+    expect(window.location.hash).toBe("#w/ws_b/new");
+    expect(useStore.getState()).toMatchObject({ selectedId: "ws_b", selectedThreadId: null, freshThread: true });
+    expect(asked).toEqual(["ws_b"]);
+    reloaded([row("thr_1")]);
+    await useStore.getState().refresh();
+    expect(useStore.getState()).toMatchObject({ selectedId: "ws_b", selectedThreadId: null, freshThread: true });
+    expect(window.location.hash).toBe("#w/ws_b/new");
+    expect(asked).toEqual(["ws_b", "ws_b"]);
+    off();
+  });
+
+  it("what the centre settles on with nothing picked is recorded, and nothing else moves it", () => {
+    useStore.setState({ selectedId: "ws_b", selectedThreadId: null });
+    useStore.getState().readingThread("ws_b", "thr_2");
+    expect([useStore.getState().selectedThreadId, window.location.hash]).toEqual(["thr_2", "#w/ws_b/t/thr_2"]);
+    useStore.getState().readingThread("ws_a", "thr_9");
+    useStore.getState().readingThread("ws_b", "thr_3");
+    expect([useStore.getState().selectedThreadId, window.location.hash]).toEqual(["thr_2", "#w/ws_b/t/thr_2"]);
   });
 });
 
 describe("store creations", () => {
+  const HERE_PLACE: PlaceView = { id: "here", kind: "computer", name: "studio.local", default: false, present: true };
+  const HETZNER_PLACE: PlaceView = { id: "p_1", kind: "computer", name: "hetzner", default: true, docker: true, present: true };
+
   const stage = (over: Partial<Extract<ProtocolEvent, { type: "workspace.creating" }>> = {}): ProtocolEvent => ({
     type: "workspace.creating",
     workspaceId: "ws_new",
@@ -265,6 +337,48 @@ describe("store creations", () => {
     finish(view("ws_new"));
     expect(await done).toBe("ws_new");
     expect(useStore.getState().creations).toEqual([]);
+  });
+
+  it("the image being built where the create is going reads as the first lines of that create's log", async () => {
+    const { api, emit } = fakeApi([view("ws_a")], []);
+    api.createFromGoldenHead = () => new Promise<WorkspaceView>(() => {});
+    useStore.getState().bind(api);
+    await flush();
+    useStore.setState({ places: [HERE_PLACE, HETZNER_PLACE] });
+    void useStore.getState().createWorkspace("beta", undefined, undefined, "p_1");
+    expect(useStore.getState().creations[0]!.where).toBe("p_1");
+
+    // The build names the place by the word its backend table keys it with, which is the same row.
+    emit({ type: "golden.stage", name: "default", stage: "installing-harness", place: "hetzner" });
+    emit({ type: "golden.stage", name: "default", stage: "snapshotting", detail: "about 4.2 GB", place: "hetzner" });
+    // The image's own build, at no place, belongs to the init screens and never to a create's log.
+    emit({ type: "golden.stage", name: "default", stage: "installing-tools" });
+    // A build at a computer this create is not going to is another road's.
+    emit({ type: "golden.stage", name: "default", stage: "installing-tools", place: "old-macbook" });
+    emit(stage({ stage: "ready", message: "Ready.", elapsedMs: 210_000 }));
+
+    expect(useStore.getState().creations[0]!.lines.map(l => [l.stage, l.message, l.notice])).toEqual([
+      ["image", "building your image on hetzner · installing agents", undefined],
+      ["image", "building your image on hetzner · taking the snapshot", "about 4.2 GB"],
+      ["ready", "Ready.", undefined],
+    ]);
+  });
+
+  it("stamps an image line's elapsed from the moment the create was asked, so the log's right column grows", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-09-12T09:27:00.000Z"));
+      useStore.setState({ places: [HERE_PLACE, HETZNER_PLACE], creations: [], api: null });
+      // The row is made by hand: what is measured is the clock, not the road that asked.
+      useStore.setState({ creations: [{ key: "c1", name: "spoo-fix", askedAt: Date.now(), where: "p_1", workspaceId: null, lines: [], failed: null }] });
+      vi.advanceTimersByTime(4_100);
+      useStore.getState().applyEvent({ type: "golden.stage", name: "default", stage: "installing-harness", place: "hetzner" });
+      vi.advanceTimersByTime(108_000);
+      useStore.getState().applyEvent({ type: "golden.stage", name: "default", stage: "snapshotting", place: "hetzner" });
+      expect(useStore.getState().creations[0]!.lines.map(l => l.elapsedMs)).toEqual([4_100, 112_100]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("a reply that lands before the created event finishes the row from the reply, and carries its notice as the toast", async () => {
@@ -442,6 +556,27 @@ describe("store sessions", () => {
     await flush();
     expect(listCalls).toEqual(["ws_a"]);
     expect(useStore.getState().sessions["ws_a"]![0]!.status).toBe("completed");
+  });
+
+  it("a prompt opening or closing refetches that workspace's rows, so a sidebar row that is not the open thread's says what it is waiting on", async () => {
+    const sessions: SessionView[] = [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", claudeSessionId: "c1" }];
+    const { api, emit, listCalls } = fakeApi([view("ws_a")], sessions);
+    useStore.getState().bind(api);
+    await flush();
+    listCalls.length = 0;
+
+    const scope = { workspaceId: "ws_a", sessionId: "c1", turnId: "turn_1", threadId: "thr_1" };
+    sessions[0]!.asking = "Permission for Bash: Check wsp version";
+    emit({ ...scope, type: "session.permission", askId: "ask_1", toolName: "Bash", detail: "Check wsp version", input: "{}", options: [{ id: "allow", label: "Allow", effect: "allow" }] });
+    await flush();
+    expect(listCalls).toEqual(["ws_a"]);
+    expect(useStore.getState().sessions["ws_a"]![0]!.asking).toBe("Permission for Bash: Check wsp version");
+
+    delete sessions[0]!.asking;
+    emit({ ...scope, type: "session.permission.closed", askId: "ask_1", outcome: "allowed", optionId: "allow" });
+    await flush();
+    expect(listCalls).toEqual(["ws_a", "ws_a"]);
+    expect(useStore.getState().sessions["ws_a"]![0]!.asking).toBeUndefined();
   });
 
   it("renameThread names the session through the runtime and reloads that workspace's rows, so the row shows the new name", async () => {

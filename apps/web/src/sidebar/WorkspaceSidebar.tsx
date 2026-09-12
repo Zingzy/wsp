@@ -14,7 +14,7 @@
 // sidebar-glass: nothing here paints a background.
 import { ChevronDownIcon, MessageSquarePlusIcon, PlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type WheelEvent } from "react";
-import { DROP_A_FOLDER_LINE, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, cloudCreateRefusal, computerOffline, dropTileLine, goldenHead, isLocalWorkspace, kindWords, registerRequest, registeredLine, workspaceKind, workspaceState, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
+import { DROP_A_FOLDER_LINE, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, cloudCreateRefusal, computerOffline, dropTileLine, goldenHead, isLocalWorkspace, kindWords, registerRequest, registeredLine, workspaceKind, workspaceState, type SealedImageCopy, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { CREATION_ASKED } from "../actions/format.js";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry.js";
@@ -44,11 +44,12 @@ import { ExportProjectDialog } from "./ExportProjectDialog.js";
 import { droppedFolder, useFolderDrag, useWindowFolderDrag } from "./folderDrag.js";
 import { ForwardsList } from "./ForwardsList.js";
 import { ImportProjectDialog } from "./ImportProjectDialog.js";
-import { NewWorkspaceDialog, type WorkspaceStart } from "./NewWorkspaceDialog.js";
+import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
 import { ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, THREE_LINE_ROW_CLASS, groupRowId, threadRowId, workspaceRowId } from "./rowGrammar.js";
 import { SearchRow } from "./SearchRow.js";
 import { SectionRow } from "./SectionRow.js";
 import { foldArchivedThreads, resolveAdjacentThreadId, resolveSettledTimestamp, splitSidebarThreads } from "./Sidebar.logic.js";
+import { threadTree, workspaceOf } from "./threadTree.js";
 import { CloudSetupRow } from "./CloudSetupRow.js";
 import { SettingsRow } from "./SettingsRow.js";
 import { HostFoot } from "../hosts/HostFoot.js";
@@ -84,7 +85,8 @@ const workspaceIdsCodec: Codec<ReadonlyArray<string>> = {
  * rename leaves the name as text, so nothing opens a field the runtime would turn away. */
 const openerOf = (rename: ResolvedAction): (() => void) | undefined => (rename.refusal === null ? () => void runAction(rename) : undefined);
 
-/** The machine every thread of one workspace runs on: what a rename has to reach. */
+/** The machine one workspace runs on, read per row off the workspace that row's thread runs on: what a rename has
+ * to reach. */
 interface RowMachine {
   readonly state: WorkspaceState;
   readonly goneWords?: string | undefined;
@@ -100,17 +102,22 @@ interface VisibleProject {
 /** Each workspace's threads split into the working ones, the settled shelf, and the ones the shelf has held long
  * enough to archive. The archive is a reading of the clock, so it comes from the same minute tick the countdowns do. */
 function visibleProjects(projects: ReadonlyArray<SidebarProjectSnapshot>, nowMs: number): VisibleProject[] {
-  return projects.map(project => {
-    const { active, settled } = splitSidebarThreads(project.threads);
+  return threadTree(projects).map(({ project, threads }) => {
+    const { active, settled } = splitSidebarThreads(threads);
     return { project, active, ...foldArchivedThreads(settled, nowMs) };
   });
 }
 
+const NO_COPIES: readonly SealedImageCopy[] = [];
+
 interface DialogState {
   readonly key: number;
   readonly name: string;
-  /** The golden head's size, read when the dialog opens; null until it lands or when no golden says. */
+  /** The image head's size, read when the dialog opens; null until it lands or when no image says. */
   readonly goldenSize: WorkspaceSize | null;
+  /** The copies of the image already built, read when the dialog opens, so a row's caption says whether the image
+   * is there or is built first; empty until they land and on a host that answers for none. */
+  readonly copies: readonly SealedImageCopy[];
 }
 
 /** A project trip's dialog open for one workspace; keyed per opening so its folder and plan reset. */
@@ -139,6 +146,9 @@ export function WorkspaceSidebar() {
   // One local workspace per host: the section's road to this computer says whether a pick makes it or goes to it.
   const hasLocal = useStore(s => s.workspaces.some(w => isLocalWorkspace(w)));
   const capabilities = useCapabilities();
+  // Where a workspace can go: the same list Settings draws, so the dialog and that table never offer two answers.
+  const places = useStore(s => s.places);
+  const openAddComputer = useStore(s => s.openAddComputer);
   const hasGolden = useStore(s => s.hasGolden);
   const initJob = useStore(s => s.initJob);
   // Read on every render of the open dialog, so a build that finishes under it frees the keycap without reopening.
@@ -201,9 +211,13 @@ export function WorkspaceSidebar() {
 
   const openDialog = (): void => {
     const key = Date.now();
-    setDialog({ key, name: defaultWorkspaceName([...workspaces.map(w => w.name), ...creations.map(c => c.name)]), goldenSize: null });
+    setDialog({ key, name: defaultWorkspaceName([...workspaces.map(w => w.name), ...creations.map(c => c.name)]), goldenSize: null, copies: NO_COPIES });
     void api?.getGolden().then(
       manifest => setDialog(d => (d?.key === key ? { ...d, goldenSize: goldenHead(manifest)?.size ?? null } : d)),
+      () => {},
+    );
+    void api?.image?.().then(
+      view => setDialog(d => (d?.key === key ? { ...d, copies: view.copies } : d)),
       () => {},
     );
   };
@@ -232,10 +246,9 @@ export function WorkspaceSidebar() {
   );
   useEffect(() => onProjectTripRequest(request => setTrip({ ...request, key: Date.now() })), []);
 
-  const create = async (name: string, start: WorkspaceStart, size?: WorkspaceSize): Promise<void> => {
+  const create = async (name: string, where?: string, size?: WorkspaceSize): Promise<void> => {
     setDialog(null);
-    const id = await createWorkspace(name, undefined, size);
-    if (start === "import" && id !== null) setTrip({ key: Date.now(), workspaceId: id, trip: "import" });
+    await createWorkspace(name, undefined, size, where);
   };
 
   // The row's rebuild spins until the status names a new machine, so it stands in for the registry's plain call.
@@ -315,12 +328,14 @@ export function WorkspaceSidebar() {
 
   /** One thread's row, wherever it is listed: the active list and the idle shelf read the same props. The row is
    * told the workspace the thread itself runs in, which is the one it is drawn under except where an agent opened
-   * a thread on another workspace, and the workspace whose rows it sits among, which is what it names against. */
-  const threadRow = (thread: SidebarThreadSnapshot, time: string, machine: RowMachine, under: SidebarProjectSnapshot) => {
-    const target = threadTarget(thread, { catalog: catalogIn({ harnesses, harnessesByWorkspace }, thread.workspaceId, thread.harness), ...machine });
+   * a thread on another workspace, and the workspace whose rows it sits among, which is what it names against.
+   * Its verbs reach the machine that workspace runs on, never the one whose rows it sits among: a rename or a stop
+   * travels to the thread's own machine, so a thread on a machine that is gone is refused wherever it is drawn. */
+  const threadRow = (thread: SidebarThreadSnapshot, time: string, under: SidebarProjectSnapshot) => {
+    const owner = workspaceOf(projects, thread) ?? under;
+    const target = threadTarget(thread, { catalog: catalogIn({ harnesses, harnessesByWorkspace }, thread.workspaceId, thread.harness), ...machineOf(owner) });
     const actionsOf = resolveActions(threadActions, target, threadVerbs);
     const rowId = threadRowId(thread.id);
-    const owner = projects.find(candidate => candidate.id === thread.workspaceId) ?? under;
     return (
       <ThreadRow
         key={thread.id}
@@ -340,19 +355,24 @@ export function WorkspaceSidebar() {
     );
   };
 
-  /** What both bodies need about one workspace: the actions every surface of it reads, the action that opens its
-   * first thread, and the machine its threads run on. */
-  const blockOf = (project: SidebarProjectSnapshot) => {
+  /** The machine one workspace runs on, as a thread's verbs read it: the state its row shows and, where it is gone,
+   * the words that say so. Read per thread off the workspace the thread itself runs on. */
+  const machineOf = (project: SidebarProjectSnapshot): RowMachine => {
     const workspace = workspaceTarget(project.workspace, project.status);
-    const actions = resolveActions(workspaceActions, workspace, verbs, labs);
-    const machine: RowMachine = { state: workspaceState(workspace), ...(workspace.reason !== null ? { goneWords: workspace.reason } : {}) };
-    return { actions, newThreadAction: actionById(actions, "new-thread"), machine };
+    return { state: workspaceState(workspace), ...(workspace.reason !== null ? { goneWords: workspace.reason } : {}) };
+  };
+
+  /** What both bodies need about one workspace: the actions every surface of it reads, and the action that opens
+   * its first thread. */
+  const blockOf = (project: SidebarProjectSnapshot) => {
+    const actions = resolveActions(workspaceActions, workspaceTarget(project.workspace, project.status), verbs, labs);
+    return { actions, newThreadAction: actionById(actions, "new-thread") };
   };
 
   /** The rows under one workspace, whichever body draws them: the line that opens its first thread while it has
    * none, the working rows, then the idle shelf under its own header with the archive nested inside it. The list
    * and Spaces both read this, so the row grammar has one home. */
-  const threadsOf = ({ project, active, settled, archived }: VisibleProject, newThreadAction: ResolvedAction, machine: RowMachine, shut: boolean) => {
+  const threadsOf = ({ project, active, settled, archived }: VisibleProject, newThreadAction: ResolvedAction, shut: boolean) => {
     const settledOpen = !settledCollapsed.includes(project.id);
     const archivedOpen = archivedOpenIds.includes(project.id);
     /** Everything the shelf holds, the archived rows included, since shutting it hides the archive with them: the
@@ -378,15 +398,15 @@ export function WorkspaceSidebar() {
         ) : null}
         {!shut && active.length + shelved > 0 ? (
           <SidebarMenuSub>
-            {active.map(thread => threadRow(thread, compactTimeLabel(thread.startedAt), machine, project))}
+            {active.map(thread => threadRow(thread, compactTimeLabel(thread.startedAt), project))}
             {shelved > 0 ? (
               <ThreadGroupRow rowId={groupRowId("settled", project.id)} label="Idle" count={shelved} open={settledOpen} onToggle={() => toggleSettled(project.id)} />
             ) : null}
-            {settledOpen ? settled.map(thread => threadRow(thread, compactTimeLabel(resolveSettledTimestamp(thread)), machine, project)) : null}
+            {settledOpen ? settled.map(thread => threadRow(thread, compactTimeLabel(resolveSettledTimestamp(thread)), project)) : null}
             {settledOpen && archived.length > 0 ? (
               <ThreadGroupRow rowId={groupRowId("archived", project.id)} label="Archived" count={archived.length} open={archivedOpen} onToggle={() => toggleArchived(project.id)} />
             ) : null}
-            {settledOpen && archivedOpen ? archived.map(thread => threadRow(thread, compactTimeLabel(resolveSettledTimestamp(thread)), machine, project)) : null}
+            {settledOpen && archivedOpen ? archived.map(thread => threadRow(thread, compactTimeLabel(resolveSettledTimestamp(thread)), project)) : null}
           </SidebarMenuSub>
         ) : null}
       </>
@@ -396,7 +416,7 @@ export function WorkspaceSidebar() {
   /** One workspace in the list body: its row and the rows under it. */
   const listItem = (visibleProject: VisibleProject) => {
     const { project } = visibleProject;
-    const { actions, newThreadAction, machine } = blockOf(project);
+    const { actions, newThreadAction } = blockOf(project);
     const isCollapsed = collapsed.has(project.id);
     const rebuildAsked = rebuilding[project.id] !== undefined && rebuilding[project.id] === (project.status?.machineId ?? project.workspace.machineId);
     const naming = renaming?.rowId === workspaceRowId(project.id);
@@ -429,7 +449,7 @@ export function WorkspaceSidebar() {
           onRenameOpen={openerOf(actionById(actions, "rename"))}
         />
         )}
-        {threadsOf(visibleProject, newThreadAction, machine, isCollapsed)}
+        {threadsOf(visibleProject, newThreadAction, isCollapsed)}
       </SidebarMenuItem>
     );
   };
@@ -438,7 +458,7 @@ export function WorkspaceSidebar() {
    * takes the same name box the row has, keyed the same way, so a rename asked for anywhere reaches one editor. */
   const spaceItem = (visibleProject: VisibleProject) => {
     const { project } = visibleProject;
-    const { actions, newThreadAction, machine } = blockOf(project);
+    const { actions, newThreadAction } = blockOf(project);
     const naming = renaming?.rowId === workspaceRowId(project.id);
     return (
       <SidebarMenuItem key={project.id}>
@@ -455,7 +475,7 @@ export function WorkspaceSidebar() {
           onRenameCancel={() => setRenaming(null)}
           onRenameOpen={openerOf(actionById(actions, "rename"))}
         />
-        {threadsOf(visibleProject, newThreadAction, machine, false)}
+        {threadsOf(visibleProject, newThreadAction, false)}
       </SidebarMenuItem>
     );
   };
@@ -570,6 +590,7 @@ export function WorkspaceSidebar() {
                     <TooltipTrigger
                       render={
                         <SidebarGroupAction
+                          data-k="new-workspace"
                           className="top-1.5 text-sidebar-muted-foreground transition-colors duration-150 disabled:pointer-events-none disabled:opacity-50"
                           aria-label="New workspace"
                           disabled={api === null}
@@ -656,11 +677,17 @@ export function WorkspaceSidebar() {
         <NewWorkspaceDialog
           key={dialog.key}
           initialName={dialog.name}
+          places={places}
+          copies={dialog.copies}
           sizes={capabilities?.sizes ?? []}
           goldenSize={dialog.goldenSize}
           refusal={createRefusal?.line ?? null}
-          onCreate={(name, start, size) => void create(name, start, size)}
+          onCreate={(name, where, size) => void create(name, where, size)}
           onCancel={() => setDialog(null)}
+          onAddComputer={() => {
+            setDialog(null);
+            openAddComputer();
+          }}
         />
       ) : null}
       {trip !== null && tripTarget !== undefined ? (

@@ -6,6 +6,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { actionRefusal, agentsKindRefusal, goneRefusal, imageMoveRefusal, NO_REBUILD_NEEDED } from "../src/index.js";
 import { ROOT, sourceFiles } from "./source-files.js";
 
 interface Call {
@@ -62,6 +63,33 @@ function refusalCalls(): Call[] {
   }
   return out;
 }
+
+/** The refusals the app holds as words rather than throwing: a held verb's tooltip, the sentence the command line
+ * throws for the same verb, and the move onto a newer image. Each is one sentence, so the two halves meet at a
+ * semicolon rather than arriving as two arguments. */
+const HELD_REFUSALS = (): ReadonlyArray<string | null> => [
+  NO_REBUILD_NEEDED,
+  goneRefusal("wake"),
+  actionRefusal("paused", "import"),
+  actionRefusal("waking", "import"),
+  actionRefusal("unreachable", "export"),
+  agentsKindRefusal("local"),
+  imageMoveRefusal("api", "running", { knownVersion: false, projectImage: false }),
+  imageMoveRefusal("api", "running", { knownVersion: true, projectImage: true }),
+  imageMoveRefusal("api", "paused", { knownVersion: true, projectImage: false }),
+  imageMoveRefusal("api", "gone", { knownVersion: true, projectImage: false }),
+];
+
+describe("every refusal the app holds as words", () => {
+  // What that second half says is read here by eye, case by case: a clause continuing one sentence in lower case
+  // cannot be checked for the shape of an instruction the way the command line's own fix half can below.
+  it("is one sentence in two clauses at a semicolon, both of them said", () => {
+    for (const refusal of HELD_REFUSALS()) {
+      const halves = (refusal ?? "").split("; ");
+      expect([refusal, halves.length > 1 && halves.every(half => half.trim() !== "")]).toEqual([refusal, true]);
+    }
+  });
+});
 
 describe("every refusal the command line can print", () => {
   const calls = refusalCalls();

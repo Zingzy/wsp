@@ -18,7 +18,6 @@ import {
   hostIdentity,
   jsonFileStore,
   localExecStream,
-  wiredPlace,
   type GoldenRecipe,
   type GoldenVersion,
   type LocalWiring,
@@ -27,9 +26,9 @@ import {
   type SshWiring,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portsAsked, runForTheList, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, unknownWordLine, usageRefusal, WS_PORT_OFFSET, type WorkspaceCreatingEvent } from "@wsp/protocol";
+import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portsAsked, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, unknownWordLine, usageRefusal, WS_PORT_OFFSET, type WorkspaceCreatingEvent } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, parseSshAddress, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshIdentity, sshMachineName, sshReachOf, type SshReach } from "@wsp/engine";
-import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerModule, wiredProviderId, type ProviderEnv } from "./providers.js";
+import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerModule, providerPlaces, wiredProviderId, type ProviderEnv } from "./providers.js";
 import { webDirFor } from "./assets.js";
 import { claudeEnvs, deployDaemon, doctor, localDoctor, removeDaemon, sshDaemonPlace } from "./doctor.js";
 import { agentsHere } from "./agents-here.js";
@@ -42,6 +41,7 @@ import { keychainReader } from "./init-import.js";
 import { adoptLoginPath } from "./login-path.js";
 import { CACHE_RULE } from "./project-bundle.js";
 import { readBrewTable } from "./init-brew.js";
+import { copyGoldenRecipe } from "./image-recipe.js";
 import { exitCodeOf, runInit, type InitIO, type InitPricing, type InitResult } from "./init.js";
 import { recipePath } from "./init-recipe.js";
 import { historyCache } from "./recipe-file.js";
@@ -621,7 +621,7 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
   );
   return {
     backend,
-    execStream: o => localExecStream({ root: backend.workFolder(), ...o }),
+    execStream: (o, waiting) => localExecStream({ root: backend.workFolder(), ...o }, waiting),
     home: id => agentHome(person, id, env),
     homeDir: home,
     env: () => ({ ...Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined)), HOME: person }),
@@ -772,13 +772,17 @@ export function statesHere(statePath: string): string[] {
   return [...new Set([statePath, resolve(defaultStatePath())])];
 }
 
-/** The provider slot each runtime made here was wired with, so a host can swap the module in when a key is saved,
- * and the environment its provider was picked out of, so the swap picks out of the same one. */
+/** The provider slot each runtime made here was wired with, so a host can swap the module in when a key is saved. */
 const PROVIDER_SLOTS = new WeakMap<Runtime, ProviderSlot>();
-const PROVIDER_ENVS = new WeakMap<Runtime, ProviderEnv>();
-/** The provider module each runtime made here forks on now, which names the place its copies are filed under; a
- * swap moves it with the backend, so the two never say different things. */
-const PROVIDER_IDS = new WeakMap<Runtime, { id: string }>();
+/** The provider pick each runtime made here stands on: the module it forks on now, which names the place its copies
+ * are filed under, and the environment that module was picked out of, which is also where the other places this
+ * host can build at are read from. A swap moves both, so the backend, the place and the table never say different
+ * things. */
+const PROVIDER_PICKS = new WeakMap<Runtime, ProviderPick>();
+interface ProviderPick {
+  id: string;
+  env: ProviderEnv;
+}
 export const providerSlotOf = (rt: Runtime): ProviderSlot | undefined => PROVIDER_SLOTS.get(rt);
 
 /** Wires the provider module the keys now on this computer name into a runtime made here, picking out of the same
@@ -789,12 +793,15 @@ export const providerSlotOf = (rt: Runtime): ProviderSlot | undefined => PROVIDE
 export function swapProvider(rt: Runtime, keys: Readonly<Record<string, string | undefined>>): void {
   const slot = providerSlotOf(rt);
   if (slot === undefined) throw new Error("this runtime has no provider slot; a key saved now would reach no machine road until the host restarts");
-  // One environment for both: the module this host forks on and the place its copies are filed under are the same
-  // pick, so they cannot drift apart when a key is saved.
-  const env = { ...(PROVIDER_ENVS.get(rt) ?? process.env), ...keys };
+  // One environment for all three: the module this host forks on, the place its copies are filed under and the
+  // other places it can build at are the same pick, so they cannot drift apart when a key is saved.
+  const pick = PROVIDER_PICKS.get(rt);
+  const env = { ...(pick?.env ?? process.env), ...keys };
   slot.swap(providerBackendFor(env));
-  const wired = PROVIDER_IDS.get(rt);
-  if (wired !== undefined) wired.id = wiredProviderId(env);
+  if (pick !== undefined) {
+    pick.id = wiredProviderId(env);
+    pick.env = env;
+  }
 }
 
 /** What a host serving this line tells a turn about where it answers: the address and port it binds, and the
@@ -814,9 +821,13 @@ export function makeRuntime(
   const slot = providerSlot(providerBackendFor(env));
   // The place this host's copies are filed under is the provider module it forks on, read at each call: a host that
   // starts with no key swaps its module in when one is saved, and its copies belong to the module that made them.
-  const wired = { id: wiredProviderId(env) };
+  const pick: ProviderPick = { id: wiredProviderId(env), env };
   const rt = createRuntime({
-    places: wiredPlace(() => wired.id, slot.backend),
+    places: providerPlaces(
+      () => pick.id,
+      slot.backend,
+      () => pick.env,
+    ),
     backend: slot.backend,
     // What a turn's own agent needs to reach back in: what this host knows about where it answers, which each kind
     // reads for its own machines, and the same wsp command an agent's config on this computer is given, so a thread
@@ -835,9 +846,23 @@ export function makeRuntime(
     vaultCaches: CACHE_RULE,
   });
   PROVIDER_SLOTS.set(rt, slot);
-  PROVIDER_ENVS.set(rt, env);
-  PROVIDER_IDS.set(rt, wired);
+  PROVIDER_PICKS.set(rt, pick);
   return rt;
+}
+
+/** How a copy of the image is planned on this computer for a serving host: the same readers wsp init builds from,
+ * the keys as they stand at the ask rather than at the start, and the daemon deploy every build made here gets. */
+function hostCopyRecipe(statePath: string): (image: SealedImage) => Promise<GoldenRecipe> {
+  return image =>
+    copyGoldenRecipe(image, {
+      collect: () => collectThisComputer(() => {}),
+      brew: () => readBrewTable(nodeHost()),
+      home: homedir(),
+      platform: hostPlatform(),
+      statePath,
+      agentKeys: agentKeyEnvs(keysFound()),
+      deployDaemon: async machine => `daemon on node ${(await deployDaemon(machine)).node}`,
+    });
 }
 
 /** The init job on this computer for a serving host: wsp init's own readers and build pieces, the keys read off the
@@ -1299,6 +1324,7 @@ async function hostFor(
       recipePath: recipePath(opts.statePath),
       statePath: opts.statePath,
       init: hostInitDoor(rt, opts.statePath, run, opts.openUrl ?? systemOpener(), line => io.log(line), opts.providerEnv),
+      copyRecipe: hostCopyRecipe(opts.statePath),
     });
     writeFileSync(lockPath, JSON.stringify({ ...lock, port: handle.port, wsPort: handle.wsPort, address }));
     // Other local tools read the token from disk; the WS never sees it in a URL.

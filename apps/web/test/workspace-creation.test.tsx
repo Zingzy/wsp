@@ -26,6 +26,7 @@ function failed(count: number): Creation {
   return {
     key: "creating:beta",
     name: "beta",
+    askedAt: Date.now(),
     workspaceId: "ws_beta",
     lines: lines(count),
     failed: { title: "The provider refused: no more workspaces can run there now", detail: CAP_LINE },
@@ -109,9 +110,41 @@ describe("workspace creation layout", () => {
     expect(box.className).toContain("w-full");
   });
 
+  it("draws the image build's lines and the create's own as one log, in the order they arrived", async () => {
+    useStore.setState({ creations: [] });
+    const at = (second: number): string => new Date(Date.UTC(2026, 8, 12, 9, 27, second)).toISOString();
+    const view = await mount({
+      key: "creating:spoo-fix",
+      name: "spoo-fix",
+      askedAt: Date.now(),
+      where: "p_1",
+      workspaceId: "ws_fix",
+      failed: null,
+      lines: [
+        { stage: "image", message: "building your image on hetzner · installing agents", at: at(6), elapsedMs: 108_000 },
+        { stage: "image", message: "building your image on hetzner · taking the snapshot", notice: "about 4.2 GB", at: at(54), elapsedMs: 130_000 },
+        { stage: "fork-requested", message: "Fork of the golden image requested.", at: at(58), elapsedMs: 190_000 },
+        { stage: "ready", message: "Ready.", at: at(59), elapsedMs: 210_000 },
+      ],
+    });
+    const rows = within(within(view).getByRole("list", { name: "Creation log" })).getAllByRole("listitem");
+    expect(rows.map(row => row.querySelector("span")!.firstChild!.textContent)).toEqual([
+      "building your image on hetzner · installing agents",
+      "building your image on hetzner · taking the snapshot",
+      "Fork of the golden image requested.",
+      "Ready.",
+    ]);
+    // What a step answered rides under its own line, muted, and moves nothing beside it.
+    const notice = rows[1]!.querySelector("span span")!;
+    expect([notice.textContent, notice.className]).toEqual(["about 4.2 GB", "block text-muted-foreground"]);
+    // The last line is the one being waited on, so it alone wears the foreground ink.
+    expect(rows.map(row => row.className.includes("text-foreground"))).toEqual([false, false, false, true]);
+    expect(rows.map(row => row.lastElementChild!.textContent)).toEqual(["1m 48s", "2m 10s", "3m 10s", "3m 30s"]);
+  });
+
   it("while creating, the same layout holds with the wave moving and no buttons", async () => {
     useStore.setState({ creations: [] });
-    const view = await mount({ key: "k", name: "beta", workspaceId: null, lines: [], failed: null });
+    const view = await mount({ key: "k", name: "beta", askedAt: Date.now(), workspaceId: null, lines: [], failed: null });
     expect(view.getAttribute("aria-busy")).toBe("true");
     expect(view.firstElementChild!.className).toContain("text-center");
     expect(within(view).getByTestId("creation-log").textContent).toContain("Asking wsp to start it.");

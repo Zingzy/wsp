@@ -15,7 +15,7 @@
 // has-aria-expanded for exactly this.
 import { ChevronRightIcon, MoreHorizontalIcon } from "lucide-react";
 import { Fragment, useCallback, useEffect, useState } from "react";
-import { PLACES_WORDS, isLocalWorkspace, offlineFor, workspaceStateOf, workspaceWord, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { PLACES_WORDS, offlineFor, workspaceStateOf, workspaceWord, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { Button, WARN_BUTTON } from "../components/ui/button.js";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu.js";
 import { TableCell, TableRow } from "../components/ui/table.js";
@@ -23,20 +23,15 @@ import { cn } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
 import { ConnectProviderSheet } from "./ConnectProviderSheet.js";
 import { WHERE_WORDS } from "./format.js";
-import { NOTHING_HELD, isProviderPlace, threadWord, type PlaceHolding } from "./places.js";
+import { copyOn } from "./image.js";
+import { NOTHING_HELD, placeOf, threadWord, type PlaceHolding } from "./places.js";
 import { PlaceRow, PlaceTable } from "./PlaceTable.js";
 import { RemoveComputerDialog } from "./RemoveComputerDialog.js";
 
-/** The machine id every workspace standing on a joined computer carries (engine's `placeMachineId`). The one rule
- * that reads it: which workspaces the Remove sentence names. The table's own cell reads the protocol's
+/** What each row holds, folded from the workspaces the store already has, each workspace going to exactly one row
+ * by placeOf, the one reading of which computer a workspace stands on. The table's own cell reads the protocol's
  * `placeWorkspacesCell` off the row instead; the two answer different questions, since a sentence naming what
  * leaves this Mac needs each workspace's name and its threads and a cell needs neither. */
-const placeMachineId = (placeId: string): string => `place:${placeId}`;
-
-/** What each row holds, folded from the workspaces the store already has, each workspace going to exactly one row:
- * a joined computer takes the workspaces whose machine id names it, this computer, which the list puts first,
- * takes the ones that run here, and the provider takes whatever is left, which is what it forked. The kind is
- * never compared here: the registry's own reader answers whether a workspace runs on this computer. */
 export function holdingsFor(
   places: readonly PlaceView[],
   workspaces: readonly WorkspaceView[],
@@ -44,13 +39,8 @@ export function holdingsFor(
   statusOf: (workspaceId: string) => WorkspaceStatus | null = () => null,
 ): Record<string, PlaceHolding> {
   const held: Record<string, PlaceHolding> = {};
-  const joined = new Set(places.map(p => placeMachineId(p.id)));
-  places.forEach((place, at) => {
-    const mine = workspaces.filter(w => {
-      if (w.machineId === placeMachineId(place.id)) return true;
-      if (joined.has(w.machineId)) return false;
-      return isLocalWorkspace(w) ? at === 0 : isProviderPlace(place);
-    });
+  places.forEach(place => {
+    const mine = workspaces.filter(w => placeOf(places, w)?.id === place.id);
     held[place.id] = { workspaces: mine.map(w => ({ name: w.name, state: workspaceWord(workspaceStateOf(w, statusOf(w.id))), threads: threadsOf(w.id) })) };
   });
   return held;
@@ -77,7 +67,7 @@ export function WhereAgentsRun({ now = Date.now() }: { now?: number }) {
   const threadsOf = (workspaceId: string): number => sessions[workspaceId]?.length ?? 0;
   const holdings = holdingsFor(places, workspaces, threadsOf, id => statuses[id] ?? null);
   /** What that computer's own copy of the image weighs, where the provider's listing gave a size for it. */
-  const imageBytesOn = (place: PlaceView): number | undefined => copies.find(c => c.place === place.id || c.place === place.name)?.sizeBytes;
+  const imageBytesOn = (place: PlaceView): number | undefined => copyOn(copies, place)?.sizeBytes;
   const holdingOf = (place: PlaceView): PlaceHolding => holdings[place.id] ?? NOTHING_HELD;
 
   return (
