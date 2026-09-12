@@ -13,14 +13,30 @@ const settle = async (): Promise<void> => {
   });
 };
 
-/** Two rows of the shape the provider table has, with the first one's key road handed in per test. */
-const rowsWith = (save: ProviderRow["save"], held?: ProviderRow["held"]): ProviderRow[] => [
-  { id: "box", name: "ASCII", what: "always on, naps to $0", fromUsdPerHour: 0.018, placeholder: "ascii_…", trial: true, ...(save === undefined ? {} : { save }), ...(held === undefined ? {} : { held }) },
+/** Two rows of the shape the provider table has. */
+const ROWS: ProviderRow[] = [
+  { id: "box", name: "ASCII", what: "always on, naps to $0", fromUsdPerHour: 0.018, placeholder: "ascii_\u2026", trial: true },
   { id: "solari", name: "Solari", what: "in memory, wakes fast", fromUsdPerHour: 0.11, placeholder: "slr_live_..." },
 ];
 
-/** What the host says about its own setup; only whether a key is held is read here. */
-const setupWith = (solari: boolean): InitSetup => ({ keys: { solari }, home: "/Users/dev", agents: [], pricing: null, job: null });
+/** What the host says about its own setup; only which providers it holds a key for is read here. */
+const setupWith = (...held: string[]): InitSetup => ({ keys: Object.fromEntries(ROWS.map(row => [row.id, held.includes(row.id)])), home: "/Users/dev", agents: [], pricing: null, job: null });
+
+/** A host that takes every key, and the keys it was handed with the provider each was for. */
+function fakeHost(over: Partial<Api> = {}): { api: Partial<Api>; saved: { provider?: string; key?: string }[] } {
+  const saved: { provider?: string; key?: string }[] = [];
+  return {
+    saved,
+    api: {
+      initGet: async () => setupWith(),
+      initKeys: async keys => {
+        saved.push(keys);
+        return setupWith(keys.provider ?? "");
+      },
+      ...over,
+    } as Partial<Api>,
+  };
+}
 
 const SIZES = [
   { cpu: 2, memMb: 4096, rateUsdPerHour: 0.018 },
@@ -43,24 +59,24 @@ afterEach(() => {
 
 describe("Connect a provider", () => {
   it("picks from the provider table, each with what it is and its cheapest rate", async () => {
-    mount(rowsWith(async () => {}));
+    mount(ROWS, fakeHost().api);
     await settle();
     expect(document.querySelector('[data-k="title"]')?.textContent).toBe("Connect a provider");
     const rows = [...document.querySelectorAll('[data-k="provider-row"]')].map(r => [r.getAttribute("data-provider"), r.textContent]);
     expect(rows).toEqual([
-      ["box", "ASCIIalways on, naps to $0 · from $0.018/hr"],
-      ["solari", "Solariin memory, wakes fast · from $0.11/hr"],
+      ["box", "ASCIIalways on, naps to $0 \u00b7 from $0.018/hr"],
+      ["solari", "Solariin memory, wakes fast \u00b7 from $0.11/hr"],
     ]);
     expect(screen.getByText("Prices are read from the provider for a 2 vCPU, 4 GB workspace. Your key stays on this Mac.")).toBeTruthy();
   });
 
   it("asks for a key in the picked provider's own words, and holds Save until one is pasted", async () => {
-    mount(rowsWith(async () => {}));
+    mount(ROWS, fakeHost().api);
     await settle();
     fireEvent.click(document.querySelector('[data-k="continue"]')!);
     expect(document.querySelector('[data-k="title"]')?.textContent).toBe("Connect ASCII");
     expect(document.querySelector('[data-k="description"]')?.textContent).toBe("Paste an API key from your ASCII account. It is checked with ASCII before it is saved.");
-    expect(document.querySelector<HTMLInputElement>("#connect-provider-key")?.placeholder).toBe("ascii_…");
+    expect(document.querySelector<HTMLInputElement>("#connect-provider-key")?.placeholder).toBe("ascii_\u2026");
     // The sheet's title names the provider, so its field is the plain label and no id word reaches a person.
     expect(screen.getByText("API key")).toBeTruthy();
     expect(screen.queryByText("Box API key")).toBeNull();
@@ -70,36 +86,108 @@ describe("Connect a provider", () => {
     expect(document.querySelector<HTMLButtonElement>('[data-k="save"]')?.disabled).toBe(false);
   });
 
-  it("holds Save on a provider whose key has no road on the wire", async () => {
-    mount(rowsWith(undefined));
+  it("says why Save is held under the field it is about, in the quiet variant, and never on a hover a held button cannot take", async () => {
+    mount(ROWS, fakeHost().api);
+    await settle();
+    fireEvent.click(document.querySelector('[data-k="continue"]')!);
+    const save = document.querySelector<HTMLButtonElement>('[data-k="save"]')!;
+    expect(save.disabled).toBe(true);
+    expect(save.className).toContain("border");
+    expect(save.className).not.toContain("bg-primary");
+    expect(document.querySelector('[data-k="key-refusal"]')?.textContent).toBe("paste the key first");
+    expect(document.querySelectorAll("[data-slot=tooltip-trigger]")).toHaveLength(0);
+    // A key typed empties the slot and hands the keycap back its loud variant in the same place.
+    type("ascii_live_9f3k2mx0");
+    const live = document.querySelector<HTMLButtonElement>('[data-k="save"]')!;
+    expect(live.disabled).toBe(false);
+    expect(live.className).toContain("bg-primary");
+    expect(document.querySelector('[data-k="key-refusal"]')?.textContent).toBe("");
+  });
+
+  it("keeps the loud keycap while the provider is asked and says what it is doing, and sends once", async () => {
+    let letGo = (): void => {};
+    const calls: unknown[] = [];
+    mount(ROWS, {
+      initGet: async () => setupWith(),
+      initKeys: async keys => {
+        calls.push(keys);
+        await new Promise<void>(r => (letGo = r));
+        return setupWith("box");
+      },
+    } as Partial<Api>);
     await settle();
     fireEvent.click(document.querySelector('[data-k="continue"]')!);
     type("ascii_live_9f3k2mx0");
-    expect(document.querySelector<HTMLButtonElement>('[data-k="save"]')?.disabled).toBe(true);
+    fireEvent.click(document.querySelector('[data-k="save"]')!);
+    await settle();
+    const asking = document.querySelector<HTMLButtonElement>('[data-k="save"]')!;
+    expect(asking.textContent).toBe("Checking with ASCII");
+    expect(asking.className).toContain("bg-primary");
+    expect(asking.disabled).toBe(false);
+    // A second press while it is asking is not a second key.
+    fireEvent.click(asking);
+    fireEvent.keyDown(document.querySelector("#connect-provider-key")!, { key: "Enter" });
+    expect(calls).toHaveLength(1);
+    letGo();
+    await settle();
+    expect(document.querySelector('[data-k="title"]')?.textContent).toBe("ASCII connected");
+  });
+
+  it("puts the typed key to the host under the provider it was picked for", async () => {
+    const host = fakeHost();
+    mount(ROWS, host.api);
+    await settle();
+    fireEvent.click(document.querySelector('[data-k="continue"]')!);
+    type("ascii_live_9f3k2mx0");
+    fireEvent.click(document.querySelector('[data-k="save"]')!);
+    await settle();
+    expect(host.saved).toEqual([{ provider: "box", key: "ascii_live_9f3k2mx0" }]);
+    expect(document.querySelector('[data-k="title"]')?.textContent).toBe("ASCII connected");
+  });
+
+  it("saves on Enter, the key the footer says that keycap does", async () => {
+    const host = fakeHost();
+    mount(ROWS, host.api);
+    await settle();
+    fireEvent.click(document.querySelector('[data-k="continue"]')!);
+    expect(document.querySelector('[data-k="foot-note"]')?.textContent).toContain("saves");
+    type("ascii_live_9f3k2mx0");
+    fireEvent.keyDown(document.querySelector("#connect-provider-key")!, { key: "Enter" });
+    await settle();
+    expect(host.saved).toEqual([{ provider: "box", key: "ascii_live_9f3k2mx0" }]);
   });
 
   it("puts what the provider said under the field and leaves the link where it was", async () => {
     mount(
-      rowsWith(async () => {
-        throw new Error("ASCII answered 401");
-      }),
+      ROWS,
+      fakeHost({
+        initKeys: async () => {
+          throw new Error("Solari refused this key: 401 Unauthorized");
+        },
+      }).api,
     );
     await settle();
     fireEvent.click(document.querySelector('[data-k="continue"]')!);
     type("ascii_live_9f3k2mx0");
     fireEvent.click(document.querySelector('[data-k="save"]')!);
     await settle();
+    // The provider the person picked is the one the refusal names, whatever words the host put around the status.
     expect(document.querySelector('[data-k="key-refusal"]')?.textContent).toBe("ASCII refused this key (401). Paste one from your ASCII account, or make a new one there.");
     expect(document.querySelector<HTMLInputElement>("#connect-provider-key")?.getAttribute("aria-invalid")).toBe("true");
-    expect(document.querySelector('[data-k="save"]')?.textContent).toBe("Save");
+    // The next press is the person's own move whatever the provider said, so the keycap says so either way.
+    expect(document.querySelector('[data-k="save"]')?.textContent).toBe("Try again");
     expect(document.querySelector('[data-k="where"]')).toBeTruthy();
+    expect(document.querySelector('[data-k="title"]')?.textContent).toBe("Connect ASCII");
   });
 
   it("offers to press again when nothing answered about the key at all", async () => {
     mount(
-      rowsWith(async () => {
-        throw new Error("runtime connection lost");
-      }),
+      ROWS,
+      fakeHost({
+        initKeys: async () => {
+          throw new Error("runtime connection lost");
+        },
+      }).api,
     );
     await settle();
     fireEvent.click(document.querySelector('[data-k="continue"]')!);
@@ -111,26 +199,19 @@ describe("Connect a provider", () => {
   });
 
   it("says what was saved and where once the provider takes the key", async () => {
-    const sent: string[] = [];
-    mount(
-      rowsWith(async (_api, key) => {
-        sent.push(key);
-      }),
-    );
+    mount(ROWS, fakeHost().api);
     await settle();
     fireEvent.click(document.querySelector('[data-k="continue"]')!);
     type("ascii_live_9f3k2mx0");
     fireEvent.click(document.querySelector('[data-k="save"]')!);
     await settle();
-    expect(sent).toEqual(["ascii_live_9f3k2mx0"]);
-    expect(document.querySelector('[data-k="title"]')?.textContent).toBe("ASCII connected");
     expect(document.querySelector('[data-k="description"]')?.textContent).toBe("Workspaces can be created on ASCII. Your image is built there the first time, about three minutes.");
     const lines = [...document.querySelectorAll('[data-k="lines"] [data-k="line"]')].map(l => l.textContent);
-    expect(lines).toEqual(["key accepted · ASCII", "saved on this Mac · never sent anywhere else"]);
+    expect(lines).toEqual(["key accepted \u00b7 ASCII", "saved on this Mac \u00b7 never sent anywhere else"]);
   });
 
   it("lists the sizes the provider offers and opens a workspace on it", async () => {
-    mount(rowsWith(async () => {}));
+    mount(ROWS, fakeHost().api);
     await settle();
     fireEvent.click(document.querySelector('[data-k="continue"]')!);
     type("ascii_live_9f3k2mx0");
@@ -145,10 +226,10 @@ describe("Connect a provider", () => {
   });
 
   it("reads a key this computer already holds as dots with saved beside it, and Change empties the field", async () => {
-    mount(rowsWith(async () => {}, setup => setup.keys.solari), { initGet: async () => setupWith(true) } as unknown as Partial<Api>);
+    mount(ROWS, fakeHost({ initGet: async () => setupWith("box") }).api);
     await settle();
     fireEvent.click(document.querySelector('[data-k="continue"]')!);
-    expect(document.querySelector<HTMLInputElement>("#connect-provider-key")?.value).toBe("••••••••••••");
+    expect(document.querySelector<HTMLInputElement>("#connect-provider-key")?.value).toBe("\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022");
     expect(document.querySelector('[data-k="key-state"]')?.textContent).toBe("saved");
     expect(document.querySelector('[data-k="save"]')?.textContent).toBe("Continue");
     expect(document.querySelector('[data-k="where"]')).toBeNull();
@@ -157,19 +238,22 @@ describe("Connect a provider", () => {
     expect(document.querySelector('[data-k="save"]')?.textContent).toBe("Save");
   });
 
+  it("asks for a key on a provider whose key this computer does not hold, though it holds another's", async () => {
+    mount(ROWS, fakeHost({ initGet: async () => setupWith("solari") }).api);
+    await settle();
+    fireEvent.click(document.querySelector('[data-k="continue"]')!);
+    expect(document.querySelector<HTMLInputElement>("#connect-provider-key")?.value).toBe("");
+    expect(document.querySelector('[data-k="key-state"]')).toBeNull();
+  });
+
   it("moves a held key straight to what the provider offers, asking for nothing", async () => {
-    const sent: string[] = [];
-    mount(
-      rowsWith(async (_api, key) => {
-        sent.push(key);
-      }, setup => setup.keys.solari),
-      { initGet: async () => setupWith(true) } as unknown as Partial<Api>,
-    );
+    const host = fakeHost({ initGet: async () => setupWith("box") });
+    mount(ROWS, host.api);
     await settle();
     fireEvent.click(document.querySelector('[data-k="continue"]')!);
     fireEvent.click(document.querySelector('[data-k="save"]')!);
     await settle();
-    expect(sent).toEqual([]);
+    expect(host.saved).toEqual([]);
     expect(document.querySelector('[data-k="title"]')?.textContent).toBe("ASCII connected");
   });
 });

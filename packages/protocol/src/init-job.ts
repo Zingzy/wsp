@@ -124,9 +124,11 @@ export const InitRow = z.object({
 });
 export type InitRow = z.infer<typeof InitRow>;
 
-/** Whether the host holds the provider key, never its value: the modal asks for nothing it has. The agents' keys sit
- * on the sign-ins screen's rows instead, each beside the agent that reads it. */
-export const InitKeys = z.object({ solari: z.boolean() });
+/** Which providers this computer holds a key for, keyed by the word WSP_PROVIDER holds: the presence alone, never a
+ * value. One entry per provider that reads a key, read off the host's own provider table, so a provider added
+ * tomorrow is a row there and nothing here. The agents' keys sit on the sign-ins screen's rows instead, each beside
+ * the agent that reads it. */
+export const InitKeys = z.record(z.boolean());
 export type InitKeys = z.infer<typeof InitKeys>;
 
 /** The step of the setup a draft belongs to that is not one of the screens: the build's own question, the first

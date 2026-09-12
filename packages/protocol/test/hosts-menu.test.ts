@@ -97,11 +97,19 @@ describe("what the Where agents run table says about a computer", () => {
     expect(placeStateWord(view({ present: false }), now)).toBe("offline");
   });
 
-  it("counts the workspaces on it and names the one thing that changes what may go there", () => {
-    expect(placeWorkspacesCell(view())).toBe("1");
-    expect(placeWorkspacesCell(view({ docker: false }))).toBe("1 · agents only");
-    expect(placeWorkspacesCell(view({ present: false }))).toBe("1 · not answering");
-    expect(placeWorkspacesCell(view({ workspaceId: undefined }))).toBe("0");
+  it("says the count it is given and names the one thing that changes what may go there", () => {
+    expect(placeWorkspacesCell(view(), 1)).toBe("1");
+    expect(placeWorkspacesCell(view({ docker: false }), 1)).toBe("1 · agents only");
+    expect(placeWorkspacesCell(view({ present: false }), 1)).toBe("1 · not answering");
+    expect(placeWorkspacesCell(view({ docker: false }), 0)).toBe("0 · agents only");
+  });
+
+  it("reads the count off the list it is handed, never off the workspace a join recorded on the row", () => {
+    // This computer's own workspace and a provider's forks are on no row, so a cell read off the row said 0 for
+    // both: the count is the caller's and the row only says what kind of place it is about.
+    expect(placeWorkspacesCell({ id: "here", kind: "computer", name: "here", default: true, docker: true }, 1)).toBe("1");
+    expect(placeWorkspacesCell({ id: "box", kind: "provider", name: "box", default: false }, 2)).toBe("2");
+    expect(placeWorkspacesCell(view({ workspaceId: undefined }), 1)).toBe("1");
   });
 });
 

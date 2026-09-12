@@ -141,7 +141,7 @@ export function addedProviders(modules: readonly ProviderModule[] = PROVIDER_MOD
 
 /** Every variable a row reads its key from, each once: what the layers a key is read through fill. */
 export function providerKeyEnvs(modules: readonly ProviderModule[] = PROVIDER_MODULES): string[] {
-  return [...new Set(modules.flatMap(m => (m.keyEnv !== undefined ? [m.keyEnv] : [])))];
+  return [...new Set(Object.values(providerKeyRows(modules)))];
 }
 
 /** The provider module this computer is set up for. */
@@ -218,11 +218,35 @@ export function providerKeyRow(env: ProviderEnv, modules: readonly ProviderModul
   return modules.find(m => m.keyEnv !== undefined && providerModule({ ...env, [m.keyEnv]: ANY_KEY }, modules) === m);
 }
 
+/** The row a key being saved belongs to: the one named, else the row this computer would be wired by. Nothing where
+ * no such row reads a key. */
+function keyRowFor(env: ProviderEnv, provider: string | undefined, modules: readonly ProviderModule[]): { id: string; keyEnv: string } | undefined {
+  const row = provider === undefined ? providerKeyRow(env, modules) : modules.find(m => m.id === provider);
+  return row?.keyEnv === undefined ? undefined : { id: row.id, keyEnv: row.keyEnv };
+}
+
+/** What saving a key writes into the wsp home's .env: the variable the row that takes it reads, and nothing else.
+ * A key saved for a provider opens it as a place and leaves the provider this computer forks on where it was: a
+ * second key is a second place, not a move of every workspace that comes after it. Nothing where no such row reads
+ * a key. */
+export function providerKeySet(env: ProviderEnv, key: string, provider?: string, modules: readonly ProviderModule[] = PROVIDER_MODULES): Record<string, string> | undefined {
+  const row = keyRowFor(env, provider, modules);
+  return row === undefined ? undefined : { [row.keyEnv]: key };
+}
+
+/** Every provider a key can be saved for, by the word WSP_PROVIDER holds and the variable that row reads its key
+ * from. Read off the table, so a provider added tomorrow is a row there and nothing else. */
+export function providerKeyRows(modules: readonly ProviderModule[] = PROVIDER_MODULES): Record<string, string> {
+  return Object.fromEntries(modules.flatMap(m => (m.keyEnv === undefined ? [] : [[m.id, m.keyEnv] as const])));
+}
+
 /** The environment a key typed on this computer is checked in: under the variable the row that would take it reads,
- * so the provider the run is wired to is the one the key is put to. */
-export function providerEnvWithKey(env: ProviderEnv, key: string): ProviderEnv {
-  const row = providerKeyRow(env);
-  return row?.keyEnv === undefined ? env : { ...env, [row.keyEnv]: key };
+ * and under the word that picks that row where one was named, so the provider the key is put to is the one it is
+ * being saved for. This is the reading the check runs in and never what is written down. */
+export function providerEnvWithKey(env: ProviderEnv, key: string, provider?: string, modules: readonly ProviderModule[] = PROVIDER_MODULES): ProviderEnv {
+  const row = keyRowFor(env, provider, modules);
+  if (row === undefined) return env;
+  return { ...env, [row.keyEnv]: key, ...(provider === undefined ? {} : { [PROVIDER_ENV]: row.id }) };
 }
 
 /** The environment a run picks its provider out of: the host's own, the command line's words in front, and every

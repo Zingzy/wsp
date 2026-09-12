@@ -16,10 +16,10 @@ import { stripVTControlCharacters } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
 import { keyCheckLine, type BackendPricing, type KeyCheck } from "@wsp/engine";
 import { RUNGS } from "@wsp/collect";
-import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, KEY_REFUSED, KEY_UNCHECKED, forksNoMachines, NEVER_REACHED, NO_FIRST_WORKSPACE, STOP_LEFT_MACHINE_LINE, shellQuote, SIGN_IN_NEVER_REACHED, LoginState, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobOver, MACHINE_ROW_LABEL, initNeedWhat, initRowOver, initSignInOutcome, initStageCount, initStoppedAt, initStoppedLine, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type McpServerSpec, type TurnResult } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, KEY_REFUSED, KEY_UNCHECKED, forksNoMachines, NEVER_REACHED, NO_FIRST_WORKSPACE, STOP_LEFT_MACHINE_LINE, shellQuote, SIGN_IN_NEVER_REACHED, LoginState, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobOver, MACHINE_ROW_LABEL, initNeedWhat, initRowOver, initSignInOutcome, initStageCount, initStoppedAt, initStoppedLine, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitKeys, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type McpServerSpec, type TurnResult } from "@wsp/protocol";
 import { harnessCatalog, smallestModel, type GoldenRecipe, type InitDoor, type Runtime, type SessionHandle } from "@wsp/runtime";
 import type { AgentHere } from "./agents-here.js";
-import { agentKeysIn, keyIn } from "./env-keys.js";
+import { agentKeysIn } from "./env-keys.js";
 import { firstWorkspaceName, folderOf } from "./init-first.js";
 import { wspToolsAgent, wspToolsItems } from "./init-pick.js";
 import { RUNG_TITLE, agentName, recipeWithAnswers } from "./init-recipe.js";
@@ -46,12 +46,19 @@ export interface InitJobDeps {
   /** Wires the provider module the keys saved here name into the runtime, so a host that started with none forks
    * after the seal. */
   provider(saved: Readonly<Record<string, string>>): void;
-  /** The variable this host's provider reads its key from, the one the keys step reads, writes and names; nothing
-   * where the provider it is wired to reads no key at all. */
-  keyEnv(): string | undefined;
-  /** Whether the provider takes this key, asked before it is saved: the provider module this host is wired to makes
-   * one cheap authenticated call, and a refusal is the person's to fix on the step that typed the key. */
-  checkKey(key: string): Promise<KeyCheck>;
+  /** Every provider a key can be saved for and whether the file holds one, by the word WSP_PROVIDER holds; read off
+   * the env this was handed, so the one reader of the home's file is `saved` and this only says what is in it. */
+  keysHeld(saved: Readonly<Record<string, string>>): InitKeys;
+  /** What saving this key for this provider writes into the wsp home's .env, under the variables that provider's own
+   * module reads; nothing where no provider of that name takes a key. A key with no provider named is the wired
+   * provider's, which is the key the setup's own step asks for. */
+  keySet(key: string, provider?: string): Record<string, string> | undefined;
+  /** The provider whose key the setup's own key step asks for, by the word WSP_PROVIDER holds; nothing where this
+   * host's provider reads no key at all. The step reads whether one is held out of keysHeld by this word. */
+  keyProvider(): string | undefined;
+  /** Whether the provider takes this key, asked before it is saved: the provider module the key is being saved for
+   * makes one cheap authenticated call, and a refusal is the person's to fix on the step that typed the key. */
+  checkKey(key: string, provider?: string): Promise<KeyCheck>;
   /** What the machine the build boots costs; the provider's own table, which needs no key to read. */
   pricing(): BackendPricing;
   agents(): Promise<AgentHere[]>;
@@ -220,11 +227,10 @@ export class InitJobs implements InitDoor {
     }
   }
 
-  /** Whether the host holds its provider's key, under the variable that provider's own row declares; read off the
-   * home's file once per ask, never on a view. */
+  /** Which providers this computer holds a key for, each under the variable that provider's own row declares; read
+   * off the home's file once per ask, never on a view. */
   private held(): InitJob["keys"] {
-    const name = this.deps.keyEnv();
-    return { solari: name !== undefined && keyIn(this.deps.saved(), name) !== undefined };
+    return this.deps.keysHeld(this.deps.saved());
   }
 
   view(): InitJob | null {
@@ -258,8 +264,10 @@ export class InitJobs implements InitDoor {
   async get(): Promise<InitSetup> {
     const pricing = this.deps.pricing();
     const agents = (await this.deps.agents()).filter(a => a.found).map(a => ({ id: a.id, name: a.name, configured: a.configured, takesTools: takesTools(a.id) }));
+    const keyProvider = this.deps.keyProvider();
     return {
       keys: this.held(),
+      ...(keyProvider !== undefined ? { keyProvider } : {}),
       home: this.deps.home,
       agents,
       // Nothing to price where this host forks nothing: the client reads the same one reading the build is gated on
@@ -280,16 +288,16 @@ export class InitJobs implements InitDoor {
    * key is put to the provider before anything is written, so a key it refuses is never saved and the setup cannot
    * move on with one; the refusal carries its kind, since a road that never answered is worth pressing again and a
    * refused key is not. */
-  async keys(k: { solari?: string; rows?: Record<string, string> }): Promise<InitSetup> {
+  async keys(k: { provider?: string; key?: string; rows?: Record<string, string> }): Promise<InitSetup> {
     const set: Record<string, string> = {};
-    const key = k.solari?.trim();
+    const key = k.key?.trim();
     if (key !== undefined && key !== "") {
-      const name = this.deps.keyEnv();
-      if (name === undefined) throw new Error("this host forks machines on a provider that reads no API key, so there is none to save");
-      const check = await this.deps.checkKey(key);
+      const saves = this.deps.keySet(key, k.provider);
+      if (saves === undefined) throw new Error(k.provider === undefined ? "this host forks machines on a provider that reads no API key, so there is none to save" : `${k.provider} is not a provider this wsp takes a key for`);
+      const check = await this.deps.checkKey(key, k.provider);
       const line = keyCheckLine(check);
       if (line !== undefined) throw Object.assign(new Error(line), { kind: check.state === "refused" ? KEY_REFUSED : KEY_UNCHECKED });
-      set[name] = key;
+      Object.assign(set, saves);
     }
     for (const [row, value] of Object.entries(k.rows ?? {})) {
       const typed = value.trim();

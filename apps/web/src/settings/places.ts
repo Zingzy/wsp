@@ -104,6 +104,19 @@ export function placeOf(places: readonly PlaceView[], workspace: Pick<WorkspaceV
   return places.find(isProviderPlace);
 }
 
+/** How many workspaces stand on each row, by the id of the row: every workspace the app holds goes to exactly one
+ * row through placeOf, which is this computer's own workspace on the first row, a fork at the provider it was made
+ * at, and the one workspace a joined computer is. Keyed by id rather than counted per row, so the whole table is
+ * one walk of the list. A row nothing stands on is not in the record and reads as none. */
+export function placeWorkspaceCounts(places: readonly PlaceView[], workspaces: readonly Pick<WorkspaceView, "kind" | "machineId">[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const workspace of workspaces) {
+    const place = placeOf(places, workspace);
+    if (place !== undefined) counts[place.id] = (counts[place.id] ?? 0) + 1;
+  }
+  return counts;
+}
+
 /** The rows the New workspace dialog offers as somewhere to put one, in the list's own order. The computer the host
  * runs on is never among them: it is already the one workspace it can be. */
 export const whereSegments = (places: readonly PlaceView[]): PlaceView[] => places.filter((place, at) => at !== 0 && placeTakesWorkspaces(place));

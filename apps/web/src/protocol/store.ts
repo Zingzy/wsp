@@ -106,8 +106,13 @@ interface State {
   connectOpen: boolean;
   /** Every computer this wsp runs on, as the Settings table shows them; the four place events keep it current. */
   places: PlaceView[];
+  /** Whether the host has answered about that list yet. An empty list is an answer and a list not asked for yet is
+   * not: what draws only while this computer is the only row would otherwise draw on every load and go again. */
+  placesRead: boolean;
   /** Whether the Add a computer sheet stands open over the Settings page. */
   addComputerOpen: boolean;
+  /** Whether the Connect a provider sheet stands open over the Settings page. */
+  connectProviderOpen: boolean;
   /** A workspace id, or a creation's key while that create runs. */
   selectedId: string | null;
   /** The thread of the selected workspace the centre is on, which the page's address names too; null until a pick
@@ -178,6 +183,9 @@ interface State {
   /** Opens Settings with the Add a computer sheet over it: the palette row and the table's button take one road. */
   openAddComputer(): void;
   closeAddComputer(): void;
+  /** The same for Connect a provider, so a person who types it into the palette lands where the button leads. */
+  openConnectProvider(): void;
+  closeConnectProvider(): void;
   applyEvent(e: ProtocolEvent): void;
   /** Rows come from the runtime (only it knows harness and final status); events say when to ask. */
   reloadSessions(workspaceId: string): Promise<void>;
@@ -359,10 +367,11 @@ export const useStore = create<State>((set, get) => {
         clearEndedNeed(setup.job?.needsYou);
       })
       .catch(() => {});
-    void api
-      .placesList?.()
-      .then(places => set({ places }))
-      .catch(() => {});
+    // An answer either way settles it, and a host whose wire carries no place list settles it at once: nothing
+    // waits on a reply that is never coming.
+    const placesAsked = api.placesList?.();
+    if (placesAsked === undefined) set({ placesRead: true });
+    else void placesAsked.then(places => set({ places, placesRead: true })).catch(() => set({ placesRead: true }));
     void api
       .preferences?.()
       .then(preferences => {
@@ -392,7 +401,9 @@ export const useStore = create<State>((set, get) => {
     setupOpen: false,
     connectOpen: false,
     places: [],
+    placesRead: false,
     addComputerOpen: false,
+    connectProviderOpen: false,
     selectedId: null,
     selectedThreadId: null,
     freshThread: false,
@@ -442,8 +453,8 @@ export const useStore = create<State>((set, get) => {
       writeAddress({ workspaceId, threadId });
     },
     openSettings() { set({ settingsOpen: true }); },
-    closeSettings() { set({ settingsOpen: false, addComputerOpen: false }); },
-    toggleSettings() { set(s => ({ settingsOpen: !s.settingsOpen, addComputerOpen: s.settingsOpen ? false : s.addComputerOpen })); },
+    closeSettings() { set({ settingsOpen: false, addComputerOpen: false, connectProviderOpen: false }); },
+    toggleSettings() { set(s => ({ settingsOpen: !s.settingsOpen, addComputerOpen: s.settingsOpen ? false : s.addComputerOpen, connectProviderOpen: s.settingsOpen ? false : s.connectProviderOpen })); },
     async setPreferences(patch) {
       const api = get().api;
       set(s => ({ preferences: applyPreferencesPatch(s.preferences, patch) }));
@@ -634,6 +645,8 @@ export const useStore = create<State>((set, get) => {
     closeConnect() { set({ connectOpen: false }); },
     openAddComputer() { set({ settingsOpen: true, addComputerOpen: true }); },
     closeAddComputer() { set({ addComputerOpen: false }); },
+    openConnectProvider() { set({ settingsOpen: true, connectProviderOpen: true }); },
+    closeConnectProvider() { set({ connectProviderOpen: false }); },
     applyWorkspace(workspace) {
       set(s => ({
         workspaces: s.workspaces.map(w => (w.id === workspace.id ? { ...w, ...workspace } : w)),
@@ -940,4 +953,6 @@ export function useProtocolEvents(fn: (e: ProtocolEvent) => void): void {
   useEffect(() => (api ? api.subscribe(fn) : undefined), [api, fn]);
 }
 export function usePlaces(): PlaceView[] { return useStore(s => s.places); }
+export function usePlacesRead(): boolean { return useStore(s => s.placesRead); }
 export function useAddComputerOpen(): boolean { return useStore(s => s.addComputerOpen); }
+export function useConnectProviderOpen(): boolean { return useStore(s => s.connectProviderOpen); }

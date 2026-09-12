@@ -9,9 +9,9 @@
 // step reads the key as dots with `saved` in its slot and Continue moves on
 // without asking; a quiet Change empties the field for a new one.
 //
-// Nothing here knows a provider by name: every word, price, ghost and key road
-// comes off the row in providers.ts, so a provider added tomorrow is a row
-// there and nothing else.
+// Nothing here knows a provider by name: every word, price and ghost comes off
+// the row in providers.ts and the key goes to the host under that row's own id,
+// so a provider added tomorrow is a row there and nothing else.
 import { ExternalLinkIcon } from "lucide-react";
 import { fmtMemGb, fmtRate, sizeWord, type Capabilities, type InitSetup } from "@wsp/protocol";
 import { useEffect, useState, type KeyboardEvent } from "react";
@@ -20,33 +20,31 @@ import { Input } from "../components/ui/input.js";
 import { Kbd } from "../components/ui/kbd.js";
 import { Radio, RadioGroup } from "../components/ui/radio-group.js";
 import { Sheet, SheetDescription, SheetFooter, SheetHeader, SheetPanel, SheetPopup, SheetTitle } from "../components/ui/sheet.js";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { cn, errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
 import { requestNewWorkspace } from "../shell/shellRequests.js";
 import { CARD, FIELD_LABEL, LONE_FIELD, NAME, ROW, ROW_LINE, STATE_WORD } from "../sidebar/cloud-setup/rows.js";
 import { CONNECT_PROVIDER_WORDS } from "./format.js";
-import { keyConsoleOf, providerRows, type ProviderRow } from "./providers.js";
+import { keyConsoleOf, keyHeld, providerRows, type ProviderRow } from "./providers.js";
 import { PlaceTable } from "./PlaceTable.js";
 import { RefusalSlot, RoadLines } from "./sheetParts.js";
 
 const WORDS = CONNECT_PROVIDER_WORDS;
 
-/** What the provider said about the key last pressed: what happened, what to do about it, and whether pressing
- * again is worth anything, which is true of a check nothing answered and false of a key it refused. */
+/** What the provider said about the key last pressed: what happened and what to do about it. */
 export interface KeySaid {
   said: string;
   fix: string;
-  retry: boolean;
 }
 
-/** A refusal read as a person reads it. A provider that answered and said no is a key to change; anything that came
- * back with no answer from the provider at all is worth pressing again. */
+/** A refusal read as a person reads it: a provider that answered and said no is a key to change, and one that never
+ * answered is a road to try again. Either way the keycap says Try again, since either way the next press is the
+ * person's own move on this step. */
 export function keySaid(row: ProviderRow, e: unknown): KeySaid {
   const text = errorText(e);
   const status = /\b(401|403)\b/.exec(text);
-  if (status !== null) return { said: WORDS.refused(row.name, status[1]!), fix: WORDS.refusedFix(row.name), retry: false };
-  return { said: WORDS.unreached(row.name), fix: WORDS.unreachedFix, retry: true };
+  if (status !== null) return { said: WORDS.refused(row.name, status[1]!), fix: WORDS.refusedFix(row.name) };
+  return { said: WORDS.unreached(row.name), fix: WORDS.unreachedFix };
 }
 
 export function ConnectProviderSheet({ open, onOpenChange, rows = providerRows() }: { open: boolean; onOpenChange: (open: boolean) => void; rows?: readonly ProviderRow[] }) {
@@ -78,9 +76,8 @@ export function ConnectProviderSheet({ open, onOpenChange, rows = providerRows()
   if (picked === undefined) return null;
 
   // A key this computer already holds, which the sheet shows as dots until Change empties the field for a new one.
-  const kept = setup !== null && picked.held?.(setup) === true && !changing;
-  const noRoad = picked.save === undefined;
-  const held = kept ? undefined : key.trim() === "" ? WORDS.pasteFirst : noRoad ? WORDS.noRoad(picked.name) : undefined;
+  const kept = setup !== null && keyHeld(picked, setup) && !changing;
+  const held = kept || key.trim() !== "" ? undefined : WORDS.pasteFirst;
   const connected = (): void => {
     setAt("connected");
     void api?.capabilities().then(c => setOffers(c.sizes), () => setOffers([]));
@@ -90,10 +87,12 @@ export function ConnectProviderSheet({ open, onOpenChange, rows = providerRows()
       connected();
       return;
     }
-    if (held !== undefined || busy || picked.save === undefined || api === null) return;
+    if (held !== undefined || busy || api?.initKeys === undefined) return;
     setBusy(true);
     setSaid(null);
-    picked.save(api, key.trim()).then(
+    // The host puts the key to the provider before it writes it, so a key that provider refuses never lands and
+    // what it said comes back as this call's own refusal.
+    api.initKeys({ provider: picked.id, key: key.trim() }).then(
       () => {
         setBusy(false);
         connected();
@@ -117,7 +116,7 @@ export function ConnectProviderSheet({ open, onOpenChange, rows = providerRows()
         </SheetHeader>
         <SheetPanel className="flex flex-col gap-5">
           {at === "pick" ? <Pick rows={rows} pickedId={pickedId} onPick={setPickedId} /> : null}
-          {at === "key" ? <KeyStep row={picked} value={key} said={said} kept={kept} onChange={setKey} onChange0={() => setChanging(true)} onEnter={save} /> : null}
+          {at === "key" ? <KeyStep row={picked} value={key} said={said} kept={kept} {...(held === undefined ? {} : { held })} onChange={setKey} onChange0={() => setChanging(true)} onEnter={save} /> : null}
           {at === "connected" ? <Connected row={picked} offers={offers} /> : null}
         </SheetPanel>
         <SheetFooter className="items-center sm:justify-between">
@@ -147,10 +146,11 @@ export function ConnectProviderSheet({ open, onOpenChange, rows = providerRows()
                 <Button variant="outline" onClick={() => setAt("pick")}>
                   {WORDS.back}
                 </Button>
-                <Tooltip>
-                  <TooltipTrigger render={<Button data-k="save" disabled={held !== undefined || busy} onClick={save} />}>{kept ? WORDS.continueWord : said?.retry === true ? WORDS.tryAgain : WORDS.save}</TooltipTrigger>
-                  {held === undefined ? null : <TooltipPopup side="top">{held}</TooltipPopup>}
-                </Tooltip>
+                {/* Held, the keycap is the quiet variant in the same slot and its reason stands under the field;
+                    while the provider is asked it keeps the loud one and says what it is doing. */}
+                <Button data-k="save" {...(held === undefined ? {} : { variant: "outline" as const })} disabled={held !== undefined} onClick={save}>
+                  {kept ? WORDS.continueWord : busy ? WORDS.checking(picked.name) : said !== null ? WORDS.tryAgain : WORDS.save}
+                </Button>
               </>
             ) : null}
             {at === "connected" ? (
@@ -198,7 +198,7 @@ function Pick({ rows, pickedId, onPick }: { rows: readonly ProviderRow[]; picked
 /** The key step: one field on its own, the two-line slot under it, and the link to where a key comes from, which
  * does not move when the slot fills. A key this computer already holds reads as dots with `saved` in the field's
  * own slot, and the quiet Change under it empties the field for a new one. */
-function KeyStep({ row, value, said, kept, onChange, onChange0, onEnter }: { row: ProviderRow; value: string; said: KeySaid | null; kept: boolean; onChange: (v: string) => void; /** Change pressed on a key this computer holds. */ onChange0: () => void; onEnter: () => void }) {
+function KeyStep({ row, value, said, kept, held, onChange, onChange0, onEnter }: { row: ProviderRow; value: string; said: KeySaid | null; kept: boolean; /** Why the keycap is held, which stands in the slot until there is something to press. */ held?: string; onChange: (v: string) => void; /** Change pressed on a key this computer holds. */ onChange0: () => void; onEnter: () => void }) {
   const id = "connect-provider-key";
   const consoleAt = keyConsoleOf(row);
   return (
@@ -232,7 +232,7 @@ function KeyStep({ row, value, said, kept, onChange, onChange0, onEnter }: { row
             </span>
           ) : null}
         </div>
-        <RefusalSlot k="key-refusal" {...(said === null ? {} : { said: said.said, fix: said.fix })} />
+        <RefusalSlot k="key-refusal" {...(said !== null ? { said: said.said, fix: said.fix } : held === undefined ? {} : { note: held })} />
       </div>
       {kept ? (
         <Button data-k="change" variant="link" className="h-auto self-start p-0 text-[13px] text-muted-foreground hover:text-foreground sm:text-[13px]" onClick={onChange0}>

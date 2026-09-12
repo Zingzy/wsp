@@ -78,12 +78,15 @@ export function RoadLines({ lines, k = "lines" }: { lines: readonly RoadLine[]; 
 }
 
 /** The slot under a field a refusal lands in: two lines at 12 px mono, standing at that height whether or not it
- * holds one. What happened is in the destructive ink; what to do about it follows in the foreground's. */
-export function RefusalSlot({ k, said, fix, children }: { k: string; said?: string; fix?: string; children?: ReactNode }) {
+ * holds one. What happened is in the destructive ink; what to do about it follows in the foreground's. The same
+ * slot carries the quiet note saying why a keycap is held, in the muted ink, so a reason a person can act on is
+ * read under the field it is about rather than hidden on a hover a held button never takes. */
+export function RefusalSlot({ k, said, fix, note, children }: { k: string; said?: string; fix?: string; note?: string; children?: ReactNode }) {
   return (
     <p data-k={k} className="min-h-9 break-words font-mono text-xs leading-[18px] text-destructive-foreground">
       {said ?? ""}
       {fix === undefined ? null : <span className="text-foreground"> {fix}</span>}
+      {note === undefined ? null : <span className="text-muted-foreground">{note}</span>}
       {children}
     </p>
   );

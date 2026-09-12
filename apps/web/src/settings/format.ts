@@ -86,6 +86,10 @@ export const CONNECT_PROVIDER_WORDS = {
   save: "Save",
   saves: "saves",
   tryAgain: "Try again",
+  /** What the keycap says while the provider is being asked about the key: the one loud button on the sheet keeps
+   * its variant and says what it is doing, since a press that answers in its own time is not a held one. */
+  checking: (name: string): string => `Checking with ${name}`,
+  /** Why the keycap is held, which stands in the field's own slot until a key is typed. */
   pasteFirst: "paste the key first",
   key: "API key",
   keyTitle: (name: string): string => `Connect ${name}`,
@@ -95,8 +99,6 @@ export const CONNECT_PROVIDER_WORDS = {
   refusedFix: (name: string): string => `Paste one from your ${name} account, or make a new one there.`,
   unreached: (name: string): string => `${name} could not be reached to check the key.`,
   unreachedFix: "Check the network and try again.",
-  /** Why Save is held on a provider whose key has no road on the wire yet. */
-  noRoad: (name: string): string => `this wsp cannot save a ${name} key yet`,
   /** The already connected state, opened again on a provider whose key this computer holds. */
   savedWord: "saved",
   change: "Change",
