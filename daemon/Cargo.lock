@@ -1291,6 +1291,7 @@ dependencies = [
  "ed25519-dalek",
  "futures-util",
  "getrandom 0.4.3",
+ "libc",
  "nix 0.31.3",
  "portable-pty",
  "serde",

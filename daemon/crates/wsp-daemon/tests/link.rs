@@ -184,7 +184,7 @@ async fn place_daemon(place: &Place, tune: impl FnOnce(&mut Options)) -> Running
     let mut options = Options::new(token.path());
     options.host = "127.0.0.1".to_owned();
     options.port = 0;
-    options.kind = wsp_frames::WorkspaceKind::Place;
+    options.kind = "place".to_owned();
     options.root = Some(place.home.path().to_path_buf());
     options.home = Some(place.home.path().to_path_buf());
     options.place_file = Some(place.file.clone());
