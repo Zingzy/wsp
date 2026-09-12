@@ -24,6 +24,9 @@ libcontainer = { version = "0.7.0", default-features = false, features = ["v2", 
 libcgroups = { version = "0.7.0", default-features = false, features = ["v2"] }
 nix = { version = "0.31", default-features = false, features = ["fs", "mount", "process", "sched", "signal", "user"] }
 xattr = "1"
+netlink-sys = "0.8"
+netlink-packet-core = "0.8"
+netlink-packet-route = "0.31"
 
 [dev-dependencies]
 tempfile = "3"

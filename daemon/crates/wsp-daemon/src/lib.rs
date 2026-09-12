@@ -341,7 +341,14 @@ impl Daemon {
             Some(path) => Some(relay::listen_open_socket(path)?),
             None => None,
         };
-        Ok(Daemon { listener, open_socket, ctx: Arc::new(Ctx::new(options, log)?) })
+        let ctx = Arc::new(Ctx::new(options, log)?);
+        #[cfg(target_os = "linux")]
+        if let Some(runtime) = &ctx.runtime {
+            if let Err(e) = runtime.restore().await {
+                ctx.log(&format!("workspace forwards not restored: {e}"));
+            }
+        }
+        Ok(Daemon { listener, open_socket, ctx })
     }
 
     pub fn local_addr(&self) -> SocketAddr {
@@ -399,6 +406,14 @@ fn open_runtime(options: &Options, log: &Log) -> Option<Arc<wsp_runtime::ops::Op
             }
             for id in ops.stopped_at_open() {
                 log(&format!("workspace {id} found stopped at start: its init is gone"));
+            }
+            let net_swept = ops.net_swept_at_open();
+            if !net_swept.links.is_empty() || net_swept.rules {
+                log(&format!(
+                    "workspace network swept: {} links{}",
+                    net_swept.links.len(),
+                    if net_swept.rules { ", the rules" } else { "" }
+                ));
             }
             Some(Arc::new(ops))
         }
