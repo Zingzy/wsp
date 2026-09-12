@@ -68,6 +68,21 @@ export function servedHostname(word: string): string | undefined {
   return parsed.hostname === "" ? undefined : parsed.hostname;
 }
 
+/** What a bare address a person types looks like: a name or an IPv4 address with a port, or an IPv6 literal in its
+ * brackets with one. The port is asked for because a wsp is reached at one and no default would be right for both
+ * the app's own and one moved by --port. */
+const BARE_ADDRESS = /^(\[[0-9a-fA-F:]+\]|[a-zA-Z0-9.-]+):\d{1,5}$/;
+
+/** The address typed on the join screen, as the road that dials it wants it: what a person reads off the other
+ * computer is an authority (`192.168.1.20:4400`), which becomes an http address; an address that already carries
+ * http or https is itself; anything else, a bare name with no port or a socket address, is nothing. One reading,
+ * so the field that refuses a word and the dial that follows it cannot disagree about what an address is. */
+export function joinAddressOf(typed: string): string | undefined {
+  const word = typed.trim();
+  if (/^https?:\/\//i.test(word)) return servedHostname(word) === undefined ? undefined : word;
+  return BARE_ADDRESS.test(word) ? `http://${word}` : undefined;
+}
+
 /** An address and a port as the authority of a URL: an IPv6 literal needs brackets and everything else is itself.
  * The one rule, so the address wsp pair prints and the one every local tool dials are spelled the same way. */
 export function authority(address: string, port: number): string {
