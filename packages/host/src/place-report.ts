@@ -7,26 +7,24 @@
 // side too, where the places list reads this computer's own row.
 
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statfsSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statfsSync, writeFileSync } from "node:fs";
 import { homedir, arch as osArch, platform, release, type as osType, userInfo } from "node:os";
 import type { PlaceSelfReport } from "@wsp/daemon";
 import { PLACE_FILE_MODE, parsePlaceFile, placeFileText, type PlaceFile } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LOGIN_READ, SSH_STORE_VARS, isPlainPath, localShape, plainPath, readValues } from "@wsp/engine";
-import { DAEMON_VERSION, placeDaemonPaths, workFolderIn } from "@wsp/protocol";
+import { DAEMON_VERSION, placeDaemonPaths, placeOwnedPaths, workFolderIn } from "@wsp/protocol";
 import { dirname } from "node:path";
-import { daemonOwnedPaths, sshDaemonPlace } from "./doctor.js";
+import { profileSourceLine, sshDaemonPlace, type DaemonPlace } from "./doctor.js";
 import { mcpServerCommand, onPath, runningWsp, type RunningWsp } from "./mcp-install.js";
 import { serviceManagerFor, systemRunner, type ServiceAddress, type ServiceManager, type ServiceRunner } from "./service.js";
 
-/** Where a place keeps the file naming the wsp it belongs to, and the private key it proves itself with. Both sit
- * in wsp's own folder under the person's home, beside the daemon's own files, so a leave takes one folder's worth. */
-export const placeFilePath = (home: string): string => `${placeDaemonPaths(home).wsp}/place.json`;
-export const placeKeyPath = (home: string): string => `${placeDaemonPaths(home).wsp}/place-key.pem`;
-
-/** Where the agent's output goes, since nobody is watching a terminal: wsp's own folder under the person's home,
- * beside everything else the agent keeps, so the sweep takes it with the rest. */
-export const placeLogPath = (home: string): string => `${placeDaemonPaths(home).wsp}/place.log`;
+/** Where a place keeps the file naming the wsp it belongs to, the private key it proves itself with, and the
+ * agent's log, since nobody is watching a terminal. All three sit in wsp's own folder under the person's home,
+ * beside the daemon's own files, so a leave takes one folder's worth; the protocol names them for both sides. */
+export const placeFilePath = (home: string): string => placeDaemonPaths(home).placeFile;
+export const placeKeyPath = (home: string): string => placeDaemonPaths(home).placeKey;
+export const placeLogPath = (home: string): string => placeDaemonPaths(home).placeLog;
 
 /** The place file as it stands, or nothing when this computer is no place. The shape, the parse and the mode are
  * the protocol's; this is the read on the host's side of the wire.
@@ -118,6 +116,12 @@ export interface PlaceReportOptions {
   home?: string;
   env?: Readonly<Record<string, string | undefined>>;
   run?: RunningWsp;
+  /** Whether this computer can fork, as the agent found out by asking the backend it offers rather than by looking
+   * for a command on the PATH. The agent hands in that answer so the report and the backend it serves on the link
+   * cannot disagree, and it stands for that agent's life: a computer that gains a Docker says so at the next start
+   * of the agent, not at the next dial. Absent leaves the PATH read, which is what a report taken outside the
+   * agent has. */
+  docker?: boolean;
 }
 
 /** What this computer says about itself on every link. Read at each dial rather than once: a laptop gains a Docker,
@@ -137,7 +141,7 @@ export function placeReport(opts: PlaceReportOptions): PlaceSelfReport {
     ...(free !== undefined ? { diskFreeBytes: free } : {}),
     login,
     // Whether this computer can fork at all, which is the one thing the host cannot read from over the link.
-    docker: onPath("docker", env.PATH) !== undefined,
+    docker: opts.docker ?? onPath("docker", env.PATH) !== undefined,
     daemonVersion: DAEMON_VERSION,
     wsp: wspArgvOf(opts.run ?? runningWsp()),
     // Off the login PATH rather than this process's: a service starts with almost none, and what the person can
@@ -182,7 +186,6 @@ const placeService = (home: string, uid?: number): ServiceAddress => ({ role: "p
 export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSweep> {
   const home = opts.home ?? homedir();
   const manager = opts.manager === undefined ? serviceManagerFor(platform()) : opts.manager;
-  const at = placeDaemonPaths(home);
   const removed: string[] = [];
   if (manager !== undefined) {
     const address = placeService(home, opts.uid);
@@ -196,23 +199,49 @@ export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSwe
       removed.push(`${manager.words} ${unit.name}`);
     }
   }
-  // The daemon on this computer is this process, so there is no second unit of its own; the paths below are the
-  // ones the daemon writes and the ones an installer over ssh put there, which on a computer that was joined by
-  // hand simply are not present.
-  const owned = [
-    placeFilePath(home),
-    placeKeyPath(home),
-    placeLogPath(home),
-    ...daemonOwnedPaths(sshDaemonPlace({ home, path: "" })),
-    `${at.binDir}/wsp-open`,
-    `${at.binDir}/xdg-open`,
-  ];
-  for (const path of owned) {
-    if (!existsSync(path)) continue;
+  // The daemon on this computer is this process, so there is no second unit of its own; the paths are the ones
+  // the daemon writes and the ones an installer over ssh put there, which on a computer that was joined by hand
+  // simply are not present.
+  for (const path of placeOwnedPaths(home)) {
+    // lstat, not exists: the browser name is a symlink to the shim beside it, and once the shim has gone the link
+    // is dangling, which every following-the-link read calls absent while the person is still left holding it.
+    if (!there(path)) continue;
     rmSync(path, { recursive: true, force: true });
     removed.push(path);
   }
+  const said = unsourced(sshDaemonPlace({ home, path: "" }));
+  if (said !== undefined) removed.push(said);
   return { removed, kept: [placeKeptLine(workFolderIn(home))] };
+}
+
+/** Whether a path is there at all, link or file. */
+function there(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Takes wsp's one line back out of the person's own login file, which would otherwise print an error at every
+ * login for a file that is gone. Their file, so it is opened only when wsp's own line is in it and written back
+ * through the same path rather than moved over: a .profile symlinked into a dotfiles checkout stays a symlink.
+ * Answers what it says it took, or nothing when the file never held it. */
+function unsourced(place: DaemonPlace): string | undefined {
+  const file = place.profileSource;
+  if (file === undefined || !there(file)) return undefined;
+  const line = profileSourceLine(place.profileFile);
+  let held: string;
+  try {
+    held = readFileSync(file, "utf8");
+  } catch {
+    return undefined;
+  }
+  const kept = held.split("\n").filter(row => row.trim() !== line);
+  if (kept.length === held.split("\n").length) return undefined;
+  writeFileSync(file, kept.join("\n"));
+  return `${line} (out of ${file})`;
 }
 
 /** Asks this computer's manager to stop the agent, once the caller has nothing left to say: on the host's own road

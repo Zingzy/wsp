@@ -7,7 +7,7 @@
 // daemon; the first subscriber starts it and the last one leaving stops it.
 import { EventEmitter } from "node:events";
 import { readFile, statfs } from "node:fs/promises";
-import type { SysSample } from "@wsp/protocol";
+import { SYS_SAMPLER_STARTED, SYS_SAMPLER_STOPPED, type SysSample } from "@wsp/protocol";
 
 /** Jiffies from the aggregate cpu line: idle includes iowait, total the eight time columns (guest time is already inside user and nice). */
 export interface CpuTimes {
@@ -79,16 +79,18 @@ export function procSysSource(root: string, procRoot = "/proc"): SysSource {
 export class SysSampler extends EventEmitter {
   private source: SysSource;
   private intervalMs: number;
+  private log: (line: string) => void;
   private timer: NodeJS.Timeout | null = null;
   private prev: CpuTimes | undefined;
   private subscribers = 0;
   /** What the last poll said, so a watch that arrives mid-stream inherits it; undefined until one has finished. */
   private last: { error?: unknown } | undefined;
 
-  constructor(source: SysSource, opts: { intervalMs?: number } = {}) {
+  constructor(source: SysSource, opts: { intervalMs?: number; log?: (line: string) => void } = {}) {
     super();
     this.source = source;
     this.intervalMs = opts.intervalMs ?? 2000;
+    this.log = opts.log ?? (() => {});
   }
 
   get running(): boolean {
@@ -146,11 +148,15 @@ export class SysSampler extends EventEmitter {
     this.prev = undefined;
     this.timer = setInterval(() => void this.poll(), this.intervalMs);
     this.timer.unref();
+    this.log(SYS_SAMPLER_STARTED);
     void this.poll();
   }
 
   stop(): void {
-    if (this.timer) clearInterval(this.timer);
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.log(SYS_SAMPLER_STOPPED);
+    }
     this.timer = null;
     this.prev = undefined;
     this.last = undefined;

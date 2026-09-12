@@ -1,0 +1,95 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// The shape every refusal wsp leaves on a terminal: two halves, what happened
+// then what to do, the command's name said once, and a word no command answers
+// to met with a pointer at the help rather than the help itself.
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { EXIT_CODES } from "@wsp/protocol";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { HELP, cli } from "../src/cli.js";
+import { CLI_VERBS } from "../src/verbs.js";
+import { captured, type Captured } from "./verbs-fixture.js";
+
+describe("what wsp says when it will not run a line", () => {
+  let dir: string;
+  let statePath: string;
+  let env: Record<string, string>;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-refusals-"));
+    statePath = join(dir, "state.json");
+    env = { HOME: join(dir, "user"), WSP_HOME: join(dir, "home") };
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const run = async (...argv: string[]): Promise<{ code: number; io: Captured }> => {
+    const io = captured();
+    const code = await cli([...argv, "--state", statePath], io, undefined, env);
+    return { code, io };
+  };
+
+  it("answers a word no command has with that word and where the list is, on one line, and never with the help", async () => {
+    for (const word of ["ls", "list", "nope"]) {
+      const { code, io } = await run(word);
+      expect(code, word).toBe(EXIT_CODES.usage);
+      expect(io.lines, word).toEqual([]);
+      expect(io.errors, word).toEqual([`unknown command: ${word}. Run wsp --help for the list.`]);
+      expect(io.errors.join("\n").split("\n"), word).toHaveLength(1);
+    }
+  });
+
+  it("answers an unknown word under mcp and under relay the same way, one line and a pointer, with no usage dump", async () => {
+    const mcp = await run("mcp", "nope");
+    expect(mcp.code).toBe(EXIT_CODES.usage);
+    expect(mcp.io.errors).toEqual(["unknown command: mcp nope. Run wsp mcp --help for the list."]);
+    const relay = await run("relay", "nope");
+    expect(relay.code).toBe(EXIT_CODES.usage);
+    expect(relay.io.errors).toEqual(["unknown command: relay nope. Run wsp --help for the list."]);
+  });
+
+  it("takes help as the word for the flag, printing what wsp --help prints and exiting 0", async () => {
+    const word = await run("help");
+    const flag = await run("--help");
+    expect(word.code).toBe(0);
+    expect(word.io.errors).toEqual([]);
+    expect(word.io.lines).toEqual(flag.io.lines);
+    expect(word.io.lines).toEqual([HELP]);
+  });
+
+  it("names the stray word and the flag its workspace belongs behind when a thread is opened on two words", async () => {
+    const { code, io } = await run("thread", "new", "api", "say hi");
+    expect(code).toBe(EXIT_CODES.usage);
+    expect(io.errors).toEqual(["wsp thread new takes one task; api reads as a second one. Name the workspace with --in api, and quote the task."]);
+    // The name is the line's own prefix, so the sentence behind it never says it a second time.
+    expect(io.errors[0]!.match(/wsp thread new/g)).toHaveLength(1);
+    expect(io.errors[0]).not.toContain("wsp thread new: wsp thread new");
+  });
+
+  it("says a thread opened on no words at all what to put in quotes", async () => {
+    const { code, io } = await run("thread", "new");
+    expect(code).toBe(EXIT_CODES.usage);
+    expect(io.errors).toEqual(['wsp thread new takes one task and got none. Put the task in quotes: wsp thread new --in <workspace> "say hi".']);
+  });
+
+  it("answers every verb in one line that never says the verb's name twice over, and refuses one with both halves", async () => {
+    // Three words is more than any verb takes, so each one answers here rather than reaching for a host; the three
+    // that read a list of words get as far as the dial, which has no host to reach and says so in one line too.
+    for (const verb of CLI_VERBS) {
+      const name = `wsp ${verb.name}`;
+      const { code, io } = await run(...verb.name.split(" "), "zzz1", "zzz2", "zzz3");
+      expect(io.lines, name).toEqual([]);
+      expect(io.errors, name).toHaveLength(1);
+      const line = io.errors[0]!;
+      expect(line.split("\n"), name).toHaveLength(1);
+      // The prefix is the one home for the verb's name; a sentence that opens with it again is the doubling.
+      expect(line.startsWith(`${name}: ${name}`), `${name}: ${line}`).toBe(false);
+      // A line refused before anything ran carries what to do: the verb's own usage, or a sentence of its own.
+      if (code === EXIT_CODES.usage) expect(line, name).toMatch(/(?:usage: |\. [A-Z])/);
+      else expect(code, `${name}: ${line}`).toBe(EXIT_CODES.provider);
+    }
+  });
+});

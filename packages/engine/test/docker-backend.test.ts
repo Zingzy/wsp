@@ -3,91 +3,10 @@
 // server on a unix socket, so the dial, the request line, the query and the
 // bodies are the ones a daemon would read.
 
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DOCKER_BOOT_CMD, DOCKER_LIFECYCLE, DOCKER_PRICING, DockerBackend, HOSTNAME_MAX, parseDockerHost } from "../src/docker-backend.js";
 import { OWNER_LABEL, WSP_LABEL } from "../src/labels.js";
-
-interface Seen {
-  method: string;
-  path: string;
-  query: URLSearchParams;
-  body: unknown;
-  raw: Buffer;
-}
-
-/** One frame of Docker's multiplexed exec stream: the eight byte header then the payload. */
-function frame(stream: 1 | 2, text: string): Buffer {
-  const payload = Buffer.from(text, "utf8");
-  const head = Buffer.alloc(8);
-  head[0] = stream;
-  head.writeUInt32BE(payload.length, 4);
-  return Buffer.concat([head, payload]);
-}
-
-type Answer = (seen: Seen, res: ServerResponse) => void;
-
-class FakeEngine {
-  readonly seen: Seen[] = [];
-  readonly routes: { match: RegExp; method: string; answer: Answer }[] = [];
-  private server: Server | undefined;
-  private dir = "";
-  socketPath = "";
-
-  on(method: string, match: RegExp, answer: Answer): this {
-    this.routes.push({ method, match, answer });
-    return this;
-  }
-
-  json(method: string, match: RegExp, value: unknown, status = 200): this {
-    return this.on(method, match, (_seen, res) => {
-      res.writeHead(status, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(value));
-    });
-  }
-
-  async start(): Promise<void> {
-    this.dir = mkdtempSync(join(tmpdir(), "wsp-fake-docker-"));
-    this.socketPath = join(this.dir, "docker.sock");
-    this.server = createServer((req: IncomingMessage, res: ServerResponse) => {
-      const chunks: Buffer[] = [];
-      req.on("data", (c: Buffer) => chunks.push(c));
-      req.on("end", () => {
-        const raw = Buffer.concat(chunks);
-        const url = new URL(req.url ?? "/", "http://docker");
-        const path = url.pathname.replace(/^\/v[\d.]+/, "");
-        let body: unknown;
-        try {
-          body = raw.length > 0 && req.headers["content-type"] === "application/json" ? JSON.parse(raw.toString("utf8")) : undefined;
-        } catch {
-          body = undefined;
-        }
-        const seen: Seen = { method: req.method ?? "", path, query: url.searchParams, body, raw };
-        this.seen.push(seen);
-        const route = this.routes.find(r => r.method === seen.method && r.match.test(path));
-        if (route === undefined) {
-          res.writeHead(404, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ message: `no such route ${seen.method} ${path}` }));
-          return;
-        }
-        route.answer(seen, res);
-      });
-    });
-    await new Promise<void>(done => this.server!.listen(this.socketPath, done));
-  }
-
-  async stop(): Promise<void> {
-    await new Promise<void>(done => this.server?.close(() => done()));
-    rmSync(this.dir, { recursive: true, force: true });
-  }
-
-  took(method: string, path: string): Seen | undefined {
-    return this.seen.find(s => s.method === method && s.path === path);
-  }
-}
+import { FakeEngine, frame } from "./fake-docker-engine.js";
 
 const RUNNING = (id: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
   Id: id,
@@ -130,6 +49,97 @@ describe("DockerBackend against a fake Engine API", () => {
 
   afterEach(async () => {
     await engine.stop();
+  });
+
+  it("says what this computer has left for one more machine", async () => {
+    engine.json("GET", /^\/info$/, { NCPU: 4, MemTotal: 4 * 1024 * 1024 * 1024, DockerRootDir: "/var/lib/docker" });
+    // The listing carries no memory at all, as a real daemon's does not: the limits are read per container.
+    engine.json("GET", /^\/containers\/json$/, [
+      { Id: "a", State: "running", HostConfig: { NetworkMode: "bridge" } },
+      { Id: "b", State: "paused", HostConfig: { NetworkMode: "bridge" } },
+      { Id: "c", State: "exited", HostConfig: { NetworkMode: "bridge" } },
+    ]);
+    engine.json("GET", /^\/containers\/a\/json$/, { Id: "a", State: { Status: "running" }, HostConfig: { Memory: 1024 * 1024 * 1024 } });
+    engine.json("GET", /^\/containers\/b\/json$/, { Id: "b", State: { Status: "paused" }, HostConfig: { Memory: 512 * 1024 * 1024 } });
+    engine.json("GET", /^\/images\/json$/, [{ Id: "sha256:img", Size: 4200, Labels: { "wsp-snapshot": "v1" } }]);
+    const statted: string[] = [];
+    const reading = new DockerBackend({
+      host: `unix://${engine.socketPath}`,
+      statfs: async path => {
+        statted.push(path);
+        return { bavail: 10, bsize: 100 };
+      },
+    });
+    const capacity = await reading.capacity();
+    expect(statted).toEqual(["/var/lib/docker"]);
+    expect(capacity.cores).toBe(4);
+    expect(capacity.memMb).toBe(4096);
+    // Half the box less what the live containers are allowed; the exited one is not one of them.
+    expect(capacity.memRoomMb).toBe(2048 - 1024 - 512);
+    // The most one machine may name here, whatever it asks for: half the box, the share a limit is held to.
+    expect(capacity.machineMemMb).toBe(2048);
+    expect(capacity.diskFreeBytes).toBe(1000);
+    expect(capacity.images).toEqual([{ id: "sha256:img", name: "v1", sizeBytes: 4200 }]);
+    expect(capacity.machines).toEqual({ running: 1, paused: 1 });
+  });
+
+  it("never says the memory room is below none, whatever the containers were given", async () => {
+    engine.json("GET", /^\/info$/, { NCPU: 2, MemTotal: 1024 * 1024 * 1024 });
+    engine.json("GET", /^\/containers\/json$/, [{ Id: "a", State: "running" }]);
+    engine.json("GET", /^\/containers\/a\/json$/, { Id: "a", State: { Status: "running" }, HostConfig: { Memory: 4096 * 1024 * 1024 } });
+    engine.json("GET", /^\/images\/json$/, []);
+    const reading = new DockerBackend({ host: `unix://${engine.socketPath}`, statfs: async () => ({ bavail: 0, bsize: 0 }) });
+    expect((await reading.capacity()).memRoomMb).toBe(0);
+  });
+
+  it("naps by the freezer and wakes from it, where a machine must keep what its processes hold", async () => {
+    engine.json("POST", /^\/containers\/c1\/pause$/, {});
+    engine.json("POST", /^\/containers\/c1\/unpause$/, {});
+    engine.json("GET", /^\/containers\/c1\/json$/, RUNNING("c1"));
+    const machine = await backend.get("c1");
+    await machine.pause();
+    await machine.resume();
+    expect(engine.took("POST", "/containers/c1/pause")).toBeDefined();
+    expect(engine.took("POST", "/containers/c1/unpause")).toBeDefined();
+    expect(backend.capabilities.pauseMode).toBe("memory");
+  });
+
+  it("naps by stopping and wakes by starting where the computer keeps no memory for an idle machine", async () => {
+    const stopping = new DockerBackend({ host: `unix://${engine.socketPath}`, pauseMode: "disk" });
+    engine.json("POST", /^\/containers\/c1\/stop$/, {});
+    engine.json("POST", /^\/containers\/c1\/start$/, {});
+    engine.json("GET", /^\/containers\/c1\/json$/, RUNNING("c1"));
+    const machine = await stopping.get("c1");
+    await machine.pause();
+    await machine.resume();
+    expect(engine.took("POST", "/containers/c1/stop")).toBeDefined();
+    expect(engine.took("POST", "/containers/c1/start")).toBeDefined();
+    expect(stopping.capabilities.pauseMode).toBe("disk");
+  });
+
+  it("reads a stopped container as napping where a nap is a stop, and as gone where it is the freezer", async () => {
+    engine.json("GET", /^\/containers\/c1\/json$/, { ...RUNNING("c1"), State: { Status: "exited" } });
+    engine.json("GET", /^\/containers\/json$/, [{ Id: "c1", State: "exited" }]);
+    const stopping = new DockerBackend({ host: `unix://${engine.socketPath}`, pauseMode: "disk" });
+    expect(await (await stopping.get("c1")).state()).toBe("paused");
+    expect((await stopping.list())[0]!.state).toBe("paused");
+    expect(await (await backend.get("c1")).state()).toBe("gone");
+    expect((await backend.list())[0]!.state).toBe("gone");
+  });
+
+  it("counts every machine it holds, napping ones included, and only what holds memory against the room", async () => {
+    engine.json("GET", /^\/info$/, { NCPU: 4, MemTotal: 4 * 1024 * 1024 * 1024, DockerRootDir: "/" });
+    engine.json("GET", /^\/containers\/json$/, [{ Id: "a", State: "running" }, { Id: "b", State: "exited" }]);
+    engine.json("GET", /^\/containers\/a\/json$/, { Id: "a", State: { Status: "running" }, HostConfig: { Memory: 1024 * 1024 * 1024 } });
+    engine.json("GET", /^\/images\/json$/, []);
+    const stopping = new DockerBackend({ host: `unix://${engine.socketPath}`, pauseMode: "disk", statfs: async () => ({ bavail: 0, bsize: 0 }) });
+    const capacity = await stopping.capacity();
+    // The stopped one is a machine the person still has there, so the count carries it and the memory room does not.
+    expect(capacity.machines).toEqual({ running: 1, paused: 1 });
+    expect(capacity.memRoomMb).toBe(2048 - 1024);
+    // Where a nap is the freezer, a stopped container is a machine that is gone and neither count carries it.
+    const freezing = new DockerBackend({ host: `unix://${engine.socketPath}`, statfs: async () => ({ bavail: 0, bsize: 0 }) });
+    expect((await freezing.capacity()).machines).toEqual({ running: 1, paused: 0 });
   });
 
   it("says what a container can and cannot do", () => {

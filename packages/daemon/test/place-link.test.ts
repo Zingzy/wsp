@@ -2,119 +2,57 @@
 // The link a place holds to its host, against a fake host that is a real ws
 // server with a real ed25519 pair: nothing here fakes a signature, so the
 // handshake the daemon runs is the one the host answers.
-import { createPrivateKey, generateKeyPairSync, sign, verify } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createPrivateKey, sign, verify } from "node:crypto";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { WebSocketServer, type WebSocket as ServerSocket } from "ws";
-import WebSocket from "ws";
-import { placeLinkTranscript, type PlaceFile } from "@wsp/protocol";
-import { PlaceLink, placeBackoffMs, readPlaceFile, writePlaceFile, type LinkOps, type PlaceSelfReport } from "../src/link.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { WebSocketServer } from "ws";
+import { NO_PLACE_FILE_LINE, PLACE_UNKNOWN_REFUSAL, PlaceProveRequest, PlaceReport, hostKeyRefusal, hostQuietLine, linkedLine, placeDaemonPaths, placeLinkTranscript, type PlaceFile } from "@wsp/protocol";
+import { placeBackoffMs, readPlaceFile, writePlaceFile } from "../src/link.js";
+import { closeFakePlaceHosts, fakePlaceHost, listening, placePair, settled } from "./fake-place-host.js";
+import { daemonUnderTest, type DaemonUnderTest, type DaemonUnderTestArgs } from "./harness.js";
 import { rejectedEvents } from "./wire-events.js";
-import { startDaemon, type DaemonHandle } from "../src/main.js";
 
 const dirs: string[] = [];
 const servers: WebSocketServer[] = [];
-const links: PlaceLink[] = [];
-const daemons: DaemonHandle[] = [];
+const daemons: DaemonUnderTest[] = [];
 
 afterEach(async () => {
-  for (const link of links.splice(0)) await link.close();
   for (const d of daemons.splice(0)) await d.close();
   for (const s of servers.splice(0)) await new Promise<void>(done => s.close(() => done()));
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  await closeFakePlaceHosts();
 });
 
-const report = async (): Promise<PlaceSelfReport> => ({
-  name: "old-macbook",
-  platform: "linux",
-  arch: "x64",
-  os: "Linux 6.8.0",
-  shape: { cpu: 4, memMb: 4096 },
-  login: { HOME: "/home/maya", USER: "maya", PATH: "/usr/bin" },
-  docker: true,
-  daemonVersion: 17,
-  agents: [],
-  wsp: ["/usr/bin/wsp"],
-});
-
-function pair(): { publicKey: string; privateKeyPem: string } {
-  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
-  return { publicKey: publicKey.export({ type: "spki", format: "der" }).toString("base64"), privateKeyPem: privateKey.export({ type: "pkcs8", format: "pem" }).toString() };
+/** A fake home joined as a place: the place file and its key where a join puts them under that home. */
+function placeFile(hostUrls: string[], hostPublicKey: string, keyPem: string): { home: string; file: string } {
+  const home = mkdtempSync(join(tmpdir(), "wsp-link-"));
+  dirs.push(home);
+  const at = placeDaemonPaths(home);
+  const file: PlaceFile = { placeId: "p_ab12cd34", name: "old-macbook", hostName: "zingzy-mbp", hostUrls, hostPublicKey, keyPath: at.placeKey, joinedAt: new Date(0).toISOString(), awake: false };
+  writePlaceFile(at.placeFile, file);
+  writeFileSync(at.placeKey, keyPem);
+  return { home, file: at.placeFile };
 }
 
-function placeFile(hostUrls: string[], hostPublicKey: string, keyPem: string): string {
-  const dir = mkdtempSync(join(tmpdir(), "wsp-link-"));
-  dirs.push(dir);
-  const keyPath = join(dir, "place-key.pem");
-  writeFileSync(keyPath, keyPem);
-  const file: PlaceFile = { placeId: "p_ab12cd34", name: "old-macbook", hostName: "zingzy-mbp", hostUrls, hostPublicKey, keyPath, joinedAt: new Date(0).toISOString(), awake: false };
-  const path = join(dir, "place.json");
-  writePlaceFile(path, file);
-  return path;
+/** The daemon a place runs, dialling out on the file under its home; the token is what its own loopback door takes. */
+async function placeDaemon(place: { home: string; file: string }, args: DaemonUnderTestArgs = {}): Promise<DaemonUnderTest> {
+  const d = await daemonUnderTest({ host: "127.0.0.1", port: 0, token: "link-token", kind: "place", root: place.home, home: place.home, placeFile: place.file, rootsPath: placeDaemonPaths(place.home).rootsPath, ...args });
+  daemons.push(d);
+  return d;
 }
 
-/** A host that answers the handshake with a real signature. `wrongTranscript` signs the place's own half instead of
- * its own, which is the one thing a place must refuse. */
-interface FakeHost {
-  url: string;
-  /** How many sockets the place has opened to it. */
-  dials: () => number;
-  /** Every frame the place sent after the handshake, in order. */
-  frames: Record<string, unknown>[];
-  /** The socket the place is holding, once it has proved. */
-  socket: Promise<ServerSocket>;
-  publicKey: string;
-}
-
-async function fakeHost(opts: { key?: { publicKey: string; privateKeyPem: string }; wrongTranscript?: boolean; refuse?: string } = {}): Promise<FakeHost> {
-  const key = opts.key ?? pair();
-  const wss = new WebSocketServer({ host: "127.0.0.1", port: 0 });
-  servers.push(wss);
-  const frames: Record<string, unknown>[] = [];
-  let dials = 0;
-  let held!: (s: ServerSocket) => void;
-  const socket = new Promise<ServerSocket>(done => (held = done));
-  wss.on("connection", ws => {
-    dials++;
-    ws.on("error", () => {});
-    ws.on("message", raw => {
-      const frame = JSON.parse(String(raw)) as Record<string, unknown>;
-      if (frame["op"] === "place.auth") {
-        if (opts.refuse !== undefined) {
-          ws.send(JSON.stringify({ id: frame["id"], ok: false, error: opts.refuse, kind: "auth" }));
-          ws.close(4401, "unauthorized");
-          return;
-        }
-        const placeId = String(frame["placeId"]);
-        const placeNonce = String(frame["nonce"]);
-        const nonce = Buffer.alloc(32, 9).toString("base64");
-        const bytes = opts.wrongTranscript === true ? placeLinkTranscript("place", placeId, placeNonce, nonce) : placeLinkTranscript("host", placeId, placeNonce, nonce);
-        const signature = sign(null, bytes, createPrivateKey(key.privateKeyPem)).toString("base64");
-        ws.send(JSON.stringify({ id: frame["id"], ok: true, nonce, hostPublicKey: key.publicKey, signature }));
-        return;
-      }
-      if (frame["op"] === "place.prove") {
-        ws.send(JSON.stringify({ id: frame["id"], ok: true }));
-        held(ws);
-        return;
-      }
-      frames.push(frame);
-    });
-  });
-  const port = await listening(wss);
-  return { url: `http://127.0.0.1:${port}`, dials: () => dials, frames, socket, publicKey: key.publicKey };
-}
-
-const settled = (ms = 50): Promise<void> => new Promise(done => setTimeout(done, ms));
-
-/** The port a fresh server bound, once it has: address() answers null until the loop turns. */
-const listening = (wss: WebSocketServer): Promise<number> =>
-  new Promise((done, fail) => {
-    wss.once("listening", () => done((wss.address() as { port: number }).port));
-    wss.once("error", fail);
-  });
+/** Waits for one line of the daemon's log. */
+const untilLogged = (d: DaemonUnderTest, test: (line: string) => boolean, timeout = 5_000): Promise<string> =>
+  vi.waitFor(
+    () => {
+      const found = d.log().find(test);
+      expect(found).toBeDefined();
+      return found!;
+    },
+    { timeout, interval: 10 },
+  );
 
 describe("the wait before each attempt", () => {
   it("doubles from two seconds to thirty and stops there", () => {
@@ -123,79 +61,77 @@ describe("the wait before each attempt", () => {
 });
 
 describe("the link a place dials", () => {
-  it("sends place.auth as its first frame and nothing else before it is answered", async () => {
-    const key = pair();
-    const host = await fakeHost({ key });
-    const file = placeFile([host.url], key.publicKey, pair().privateKeyPem);
-    const link = new PlaceLink({ file, report, onLeave: async () => [] }, () => {});
-    links.push(link);
+  it("sends place.auth as its first frame and proves with a report the host reads, before anything else", async () => {
+    const key = placePair();
+    const host = await fakePlaceHost({ key });
+    const place = placeFile([host.url], key.publicKey, placePair().privateKeyPem);
     // The place's own key is not the host's; the file above pins the host's, which is what it verifies against.
-    await settled(200);
-    expect(link.status()).toBe("linked");
+    const d = await placeDaemon(place, { wspArgv: ["/usr/local/bin/node", "/opt/wsp/bin.js"], agents: [{ id: "a1", bin: "sh" }, { id: "b2", bin: "no-such-agent-command" }] });
+    await host.socket;
+    await untilLogged(d, line => line === linkedLine(host.url));
+    // The place asked nothing of the host; what the host saw after the handshake is the daemon's hello and no request.
+    expect(host.frames.filter(f => "op" in f)).toEqual([]);
+    // The report is the daemon's own, off the home and the words it was started with, in the shape the host parses.
+    const proof = PlaceProveRequest.parse(host.proofs[0]);
+    const report = PlaceReport.parse(proof.report);
+    // The agents are the ids off the list it was started with whose command is on PATH now: sh is, the other is not.
+    expect(report).toMatchObject({ name: "old-macbook", dialed: host.url, daemonPort: d.port, wsp: ["/usr/local/bin/node", "/opt/wsp/bin.js"], login: { HOME: place.home }, agents: ["a1"] });
+    expect(report.shape.cpu).toBeGreaterThan(0);
   });
 
   it("dials the second address when the first refuses the connect, and names both in its log", async () => {
-    const key = pair();
-    const host = await fakeHost({ key });
+    const key = placePair();
+    const host = await fakePlaceHost({ key });
     const dead = "http://127.0.0.1:1";
-    const file = placeFile([dead, host.url], key.publicKey, pair().privateKeyPem);
-    const lines: string[] = [];
-    const link = new PlaceLink({ file, report, onLeave: async () => [], log: line => lines.push(line), connectTimeoutMs: 500 }, () => {});
-    links.push(link);
-    await settled(600);
-    expect(link.status()).toBe("linked");
-    expect(lines.join("\n")).toContain(dead);
-    expect(lines.join("\n")).toContain(host.url);
+    const place = placeFile([dead, host.url], key.publicKey, placePair().privateKeyPem);
+    const d = await placeDaemon(place, { linkConnectMs: 500 });
+    await untilLogged(d, line => line === linkedLine(host.url));
+    expect(d.log().join("\n")).toContain(dead);
+    expect(d.log().join("\n")).toContain(host.url);
   });
 
   it("ends the attempt before it sends its report when the host's signature is over the wrong transcript", async () => {
-    const key = pair();
-    const host = await fakeHost({ key, wrongTranscript: true });
-    const file = placeFile([host.url], key.publicKey, pair().privateKeyPem);
-    const lines: string[] = [];
-    const link = new PlaceLink({ file, report, onLeave: async () => [], log: line => lines.push(line), backoffMs: () => 60_000 }, () => {});
-    links.push(link);
-    await settled(200);
-    expect(link.status()).toBe("dialing");
-    expect(lines.join("\n")).toContain("did not prove the key this computer learned at join");
+    const key = placePair();
+    const host = await fakePlaceHost({ key, wrongTranscript: true });
+    const place = placeFile([host.url], key.publicKey, placePair().privateKeyPem);
+    const d = await placeDaemon(place, { linkBackoffMs: 60_000 });
+    await untilLogged(d, line => line === hostKeyRefusal(host.url));
+    await settled(100);
     expect(host.frames).toEqual([]);
+    expect(host.proofs).toEqual([]);
+    expect(d.log()).not.toContain(linkedLine(host.url));
   });
 
   it("refuses a host whose key is not the one this computer pinned", async () => {
-    const host = await fakeHost();
-    const file = placeFile([host.url], pair().publicKey, pair().privateKeyPem);
-    const lines: string[] = [];
-    const link = new PlaceLink({ file, report, onLeave: async () => [], log: line => lines.push(line), backoffMs: () => 60_000 }, () => {});
-    links.push(link);
-    await settled(200);
-    expect(link.status()).toBe("dialing");
-    expect(lines.join("\n")).toContain("nothing was sent to it");
+    const host = await fakePlaceHost();
+    const place = placeFile([host.url], placePair().publicKey, placePair().privateKeyPem);
+    const d = await placeDaemon(place, { linkBackoffMs: 60_000 });
+    await untilLogged(d, line => line === hostKeyRefusal(host.url));
+    await settled(100);
+    expect(host.proofs).toEqual([]);
+    expect(d.log()).not.toContain(linkedLine(host.url));
   });
 
   it("stops dialling for minutes when the host says it holds no such place", async () => {
-    const host = await fakeHost({ refuse: "this host holds no place by that id; join it with a code from wsp add" });
-    const file = placeFile([host.url], pair().publicKey, pair().privateKeyPem);
-    const lines: string[] = [];
-    const link = new PlaceLink({ file, report, onLeave: async () => [], log: line => lines.push(line), refusedRetryMs: 600_000 }, () => {});
-    links.push(link);
-    await settled(200);
-    expect(link.status()).toBe("refused");
-    expect(lines.join("\n")).toContain("holds no place by that id");
+    const host = await fakePlaceHost({ refuse: PLACE_UNKNOWN_REFUSAL });
+    const place = placeFile([host.url], placePair().publicKey, placePair().privateKeyPem);
+    const d = await placeDaemon(place, { linkRefusedRetryMs: 600_000 });
+    await untilLogged(d, line => line.includes("holds no place by that id"));
+    // Refused is a wait of minutes, not the backoff of seconds: no second dial lands in the time a redial would take.
+    await settled(300);
+    expect(host.dials()).toBe(1);
   });
 
   it("says so and waits when this computer holds no place file at all", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "wsp-link-none-"));
-    dirs.push(dir);
-    const lines: string[] = [];
-    const link = new PlaceLink({ file: join(dir, "place.json"), report, onLeave: async () => [], log: line => lines.push(line), refusedRetryMs: 600_000 }, () => {});
-    links.push(link);
-    await settled(100);
-    expect(lines.join("\n")).toContain("wsp join <address> --code <code>");
+    const home = mkdtempSync(join(tmpdir(), "wsp-link-none-"));
+    dirs.push(home);
+    const d = await placeDaemon({ home, file: placeDaemonPaths(home).placeFile }, { linkRefusedRetryMs: 600_000 });
+    await untilLogged(d, line => line === NO_PLACE_FILE_LINE);
   });
 
   it("proves the place's own half against the key on its file, which is what the host verifies", async () => {
-    const key = pair();
-    const mine = pair();
+    const key = placePair();
+    const mine = placePair();
     const wss = new WebSocketServer({ host: "127.0.0.1", port: 0 });
     servers.push(wss);
     let proved: boolean | undefined;
@@ -220,44 +156,29 @@ describe("the link a place dials", () => {
       });
     });
     const port = await listening(wss);
-    const file = placeFile([`http://127.0.0.1:${port}`], key.publicKey, mine.privateKeyPem);
-    const link = new PlaceLink({ file, report, onLeave: async () => [] }, () => {});
-    links.push(link);
-    await settled(200);
-    expect(proved).toBe(true);
+    const place = placeFile([`http://127.0.0.1:${port}`], key.publicKey, mine.privateKeyPem);
+    await placeDaemon(place);
+    await vi.waitFor(() => expect(proved).toBe(true), { timeout: 5_000, interval: 10 });
   });
 
   it("cuts a link that carried no frame at all and dials again", async () => {
-    const key = pair();
-    const host = await fakeHost({ key });
-    const file = placeFile([host.url], key.publicKey, pair().privateKeyPem);
-    const lines: string[] = [];
-    const link = new PlaceLink({ file, report, onLeave: async () => [], log: line => lines.push(line), quietMs: 120, backoffMs: () => 60_000 }, () => {});
-    links.push(link);
-    await settled(400);
-    expect(lines.join("\n")).toContain("cutting the link and dialling again");
-    expect(link.status()).toBe("dialing");
+    const key = placePair();
+    const host = await fakePlaceHost({ key });
+    const place = placeFile([host.url], key.publicKey, placePair().privateKeyPem);
+    const d = await placeDaemon(place, { linkQuietMs: 120, linkBackoffMs: 60_000 });
+    await untilLogged(d, line => line === hostQuietLine(host.url, 0));
+    // Dialling again is the backoff away, a minute here: the link is down and nothing has redialled yet.
+    await settled(100);
+    expect(host.dials()).toBe(1);
   });
 });
 
 describe("the socket a place proved, served as an inbound one", () => {
   it("hands the host a daemon that answers ping and pushes only frames the protocol takes", async () => {
-    const key = pair();
-    const host = await fakeHost({ key });
-    const file = placeFile([host.url], key.publicKey, pair().privateKeyPem);
-    const root = mkdtempSync(join(tmpdir(), "wsp-link-root-"));
-    dirs.push(root);
-    const daemon = await startDaemon({
-      host: "127.0.0.1",
-      port: 0,
-      token: "link-token",
-      kind: "place",
-      root,
-      inboxDir: root,
-      rootsPath: join(root, "roots"),
-      link: { file, report, onLeave: async () => ["the unit", "the key"] },
-    });
-    daemons.push(daemon);
+    const key = placePair();
+    const host = await fakePlaceHost({ key });
+    const place = placeFile([host.url], key.publicKey, placePair().privateKeyPem);
+    await placeDaemon(place);
     const ws = await host.socket;
     const answers: Record<string, unknown>[] = [];
     const events: Record<string, unknown>[] = [];
@@ -285,21 +206,34 @@ describe("the socket a place proved, served as an inbound one", () => {
     expect(rejectedEvents(events)).toEqual([]);
   });
 
-  it("answers place.leave with what the sweep took and then asks for the process to end", async () => {
-    const key = pair();
-    const host = await fakeHost({ key });
-    const file = placeFile([host.url], key.publicKey, pair().privateKeyPem);
-    let ended = 0;
-    let ops: LinkOps | undefined;
-    const link = new PlaceLink({ file, report, onLeave: async () => ["the launchd agent", "/home/maya/.wsp/place.json"], exit: () => ended++ }, (_ws, given) => (ops = given));
-    links.push(link);
-    await settled(200);
-    expect(ops).toBeDefined();
-    expect(await ops!["place.leave"]!()).toEqual({ swept: ["the launchd agent", "/home/maya/.wsp/place.json"] });
-    // The exit is asked for after the reply is on the wire, which is the next turn of the loop.
-    await settled(50);
-    expect(ended).toBe(1);
-    // Nothing dials again: the sweep unloaded the unit, so a redial would be an agent nothing brings back.
+  it("answers place.leave with what the sweep took and then ends the process", async () => {
+    const key = placePair();
+    const host = await fakePlaceHost({ key });
+    const place = placeFile([host.url], key.publicKey, placePair().privateKeyPem);
+    const at = placeDaemonPaths(place.home);
+    // What a join and a daemon leave under the home: the token file beside the place file and its key.
+    writeFileSync(at.tokenPath, "a-token\n");
+    const d = await placeDaemon(place);
+    const ws = await host.socket;
+    const answers: Record<string, unknown>[] = [];
+    ws.on("message", raw => {
+      const f = JSON.parse(String(raw)) as Record<string, unknown>;
+      if (f["type"] === undefined) answers.push(f);
+    });
+    ws.send(JSON.stringify({ id: 21, op: "place.leave" }));
+    const answer = await vi.waitFor(
+      () => {
+        const found = answers.find(a => a["id"] === 21);
+        expect(found).toBeDefined();
+        return found!;
+      },
+      { timeout: 5_000, interval: 10 },
+    );
+    // The sweep is the real one over that home: the place file, its key and the token are gone and named.
+    expect(answer).toMatchObject({ ok: true, swept: [at.placeFile, at.placeKey, at.tokenPath] });
+    for (const path of [at.placeFile, at.placeKey, at.tokenPath]) expect(existsSync(path)).toBe(false);
+    // The process ends after the reply is on the wire, and nothing dials again: the sweep took what would bring it back.
+    await Promise.race([d.exited, settled(5_000).then(() => Promise.reject(new Error("the daemon did not end after the leave")))]);
     const dialed = host.dials();
     await settled(150);
     expect(host.dials()).toBe(dialed);
@@ -308,8 +242,8 @@ describe("the socket a place proved, served as an inbound one", () => {
 
 describe("the place file", () => {
   it("reads back what was written, and a file that is not one reads as none", () => {
-    const key = pair();
-    const path = placeFile(["http://192.168.1.20:4400"], key.publicKey, pair().privateKeyPem);
+    const key = placePair();
+    const { file: path } = placeFile(["http://192.168.1.20:4400"], key.publicKey, placePair().privateKeyPem);
     expect(readPlaceFile(path)?.placeId).toBe("p_ab12cd34");
     writeFileSync(path, "not a place file");
     expect(readPlaceFile(path)).toBeUndefined();

@@ -6,12 +6,8 @@
 // bytes take is the machine's to say, since on a machine somebody else may
 // hold an account the command itself must never name the token.
 import { hasByteRoad, landBytes, type Machine } from "@wsp/engine";
-import { shellQuote } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, shellQuote } from "@wsp/protocol";
 
-/** Mirrors @wsp/daemon's DEFAULT_TOKEN_PATH; the runtime cannot import the daemon package (it only runs inside guests).
- * Where a machine wsp forked keeps the file; a machine the person owns keeps it under their own home, and the
- * kind that reaches it says where. */
-export const DAEMON_TOKEN_PATH = "/root/.wsp-daemon-token";
 /** The rotation script's answer on a machine that has a daemon. */
 export const DAEMON_TOKEN_SET = "WSP_DAEMON_TOKEN_SET";
 /** Its answer on a machine with no daemon: nothing is written. */

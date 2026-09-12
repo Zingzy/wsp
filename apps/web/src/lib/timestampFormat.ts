@@ -23,9 +23,19 @@ export function getTimestampFormatOptions(
 }
 
 /**
+ * The locale every stamp in the app is shaped by while no host has said
+ * otherwise. The shape of a stamp is the app's, not the shell's: left to the
+ * runtime's own locale, one instant reads `Sep 2` in one terminal, `2 Sept` in
+ * another and something else again on a Linux runner, so the same window words
+ * the same moment three ways. Every formatter in this file, and every caller
+ * that spells a stamp of its own, reads this one tag.
+ */
+export const APP_LOCALE = "en-US";
+
+/**
  * Pick the locale to format wall-clock times in, given the locale the host
- * reports. Hosts that report nothing fall back to `undefined`, which is the
- * runtime default and the right answer in a browser.
+ * reports. Hosts that report nothing fall back to the app's own, never to the
+ * runtime's, so a stamp is the same in every window.
  */
 export function resolveTimestampLocale(
   systemLocale: string | null | undefined,
@@ -45,7 +55,7 @@ export function resolveTimestampLocale(
   }
 }
 
-const timestampLocale = resolveTimestampLocale(null);
+const timestampLocale = resolveTimestampLocale(null) ?? APP_LOCALE;
 
 const timestampFormatterCache = new Map<string, Intl.DateTimeFormat>();
 
@@ -75,7 +85,7 @@ export function parseTimestampDate(isoDate: string): Date | null {
 // Deliberately not the host locale: the tooltip's ordinal suffix and
 // day-before-month order below are English, so a localized month alone would
 // read "4th Juni 2026". Localizing the whole label is a separate change.
-const monthNameFormatter = new Intl.DateTimeFormat(undefined, { month: "long" });
+const monthNameFormatter = new Intl.DateTimeFormat(APP_LOCALE, { month: "long" });
 
 function ordinalSuffix(day: number): string {
   const lastTwo = day % 100;
@@ -126,10 +136,23 @@ const numericDateWithYearFormatter = new Intl.DateTimeFormat(timestampLocale, {
 });
 
 /**
+ * How many local calendar days back a moment is: 0 today, 1 yesterday, more
+ * beyond. The one day-boundary reading in the app, since every surface that
+ * says "today" has to agree on where today ends; the words are each caller's.
+ * Boundaries are local calendar days, not 24-hour windows.
+ */
+export function daysBack(date: Date, nowMs: number = Date.now()): number {
+  const now = new Date(nowMs);
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startOfThatDay = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  // Round so DST-shifted 23/25 hour days still count as whole days.
+  return Math.round((startOfToday - startOfThatDay) / 86_400_000);
+}
+
+/**
  * Chat timestamp that adds the date once the message is no longer from today:
  * today `12:34 PM`, yesterday `yesterday at 12:34 PM`, older `8/13 12:34 PM`
  * (locale digit order), with the year included once the calendar year differs.
- * Boundaries are local calendar days, not 24-hour windows.
  */
 export function formatDayAwareTimestamp(
   isoDate: string,
@@ -141,10 +164,7 @@ export function formatDayAwareTimestamp(
   const time = getTimestampFormatter(timestampFormat, false).format(date);
 
   const now = new Date(nowMs);
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const startOfMessageDay = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
-  // Round so DST-shifted 23/25 hour days still count as whole days.
-  const dayDiff = Math.round((startOfToday - startOfMessageDay) / 86_400_000);
+  const dayDiff = daysBack(date, nowMs);
 
   if (dayDiff <= 0) return time;
   if (dayDiff === 1) return `yesterday at ${time}`;

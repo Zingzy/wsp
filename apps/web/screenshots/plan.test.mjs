@@ -103,12 +103,53 @@ describe("the folder a run leaves", () => {
   });
 });
 
+describe("a surface that names its own fixture", () => {
+  it("carries the name onto every shot, and says so in the index", () => {
+    const read = list([{ name: "image", at: "/", fixture: "image-built" }]);
+    expect(shotPlan(read).every(s => s.fixture === "image-built")).toBe(true);
+    expect(indexMarkdown(read, [shotName("image", "light", 1440)], { at: "now", sha: "abc1234", branch: "main" })).toContain("served from the image-built fixture");
+  });
+
+  it("refuses a fixture word that is not a name", () => {
+    expect(() => list([{ name: "image", at: "/", fixture: "../etc" }])).toThrow(/fixture/);
+  });
+
+  it("leaves a surface that names none without one, so it is served the run's own state", () => {
+    expect(shotPlan(list([{ name: "image", at: "/" }])).every(s => s.fixture === undefined)).toBe(true);
+  });
+});
+
 describe("the surfaces list this repo ships", () => {
-  it("reads, and asks for four files per surface", () => {
+  it("reads, and asks for one file per surface, width and theme", () => {
     const read = readSurfaces(JSON.parse(readFileSync(join(HERE, "surfaces.json"), "utf8")));
-    expect(read.surfaces.map(s => s.name)).toEqual(["sidebar", "workspace", "composer-thread", "machine", "cloud-setup", "spawned-thread", "host-asleep", "settings-where", "add-computer"]);
+    expect(read.surfaces.map(s => s.name)).toEqual([
+      "sidebar",
+      "workspace",
+      "composer-thread",
+      "machine",
+      "cloud-setup",
+      "spawned-thread",
+      "host-asleep",
+      "settings-where",
+      "add-computer",
+      "settings-image-fresh",
+      "settings-image-built",
+      "settings-image-sheet",
+      "settings-computer-open",
+      "remove-computer",
+      "add-computer-no-app",
+      "add-computer-ssh",
+      "connect-provider-pick",
+      "connect-provider-key",
+    ]);
     // The one surface shot as a window on another computer, which is the only state the asleep line is drawn in.
     expect(read.surfaces.filter(s => s.remote).map(s => s.name)).toEqual(["host-asleep"]);
-    expect(shotPlan(read)).toHaveLength(read.surfaces.length * 4);
+    // The two served from a state of their own, since an image that is built cannot stand in the same state file
+    // as one that never was.
+    expect(read.surfaces.filter(s => s.fixture !== undefined).map(s => s.fixture)).toEqual(["image-built", "image-built"]);
+    expect(shotPlan(read)).toHaveLength(read.surfaces.length * read.widths.length * 2);
+    // The app's own default window is one of them, so a row that only breaks at 1280 is photographed.
+    expect(read.widths).toContain(1280);
+    expect(read.heights[1280]).toBe(800);
   });
 });

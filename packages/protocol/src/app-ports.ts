@@ -38,6 +38,17 @@ export function wsUrlOf(url: string): string {
   return `${scheme}//${parsed.host}${path}${WS_PATH}`;
 }
 
+/** An address as a person reads and types it: the host and its port, which is the short form joinAddressOf takes
+ * back. The door answers with a whole URL and no screen shows one, since a line carrying `http://` is longer than
+ * the row it sits in and the scheme is the one part nobody has a choice about. */
+export function joinAddressWord(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
 /** Whether an address a host bound reaches no further than the computer it runs on. This decides whether the page
  * is served with the host token inlined and whether the JSON routes ask for a device token, so it is read once here
  * and nowhere else: two readings would let one road stay open while the other closed. */

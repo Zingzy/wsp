@@ -11,6 +11,7 @@ import { useNeedsYouEffect } from "./shell/needsYou.js";
 import { useShellVersionEffect } from "./shell/shellVersion.js";
 import { WorkspaceCreation } from "./shell/WorkspaceCreation.js";
 import { WorkspaceThread } from "./shell/WorkspaceThread.js";
+import { wireHostLive } from "./machine/hostLive.js";
 import { wireTerminals } from "./terminal/wiring.js";
 import { Gallery } from "./gallery/Gallery.js";
 
@@ -50,6 +51,7 @@ export function App({ wsUrl, token, onUnauthorized }: AppProps) {
     return () => { live = false; client.close(); };
   }, [wsUrl, token, bind, setConn, noteGap, onUnauthorized]);
   useEffect(() => wireTerminals(useStore), []);
+  useEffect(() => wireHostLive(useStore), []);
   useThemeEffect();
   useNeedsYouEffect();
   useShellVersionEffect();

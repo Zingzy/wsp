@@ -1,16 +1,16 @@
 import { homedir, userInfo } from "node:os";
 import type { IPty, spawn as PtySpawn } from "node-pty";
-import { workArgv } from "@wsp/protocol";
-import { OPEN_SHIM_PATH } from "./relay.js";
-
-const SCROLLBACK_CAP_BYTES = 256 * 1024;
+import { OPEN_SHIM_PATH, PTY_SCROLLBACK_CAP_BYTES, workArgv } from "@wsp/protocol";
 
 /** node-pty dlopens its native module the moment it is imported, and it ships no prebuild for Linux: a daemon that
  * imported it at load would refuse to start on every Linux where nothing built it, whether or not anyone ever opens
  * a terminal. Every other op this daemon answers needs none of it, so it is loaded at the first pty and not before.
  * The one import, awaited once and kept. */
 let loading: Promise<typeof PtySpawn> | undefined;
-const ptySpawn = (): Promise<typeof PtySpawn> => (loading ??= import("node-pty").then(m => m.spawn));
+// The default export as well as the named one: node-pty is CommonJS, and where this daemon runs inside the packaged
+// wsp command it is inlined into that bundle, where a CommonJS module arrives with a default and no named exports.
+const ptySpawn = (): Promise<typeof PtySpawn> =>
+  (loading ??= import("node-pty").then(m => m.spawn ?? (m as unknown as { default?: { spawn: typeof PtySpawn } }).default?.spawn) as Promise<typeof PtySpawn>);
 
 export interface PtyCreateOpts {
   cols?: number;
@@ -94,13 +94,13 @@ export class PtySession {
   private buffer(d: string): void {
     this.chunks.push(d);
     this.bufferedBytes += Buffer.byteLength(d);
-    while (this.bufferedBytes > SCROLLBACK_CAP_BYTES && this.chunks.length > 1) {
+    while (this.bufferedBytes > PTY_SCROLLBACK_CAP_BYTES && this.chunks.length > 1) {
       const dropped = this.chunks.shift()!;
       this.bufferedBytes -= Buffer.byteLength(dropped);
     }
     const head = this.chunks[0];
-    if (head !== undefined && this.chunks.length === 1 && this.bufferedBytes > SCROLLBACK_CAP_BYTES) {
-      const trimmed = head.slice(-SCROLLBACK_CAP_BYTES);
+    if (head !== undefined && this.chunks.length === 1 && this.bufferedBytes > PTY_SCROLLBACK_CAP_BYTES) {
+      const trimmed = head.slice(-PTY_SCROLLBACK_CAP_BYTES);
       this.chunks[0] = trimmed;
       this.bufferedBytes = Buffer.byteLength(trimmed);
     }

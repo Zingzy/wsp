@@ -2,56 +2,55 @@
   {
     "id": 2,
     "op": "place.prove",
-    "signature": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC==",
+    "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
     "report": {
-      "name": "studio",
-      "platform": "darwin",
-      "arch": "arm64",
-      "os": "macOS 15.6",
+      "name": "old-macbook",
+      "platform": "linux",
+      "arch": "x64",
+      "os": "Linux 6.8.0",
       "shape": {
-        "cpu": 8,
-        "memMb": 16384
+        "cpu": 4,
+        "memMb": 4096
       },
-      "diskFreeBytes": 123456789,
+      "diskFreeBytes": 1024,
       "login": {
-        "HOME": "/Users/me",
-        "USER": "me",
+        "HOME": "/home/maya",
+        "USER": "maya",
         "PATH": "/usr/bin"
       },
       "docker": true,
       "daemonVersion": 17,
-      "daemonPort": 51234,
+      "daemonPort": 41234,
       "wsp": [
-        "node",
-        "/Users/me/wsp/dist/bin.js"
+        "/usr/bin/wsp"
       ],
-      "dialed": "http://192.168.1.20:7080",
+      "dialed": "http://192.168.1.20:4400",
       "agents": [
-        "one",
-        "two"
+        "a1",
+        "b2"
       ]
     }
   },
   {
     "id": 2,
     "op": "place.prove",
-    "signature": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC==",
+    "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
     "report": {
       "name": "box",
-      "platform": "linux",
-      "arch": "x86_64",
-      "os": "Ubuntu 24.04",
+      "platform": "darwin",
+      "arch": "arm64",
+      "os": "Darwin 25.4.0",
       "shape": {
-        "cpu": 4,
-        "memMb": 8192
+        "cpu": 8,
+        "memMb": 16384
       },
       "login": {},
       "docker": false,
-      "daemonVersion": 17,
+      "daemonVersion": 0,
       "wsp": [
         "wsp"
       ],
-      "dialed": "https://relay.example",
+      "dialed": "https://relay.example.com",
       "agents": []
     }
   }

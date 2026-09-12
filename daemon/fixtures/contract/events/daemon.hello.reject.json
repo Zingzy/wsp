@@ -5,11 +5,6 @@
   {
     "type": "daemon.hello",
     "root": "/root",
-    "version": "17"
-  },
-  {
-    "type": "daemon.hello",
-    "root": "/root",
     "version": 1.5
   }
 ]

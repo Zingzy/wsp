@@ -5,7 +5,7 @@
 // somebody owns must spell one that needs no root and touches nothing of
 // theirs outside one folder under their home.
 import { describe, expect, it } from "vitest";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,7 +13,7 @@ import { promisify } from "node:util";
 import { machineLacksLine, machineLacksShort, machineNeverAnswered, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, sshDaemonPaths } from "@wsp/protocol";
 import { putBytesScript } from "@wsp/engine";
 import type { Machine } from "@wsp/engine";
-import { BOOT_SCRIPT, CLOUD_PLACE, CONTAINER_PLACE, DAEMON_GONE_LINE, daemonLogCommand, guestPlace, SYSTEMD, deployDaemon, PREFLIGHT_OK_LINE, preflightScript, DAEMON_UNIT, daemonUnit, deployScript, removeDaemonScript, sshDaemonPlace, stageDaemonBundle, startMjs, stopDaemonScript } from "../src/doctor.js";
+import { BOOT_SCRIPT, CLOUD_PLACE, JOINED, joinedPlace, CONTAINER_PLACE, DAEMON_GONE_LINE, daemonLogCommand, guestPlace, SYSTEMD, deployDaemon, PREFLIGHT_OK_LINE, preflightScript, profileSourceLine, DAEMON_UNIT, daemonUnit, deployScript, removeDaemonScript, sshDaemonPlace, stageDaemonBundle, startMjs, stopDaemonScript } from "../src/doctor.js";
 
 const LOGIN = { home: "/home/maya", path: "/usr/local/bin:/usr/bin:/bin" };
 
@@ -40,7 +40,18 @@ function fakeMachine(over: { preflight?: { exitCode: number; stdout: string; std
 function emptyBundle(): string {
   const dir = mkdtempSync(join(tmpdir(), "wsp-bundle-"));
   mkdirSync(join(dir, "dist"), { recursive: true });
+  writeFileSync(join(dir, "dist", "index.js"), "");
   writeFileSync(join(dir, "package.json"), JSON.stringify({ dependencies: {} }));
+  return dir;
+}
+/** The wsp command as npm lays the published package out, which is all a bundle takes of it: without one every
+ * stage throws before the deploy reaches the machine, and a test reading what landed reads an empty list instead
+ * of a failure. */
+function emptyCli(): string {
+  const dir = mkdtempSync(join(tmpdir(), "wsp-cli-"));
+  mkdirSync(join(dir, "dist"), { recursive: true });
+  writeFileSync(join(dir, "dist", "bin.js"), "");
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@zingzy/wsp", version: "0.0.0" }));
   return dir;
 }
 const script = (): string => deployScript(sshDaemonPlace(LOGIN), "aabbcc");
@@ -142,7 +153,7 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
     expect(start).toContain('host: "127.0.0.1"');
     expect(start).toContain("port: 0");
     expect(start).toContain('kind: "ssh"');
-    expect(start).toContain('writeFileSync("/home/maya/.wsp/daemon.port", String(d.port))');
+    expect(start).toContain('portFile: "/home/maya/.wsp/daemon.port"');
     expect(start).not.toContain("0.0.0.0");
     const s = script();
     // The old port file goes before the restart, so the wait cannot read the port of the daemon just replaced.
@@ -182,8 +193,9 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
   it("adds its BROWSER line to the person's own login file once, behind its own name", () => {
     const s = script();
     expect(s).toContain("printf 'export BROWSER=%s\\nunset DISPLAY\\n' '/home/maya/.local/bin/wsp-open' > '/home/maya/.wsp/profile.sh'");
-    // Their .profile is theirs: the line is added only when it is not there, so a second deploy adds nothing.
-    expect(s).toContain("grep -q '/home/maya/.wsp/profile.sh' '/home/maya/.profile' 2>/dev/null || printf '. %s\\n' '/home/maya/.wsp/profile.sh' >> '/home/maya/.profile'");
+    // Their .profile is theirs: the line is added only when it is not there, so a second deploy adds nothing, and
+    // the line itself is the one the sweep on either road matches by.
+    expect(s).toContain(`grep -q '/home/maya/.wsp/profile.sh' '/home/maya/.profile' 2>/dev/null || printf '%s\\n' '${profileSourceLine("/home/maya/.wsp/profile.sh")}' >> '/home/maya/.profile'`);
   });
 
   it("never writes the token into a command, since every account on the machine can read a running one", () => {
@@ -241,14 +253,14 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
 
     // A machine that refuses is told what it needs, and had nothing put on it: no write, no run but the ask.
     const refused = fakeMachine({ preflight: { exitCode: 1, stdout: `${NO_BUILD_TOOLS_LINE}\n` } });
-    await expect(deployDaemon(refused.machine, { place, daemonDir: emptyBundle() })).rejects.toThrow(NO_BUILD_TOOLS_LINE);
+    await expect(deployDaemon(refused.machine, { place, daemonDir: emptyBundle(), cliDir: emptyCli() })).rejects.toThrow(NO_BUILD_TOOLS_LINE);
     expect(refused.wrote).toEqual([]);
     expect(refused.ran).toEqual([ask]);
 
     // A place with nothing to ask does not spend a round trip on it, which is every fork.
     expect(CLOUD_PLACE.preflight).toEqual([]);
     const guest = fakeMachine();
-    await deployDaemon(guest.machine, { place: CLOUD_PLACE, daemonDir: emptyBundle() }).catch(() => {});
+    await deployDaemon(guest.machine, { place: CLOUD_PLACE, daemonDir: emptyBundle(), cliDir: emptyCli() }).catch(() => {});
     expect(guest.ran.some(r => r.includes(PREFLIGHT_OK_LINE))).toBe(false);
   });
 
@@ -256,13 +268,13 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
     const place = sshDaemonPlace(LOGIN);
     // The refusing line echoes its sentence and exits 1, so the words are the machine's own and are marked as
     // what it has not got: that is the sentence a row shows.
-    const refused = await deployDaemon(fakeMachine({ preflight: { exitCode: 1, stdout: `${NO_BUILD_TOOLS_LINE}\n` } }).machine, { place, daemonDir: emptyBundle() }).catch((e: unknown) => e);
+    const refused = await deployDaemon(fakeMachine({ preflight: { exitCode: 1, stdout: `${NO_BUILD_TOOLS_LINE}\n` } }).machine, { place, daemonDir: emptyBundle(), cliDir: emptyCli() }).catch((e: unknown) => e);
     expect(machineLacksLine(refused)).toBe(NO_BUILD_TOOLS_LINE);
     expect(machineNeverAnswered(refused)).toBe(false);
 
     // A box that is switched off: nothing ran on it, so ssh answers 255 with its own words on stderr and nothing
     // on stdout. Those words say nothing about what that machine has, so they carry no lack and never reach a row.
-    const off = await deployDaemon(fakeMachine({ preflight: { exitCode: 255, stdout: "", stderr: "ssh: connect to host box port 2222: Connection refused\n" } }).machine, { place, daemonDir: emptyBundle() }).catch((e: unknown) => e);
+    const off = await deployDaemon(fakeMachine({ preflight: { exitCode: 255, stdout: "", stderr: "ssh: connect to host box port 2222: Connection refused\n" } }).machine, { place, daemonDir: emptyBundle(), cliDir: emptyCli() }).catch((e: unknown) => e);
     expect(machineLacksLine(off)).toBeUndefined();
     expect(machineNeverAnswered(off)).toBe(true);
     expect((off as Error).message).toContain("Connection refused");
@@ -351,13 +363,13 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
       writeFileSync(join(daemonDir, "package.json"), JSON.stringify({ dependencies: { ws: "^8" } }));
       // A stand-in daemon that reports what start.mjs asked of it, so the options the machine gets are read and
       // not only the text of the file.
-      writeFileSync(join(daemonDir, "dist", "index.js"), 'export const OPEN_SOCKET_PATH = "/root/.wsp/open.sock";\nexport async function startDaemon(o) { console.log(JSON.stringify(o)); return { port: 41234 }; }\n');
+      writeFileSync(join(daemonDir, "dist", "index.js"), 'export const OPEN_SOCKET_PATH = "/root/.wsp/open.sock";\n' + "export const daemonListeningLine = (host, port) => `wsp-daemon listening on ${host}:${port}`;\n" + 'export async function startDaemon(o) { console.log(JSON.stringify(o)); return { port: 41234 }; }\n');
       // Run under a home on this computer, so the start script's own writes land somewhere this test owns.
       const home = join(dir, "home");
       const at = sshDaemonPaths(home);
       mkdirSync(at.wsp, { recursive: true });
       const stage = join(dir, "stage");
-      await stageDaemonBundle(stage, sshDaemonPlace({ home, path: LOGIN.path }), daemonDir);
+      await stageDaemonBundle(stage, sshDaemonPlace({ home, path: LOGIN.path }), daemonDir, emptyCli());
       expect(readFileSync(join(stage, "wsp-open"), "utf8")).toContain(`--unix-socket '${at.openSocket}'`);
       const { stdout } = await promisify(execFile)(process.execPath, [join(stage, "start.mjs")], { env: { PATH: process.env["PATH"] ?? "", HOME: home } });
       expect(JSON.parse(stdout.split("\n")[0]!)).toEqual({
@@ -370,12 +382,86 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
         inboxDir: at.inbox,
         manifest: { path: at.manifestPath },
         openSocketPath: at.openSocket,
+        // The daemon writes the port it bound there itself: the one thing the host cannot know beforehand.
+        portFile: at.portFile,
       });
       expect(stdout).toContain("wsp-daemon listening on 127.0.0.1:41234");
-      // The port it bound is written where the host reads it: the one thing the host cannot know beforehand.
-      expect(readFileSync(at.portFile, "utf8")).toBe("41234");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("the place a computer joined over ssh keeps its agent", () => {
+  const JOIN = { hostUrls: ["http://192.168.1.20:4400", "https://p_x.example.com"], codeFile: "/home/maya/.wsp/join-code", name: "box" };
+  const joined = (): string => deployScript(joinedPlace(LOGIN, JOIN), "aabbcc");
+
+  it("runs the computer's own join, at every address this host answers on and with the code read off a file", () => {
+    const s = joined();
+    expect(s).toContain(
+      "'/home/maya/.wsp/daemon/node' '/home/maya/.wsp/daemon/wsp/dist/bin.js' join 'http://192.168.1.20:4400' 'https://p_x.example.com' --code-file '/home/maya/.wsp/join-code' --name 'box'",
+    );
+    // The code never sits in a command line, where every account on that computer could read it while it runs.
+    expect(s).not.toContain("--code ");
+  });
+
+  it("writes no unit of its own, because the join it runs installs the one that holds the agent up", () => {
+    const s = joined();
+    expect(s).not.toContain(DAEMON_UNIT);
+    expect(s).not.toContain("systemctl --user enable");
+    // What it waits on is the file that says this computer belongs to a wsp.
+    expect(s).toContain("[ -s '/home/maya/.wsp/place.json' ] && echo DAEMON_UP || echo DAEMON_DOWN");
+  });
+
+  it("takes the code off that computer however the deploy ends, armed before the first line that writes", () => {
+    const s = joined();
+    expect(s).toContain(`trap "rm -f '/home/maya/.wsp/join-code'" EXIT`);
+    // Before anything lands: a deploy that dies at the node download must leave no code on their disk either.
+    expect(s.indexOf("trap ")).toBeLessThan(s.indexOf("tar -xzf"));
+    // Every other place carries no trap at all, so what a fork's deploy writes is what it always wrote.
+    expect(deployScript(CLOUD_PLACE, "aabbcc")).not.toContain("trap ");
+    expect(script()).not.toContain("trap ");
+  });
+
+  it("parses as a shell script, and the trap takes the code off however the deploy ends", () => {
+    const home = mkdtempSync(join(tmpdir(), "wsp-trap-"));
+    mkdirSync(`${home}/.wsp`, { recursive: true });
+    const codeFile = `${home}/.wsp/join-code`;
+    const place = joinedPlace({ home, path: LOGIN.path }, { hostUrls: ["http://10.0.0.2:4400"], codeFile, name: "box" });
+    const whole = deployScript(place, "aabbcc");
+    const path = `${home}/deploy.sh`;
+    // bash reads the whole file before it runs a line, so a quoting fault anywhere in it is a parse error here.
+    writeFileSync(path, whole);
+    execFileSync("bash", ["-n", path]);
+    // The trap and then a line that fails, which is every deploy that dies before the join spends the code.
+    writeFileSync(codeFile, "7QK3M2VD\n");
+    writeFileSync(path, `${whole.split("\n").slice(0, 4).join("\n")}\nfalse\n`);
+    expect(() => execFileSync("bash", [path], { stdio: "ignore" })).toThrow();
+    expect(existsSync(codeFile)).toBe(false);
+  });
+
+  it("puts the native terminal module where the packaged command looks for it, beside its own bundle", () => {
+    expect(joined()).toContain("ln -sfn '/home/maya/.wsp/daemon/node_modules/node-pty/build' '/home/maya/.wsp/daemon/wsp/build'");
+  });
+
+  it("keeps every path the ssh road lays down, so one sweep takes the lot however the agent got there", () => {
+    const place = joinedPlace(LOGIN, JOIN);
+    const { supervise: _ssh, kind: _k, ...ssh } = sshDaemonPlace(LOGIN);
+    const { supervise: _joined, kind: _jk, join: _j, onExit: _x, ...rest } = place;
+    expect(rest).toEqual(ssh);
+    expect(place.kind).toBe("place");
+  });
+
+  it("says so when a place it is given names no wsp to join, rather than writing a join line with nothing in it", () => {
+    expect(() => JOINED.start(sshDaemonPlace(LOGIN))).toThrow("names no wsp to join");
+  });
+
+  it("lands whatever else that place's script reads off disk by the byte road, never in a command", async () => {
+    const place = joinedPlace(LOGIN, JOIN);
+    const box = fakeMachine();
+    await deployDaemon(box.machine, { place, daemonDir: emptyBundle(), cliDir: emptyCli(), land: [{ path: place.join!.codeFile, bytes: new TextEncoder().encode("7QK3M2VD\n") }] }).catch(() => {});
+    // The bundle, the token and then the code, each over the byte road, before one command names any of them.
+    expect(box.wrote).toEqual([place.bundle, place.tokenPath, "/home/maya/.wsp/join-code"]);
+    expect(box.ran.join("\n")).not.toContain("7QK3M2VD");
   });
 });

@@ -23,7 +23,7 @@ import { repoAbsence } from "../../adapt/git";
 import { cn } from "../../lib/utils";
 import { gitStatus } from "../../terminal/daemon-fs";
 import type { TerminalWire } from "../../terminal/link";
-import { Button } from "../ui/button";
+import { Button, BUTTON_GLYPH_INSET } from "../ui/button";
 import { Menu, MenuGroup, MenuItem, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ComposerSurface } from "./ComposerSurface";
@@ -60,13 +60,32 @@ export function canPickFolder(thread: ChatThreadHandle): boolean {
   return thread.hydrated && (thread.fresh || (entries.length === 0 && !running && cwd === null));
 }
 
-/** Sized like the picker button (size xs), so the row does not move when the label replaces it. */
-const labelClass = "inline-flex h-7 min-w-0 items-center gap-1 px-2 text-sm text-muted-foreground/70 sm:h-6 sm:text-xs";
+/** The size both the folder and the branch wear, the picker button's (size xs), so the row does not move when the
+ * label replaces the button. */
+const slotClass = "inline-flex h-7 items-center gap-1 px-2 text-sm text-muted-foreground/70 sm:h-6 sm:text-xs";
+/** The folder in either form: the one item in the row that gives its width up, and that keeps what it cannot hold
+ * inside its own box, so a long path is cut at its edge rather than drawn over the branch. */
+const folderItemClass = "min-w-0 shrink overflow-hidden";
+/** The path, cut at its head: the end of a path is the part a person recognises, so the ellipsis goes on the left,
+ * which is what a right-to-left box gives. The isolate keeps the path's own order inside that box. */
+const folderPathClass = "min-w-0 truncate font-mono [direction:rtl]";
+/** The button's own glyph inset, carried here so the path starts on the same pixel in both forms and does not step
+ * sideways when the picker replaces the label. */
+const labelClass = cn(slotClass, folderItemClass, BUTTON_GLYPH_INSET);
 
 const LOCKED_FOLDER_NOTE = "The folder this thread's harness runs in. A cd inside the agent's shell does not move it; start a new thread to work from another folder.";
 const BRANCH_NOTE = "The folder's branch as the workspace reports it. Nothing here switches it; check out another branch from the terminal.";
 /** The branch slot keeps the label's height while empty, so the row does not move when a branch arrives. */
-const branchSlotClass = cn(labelClass, "shrink-0 font-mono");
+const branchSlotClass = cn(slotClass, "shrink-0 font-mono");
+
+/** The folder's path as both forms of the row draw it. */
+function FolderPath({ path }: { path: string }) {
+  return (
+    <span className={folderPathClass}>
+      <bdi dir="ltr">{path}</bdi>
+    </span>
+  );
+}
 
 function FolderMenu({
   workspaceId,
@@ -107,12 +126,12 @@ function FolderMenu({
     >
       <MenuTrigger
         render={<Button type="button" variant="ghost" size="xs" />}
-        className="min-w-0 justify-start font-medium text-muted-foreground/70 hover:text-foreground/80"
+        className={cn(folderItemClass, "justify-start font-medium text-muted-foreground/70 hover:text-foreground/80")}
         aria-label={`Working folder: ${folder}`}
         data-composer-folder={folder}
       >
         <FolderIcon className="size-3 shrink-0" />
-        <span className="min-w-0 truncate font-mono">{folder}</span>
+        <FolderPath path={folder} />
         <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
       </MenuTrigger>
       <MenuPopup align="start" side="top" className="w-72">
@@ -209,7 +228,7 @@ export function ComposerCheckoutRow({
 
   return (
     <ComposerSurface.ContextStrip data-composer-checkout data-pickable={pickable || undefined}>
-      <div className="flex min-w-10 flex-1 items-center gap-1">
+      <div className="flex min-w-0 flex-1 items-center gap-1">
         {pickable && canPick ? (
           <FolderMenu workspaceId={workspaceId} roots={roots} folder={folder} open={pickerOpen} onOpenChange={onPickerOpenChange} onPick={dir => choose(workspaceId, dir)} />
         ) : (
@@ -217,7 +236,7 @@ export function ComposerCheckoutRow({
             <Tooltip>
               <TooltipTrigger render={<span className={labelClass} tabIndex={0} data-composer-folder={folder ?? undefined} />}>
                 {branch.kind === "repo" ? <FolderGitIcon className="size-3 shrink-0" /> : <FolderIcon className="size-3 shrink-0" />}
-                <span className="min-w-0 truncate font-mono">{folder ?? ""}</span>
+                <FolderPath path={folder ?? ""} />
               </TooltipTrigger>
               <TooltipPopup side="top" align="start" className="max-w-72">
                 {LOCKED_FOLDER_NOTE}

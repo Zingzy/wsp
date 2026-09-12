@@ -15,7 +15,7 @@ import { keptLog, labLines } from "./lab.mjs";
 
 describe("the fixtures a lab serves", () => {
   it("has one per kind of person the testers play", () => {
-    expect(FIXTURE_NAMES).toEqual(["mac-in-use", "mac-only", "mac-and-laptop", "mac-and-vps", "ascii-only", "solari-only", "both-providers", "no-sign-in", "orchestrator"]);
+    expect(FIXTURE_NAMES).toEqual(["mac-in-use", "mac-only", "mac-and-laptop", "mac-and-vps", "ascii-only", "solari-only", "both-providers", "no-sign-in", "orchestrator", "image-built"]);
   });
 
   it("gives the two personas who have this computer and nothing else an empty window named after it", () => {
@@ -54,7 +54,7 @@ describe("the fixtures a lab serves", () => {
         // The key is the id: the store reads a collection as one document per id, so a row filed under another
         // key would load as a workspace nothing can name.
         expect([name, state.workspaces[w.id]]).toEqual([name, w]);
-        expect([name, w.kind]).toEqual([name, w.kind === "local" ? "local" : "cloud"]);
+        expect([name, ["local", "place", "cloud"].includes(w.kind)]).toEqual([name, true]);
         expect([name, typeof w.name, typeof w.machineId, typeof w.phase]).toEqual([name, "string", "string", "string"]);
         // A fork boots from the image the manifest's head names; a local machine forks from nothing.
         if (w.kind === "cloud") expect([name, w.golden]).toEqual([name, state.goldens.default.versions.at(-1).snapshotId]);
@@ -106,6 +106,7 @@ describe("the provider a fixture's host runs under", () => {
       "both-providers": "fake",
       "no-sign-in": "none",
       orchestrator: "fake",
+      "image-built": "fake",
     });
   });
 
