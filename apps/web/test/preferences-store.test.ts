@@ -213,11 +213,23 @@ describe("the preferences record in the store", () => {
     expect(useStore.getState().settingsOpen).toBe(false);
   });
 
-  it("with labs off the settings page never opens: the chord toggles nothing and the palette road is shut", () => {
+  it("opens with labs off too: the page is where a person finds the computers their agents run on, and the labs flag gates the picks inside it", () => {
     useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: false } });
+    useStore.getState().toggleSettings();
+    expect(useStore.getState().settingsOpen).toBe(true);
     useStore.getState().toggleSettings();
     expect(useStore.getState().settingsOpen).toBe(false);
     useStore.getState().openSettings();
-    expect(useStore.getState().settingsOpen).toBe(false);
+    expect(useStore.getState().settingsOpen).toBe(true);
+  });
+
+  it("shuts the Add a computer sheet with the page, whichever road shut it", () => {
+    useStore.getState().openAddComputer();
+    expect(useStore.getState()).toMatchObject({ settingsOpen: true, addComputerOpen: true });
+    useStore.getState().closeSettings();
+    expect(useStore.getState()).toMatchObject({ settingsOpen: false, addComputerOpen: false });
+    useStore.getState().openAddComputer();
+    useStore.getState().toggleSettings();
+    expect(useStore.getState()).toMatchObject({ settingsOpen: false, addComputerOpen: false });
   });
 });

@@ -217,7 +217,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
       served.push(ports);
       // The host starts only once the golden is on the account and in the store: a host that fails cannot lose it.
       expect(goldenHead(await rt.golden.get())).toBeDefined();
-      const handle: HostHandle = { port: 4400, wsPort: 4410, authToken: "tok", ...roadsOf(rt, trail, imports), close: async () => void (counters.closed += 1) };
+      const handle: HostHandle = { port: 4400, wsPort: 4410, authToken: "tok", door: { open: async () => ({ port: 4420, addresses: ["http://192.168.1.20:4420"] }), port: () => 4420, close: async () => {} }, ...roadsOf(rt, trail, imports), close: async () => void (counters.closed += 1) };
       return handle;
     },
     daemon: async () => ({ link: link.dial(), close: () => {} }),
@@ -348,7 +348,7 @@ async function bootedOnly(f: Fake): Promise<void> {
 /** Workspace roads whose fork is refused, for runs that test what comes before the first workspace. */
 const quietRoads: WorkspaceRoads = { createWorkspace: async () => { throw new Error("no workspace in this fixture"); }, createLocalWorkspace: async () => { throw new Error("no local workspace in this fixture"); }, ...fakeProjects([], []) };
 /** A host whose first-workspace fork is refused, for the same runs on a terminal. */
-const quietHost = () => async (): Promise<HostHandle> => ({ port: 4400, wsPort: 4410, authToken: "tok", ...quietRoads, close: async () => {} });
+const quietHost = () => async (): Promise<HostHandle> => ({ port: 4400, wsPort: 4410, authToken: "tok", door: { open: async () => ({ port: 4420, addresses: ["http://192.168.1.20:4420"] }), port: () => 4420, close: async () => {} }, ...quietRoads, close: async () => {} });
 
 const dirs: string[] = [];
 const servers: Server[] = [];

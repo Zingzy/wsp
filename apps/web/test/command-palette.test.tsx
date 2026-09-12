@@ -5,7 +5,7 @@
 import { act, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, PLACES_WORDS, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { SIDEBAR_MODE_WORDS } from "../src/actions/format.js";
 import { RECENT_THREAD_LIMIT } from "../src/components/palette/CommandPalette.logic.js";
 import { SidebarProvider, useSidebar } from "../src/components/ui/sidebar.js";
@@ -171,6 +171,16 @@ describe("command palette", () => {
     expect(inPalette().getByText("fix the flaky test")).toBeTruthy();
     mod("k");
     await waitFor(() => expect(palette()).toBeNull());
+  });
+
+  it("carries Add a computer, which opens Settings with the sheet over it", async () => {
+    await mountShell();
+    mod("k");
+    await waitFor(() => expect(palette()).not.toBeNull());
+    fireEvent.click(inPalette().getByText(PLACES_WORDS.addComputer));
+    await waitFor(() => expect(palette()).toBeNull());
+    expect(useStore.getState().settingsOpen).toBe(true);
+    expect(useStore.getState().addComputerOpen).toBe(true);
   });
 
   it("filters by query and switches workspace from a row", async () => {

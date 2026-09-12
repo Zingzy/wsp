@@ -12,6 +12,7 @@ import { SidebarProvider } from "../src/components/ui/sidebar.js";
 import { getLive, resetLive } from "../src/machine/live.js";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
+import { SETTINGS_WORDS } from "../src/settings/format.js";
 import { statusOf } from "./workspace-status.js";
 import { onNewThreadRequest, requestProjectTrip, requestRenameWorkspace } from "../src/shell/shellRequests.js";
 import { useSpaceTheme } from "../src/sidebar/sidebarMode.js";
@@ -939,7 +940,7 @@ describe("the Workspaces section row", () => {
     expect(label.className).not.toContain("text-sm");
   });
 
-  it("the new-workspace glyph sits at the row's right edge and opens the dialog; the footer has no New workspace row", async () => {
+  it("the new-workspace glyph sits at the row's right edge and opens the dialog; the footer holds the Settings row and no New workspace one", async () => {
     await mount(fakeApi([API], [status(API)]), "api");
     const buttons = screen.getAllByRole("button", { name: "New workspace" });
     expect(buttons).toHaveLength(1);
@@ -950,7 +951,9 @@ describe("the Workspaces section row", () => {
     expect(glyph.textContent).toBe("");
     // Quiet at rest like the rows' own glyphs; the hover brings it up.
     expect(glyph.className).toContain("text-sidebar-muted-foreground");
-    expect(document.querySelector("[data-slot=sidebar-footer]")!.textContent).toBe("");
+    // The footer is the Settings row's home and nothing else's here: the door a person finds without the chord.
+    expect(document.querySelector("[data-slot=sidebar-footer]")!.textContent).toBe(`${SETTINGS_WORDS.title}⌘,`);
+    expect(document.querySelector("[data-slot=sidebar-footer] [data-k=settings-row]")).not.toBeNull();
     fireEvent.click(glyph);
     expect(await screen.findByRole("dialog", { name: "New workspace" })).toBeDefined();
   });

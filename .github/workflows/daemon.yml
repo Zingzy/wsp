@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: daemon
+
+# The Rust daemon under daemon/ has its own gate, run on every pull request
+# and every push to main that touches it: format, lints as errors, the tests,
+# the release build and the static musl build. It sits in its own workflow so
+# the paths filter leaves the node jobs in ci.yml exactly as they are.
+on:
+  pull_request:
+    paths:
+      - "daemon/**"
+      - ".github/workflows/daemon.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "daemon/**"
+      - ".github/workflows/daemon.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daemon-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  daemon-rust:
+    name: Format, lint, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: daemon
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain from rust-toolchain.toml
+        run: |
+          rustup toolchain install
+          rustup show
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            daemon/target
+          key: daemon-rust-${{ runner.os }}-${{ hashFiles('daemon/Cargo.lock', 'daemon/rust-toolchain.toml') }}
+          restore-keys: |
+            daemon-rust-${{ runner.os }}-
+      - name: Format
+        run: cargo fmt --check
+      - name: Lints
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test
+      - name: Release build
+        run: cargo build --release
+      - name: Static musl build
+        run: cargo build --release --target x86_64-unknown-linux-musl

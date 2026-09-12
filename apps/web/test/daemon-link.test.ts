@@ -51,7 +51,7 @@ describe("connectDaemonLink over the host's relay", () => {
     const statuses: DaemonLinkStatus[] = [];
     link = connect(harness, { onStatus: s => statuses.push(s) }, e => events.push(e));
     await until(() => link!.status() === "live");
-    expect(statuses).toEqual(["connecting", "live"]);
+    expect(statuses).toEqual(["opening", "live"]);
     // The daemon's hello is the first thing on a fresh channel, so the pane knows the root before anything else.
     expect(events[0]).toMatchObject({ type: "daemon.hello" });
 
@@ -102,7 +102,8 @@ describe("connectDaemonLink over the host's relay", () => {
     // A link refused at the door never says reconnecting: it holds the door's sentence while it keeps trying.
     await new Promise(r => setTimeout(r, 200));
     expect(link.status()).toBe("refused");
-    expect(statuses.filter(s => s === "connecting")).toHaveLength(1);
+    expect(statuses).not.toContain("connecting");
+    expect(statuses.filter(s => s === "opening")).toHaveLength(1);
     expect(statuses).not.toContain("live");
 
     // The door opening later needs no reload: the next dial through it goes live.
@@ -127,7 +128,8 @@ describe("connectDaemonLink over the host's relay", () => {
     expect(link.status()).toBe("refused");
     expect(link.refusal()).toBe(said);
     expect(statuses).not.toContain("live");
-    expect(statuses.filter(s => s === "connecting")).toHaveLength(1);
+    expect(statuses).not.toContain("connecting");
+    expect(statuses.filter(s => s === "opening")).toHaveLength(1);
     expect(statuses.filter(s => s === "refused")).toHaveLength(1);
 
     // Only a dial that gets through ends it.

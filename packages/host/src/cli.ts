@@ -214,6 +214,8 @@ options:
                      join: the code wsp add printed on the host
   --code-file PATH   join: read the code off this file and delete the file
                      before dialing, so a code never sits on a disk
+  --awake            join: hold this computer out of idle sleep while it is
+                     joined, for as long as the agent runs
   --serve            join: hold the link open in this terminal, which is what
                      the service installed by a join runs
   --name ALIAS       connect: the name to call that host here (default what its
@@ -1258,6 +1260,9 @@ async function hostFor(
   // alone and not the flag: a connector an earlier run left behind carries the tunnel to this same port whatever
   // this run was asked for, and --no-relay stops that one rather than serving a token past it.
   const linked = readRelayRecord(opts.statePath) !== undefined;
+  // A computer that already joined dials the port its place file names, so the door binds as this host starts
+  // rather than waiting for somebody to open the Add a computer sheet again.
+  const joined = (await rt.places?.list(Date.now()).catch(() => []))?.some(p => p.kind === "computer" && p.joinedAt !== undefined) === true;
   try {
     const handle = await startHost({
       runtime: rt,
@@ -1265,6 +1270,8 @@ async function hostFor(
       wsPort: opts.wsPort,
       listen: address,
       beyondThisComputer: linked,
+      door: joined ? "open" : "closed",
+      doorLine: line => io.log(line),
       webDir: opts.webDir ?? assetDir("web"),
       // Read at each fork, not once at start: the init job saves a key while this host serves.
       workspaceEnvs: golden => workspaceEnvsFor(keysFound()).workspaceEnvs?.(golden) ?? {},
@@ -1521,6 +1528,7 @@ interface SharedFlags {
   code?: string;
   "code-file"?: string;
   serve?: boolean;
+  awake?: boolean;
   name?: string;
   relay?: string;
   host?: string;
@@ -1656,6 +1664,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
         ...(values["code-file"] !== undefined ? { codeFile: values["code-file"] } : {}),
         ...(values.name !== undefined ? { name: values.name } : {}),
         ...(values.serve === true ? { serve: true } : {}),
+        ...(values.awake === true ? { awake: true } : {}),
       }),
   },
   leave: {
@@ -1808,6 +1817,7 @@ export const SHARED_OPTIONS: Options = {
   code: { type: "string" },
   "code-file": { type: "string" },
   serve: { type: "boolean" },
+  awake: { type: "boolean" },
   name: { type: "string" },
   relay: { type: "string" },
   host: { type: "string" },

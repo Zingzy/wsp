@@ -24,6 +24,7 @@
 
       /* ---- the screen: cloud-setup/SetupScreen.tsx, at its numbers ---- */
       .setup { margin: 0 auto; display: flex; height: 100%; width: 560px; max-width: 100%; flex-direction: column; align-items: center; }
+      .setup[hidden] { display: none; }
       /* Two flex items sharing what the bands leave, so the screen stands centred and each stops at its least. */
       .margin { flex: 1 1 0; min-height: 48px; width: 100%; }
       .margin.bottom { min-height: 40px; }
@@ -47,27 +48,31 @@
       @keyframes draw { from { stroke-dashoffset: 22; } }
       @keyframes light { from { flood-opacity: 0; } }
       @keyframes rise { from { opacity: 0; translate: 0 12px; } }
-      .tilde .body, .tilde .lit, h1, .sentence, .content, .foot {
+      #welcome .tilde .body, #welcome .tilde .lit, #welcome h1, #welcome .sentence, #welcome .content, #welcome .foot {
         animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
         animation-fill-mode: backwards;
       }
-      .tilde .body { animation-name: draw; animation-duration: 0.42s; }
-      .tilde .lit { animation-name: light; animation-duration: 0.22s; animation-delay: 0.3s; }
-      h1 { animation-name: rise; animation-duration: 0.34s; animation-delay: 0.26s; }
-      .sentence { animation-name: rise; animation-duration: 0.34s; animation-delay: 0.34s; }
-      .content { animation-name: rise; animation-duration: 0.34s; animation-delay: 0.42s; }
-      .foot { animation-name: rise; animation-duration: 0.34s; animation-delay: 0.46s; }
+      #welcome .tilde .body { animation-name: draw; animation-duration: 0.42s; }
+      #welcome .tilde .lit { animation-name: light; animation-duration: 0.22s; animation-delay: 0.3s; }
+      #welcome h1 { animation-name: rise; animation-duration: 0.34s; animation-delay: 0.26s; }
+      #welcome .sentence { animation-name: rise; animation-duration: 0.34s; animation-delay: 0.34s; }
+      #welcome .content { animation-name: rise; animation-duration: 0.34s; animation-delay: 0.42s; }
+      #welcome .foot { animation-name: rise; animation-duration: 0.34s; animation-delay: 0.46s; }
       @media (prefers-reduced-motion: reduce) {
-        .tilde .body, .tilde .lit, h1, .sentence, .content, .foot { animation: none; }
+        #welcome .tilde .body, #welcome .tilde .lit, #welcome h1, #welcome .sentence, #welcome .content, #welcome .foot { animation: none; }
       }
 
       /* ---- the card and its one row: cloud-setup/rows.tsx CARD, ROW, NAME, Slot, STATE_WORD ---- */
       .card { width: 100%; overflow: hidden; border-radius: 10px; border: 1px solid var(--border); background: var(--card); text-align: left; }
-      .row { display: flex; height: 48px; align-items: center; gap: 12px; padding: 0 10px 0 16px; cursor: pointer; transition: background-color 150ms; }
-      .row:hover { background: color-mix(in oklab, var(--accent) 40%, transparent); }
-      .row:has(input:disabled) { cursor: default; background: none; }
+      .row { display: flex; height: 48px; align-items: center; gap: 12px; padding: 0 10px 0 16px; }
+      .row + .row { border-top: 1px solid var(--border); }
+      label.row { cursor: pointer; transition: background-color 150ms; }
+      label.row:hover { background: color-mix(in oklab, var(--accent) 40%, transparent); }
+      label.row:has(input:disabled) { cursor: default; background: none; }
+      .mark { width: 18px; height: 18px; flex: none; display: grid; place-items: center; color: var(--muted-foreground); }
+      .mark svg { width: 18px; height: 18px; }
       .name { min-width: 0; flex: 1 0 auto; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; color: var(--foreground); }
-      .row:has(input:disabled) .name { color: var(--muted-foreground); }
+      label.row:has(input:disabled) .name { color: var(--muted-foreground); }
       .slot { margin-left: auto; display: flex; min-width: 96px; flex: 0 1 auto; align-items: center; justify-content: flex-end; }
       .state { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px/1.5 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted-foreground); }
       /* One row of its own height before the scan answers: the line is empty until then, and a column that recentres
@@ -91,6 +96,8 @@
       }
       .primary:hover { background: color-mix(in oklab, var(--primary) 90%, transparent); }
       .primary:disabled { opacity: 0.64; pointer-events: none; }
+      /* A disabled control cannot be hovered, so the reason a keycap is held rides on a wrapper, as SetupScreen does. */
+      .held { display: inline-flex; }
       .links { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
       .link { height: auto; padding: 0; border: 0; background: none; font: 15px/1.5 var(--font-sans); color: var(--muted-foreground); cursor: pointer; transition: color 150ms; }
       .link:hover { color: var(--foreground); }
@@ -102,11 +109,47 @@
          560 px, so nothing is ever cut. */
       .refusal { position: absolute; top: 18px; left: 50%; transform: translateX(-50%); margin: 0; width: 560px; max-width: 100%; min-height: 36px; text-align: center; font: 12px/18px var(--font-mono); color: var(--destructive-foreground); overflow-wrap: anywhere; }
       .refusal .fix { color: var(--foreground); }
+
+      /* ---- the two fields of the join screen: hosts/ConnectHostSheet.tsx over rows.tsx LONE_FIELD and FIELD_LABEL,
+             with components/ui/input.tsx's own border, ground and bevel ---- */
+      .fields { display: flex; width: 100%; gap: 16px; align-items: flex-start; }
+      .field { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 8px; }
+      .field.narrow { width: 140px; flex: none; }
+      .field-label { font: 13px/1 var(--font-sans); color: var(--foreground); }
+      .input {
+        width: 100%; height: 48px; padding: 0 14px; border: 1px solid var(--input); border-radius: var(--radius-md);
+        background: light-dark(var(--background), color-mix(in oklab, var(--input) 32%, transparent));
+        color: var(--foreground); font: 13px/48px var(--font-mono); letter-spacing: 0.04em; outline: none;
+        box-shadow: 0 1px 2px light-dark(color-mix(in oklab, var(--color-black) 5%, transparent), transparent);
+        transition: border-color 150ms;
+      }
+      .input::placeholder { color: var(--placeholder); }
+      /* A focused field wears the ring in its own border, as the app's Input does, and not the outline the page
+         puts on everything else it can focus. */
+      .input:focus-visible { border-color: var(--ring); box-shadow: none; outline: none; }
+      .input[aria-invalid] { border-color: color-mix(in oklab, var(--destructive) 36%, transparent); box-shadow: none; }
+      .input[aria-invalid]:focus-visible { border-color: color-mix(in oklab, var(--destructive) 64%, transparent); }
+      /* One slot per field, since either can be refused on its own. Its room is two lines whether it holds a sentence
+         or not, and the sentence is drawn inside that room without growing it, so neither a refusal's arrival nor a
+         long address moves the field beside it or the keycap under it. Each refusal is written to fit those two lines
+         at its own width, 404 px under the address and 140 px under the code; an address a person pasted can still
+         run a third line, which the footer's own gap has room for. */
+      .said { height: 36px; }
+      .field .refusal { position: static; transform: none; width: 100%; text-align: left; }
+
+      /* components/ui/spinner.tsx, lucide's loader-2, while the join is out: the keycap's arrow stands aside for it. */
+      .spin { width: 16px; height: 16px; display: none; animation: turn 1s linear infinite; }
+      @keyframes turn { to { rotate: 360deg; } }
+      .primary[data-busy] .arrow { display: none; }
+      .primary[data-busy] .spin { display: block; }
+      @media (prefers-reduced-motion: reduce) {
+        .spin { animation-duration: 2s; }
+      }
     </style>
   </head>
   <body>
     <div class="ground" aria-hidden="true"></div>
-    <div class="setup">
+    <section class="setup" id="welcome">
       <div class="margin" aria-hidden="true"></div>
       <div class="head">
         <div class="hero">
@@ -149,7 +192,69 @@
         <div class="links"><button id="join" type="button" class="link">This Mac joins another wsp</button></div>
       </div>
       <div class="margin bottom" aria-hidden="true"></div>
-    </div>
+    </section>
+
+    <section class="setup" id="joining" hidden>
+      <div class="margin" aria-hidden="true"></div>
+      <div class="head">
+        <h1>Join another wsp</h1>
+        <p class="sentence">On the Mac that runs your wsp, open Settings, then Where agents run, then Add a computer. The address and code are on that screen.</p>
+      </div>
+      <div class="content">
+        <div class="fields">
+          <div class="field">
+            <label class="field-label" for="address">Address</label>
+            <input id="address" class="input" type="text" placeholder="192.168.1.20:7788" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
+            <div class="said"><p class="refusal" id="address-said"></p></div>
+          </div>
+          <div class="field narrow">
+            <label class="field-label" for="code">Code</label>
+            <input id="code" class="input" type="text" placeholder="XXXX-XXXX" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
+            <div class="said"><p class="refusal" id="code-said"></p></div>
+          </div>
+        </div>
+      </div>
+      <div class="foot">
+        <p class="refusal" id="join-said"></p>
+        <span id="why" class="held" title="type the address and the code first">
+          <button id="go" type="button" class="primary" disabled>
+            Join <span class="arrow" aria-hidden="true">→</span>
+            <!-- components/ui/spinner.tsx draws lucide's loader-2; it turns while the join is out. -->
+            <svg class="spin" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+          </button>
+        </span>
+        <div class="links"><button id="back" type="button" class="link">Back</button></div>
+      </div>
+      <div class="margin bottom" aria-hidden="true"></div>
+    </section>
+
+    <section class="setup" id="joined" hidden>
+      <div class="margin" aria-hidden="true"></div>
+      <div class="head">
+        <h1>This Mac joined your wsp</h1>
+        <p class="sentence">It now runs threads for your wsp. Leave it plugged in and awake.</p>
+      </div>
+      <div class="content">
+        <div class="card">
+          <div class="row">
+            <!-- The laptop of lucide, which workspaceKindGlyph gives a computer of the person's own. -->
+            <span class="mark"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 16V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9m16 0H4m16 0 1.28 2.55a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45L4 16" /></svg></span>
+            <span class="name" id="here-name"></span>
+            <span class="slot"><span class="state" id="here-facts"></span></span>
+          </div>
+          <div class="row">
+            <span class="mark" aria-hidden="true"></span>
+            <span class="name">Docker</span>
+            <span class="slot"><span class="state" id="here-docker"></span></span>
+          </div>
+        </div>
+      </div>
+      <div class="foot">
+        <p class="refusal" id="joined-said"></p>
+        <button id="open-joined" type="button" class="primary">Open wsp <span aria-hidden="true">→</span></button>
+      </div>
+      <div class="margin bottom" aria-hidden="true"></div>
+    </section>
     <script>
       const $ = id => document.getElementById(id);
       /** The row's slot and the line under it on a computer the scan found no agent on. */
@@ -182,21 +287,33 @@
        * sentence holds the slot's two lines however many of the catalog's agents refused at once. */
       const capped = names => (names.length <= 3 ? list(names) : `${names[0]}, ${names[1]} and ${names.length - 2} more`);
 
-      /** Draws one refusal in the slot: what happened in the destructive ink, then what to do in the foreground ink,
+      /** Draws one refusal in a slot: what happened in the destructive ink, then what to do in the foreground ink,
        * with the shell's own words, where there are any, on the title. */
-      function refuse(happened, fix, said) {
+      function refuse(slot, happened, fix, said) {
         const what = document.createElement("span");
         what.className = "fix";
         what.textContent = fix;
-        $("status").replaceChildren(`${happened} `, what);
-        if (said === undefined) $("status").removeAttribute("title");
-        else $("status").title = said;
+        slot.replaceChildren(`${happened} `, what);
+        if (said === undefined) slot.removeAttribute("title");
+        else slot.title = said;
       }
 
-      function clearRefusal() {
-        $("status").replaceChildren();
-        $("status").removeAttribute("title");
+      function clearRefusal(slot) {
+        slot.replaceChildren();
+        slot.removeAttribute("title");
       }
+
+      /** Which of the three screens the person is on. The column is the same on each; the head, the content and the
+       * footer are what change, so each is its own section and one stands at a time. */
+      const SCREENS = ["welcome", "joining", "joined"];
+      let screen = "welcome";
+      function show(next) {
+        screen = next;
+        for (const id of SCREENS) $(id).hidden = id !== next;
+      }
+      /** The footer of the screen that stands: its keycap, and the slot its refusals land in. */
+      const keycap = () => $(screen === "joined" ? "open-joined" : "open");
+      const footSlot = () => $(screen === "joined" ? "joined-said" : "status");
 
       /** The agents the recipe scan found on this computer, in the catalog's order. Nothing else is ticked or named:
        * the row means the tools go into these, so a name here is one the scan answered with. */
@@ -217,7 +334,7 @@
         try {
           found = (await window.wsp.agents()).filter(a => a.found);
           unread = false;
-          clearRefusal();
+          clearRefusal($("status"));
           draw();
         } catch (e) {
           // Not "no agents found on this Mac": that is a fact about the computer, and this scan learned none.
@@ -227,7 +344,7 @@
           $("tools").disabled = true;
           $("slot").textContent = "";
           $("line").textContent = "";
-          refuse(REFUSALS.unread.happened, REFUSALS.unread.fix, text(e));
+          refuse($("status"), REFUSALS.unread.happened, REFUSALS.unread.fix, text(e));
         }
       }
 
@@ -235,10 +352,13 @@
       // deciding.
       let reading = scan();
 
-      /** The one press: the tools into every agent the scan found, then this computer recorded and the app opened on
-       * it. A config that refused says which and stays here, so the tick can come off and the press go again. */
+      /** The one press out of this page: the tools into every agent the scan found, then this computer recorded and
+       * the app opened on it. A config that refused says which and stays here, so the tick can come off and the press
+       * go again. The joined screen's keycap is the same press, and its refusals land in its own footer. */
       async function openWsp() {
-        $("open").disabled = true;
+        const button = keycap();
+        const slot = footSlot();
+        button.disabled = true;
         let leaving = false;
         try {
           await reading;
@@ -247,13 +367,13 @@
             await reading;
             if (unread) return;
           }
-          clearRefusal();
+          clearRefusal(slot);
           if ($("tools").checked && found.length > 0) {
             const report = await window.wsp.install(found.map(a => a.id));
             if (report.failures.length > 0) {
               const names = report.failures.map(f => found.find(a => a.id === f.id)?.name ?? f.id);
               const happened = names.length === 1 ? `${names[0]}'s config would not take the wsp tools.` : `${capped(names)} would not take the wsp tools.`;
-              refuse(happened, REFUSALS.tools.fix, report.failures.map(f => `${f.id}: ${f.error}`).join("\n"));
+              refuse(slot, happened, REFUSALS.tools.fix, report.failures.map(f => `${f.id}: ${f.error}`).join("\n"));
               return;
             }
           }
@@ -261,31 +381,129 @@
           await window.wsp.finish();
         } catch (e) {
           leaving = false;
-          refuse(REFUSALS.shell.happened, REFUSALS.shell.fix, text(e));
+          refuse(slot, REFUSALS.shell.happened, REFUSALS.shell.fix, text(e));
         } finally {
-          if (!leaving) $("open").disabled = false;
+          if (!leaving) button.disabled = false;
         }
       }
 
-      /** The way out for a person whose wsp runs on another computer: this Mac is recorded all the same, and the app
-       * opens on the road that joins it to one. */
-      async function joinAnother() {
-        $("join").disabled = true;
-        $("open").disabled = true;
+      // ---- the join screen ----------------------------------------------------------------------------------------
+
+      /** The code as the field shows it and as the host takes it: upper case, the pairing alphabet, one dash, eight
+       * letters. The rule is hosts/pairingCode.ts over the protocol's PAIR_CODE_ALPHABET and PAIR_CODE_LENGTH,
+       * copied because this page is one file the shell opens and imports nothing; first-run.test.ts reads these two
+       * constants against the protocol's and this shaping against that file's, so the copy cannot drift. */
+      const CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+      const CODE_LENGTH = 8;
+      const NOT_CODE = new RegExp(`[^${CODE_ALPHABET}-]`, "g");
+      function shownCode(typed) {
+        const upper = typed.toUpperCase().replace(NOT_CODE, "");
+        const dashAt = upper.indexOf("-");
+        const letters = upper.replace(/-/g, "").slice(0, CODE_LENGTH);
+        return dashAt > 0 && dashAt < letters.length ? `${letters.slice(0, dashAt)}-${letters.slice(dashAt)}` : letters;
+      }
+      const sentCode = shown => shown.replace(/-/g, "");
+
+      /** Every refusal this screen draws, by the word the shell answers with: which slot it belongs in, what happened
+       * and what to do. Each is written to fit the two lines of its own slot, which is 404 px under the address, 140 px
+       * under the code, and the column's 560 px in the footer for what is about neither field. None of them carries
+       * the address a person typed: it stands in the field 8 px above wearing the refused border, and a sentence that
+       * repeated it would run a third line for every address longer than the ghost's. */
+      const JOIN_REFUSALS = {
+        address: { slot: "address-said", field: "address", happened: "That is not an address.", fix: "Type it as the other screen shows it, like 192.168.1.20:7788." },
+        answer: { slot: "address-said", field: "address", happened: "Nothing answered at that address.", fix: "Check both Macs are on one network and the address on the other screen." },
+        code: { slot: "code-said", field: "code", happened: "Wrong or expired.", fix: "Get a fresh one." },
+        already: { slot: "join-said", happened: "This Mac already runs threads for another wsp.", fix: "Take it out of that one first, with wsp leave in a terminal." },
+        shell: { slot: "join-said", happened: "This Mac could not join that wsp.", fix: "Press Join again." },
+      };
+      /** What the second row of the joined card says about this computer: a computer without Docker runs the agents
+       * the person has here and holds one workspace; with it, it can run a copy of the image too. */
+      const DOCKER = { yes: "installed · runs copies of your image", no: "not installed · runs your agents, one workspace" };
+
+      const joinSlots = () => [$("address-said"), $("code-said"), $("join-said")];
+      function clearJoinRefusals() {
+        for (const slot of joinSlots()) clearRefusal(slot);
+        for (const field of ["address", "code"]) $(field).removeAttribute("aria-invalid");
+      }
+
+      /** Whether both fields are filled: an address, and a whole code. Until then the keycap is the primary at 64 per
+       * cent and says why on hover. */
+      const filled = () => $("address").value.trim() !== "" && sentCode($("code").value).length === CODE_LENGTH;
+      function drawJoin() {
+        const ready = filled();
+        $("go").disabled = !ready;
+        if (ready) $("why").removeAttribute("title");
+        else $("why").title = "type the address and the code first";
+      }
+
+      /** Draws what the shell refused where it belongs, and marks the field it was about. */
+      function sayRefusal(answer) {
+        const said = JOIN_REFUSALS[answer.why] ?? JOIN_REFUSALS.shell;
+        refuse($(said.slot), said.happened, said.fix, answer.said);
+        if (said.field !== undefined) $(said.field).setAttribute("aria-invalid", "true");
+      }
+
+      /** The join itself: the shell dials the wsp at that address with that code, installs the agent under this
+       * computer's own service manager and answers what this computer is, which the joined screen then reads. */
+      async function join() {
+        if (!filled() || $("go").dataset.busy !== undefined) return;
+        clearJoinRefusals();
+        $("go").dataset.busy = "";
+        $("go").disabled = true;
+        $("back").disabled = true;
         try {
-          await window.wsp.connect();
+          const answer = await window.wsp.join({ address: $("address").value.trim(), code: sentCode($("code").value) });
+          if (answer.ok) {
+            $("here-name").textContent = answer.here.name;
+            $("here-facts").textContent = answer.here.facts;
+            $("here-docker").textContent = answer.here.docker ? DOCKER.yes : DOCKER.no;
+            show("joined");
+            return;
+          }
+          sayRefusal(answer);
         } catch (e) {
-          refuse(REFUSALS.shell.happened, REFUSALS.shell.fix, text(e));
-          $("join").disabled = false;
-          $("open").disabled = false;
+          sayRefusal({ why: "shell", said: text(e) });
+        } finally {
+          delete $("go").dataset.busy;
+          $("back").disabled = false;
+          drawJoin();
         }
+      }
+
+      for (const field of ["address", "code"]) {
+        $(field).addEventListener("input", () => {
+          if (field === "code") $("code").value = shownCode($("code").value);
+          // A refusal described what is no longer there, so typing into the field it was about takes it off.
+          clearRefusal($(`${field}-said`));
+          $(field).removeAttribute("aria-invalid");
+          drawJoin();
+        });
       }
 
       $("open").addEventListener("click", openWsp);
-      $("join").addEventListener("click", joinAnother);
-      // Nothing is focused for the person: Enter is answered here, and a ring shows only where the keyboard put it.
+      $("open-joined").addEventListener("click", openWsp);
+      $("go").addEventListener("click", join);
+      // The way out for a person whose wsp runs on another computer: the same column, the address and the code.
+      $("join").addEventListener("click", () => {
+        show("joining");
+        $("address").focus();
+      });
+      $("back").addEventListener("click", () => show("welcome"));
+      // Nothing is focused on the first screen: Enter is answered here, and a ring shows only where the keyboard put
+      // it. On the join screen the fields hold the keyboard, so Enter there is the keycap and Escape is Back. A
+      // button the keyboard is on answers its own Enter on either screen: a press on Back is leaving, never joining.
       document.addEventListener("keydown", e => {
-        if (e.key !== "Enter" || e.target instanceof HTMLButtonElement || e.target instanceof HTMLInputElement) return;
+        if (e.key !== "Enter" && e.key !== "Escape") return;
+        if (screen === "joining" && e.key === "Escape") {
+          $("back").click();
+          return;
+        }
+        if (e.key !== "Enter" || e.target instanceof HTMLButtonElement) return;
+        if (screen === "joining") {
+          void join();
+          return;
+        }
+        if (e.target instanceof HTMLInputElement) return;
         void openWsp();
       });
     </script>
