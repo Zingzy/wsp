@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ASSET_KINDS, assetDir, assetProof, stagedAsset, workspaceAsset } from "@wsp/host";
+import { ASSET_KINDS, REQUIRE_DAEMON_ENV, assetDir, assetProof, daemonTargetHere, stagedAsset, workspaceAsset } from "@wsp/host";
 import { stageAssets, stagePaths } from "../scripts/stage.mjs";
 
 const made: string[] = [];
@@ -22,8 +22,9 @@ function sources(): { pkg: string; repo: string; from: Record<string, string> } 
   }
   mkdirSync(join(paths.from["web"]!, "assets"), { recursive: true });
   writeFileSync(join(paths.from["web"]!, "assets", "app.js"), "export {};");
-  writeFileSync(join(paths.from["daemon"]!, "package.json"), '{"name":"@wsp/daemon"}');
-  writeFileSync(join(paths.from["daemon"]!, "src.ts"), "// never travels");
+  // A release folder holds every target's binary; the one for this machine is the proof, the others ride along.
+  mkdirSync(join(paths.from["daemon"]!, "x86_64-unknown-linux-musl"), { recursive: true });
+  writeFileSync(join(paths.from["daemon"]!, "x86_64-unknown-linux-musl", "wsp-daemon"), "");
   // The published command is split across chunk files its bin imports by name, so its dist travels whole, and its
   // package.json with it, since the bin reads its version through that file.
   writeFileSync(join(paths.from["cli"]!, "dist", "chunk-1.js"), "export const y = 2;");
@@ -49,17 +50,17 @@ describe("staging the published package", () => {
       expect(existsSync(join(assetDir(kind, dist), assetProof(kind)))).toBe(true);
     }
     expect(existsSync(join(stagedAsset(paths.pkg, "web"), "assets", "app.js"))).toBe(true);
-    expect(existsSync(join(stagedAsset(paths.pkg, "daemon"), "package.json"))).toBe(true);
+    // Every target's binary travels, whatever machine staged the package: the command deploys the Linux ones.
+    expect(existsSync(join(stagedAsset(paths.pkg, "daemon"), "x86_64-unknown-linux-musl", "wsp-daemon"))).toBe(true);
     // The wsp command rides in the package too, as npm lays it out: it is what a machine's daemon bundle carries to
     // the guest, and the bin reads its version through the package.json beside its dist.
     expect(existsSync(join(stagedAsset(paths.pkg, "cli"), "dist", "chunk-1.js"))).toBe(true);
     expect(JSON.parse(readFileSync(join(stagedAsset(paths.pkg, "cli"), "package.json"), "utf8"))).toMatchObject({ version: "9.9.9" });
   });
 
-  it("takes only what a guest runs out of the daemon's folder and the command's", () => {
+  it("takes only what a guest runs out of the command's folder", () => {
     const paths = sources();
     stageAssets(paths);
-    expect(existsSync(join(stagedAsset(paths.pkg, "daemon"), "src.ts"))).toBe(false);
     expect(existsSync(join(stagedAsset(paths.pkg, "cli"), "tsup.config.ts"))).toBe(false);
   });
 
@@ -85,20 +86,43 @@ describe("staging the published package", () => {
     expect(existsSync(stale)).toBe(false);
   });
 
-  it("names any asset that was never built instead of packing a broken command", () => {
+  it("names any asset that was never built instead of packing a broken command, where the release requires them all", () => {
     for (const kind of ASSET_KINDS) {
       const paths = sources();
       rmSync(join(paths.from[kind]!, assetProof(kind)));
-      expect(() => stageAssets(paths)).toThrow(new RegExp(`missing: .*${assetProof(kind).replace(".", "\\.")}$`));
+      expect(() => stageAssets(paths, { [REQUIRE_DAEMON_ENV]: "1" })).toThrow(new RegExp(`missing: .*${assetProof(kind).replace(".", "\\.")}$`));
     }
   });
 
-  // The daemon's folder always has a package.json, built or not, so that file cannot be what proves it.
-  it("refuses a daemon folder that has its package.json but was never built", () => {
+  // The binary this machine runs is what proves the daemon folder: without it the host on this machine could
+  // serve no local workspace, however many other targets' binaries are there. The release is where the folder is
+  // filled before the build, so the release is where a missing one fails it.
+  it("where the release stages the package, refuses a daemon folder without this machine's own binary, whatever else is in it", () => {
     const paths = sources();
-    rmSync(join(paths.from["daemon"]!, "dist"), { recursive: true });
-    expect(existsSync(join(paths.from["daemon"]!, "package.json"))).toBe(true);
-    expect(() => stageAssets(paths)).toThrow(/daemon package missing/);
+    expect(assetProof("daemon")).toBe(`${daemonTargetHere()!.triple}/wsp-daemon`);
+    rmSync(join(paths.from["daemon"]!, assetProof("daemon")));
+    mkdirSync(join(paths.from["daemon"]!, "some-other-triple"), { recursive: true });
+    writeFileSync(join(paths.from["daemon"]!, "some-other-triple", "wsp-daemon"), "");
+    expect(() => stageAssets(paths, { [REQUIRE_DAEMON_ENV]: "1" })).toThrow(/wsp-daemon binary missing/);
+    expect(existsSync(stagedAsset(paths.pkg, "daemon"))).toBe(false);
+  });
+
+  // No node build fills the daemon folder: a cargo build or a release's artifacts do. A checkout without either is a
+  // developer's or a gate's, and the command it builds carries no daemon rather than not building at all.
+  it("anywhere else, skips a daemon folder that was never filled, says so once, and stages everything else", () => {
+    const paths = sources();
+    rmSync(join(paths.from["daemon"]!, assetProof("daemon")));
+    const said: string[] = [];
+    stageAssets(paths, {}, line => said.push(line));
+    expect(said).toEqual([`wsp-daemon binary not staged: ${join(paths.from["daemon"]!, assetProof("daemon"))} is missing, so the command carries none; packages/wspx/scripts/daemon-binary.mjs places one`]);
+    expect(existsSync(stagedAsset(paths.pkg, "daemon"))).toBe(false);
+    for (const kind of ASSET_KINDS.filter(k => k !== "daemon")) expect(existsSync(join(stagedAsset(paths.pkg, kind), assetProof(kind)))).toBe(true);
+    // With the binary there, the same stage takes it and says nothing.
+    const filled = sources();
+    const quiet: string[] = [];
+    stageAssets(filled, {}, line => quiet.push(line));
+    expect(quiet).toEqual([]);
+    expect(existsSync(join(stagedAsset(filled.pkg, "daemon"), assetProof("daemon")))).toBe(true);
   });
 
   it("takes every asset's source from the table rather than resolving its own", () => {

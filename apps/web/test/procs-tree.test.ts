@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { ProcEntry } from "@wsp/protocol";
 import { compactBytes } from "../src/components/machine/format.js";
-import { procLabel, procRows } from "../src/components/procs/tree.js";
+import { procLabel, procTable, type ProcThread } from "../src/components/procs/tree.js";
 
 const proc = (pid: number, ppid: number, comm: string, extra: Partial<ProcEntry> = {}): ProcEntry => ({
   pid,
@@ -27,10 +27,11 @@ const procs: ProcEntry[] = [
   proc(77, 9999, "cron", { cpu: 0, rss: 10 }),
 ];
 
-describe("procRows", () => {
+const flat = (table: ReturnType<typeof procTable>) => table.rest.map(r => [r.proc.pid, r.depth]);
+
+describe("procTable", () => {
   it("nests by ppid with siblings sorted by cpu, ties by pid, orphans at the root", () => {
-    const rows = procRows(procs, "cpu", "");
-    expect(rows.map(r => [r.proc.pid, r.depth])).toEqual([
+    expect(flat(procTable(procs, "cpu", ""))).toEqual([
       [1, 0],
       [40, 1],
       [42, 2],
@@ -41,21 +42,67 @@ describe("procRows", () => {
   });
 
   it("sorting by mem reorders siblings, not the tree", () => {
-    const rows = procRows(procs, "mem", "");
-    expect(rows.map(r => r.proc.pid)).toEqual([77, 1, 50, 40, 42, 41]);
+    expect(procTable(procs, "mem", "").rest.map(r => r.proc.pid)).toEqual([77, 1, 50, 40, 42, 41]);
   });
 
-  it("a filter flattens to the matches sorted by the key, matching pid, comm, cmdline and user", () => {
-    expect(procRows(procs, "cpu", "n").map(r => [r.proc.pid, r.depth])).toEqual([
-      [40, 0],
-      [50, 0],
+  it("a filter keeps every match under its own parents, matching pid, comm, cmdline and user", () => {
+    // nginx matches; init is its parent and stays above it, at the depth it always had.
+    expect(flat(procTable(procs, "cpu", "ngin"))).toEqual([
       [1, 0],
-      [77, 0],
+      [50, 1],
     ]);
-    expect(procRows(procs, "cpu", "42").map(r => r.proc.pid)).toEqual([42]);
-    expect(procRows(procs, "mem", "DAEMON.JS").map(r => r.proc.pid)).toEqual([40]);
-    expect(procRows(procs, "cpu", "root").map(r => r.proc.pid)).toEqual([42, 40, 50, 41, 1, 77]);
-    expect(procRows(procs, "cpu", "nothing here")).toEqual([]);
+    expect(flat(procTable(procs, "cpu", "42"))).toEqual([
+      [1, 0],
+      [40, 1],
+      [42, 2],
+    ]);
+    expect(procTable(procs, "mem", "DAEMON.JS").rest.map(r => r.proc.pid)).toEqual([1, 40]);
+    expect(procTable(procs, "cpu", "root").rest.map(r => r.proc.pid)).toEqual([1, 40, 42, 41, 50, 77]);
+    expect(procTable(procs, "cpu", "nothing here").rest).toEqual([]);
+  });
+});
+
+describe("procTable with this workspace's threads", () => {
+  // Two threads of this workspace, each the shell the host started for a turn, with the agent and its tools under it.
+  const own: ProcEntry[] = [
+    ...procs,
+    proc(100, 40, "bash", { cpu: 1, rss: 20, cmdline: "bash -c claude -p docs" }),
+    proc(101, 100, "claude", { cpu: 40, rss: 800, cmdline: "claude --settings {} -p docs" }),
+    proc(102, 101, "rg", { cpu: 5, rss: 30, cmdline: "rg needle" }),
+    proc(200, 40, "bash", { cpu: 1, rss: 20, cmdline: "bash -c claude -p tests" }),
+    proc(201, 200, "claude", { cpu: 10, rss: 700, cmdline: "claude --settings {} -p tests" }),
+  ];
+  const threads: ProcThread[] = [
+    { threadId: "th_docs", title: "the docs agent", pid: 100 },
+    { threadId: "th_tests", title: "the tests agent", pid: 200 },
+  ];
+
+  it("gives each thread its own tree, nested, and leaves those processes out of the rest", () => {
+    const table = procTable(own, "cpu", "", threads);
+    expect(table.threads.map(t => t.thread.title)).toEqual(["the docs agent", "the tests agent"]);
+    expect(table.threads[0]!.rows.map(r => [r.proc.pid, r.depth])).toEqual([
+      [100, 0],
+      [101, 1],
+      [102, 2],
+    ]);
+    expect(table.threads[1]!.rows.map(r => [r.proc.pid, r.depth])).toEqual([
+      [200, 0],
+      [201, 1],
+    ]);
+    // The rest is the computer without those two trees; nothing is counted twice.
+    expect(table.rest.map(r => r.proc.pid)).toEqual([1, 40, 42, 41, 50, 77]);
+  });
+
+  it("a thread whose process is not in the snapshot has no tree", () => {
+    const table = procTable(own.filter(p => p.pid !== 200 && p.pid !== 201), "cpu", "", threads);
+    expect(table.threads.map(t => t.thread.threadId)).toEqual(["th_docs"]);
+  });
+
+  it("the filter reads the threads' trees too, keeping matches under their parents and dropping a thread with none", () => {
+    const table = procTable(own, "cpu", "docs", threads);
+    expect(table.threads.map(t => t.thread.threadId)).toEqual(["th_docs"]);
+    expect(table.threads[0]!.rows.map(r => r.proc.pid)).toEqual([100, 101]);
+    expect(table.rest).toEqual([]);
   });
 });
 

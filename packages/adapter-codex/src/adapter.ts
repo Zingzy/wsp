@@ -34,6 +34,9 @@ export interface CodexSession {
   readonly command?: string;
   /** What a later host process attaches to this turn by; absent when its run dies with this process. */
   readonly run?: string;
+  /** The process this turn leads on the computer the host runs on, where it runs there; absent on a turn running on
+   * another machine. */
+  readonly pid?: number;
   readonly finished: Promise<TurnResult>;
   interrupt(): Promise<void>;
 }
@@ -302,6 +305,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       },
       ...(o.command !== undefined ? { command: o.command } : {}),
       ...(stream.run !== undefined ? { run: stream.run } : {}),
+      ...(stream.pid !== undefined ? { pid: stream.pid } : {}),
       finished,
       interrupt: async () => {
         interruptRequested = true;

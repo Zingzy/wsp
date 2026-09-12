@@ -14,8 +14,8 @@ import {
   machineLacking,
   machineLacksLine,
   machineLacksShort,
-  NO_BUILD_TOOLS_LINE,
   NO_LINGER_LINE,
+  NO_NODE_LINE,
   noImportRoadLine,
   noSshDaemonLine,
   OVER_SSH,
@@ -1031,7 +1031,6 @@ describe("daemon files and diff ops", () => {
       openSocket: "/home/maya/.wsp/open.sock",
       manifestPath: "/home/maya/.wsp/manifest.json",
       profileFile: "/home/maya/.wsp/profile.sh",
-      nodeDir: "/home/maya/.wsp/node",
       unitDir: "/home/maya/.config/systemd/user",
       binDir: "/home/maya/.local/bin",
       rootsPath: "/home/maya/.wsp/roots",
@@ -1058,21 +1057,21 @@ describe("daemon files and diff ops", () => {
     // A login whose services stop with it would lose the daemon the moment the connection closed, so it is
     // refused with the one command that turns that off.
     expect(NO_LINGER_LINE).toContain("loginctl enable-linger");
-    // node-pty ships prebuilt binaries for macOS and Windows only, so the terminal is compiled where it runs.
-    expect(NO_BUILD_TOOLS_LINE).toContain("no C compiler");
-    expect(NO_BUILD_TOOLS_LINE).toContain("build-essential");
+    // The daemon is one static binary; the wsp command beside it still runs on node, so that is what is asked for.
+    expect(NO_NODE_LINE).toContain("no Node 22");
+    expect(NO_NODE_LINE).toContain("install Node 22 or newer");
     // A refusal the machine itself raised is marked where it is thrown, so a row can show those words and show a
-    // deploy that failed further in the general line instead of an npm log.
-    expect(machineLacksLine(machineLacking(NO_BUILD_TOOLS_LINE))).toBe(NO_BUILD_TOOLS_LINE);
-    expect(machineLacksLine(new Error(NO_BUILD_TOOLS_LINE))).toBeUndefined();
-    expect(machineLacksLine("daemon deploy failed: NPM_FAIL")).toBeUndefined();
+    // deploy that failed further in the general line instead of the deploy's tail.
+    expect(machineLacksLine(machineLacking(NO_NODE_LINE))).toBe(NO_NODE_LINE);
+    expect(machineLacksLine(new Error(NO_NODE_LINE))).toBeUndefined();
+    expect(machineLacksLine("daemon deploy failed: DAEMON_DOWN")).toBeUndefined();
     // Every refusal is written as what is wrong, then why, then what to do, so its first clause is the row's half
     // and fits the row, and the whole sentence keeps the command a person types.
-    expect(machineLacksShort(NO_BUILD_TOOLS_LINE)).toBe("this machine has no C compiler");
+    expect(machineLacksShort(NO_NODE_LINE)).toBe("this machine has no Node 22");
     expect(machineLacksShort(NO_LINGER_LINE)).toBe("this login does not linger");
     // Off the one list beside the sentences, not a copy of it here: a refusal added to a place's preflight takes
     // this rule by being listed once, rather than by somebody remembering that this loop exists.
-    expect(MACHINE_LACKS_LINES).toContain(NO_BUILD_TOOLS_LINE);
+    expect(MACHINE_LACKS_LINES).toContain(NO_NODE_LINE);
     expect(MACHINE_LACKS_LINES).toContain(NO_LINGER_LINE);
     for (const line of MACHINE_LACKS_LINES) {
       expect(machineLacksShort(line).length).toBeLessThanOrEqual(30);
@@ -1226,6 +1225,22 @@ describe("thread provenance", () => {
     ]);
     expect([worked!.ran, neverAnnounced!.ran, working!.ran, refused!.ran, signedInLater!.ran]).toEqual([true, false, true, false, true]);
     expect(threadRan([])).toBe(false);
+  });
+
+  it("foldThreads carries the latest turn's process on this computer, so the pane heads a thread's tree with its name", () => {
+    const [here, elsewhere] = foldThreads([
+      { ...row, id: "s1", threadId: "thr_a", status: "running", prompt: "read the docs", pid: 4_242 },
+      { ...row, id: "s2", threadId: "thr_b", status: "running", prompt: "on a machine" },
+    ]);
+    expect(here!.pid).toBe(4_242);
+    expect(elsewhere).not.toHaveProperty("pid");
+    expect(ThreadView.parse(here!).pid).toBe(4_242);
+    // The latest turn is the one running: a thread whose earlier turn had a process carries none now.
+    const [over] = foldThreads([
+      { ...row, id: "s3", threadId: "thr_c", status: "completed", pid: 99 },
+      { ...row, id: "s4", threadId: "thr_c", status: "completed" },
+    ]);
+    expect(over).not.toHaveProperty("pid");
   });
 
   it("foldThreads carries the latest turn's open prompt, so the word every row reads comes off the fold and nowhere else", () => {

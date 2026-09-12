@@ -6,9 +6,12 @@
 import { chmodSync, cpSync, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { ASSETS_DIR, ASSET_KINDS, stageAsset, workspaceAsset } from "@wsp/host";
+import { ASSETS_DIR, ASSET_KINDS, stageAssetOrSkip, workspaceAsset } from "@wsp/host";
 
-export function stageAssets(paths) {
+/** Stages every asset into the package. The daemon binaries come from a cargo build or a release's artifacts, never
+ * from this build, so a checkout without them is told so in one line and built without them; the release sets the
+ * variable that makes them required. `say` is where that line goes. */
+export function stageAssets(paths, env = process.env, say = console.log) {
   for (const [what, path] of [
     ["command bundle", join(paths.pkg, "dist", "bin.js")],
     ["license", join(paths.repo, "LICENSE")],
@@ -19,7 +22,10 @@ export function stageAssets(paths) {
 
   const assets = join(paths.pkg, ASSETS_DIR);
   rmSync(assets, { recursive: true, force: true });
-  for (const kind of ASSET_KINDS) stageAsset(paths.from[kind], paths.pkg, kind);
+  for (const kind of ASSET_KINDS) {
+    const said = stageAssetOrSkip(paths.from[kind], paths.pkg, kind, env);
+    if (said !== undefined) say(said);
+  }
   cpSync(join(paths.repo, "LICENSE"), join(paths.pkg, "LICENSE"));
   cpSync(join(paths.repo, "README.md"), join(paths.pkg, "README.md"));
   // npm sets the bin's mode on install; a tarball read any other way still gets an executable file.

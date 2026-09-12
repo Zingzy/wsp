@@ -17,6 +17,25 @@ export function underProject(path: string, root: string): boolean {
  * call the folder, and what a permission prompt names a file by. */
 export const folderName = (path: string): string => path.replace(/\/+$/, "").split("/").at(-1) ?? path;
 
+/** The machine a folder browser is walking, as far as the hidden rule cares: the home that machine reports, and
+ * whether it is a Mac. Absent either way, the dot rule stands alone, which is every machine wsp forks. */
+export interface FolderMachine {
+  readonly home?: string | null;
+  readonly mac?: boolean;
+}
+
+/** Whether a folder browser hides this folder: a dot-named one on any machine, and the Library a Mac keeps in the
+ * home itself, which the Finder hides there too. The home decides and not the path's shape, since a Mac home sits
+ * wherever the login puts it (a lab account under /Users/Shared holds one), and a Library somebody made inside
+ * their own work is theirs. A home holds twenty of these and none is what somebody browsing for their work is
+ * looking for; they are folders like any other to everything else, so a path typed or pasted whole still opens one. */
+export function hiddenFolder(path: string, machine: FolderMachine = {}): boolean {
+  const at = path.replace(/\/+$/, "");
+  if (folderName(at).startsWith(".")) return true;
+  const home = machine.home?.replace(/\/+$/, "");
+  return machine.mac === true && home !== undefined && home !== "" && at === `${home}/Library`;
+}
+
 /** The name of the folder a path sits in, empty where it sits at the root or is a bare name. */
 export const parentFolderName = (path: string): string => {
   const parts = path.replace(/\/+$/, "").split("/");
@@ -60,7 +79,6 @@ export function placeDaemonPaths(home: string): {
   openSocket: string;
   manifestPath: string;
   profileFile: string;
-  nodeDir: string;
   unitDir: string;
   binDir: string;
   rootsPath: string;
@@ -85,7 +103,6 @@ export function placeDaemonPaths(home: string): {
     openSocket: `${wsp}/open.sock`,
     manifestPath: `${wsp}/manifest.json`,
     profileFile: `${wsp}/profile.sh`,
-    nodeDir: `${wsp}/node`,
     unitDir: `${at}/.config/systemd/user`,
     binDir: `${at}/.local/bin`,
     rootsPath: rootsPathIn(at),
@@ -101,7 +118,7 @@ export function placeDaemonPaths(home: string): {
  * daemon sweeps by this list when its host asks over the link and wsp leave sweeps by it at the terminal. */
 export function placeOwnedPaths(home: string): string[] {
   const at = placeDaemonPaths(home);
-  return [at.placeFile, at.placeKey, at.placeLog, at.dir, at.bundle, at.inbox, at.tokenPath, at.rootsPath, at.nodeDir, at.profileFile, at.openSocket, at.runDir, `${at.wsp}/wsp-npm.log`, at.portFile, `${at.binDir}/wsp-open`, `${at.binDir}/xdg-open`];
+  return [at.placeFile, at.placeKey, at.placeLog, at.dir, at.bundle, at.inbox, at.tokenPath, at.rootsPath, at.profileFile, at.openSocket, at.runDir, at.portFile, `${at.binDir}/wsp-open`, `${at.binDir}/xdg-open`];
 }
 
 /** The same paths under the name the ssh road has always called them. One function, two names, so nothing keeps a

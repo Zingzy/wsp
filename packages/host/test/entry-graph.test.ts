@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The desktop's tsup bundles everything @wsp/host's entry reaches into the Electron main script, and @wsp/daemon
-// dlopens node-pty's native module at import. An eager edge from this entry to the daemon would load that module in
-// every process that imports the host, before app.whenReady in the packaged app, whether or not anyone ever opens a
-// pane. The rule is stated at doctor.ts's OPEN_SHIM_PATH; this holds it. The daemon is reached by a dynamic import,
-// which the bundle defers to the first caller.
+// The desktop's tsup bundles everything @wsp/host's entry reaches into the Electron main script. The node daemon
+// package is the fake guest the runtime's and the web app's tests stand up in process, and it dlopens node-pty's
+// native module at import: an edge from this entry to it would load that module in every process that imports the
+// host, before app.whenReady in the packaged app. The daemon a host runs is the static binary it spawns.
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -51,7 +50,7 @@ describe("what importing @wsp/host loads", () => {
     expect(packages).toContain("@wsp/runtime");
   });
 
-  it("never reaches @wsp/daemon, whose module scope loads node-pty", () => {
+  it("never reaches @wsp/daemon, the test double whose module scope loads node-pty", () => {
     expect([...eagerPackages(ENTRY)].filter(p => p === "@wsp/daemon" || p.startsWith("@wsp/daemon/"))).toEqual([]);
   });
 
