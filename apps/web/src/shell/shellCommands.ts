@@ -22,7 +22,7 @@ import { spaceWorkspaceId } from "../sidebar/sidebarMode.js";
 import { useTerminalDrawerStore } from "../terminal/drawerStore.js";
 import { resetTerminalZoom, stepTerminalZoom } from "../terminal/fontSetting.js";
 import { getTerminals, type WorkspaceTerminals } from "../terminal/link.js";
-import { requestComposerFocus, requestNewThread } from "./shellRequests.js";
+import { requestComposerFocus } from "./shellRequests.js";
 import { recentThreads, useThreadHistory } from "./threadHistory.js";
 import { highlightedTarget, stepSwitcherAt, useWorkspaceSwitcher } from "./workspaceSwitcher.js";
 
@@ -247,7 +247,7 @@ export function runShellCommand(command: KeybindingCommand, target: ShellCommand
       if (workspaceId) resetTerminalZoom(workspaceId);
       return;
     case "chat.new":
-      if (workspaceId) requestNewThread({ workspaceId });
+      if (workspaceId) useStore.getState().newThread(workspaceId);
       return;
     case "workspace.next":
       cycleWorkspaceSwitcher(1, hold);
