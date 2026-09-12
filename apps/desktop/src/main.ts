@@ -9,6 +9,7 @@ import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./contex
 import { fontDirs, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { locateHost, openHost, statePathIn, type HostSession, type Launch, type Located } from "./host-lifecycle.js";
 import { hostSwitcher, parseConnectAsk, type HostSwitcher } from "./host-switch.js";
+import { joinWsp } from "./join.js";
 import { offerMove, type MoveGate } from "./move.js";
 import { sayNeedsYou, type Notifier } from "./needs-you.js";
 import { fromAppPage, fromOnboardingPage } from "./origin.js";
@@ -196,9 +197,8 @@ function locate(): Promise<Located> {
 }
 
 /** A serving host is attached to with no gate; otherwise a host is started over the runtime the first launch just
- * recorded this computer on, or, with none, over the located home once the gate says it holds something to show. The
- * hash rides on the page's url for what the page opens on (#connect is the connect sheet). */
-async function showApp(located: Located, recorded?: Runtime, hash = ""): Promise<boolean> {
+ * recorded this computer on, or, with none, over the located home once the gate says it holds something to show. */
+async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
   const statePath = statePathIn(located.home, launch());
   if (located.session === undefined) {
     let runtime = recorded;
@@ -263,11 +263,11 @@ async function showApp(located: Located, recorded?: Runtime, hash = ""): Promise
     page.webContents.send("shell:chord", shellChordOf(input));
   });
   page.on("closed", () => terminalFocus.delete(contentsId));
-  await page.loadURL(`${session.url}${hash}`);
+  await page.loadURL(session.url);
   return true;
 }
 
-const ONBOARDING_CHANNELS = ["onboarding:agents", "onboarding:install", "onboarding:finish", "onboarding:connect"] as const;
+const ONBOARDING_CHANNELS = ["onboarding:agents", "onboarding:install", "onboarding:finish", "onboarding:join"] as const;
 
 /** The ids the page asked to install, as strings and nothing else; the catalog refuses an id it does not know. */
 function agentIds(raw: unknown): string[] {
@@ -297,23 +297,27 @@ async function showOnboarding(located: Located): Promise<void> {
     return installEach(agentIds(raw), mcpServerSpec(statePath, { ...runningWsp(), shim }), homedir());
   });
   let finishing: Promise<void> | undefined;
-  // Both ways out record this computer and open the app on it; the second opens the app on the road that joins this
-  // Mac to another wsp, and the app's own host still serves the page that road is drawn in.
-  const finish = (hash: string): Promise<void> =>
+  // The one way out of both screens: this computer recorded and the app opened on it. A Mac that joined another wsp
+  // opens the app the same way, and the wsp it joined is reached from the window's own switcher.
+  const finish = (): Promise<void> =>
     (finishing ??= (async () => {
       const { runtime, workspace } = await recordThisComputer({ statePath });
       io.log(`${workspace.name} (${workspace.id}) is this computer`);
-      await showApp(located, runtime, hash);
+      await showApp(located, runtime);
       for (const channel of ONBOARDING_CHANNELS) ipcMain.removeHandler(channel);
       page.close();
     })());
   ipcMain.handle("onboarding:finish", event => {
     gate(event, "onboarding:finish");
-    return finish("");
+    return finish();
   });
-  ipcMain.handle("onboarding:connect", event => {
-    gate(event, "onboarding:connect");
-    return finish("#connect");
+  // The join runs here rather than in the page: it writes files under this login's home and installs a service, and
+  // the page is handed only what it draws.
+  ipcMain.handle("onboarding:join", (event, raw: unknown) => {
+    gate(event, "onboarding:join");
+    const ask = raw as { address?: unknown; code?: unknown } | null;
+    const word = (value: unknown): string => (typeof value === "string" ? value : "");
+    return joinWsp({ address: word(ask?.address), code: word(ask?.code) }, { home: homedir(), argv: [shim, "join", "--serve"] });
   });
   // The page follows the Mac's appearance: no preference record exists yet for it to read.
   nativeTheme.themeSource = "system";

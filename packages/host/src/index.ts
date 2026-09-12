@@ -36,6 +36,8 @@ export { shimPath } from "./shim.js";
 export { agentsHere, type AgentHere } from "./agents-here.js";
 export { installEach, mcpServerSpec, runningWsp, type InstallReport, type RunningWsp } from "./mcp-install.js";
 export { dialAddress, hostTokenFor, servingHost, type HostLock } from "./host-lock.js";
+export { JoinRefused, joinCommand, placeHere, placeNameHere, type JoinRefusalAbout } from "./places.js";
+export { joinedAlready, placeFilePath } from "./place-report.js";
 export { SERVING_HOME_SH, currentHome, currentHomePointer, defaultHomeIn, homeNamed, servingHome } from "./serving-home.js";
 export { aliasFrom, defaultHost, isUrl, listHosts, noSuchHostLine, readHost, removeHost, writeHost, type HostEntry, type HostRecord, type SshLogin } from "./hosts.js";
 export { connectCommand, disconnectCommand, type ConnectOpts } from "./connect.js";

@@ -13,6 +13,7 @@ import {
   isLoopback,
   isUrl,
   isWildcard,
+  joinAddressOf,
   listenBeyondLoopbackLine,
   portHolderWords,
   portTakenLine,
@@ -95,6 +96,23 @@ describe("the address the pair is bound on", () => {
     expect(authority("box.example.com", 4400)).toBe("box.example.com:4400");
     expect(authority("2001:db8::5", 4410)).toBe("[2001:db8::5]:4410");
     expect(authority("[2001:db8::5]", 4410)).toBe("[2001:db8::5]:4410");
+  });
+});
+
+describe("the address a person types to join a wsp", () => {
+  it("takes the authority the other computer shows as an http address, and an address that already carries one as it is", () => {
+    expect(joinAddressOf("192.168.1.20:7788")).toBe("http://192.168.1.20:7788");
+    expect(joinAddressOf(" 192.168.1.20:7788 ")).toBe("http://192.168.1.20:7788");
+    expect(joinAddressOf("old-macbook.local:4400")).toBe("http://old-macbook.local:4400");
+    expect(joinAddressOf("[::1]:4400")).toBe("http://[::1]:4400");
+    expect(joinAddressOf("http://192.168.1.20:7788")).toBe("http://192.168.1.20:7788");
+    expect(joinAddressOf("https://p-x.singhi.me")).toBe("https://p-x.singhi.me");
+  });
+
+  it("is nothing for a word that names no wsp: a name with no port, a socket address, an empty field", () => {
+    for (const word of ["", "   ", "box", "192.168.1.20", "ws://192.168.1.20:7788", "wss://box", "http://", "192.168.1.20:", "not an address"]) {
+      expect(joinAddressOf(word)).toBeUndefined();
+    }
   });
 });
 

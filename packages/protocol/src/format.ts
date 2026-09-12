@@ -122,6 +122,15 @@ export function fmtSize(size: WorkspaceSize, cpu: CpuWord = "vCPU"): string {
   return `${size.cpu}\u00a0${cpu}\u00a0·\u00a0${fmtMemGb(size.memMb).replace(" ", "\u00a0")}`;
 }
 
+/** What a computer of the person's own is worth saying in one line: the cores and memory it has, and the room left
+ * where its threads work. The one reading, so the screen a computer joins on and the row it lands in later cannot
+ * describe the same computer differently. A computer that would not say how much room it has leaves that out. The
+ * whole line is joined with no-break spaces, fmtSize's own rule carried on: it is one phrase about one computer. */
+export function placeFactsLine(shape: WorkspaceSize, diskFreeBytes?: number): string {
+  const parts = [fmtSize(shape, "cores"), ...(diskFreeBytes === undefined ? [] : [`${fmtBytes(diskFreeBytes)} free`])];
+  return parts.join(" · ").replace(/ /g, "\u00a0");
+}
+
 /** What a machine wsp neither forks nor pays for costs, on its row's cost line and the Machine tab's Cost row. */
 export const FREE_WORD = "free";
 
