@@ -30,6 +30,7 @@ const GATES: Record<string, string> = {
   WSP_PACK_SMOKE: "runs the npm pack smoke",
   WSP_DESKTOP_SMOKE: "runs the packaged desktop smoke",
   WSP_DESKTOP_APP: "the packaged app the desktop smoke drives instead of the built one",
+  WSP_DAEMON_BIN: "the daemon binary the daemon suite drives instead of the daemon in its own process",
 };
 
 /** Every WSP_ variable the protocol names, by the constant it is exported as, so a read written as

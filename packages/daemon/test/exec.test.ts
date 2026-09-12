@@ -8,12 +8,12 @@ import { afterAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { EXEC_DEADLINE_EXIT, NOT_ON_THIS_ROAD } from "@wsp/protocol";
 import { runExec } from "../src/exec.js";
-import { startDaemon, type DaemonHandle } from "../src/main.js";
+import { daemonUnderTest, type DaemonUnderTest } from "./harness.js";
 
 const TOKEN = "exec-token";
 const root = mkdtempSync(join(tmpdir(), "wsp-exec-root-"));
 const inboxDir = mkdtempSync(join(tmpdir(), "wsp-exec-inbox-"));
-let handle: DaemonHandle | undefined;
+let handle: DaemonUnderTest | undefined;
 
 afterAll(async () => {
   await handle?.close();
@@ -99,7 +99,7 @@ describe("one command on this machine", () => {
 
 describe("the exec op over the wire", () => {
   it("answers a command on an authed socket", async () => {
-    handle ??= await startDaemon({ host: "127.0.0.1", port: 0, token: TOKEN, kind: "place", root, inboxDir, rootsPath: join(root, "roots") });
+    handle ??= await daemonUnderTest({ host: "127.0.0.1", port: 0, token: TOKEN, kind: "place", root, inbox: inboxDir, rootsPath: join(root, "roots") });
     const client = await connect(handle.port, {});
     try {
       const res = await client.request("exec", { cmd: "echo hello", timeoutMs: 5_000 });
@@ -111,7 +111,7 @@ describe("the exec op over the wire", () => {
   });
 
   it("is refused on a socket scoped to one guest port, like every op but tunnel and ping", async () => {
-    handle ??= await startDaemon({ host: "127.0.0.1", port: 0, token: TOKEN, kind: "place", root, inboxDir, rootsPath: join(root, "roots") });
+    handle ??= await daemonUnderTest({ host: "127.0.0.1", port: 0, token: TOKEN, kind: "place", root, inbox: inboxDir, rootsPath: join(root, "roots") });
     const client = await connect(handle.port, { port: 8123 });
     try {
       const res = await client.request("exec", { cmd: "echo hello" });
@@ -123,7 +123,7 @@ describe("the exec op over the wire", () => {
   });
 
   it("refuses place.leave on an inbound socket: only the link this computer opened may take it out of a wsp", async () => {
-    handle ??= await startDaemon({ host: "127.0.0.1", port: 0, token: TOKEN, kind: "place", root, inboxDir, rootsPath: join(root, "roots") });
+    handle ??= await daemonUnderTest({ host: "127.0.0.1", port: 0, token: TOKEN, kind: "place", root, inbox: inboxDir, rootsPath: join(root, "roots") });
     const client = await connect(handle.port, {});
     try {
       const res = await client.request("place.leave");
@@ -137,7 +137,7 @@ describe("the exec op over the wire", () => {
   });
 
   it("refuses a frame whose cmd is not a string, and one whose timeout is not a positive integer", async () => {
-    handle ??= await startDaemon({ host: "127.0.0.1", port: 0, token: TOKEN, kind: "place", root, inboxDir, rootsPath: join(root, "roots") });
+    handle ??= await daemonUnderTest({ host: "127.0.0.1", port: 0, token: TOKEN, kind: "place", root, inbox: inboxDir, rootsPath: join(root, "roots") });
     const client = await connect(handle.port, {});
     try {
       expect((await client.request("exec", { cmd: 3 })).ok).toBe(false);

@@ -9,6 +9,6 @@
     "op": "manifest.record",
     "cmd": "pnpm dev",
     "cwd": "/root/app",
-    "port": "3000"
+    "port": "5173"
   }
 ]

@@ -7,13 +7,11 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
-import { HTTP_URL_MAX, HTTP_URL_RE, isHttpUrl } from "@wsp/protocol";
-import { startDaemon, type DaemonHandle } from "../src/main.js";
-import { isLoopbackHex, parseProcNetTcp, type ListeningPort } from "../src/ports.js";
+import { HTTP_URL_MAX, HTTP_URL_RE, OPEN_SHIM_PATH, isHttpUrl } from "@wsp/protocol";
+import { isLoopbackHex, parseProcNetTcp } from "../src/ports.js";
 import { ptyEnv } from "../src/pty-manager.js";
 import {
   CallbackSpotter,
-  OPEN_SHIM_PATH,
   OPEN_SHIM_SCRIPT,
   OPEN_URL_MAX,
   OPEN_URL_RE,
@@ -24,6 +22,9 @@ import {
   stripOsc8,
   type OpenSocket,
 } from "../src/relay.js";
+import { fakeProcTree, setListeners } from "./fake-proc.js";
+import { fixture } from "./fixtures.js";
+import { daemonUnderTest, type DaemonUnderTest } from "./harness.js";
 import { rejectedEvents } from "./wire-events.js";
 
 const execFileAsync = promisify(execFile);
@@ -163,14 +164,14 @@ describe("loopback listeners in /proc/net/tcp and tcp6", () => {
   });
 
   it("flags the fixture rows: [::1]:8976 and ::ffff:127.0.0.1 are loopback, [::]:7070 and 0.0.0.0:8080 are not", () => {
-    const tcp6 = readFileSync(join(import.meta.dirname, "fixtures", "proc-net-tcp6.txt"), "utf8");
+    const tcp6 = fixture("proc-net-tcp6.txt");
     const rows6 = parseProcNetTcp(tcp6);
     expect(rows6.map(r => [r.port, r.loopback])).toEqual([
       [8976, true],
       [7070, false],
       [3001, true],
     ]);
-    const tcp = readFileSync(join(import.meta.dirname, "fixtures", "proc-net-tcp.txt"), "utf8");
+    const tcp = fixture("proc-net-tcp.txt");
     expect(parseProcNetTcp(tcp).map(r => [r.port, r.loopback])).toEqual([
       [8080, false],
       [3000, true],
@@ -358,10 +359,11 @@ async function until(cond: () => boolean, ms = 3000): Promise<void> {
 }
 
 describe("daemon: browser.open, callback.port and tunnels", () => {
-  let daemon: DaemonHandle | undefined;
+  let daemon: DaemonUnderTest | undefined;
   let dir: string | undefined;
   let echo: Server | undefined;
-  let snapshot: ListeningPort[] = [];
+  /** The fake machine the daemon reads its listening ports off. */
+  let procRoot: string;
   afterEach(async () => {
     await daemon?.close();
     daemon = undefined;
@@ -369,14 +371,14 @@ describe("daemon: browser.open, callback.port and tunnels", () => {
     echo = undefined;
     if (dir) rmSync(dir, { recursive: true, force: true });
     dir = undefined;
-    snapshot = [];
+    rmSync(procRoot, { recursive: true, force: true });
   });
 
-  async function start(o: { slowPollMs?: number } = {}): Promise<string> {
+  async function start(): Promise<string> {
     dir = mkdtempSync(join(tmpdir(), "wsp-relay-daemon-"));
     const sockPath = join(dir, "open.sock");
-    const source = o.slowPollMs === undefined ? async () => snapshot : () => new Promise<ListeningPort[]>(r => setTimeout(() => r(snapshot), o.slowPollMs));
-    daemon = await startDaemon({ host: "127.0.0.1", port: 0, token: TOKEN, openSocketPath: sockPath, portsSource: source, portsIntervalMs: 20 });
+    procRoot = fakeProcTree([]);
+    daemon = await daemonUnderTest({ host: "127.0.0.1", port: 0, token: TOKEN, openSocket: sockPath, procRoot, portsIntervalMs: 20 });
     return sockPath;
   }
 
@@ -402,10 +404,10 @@ describe("daemon: browser.open, callback.port and tunnels", () => {
     await shim(sockPath, GH_DEVICE);
     await until(() => c.events.some(e => e.type === "browser.open"));
     expect(c.events.find(e => e.type === "browser.open")).toEqual({ type: "browser.open", url: GH_DEVICE });
-    snapshot = [
-      { port: 3000, pid: 1, inode: 1, uid: 0, loopback: false },
-      { port: 45543, pid: 2, inode: 2, uid: 0, loopback: true },
-    ];
+    setListeners(procRoot, [
+      { port: 3000, pid: 1 },
+      { port: 45543, pid: 2, loopback: true },
+    ]);
     await until(() => c.events.some(e => e.type === "callback.port"));
     expect(c.events.filter(e => e.type === "callback.port")).toEqual([{ type: "callback.port", port: 45543 }]);
     expect(c.events.find(e => e.type === "port.open" && e["port"] === 45543)).toMatchObject({ loopback: true });
@@ -413,18 +415,22 @@ describe("daemon: browser.open, callback.port and tunnels", () => {
   });
 
   it("a listener already on the machine when the watcher first polls is never the flow's, even for an open that came first", async () => {
-    snapshot = [{ port: 3000, pid: 1, inode: 1, uid: 0, loopback: true }];
-    const sockPath = await start({ slowPollMs: 30 });
+    const sockPath = await start();
+    // Listening before anyone asked for ports, so the watcher's first poll finds it there.
+    setListeners(procRoot, [{ port: 3000, pid: 1, loopback: true }]);
     const c = await client(daemon!.port);
     // The open arrives before anyone has asked for ports; the watcher's first poll must not answer it with 3000.
     await shim(sockPath, GH_DEVICE);
     await until(() => c.events.some(e => e.type === "browser.open"));
-    // The reply still seeds the subscriber with what was already listening, even though the seeding poll is slow.
+    // The reply still seeds the subscriber with what was already listening.
     const watched = await c.request("ports.watch");
     expect((watched["ports"] as { port: number }[]).map(p => p.port)).toEqual([3000]);
     await new Promise(r => setTimeout(r, 150));
     expect(c.events.filter(e => e.type === "callback.port")).toEqual([]);
-    snapshot = [...snapshot, { port: 45543, pid: 2, inode: 2, uid: 0, loopback: true }];
+    setListeners(procRoot, [
+      { port: 3000, pid: 1, loopback: true },
+      { port: 45543, pid: 2, loopback: true },
+    ]);
     await until(() => c.events.some(e => e.type === "callback.port"));
     expect(c.events.filter(e => e.type === "callback.port")).toEqual([{ type: "callback.port", port: 45543 }]);
     c.close();

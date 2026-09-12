@@ -973,9 +973,11 @@ export const EMPTY_TASK_LINE = "the task is empty; say what the thread is to do"
 export const EMPTY_TITLE_LINE = "the name is empty; say what the thread is called";
 
 /** The one line a codex turn fails with when its provider wants an OpenAI login the machine has not got: the CLI
- * itself only retries the 401 and dies. `login` is the catalog's command for signing in on a machine. */
+ * itself only retries the 401 and dies. `login` is the catalog's command for signing in on a machine. It is also
+ * what the composer's model menu shows in place of its footer's source line, which is why it names the workspace
+ * rather than the machine it runs on. */
 export function codexNotSignedInLine(login: string): string {
-  return `Codex is not signed in on this machine; run ${login} there`;
+  return `Codex is not signed in where this workspace runs; run ${login} there`;
 }
 
 /** The line when codex's provider reads its key from an environment variable the machine does not set. */
@@ -985,13 +987,26 @@ export function codexMissingEnvLine(name: string): string {
 
 /** The one line under the composer's model lists: the binary that filled them, else whose table stood in and what it
  * was pinned from, or the adapter's own words for why the binary gave nothing. Every word comes from the catalog being
- * shown, so a tab never borrows another agent's binary, reason or pin. The slot is one line at the popup's width, 290px
- * of the 10px mono it draws in, so the agent is named once and the pin's own words carry the rest. */
-export function catalogSourceLine(catalog: HarnessCatalog): string {
+ * shown, so a tab never borrows another agent's binary, reason or pin. `where` is the word for where the turn runs,
+ * which the caller reads off the workspace: the binary the line names is the one on that computer and on no other.
+ * The slot is one line at the popup's width, 290px of the 10px mono it draws in, so the agent is named once and the
+ * pin's own words carry the rest. */
+export function catalogSourceLine(catalog: HarnessCatalog, where: string): string {
   const version = catalog.version;
-  if (catalog.source === "harness") return `${catalog.label}${version === null ? "" : ` ${version}`} on this machine`;
+  if (catalog.source === "harness") return `${catalog.label}${version === null ? "" : ` ${version}`} on ${where}`;
   const why = catalog.refusal ?? `${catalog.harness} table`;
   return version === null ? why : `${why} · ${version}`;
+}
+
+/** What the foot of the composer's model menu says after that line, and the only place it is said. The rows above it
+ * carry the agent's own dollar prices per million tokens, which a person with no account anywhere read as a bill from
+ * wsp: so the foot names whose sign-in the turn runs on and where that sign-in is, and says the prices are the agent's
+ * own. Both sentences hold on every workspace and only the word for where the turn runs changes, so a person who moves
+ * a thread to another computer reads the same two sentences with one word swapped. The prices sentence is dropped
+ * where the menu lists no model, since there is then no price on the screen for it to be about. */
+export function whoPaysLines(catalog: HarnessCatalog, where: string): string[] {
+  const runs = `Threads run on ${catalog.label}'s own sign-in on ${where}, which costs this wsp nothing.`;
+  return catalog.models.length === 0 ? [runs] : [runs, "The prices are its list prices, not a bill."];
 }
 
 /** The one line in place of the model rows: what the binary reported, or what the table holds, and never a count the

@@ -1,11 +1,38 @@
 import { timingSafeEqual } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
 import { connect as connectTcp, type Socket } from "node:net";
 import { homedir, platform } from "node:os";
 import { resolve } from "node:path";
-import { DAEMON_ROOTS_PATH, DAEMON_VERSION, DaemonAuthRequest, EXEC_TIMEOUT_DEFAULT_MS, MachineErrorKind, NOT_ON_THIS_ROAD, callbackPortOf, type DaemonEvent, type WorkspaceKind } from "@wsp/protocol";
+import {
+  AUTH_DEADLINE_MS,
+  DAEMON_AUTH_DEADLINE_PASSED,
+  DAEMON_DEFAULT_HOST,
+  DAEMON_DEFAULT_PORT,
+  DAEMON_FIRST_FRAME_NOT_AUTH,
+  DAEMON_INVALID_JSON,
+  DAEMON_NO_TOKEN,
+  DAEMON_PRE_AUTH_BYTES_EXCEEDED,
+  DAEMON_ROOTS_PATH,
+  DAEMON_TOKEN_PATH,
+  DAEMON_TOKEN_REFUSED,
+  DAEMON_VERSION,
+  DaemonAuthRequest,
+  EXEC_TIMEOUT_DEFAULT_MS,
+  GUEST_INBOX_DIR,
+  GUEST_MANIFEST_PATH,
+  MachineErrorKind,
+  NOT_ON_THIS_ROAD,
+  PID_MAX,
+  PRE_AUTH_MAX_BYTES,
+  TUNNEL_CAP,
+  callbackPortOf,
+  portScopeRefusal,
+  unknownOpLine,
+  type DaemonEvent,
+  type WorkspaceKind,
+} from "@wsp/protocol";
 import { WebSocketServer, type WebSocket } from "ws";
 import { runExec } from "./exec.js";
 import { listDir, readFileBounded, type FsReadEncoding } from "./fs-ops.js";
@@ -14,8 +41,8 @@ import { gitDiff, gitStatus, type GitDiffScope } from "./git-ops.js";
 import { InboxWatcher } from "./inbox.js";
 import { ProcessManifest, type ManifestOptions } from "./manifest.js";
 import { linuxModeProbe, ModeWatcher, type ModeProbe } from "./mode.js";
-import { PortWatcher, portSourceFor, type PortOpenEvent, type PortSnapshotSource } from "./ports.js";
-import { killProcess, ProcSampler, type ProcSource } from "./proc.js";
+import { PortWatcher, portSourceFor, procNetTcpSource, type PortOpenEvent, type PortSnapshotSource } from "./ports.js";
+import { killProcess, ProcSampler } from "./proc.js";
 import { readingsFor, type ReadingsOptions } from "./readings.js";
 import { PtyManager } from "./pty-manager.js";
 import { SysSampler, type SysSource } from "./sys.js";
@@ -23,13 +50,11 @@ import { localhostPortOf, settledLocalPorts } from "./local-urls.js";
 import { CallbackSpotter, TerminalUrlScanner, listenOpenSocket, type OpenSocket } from "./relay.js";
 import { OpError, resolveInside } from "./workspace-paths.js";
 
-export const DEFAULT_PORT = 7070;
-// 0.0.0.0, not loopback: the previewUrl edge dials the guest's eth0 (loopback answers 502).
-export const DEFAULT_HOST = "0.0.0.0";
-export const DEFAULT_TOKEN_PATH = "/root/.wsp-daemon-token";
-export const DEFAULT_INBOX_DIR = "/root/inbox";
-export const DEFAULT_MANIFEST_PATH = "/root/.wsp/manifest.json";
-
+/** What starts a daemon in this process. The bin reads the same set off its flags (DaemonArgs in args.ts), one
+ * flag per option here, and the test harness hands one set to whichever daemon it drives. The three readings a
+ * caller may hand in as functions (portsSource, sysSource, modeProbe) have no flag: the daemon's own suite drives
+ * every daemon by files under procRoot instead, and they stay for the harnesses of other packages that stand a
+ * daemon in for a guest. */
 export interface DaemonOptions {
   host?: string;
   port?: number;
@@ -38,6 +63,8 @@ export interface DaemonOptions {
   tokenPath?: string;
   /** How long a fresh socket has to send its auth frame. */
   authDeadlineMs?: number;
+  /** This machine's listening ports, when a caller reads them itself; the platform's road otherwise, or the fake
+   * /proc under procRoot. */
   portsSource?: PortSnapshotSource;
   portsIntervalMs?: number;
   /** Which kind of machine this daemon serves, which picks the modules its Live rows and Processes tab read: a
@@ -50,13 +77,14 @@ export interface DaemonOptions {
   inboxQuietMs?: number;
   inboxPollMs?: number;
   manifest?: ManifestOptions;
+  /** A caller's own reading of the pty modes; the stty probe over procRoot otherwise. */
   modeProbe?: ModeProbe;
   modeIntervalMs?: number;
+  /** A caller's own reading of this machine's load; the kind's module over procRoot otherwise. */
   sysSource?: SysSource;
   sysIntervalMs?: number;
-  /** Stands in for the kind's own processes module, as sysSource does for its metrics one. */
-  procSource?: ProcSource;
-  /** A directory laid out like /proc, for tests on darwin; the real one otherwise. */
+  /** A directory laid out like /proc, which every /proc reading takes: the ports, the load, the processes and the
+   * pty modes. For tests on darwin; the real one otherwise. */
   procRoot?: string;
   procPasswdPath?: string;
   procIntervalMs?: number;
@@ -66,51 +94,25 @@ export interface DaemonOptions {
   rootsPath?: string;
   /** Unix socket the browser shim posts URLs to; absent means no shim socket (local and test daemons). */
   openSocketPath?: string;
-  spotter?: CallbackSpotter;
+  /** Where the bound port is written once the listener is up: the one fact a caller that asked for port 0 cannot
+   * know before, and the file the host reads it back off on a machine somebody owns. */
+  portFile?: string;
   /** The host this daemon dials instead of waiting to be dialled: a computer somebody joined as a place. The link
    * opens one socket outward and hands it to the same serve every inbound socket gets, so a joined computer speaks
    * what a fork speaks. Absent leaves the daemon inbound only, which is every other kind. */
   link?: Omit<PlaceLinkOptions, "daemonPort">;
+  /** One line per event of the daemon's own, in the sentences the protocol names: the bin writes them to stderr,
+   * a place agent to its log, a test to its lines. Nothing by default. */
+  log?: (line: string) => void;
 }
 
 export interface DaemonHandle {
   port: number;
+  /** The ptys this daemon holds, for a harness that stands it in for a guest; a client asks pty.list. */
   ptys: PtyManager;
   /** The link this daemon holds outward, on a place; absent on every other kind. */
   link?: PlaceLink;
   close(): Promise<void>;
-}
-
-/** CLI flags for the bin: --host matters for LOCAL runs (bind 127.0.0.1 so
- * macOS/Windows firewalls stay quiet); in-guest keeps the 0.0.0.0 default
- * because the previewUrl edge dials eth0. */
-export function parseDaemonArgs(argv: string[]): Pick<DaemonOptions, "host" | "port" | "tokenPath" | "root"> {
-  const out: { host?: string; port?: number; tokenPath?: string; root?: string } = {};
-  for (let i = 0; i < argv.length; i++) {
-    const flag = argv[i]!;
-    const value = argv[i + 1];
-    if (flag === "--host") {
-      if (!value) throw new Error("--host needs a value (e.g. --host 127.0.0.1)");
-      out.host = value;
-      i++;
-    } else if (flag === "--port") {
-      const port = Number(value);
-      if (!value || !Number.isInteger(port)) throw new Error("--port needs an integer value");
-      out.port = port;
-      i++;
-    } else if (flag === "--token-path") {
-      if (!value) throw new Error("--token-path needs a file path");
-      out.tokenPath = value;
-      i++;
-    } else if (flag === "--root") {
-      if (!value) throw new Error("--root needs a directory path");
-      out.root = value;
-      i++;
-    } else {
-      throw new Error(`unknown flag ${flag} (known: --host, --port, --token-path, --root)`);
-    }
-  }
-  return out;
 }
 
 interface Request {
@@ -134,12 +136,6 @@ interface ConnState {
   closed?: boolean;
 }
 
-/** Laptop connections one socket may hold open through the forward at once. */
-const TUNNEL_CAP = 64;
-const AUTH_DEADLINE_MS = 5_000;
-/** Wire bytes a peer may send before its auth frame passes; an auth frame is under 200. */
-const PRE_AUTH_MAX_BYTES = 4096;
-
 function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a);
   const bb = Buffer.from(b);
@@ -148,20 +144,22 @@ function safeEqual(a: string, b: string): boolean {
 
 export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandle> {
   // Read per auth frame, not once: the host rotates the file on every start and the daemon keeps running.
-  const currentToken = (): string => (opts.token ?? readFileSync(opts.tokenPath ?? DEFAULT_TOKEN_PATH, "utf8")).trim();
-  if (!currentToken()) throw new Error("daemon refuses to start without an auth token");
+  const currentToken = (): string => (opts.token ?? readFileSync(opts.tokenPath ?? DAEMON_TOKEN_PATH, "utf8")).trim();
+  if (!currentToken()) throw new Error(DAEMON_NO_TOKEN);
   const authDeadlineMs = opts.authDeadlineMs ?? AUTH_DEADLINE_MS;
+  const log = opts.log ?? (() => {});
 
   const ptys = new PtyManager();
-  const manifest = new ProcessManifest(opts.manifest ?? { path: DEFAULT_MANIFEST_PATH });
-  const spotter = opts.spotter ?? new CallbackSpotter();
+  const manifest = new ProcessManifest({ path: GUEST_MANIFEST_PATH, ...opts.manifest });
+  const spotter = new CallbackSpotter();
   // Watchers are created on first watch op so darwin tests never touch /proc.
   let portWatcher: PortWatcher | null = null;
   let inboxWatcher: InboxWatcher | null = null;
   let sysSampler: SysSampler | null = null;
   let procSampler: ProcSampler | null = null;
 
-  const portsSource = opts.portsSource ?? portSourceFor(platform());
+  // A fake /proc stands in for the whole machine, ports included, so a test on darwin drives the Linux road.
+  const portsSource = opts.portsSource ?? (opts.procRoot !== undefined ? procNetTcpSource(opts.procRoot) : portSourceFor(platform()));
   const getPortWatcher = () => {
     if (!portWatcher) {
       portWatcher = new PortWatcher(portsSource, {
@@ -175,7 +173,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
   const getInboxWatcher = () => {
     if (!inboxWatcher) {
       inboxWatcher = new InboxWatcher({
-        dir: opts.inboxDir ?? DEFAULT_INBOX_DIR,
+        dir: opts.inboxDir ?? GUEST_INBOX_DIR,
         ...(opts.inboxQuietMs !== undefined ? { quietMs: opts.inboxQuietMs } : {}),
         ...(opts.inboxPollMs !== undefined ? { pollMs: opts.inboxPollMs } : {}),
       });
@@ -210,12 +208,14 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
   });
   const getSysSampler = () => {
     sysSampler ??= new SysSampler(opts.sysSource ?? readingsFor(kind).metrics(readingsOptions()), {
+      log,
       ...(opts.sysIntervalMs !== undefined ? { intervalMs: opts.sysIntervalMs } : {}),
     });
     return sysSampler;
   };
   const getProcSampler = () => {
-    procSampler ??= new ProcSampler(opts.procSource ?? readingsFor(kind).processes(readingsOptions()), {
+    procSampler ??= new ProcSampler(readingsFor(kind).processes(readingsOptions()), {
+      log,
       // An exited pty's pid can be reused by a stranger; only live shells carry the label.
       ptys: () => ptys.list().filter(p => !p.exited),
       ...(opts.procIntervalMs !== undefined ? { intervalMs: opts.procIntervalMs } : {}),
@@ -223,13 +223,13 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
     return procSampler;
   };
 
-  // Inert until a pty.attach; the Linux-only default probe fails silently on
-  // darwin, so attach tests without a fake probe still pass.
-  const modes = new ModeWatcher(opts.modeProbe ?? linuxModeProbe(), {
+  // Inert until a pty.attach; the probe reads /proc and fails silently where there is none, so an attach on darwin
+  // without a fake tree still passes.
+  const modes = new ModeWatcher(opts.modeProbe ?? linuxModeProbe(opts.procRoot), {
     ...(opts.modeIntervalMs !== undefined ? { intervalMs: opts.modeIntervalMs } : {}),
   });
 
-  const wss = new WebSocketServer({ host: opts.host ?? DEFAULT_HOST, port: opts.port ?? DEFAULT_PORT });
+  const wss = new WebSocketServer({ host: opts.host ?? DAEMON_DEFAULT_HOST, port: opts.port ?? DAEMON_DEFAULT_PORT });
   // Armed before any await: the listening event fires as soon as the loop turns.
   const listening = new Promise<void>((resolve, reject) => {
     wss.once("listening", resolve);
@@ -281,12 +281,12 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
     const countPreAuth = (chunk: Buffer): void => {
       preAuthBytes += chunk.length;
       if (preAuthBytes <= PRE_AUTH_MAX_BYTES) return;
-      if (ws.readyState === ws.OPEN) ws.close(4401, "too many bytes before the auth frame");
+      if (ws.readyState === ws.OPEN) ws.close(4401, DAEMON_PRE_AUTH_BYTES_EXCEEDED);
       else wire.destroy();
     };
     wire.prependListener("data", countPreAuth);
     // With the server on 0.0.0.0 the first frame is the only gate: no handler exists until it passes.
-    const deadline = setTimeout(() => ws.close(4401, "no auth frame arrived in time"), authDeadlineMs);
+    const deadline = setTimeout(() => ws.close(4401, DAEMON_AUTH_DEADLINE_PASSED), authDeadlineMs);
     ws.once("close", () => clearTimeout(deadline));
     ws.once("message", raw => {
       clearTimeout(deadline);
@@ -299,7 +299,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
       }
       const auth = DaemonAuthRequest.safeParse(frame);
       if (!auth.success) {
-        ws.close(4401, "the first frame must be auth");
+        ws.close(4401, DAEMON_FIRST_FRAME_NOT_AUTH);
         return;
       }
       let expected = "";
@@ -309,7 +309,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
         expected = "";
       }
       if (expected === "" || !safeEqual(auth.data.token, expected)) {
-        ws.close(4401, "daemon token refused; the host holds the current one");
+        ws.close(4401, DAEMON_TOKEN_REFUSED);
         return;
       }
       wire.off("data", countPreAuth);
@@ -337,7 +337,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
       try {
         msg = JSON.parse(String(raw)) as Request;
       } catch {
-        ws.send(JSON.stringify({ id: null, ok: false, error: "invalid json" }));
+        ws.send(JSON.stringify({ id: null, ok: false, error: DAEMON_INVALID_JSON }));
         return;
       }
       handle(ws, state, ctx, msg).catch((e: unknown) => {
@@ -349,11 +349,12 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
 
   await listening;
   const addr = wss.address();
-  const boundPort = typeof addr === "object" && addr !== null ? addr.port : (opts.port ?? DEFAULT_PORT);
+  const boundPort = typeof addr === "object" && addr !== null ? addr.port : (opts.port ?? DAEMON_DEFAULT_PORT);
+  if (opts.portFile !== undefined) writeFileSync(opts.portFile, `${boundPort}\n`, { mode: 0o600 });
 
   // The port goes into the report here, since only this call knows it, and the socket the link proves is handed to
   // the same serve an inbound one gets: a joined computer speaks what a fork speaks.
-  const link = opts.link === undefined ? undefined : new PlaceLink({ ...opts.link, daemonPort: boundPort }, (ws, ops) => serve(ws, undefined, ops));
+  const link = opts.link === undefined ? undefined : new PlaceLink({ log, ...opts.link, daemonPort: boundPort }, (ws, ops) => serve(ws, undefined, ops));
 
   return {
     port: boundPort,
@@ -446,8 +447,6 @@ function requireString(msg: Request, key: string): string {
   return v;
 }
 
-// Linux pid_max ceiling; above int32 process.kill throws instead of ESRCH, so both proc ops refuse alike.
-const PID_MAX = 4_194_304;
 function requirePid(msg: Request): number {
   const pid = msg["pid"];
   if (!Number.isInteger(pid) || (pid as number) < 1 || (pid as number) > PID_MAX) {
@@ -488,7 +487,7 @@ function inPortScope(port: number, msg: Request): boolean {
 
 async function handle(ws: WebSocket, state: ConnState, ctx: Ctx, msg: Request): Promise<void> {
   if (state.port !== undefined && !inPortScope(state.port, msg)) {
-    throw new OpError("forbidden", `this socket is scoped to port ${state.port}: only tunnel ops on it and ping are allowed`);
+    throw new OpError("forbidden", portScopeRefusal(state.port));
   }
   // The road that opened this socket answers its own ops before the daemon's switch sees them, so an act that
   // belongs to a road lives with that road and no other socket can reach it.
@@ -717,7 +716,7 @@ async function handle(ws: WebSocket, state: ConnState, ctx: Ctx, msg: Request): 
       return;
     }
     default:
-      fail(ws, msg.id, `unknown op: ${String(msg.op)}`);
+      fail(ws, msg.id, unknownOpLine(String(msg.op)));
   }
 }
 

@@ -959,6 +959,31 @@ describe("the Workspaces section row", () => {
   });
 });
 
+describe("the group before the first list has arrived", () => {
+  it("says nothing at all while the store is not ready: no empty state, no rows, no bars", () => {
+    render(<SidebarProvider defaultOpen><WorkspaceSidebar /></SidebarProvider>);
+    expect(screen.queryByText(/No workspaces yet/)).toBeNull();
+    expect(rowIds()).toEqual([]);
+    expect(document.querySelectorAll("[data-slot=skeleton]").length).toBe(0);
+    expect(document.querySelector("[data-slot=sidebar-group-content]")!.textContent).toBe("");
+  });
+
+  it("says the fleet is empty once the list has arrived and holds nothing", async () => {
+    render(<SidebarProvider defaultOpen><WorkspaceSidebar /></SidebarProvider>);
+    expect(screen.queryByText(/No workspaces yet/)).toBeNull();
+    act(() => useStore.setState({ ready: true }));
+    expect(await screen.findByText(/No workspaces yet/)).toBeDefined();
+    expect(screen.getByText("Add a computer or connect a provider, then create one.")).toBeDefined();
+  });
+
+  it("a creation on its way holds the empty state off while the list is still coming", () => {
+    render(<SidebarProvider defaultOpen><WorkspaceSidebar /></SidebarProvider>);
+    act(() => useStore.setState({ creations: [{ key: "creating:1", name: "beta", workspaceId: null, lines: [], failed: null }] }));
+    expect(screen.getByText("beta")).toBeDefined();
+    expect(screen.queryByText(/No workspaces yet/)).toBeNull();
+  });
+});
+
 describe("keyboard navigation", () => {
   it("arrows walk every row in order from the search row; Enter selects", async () => {
     await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "hello" })]), "api");

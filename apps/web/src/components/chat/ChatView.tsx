@@ -20,7 +20,7 @@ import { useRightPanelStore } from "../../rightPanelStore";
 import { cn } from "../../lib/utils";
 import { DEFAULT_TIMESTAMP_FORMAT, pausedLine, turnWait, type TimestampFormat, type TurnSummary } from "./adapt";
 import { threadsOpenedBy, type ThreadOnWorkspace } from "../../sidebar/threadTree";
-import { whereWord } from "../../sidebar/workspaceRows";
+import { useWhereWord, whereWord } from "../../sidebar/workspaceRows";
 import { TimelineRuleLine } from "./TimelineRuleLine";
 import { MessagesTimeline, type MachineWait } from "./MessagesTimeline";
 import { useNewThreadRequests } from "./newThreadRequests";
@@ -73,10 +73,8 @@ export function ChatView({
   // naming the workspace and, while it wakes, where it runs, since that is what the send is waiting on.
   const state = useWorkspaceState(workspaceId);
   const status = useStatus(workspaceId);
-  const runs = useMemo(
-    () => ({ name: workspace?.name ?? workspaceId, where: workspace === null ? workspaceId : whereWord({ workspace, status }) }),
-    [workspace, workspaceId, status],
-  );
+  const where = useWhereWord(workspaceId);
+  const runs = useMemo(() => ({ name: workspace?.name ?? workspaceId, where }), [workspace, workspaceId, where]);
   const machineWait = useMemo<MachineWait | null>(() => {
     if (state === null || !view.running) return null;
     const wait = turnWait(state, runs);
