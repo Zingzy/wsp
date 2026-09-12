@@ -14,6 +14,7 @@ import type { Api } from "../../src/protocol/client";
 import { useStore } from "../../src/protocol/store";
 import "../../src/index.css";
 import { caps } from "../caps.js";
+import { noDaemonApi } from "../fake-daemon-api.js";
 
 document.documentElement.classList.toggle("dark", new URLSearchParams(window.location.search).get("theme") !== "light");
 
@@ -29,7 +30,7 @@ const api: Api = {
   upgrade: async () => mac,
   capabilities: async () => (caps({ liveCloneForks: false, resize: false, previewUrls: false, signedUrls: false, containers: false, callbackRelay: false, snapshotListing: false, pauseMode: undefined })),
   portReach: async () => ({ url: "https://example.invalid", expiresAt: 0 }),
-  daemonReach: async () => ({ url: "http://127.0.0.1:1", expiresAt: Number.MAX_SAFE_INTEGER }),
+  daemon: noDaemonApi,
   startSession: async o => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
   sessionHistory: async () => [],
   listSnapshots: async () => ({ name: "default", head: 0, versions: [] }),

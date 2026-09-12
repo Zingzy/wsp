@@ -15,6 +15,7 @@ import { useComposerDraftStore } from "../src/components/chat/composerDraftStore
 import { useComposerImagesStore } from "../src/components/chat/composerImages.js";
 import { CHAT_WS } from "./fixtures/chat-stream.js";
 import { caps } from "./caps.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 let restoreLayout: () => void = () => {};
 const urls: string[] = [];
@@ -65,7 +66,7 @@ function fixtureApi(history: Record<string, SessionEvent[]> = {}, statuses: Work
   const api: Api = {
     interruptSession: async () => "accepted",
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/`, expiresAt: Date.now() + 3_600_000 }),
-    daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
+    daemon: noDaemonApi,
     sessionHistory: async id => history[id] ?? [],
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     snapshotStorage: async () => null,

@@ -47,7 +47,7 @@ import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
 import { aimName, aimedHost, wspHome, type HostAim, type HostPick } from "./hosts.js";
 import { placeFilePath, placeKeyPath, placeLogPath, placeReport, readPlaceFile, stopPlaceService, sweepPlace, writePlaceFile } from "./place-report.js";
-import { PROVIDER_ENV, addedProviders, providerBackendFor, providerModule, type ProviderEnv } from "./providers.js";
+import { PROVIDER_ENV, addedBy, addedProviders, providerBackendFor, providerModule, type ProviderEnv } from "./providers.js";
 import { publicHostname } from "./relay-link.js";
 import { pairOnLoopbackLine, reachAddresses } from "./pairing.js";
 import {
@@ -62,7 +62,7 @@ import {
   type ServiceRunner,
 } from "./service.js";
 import { dialHost, type DialOpts, type HostClient } from "./verbs.js";
-import { writeEnvFile, type Keys } from "./env-keys.js";
+import { writeEnvFile } from "./env-keys.js";
 
 /** What this computer is called when the person named no name: its own name lowercased, which is what they would
  * type for it on a command line. The one reading, so the row for this computer and the name a join writes agree. */
@@ -103,14 +103,14 @@ export function hostPlaceKey(statePath: string): PlaceKeyPair {
 
 /** What a host wires for its places: its own pair, the provider it is set up for as a row of the same list, and
  * this computer's own row. */
-export function placeWiring(statePath: string, keys: Keys, env: ProviderEnv): PlaceWiring {
+export function placeWiring(statePath: string, env: ProviderEnv): PlaceWiring {
   return {
     hostKey: hostPlaceKey(statePath),
     provider: () => {
-      const module = providerModule({ keys, env });
-      // A row that names no way of being added is no place to show: a host set up to fork nowhere has none.
-      if (module.added === undefined) return undefined;
-      const { pricing } = providerBackendFor({ keys, env });
+      const module = providerModule(env);
+      // A row that answers for no way of being added is no place to show: a host set up to fork nowhere has none.
+      if (addedBy(module) === undefined) return undefined;
+      const { pricing } = providerBackendFor(env);
       return { id: module.id, rateUsdPerHour: pricing.rateUsdPerHour(pricing.defaultSize) };
     },
     hostName: hostNameHere,
@@ -220,7 +220,8 @@ const systemDeps: PlaceDeps = { dial: dialHost, now: Date.now, run: systemRunner
  * aim a line, which is read to refuse anywhere but here. */
 export interface PlaceOpts extends HostPick {
   statePath: string;
-  keys?: Keys;
+  /** The environment the provider is picked out of, carrying every registered row's key off the three layers a key
+   * is read through: a provider added as a place is put the key this computer already holds under its own variable. */
   providerEnv?: ProviderEnv;
 }
 
@@ -280,15 +281,13 @@ export async function addCommand(io: CliIO, opts: PlaceOpts, args: readonly stri
 
 /** A provider as a place: the words name it, this computer is set up for it, and a provider that is opened by a key
  * of the person's is put the one this computer already holds before anything is written. The key itself is read
- * where they keep it and is never written here: which variable a given provider's key lives under is the key seam's
- * to declare, and until it does the row's own rule stands, which is that a missing key is the provider's own
- * refusal rather than a guess made on this side. */
+ * under the variable that provider's row declares, off the same three layers every other road reads a key through,
+ * and is never written here. */
 async function addProvider(io: CliIO, opts: PlaceOpts, id: string, deps: PlaceDeps): Promise<number> {
   const module = addedProviders().find(m => m.id === id)!;
-  const keys = opts.keys ?? {};
   const env: ProviderEnv = { ...(opts.providerEnv ?? process.env), [PROVIDER_ENV]: id };
-  const backend = providerBackendFor({ keys, env });
-  if (module.added === "key") {
+  const backend = providerBackendFor(env);
+  if (addedBy(module) === "key") {
     const check = await deps.checkKey(backend);
     const said = keyCheckLine(check, true);
     if (check.state === "refused" && said !== undefined) {

@@ -1095,7 +1095,8 @@ export async function localDoctor(rt: Runtime, io: CliIO): Promise<number> {
       async () => {
         const handle = await rt.sessions.start(workspace.id, { prompt: localPrompt(word), harness: harness.harness });
         const result = await handle.finished;
-        if (result.status !== "completed") throw new Error(`the turn ended ${result.status}${result.text === undefined ? "" : `: ${result.text.slice(0, 200)}`}`);
+        const why = result.error ?? result.text;
+        if (result.status !== "completed") throw new Error(`the turn ended ${result.status}${why === undefined ? "" : `: ${why.slice(0, 200)}`}`);
         if (result.text === undefined || !result.text.includes(word)) throw new Error(`the reply did not carry the word this run asked for: ${JSON.stringify(result.text?.slice(0, 200) ?? null)}`);
         return result;
       },

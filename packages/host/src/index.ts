@@ -25,11 +25,13 @@ export {
   type CliIO,
   type Keys,
   type KeySources,
+  type LoadedKeys,
   type StopProcess,
 } from "./cli.js";
 export { LAUNCHD_PATH, adoptLoginPath, needsLoginPath, takeLoginPath, type LoginShellDeps } from "./login-path.js";
 export { SECTION_BEGIN, SECTION_END, sectionText } from "./agents-md.js";
 export { runBin } from "./entry.js";
+export { type ProviderEnv } from "./providers.js";
 export { shimPath } from "./shim.js";
 export { agentsHere, type AgentHere } from "./agents-here.js";
 export { installEach, mcpServerSpec, runningWsp, type InstallReport, type RunningWsp } from "./mcp-install.js";

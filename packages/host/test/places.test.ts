@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
 import { ALREADY_JOINED_LINE, PLACE_DOOR_UNSERVED, doorPortHeldLine, placeDaemonPaths, placeLinkTranscript, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
+import { BoxBackend, type KeyCheck, type MachineBackend } from "@wsp/engine";
 import { placeLines } from "../src/verbs.js";
 import {
   ADD_NAME_REFUSAL,
@@ -37,7 +38,7 @@ import {
 import { placeFilePath, placeKeyPath, placeLogPath, placeReport, readPlaceFile, stopPlaceService, sweepPlace, writePlaceFile } from "../src/place-report.js";
 import { captured } from "./verbs-fixture.js";
 import { SERVICE_MANAGERS, type RunResult, type ServiceRunner } from "../src/service.js";
-import { addedProviders } from "../src/providers.js";
+import { addedBy, addedProviders } from "../src/providers.js";
 
 const dirs: string[] = [];
 const servers: WebSocketServer[] = [];
@@ -146,7 +147,10 @@ describe("what wsp add prints with no argument", () => {
     // Read off the table, never off an id: docker is added by its words and the row that holds no machine is no
     // place to add at all.
     expect(addableProviders()).toEqual(["docker", "box", "solari"]);
-    expect(addedProviders().map(m => m.added)).toEqual(["words", "key", "key"]);
+    // How a row is added is read off the row's own facts: a row that declares the variable it reads a key from is
+    // opened by that key, and is not asked to say so twice.
+    expect(addedProviders().map(m => addedBy(m))).toEqual(["words", "key", "key"]);
+    expect(addedProviders().map(m => [m.id, m.keyEnv !== undefined])).toEqual([["docker", false], ["box", true], ["solari", true]]);
     expect(addableProviders()).not.toContain("none");
     expect(addRefusal("nonsense")).toContain("docker, box, solari");
     expect(addRefusal("nonsense")).toContain("user@host");
@@ -179,17 +183,22 @@ describe("a provider as a place", () => {
     expect(await addCommand(io, opts(home, {}), ["docker"], {}, systemPlaceDeps)).toBe(0);
     expect(io.lines.join("\n")).toContain("place docker");
     expect(readFileSync(join(home, ".env"), "utf8")).toContain("WSP_PROVIDER=docker");
-    // The key itself is never written here: which variable holds a given provider's key is the key seam's to say.
+    // The key itself is never written here: it stays where the person keeps it, under its own row's variable.
     expect(readFileSync(join(home, ".env"), "utf8")).not.toContain("API_KEY");
   });
 
   it("puts the key to a provider that is opened by one, and writes nothing when it is refused", async () => {
     const home = tmp("add-provider-key");
-    const refusing = { ...systemPlaceDeps, checkKey: async () => ({ state: "refused", said: "box said 401 invalid token" }) as const };
+    const put: MachineBackend[] = [];
+    const refusing = { ...systemPlaceDeps, checkKey: async (b: MachineBackend): Promise<KeyCheck> => (put.push(b), { state: "refused", said: "box said 401 invalid token" }) };
     const io = captured();
     expect(await addCommand(io, opts(home, { BOX_API_KEY: "sk-ant-x" }), ["box"], {}, refusing)).toBe(1);
     expect(io.errors.join("\n")).toContain("401");
     expect(existsSync(join(home, ".env"))).toBe(false);
+    // The key is put to the provider being added, built out of the environment that carries every row's key under
+    // the variable that row declares.
+    expect(put).toHaveLength(1);
+    expect(put[0]).toBeInstanceOf(BoxBackend);
     // A key the provider took sets this computer up for it and nothing of the key is written or printed.
     const taking = { ...systemPlaceDeps, checkKey: async () => ({ state: "taken" }) as const };
     const good = captured();

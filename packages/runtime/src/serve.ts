@@ -43,6 +43,7 @@ import {
   type WorkspaceOrigin,
   type WorkspaceView,
 } from "@wsp/protocol";
+import { openDaemonChannel, type DaemonChannel } from "./daemon-channel.js";
 import { NO_DEVICE_DOOR, safeEqual, type DeviceDoor } from "./devices.js";
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
 import type { GoldenRecipe, HostFolders, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
@@ -284,6 +285,13 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     let handedOver = false;
 
     const detaches: (() => void)[] = [];
+    /** The daemon links this socket holds open, by the id it was answered with. A channel is never reachable from
+     * another socket, so a page cannot drive a machine by guessing an id another page was given. */
+    const channels = new Map<string, DaemonChannel>();
+    detaches.push(() => {
+      for (const ch of channels.values()) ch.close();
+      channels.clear();
+    });
     let bound: { deviceId: string; cut: () => void } | undefined;
     ws.on("close", () => {
       for (const un of detaches) un();
@@ -554,6 +562,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "workspaces.list":
               send({ id: msg.id, ok: true, workspaces: (await rt.workspaces.list(origin)).map(handed) });
               return;
+            case "workspaces.resolve":
+              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.resolve(msg.ref, origin)) });
+              return;
             case "workspaces.get":
               send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.get(msg.workspaceId, origin)) });
               return;
@@ -608,9 +619,55 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               await rt.workspaces.touch(msg.workspaceId, origin);
               send({ id: msg.id, ok: true });
               return;
-            case "workspaces.daemonReach":
-              send({ id: msg.id, ok: true, reach: await rt.workspaces.daemonReach(msg.workspaceId, origin) });
+            case "daemon.open": {
+              // The same gate every workspace verb reads: a socket that may not drive this workspace is refused here.
+              const reach = await rt.workspaces.daemonReach(msg.workspaceId, origin);
+              if (reach.daemonToken === undefined) throw new Error("the machine has no daemon yet");
+              const channel = randomBytes(6).toString("hex");
+              // The daemon pushes its hello right after the auth reply, so frames that land before the open reply is
+              // written wait here and go out after it: a page hears a channel's id before anything arrives on it.
+              let queued: Record<string, unknown>[] | null = [];
+              const ch = await openDaemonChannel({
+                url: reach.url,
+                token: reach.daemonToken,
+                onEvent: event => {
+                  if (queued !== null) queued.push(event);
+                  else send({ type: "daemon.event", channel, event });
+                },
+              });
+              // The page left while the dial was in flight; the machine keeps no socket for a tab that is gone.
+              if (ws.readyState !== ws.OPEN) {
+                ch.close();
+                return;
+              }
+              channels.set(channel, ch);
+              void ch.closed.then(({ code, reason }) => {
+                // Still ours means the page did not ask for this close, so it is told; a close it asked for is silent.
+                if (channels.get(channel) !== ch) return;
+                channels.delete(channel);
+                send({ type: "daemon.closed", channel, code, reason });
+              });
+              send({ id: msg.id, ok: true, channel });
+              const held = queued;
+              queued = null;
+              for (const event of held) send({ type: "daemon.event", channel, event });
               return;
+            }
+            case "daemon.send": {
+              const ch = channels.get(msg.channel);
+              if (ch === undefined) throw new Error("no such daemon channel on this socket");
+              // The host reads none of the frame and none of the answer: the page validates what it asked for.
+              send({ id: msg.id, ok: true, reply: await ch.send(msg.frame) });
+              return;
+            }
+            case "daemon.close": {
+              const ch = channels.get(msg.channel);
+              if (ch === undefined) throw new Error("no such daemon channel on this socket");
+              channels.delete(msg.channel);
+              ch.close();
+              send({ id: msg.id, ok: true });
+              return;
+            }
             case "sessions.start": {
               const handle = await rt.sessions.start(msg.workspaceId, {
                 prompt: msg.prompt,
@@ -711,9 +768,6 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, exported: await imageExport()({ image, tar, dest: msg.dest, passphrase: msg.passphrase }) });
               return;
             }
-            case "golden.builderReach":
-              send({ id: msg.id, ok: true, reach: await rt.golden.builderReach(msg.builderId) });
-              return;
             case "workspaces.portReach":
               send({ id: msg.id, ok: true, reach: await rt.workspaces.portReach(msg.workspaceId, msg.port, origin) });
               return;
