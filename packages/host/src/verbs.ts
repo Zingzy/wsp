@@ -39,7 +39,19 @@ import {
   NO_REBUILD_NEEDED,
   ProjectExportResult,
   ProjectGolden,
+  SealedImage,
+  SealedImageCopy,
+  SealedImageView,
+  NO_SEALED_IMAGE,
+  IMAGE_PASSPHRASE_ENV,
+  IMAGE_PASSPHRASE_MIN,
+  sealedCopyLine,
+  sealedExportLine,
+  sealedImageLine,
+  sealedProjectLine,
+  type SealedImageExport,
   ProjectImportResult,
+  PlaceView,
   ProjectPlan,
   RECIPE_TICKS,
   RecipeTick,
@@ -165,7 +177,7 @@ import {
 import type { CliIO } from "./cli.js";
 import { gitRootOf } from "./repo-root.js";
 import { dialAddress, hostTokenFor, hostTokenPath, servingHost } from "./host-lock.js";
-import { addressNotPairedLine, aimAddress, aimName, aimedHost, deviceRefusedLine, dialWindowMs, noAnswerRefusal, noAnswerWithin, stateIgnoredLine, wsUrlOf, type HostAim, type HostPick } from "./hosts.js";
+import { addressNotPairedLine, aimAddress, aimName, aimedHost, deviceRefusedLine, dialWindowMs, hostSideOnlyLine, noAnswerRefusal, noAnswerWithin, stateIgnoredLine, wsUrlOf, type HostAim, type HostPick } from "./hosts.js";
 import { colourDepth, isTTY, wrap } from "./init-layout.js";
 import { RecipeAnswer, RecipeScan, recipePrintout, scanPrintout } from "./recipe-answer.js";
 import { isRecipeTick, runRecipe, runScan, type ScanInput } from "./recipe-command.js";
@@ -380,6 +392,24 @@ function formatter(io: CliIO, json: boolean): Out {
   };
 }
 
+/** The rows wsp places prints. Every fact is what the place last reported; a provider row carries its rate and no
+ * shape, since nothing about a machine exists there until one is forked. */
+export function placeLines(places: readonly PlaceView[]): string[] {
+  if (places.length === 0) return ["This host holds no place. wsp add prints the join line for a computer you are sitting at."];
+  const rows = places.map(p => [
+    p.name,
+    p.kind,
+    p.shape === undefined ? "" : String(p.shape.cpu),
+    p.shape === undefined ? "" : fmtBytes(p.shape.memMb * 1024 * 1024),
+    p.diskFreeBytes === undefined ? "" : fmtBytes(p.diskFreeBytes),
+    p.docker === undefined ? "" : p.docker ? "yes" : "no",
+    p.kind === "provider" ? `$${(p.rateUsdPerHour ?? 0).toFixed(3)}/h` : p.present === true ? "yes" : "no",
+    p.kind === "provider" ? "" : (p.lastSeenAt ?? ""),
+    p.default ? "default" : "",
+  ]);
+  return table([["PLACE", "KIND", "CORES", "MEMORY", "DISK FREE", "DOCKER", "PRESENT", "LAST SEEN", "DEFAULT"], ...rows]);
+}
+
 /** Columns padded to their widest cell, two spaces apart; the last column is never padded. */
 export function table(rows: ReadonlyArray<ReadonlyArray<string>>): string[] {
   const widths = rows.reduce<number[]>((w, row) => row.map((cell, i) => Math.max(w[i] ?? 0, cell.length)), []);
@@ -485,7 +515,21 @@ export interface ToolOnlyVerb {
   toolOnly: string;
 }
 
-export type Verb = CliVerb | ToolOnlyVerb;
+/** A verb the command line alone offers, with why no tool serves it: a line only a person at this terminal has any
+ * business running. The parity test holds the reason as it holds a tool-only verb's. */
+export interface CliOnlyVerb extends Omit<CliVerb, "tool"> {
+  cliOnly: string;
+  /** Why this line runs at its own host's terminal and nowhere else. The flag is still parsed, so a typed --host
+   * reads this sentence rather than the parser's unknown option, and so does WSP_HOST and the default alias. */
+  hostSide?: string;
+}
+
+export type Verb = CliVerb | ToolOnlyVerb | CliOnlyVerb;
+
+/** Whether this verb is served as a tool; a cli-only one says in its own words why not. */
+export function hasTool<V extends Verb>(verb: V): verb is Extract<V, { tool: Tool }> {
+  return "tool" in verb;
+}
 
 /** The one rule that names a verb's tool: its words joined by underscores, so `thread new` is `thread_new`. */
 export function toolName(words: string): string {
@@ -589,6 +633,48 @@ export async function rebuild(client: HostClient, ref: string): Promise<Workspac
  * so a caller that held the old one is told. */
 export function rebuiltLine(workspace: WorkspaceView): string {
   return `${stateLine(workspace)} on ${workspace.machineId}`;
+}
+
+/** The image and its copies as this host serves them, parsed and not trusted, for every director that draws them. */
+async function imageView(client: HostClient): Promise<SealedImageView> {
+  const { view } = await client.request<{ view: unknown }>("image.get", {});
+  return SealedImageView.parse(view);
+}
+
+/** What every director prints for the image: the record, a row per place, and the project images under it. */
+function imageLines(view: SealedImageView): string[] {
+  if (view.image === null) return [NO_SEALED_IMAGE];
+  const image = view.image;
+  return [
+    sealedImageLine(image),
+    ...view.copies.map(c => sealedCopyLine(image, c)),
+    ...view.projects.map(sealedProjectLine),
+  ];
+}
+
+/** Why an export runs at its own host's terminal: the bytes it writes are the person's sign-ins, so the file lands
+ * on the computer whose terminal asked for it and the passphrase never crosses to another. */
+export const HOST_SIDE_VAULT = "The vault leaves the host only as a sealed file on the computer that typed the line.";
+
+/** The passphrase an export is sealed to: typed twice at a terminal, read from the environment where there is none,
+ * and never taken from the command line, which every process on this computer can read. */
+async function imagePassphrase(ctx: VerbContext): Promise<string> {
+  const short = (word: string): string => (word.length < IMAGE_PASSPHRASE_MIN ? `the passphrase is ${IMAGE_PASSPHRASE_MIN} characters at least` : "");
+  if (ctx.io.isTTY !== true) {
+    const held = ctx.env[IMAGE_PASSPHRASE_ENV];
+    if (held === undefined || held === "") throw usageRefusal(`nobody is at this terminal to type a passphrase; set ${IMAGE_PASSPHRASE_ENV} for this run instead`);
+    const why = short(held);
+    if (why !== "") throw usageRefusal(`${IMAGE_PASSPHRASE_ENV} is too short: ${why}`);
+    return held;
+  }
+  // Through the run's own io, as every other question this command line asks is: it is what a terminal answers
+  // without echo and what a test answers in its place.
+  const typed = await ctx.io.askSecret(`A passphrase for this export\n${IMAGE_PASSPHRASE_MIN} characters at least; it is the only way back into the file`);
+  const why = short(typed);
+  if (why !== "") throw usageRefusal(`${why}; nothing was exported`);
+  const again = await ctx.io.askSecret("The same passphrase again");
+  if (again !== typed) throw usageRefusal("the two passphrases are not the same; nothing was exported");
+  return typed;
 }
 
 /** Moves a workspace onto the newest version of the image it stands on, by the id a caller already resolved. The
@@ -1756,6 +1842,25 @@ function folderLines(listing: HostFolderListing): string[] {
 
 export const VERBS: readonly Verb[] = [
   {
+    name: "places",
+    usage: "wsp places",
+    about: "every place this host holds: this computer, the computers joined to it and the provider it forks on, with what each has and whether it is connected",
+    options: {},
+    run: async ctx => {
+      if (ctx.args.length !== 0) throw usageRefusal("wsp places takes no positional arguments");
+      const places = (await (await ctx.client()).request<{ places: PlaceView[] }>("places.list")).places;
+      ctx.out.emit({ places }, placeLines(places).join("\n"));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Every place this host holds, which is the whole of where work can run: this computer, each computer joined to it as a place, and the provider it forks on. A computer's row carries what it last reported (cores, memory, free disk, whether it has Docker) and whether it is connected right now; a provider's row carries its hourly rate. Exactly one row is the default, which is the last place added. A place is not a workspace: a workspace on a place is what threads run in, and wsp workspaces lists those.",
+      input: {},
+      output: { places: z.array(PlaceView) },
+      call: async (_args, deps) => asJson({ places: (await (await deps.client()).request<{ places: PlaceView[] }>("places.list")).places }),
+    }),
+  },
+  {
     name: "workspaces",
     usage: "wsp workspaces",
     about: "every workspace this host runs: what its machine is, its state as the sidebar shows it (running, paused, waking or unreachable, off the phase with the provider's word for the machine and the daemon reach beside it) where the kind has one, and how many projects it holds",
@@ -2197,6 +2302,44 @@ export const VERBS: readonly Verb[] = [
         return asText(rebuiltLine(workspace), { workspace });
       },
     }),
+  },
+  {
+    name: "image",
+    usage: "wsp image",
+    about: "the image this host owns: its version, its hash, whether it holds your sign-ins, and the copy each place has built of it",
+    options: {},
+    run: async ctx => {
+      if (ctx.args.length !== 0) throw usageRefusal("wsp image takes no positional arguments");
+      const view = await imageView(await ctx.client());
+      ctx.out.emit(view, imageLines(view).join("\n"));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "The image this host owns and the copy each place has built of it. The record is the recipe the seal was planned from, the sign-ins it holds and a hash over both; a copy built at that hash is current and any other is stale, whatever version the place's own manifest gave it. A record with no vault was read back off its own copy rather than written at a seal, so it judges none of them and every copy of it asks for the sign-ins again: cutting the next version holds them. The project images taken off workspaces are listed under it.",
+      input: {},
+      output: { image: SealedImage.nullable(), copies: z.array(SealedImageCopy), projects: z.array(ProjectGolden) },
+      call: async (_args, deps) => {
+        const view = await imageView(await deps.client());
+        return asText(imageLines(view).join("\n"), view);
+      },
+    }),
+  },
+  {
+    name: "image export",
+    usage: "wsp image export <file>",
+    about: "writes the image record and your sign-ins to one encrypted file, sealed to a passphrase you type",
+    options: {},
+    cliOnly: "the vault leaves the host only at a person's hand, with a passphrase they type",
+    hostSide: HOST_SIDE_VAULT,
+    run: async ctx => {
+      const [dest] = ctx.args;
+      if (dest === undefined || ctx.args.length !== 1) throw usageRefusal("wsp image export takes one file on this computer");
+      const passphrase = await imagePassphrase(ctx);
+      const { exported } = await (await ctx.client()).request<{ exported: SealedImageExport }>("image.export", { dest: resolve(dest), passphrase });
+      ctx.out.emit({ exported }, sealedExportLine(exported));
+      return 0;
+    },
   },
   {
     name: "image move",
@@ -2686,10 +2829,10 @@ export const VERBS: readonly Verb[] = [
 ];
 
 /** The entries the command line answers, in the help's order. */
-export const CLI_VERBS: readonly CliVerb[] = VERBS.filter((v): v is CliVerb => "run" in v);
+export const CLI_VERBS: readonly (CliVerb | CliOnlyVerb)[] = VERBS.filter((v): v is CliVerb | CliOnlyVerb => "run" in v);
 
 /** The verb whose words open argv, the longest first, so `thread new` wins over a verb named `thread`. */
-export function findVerb(argv: ReadonlyArray<string>): CliVerb | undefined {
+export function findVerb(argv: ReadonlyArray<string>): CliVerb | CliOnlyVerb | undefined {
   return [...CLI_VERBS].sort((a, b) => b.name.length - a.name.length).find(v => {
     const words = v.name.split(" ");
     return words.every((w, i) => argv[i] === w);
@@ -2700,7 +2843,7 @@ export function findVerb(argv: ReadonlyArray<string>): CliVerb | undefined {
 const HELP_WIDTH = 80;
 
 /** The verb's about behind the indent, wrapped to the help's width. */
-const aboutLines = (verb: CliVerb, indent: string): string[] => wrap(`${indent}${verb.about}`, HELP_WIDTH, indent);
+const aboutLines = (verb: CliVerb | CliOnlyVerb, indent: string): string[] => wrap(`${indent}${verb.about}`, HELP_WIDTH, indent);
 
 /** The usage wrapped at the gaps between its groups and never inside a bracket, so a flag stays on the line with its
  * value. */
@@ -2728,7 +2871,7 @@ export function verbUsage(word: string): string | undefined {
 }
 
 /** The parser's refusal or, when the unknown option is a flag other verbs read, the line naming those verbs. */
-function parseRefusal(verb: CliVerb, e: unknown): string {
+function parseRefusal(verb: CliVerb | CliOnlyVerb, e: unknown): string {
   const message = e instanceof Error ? e.message : String(e);
   const named = (e as { code?: unknown }).code === "ERR_PARSE_ARGS_UNKNOWN_OPTION" ? /^Unknown option '--([^']+)'/.exec(message)?.[1] : undefined;
   if (named === undefined) return message;
@@ -2756,7 +2899,7 @@ export function jsonAsked(argv: ReadonlyArray<string>): boolean {
   return argv.slice(0, cut === -1 ? argv.length : cut).includes("--json");
 }
 
-export async function runVerb(verb: CliVerb, argv: ReadonlyArray<string>, io: CliIO, statePathOf: (flag?: string) => string, deps: Pick<VerbDeps, "alsoHere" | "cwd" | "runtime" | "env">): Promise<number> {
+export async function runVerb(verb: CliVerb | CliOnlyVerb, argv: ReadonlyArray<string>, io: CliIO, statePathOf: (flag?: string) => string, deps: Pick<VerbDeps, "alsoHere" | "cwd" | "runtime" | "env">): Promise<number> {
   let flags: Flags;
   let args: string[];
   try {
@@ -2767,8 +2910,11 @@ export async function runVerb(verb: CliVerb, argv: ReadonlyArray<string>, io: Cl
   } catch (e) {
     return failed(io, jsonAsked(argv), usageRefusal(`${parseRefusal(verb, e)}\n\nusage: ${verb.usage}`));
   }
+  const hostSide = "hostSide" in verb ? verb.hostSide : undefined;
   if (flags["help"] === true) {
-    io.log(`usage: ${verb.usage}\n${aboutLines(verb, "  ").join("\n")}\n\n  --json         print the raw protocol values, one JSON line each\n  --state PATH   the state file the host serves\n  --host NAME    a host on another computer, by the name wsp connect gave it`);
+    // A line that runs at its own host's terminal takes the flag only to say so, which is what its own line says.
+    const host = hostSide === undefined ? "a host on another computer, by the name wsp connect gave it" : "read to say this line runs at its own host's terminal; it dials no other";
+    io.log(`usage: ${verb.usage}\n${aboutLines(verb, "  ").join("\n")}\n\n  --json         print the raw protocol values, one JSON line each\n  --state PATH   the state file the host serves\n  --host NAME    ${host}`);
     return 0;
   }
   const statePath = statePathOf(flag(flags, "state"));
@@ -2779,6 +2925,11 @@ export async function runVerb(verb: CliVerb, argv: ReadonlyArray<string>, io: Cl
     aim = aimedHost(statePath, { ...(flag(flags, "host") !== undefined ? { host: flag(flags, "host")! } : {}), env: deps.env });
   } catch (e) {
     return failed(io, flags["json"] === true, e, `wsp ${verb.name}: `);
+  }
+  // A line whose work happens at the host's own terminal is answered here however it was aimed, as wsp pair and
+  // wsp devices are: it never dials, so nothing of this computer's crosses to the other one.
+  if (hostSide !== undefined && aim.kind !== "here") {
+    return failed(io, flags["json"] === true, usageRefusal(hostSideOnlyLine(verb.name, aimName(aim), hostSide)));
   }
   // The note rides with the dial, not with the line: the recipe verbs write beside the state file whatever host
   // the line names, so saying it is not read before they run would be untrue.

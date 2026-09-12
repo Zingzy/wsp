@@ -15,7 +15,7 @@ import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { RUNGS, parseManifest, type Manifest, type ManifestEntry } from "@wsp/collect";
 import { BUILDER_DISK_GB, LocalBackend, SNAPSHOT_STORAGE, type BackendPricing, type ExecResult } from "@wsp/engine";
 import { ALREADY_APPLIED, Recipe, type GoldenManifest, type ProjectImportResult, type ProjectPlan } from "@wsp/protocol";
-import { DAEMON_TOKEN_SET, LOOPBACK, createRuntime, goldenHead, localExecStream, memoryStore, type GoldenRecipe, type LocalWiring, type Runtime, type Store } from "@wsp/runtime";
+import { copyKey, DAEMON_TOKEN_SET, LOOPBACK, createRuntime, goldenHead, localExecStream, memoryStore, type GoldenRecipe, type LocalWiring, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { catalogEntry } from "@wsp/catalog";
 import { applyRecipe, recipePath, withCatalogAgents } from "../src/init-recipe.js";
@@ -1472,7 +1472,7 @@ describe("wsp init, the sign-in stage", () => {
     const create = backend.create.bind(backend);
     backend.create = async spec => Object.assign(await create(spec), { previewUrl: async () => ({ url: "http://guest.test", token: "pt", expiresAt: Date.now() + 3_600_000 }) });
     const store = memoryStore();
-    await store.put("goldens", "default", { head: 1, versions: [{ version: 1, snapshotId: "snap_g", baseTemplate: "base", setupSha: "x", createdAt: "t", smoke: { cmd: "true", exitCode: 0 } }] });
+    await store.put("goldens", copyKey("default", "default"), { head: 1, versions: [{ version: 1, snapshotId: "snap_g", baseTemplate: "base", setupSha: "x", createdAt: "t", smoke: { cmd: "true", exitCode: 0 } }] });
     // Nothing answers on guest.test, so the create's daemon ping is kept short.
     backend.lifecycle.budgets.daemonAnswersMs = 100;
     const rt = createRuntime({ backend, store, adapters: {}, hostId: "box:h1" });
@@ -3191,7 +3191,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     const builder = shared.machines[0]!;
     await first.runtimes.at(-1)!.close();
     expect(builder.killed).toBe(false);
-    expect(await store.get("golden-recipes", "default@v1")).toBeDefined();
+    expect(await store.get("golden-recipes", copyKey("default", "default@v1"))).toBeDefined();
     const next = (o: Partial<InitOptions> & { tty?: boolean } = {}) => {
       const f = fake({ yes: true, home: first.opts.home, statePath: first.opts.statePath, ...o });
       f.opts.runtime = recipe => {
@@ -3225,7 +3225,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(small().rows.find(r => r.id === "gh")?.pin).toEqual({ tag: "v2.86.0", sha256: sha });
     expect(small().rows.filter(r => r.pin !== undefined).map(r => r.id)).toEqual(["gh"]);
     // The sealed digest says the same, stamped by the build, so the recipe it wrote reads as the recipe it built.
-    const sealedDigest = (v: number) => (store.get("golden-recipes", `default@v${v}`) as Promise<{ ticks: { id: string; road?: string; pin?: unknown }[] }>);
+    const sealedDigest = (v: number) => (store.get("golden-recipes", copyKey("default", `default@v${v}`)) as Promise<{ ticks: { id: string; road?: string; pin?: unknown }[] }>);
     expect((await sealedDigest(1)).ticks.find(t => t.id === "tools/catalog/gh")).toMatchObject({ road: "release", pin: { tag: "v2.86.0", sha256: sha } });
 
     // The same recipe again: the pin folds away and nothing is built.
@@ -3251,7 +3251,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(pinned).toContain(sha);
     // The failure the road would print names the download, the tag and both sums.
     expect(pinned).toContain(`$asset at $tag does not match the checksum recorded on its first install: recorded ${"b".repeat(12)}, served \${sum:0:12}`);
-    expect((await store.get("goldens", "default") as GoldenManifest).head).toBe(2);
+    expect((await store.get("goldens", copyKey("default", "default")) as GoldenManifest).head).toBe(2);
     expect((await sealedDigest(2)).ticks.find(t => t.id === "tools/catalog/gh")).toMatchObject({ pin: { tag: "v2.85.0", sha256: sha } });
     expect(small().rows.find(r => r.id === "gh")?.pin).toEqual({ tag: "v2.85.0", sha256: sha });
 
@@ -3269,7 +3269,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(given.text()).toContain("update 1 tool: GitHub CLI (release v2.85.0 to v2.84.0)");
     expect(roadRuns()).toHaveLength(3);
     expect(roadRuns()[2]).toContain("releases/tags/v2.84.0");
-    expect((await store.get("goldens", "default") as GoldenManifest).head).toBe(3);
+    expect((await store.get("goldens", copyKey("default", "default")) as GoldenManifest).head).toBe(3);
     expect(small().rows.find(r => r.id === "gh")?.pin).toEqual({ tag: "v2.84.0", sha256: sha });
     // A file that leaves the row unpinned takes the state's pin: nothing is reinstalled.
     writeFileSync(file, JSON.stringify({ ...small(), rows: small().rows.map(r => { const { pin: _pin, ...rest } = r; return rest; }) }));
@@ -3310,7 +3310,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(small().rows.filter(r => r.pin !== undefined).map(r => r.id)).toEqual([tap.id]);
     expect(loadManifest(recipePath(first.opts.statePath)).entries.find(e => e.id === tap.id)).toEqual({ ...tap, bring: true, pin });
     // The sealed digest says the row installed by the release road at this Mac's tag, the pin stamped by the build.
-    const sealedDigest = (v: number) => (store.get("golden-recipes", `default@v${v}`) as Promise<{ ticks: { id: string; road?: string; version?: string; pin?: unknown }[] }>);
+    const sealedDigest = (v: number) => (store.get("golden-recipes", copyKey("default", `default@v${v}`)) as Promise<{ ticks: { id: string; road?: string; version?: string; pin?: unknown }[] }>);
     expect((await sealedDigest(1)).ticks.find(t => t.id === tap.id)).toMatchObject({ road: "release", version: "v0.1.0", pin });
     const tools = JSON.parse(readFileSync(join(dirname(first.opts.statePath), "golden-import.json"), "utf8")).tools as { id: string; outcome: string; road?: unknown }[];
     expect(tools.find(t => t.id === tap.id)).toMatchObject({ outcome: "installed", road: { kind: "release", sha256: sha, tag: "v0.1.0" } });
@@ -3339,7 +3339,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(roadRuns()[1]).toContain("releases/tags/v0.1.0");
     expect(roadRuns()[1]).toContain('[ "$sum" = ');
     expect(roadRuns()[1]).toContain(other);
-    expect((await store.get("goldens", "default") as GoldenManifest).head).toBe(2);
+    expect((await store.get("goldens", copyKey("default", "default")) as GoldenManifest).head).toBe(2);
 
     // The file with the row unticked: the row is retired on the next version, and the state's recipe says off.
     writeFileSync(file, JSON.stringify({ ...small(), rows: small().rows.map(r => (r.id === tap.id ? { ...r, on: false } : r)) }));
@@ -3414,11 +3414,11 @@ describe("wsp init with a golden already built from a recipe", () => {
     const after = JSON.parse(readFileSync(join(dirname(first.opts.statePath), "golden-import.json"), "utf8")) as { recipeHash: string; build: unknown };
     expect(after.recipeHash).not.toBe(before.recipeHash);
     expect(after.build).toEqual(before.build);
-    expect(await store.get("goldens", "default")).toMatchObject({ head: 2 });
+    expect(await store.get("goldens", copyKey("default", "default"))).toMatchObject({ head: 2 });
     // The update kept the golden's disk, so what v1's sign-in stage recorded (both skipped under --yes) is stamped on v2 as it was.
     const skipped = [{ name: "GitHub CLI login", state: "skipped" }, { name: "Claude Code login", state: "skipped" }];
-    expect(((await store.get("goldens", "default")) as { versions: { logins?: unknown }[] }).versions.map(v => v.logins)).toEqual([skipped, skipped]);
-    expect(await store.get("golden-recipes", "default@v2")).toBeDefined();
+    expect(((await store.get("goldens", copyKey("default", "default"))) as { versions: { logins?: unknown }[] }).versions.map(v => v.logins)).toEqual([skipped, skipped]);
+    expect(await store.get("golden-recipes", copyKey("default", "default@v2"))).toBeDefined();
     // The saved recipe is the new one, and a run on the same answers finds nothing to update.
     const again = next({ tty: false });
     expect((await runInit(again.opts, again.io)).code).toBe(0);
@@ -3446,7 +3446,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(out).toMatch(/Tools, agents and machine context: 0 installed, 1 retired, 0 failed, 0 skipped; the list is in .*golden-import\.json/);
     expect(out).toContain("yq retired: out of the recipe, left on the image");
     expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({ tools: [], retired: [{ id: "tools/brew/yq", name: "yq" }] });
-    expect(await store.get("goldens", "default")).toMatchObject({ head: 2, versions: [{ version: 1 }, { version: 2, retired: [{ id: "tools/brew/yq", name: "yq" }] }] });
+    expect(await store.get("goldens", copyKey("default", "default"))).toMatchObject({ head: 2, versions: [{ version: 1 }, { version: 2, retired: [{ id: "tools/brew/yq", name: "yq" }] }] });
   });
 
   it("when the cap refuses the smoke fork the update falls back and the line about the builder staying up is not printed", async () => {
@@ -3620,9 +3620,9 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(out).toContain("Deleted golden v1.");
     expect(out).toContain("storage: 2 snapshots, 16.0 GB; about $0.30/month above the free 10 GB from 2026-10-01");
     expect(shared.snapshots.map(r => r.id)).toEqual(["snap_wsp-h1-default-v2", "snap_wsp-h1-default-v3"]);
-    expect(await store.get("goldens", "default")).toMatchObject({ head: 3, versions: [{ version: 2 }, { version: 3 }] });
-    expect(await store.get("golden-recipes", "default@v1")).toBeUndefined();
-    expect(await store.get("golden-recipes", "default@v3")).toBeDefined();
+    expect(await store.get("goldens", copyKey("default", "default"))).toMatchObject({ head: 3, versions: [{ version: 2 }, { version: 3 }] });
+    expect(await store.get("golden-recipes", copyKey("default", "default@v1"))).toBeUndefined();
+    expect(await store.get("golden-recipes", copyKey("default", "default@v3"))).toBeDefined();
   });
 
   it("a recipe with one row added builds the next version on top of the golden's head: one road only, v2 with v1 as its parent, and the wizard says what it builds", async () => {
@@ -3636,7 +3636,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(out).not.toContain("Rebuilding from scratch");
     expect(out).not.toMatch(BOOT);
     expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_wsp-h1-default-v1", true], ["snap_wsp-h1-default-v2", true]]);
-    const manifest = (await store.get("goldens", "default")) as GoldenManifest;
+    const manifest = (await store.get("goldens", copyKey("default", "default"))) as GoldenManifest;
     expect(manifest.head).toBe(2);
     expect(manifest.versions.map(v => v.version)).toEqual([1, 2]);
     expect(manifest.versions[1]).toMatchObject({ version: 2, parentSnapshotId: manifest.versions[0]!.snapshotId });
@@ -3658,7 +3658,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(out).toContain("tmux retired: out of the recipe, left on the image");
     const ran = shared.machines.slice(before - 1).flatMap(m => m.execLog);
     expect(ran.filter(c => /uninstall|apt-get purge/.test(c))).toEqual([]);
-    const manifest = (await store.get("goldens", "default")) as GoldenManifest;
+    const manifest = (await store.get("goldens", copyKey("default", "default"))) as GoldenManifest;
     expect(manifest.head).toBe(3);
     expect(manifest.versions.find(v => v.version === 3)!.retired).toEqual([{ id: "tools/catalog/tmux", name: "tmux" }]);
   });
@@ -3685,7 +3685,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(shared.machines.slice(before - 1).flatMap(m => m.execLog).filter(c => /uninstall|apt-get purge/.test(c))).toEqual([]);
 
     // The version's record is the whole truth about its image, so it carries both.
-    const manifest = (await store.get("goldens", "default")) as GoldenManifest;
+    const manifest = (await store.get("goldens", copyKey("default", "default"))) as GoldenManifest;
     expect(manifest.versions.find(v => v.version === 2)!.retired).toEqual([{ id: "tools/brew/yq", name: "yq" }]);
     expect(manifest.versions.find(v => v.version === 3)!.retired).toEqual([
       { id: "tools/brew/yq", name: "yq" },
@@ -3792,8 +3792,8 @@ describe("wsp init with a golden already built from a recipe", () => {
 
   it("a head sealed before the base tools existed is offered the rebuild only: no update choice, the boot question follows", async () => {
     const { store, first, next } = await sealed();
-    const manifest = (await store.get("goldens", "default")) as GoldenManifest;
-    await store.put("goldens", "default", { ...manifest, versions: manifest.versions.map(({ base: _base, ...v }) => v) });
+    const manifest = (await store.get("goldens", copyKey("default", "default"))) as GoldenManifest;
+    await store.put("goldens", copyKey("default", "default"), { ...manifest, versions: manifest.versions.map(({ base: _base, ...v }) => v) });
     writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
     const f = next({ yes: false, tty: true });
     const run = runInit(f.opts, f.io);

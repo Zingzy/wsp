@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HOST_TOKEN_ENV, HOST_URL_ENV, spawnCapRefusal, type WorkspaceView } from "@wsp/protocol";
-import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
+import { copyKey, createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cli, localWiring, serve } from "../src/cli.js";
 import type { HostHandle } from "../src/server.js";
@@ -33,7 +33,7 @@ describe("the wsp command on a thread's machine", () => {
     vi.stubEnv("HOME", join(dir, "user"));
     vi.stubEnv("WSP_HOME", join(dir, "home"));
     const store = memoryStore();
-    await store.put("goldens", "default", SEALED_GOLDEN);
+    await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
     held = heldAgent(false);
     // The address a machine dials this host at is the port the host is about to bind, so the launch carries the
     // very address the command below dials.

@@ -231,4 +231,34 @@ describe("connectDaemon", () => {
     await reach.ready;
     await until(() => reach!.stats().pongsReceived >= 1);
   });
+
+  it("takes a socket somebody else opened without an auth frame of its own, and is dead when that socket goes", async () => {
+    // The link a place dials out on: its handshake was the auth, so the ritual on it starts at the watches. Nothing
+    // here redials, since only that computer can open one.
+    daemon = await startTestDaemon();
+    const WebSocketClient = (await import("ws")).default;
+    const ws = new WebSocketClient(`ws://127.0.0.1:${daemon.port}/`);
+    await new Promise<void>((done, fail) => {
+      ws.once("open", () => done());
+      ws.once("error", fail);
+    });
+    // The daemon's inbound door wants an auth frame first, so this socket is authed the way an inbound one is and
+    // then handed over: what this proves is that connectDaemon sends none of its own.
+    ws.send(JSON.stringify({ id: 0, op: "auth", token: TOKEN }));
+    await new Promise(r => setTimeout(r, 50));
+    const states: DaemonLinkStatus[] = [];
+    reach = connectDaemon({ socket: ws, onEvent: () => {}, onStatus: s => states.push(s), heartbeatMs: 50 });
+    await reach.ready;
+    expect(states).toContain("live");
+    await until(() => reach!.stats().pongsReceived >= 1);
+    // A second auth frame would have been refused by the daemon and cut the socket; the link stood.
+    expect(reach.stats().reconnects).toBe(0);
+    ws.close();
+    await until(() => reach!.status() === "dead");
+  });
+
+  it("refuses to be built with neither a route to dial nor a socket to take", () => {
+    expect(() => connectDaemon({ onEvent: () => {} })).toThrow(/previewUrl to dial or an open socket/);
+    expect(() => connectDaemon({ previewUrl: "ws://127.0.0.1:1", onEvent: () => {} })).toThrow(/needs the daemon's token/);
+  });
 });

@@ -93,8 +93,10 @@ export const GOLDEN_SMOKE = "claude --version";
 export const GUEST_HOME = "/root";
 /** The one line every apt run exports, so no prompt can wait on a machine nobody types at. */
 export const APT_ENV = "export DEBIAN_FRONTEND=noninteractive";
+/** Claude Code's config dir on the guest under the guest home, which the pack rewrites `.claude/` to. */
+export const CLAUDE_CONFIG_REL = ".claude-cfg";
 /** Claude Code's config dir on the guest, always CLAUDE_CONFIG_DIR and never HOME. */
-export const CLAUDE_CONFIG_DIR = `${GUEST_HOME}/.claude-cfg`;
+export const CLAUDE_CONFIG_DIR = `${GUEST_HOME}/${CLAUDE_CONFIG_REL}`;
 /** The file under Claude Code's config dir that the apiKeyHelper's key is placed in and the copied settings read. */
 export const CLAUDE_KEY_FILE = "anthropic-api-key";
 

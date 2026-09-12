@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createServer } from "node:http";
 import { HOST_STOPPING_CLOSE, type AdapterEvent, type ForwardEvent, type InitJob, type PortForward, type TurnResult } from "@wsp/protocol";
-import { createRuntime, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions, type InitDoor } from "../src/runtime.js";
+import { copyKey, createRuntime, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions, type InitDoor } from "../src/runtime.js";
 import { serveRuntime, type ForwardsSource, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
 import { WsClient } from "./ws-client.js";
@@ -487,7 +487,7 @@ describe("serveRuntime snapshot lineage", () => {
 
   it("snapshots.list is the manifest with head; rollback moves head, says existing workspaces are untouched, persists", async () => {
     const store = memoryStore();
-    await store.put("goldens", "default", { head: 2, versions: [version(1), version(2)] });
+    await store.put("goldens", copyKey("default", "default"), { head: 2, versions: [version(1), version(2)] });
     srv = await serveRuntime(createRuntime({ backend: stubBackend(), store, adapters: {} }), { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
 
@@ -508,7 +508,7 @@ describe("serveRuntime snapshot lineage", () => {
 
   it("snapshots.rollback to a version outside the manifest is a typed refusal that changes nothing", async () => {
     const store = memoryStore();
-    await store.put("goldens", "default", { head: 1, versions: [version(1)] });
+    await store.put("goldens", copyKey("default", "default"), { head: 1, versions: [version(1)] });
     srv = await serveRuntime(createRuntime({ backend: stubBackend(), store, adapters: {} }), { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
     const refused = await c.request("snapshots.rollback", { version: 9 });

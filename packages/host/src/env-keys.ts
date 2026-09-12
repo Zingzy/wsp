@@ -4,8 +4,8 @@
 // record. The app's setup reads the home's file alone: a key in the process
 // environment or a .env beside a checkout is the terminal's business and never
 // reads as saved on a screen.
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { CATALOG_AGENTS, hasLogin } from "@wsp/catalog";
 
 export const SOLARI_KEY = "SOLARI_API_KEY";
@@ -51,4 +51,28 @@ export function agentKeysIn(env: Readonly<Record<string, string>>): Record<strin
 /** The terminal's keys as the image's variables: the one agent key it asks for, under the variable Claude Code reads. */
 export function agentKeyEnvs(keys: Pick<Keys, "anthropic">): Record<string, string> {
   return keys.anthropic !== undefined ? { [ANTHROPIC_KEY]: keys.anthropic } : {};
+}
+
+/** The one writer of the wsp home's .env: a key line it knows is rewritten in place, the rest appended, mode 0600. */
+export function writeEnvFile(path: string, set: Record<string, string>): void {
+  const pending = new Map(Object.entries(set));
+  const lines: string[] = [];
+  if (existsSync(path)) {
+    for (const line of readFileSync(path, "utf8").split("\n")) {
+      const key = line.match(/^([A-Z_]+)=/)?.[1];
+      const value = key === undefined ? undefined : pending.get(key);
+      if (key === undefined || value === undefined) {
+        lines.push(line);
+        continue;
+      }
+      lines.push(`${key}=${value}`);
+      pending.delete(key);
+    }
+    while (lines.at(-1) === "") lines.pop();
+  }
+  for (const [k, v] of pending) lines.push(`${k}=${v}`);
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  writeFileSync(path, `${lines.join("\n")}\n`, { mode: 0o600 });
+  // writeFileSync's mode only applies when it creates the file.
+  chmodSync(path, 0o600);
 }

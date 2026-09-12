@@ -22,6 +22,7 @@ import { isMissing, NotFirstLifeError } from "./errors.js";
 import { BUILDER_LABEL, CREATED_AT_LABEL, SMOKE_LABEL } from "./labels.js";
 import { goldenName } from "./snapshot-names.js";
 import { recipeOwnedFiles } from "./recipe-owned.js";
+import { exportImageVault, type ImageVault } from "./image-vault.js";
 import { importInto } from "./vault.js";
 
 export { goldenHead, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenStage, type GoldenVersion };
@@ -689,6 +690,11 @@ export interface SealGoldenOptions extends MachineSize {
   hostId: string;
   /** How long the seal waits for the promoted template to read ready, and how often it reads (tests shrink both). */
   templateWait?: Pick<TemplateWait, "readyMs" | "pollMs">;
+  /** Absolute guest paths to archive off the builder before the snapshot: the sign-in state and the secrets files.
+   * Absent, no vault is taken, which is what a copy's own build wants: its vault is already the record's. */
+  vaultPaths?: readonly string[];
+  /** The vault archive's trip off the builder takes this; the global fetch when absent (tests inject one). */
+  fetch?: typeof globalThis.fetch;
 }
 
 export interface SealResult {
@@ -696,6 +702,8 @@ export interface SealResult {
   version: GoldenVersion;
   /** True when keepBuilder was asked and the builder is still running. */
   builderKept: boolean;
+  /** The archive and its hash when vaultPaths was given; a path missing on the builder is silently not in it. */
+  vault?: ImageVault;
 }
 
 export interface BuildGoldenOptions extends MachineSize {
@@ -843,6 +851,17 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
   // Read before the snapshot is asked for, off the disk the snapshot takes, and before the try: a builder whose
   // files cannot be read is left as the person set it up, the way a refused snapshot leaves it.
   const owned = builder.import?.recipe === undefined ? undefined : await recipeOwnedFiles(builder.machine, builder.import.recipe);
+  // The person's logins as the sign-in and secrets stages left them, read off the same disk the snapshot takes and
+  // under the same rule as the owned files: a builder whose vault cannot be read is left as the person set it up.
+  const vault =
+    opts.vaultPaths === undefined
+      ? undefined
+      : await exportImageVault(builder.machine, opts.vaultPaths, {
+          ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),
+          // A provider that mints no signed URL hands the archive back through the one call every backend has; the
+          // image vault is credential files and two secrets files, which that road can carry.
+          ...(opts.backend.capabilities.signedUrls ? {} : { readRoad: "exec" as const }),
+        });
   // The 502 is asked again only while the provider still reads the builder running; one that reads otherwise is
   // never snapshotted, so the seal stops at once and says what the provider said.
   const takeSnapshot = async (): Promise<string> => {
@@ -860,7 +879,8 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
     }
   };
   try {
-    stage("snapshotting", snapshotStageLine(await usedBytes(builder.machine)));
+    const used = await usedBytes(builder.machine);
+    stage("snapshotting", snapshotStageLine(used));
     snapshotId = await takeSnapshot();
     if (opts.keepBuilder !== true) {
       await kill(builder.machine);
@@ -919,10 +939,11 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
       ...(builder.base !== undefined ? { base: builder.base } : {}),
       ...(builder.retired !== undefined && builder.retired.length > 0 ? { retired: builder.retired } : {}),
       ...(owned !== undefined ? { owned } : {}),
+      ...(used !== undefined ? { usedBytes: used } : {}),
     };
     const kept = builderAlive ? "; builder kept for one more change" : "";
     stage("sealed", leak === undefined ? `v${versionNum}${kept}` : `v${versionNum}${kept}; ${leak}`);
-    return { manifest: { head: versionNum, versions: [...prior, version] }, version, builderKept: builderAlive };
+    return { manifest: { head: versionNum, versions: [...prior, version] }, version, builderKept: builderAlive, ...(vault !== undefined ? { vault } : {}) };
   } catch (e) {
     const detail = messageOf(e);
     // A rollback the provider would not take leaves a machine billing: the refusal goes on the stage's own block and

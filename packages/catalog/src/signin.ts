@@ -5,7 +5,7 @@
 // the login, and how long the tool itself waits before it gives up. Nothing
 // here reads the tool's output beyond the status lines named below.
 import type { SignInFinish } from "@wsp/protocol";
-import { CLAUDE_CONFIG_DIR, CLAUDE_KEY_FILE } from "./roads.js";
+import { CLAUDE_CONFIG_DIR, CLAUDE_CONFIG_REL, CLAUDE_KEY_FILE, GUEST_HOME } from "./roads.js";
 
 export interface StatusCheck {
   /** The command as the row and the golden's notes show it. */
@@ -79,9 +79,13 @@ export type SignIn =
       toolTimeoutMs?: number;
       note?: string;
       keys?: KeyFiles;
+      /** Where this tool's login lives on the machine once signed in there or copied onto it, `~`-relative guest
+       * paths: what the image vault archives for the row. Claude Code's is under CLAUDE_CONFIG_DIR, never HOME. */
+      stateOnMachine: readonly string[];
     }
-  /** Nothing to run on a headless machine; the note, when there is one, says what to do instead. A status still proves copied files. */
-  | { kind: "none"; note?: string; sources: readonly LoginSource[]; status?: StatusCheck };
+  /** Nothing to run on a headless machine; the note, when there is one, says what to do instead. A status still
+   * proves copied files, and a row with sources keeps state on the machine because a copy puts it there. */
+  | { kind: "none"; note?: string; sources: readonly LoginSource[]; status?: StatusCheck; stateOnMachine?: readonly string[] };
 
 export type LoginSignIn = Extract<SignIn, { login: string }>;
 
@@ -132,6 +136,12 @@ export function keysIdOf(entryId: string): string {
 /** The row a login's key files make: nothing to run on the machine, and the login's own status proves the copy. */
 export function keysRowOf(keys: KeyFiles, status: StatusCheck | undefined): SignIn {
   return { kind: "none", sources: ["file"], note: keys.note, ...(status !== undefined ? { status } : {}) };
+}
+
+/** The absolute guest paths a catalog entry's login lives at; empty for an entry with no sign-in. The one place
+ * a row's `stateOnMachine` is turned into a path on the machine. */
+export function loginStatePaths(entry: { signIn: SignIn }): string[] {
+  return (entry.signIn.stateOnMachine ?? []).map(p => `${GUEST_HOME}/${p}`);
 }
 
 /** No sign-in and nothing to say about it. */
@@ -239,6 +249,7 @@ export const SIGN_IN_ROWS = {
     code: /\b[A-Z0-9]{4}-[A-Z0-9]{4}\b/,
     status: { command: "gh auth status", signedIn: o => /Logged in to/.test(o) && !/Failed to log in/.test(o) },
     toolTimeoutMs: 15 * MIN,
+    stateOnMachine: [".config/gh/hosts.yml"],
   },
   // Under the daemon pty DISPLAY is unset, so gcloud, gemini and railway take their paste or device flow by
   // themselves; their callback road is the one a DISPLAY the hand-off asks for opens.
@@ -248,6 +259,7 @@ export const SIGN_IN_ROWS = {
     finish: "callback",
     login: "gcloud auth login",
     status: { command: "gcloud auth list --filter=status:ACTIVE --format=value(account)", signedIn: ok(/@/) },
+    stateOnMachine: [".config/gcloud"],
   },
   // A fresh machine has no sso-session profile, so the login is the one that writes it first; it names
   // the profile {role}-{account} by default, so the check tries every configured profile. It is a configuration
@@ -266,6 +278,7 @@ export const SIGN_IN_ROWS = {
     status: { command: AWS_STATUS, signedIn: ok(/"Arn"/) },
     toolTimeoutMs: 10 * MIN,
     note: "the check tries every configured profile; the start URL and region it asks for are yours to type",
+    stateOnMachine: [".aws"],
   },
   // --browser=false still binds the callback port, so there is no flag around the callback.
   wrangler: {
@@ -276,12 +289,13 @@ export const SIGN_IN_ROWS = {
     status: { command: "wrangler whoami", signedIn: has(/You are logged in/) },
     toolTimeoutMs: 2 * MIN,
     note: "needs the callback forward; CLOUDFLARE_API_TOKEN on the machine is the alternative",
+    stateOnMachine: [".config/.wrangler"],
   },
   // A row's road is how the hand-off runs that login, so a road nobody measured would move a flow that works: these
   // five carry `none`, which is what they do today.
-  vercel: { kind: "oauth", sources: ["file"], finish: "none", login: "vercel login", status: { command: "vercel whoami", signedIn: (o, c) => c === 0 && !/No existing credentials/.test(o) }, toolTimeoutMs: 15 * MIN },
-  netlify: { kind: "oauth", sources: [], finish: "none", login: "netlify login", status: { command: "netlify status", signedIn: (o, c) => c === 0 && !/Not logged in/i.test(o) }, toolTimeoutMs: 5 * MIN },
-  fly: { kind: "oauth", sources: [], finish: "none", login: "fly auth login", status: { command: "fly auth whoami", signedIn: ok(/@/) }, toolTimeoutMs: 15 * MIN },
+  vercel: { kind: "oauth", sources: ["file"], finish: "none", login: "vercel login", status: { command: "vercel whoami", signedIn: (o, c) => c === 0 && !/No existing credentials/.test(o) }, toolTimeoutMs: 15 * MIN, stateOnMachine: [".config/com.vercel.cli", ".vercel"] },
+  netlify: { kind: "oauth", sources: [], finish: "none", login: "netlify login", status: { command: "netlify status", signedIn: (o, c) => c === 0 && !/Not logged in/i.test(o) }, toolTimeoutMs: 5 * MIN, stateOnMachine: [".netlify/config.json"] },
+  fly: { kind: "oauth", sources: [], finish: "none", login: "fly auth login", status: { command: "fly auth whoami", signedIn: ok(/@/) }, toolTimeoutMs: 15 * MIN, stateOnMachine: [".fly"] },
   // supabase waits for an Enter before it opens anything and has no flag for it (--yes leaves it standing); the
   // relay presses it. --no-browser prints the link at once instead and asks for a code back, which is the retry.
   supabase: {
@@ -292,8 +306,9 @@ export const SIGN_IN_ROWS = {
     fallback: "supabase login --no-browser",
     questions: [{ asks: /Press Enter to open browser and login automatically/, answer: "\r" }],
     status: { command: "supabase projects list", signedIn: ok() },
+    stateOnMachine: [".supabase"],
   },
-  railway: { kind: "oauth", sources: [], finish: "callback", login: "railway login", status: { command: "railway whoami", signedIn: ok(/Logged in as/) }, toolTimeoutMs: 5 * MIN },
+  railway: { kind: "oauth", sources: [], finish: "callback", login: "railway login", status: { command: "railway whoami", signedIn: ok(/Logged in as/) }, toolTimeoutMs: 5 * MIN, stateOnMachine: [".railway"] },
   // Without --yes doppler asks before it prints anything; with it the page and the code its page asks for come at once.
   doppler: {
     kind: "oauth",
@@ -306,6 +321,7 @@ export const SIGN_IN_ROWS = {
     code: /(?<=Your auth code is:\s*)[a-z]+(?:_[a-z]+){2,}/,
     status: { command: "doppler me", signedIn: ok() },
     toolTimeoutMs: 5 * MIN,
+    stateOnMachine: [".doppler"],
   },
   // The shim gets the localhost-callback URL and the terminal the hosted paste-code one; either finishes the login.
   claude: {
@@ -315,8 +331,9 @@ export const SIGN_IN_ROWS = {
     keyEnv: "ANTHROPIC_API_KEY",
     login: "claude auth login",
     status: { command: "claude auth status", typed: CLAUDE_STATUS, signedIn: claudeSignedIn, detail: claudeSource, why: claudeWhy },
+    stateOnMachine: [`${CLAUDE_CONFIG_REL}/.credentials.json`, `${CLAUDE_CONFIG_REL}/${CLAUDE_KEY_FILE}`],
   },
-  codex: { kind: "oauth", sources: ["file"], finish: "callback", keyEnv: "OPENAI_API_KEY", login: "codex login", fallback: "codex login --device-auth", status: { command: "codex login status", signedIn: ok(/Logged in using/) } },
+  codex: { kind: "oauth", sources: ["file"], finish: "callback", keyEnv: "OPENAI_API_KEY", login: "codex login", fallback: "codex login --device-auth", status: { command: "codex login status", signedIn: ok(/Logged in using/) }, stateOnMachine: [".codex/auth.json"] },
   // Gemini CLI 0.59.0 asks about the folder before anything else, and then which sign-in to take, with Google's
   // preselected: --skip-trust answers the first and the relay's Enter takes the second.
   gemini: {
@@ -331,6 +348,7 @@ export const SIGN_IN_ROWS = {
     ],
     status: { command: GEMINI_STATUS, signedIn: ok(), detail: geminiSource },
     toolTimeoutMs: 5 * MIN,
+    stateOnMachine: [".gemini/oauth_creds.json"],
   },
   // Both counts print on exit 0; a provider key exported on the machine is listed under Environment and counts as a login.
   opencode: {
@@ -342,8 +360,9 @@ export const SIGN_IN_ROWS = {
     status: { command: "opencode auth list", signedIn: ok(/[1-9]\d* (credentials|environment variable)/), detail: secretNamed },
     note: "OpenCode dropped its Anthropic sign-in in 1.3.0; it takes an API key there",
     toolTimeoutMs: 5 * MIN,
+    stateOnMachine: [".local/share/opencode/auth.json"],
   },
-  cloudflared: { kind: "oauth", sources: ["file"], finish: "none", login: "cloudflared tunnel login", status: { command: CLOUDFLARED_STATUS, signedIn: ok() } },
+  cloudflared: { kind: "oauth", sources: ["file"], finish: "none", login: "cloudflared tunnel login", status: { command: CLOUDFLARED_STATUS, signedIn: ok() }, stateOnMachine: [".cloudflared"] },
   op: { kind: "none", sources: [], note: "needs the 1Password desktop app; set OP_SERVICE_ACCOUNT_TOKEN on the machine instead" },
   // kubectl v1.36.1 puts a kuberc warning on stderr with no newline, so on the merged pty it would glue onto the context.
   kubectl: {
@@ -351,6 +370,7 @@ export const SIGN_IN_ROWS = {
     sources: ["file"],
     note: "kubectl has no sign-in; copy the kubeconfig instead",
     status: { command: "kubectl config current-context", typed: "kubectl config current-context 2>/dev/null", signedIn: ok(/\S/), detail: o => `context ${o.trim()}` },
+    stateOnMachine: [".kube/config"],
   },
   // pi lists a model only for a provider it holds credentials for, and prints a /login hint on exit 0 when it holds none.
   pi: {
@@ -361,6 +381,7 @@ export const SIGN_IN_ROWS = {
     questions: [{ asks: /Trust project folder\?/, person: true }],
     status: { command: "pi --list-models", signedIn: ok(/^provider\s+model\b/m) },
     note: "type /login inside pi and pick a provider, then /exit; a key on the machine counts",
+    stateOnMachine: [".pi/agent/auth.json"],
   },
   // The pool lists keys from ~/.hermes/.env and the environment beside stored logins; with none it prints nothing on exit 0.
   hermes: {
@@ -372,5 +393,6 @@ export const SIGN_IN_ROWS = {
     status: { command: "hermes auth list", signedIn: ok(/\(\d+ credentials\):/), detail: secretNamed },
     note: "pick Add a credential in the menu; keys in ~/.hermes/.env count",
     keys: { paths: ["~/.hermes/.env"], note: "the keys in ~/.hermes/.env travel only by copy; no sign-in produces them" },
+    stateOnMachine: [".hermes/auth.json", ".hermes/.env"],
   },
 } satisfies Record<string, SignIn>;

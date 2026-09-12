@@ -20,15 +20,47 @@ export type ComposerOptions = Partial<Record<ComposerOptionKey | "permissionMode
 const STORAGE_KEY = "wsp:composer-options:v1";
 const KEYS: readonly ComposerOptionKey[] = ["harness", "model", "effort", "contextWindow"];
 const NONE: ComposerOptions = {};
+const NO_THREADS: PickThreads = {};
+
+/** The picks a thread that has run takes only from its own picker: the model, and the window that rides inside it on
+ * the wire. Each names its own thread, never one stamp for the pair, or a window picked here would carry a model
+ * picked on another thread onto this one. Effort and access are not scoped yet, which is #643; that is one more
+ * entry here and in the pickers that write them. */
+export const THREAD_SCOPED_PICKS: readonly ComposerOptionKey[] = ["model", "contextWindow"];
+
+/** The thread each of a workspace's scoped picks was made in, by the pick's own key. */
+export type PickThreads = Partial<Record<ComposerOptionKey, string>>;
 
 interface ComposerOptionsState {
   byWorkspaceId: Record<string, ComposerOptions>;
-  pick: (workspaceId: string, key: ComposerOptionKey, value: string) => void;
+  /** Where each scoped pick was made, since every thread of a workspace reads the one record above and without this a
+   * model picked in one of them paints the rest; composerPicks reads it to decide which thread a pick belongs to. One
+   * slot per pick per workspace is the whole of it: pick on thread A, leave without sending, pick the same key on
+   * thread B, and A's button is back on its own model, which is where a thread that ran belongs anyway. */
+  pickedOn: Record<string, PickThreads>;
+  pick: (workspaceId: string, key: ComposerOptionKey, value: string, thread?: string) => void;
 }
 
-function normalizePersisted(persisted: unknown): { byWorkspaceId: Record<string, ComposerOptions> } {
+function normalizeThreads(persisted: unknown): Record<string, PickThreads> {
+  const raw = persisted && typeof persisted === "object" ? (persisted as { pickedOn?: unknown }).pickedOn : undefined;
+  if (!raw || typeof raw !== "object") return {};
+  const pickedOn: Record<string, PickThreads> = {};
+  for (const [workspaceId, threads] of Object.entries(raw as Record<string, unknown>)) {
+    if (!threads || typeof threads !== "object") continue;
+    const clean: PickThreads = {};
+    for (const key of THREAD_SCOPED_PICKS) {
+      const value = (threads as Record<string, unknown>)[key];
+      if (typeof value === "string" && value !== "") clean[key] = value;
+    }
+    if (Object.keys(clean).length > 0) pickedOn[workspaceId] = clean;
+  }
+  return pickedOn;
+}
+
+function normalizePersisted(persisted: unknown): { byWorkspaceId: Record<string, ComposerOptions>; pickedOn: Record<string, PickThreads> } {
+  const pickedOn = normalizeThreads(persisted);
   const raw = persisted && typeof persisted === "object" ? (persisted as { byWorkspaceId?: unknown }).byWorkspaceId : undefined;
-  if (!raw || typeof raw !== "object") return { byWorkspaceId: {} };
+  if (!raw || typeof raw !== "object") return { byWorkspaceId: {}, pickedOn };
   const byWorkspaceId: Record<string, ComposerOptions> = {};
   for (const [workspaceId, options] of Object.entries(raw as Record<string, unknown>)) {
     if (!options || typeof options !== "object") continue;
@@ -39,25 +71,34 @@ function normalizePersisted(persisted: unknown): { byWorkspaceId: Record<string,
     }
     if (Object.keys(clean).length > 0) byWorkspaceId[workspaceId] = clean;
   }
-  return { byWorkspaceId };
+  return { byWorkspaceId, pickedOn };
 }
 
 export const useComposerOptionsStore = create<ComposerOptionsState>()(
   persist(
     set => ({
       byWorkspaceId: {},
-      pick: (workspaceId, key, value) =>
+      pickedOn: {},
+      pick: (workspaceId, key, value, thread) =>
         set(s => {
           const current = s.byWorkspaceId[workspaceId] ?? NONE;
-          if (current[key] === value) return s;
-          return { byWorkspaceId: { ...s.byWorkspaceId, [workspaceId]: { ...current, [key]: value } } };
+          const moved = current[key] !== value;
+          // This pick names the thread it was made in, and only this pick: the same value picked again on another
+          // thread still moves it there, and no other key's thread moves with it.
+          const threads = s.pickedOn[workspaceId] ?? NO_THREADS;
+          const marks =
+            THREAD_SCOPED_PICKS.includes(key) && thread !== undefined && threads[key] !== thread
+              ? { pickedOn: { ...s.pickedOn, [workspaceId]: { ...threads, [key]: thread } } }
+              : undefined;
+          if (!moved && marks === undefined) return s;
+          return { ...(moved ? { byWorkspaceId: { ...s.byWorkspaceId, [workspaceId]: { ...current, [key]: value } } } : {}), ...marks };
         }),
     }),
     {
       name: STORAGE_KEY,
       version: 1,
       storage: createJSONStorage(() => window.localStorage),
-      partialize: s => ({ byWorkspaceId: s.byWorkspaceId }),
+      partialize: s => ({ byWorkspaceId: s.byWorkspaceId, pickedOn: s.pickedOn }),
       migrate: normalizePersisted,
       // migrate runs only on a version change; a bad shape stored at this version must be caught on every hydrate.
       merge: (persisted, current) => ({ ...current, ...normalizePersisted(persisted) }),

@@ -9,7 +9,7 @@ import { CATALOG } from "@wsp/catalog";
 import { allRows, type RecipeAnswer } from "../src/recipe-answer.js";
 import { HERE } from "./recipe-fixture.js";
 import { BUILDER_IDLE_MS, type GoldenImport } from "@wsp/engine";
-import { createRuntime, memoryStore, type HarnessAdapterFactory, type ReapResult, type Runtime, type Store } from "@wsp/runtime";
+import { copyKey, createRuntime, memoryStore, type HarnessAdapterFactory, type ReapResult, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cli, serve, type CliIO } from "../src/cli.js";
 import { claudeEnvs } from "../src/doctor.js";
@@ -49,7 +49,7 @@ function quietIO(lines: string[] = []): CliIO {
 function testRuntime(seedGolden = true): { rt: Runtime; backend: StubBackend; store: Store } {
   const backend = stubBackend();
   const store = memoryStore();
-  if (seedGolden) void store.put("goldens", "default", GOLDEN);
+  if (seedGolden) void store.put("goldens", copyKey("default", "default"), GOLDEN);
   const rt = createRuntime({ backend, store, adapters: {} });
   return { rt, backend, store };
 }
@@ -430,7 +430,7 @@ describe("host serves the app", () => {
       const backend = stubBackend();
       const store = memoryStore();
       const head = { ...GOLDEN.versions[0]!, ...(browserShim ? { browserShim } : {}) };
-      void store.put("goldens", "default", { head: 1, versions: [head] });
+      void store.put("goldens", copyKey("default", "default"), { head: 1, versions: [head] });
       const rt = createRuntime({ backend, store, adapters: {} });
       const h = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), workspaceEnvs: g => claudeEnvs("sk-ant-x", g) });
       try {
@@ -528,7 +528,7 @@ describe("host close flushes transcripts", () => {
   it("a turn boundary right before close() is in the store once close() resolves", async () => {
     const backend = stubBackend();
     const store = memoryStore();
-    await store.put("goldens", "default", GOLDEN);
+    await store.put("goldens", copyKey("default", "default"), GOLDEN);
     const m = manualAdapter();
     const rt = createRuntime({ backend, store, adapters: { claude: m.adapter } });
     const dir = fakeWebDir();
@@ -918,7 +918,7 @@ describe("host names snapshot storage at start", () => {
   it("a snapshot this host made that nothing records is counted apart, which is the answer to why the account holds so many", async () => {
     const backend = stubBackend();
     const store = memoryStore();
-    await store.put("goldens", "default", GOLDEN);
+    await store.put("goldens", copyKey("default", "default"), GOLDEN);
     // Pinned: the mark on a name is read back against this host's own, so the identity has to be the test's.
     const rt = createRuntime({ backend, store, adapters: {}, hostId: "box:h1" });
     // Long past OWN_GRACE_MS whenever the suite runs: a marked row inside that window is still being recorded.

@@ -34,7 +34,7 @@ import {
   secretPath,
   withApiKeyHelper,
 } from "@wsp/engine";
-import { CATALOG_AGENTS, CLAUDE_CONFIG_DIR, CLAUDE_SETTINGS_FILE, MCP_AGENTS } from "@wsp/catalog";
+import { CATALOG_AGENTS, CLAUDE_CONFIG_REL, CLAUDE_SETTINGS_FILE, MCP_AGENTS } from "@wsp/catalog";
 import type { GoldenLeftBehind, RecipeCustomRow } from "@wsp/protocol";
 import { tarPackCommand } from "./doctor.js";
 
@@ -497,13 +497,10 @@ export function digestOf(source: string, excludes: readonly string[], home: stri
   return hash.digest("hex");
 }
 
-/** The guest's Claude config dir, relative to its home; the laptop's ~/.claude lands there. */
-const CLAUDE_REL = CLAUDE_CONFIG_DIR.replace(/^\/root\//, "");
-
 /** Where a laptop config lands on the guest, by the same rewrite the files plan applies. */
 function guestPath(tildePath: string): string {
   const rel = tildePath.slice(2);
-  const moved = rel === ".claude.json" ? `${CLAUDE_REL}/.claude.json` : rel.startsWith(".claude/") ? `${CLAUDE_REL}/${rel.slice(".claude/".length)}` : rel;
+  const moved = rel === ".claude.json" ? `${CLAUDE_CONFIG_REL}/.claude.json` : rel.startsWith(".claude/") ? `${CLAUDE_CONFIG_REL}/${rel.slice(".claude/".length)}` : rel;
   return `${GUEST_HOME}/${moved}`;
 }
 
@@ -536,7 +533,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
     stat: statOf,
     read: readSmall,
     platform: opts.platform,
-    rewrites: [[".claude/", `${CLAUDE_REL}/`], [".claude.json", `${CLAUDE_REL}/.claude.json`]],
+    rewrites: [[".claude/", `${CLAUDE_CONFIG_REL}/`], [".claude.json", `${CLAUDE_CONFIG_REL}/.claude.json`]],
   });
   const shell = shellInstallFor(bring);
   // The Mac's Homebrew unread (the wizard said so) is an empty table: no tap formula has a release to take.

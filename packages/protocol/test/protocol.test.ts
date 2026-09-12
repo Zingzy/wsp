@@ -84,6 +84,21 @@ import {
 
 import * as wire from "../src/index.js";
 
+import { copyIsCurrent, type SealedImage, type SealedImageCopy } from "../src/index.js";
+
+describe("a copy of the image beside the record", () => {
+  const image: SealedImage = { name: "default", version: 2, hash: "a".repeat(64), recipeHash: "rh", logins: [], sealedAt: "t", sealedFrom: "h1" };
+  const copy = (o: Partial<SealedImageCopy>): SealedImageCopy => ({ place: "solari", version: 1, snapshotId: "s", builtAt: "t", ...o });
+
+  it("is current on the hash alone: each place numbers its own manifest, so the version says nothing about the record", () => {
+    // A second place's first copy is its v1 and was built from the record's v2; the hash is what they share.
+    expect(copyIsCurrent(image, copy({ version: 1, hash: image.hash }))).toBe(true);
+    expect(copyIsCurrent(image, copy({ version: 9, hash: image.hash }))).toBe(true);
+    expect(copyIsCurrent(image, copy({ version: 2, hash: "b".repeat(64) }))).toBe(false);
+    expect(copyIsCurrent(image, copy({ version: 2 }))).toBe(false);
+  });
+});
+
 describe("the recipe's pins", () => {
   it("a recipe row and a digest tick carry one pin shape, the tag and the sum, beside the tick's road and install lines", () => {
     const pin = { tag: "v2.86.0", sha256: "b".repeat(64) };
