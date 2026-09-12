@@ -21,6 +21,7 @@ import {
   spawnActRefusal,
   spawnCapRefusal,
   spawnDepthRefusal,
+  noWorkspaceRefusal,
   spawnReachRefusal,
   threadWord,
   type Caller,
@@ -198,8 +199,14 @@ describe("agents spawning agents", () => {
     expect((await rt.workspaces.get(forked.id, asThread(scope))).name).toBe("ours");
     await expect(rt.sessions.start(theirs.id, { prompt: "hi" }, asThread(scope))).rejects.toThrow(spawnReachRefusal("t_root", "theirs"));
     await expect(rt.workspaces.get(theirs.id, asThread(scope))).rejects.toThrow(spawnReachRefusal("t_root", "theirs"));
-    // The listing leaves out what it may not drive rather than naming it.
+    // The listing leaves out what it may not drive rather than naming it, and the name is refused by the same rule:
+    // one reading behind the list and behind every verb that takes a workspace, so neither can deny what the other shows.
     expect((await rt.workspaces.list(asThread(scope))).map(w => w.name).sort()).toEqual(["mine", "ours"]);
+    expect((await rt.status.list(undefined, asThread(scope))).map(s => s.name).sort()).toEqual(["mine", "ours"]);
+    expect((await rt.workspaces.resolve("mine", asThread(scope))).id).toBe(mine.id);
+    await expect(rt.workspaces.resolve("theirs", asThread(scope))).rejects.toThrow(spawnReachRefusal("t_root", "theirs"));
+    await expect(rt.workspaces.resolve(theirs.id, asThread(scope))).rejects.toThrow(spawnReachRefusal("t_root", "theirs"));
+    await expect(rt.workspaces.resolve("nobody", asThread(scope))).rejects.toThrow(noWorkspaceRefusal("nobody"));
     await rt.close();
   });
 

@@ -2820,6 +2820,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * The name defaults to what the address calls the machine. Replies with { workspace }. */
   z.object({ id: reqId, op: z.literal("workspaces.createSsh"), address: z.string(), name: z.string().optional(), port: z.number().int().optional(), keyPath: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("workspaces.list") }),
+  /** The workspace a person's word names, by id or by name, off the same reading workspaces.list serves: a name no
+   * workspace here carries is refused as absent, and one this caller may not drive by the rule that hides it, so a
+   * verb never denies a workspace the listing just showed. Replies with { workspace }. */
+  z.object({ id: reqId, op: z.literal("workspaces.resolve"), ref: z.string() }),
   z.object({ id: reqId, op: z.literal("workspaces.get"), workspaceId: z.string() }),
   z.object({ id: reqId, op: z.literal("workspaces.nap"), workspaceId: z.string() }),
   z.object({ id: reqId, op: z.literal("workspaces.wake"), workspaceId: z.string() }),
@@ -3117,6 +3121,9 @@ export const THREAD_OPS: readonly string[] = [
   "capabilities.get",
   "workspaces.create",
   "workspaces.list",
+  // Every verb a thread runs names its workspace as a person does, so the door that reads a name is open to the
+  // same tokens the list is: the tree rule refuses the names outside it here exactly as it hides them there.
+  "workspaces.resolve",
   "workspaces.get",
   "workspaces.touch",
   "workspaces.wake",
