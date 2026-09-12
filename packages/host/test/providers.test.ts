@@ -2,9 +2,15 @@
 import { describe, expect, it } from "vitest";
 import { BoxBackend, DockerBackend, FakeBackend, LocalBackend, NoProviderBackend, SolariBackend, SshBackend, landsBytes, type MachineBackend } from "@wsp/engine";
 import { goldenRecipe, makeRuntime, optsFor, providerSlotOf, swapProvider } from "../src/cli.js";
-import { PROVIDER_MODULES, providerBackendFor, providerEnvNames, providerEnvWith, providerModule, type ProviderModule } from "../src/providers.js";
+import { keysOf } from "../src/env-keys.js";
+import { BOX_KEY_ENV, PROVIDER_MODULES, SOLARI_KEY_ENV, providerBackendFor, providerEnvNames, providerEnvWith, providerEnvWithKey, providerKeyEnvs, providerKeyRow, providerModule, type ProviderModule } from "../src/providers.js";
 
-const pick = (keys: Record<string, string> = {}, env: Record<string, string | undefined> = {}) => ({ keys, env });
+/** A computer's environment as the rows read it: the provider key rides in it under the row's own variable, which
+ * is where every layer a key is read through puts it. */
+const pick = (keys: Record<string, string> = {}, env: Record<string, string | undefined> = {}) => ({
+  ...env,
+  ...(keys["solari"] !== undefined ? { [SOLARI_KEY_ENV]: keys["solari"] } : {}),
+});
 
 describe("provider modules", () => {
   it("takes the module the keys name and nothing else when nothing is said", () => {
@@ -98,7 +104,7 @@ describe("provider modules", () => {
       // exists, and sizes to offer, so the fork roads are open.
       expect(held.capabilities).toMatchObject({ previewUrls: false, pauseMode: "memory", liveCloneForks: false, diskSnapshots: true, replacesMachine: true, resize: false });
       expect(held.capabilities.sizes.length).toBeGreaterThan(0);
-      swapProvider(rt, { solari: "slr_live_fake" });
+      swapProvider(rt, { [SOLARI_KEY_ENV]: "slr_live_fake" });
       expect(providerSlotOf(rt)!.current().capabilities.previewUrls).toBe(false);
     } finally {
       await rt.close();
@@ -108,16 +114,57 @@ describe("provider modules", () => {
   it("a key is checked against its own provider, whatever this computer forks on", () => {
     // The words a run picks a provider out of are not the words a typed key is checked under: a person typing a
     // cloud key on a computer that forks containers is asking about the key.
-    expect(providerModule({ keys: { solari: "slr_live_fake" }, env: {} }).id).toBe("solari");
+    expect(providerModule(pick({ solari: "slr_live_fake" })).id).toBe("solari");
+    expect(providerModule(providerEnvWithKey({}, "slr_live_fake")).id).toBe("solari");
+    // A run wired to another provider puts the key it is typed to that provider, not to the row a key alone wires.
+    expect(providerModule(providerEnvWithKey({ WSP_PROVIDER: "box" }, "box_fake")).id).toBe("box");
   });
 
   it("the variables a service carries are the rows' own, so a provider added brings its variable with it", () => {
-    expect(providerEnvNames()).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST", "BOX_API_KEY"]);
+    expect(providerEnvNames()).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST"]);
     // The row a provider is added as: the list follows it, and nothing else has to be remembered for the unit its
-    // host is installed as to be given the variable that selects it.
-    const fly: ProviderModule = { id: "fly", envNames: ["WSP_PROVIDER", "FLY_API_TOKEN"], selects: p => p.env["FLY_API_TOKEN"] !== undefined, build: () => new NoProviderBackend() };
-    expect(providerEnvNames([...PROVIDER_MODULES, fly])).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST", "BOX_API_KEY", "FLY_API_TOKEN"]);
+    // host is installed as to be given the variable that selects it. Keys are not among them: a unit file carries
+    // no key, and the host reads its own off the same files at every start.
+    const fly: ProviderModule = { id: "fly", envNames: ["WSP_PROVIDER", "FLY_REGION"], keyEnv: "FLY_API_TOKEN", selects: env => env["FLY_API_TOKEN"] !== undefined, build: () => new NoProviderBackend() };
+    expect(providerEnvNames([...PROVIDER_MODULES, fly])).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST", "FLY_REGION"]);
+    expect(providerEnvNames()).not.toContain(BOX_KEY_ENV);
     // What a row selects on is what it names: a row reading a variable it never listed would be carried by neither.
     for (const m of PROVIDER_MODULES) for (const name of m.envNames) expect(providerEnvNames()).toContain(name);
+  });
+
+  it("the environment a provider is picked out of carries every registered row's key, taken from the first layer that holds it", () => {
+    const layers: Record<string, string>[] = [{ WSP_PROVIDER: "box" }, { [BOX_KEY_ENV]: "from-cwd", [SOLARI_KEY_ENV]: "" }, { [BOX_KEY_ENV]: "from-home", [SOLARI_KEY_ENV]: "solari-from-home" }];
+    const env = providerEnvWith({}, layers[0]!, layers);
+    // Every variable a row declares, and each from the first layer with something in it: an empty line is no key.
+    expect(providerKeyEnvs().every(name => name in env || layers.every(l => (l[name] ?? "") === ""))).toBe(true);
+    expect([env[BOX_KEY_ENV], env[SOLARI_KEY_ENV]]).toEqual(["from-cwd", "solari-from-home"]);
+    // A row added tomorrow is filled by the same three layers with nothing else edited.
+    expect(providerKeyEnvs([...PROVIDER_MODULES, { id: "fly", envNames: [], keyEnv: "FLY_API_TOKEN", selects: () => false, build: () => new NoProviderBackend() }])).toContain("FLY_API_TOKEN");
+    // Nothing provider-shaped is left on the keys a record answers with: those are the agents' keys alone.
+    expect(keysOf({ [SOLARI_KEY_ENV]: "slr_live_fake", [BOX_KEY_ENV]: "box_fake", ANTHROPIC_API_KEY: "sk-ant-x-fake" })).toEqual({ anthropic: "sk-ant-x-fake" });
+  });
+
+  it("a row that reads a key declares the words its screen is titled with, and a row that reads none declares neither", () => {
+    // What the key screen is titled and what it says to set are the row's own, declared together: a row with a
+    // variable and no words for it would open a screen titled with a shell variable.
+    expect(PROVIDER_MODULES.map(m => [m.id, m.keyEnv, m.keyName])).toEqual([
+      ["docker", undefined, undefined],
+      ["box", BOX_KEY_ENV, "Box API key"],
+      ["fake", undefined, undefined],
+      ["solari", SOLARI_KEY_ENV, "Solari API key"],
+      ["none", undefined, undefined],
+    ]);
+    for (const m of PROVIDER_MODULES) expect([m.id, m.keyEnv === undefined]).toEqual([m.id, m.keyName === undefined]);
+  });
+
+  it("the row a key typed here is put to is the picked one, or the one a key alone would wire", () => {
+    // Wired to a provider that reads a key: that row's variable, whatever else this computer holds.
+    expect(providerKeyRow({ WSP_PROVIDER: "box" })?.keyEnv).toBe(BOX_KEY_ENV);
+    expect(providerKeyRow({ WSP_PROVIDER: "box", [SOLARI_KEY_ENV]: "slr_live_fake" })?.keyEnv).toBe(BOX_KEY_ENV);
+    // Wired to nothing: the cloud a key alone wires, which is what wsp init offers on a computer set up for none.
+    expect(providerKeyRow({})?.keyEnv).toBe(SOLARI_KEY_ENV);
+    // Wired to a provider that reads no key: nothing to ask for.
+    expect(providerKeyRow({ WSP_PROVIDER: "docker" })).toBeUndefined();
+    expect(providerKeyRow({ WSP_DOCKER: "1" })).toBeUndefined();
   });
 });
