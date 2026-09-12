@@ -191,7 +191,7 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { GUEST_WSP_BIN, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadWord, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct } from "@wsp/protocol";
-import { mcpServersBlocked, actionRefusal, copyIsCurrent, forksNoMachines, kindWords, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState, placeAbsentLine, placeDaemonPaths, placeNoPaneRoadLine, placeWorkspaceGoneLine, workFolderIn } from "@wsp/protocol";
+import { mcpServersBlocked, actionRefusal, copyIsCurrent, forksNoMachines, kindWords, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState, placeDaemonPaths, placeWorkspaceGoneLine, workFolderIn } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
 import { PlaceBackend, parsePlaceMachineId, placeMachineId } from "@wsp/engine";
@@ -771,6 +771,9 @@ export interface RuntimeOptions {
    * `places`, which is the row below: that one is where this host can build a copy of its image, and one option
    * cannot be two things. `rt.places`, the `places.*` ops and `wsp places` are this one's. */
   placeLinks?: PlaceWiring;
+  /** How long a computer has to dial back after its own join before an install gives up on it; the door's own wait
+   * unless a test shortens it. */
+  placeJoinWaitMs?: number;
   store: Store;
   adapters: Record<string, HarnessAdapterFactory>;
   /** Required for golden.prepare / golden.seal; the scripted golden.build carries its own. */
@@ -1807,11 +1810,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
   /** Every command on a place rides one exec frame on the link that place is holding. */
   const placeBackend = opts.placeLinks === undefined ? undefined : new PlaceBackend((placeId, cmd, o) => placeDoorOf().exec(placeId, cmd, o), placeRunDir);
-  /** The road a pane takes to the daemon on a place. The link carries the frames this host sends; a pane needs an
-   * address on this computer of its own, which the round that forwards over the link answers. */
+  /** The road a pane takes to the daemon on a place: a port on this computer's own loopback, carried over the link
+   * that computer opened outward to the port its daemon bound on its own. Nothing on that computer listens past
+   * its own loopback, so the link is the whole road and this host is the only thing on the other end of it. */
   const placeRoad = async (entry: LiveWorkspace): Promise<DaemonReachView> => {
-    const linked = placeDoor?.link(placeIdOf(entry)) !== undefined;
-    throw new Error(linked ? placeNoPaneRoadLine(entry.record.name) : placeAbsentLine(entry.record.name));
+    const port = await placeDoorOf().road(placeIdOf(entry));
+    const token = await daemonTokenOf(entry.machine, placeDaemonPaths(placeHomeDir(entry)).tokenPath);
+    return { url: `http://${LOOPBACK}:${port}`, expiresAt: NEVER, ...(token !== undefined ? { daemonToken: token } : {}) };
   };
   const modules: Record<WorkspaceKind, KindModule | undefined> = {
     cloud: {
@@ -1956,9 +1961,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             relayed: () => false,
             wspMcp: () => undefined,
             hostUrl: () => undefined,
-            // The link carries the frames this host sends and nothing yet carries a pane's own socket to this
-            // computer, so no road is claimed: the round that forwards over the link answers true while linked.
-            hasDaemon: () => false,
+            // While the link stands there is a daemon this host can reach, over the port the road below opens on
+            // this computer's loopback; a computer that is off has none until it dials again.
+            hasDaemon: entry => placeDoor?.link(placeIdOf(entry)) !== undefined,
             daemonRoad: placeRoad,
             scratch: entry => placeDaemonPaths(placeHomeDir(entry)).wsp,
             daemonVersion: async entry => (await placeDoorOf().reportOf(placeIdOf(entry)))?.daemonVersion ?? null,
@@ -2214,6 +2219,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       devices: deviceDoor,
       wiring,
       now: () => clock.now(),
+      onStage: event => bus.emit(event),
+      ...(opts.placeJoinWaitMs !== undefined ? { joinWaitMs: opts.placeJoinWaitMs } : {}),
       recording: {
         // Every one of these three reads the live records, so each waits on the one hydration every other road
         // waits on: a place that dials a host nothing has asked a verb of yet would otherwise find no records at all.
@@ -2256,6 +2263,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         },
       },
     });
+    // What the door raises is what a list of places redraws on: a computer joining, dialling in, going quiet or
+    // being taken out. The stream is the one every other change rides.
+    placeDoor.on(event => bus.emit(event));
   }
   /** The machines a root thread's forks are landing but have no record for yet, by root: a slot is taken before
    * the first await of a fork and handed back when it lands or fails, so the cap counts what is on its way too. */

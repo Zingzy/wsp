@@ -11,16 +11,25 @@
 // handshake and no rule of its own about how it is spelled.
 import { createPublicKey, createPrivateKey, generateKeyPairSync, randomBytes, sign as signBytes, verify as verifyBytes } from "node:crypto";
 import {
+  HERE_PLACE_ID,
+  NO_PLACE_INSTALLER,
+  PAIR_CODE_TTL_MS,
   PLACE_KEY_REFUSAL,
   PLACE_LINK_NONCE_BYTES,
   placeLinkTranscript,
+  fmtSize,
   placeAbsentLine,
+  placeNoDaemonPortLine,
+  placeNoLinkLine,
   placeStillInstalledLine,
   type DaemonEvent,
+  type PlaceAddStep,
+  type PlaceStageEvent,
   type PlaceAuthReply,
   type PlaceAuthRequest,
   type PlaceJoinReply,
   type PlaceJoinRequest,
+  type PlaceEvent,
   type PlaceReport,
   type PlaceView,
   type WorkspaceSize,
@@ -28,6 +37,7 @@ import {
 import { SSH_STORE_VARS, isPlainPath, plainPath, type ExecResult } from "@wsp/engine";
 import type { WebSocket } from "ws";
 import type { DeviceDoor } from "./devices.js";
+import { openPlaceForward, type PlaceForward } from "./place-forward.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import type { Store } from "./store.js";
 
@@ -36,9 +46,6 @@ const PLACES = "places";
 /** The one document naming which place a verb means when nobody says: the last one added. */
 const DEFAULT_COLLECTION = "place-default";
 const DEFAULT_ID = "default";
-
-/** The row id this computer carries in the list, so the default mark can name it like any other place. */
-export const HERE_PLACE_ID = "here";
 
 /** An ed25519 pair as this host keeps it: the public half base64 SPKI DER, which is what travels, and the private
  * half as pkcs8 PEM, which never does. */
@@ -65,12 +72,9 @@ const isPlaceRecord = (v: unknown): v is PlaceRecord => {
   return typeof r === "object" && r !== null && typeof r.id === "string" && typeof r.publicKey === "string" && typeof r.name === "string";
 };
 
-/** What a client watching the places hears. */
-export type PlaceEvent =
-  | { type: "place.joined"; placeId: string; name: string }
-  | { type: "place.present"; placeId: string }
-  | { type: "place.absent"; placeId: string }
-  | { type: "place.removed"; placeId: string };
+/** What a client watching the places hears; the shapes are the protocol's, since the app reads them off the same
+ * event stream every other change rides. */
+export type { PlaceEvent } from "@wsp/protocol";
 
 /** What this computer is, as a row of the same list: the list is the whole of where work can run, so the computer
  * the host runs on is on it. The host answers, since its own name and shape are its own to read. */
@@ -90,7 +94,35 @@ export interface PlaceWiring {
   /** The one word for a provider the host is set up for, as a place; nothing when it forks nowhere. */
   provider(): { id: string; rateUsdPerHour: number } | undefined;
   here(): HerePlace;
+  /** Every address a joining computer can dial this host at, the ones on its own network first and a tunnel
+   * hostname after them: read at each call, since a host is linked to a relay while it runs. */
+  addresses(): string[];
+  /** How the agent is put on a computer over ssh; absent on a runtime served without the road that installs it,
+   * where the printed join line is the only way in. */
+  install?: PlaceInstaller;
 }
+
+/** What one install is told: where to log in, what to call the computer, and the single-use code it spends on
+ * this host, with the addresses to dial in the order the place file keeps them. */
+export interface PlaceInstallRequest {
+  address: string;
+  name?: string;
+  sshPort?: number;
+  keyPath?: string;
+  code: string;
+  hostUrls: readonly string[];
+}
+
+/** What the install answers once the computer has run its own join: the name it was given, and the key its ssh
+ * answered with, which a person checks against the computer in front of them. */
+export interface PlaceInstalled {
+  name: string;
+  hostKey?: string;
+}
+
+/** How far one install has got; the words for each step are the protocol's. */
+export type PlaceStaging = (step: PlaceAddStep, state: "running" | "done" | "failed", note?: string) => void;
+export type PlaceInstaller = (req: PlaceInstallRequest, stage: PlaceStaging) => Promise<PlaceInstalled>;
 
 /** The two roads into the runtime a place needs, handed in because both are the runtime's own: a joined computer
  * becomes a workspace at its join, and those workspaces go when the place does. */
@@ -114,6 +146,10 @@ export interface PlaceDoorOptions {
   recording: PlaceRecording;
   /** Every daemon event a place pushes; the panes and the inbox read these once they ride the link. */
   onDaemonEvent?: (placeId: string, event: DaemonEvent) => void;
+  /** How far an install on a computer this host has never met has got; the runtime puts these on its own stream. */
+  onStage?: (event: PlaceStageEvent) => void;
+  /** How long a computer has to dial back after its join before an install gives up on it. */
+  joinWaitMs?: number;
   /** How long between the writes of a linked place's last seen, so a link held for a day is not a write a second. */
   seenEveryMs?: number;
   now?: () => number;
@@ -133,6 +169,14 @@ export interface PlaceDoor {
   /** Takes the proved socket as this place's link, with the report `prove` answered; the previous link is cut. */
   attach(placeId: string, socket: WebSocket, report: PlaceReport, now: number): Promise<void>;
   link(placeId: string): DaemonReach | undefined;
+  /** Every address a computer joining this host can dial it at, for the line a person types on that computer. */
+  addresses(): string[];
+  /** Puts the agent on a computer over ssh and waits for it to dial back as a place. Refused in one sentence on a
+   * host that wired no installer. */
+  add(req: { addId?: string; address: string; name?: string; sshPort?: number; keyPath?: string }, now: number): Promise<PlaceAdded>;
+  /** The port on this computer's loopback that carries to the daemon on a linked place, opened at the first ask
+   * and held with the link. Throws with the place's name when it is not connected or has said no port. */
+  road(placeId: string): Promise<number>;
   /** One command on that place over its link; the refusal names the place when it is not connected. */
   exec(placeId: string, cmd: string, opts: { timeoutMs?: number; stdin?: Uint8Array }): Promise<ExecResult>;
   /** What the place last reported about itself, off its record. */
@@ -151,6 +195,14 @@ export interface PlaceDoor {
 /** The one refusal for a runtime served without places wired, so the ops answer plainly rather than pretending
  * this host holds none. */
 export const NO_PLACE_DOOR = "this runtime holds no places; the host that serves the app wires them";
+
+/** What an install answers once the computer has dialled in: which stream of steps it was, the place it became,
+ * and the key its ssh answered with. */
+export interface PlaceAdded {
+  addId: string;
+  place: PlaceView;
+  hostKey?: string;
+}
 
 /** What a remove answers: whether a place of that id was there, what the sweep took off that computer, what the
  * workspaces standing on it said as they went, and the one line for a place that was not connected to sweep. */
@@ -242,7 +294,13 @@ interface Live {
   socket: WebSocket;
   reach: DaemonReach;
   seen: NodeJS.Timeout;
+  /** The loopback port carrying to that computer's daemon, opened at the first pane that asks for one. */
+  forward?: Promise<PlaceForward>;
 }
+
+/** How long a computer has to dial back after its own join wrote its place file. A join that landed and a link
+ * that never arrives is a network between the two, which is what the sentence says. */
+const JOIN_WAIT_MS = 90_000;
 
 export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   const { store, devices, wiring, recording } = opts;
@@ -289,9 +347,14 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     if (held === undefined) return;
     live.delete(placeId);
     clearInterval(held.seen);
+    void held.forward?.then(f => f.close()).catch(() => undefined);
     held.reach.close();
     held.socket.close(1000, reason);
   };
+
+  /** The installs waiting on a computer to dial in, keyed by the code each handed it: the join notes which place
+   * the code became and the attach that follows wakes the install. */
+  const awaiting = new Map<string, { placeId?: string; woken?: (placeId: string) => void }>();
 
   const viewOf = (record: PlaceRecord, defaulted: string | undefined): PlaceView => ({
     id: record.id,
@@ -327,9 +390,15 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const recorded = await recording.record(record);
       if (recorded.workspaceId !== undefined) await store.put(PLACES, id, { ...record, workspaceId: recorded.workspaceId } satisfies PlaceRecord);
       const { nonce, signature, expect } = challenge(id, req.nonce);
+      // An install that handed this computer the code is waiting on the link it will open next.
+      const waiting = awaiting.get(req.code);
+      if (waiting !== undefined) waiting.placeId = id;
       emit({ type: "place.joined", placeId: id, name: record.name });
+      const hostUrls = wiring.addresses();
       return {
-        reply: { placeId: id, hostPublicKey: wiring.hostKey.publicKey, nonce, signature },
+        // Every address this host answers on, so the computer keeps dialling when the one it was given stops
+        // answering: the order is the order the link tries them in.
+        reply: { placeId: id, hostPublicKey: wiring.hostKey.publicKey, nonce, signature, ...(hostUrls.length > 0 ? { hostUrls } : {}) },
         expect,
         ...(recorded.notice !== undefined ? { notice: recorded.notice } : {}),
       };
@@ -369,7 +438,11 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       await recording.refresh(moved);
       const reach = connectDaemon({
         socket,
-        onEvent: e => opts.onDaemonEvent?.(placeId, e),
+        onEvent: e => {
+          // A pane's bytes come back as tunnel frames; the road that opened the tunnel is the one that reads them.
+          void live.get(placeId)?.forward?.then(f => f.event(e)).catch(() => undefined);
+          opts.onDaemonEvent?.(placeId, e);
+        },
       });
       const seen = setInterval(() => void writeSeen(placeId, clockNow()).catch(() => undefined), seenEveryMs);
       // The poller must not hold a host that is otherwise done open.
@@ -380,14 +453,84 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         if (mine?.socket !== socket) return;
         live.delete(placeId);
         clearInterval(seen);
+        // The port this host opened for that computer's panes goes with the link that carried them: a listener
+        // left standing would answer a pane with a connection to nothing.
+        void mine.forward?.then(f => f.close()).catch(() => undefined);
         reach.close();
         void writeSeen(placeId, clockNow()).catch(() => undefined);
         emit({ type: "place.absent", placeId });
       });
       emit({ type: "place.present", placeId });
+      // Not taken off the list here: the join's own socket attaches and closes before the agent's link dials, and
+      // an install that has not reached its wait yet would otherwise never be woken by the link that follows.
+      for (const waiting of awaiting.values()) {
+        if (waiting.placeId === placeId) waiting.woken?.(placeId);
+      }
     },
 
     link: placeId => live.get(placeId)?.reach,
+
+    addresses: () => wiring.addresses(),
+
+    async add(req, at) {
+      const install = wiring.install;
+      if (install === undefined) throw new Error(NO_PLACE_INSTALLER);
+      const addId = req.addId ?? `a_${randomBytes(6).toString("hex")}`;
+      let step: PlaceAddStep = "connect";
+      const stage: PlaceStaging = (which, state, note) => {
+        step = which;
+        opts.onStage?.({ type: "place.stage", addId, step: which, state, ...(note !== undefined ? { note } : {}) });
+      };
+      const { code } = await devices.issue({ now: at, ttlMs: PAIR_CODE_TTL_MS });
+      const waiting: { placeId?: string; woken?: (placeId: string) => void } = {};
+      awaiting.set(code, waiting);
+      try {
+        const { addId: _stream, ...asked } = req;
+        const installed = await install({ ...asked, code, hostUrls: wiring.addresses() }, stage);
+        stage("join", "running");
+        const placeId = await new Promise<string>((woken, fail) => {
+          // The link may already be up: the computer dials the moment its own join has written its place file, and
+          // that can land before the install's own ssh command has answered.
+          if (waiting.placeId !== undefined && live.has(waiting.placeId)) {
+            woken(waiting.placeId);
+            return;
+          }
+          const timer = setTimeout(() => fail(new Error(placeNoLinkLine(installed.name))), opts.joinWaitMs ?? JOIN_WAIT_MS);
+          timer.unref?.();
+          waiting.woken = id => {
+            clearTimeout(timer);
+            woken(id);
+          };
+        });
+        const held = await recordOf(placeId);
+        if (held === undefined) throw new Error(placeNoLinkLine(installed.name));
+        stage("join", "done", `${fmtSize(held.report.shape, "cores")} · docker ${held.report.docker ? "yes" : "no"}`);
+        return { addId, place: viewOf(held, await defaultId()), ...(installed.hostKey !== undefined ? { hostKey: installed.hostKey } : {}) };
+      } catch (e) {
+        // The step the install was on when it stopped is the one that failed, so a person reads the sentence
+        // against the line it belongs to rather than under the list.
+        stage(step, "failed", e instanceof Error ? e.message : String(e));
+        throw e;
+      } finally {
+        awaiting.delete(code);
+      }
+    },
+
+    async road(placeId) {
+      const held = live.get(placeId);
+      const name = (await recordOf(placeId))?.name ?? placeId;
+      if (held === undefined) throw new Error(placeAbsentLine(name));
+      const port = (await recordOf(placeId))?.report.daemonPort;
+      if (port === undefined) throw new Error(placeNoDaemonPortLine(name));
+      // One port per link, opened at the first pane that asks and closed with the link it rides.
+      held.forward ??= openPlaceForward(held.reach, port);
+      try {
+        return (await held.forward).port;
+      } catch (e) {
+        if (live.get(placeId) === held) delete held.forward;
+        throw e;
+      }
+    },
 
     async exec(placeId, cmd, execOpts) {
       const reach = live.get(placeId)?.reach;
@@ -465,6 +608,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
 
     close: async () => {
       for (const placeId of [...live.keys()]) cut(placeId, "this host is stopping");
+      awaiting.clear();
     },
   };
   return door;

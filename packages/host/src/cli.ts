@@ -80,7 +80,7 @@ import { publicHostname, readRelayRecord, relayCommand, relayOnLoopbackLine, sta
 import { aimAddress, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnoredLine, wspHome } from "./hosts.js";
 import { currentHome, currentHomePointer, homeNamed, servingHome } from "./serving-home.js";
 import { advertiseWord, devicesCommand, hostReach, pairCommand } from "./pairing.js";
-import { addCommand, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
+import { addCommand, addFlags, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, registeredLine, removeEach, removeLines, runningWsp, type RunningWsp } from "./mcp-install.js";
@@ -219,8 +219,12 @@ options:
   --name ALIAS       connect: the name to call that host here (default what its
                      address calls it); relay link: the name the approval page
                      shows for this computer (default what it calls itself);
-                     join: the name the wsp calls the computer being joined
-                     (default its own name lowercased)
+                     add, join: the name the wsp calls the computer being
+                     joined (default its own name lowercased)
+  --ssh-port PORT    add, new --ssh: the port ssh dials that computer on
+                     (default 22)
+  --ssh-key PATH     add, new --ssh: the key file ssh logs in with (default
+                     whatever your own ssh config and agent already use)
   --relay HOST       connect: reach that host through your relay by the name it
                      has there, instead of giving an address. The code is still
                      the one wsp pair printed on it: the relay never carries one
@@ -1478,6 +1482,8 @@ interface SharedFlags {
   service?: boolean;
   code?: string;
   "code-file"?: string;
+  "ssh-port"?: string;
+  "ssh-key"?: string;
   serve?: boolean;
   name?: string;
   relay?: string;
@@ -1596,7 +1602,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     host: "hostSide",
     cliOnly: "hands out a code that lets another computer join this wsp, or takes a provider's key into this person's own files; both belong with the terminal the host runs at",
     run: (io, opts, values, args) =>
-      addCommand(io, { ...aimPick(opts, values), keys: keysFound(), providerEnv: opts.providerEnv }, args, values.name !== undefined ? { name: values.name } : {}),
+      addCommand(io, { ...aimPick(opts, values), keys: keysFound(), providerEnv: opts.providerEnv }, args, addFlags(values.name, values["ssh-port"], values["ssh-key"])),
   },
   remove: {
     json: false,
@@ -1765,6 +1771,8 @@ export const SHARED_OPTIONS: Options = {
   service: { type: "boolean" },
   code: { type: "string" },
   "code-file": { type: "string" },
+  "ssh-port": { type: "string" },
+  "ssh-key": { type: "string" },
   serve: { type: "boolean" },
   name: { type: "string" },
   relay: { type: "string" },

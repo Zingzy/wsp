@@ -4,19 +4,21 @@
 // computer is the one a host answers; the service manager is a fake runner,
 // since installing a launchd agent is not this test's business.
 import { createPrivateKey, generateKeyPairSync, sign } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { ALREADY_JOINED_LINE, placeDaemonPaths, placeLinkTranscript, wsUrlOf, type PlaceView } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, PLACE_ADD_WORDS, placeDaemonPaths, placeLinkTranscript, wsUrlOf, type PlaceView } from "@wsp/protocol";
 import { placeLines } from "../src/verbs.js";
 import {
-  ADD_NAME_REFUSAL,
+  ADD_FLAGS_REFUSAL,
+  joinUrls,
   NOTHING_TO_LEAVE_LINE,
   NOT_A_PLACE_LINE,
   addCommand,
+  addFlags,
   addLines,
   addRefusal,
   hostPlaceKey,
@@ -66,7 +68,7 @@ interface FakeHost {
   frames: Record<string, unknown>[];
 }
 
-async function fakeHost(opts: { wrongKey?: boolean; refuse?: string } = {}): Promise<FakeHost> {
+async function fakeHost(opts: { wrongKey?: boolean; refuse?: string; hostUrls?: string[] } = {}): Promise<FakeHost> {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   const key = { publicKey: publicKey.export({ type: "spki", format: "der" }).toString("base64"), pem: privateKey.export({ type: "pkcs8", format: "pem" }).toString() };
   const other = generateKeyPairSync("ed25519");
@@ -89,7 +91,7 @@ async function fakeHost(opts: { wrongKey?: boolean; refuse?: string } = {}): Pro
         const bytes = placeLinkTranscript("host", placeId, String(frame["nonce"]), nonce);
         // A host whose signature is made by a key other than the one it sent is the one thing a join must refuse.
         const signature = sign(null, bytes, opts.wrongKey === true ? other.privateKey : createPrivateKey(key.pem)).toString("base64");
-        ws.send(JSON.stringify({ id: frame["id"], ok: true, placeId, hostPublicKey: key.publicKey, nonce, signature }));
+        ws.send(JSON.stringify({ id: frame["id"], ok: true, placeId, hostPublicKey: key.publicKey, nonce, signature, ...(opts.hostUrls !== undefined ? { hostUrls: opts.hostUrls } : {}) }));
         return;
       }
       if (frame["op"] === "place.prove") ws.send(JSON.stringify({ id: frame["id"], ok: true }));
@@ -113,7 +115,7 @@ const joinDepsFor = (home: string, runner: ServiceRunner): Parameters<typeof joi
 
 describe("what wsp add prints with no argument", () => {
   it("names the line to type on that computer at every address this host answers on, and the other two roads", () => {
-    const lines = addLines("7QK3M2VD", 600_000, 0, ["192.168.1.20"], 4400, "p_ab12cd34.singhi.me").join("\n");
+    const lines = addLines("7QK3M2VD", 600_000, 0, joinUrls("192.168.1.20", 4400, "p_ab12cd34.singhi.me")).join("\n");
     expect(lines).toContain("wsp join http://192.168.1.20:4400 --code 7QK3M2VD");
     expect(lines).toContain("wsp join https://p_ab12cd34.singhi.me --code 7QK3M2VD");
     expect(lines).toContain("spent by the first join");
@@ -122,7 +124,7 @@ describe("what wsp add prints with no argument", () => {
   });
 
   it("leaves the relay line out when the host is on no relay", () => {
-    expect(addLines("X", 1, 0, ["10.0.0.2"], 4400, undefined).join("\n")).not.toContain("relay");
+    expect(addLines("X", 1, 0, joinUrls("10.0.0.2", 4400, undefined)).join("\n")).not.toContain("relay");
   });
 
   it("takes every provider the table says how to add, and nothing it names no way of adding", () => {
@@ -137,24 +139,24 @@ describe("what wsp add prints with no argument", () => {
   });
 });
 
+/** Every dependency the two host-side words take, with the provider check answered here: a unit test calls no
+ * provider. The dial is the one road that reaches a host, and the tests that take it hand their own. */
+const systemPlaceDeps: Parameters<typeof addCommand>[4] = {
+  dial: () => Promise.reject(new Error("no host is dialled on this road")),
+  now: () => 0,
+  run: fakeRunner().run,
+  platform: "linux",
+  checkKey: async () => ({ state: "taken" }),
+};
+
+const opts = (home: string, env: Record<string, string | undefined> = {}): Parameters<typeof addCommand>[1] => ({
+  statePath: join(home, "state.json"),
+  home,
+  env: { HOME: home, WSP_HOME: home },
+  providerEnv: env,
+});
+
 describe("a provider as a place", () => {
-  /** Every dependency the two host-side words take, with the provider check answered here: a unit test calls no
-   * provider. The dial is never reached on these roads.  */
-  const systemPlaceDeps: Parameters<typeof addCommand>[4] = {
-    dial: () => Promise.reject(new Error("no host is dialled on this road")),
-    now: () => 0,
-    run: fakeRunner().run,
-    platform: "linux",
-    checkKey: async () => ({ state: "taken" }),
-  };
-
-  const opts = (home: string, env: Record<string, string | undefined>): Parameters<typeof addCommand>[1] => ({
-    statePath: join(home, "state.json"),
-    home,
-    env: { HOME: home, WSP_HOME: home },
-    providerEnv: env,
-  });
-
   it("sets this computer up for the provider and prints its place line, with the key read where the person keeps it", async () => {
     const home = tmp("add-provider");
     const io = captured();
@@ -182,11 +184,11 @@ describe("a provider as a place", () => {
     expect(good.lines.join("\n") + good.errors.join("\n")).not.toContain("sk-ant-x");
   });
 
-  it("refuses --name until the road that names a computer over ssh lands", async () => {
+  it("refuses the ssh road's own flags when no computer was named beside them", async () => {
     const home = tmp("add-name");
     const io = captured();
     expect(await addCommand(io, opts(home, {}), [], { name: "box" }, systemPlaceDeps)).toBe(1);
-    expect(io.errors).toEqual([ADD_NAME_REFUSAL]);
+    expect(io.errors).toEqual([ADD_FLAGS_REFUSAL]);
     expect(io.errors[0]).toContain("wsp join");
   });
 });
@@ -408,5 +410,114 @@ describe("taking wsp off the computer it is typed on", () => {
     const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run });
     expect(swept.removed.filter(line => line.startsWith("/"))).toEqual([]);
     expect(swept.kept[0]).toContain(join(home, "wsp-work"));
+  });
+});
+
+describe("a join with more than one address to try", () => {
+  it("writes every address its host answers on, the one it reached first", async () => {
+    const home = tmp("join-urls");
+    const host = await fakeHost({ hostUrls: ["http://10.0.0.2:4400", "https://p_x.example.com"] });
+    const io = captured();
+    expect(await joinCommand(io, [host.url], { code: "7QK3M2VD" }, joinDepsFor(home, fakeRunner().run))).toBe(0);
+    // The one it typed first, then the rest the host named: that is the order the link dials them in.
+    expect(readPlaceFile(placeFilePath(home))!.hostUrls).toEqual([host.url, "http://10.0.0.2:4400", "https://p_x.example.com"]);
+  });
+
+  it("tries the next address when the first answers nothing, and says which one went nowhere", async () => {
+    const home = tmp("join-next");
+    const host = await fakeHost();
+    const io = captured();
+    // Port 1 on loopback answers nothing at all, which is the address an installer picked that this computer cannot route to.
+    expect(await joinCommand(io, ["http://127.0.0.1:1", host.url], { code: "7QK3M2VD" }, joinDepsFor(home, fakeRunner().run))).toBe(0);
+    expect(io.errors.join("\n")).toContain("http://127.0.0.1:1");
+    expect(readPlaceFile(placeFilePath(home))!.hostUrls[0]).toBe(host.url);
+  });
+
+  it("stops at a host's own refusal rather than asking its other addresses the same question", async () => {
+    const home = tmp("join-refused");
+    const host = await fakeHost({ refuse: "that join code is not one this host is waiting for" });
+    const io = captured();
+    await expect(joinCommand(io, [host.url, "http://127.0.0.1:1"], { code: "SPENT" }, joinDepsFor(home, fakeRunner().run))).rejects.toThrow("not one this host is waiting for");
+    expect(io.errors.join("\n")).not.toContain("http://127.0.0.1:1");
+    expect(existsSync(placeFilePath(home))).toBe(false);
+  });
+});
+
+describe("wsp add on a computer reached over ssh", () => {
+  it("asks the host to do it, prints each step as it lands and says what joined", async () => {
+    const io = captured();
+    const frames: ((frame: Record<string, unknown>) => void)[] = [];
+    const place: PlaceView = { id: "p_1", kind: "computer", name: "box", default: true, shape: { cpu: 4, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, docker: true, present: true };
+    const client = {
+      request: async (op: string, params?: Record<string, unknown>) => {
+        expect(op).toBe("places.add");
+        expect(params).toMatchObject({ address: "root@10.0.0.9", name: "box", sshPort: 2222 });
+        // The line minted the stream it asks under, since the steps reach the terminal before the reply does.
+        const addId = String(params!["addId"]);
+        expect(addId).toMatch(/^a_/);
+        for (const fn of frames) {
+          fn({ type: "place.stage", addId, step: "node", state: "done", note: "v22.23.2" });
+          // Another client's install on the same host is another stream, and this line prints none of it.
+          fn({ type: "place.stage", addId: "a_other", step: "node", state: "done", note: "somebody else" });
+        }
+        return { addId, place, hostKey: "ssh-ed25519 SHA256:abc" } as Record<string, unknown>;
+      },
+      events: async () => {},
+      onFrame: (fn: (frame: Record<string, unknown>) => void) => {
+        frames.push(fn);
+        return () => frames.splice(frames.indexOf(fn), 1);
+      },
+      closeWords: () => "",
+      closed: Promise.resolve(),
+      close: () => {},
+      terminate: () => {},
+    };
+    const deps = { ...systemPlaceDeps, dial: async () => client as never };
+    expect(await addCommand(io, opts(tmp("add-ssh")), ["root@10.0.0.9"], addFlags("box", "2222", undefined), deps)).toBe(0);
+    const said = io.lines.join("\n");
+    expect(said).toContain(`${PLACE_ADD_WORDS.node}: v22.23.2`);
+    expect(said).toContain("box joined this wsp");
+    expect(said).toContain("ssh-ed25519 SHA256:abc");
+    expect(said).toContain("wsp remove box");
+    expect(said).not.toContain("somebody else");
+  });
+
+  it("reads the port and the key by the rule every ssh road on this command line reads them by", () => {
+    expect(addFlags("box", "2222", "/tmp/id_ed25519")).toEqual({ name: "box", sshPort: 2222, keyPath: "/tmp/id_ed25519" });
+    expect(addFlags(undefined, undefined, undefined)).toEqual({});
+    expect(() => addFlags(undefined, "no", undefined)).toThrow("--ssh-port");
+  });
+
+  it("refuses the ssh road's flags when no computer was named beside them, naming the word that does name one", async () => {
+    const io = captured();
+    expect(await addCommand(io, opts(tmp("add-flags")), [], { sshPort: 2222 }, systemPlaceDeps)).toBe(1);
+    expect(io.errors).toEqual([ADD_FLAGS_REFUSAL]);
+  });
+});
+
+describe("the sweep a computer runs on itself", () => {
+  it("takes the browser name it left even once the shim it pointed at has gone, and its own line out of the login file", async () => {
+    const home = tmp("sweep-leftovers");
+    const at = placeDaemonPaths(home);
+    mkdirSync(at.binDir, { recursive: true });
+    writeFileSync(`${at.binDir}/wsp-open`, "#!/bin/sh\n");
+    // The name every tool execs, pointing at the shim: once the shim goes it is a link to nothing, which every
+    // read that follows a link calls absent while the person is still left holding it.
+    symlinkSync(`${at.binDir}/wsp-open`, `${at.binDir}/xdg-open`);
+    writeFileSync(join(home, ".profile"), `# theirs\n. ${at.profileFile}\nexport EDITOR=vi\n`);
+    const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run });
+    expect(existsSync(`${at.binDir}/xdg-open`)).toBe(false);
+    expect(swept.removed).toContain(`${at.binDir}/xdg-open`);
+    // Their file keeps everything of theirs and loses the one line wsp put in it.
+    expect(readFileSync(join(home, ".profile"), "utf8")).toBe("# theirs\nexport EDITOR=vi\n");
+    expect(swept.removed.some(line => line.includes(".profile"))).toBe(true);
+  });
+
+  it("leaves a login file it never wrote to exactly as it was", async () => {
+    const home = tmp("sweep-untouched");
+    writeFileSync(join(home, ".profile"), "# theirs\n");
+    const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run });
+    expect(readFileSync(join(home, ".profile"), "utf8")).toBe("# theirs\n");
+    expect(swept.removed.some(line => line.includes(".profile"))).toBe(false);
   });
 });

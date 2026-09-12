@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import {
+  GUEST_DAEMON_DIR,
+  GUEST_WSP_BIN,
+  PLACE_ADD_WORDS,
   PLACE_LINK_NONCE_BYTES,
+  PlaceAddStep,
   PlaceAuthRequest,
+  PlaceJoinReply,
   PlaceJoinRequest,
   WORKSPACE_KIND_WORDS,
   deleteNotice,
@@ -10,6 +15,7 @@ import {
   placeLinkTranscript,
   sshDaemonPaths,
   workFolderIn,
+  wspBinIn,
 } from "../src/index.js";
 
 const nonce = Buffer.alloc(PLACE_LINK_NONCE_BYTES, 7).toString("base64");
@@ -109,5 +115,38 @@ describe("where a daemon on somebody's own computer keeps things", () => {
   it("names the work folder by the one rule this computer's own workspace reads", () => {
     expect(workFolderIn("/Users/maya/")).toBe("/Users/maya/wsp-work");
     expect(placeDaemonPaths("/Users/maya").tokenPath).toBe("/Users/maya/.wsp/daemon-token");
+  });
+});
+
+describe("what a host tells a computer it has just taken in", () => {
+  const reply = { placeId: "p_1", hostPublicKey: publicKey, nonce, signature: Buffer.alloc(64, 9).toString("base64") };
+
+  it("may name every address it answers on, and refuses a word that is no address", () => {
+    expect(PlaceJoinReply.safeParse({ ...reply, hostUrls: ["http://10.0.0.2:4400", "https://p_x.example.com"] }).success).toBe(true);
+    // A host that answered before it said so leaves it out, and the computer keeps the address it typed.
+    expect(PlaceJoinReply.safeParse(reply).success).toBe(true);
+    expect(PlaceJoinReply.safeParse({ ...reply, hostUrls: ["10.0.0.2:4400"] }).success).toBe(false);
+  });
+});
+
+describe("the steps of an install on a computer over ssh", () => {
+  it("has words for every one of them, so a step added is a step a person can read", () => {
+    expect(Object.keys(PLACE_ADD_WORDS).sort()).toEqual([...PlaceAddStep.options].sort());
+    for (const step of PlaceAddStep.options) expect(PLACE_ADD_WORDS[step].length).toBeGreaterThan(0);
+  });
+});
+
+describe("where a computer joined as a place keeps its own two files", () => {
+  it("puts them in the folder the daemon's own files are in, so one sweep takes the lot", () => {
+    const at = placeDaemonPaths("/home/maya");
+    expect(at.placeFile).toBe("/home/maya/.wsp/place.json");
+    expect(at.placeKey).toBe("/home/maya/.wsp/place-key.pem");
+    expect(at.placeLog).toBe("/home/maya/.wsp/place.log");
+    for (const path of [at.placeFile, at.placeKey, at.placeLog]) expect(path.startsWith(`${at.wsp}/`)).toBe(true);
+  });
+
+  it("names the wsp command in a bundle by one rule, which a fork and a joined computer both read", () => {
+    expect(wspBinIn(GUEST_DAEMON_DIR)).toBe(GUEST_WSP_BIN);
+    expect(wspBinIn("/home/maya/.wsp/daemon")).toBe("/home/maya/.wsp/daemon/wsp/dist/bin.js");
   });
 });

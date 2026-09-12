@@ -405,7 +405,10 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 return;
               }
               const { code, expiresAt } = await devices().issue({ now: now(), ttlMs: pairTtlMs });
-              send({ id: msg.id, ok: true, code, expiresAt });
+              // The addresses a computer spending this code would dial, beside the code itself: one round trip for
+              // the whole of what a person types over there, and one reading of which addresses this host answers on.
+              const joinUrls = rt.places?.addresses() ?? [];
+              send({ id: msg.id, ok: true, code, expiresAt, ...(joinUrls.length > 0 ? { joinUrls } : {}) });
               return;
             }
             case "pair.redeem":
@@ -432,6 +435,24 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 return;
               }
               send({ id: msg.id, ok: true, ...(await places().remove(msg.placeId)) });
+              return;
+            }
+            case "places.add": {
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                return;
+              }
+              const added = await places().add(
+                {
+                  ...(msg.addId !== undefined ? { addId: msg.addId } : {}),
+                  address: msg.address,
+                  ...(msg.name !== undefined ? { name: msg.name } : {}),
+                  ...(msg.sshPort !== undefined ? { sshPort: msg.sshPort } : {}),
+                  ...(msg.keyPath !== undefined ? { keyPath: msg.keyPath } : {}),
+                },
+                now(),
+              );
+              send({ id: msg.id, ok: true, ...added });
               return;
             }
             case "devices.list":

@@ -993,7 +993,8 @@ export const MCP_SERVER_NAME = "wsp";
 /** The command sits in the bundle as npm lays the published package out, its package.json beside a dist folder,
  * because the bin reads its own version through that file (`../package.json` from the bin) and announces it in
  * every MCP handshake; a client refuses a server that names none. */
-export const GUEST_WSP_BIN = `${GUEST_DAEMON_DIR}/wsp/dist/bin.js`;
+export const wspBinIn = (dir: string): string => `${dir}/wsp/dist/bin.js`;
+export const GUEST_WSP_BIN = wspBinIn(GUEST_DAEMON_DIR);
 
 /** The token a client puts on its requests, off its own environment; nothing when it is not running inside a turn. */
 export function turnTokenOf(env: Readonly<Record<string, string | undefined>>): string | undefined {
@@ -2019,6 +2020,40 @@ export const ForwardOpenEvent = z.object({ type: z.literal("forward.open"), forw
 export const ForwardCloseEvent = z.object({ type: z.literal("forward.close"), workspaceId: z.string(), port: RelayPort });
 export type ForwardEvent = z.infer<typeof ForwardOpenEvent> | z.infer<typeof ForwardCloseEvent>;
 
+/** What a computer joining this host passes through when the host installs the agent on it over ssh, in order.
+ * One list for the line a terminal prints and the rows the app draws, so neither invents a step the other has not
+ * got. */
+export const PlaceAddStep = z.enum(["connect", "node", "wsp", "service", "join"]);
+export type PlaceAddStep = z.infer<typeof PlaceAddStep>;
+
+/** What each step reads as while it runs. The note beside it carries what the computer answered (its system, the
+ * node it got), which is the step's own to say and never a second sentence about it. */
+export const PLACE_ADD_WORDS: Record<PlaceAddStep, string> = {
+  connect: "connecting over ssh",
+  node: "installing node",
+  wsp: "installing wsp",
+  service: "starting the agent",
+  join: "waiting for it to connect to this computer",
+};
+
+/** How far the install on one computer has got, keyed by the id the request was answered with, so two installs at
+ * once are two lists. A step that is running is the one with a spinner; one that is done carries its note. */
+export const PlaceStageEvent = z.object({
+  type: z.literal("place.stage"),
+  addId: z.string(),
+  step: PlaceAddStep,
+  state: z.enum(["running", "done", "failed"]),
+  note: z.string().optional(),
+});
+export type PlaceStageEvent = z.infer<typeof PlaceStageEvent>;
+
+/** A computer joined this host, dialled in, went quiet or was taken out: what a list of places redraws on. */
+export const PlaceJoinedEvent = z.object({ type: z.literal("place.joined"), placeId: z.string(), name: z.string() });
+export const PlacePresentEvent = z.object({ type: z.literal("place.present"), placeId: z.string() });
+export const PlaceAbsentEvent = z.object({ type: z.literal("place.absent"), placeId: z.string() });
+export const PlaceRemovedEvent = z.object({ type: z.literal("place.removed"), placeId: z.string() });
+export type PlaceEvent = z.infer<typeof PlaceJoinedEvent> | z.infer<typeof PlacePresentEvent> | z.infer<typeof PlaceAbsentEvent> | z.infer<typeof PlaceRemovedEvent>;
+
 export const EventUnion = z.discriminatedUnion("type", [
   WorkspaceCreatingEvent.extend(sequenced),
   WorkspaceCreatedEvent.extend(sequenced),
@@ -2052,6 +2087,11 @@ export const EventUnion = z.discriminatedUnion("type", [
   PreferencesChangedEvent.extend(sequenced),
   InitJobEvent.extend(sequenced),
   InitNeedsYouEvent.extend(sequenced),
+  PlaceStageEvent.extend(sequenced),
+  PlaceJoinedEvent.extend(sequenced),
+  PlacePresentEvent.extend(sequenced),
+  PlaceAbsentEvent.extend(sequenced),
+  PlaceRemovedEvent.extend(sequenced),
 ]);
 export type EventUnion = z.infer<typeof EventUnion>;
 
@@ -2360,6 +2400,7 @@ const DAEMON_CONTENTS = [
   "6875c912371aadfb9947191e4d887b9fb6576ed57d0268de91811a6d3ac4f4cd",
   "4c81908db0c4d29e74f00ddd5513e94137f01afeb39b9afbed242368be6097c6",
   "0ad3a1c3e98d5b75bf94d610b9e166a7ad1bb5e79ee7ab4905d6b738fb5eded9",
+  "01030623497a43f044916ca27731dbfa4c92c6b82765a9e9dbd6426d69b1ee4e",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -2394,7 +2435,10 @@ const DAEMON_CONTENTS = [
  * at the join, and then serves that socket exactly as it serves an inbound one, so every command the host already
  * sends a machine rides one frame on the link and no runtime road learns a second transport. It also loads its
  * native pty module at the first terminal rather than at its own import, so a machine where nothing built that
- * module serves every other op instead of refusing to start. */
+ * module serves every other op instead of refusing to start. Version 18 finds that native module where a packaged
+ * command carries it: the command bundles node-pty rather than requiring it, and a bundled CommonJS module arrives
+ * with a default export and no named one, so a daemon running inside the packaged command opened no terminal at
+ * all until this. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the daemon's sources, the dependency
@@ -2587,7 +2631,16 @@ export type PlaceReport = z.infer<typeof PlaceReport>;
  * this key. Answered with PlaceJoinReply; the socket then continues with place.prove as an auth would. */
 export const PlaceJoinRequest = z.object({ id: reqId, op: z.literal("place.join"), code: z.string().max(64), publicKey: PlacePublicKey, nonce: PlaceNonce, report: PlaceReport });
 export type PlaceJoinRequest = z.infer<typeof PlaceJoinRequest>;
-export const PlaceJoinReply = z.object({ placeId: z.string(), hostPublicKey: PlacePublicKey, nonce: PlaceNonce, signature: PlaceSignature });
+export const PlaceJoinReply = z.object({
+  placeId: z.string(),
+  hostPublicKey: PlacePublicKey,
+  nonce: PlaceNonce,
+  signature: PlaceSignature,
+  /** Every address this host answers on, the one that was dialled first: the joining computer writes them all into
+   * its place file, so a laptop that joined over the network keeps dialling when the host moves to its tunnel
+   * hostname and back. Absent from a host that answered a join before it said so. */
+  hostUrls: z.array(z.string().refine(isHttpUrl, "http or https URL")).optional(),
+});
 export type PlaceJoinReply = z.infer<typeof PlaceJoinReply>;
 
 /** The first frame of a place that already joined: names itself and challenges the host. */
@@ -2633,6 +2686,10 @@ export const PlaceView = z.object({
 });
 export type PlaceView = z.infer<typeof PlaceView>;
 
+/** The id the computer the host runs on carries in that list. It is a place like every other, and the one nothing
+ * was installed on, so both sides of the wire read the same word for it. */
+export const HERE_PLACE_ID = "here";
+
 /** The refusal a join whose code this host is not holding gets. Spent, expired and never minted read the same, so
  * guessing tells a caller nothing about which; the words differ from a pairing code's only in naming the verb that
  * mints this one, since a person joining a computer never typed wsp pair. */
@@ -2662,9 +2719,17 @@ export const placeStillInstalledLine = (name: string): string => `${name} is off
  * this host, and the computer keeps its own files, since wsp never made them. */
 export const placeWorkspaceGoneLine = (name: string, id: string): string => `workspace ${name} (${id}) and its threads are gone from this host; its files on that computer are the person's own and stay`;
 
-/** What a pane on a place is refused with while nothing carries the daemon's own socket to this computer: the link
- * carries the frames the host sends, and a pane needs an address on this computer of its own. */
-export const placeNoPaneRoadLine = (name: string): string => `${name} is connected, and its terminal, files and ports wait on a road from this computer to the daemon on it; wsp drives it over the link meanwhile`;
+/** What a place that is connected but has never said which port its daemon bound is refused with: a pane needs
+ * that port to carry to, and only that computer knows it. */
+export const placeNoDaemonPortLine = (name: string): string => `${name} is connected but has not said which port its daemon is on, so nothing can carry a pane to it yet; it says so on its next link`;
+
+/** What an install is refused with when the computer took the agent and never dialled back: the join landed, so
+ * the computer belongs to this wsp, and what is missing is a road from it to here. */
+export const placeNoLinkLine = (name: string): string => `${name} took the agent and has not dialled this host yet; check that it can reach this computer on the address it was given, and wsp places shows it the moment it does`;
+
+/** The refusal wsp add over ssh gets on a host that wired no installer: the road that puts the agent on a computer
+ * is the host command's, so a runtime served without one holds no way onto a machine it has never met. */
+export const NO_PLACE_INSTALLER = "this host cannot install the agent on a computer over ssh; run wsp add with no argument for the line to type on that computer";
 
 /** The refusal a socket that was let in on a single-use ticket gets for reaching the place ops: which computers a
  * person's wsp runs on, and taking one back out, is handed out and taken away at the terminal of the computer the
@@ -2744,6 +2809,21 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Takes a place back out: sweeps wsp off that computer over its link, drops the workspaces standing on it and
    * the place record. Answers `{ removed, swept, note? }`. */
   z.object({ id: reqId, op: z.literal("places.remove"), placeId: z.string() }),
+  /** Puts the agent on a Linux computer over ssh and joins it: the host logs in as the person's own ssh would,
+   * installs node and wsp there, starts the agent under that login's own service manager and waits for it to dial
+   * back. Answers `{ addId, place: PlaceView }` once it has dialled; the steps ride place.stage events carrying the
+   * same addId. */
+  z.object({
+    id: reqId,
+    op: z.literal("places.add"),
+    /** The stream the steps of this install ride, minted by whoever asked: the steps start before the reply names
+     * the place, so a caller that wants to draw them has to know which are its own before it asks. */
+    addId: z.string().max(64).optional(),
+    address: z.string().max(200),
+    name: z.string().max(200).optional(),
+    sshPort: z.number().int().min(1).max(65535).optional(),
+    keyPath: z.string().max(1024).optional(),
+  }),
   /** Replies with an EventsSubscribeReply, then pushes events on this socket. With `after`, the seq of the last event
    * this client saw, every retained event past it is pushed first, oldest first, before anything live; `stream` is
    * the id that came with that seq, so a runtime that is not the one that issued it answers gap instead. */

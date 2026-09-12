@@ -4,9 +4,11 @@
 // ops a person's own socket reaches. The signatures here are real ed25519
 // ones, so what the door verifies is what a place would send.
 import { createPrivateKey, randomBytes, sign } from "node:crypto";
+import { connect as netConnect } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import type WebSocket from "ws";
 import {
+  NO_PLACE_INSTALLER,
   PLACE_CODE_REFUSAL,
   PLACES_TICKET_REFUSAL,
   PLACE_KEY_REFUSAL,
@@ -14,13 +16,17 @@ import {
   PLACE_LINK_NONCE_BYTES,
   THREAD_OPS,
   placeDaemonPaths,
+  placeAbsentLine,
   placeLinkTranscript,
+  placeNoDaemonPortLine,
+  placeNoLinkLine,
   workFolderIn,
+  type PlaceStageEvent,
   type PlaceReport,
   type PlaceView,
 } from "@wsp/protocol";
 import { createRuntime, type Runtime } from "../src/runtime.js";
-import { newPlaceKeyPair, type PlaceKeyPair, type PlaceWiring } from "../src/places.js";
+import { newPlaceKeyPair, type PlaceInstallRequest, type PlaceKeyPair, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend } from "./stub-backend.js";
@@ -42,7 +48,7 @@ afterEach(async () => {
 const HERE = { name: "zingzys-mac", os: "macOS 15.0", shape: { cpu: 8, memMb: 16384 }, docker: true };
 
 function wiring(hostKey: PlaceKeyPair, provider?: { id: string; rateUsdPerHour: number }): PlaceWiring {
-  return { hostKey, provider: () => provider, here: () => HERE };
+  return { hostKey, provider: () => provider, here: () => HERE, addresses: () => ["http://192.168.1.20:4400"] };
 }
 
 const report = (name = "old-macbook", over: Partial<PlaceReport> = {}): PlaceReport => ({
@@ -434,9 +440,11 @@ describe("the list of every place", () => {
     const relayed = await WsClient.connect(srv!.port, { ticket });
     expect(await relayed.request("places.list")).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
     expect(await relayed.request("places.remove", { placeId: "p_1" })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
+    expect(await relayed.request("places.add", { address: "root@10.0.0.9" })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
     relayed.close();
     expect(THREAD_OPS).not.toContain("places.list");
     expect(THREAD_OPS).not.toContain("places.remove");
+    expect(THREAD_OPS).not.toContain("places.add");
   });
 });
 
@@ -502,5 +510,166 @@ describe("a workspace on a place", () => {
     await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
     await expect(runtime!.workspaces.exec(ws.id, "hostname")).rejects.toThrow(/is not connected right now/);
     expect(placeDaemonPaths("/home/maya").runDir).toBe("/home/maya/.wsp/run");
+  });
+});
+
+describe("putting the agent on a computer over ssh", () => {
+  it("refuses on a host that wired no road onto a computer it has never met", async () => {
+    const { hostKey } = await serving();
+    // The wiring this host was served with names no installer, which is every host but the one with the ssh road.
+    expect(hostKey).toBeDefined();
+    await expect(runtime!.places!.add({ address: "root@10.0.0.9" }, Date.now())).rejects.toThrow(NO_PLACE_INSTALLER);
+  });
+
+  it("mints a code the computer spends, says what each step is doing, and answers once that computer's link is up", async () => {
+    const hostKey = newPlaceKeyPair();
+    const store = memoryStore();
+    const stages: PlaceStageEvent[] = [];
+    let handed: PlaceInstallRequest | undefined;
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store,
+      adapters: {},
+      placeLinks: {
+        ...wiring(hostKey),
+        install: async (req, stage) => {
+          handed = req;
+          stage("connect", "done", "Ubuntu 24.04");
+          // The computer's own join, with the code the install was handed: the door spends it and the link follows.
+          await join(hostKey, { code: req.code, name: "box" });
+          return { name: "box", hostKey: "ssh-ed25519 SHA256:abc" };
+        },
+      },
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    // The caller mints the stream, since the steps come back before the reply that would have named it.
+    const added = await runtime.places!.add({ addId: "a_mine", address: "root@10.0.0.9", name: "box" }, Date.now());
+    expect(added.place.name).toBe("box");
+    expect(added.place.present).toBe(true);
+    expect(added.hostKey).toBe("ssh-ed25519 SHA256:abc");
+    // The code and every address this host answers on are the door's to hand the installer, not the installer's to find.
+    expect(handed?.code).toMatch(/^[A-Z0-9]+$/);
+    expect(handed?.hostUrls).toEqual(["http://192.168.1.20:4400"]);
+    expect(stages.map(s => `${s.step} ${s.state}`)).toEqual(["connect done", "join running", "join done"]);
+    expect(added.addId).toBe("a_mine");
+    expect(stages.every(s => s.addId === "a_mine")).toBe(true);
+    expect(stages.at(-1)?.note).toContain("cores");
+  });
+
+  it("waits for the link the agent dials, not the socket the join itself opened and closed", async () => {
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: {
+        ...wiring(hostKey),
+        install: async req => {
+          // What happens on a real computer: its own join dials once, writes its place file and closes that socket,
+          // and the unit its join installed is what opens the link a moment later.
+          const { client, placeId, pair } = await join(hostKey, { code: req.code, name: "box" });
+          await until(async () => (await placesOf()).some(p => p.id === placeId && p.present === true));
+          client.close();
+          await until(async () => (await placesOf()).some(p => p.id === placeId && p.present === false));
+          setTimeout(() => void relink(hostKey, placeId, pair).then(({ client: link }) => sockets.push(link.ws)), 20);
+          return { name: "box" };
+        },
+      },
+      placeJoinWaitMs: 4_000,
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    const added = await runtime.places!.add({ address: "root@10.0.0.9" }, Date.now());
+    expect(added.place.present).toBe(true);
+  });
+
+  it("names the step an install stopped on, and the code it minted opens nothing afterwards", async () => {
+    const hostKey = newPlaceKeyPair();
+    const stages: PlaceStageEvent[] = [];
+    let minted = "";
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: {
+        ...wiring(hostKey),
+        install: async (req, stage) => {
+          minted = req.code;
+          stage("node", "running");
+          throw new Error("ssh refused the login (publickey)");
+        },
+      },
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    await expect(runtime.places!.add({ address: "root@10.0.0.9" }, Date.now())).rejects.toThrow("publickey");
+    expect(stages.map(s => `${s.step} ${s.state}`)).toEqual(["node running", "node failed"]);
+    expect(stages.at(-1)?.note).toContain("publickey");
+    // An install that never reached a join leaves its code unspent, and the person's next add mints another.
+    expect(await runtime.devices.spend(minted, 1)).toBe(true);
+  });
+
+  it("gives up on a computer that took the agent and never dialled, in the sentence that says what to check", async () => {
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: { ...wiring(hostKey), install: async () => ({ name: "box" }) },
+      placeJoinWaitMs: 50,
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    await expect(runtime.places!.add({ address: "root@10.0.0.9" }, Date.now())).rejects.toThrow(placeNoLinkLine("box"));
+  });
+
+});
+
+describe("the code a person types on the computer they are sitting at", () => {
+  it("comes back with every address that computer could dial this host at", async () => {
+    await serving();
+    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    const issued = await c.request("pair.issue");
+    c.close();
+    expect(issued.ok, String(issued["error"])).toBe(true);
+    expect(issued["joinUrls"]).toEqual(["http://192.168.1.20:4400"]);
+  });
+
+  it("writes every one of them into the reply a join gets, so the computer keeps dialling when one stops answering", async () => {
+    const { hostKey } = await serving();
+    const { reply } = await join(hostKey, { code: await code() });
+    expect(reply["hostUrls"]).toEqual(["http://192.168.1.20:4400"]);
+  });
+});
+
+describe("the road a pane takes to a place", () => {
+  it("is refused with the place's name while that computer is not connected", async () => {
+    const { hostKey } = await serving();
+    const { client, placeId } = await join(hostKey, { code: await code(), name: "box" });
+    client.close();
+    await until(async () => (await placesOf()).some(p => p.id === placeId && p.present === false));
+    await expect(runtime!.places!.road(placeId)).rejects.toThrow(placeAbsentLine("box"));
+  });
+
+  it("is refused with its own sentence while that computer has not said which port its daemon bound", async () => {
+    const { hostKey } = await serving();
+    const { client, placeId } = await join(hostKey, { code: await code(), name: "box" });
+    await expect(runtime!.places!.road(placeId)).rejects.toThrow(placeNoDaemonPortLine("box"));
+  });
+});
+
+describe("the port a place's panes ride", () => {
+  it("goes with the link that carried it, so nothing is left answering for a computer that is gone", async () => {
+    const { hostKey } = await serving();
+    const { client, placeId } = await join(hostKey, { code: await code(), name: "box", report: report("box", { daemonPort: 4321 }) });
+    const port = await runtime!.places!.road(placeId);
+    expect(port).toBeGreaterThan(0);
+    client.close();
+    await until(async () => (await placesOf()).some(p => p.id === placeId && p.present === false));
+    await expect(
+      new Promise((done, fail) => {
+        const socket = netConnect({ port, host: "127.0.0.1" }, () => done(true));
+        socket.once("error", fail);
+      }),
+    ).rejects.toThrow();
   });
 });

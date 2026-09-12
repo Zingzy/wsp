@@ -12,7 +12,7 @@ import { join, posix } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, CURL_NET, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_SUPERVISOR_PATH, GUEST_TMP, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
-import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, DAEMON_ROOTS_PATH, GUEST_DAEMON_DIR, LOOPBACK, machineLacking, machineUnanswered, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, type SnapshotStorage, type WorkspaceKind } from "@wsp/protocol";
+import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, DAEMON_ROOTS_PATH, GUEST_DAEMON_DIR, LOOPBACK, machineLacking, machineUnanswered, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, type SnapshotStorage, type WorkspaceKind } from "@wsp/protocol";
 import { DAEMON_TOKEN_PATH, goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import { assetDir, assetName, assetProof, copyAsset } from "./assets.js";
@@ -109,6 +109,25 @@ export interface DaemonPlace {
   daemonArgs: readonly string[];
   /** Quarter seconds the deploy waits for the daemon to answer before it reads the log instead. */
   upTries: number;
+  /** Which wsp this computer is to join, on a place whose daemon is held up by its own join rather than by a unit
+   * this deploy writes. Absent everywhere else, and the one supervision that reads it says so when it is. */
+  join?: DaemonJoin;
+  /** What the deploy takes off the machine on its way out, however it ends: armed before anything lands, so a
+   * deploy that dies halfway leaves none of it behind. Empty on a fork, whose disk goes with the machine. */
+  onExit?: readonly string[];
+}
+
+/** What a computer needs told to join a wsp: the address it dials this host at, the file the single-use code was
+ * landed in, the name the host is to know it by, and the two files the join leaves behind, which are the proof it
+ * landed and where the agent prints. */
+export interface DaemonJoin {
+  /** Every address this host answers on, tried in order: the first that answers is the one that computer can
+   * reach, which is not always the one the host would name first. */
+  hostUrls: readonly string[];
+  codeFile: string;
+  name: string;
+  file: string;
+  log: string;
 }
 
 /** The supervisor's name for the daemon, the one string the unit file, the stop, the start and the log read. */
@@ -243,6 +262,47 @@ export const BOOT_SCRIPT: DaemonSupervision = {
   log: (_place, lines) => `tail -n ${lines} ${DAEMON_LOG_PATH}`,
 };
 
+/** What a computer joined as a place is held up by: its own `wsp join`, which writes the place file, installs the
+ * unit under that login's own service manager and dials the host from it. Nothing here writes a unit, because the
+ * agent that holds the link is not the daemon this deploy would start: the daemon runs inside the agent, on that
+ * computer's loopback, and the socket to this host is one the agent opened outward. The deploy's part ends when the
+ * place file is on disk.
+ *
+ * The wsp the join runs is the one in the bundle, under the node the deploy pinned beside it, so neither is
+ * whatever that computer's PATH happens to name. */
+export const JOINED: DaemonSupervision = {
+  requires: [],
+  start: place => {
+    const join = joinOf(place);
+    return [
+      // The native pty the agent loads at its first terminal is the one npm just compiled beside the bundle: the
+      // packaged command carries node-pty inlined and looks for the native module next to its own dist folder.
+      `ln -sfn ${sh(place, `${place.dir}/node_modules/node-pty/build`)} ${sh(place, `${place.dir}/wsp/build`)}`,
+      // Said once the computer has everything wsp needs of it and before its own join runs, so a person watching
+      // reads the install and the join apart.
+      `echo ${WSP_READY_LINE}`,
+      `${sh(place, daemonNodePath(place))} ${sh(place, wspBinIn(place.dir))} join ${join.hostUrls.map(at => shellQuote(at)).join(" ")} --code-file ${sh(place, join.codeFile)} --name ${shellQuote(join.name)}`,
+      `echo ${PLACE_JOINED_LINE}`,
+    ];
+  },
+  // The join itself ends the deploy when it fails, since the script runs under set -e; what this reads is whether
+  // the computer came out of it belonging to a wsp.
+  up: place => [`[ -s ${sh(place, joinOf(place).file)} ] && echo DAEMON_UP || echo DAEMON_DOWN`],
+  log: (place, lines) => `tail -n ${lines} ${sh(place, joinOf(place).log)} 2>/dev/null || true`,
+};
+
+/** What the install says once that computer carries wsp and the node it runs on, and what its own join says once
+ * it belongs to a wsp. Two words on stdout, read by whoever is watching the install. */
+export const WSP_READY_LINE = "WSP_READY";
+export const PLACE_JOINED_LINE = "PLACE_JOINED";
+
+/** The join a place names, or the one sentence for a place built without one: every line of this supervision reads
+ * it, so the fault is named once rather than at each. */
+function joinOf(place: DaemonPlace): DaemonJoin {
+  if (place.join === undefined) throw new Error(`the place at ${place.dir} names no wsp to join, so nothing could tell that computer which host to dial`);
+  return place.join;
+}
+
 /** The protocol's own reading of the folder, since the wsp command the runtime hands every fork sits under it:
  * two spellings of one path would have those two agreeing by luck. */
 const GUEST_DIR = GUEST_DAEMON_DIR;
@@ -360,7 +420,30 @@ export function sshDaemonPlace(login: { home: string; path: string }): DaemonPla
   };
 }
 
+/** The place a computer joined over ssh keeps its agent: everything the ssh road lays down under that login's own
+ * home, since the agent and the daemon inside it read the same folder, with the daemon's unit swapped for the
+ * join that computer runs for itself. Built off the ssh place rather than beside it, so what a sweep takes off a
+ * computer is one list however the agent got there. */
+export function joinedPlace(login: { home: string; path: string }, join: Omit<DaemonJoin, "file" | "log">): DaemonPlace {
+  const at = placeDaemonPaths(login.home);
+  return {
+    ...sshDaemonPlace(login),
+    kind: "place",
+    supervise: JOINED,
+    join: { ...join, file: at.placeFile, log: at.placeLog },
+    // The code buys a place in somebody's wsp for the ten minutes it stands: a deploy that dies between landing it
+    // and the join that spends it must not leave it on their disk. The join deletes it before it dials, so on the
+    // road that works this removes a file that has already gone.
+    onExit: [`rm -f ${shellQuote(join.codeFile)}`],
+  };
+}
+
 export const DAEMON_UNIT_PATH = CLOUD_PLACE.unitPath;
+
+/** The one line wsp adds to the person's own login file, and takes back out: their file is theirs, so what wsp
+ * wrote is named once and matched by that name. Read by the deploy that writes it, by the removal that runs on a
+ * machine this host reaches, and by the sweep a place runs on itself. */
+export const profileSourceLine = (profileFile: string): string => `. ${profileFile}`;
 
 /** A path as this place's shell scripts write it: quoted where it came from the machine, since a home with a
  * space in it would otherwise make `rm -rf /Users/Jane Doe/.wsp` two words and take /Users/Jane with it. */
@@ -588,6 +671,9 @@ export function deployScript(place: DaemonPlace, token: string, previewHostSuffi
     // An unsupervised daemon is what this deploy exists to stop shipping, and what a machine must be able to do to
     // avoid being one is its supervision's to ask.
     ...place.supervise.requires,
+    // Armed before the first line that writes: what this deploy leaves on a machine somebody owns has to go when
+    // it dies halfway as surely as when it finishes.
+    ...(place.onExit === undefined || place.onExit.length === 0 ? [] : [`trap "${place.onExit.join("; ")}" EXIT`]),
     // A guest exec carries PATH and nothing else (measured 2026-09-05), and npm and the bundle's build read the
     // machine's home. What the daemon itself hands to every pty comes from its unit, not from here.
     ...place.exportEnv,
@@ -618,7 +704,7 @@ export function deployScript(place: DaemonPlace, token: string, previewHostSuffi
     // login file is theirs: the line goes in once, behind its own name, so a second deploy adds nothing.
     ...(place.profileSource === undefined
       ? []
-      : [`grep -q ${shellQuote(place.profileFile)} ${sh(place, place.profileSource)} 2>/dev/null || printf '. %s\\n' ${sh(place, place.profileFile)} >> ${sh(place, place.profileSource)}`]),
+      : [`grep -q ${shellQuote(place.profileFile)} ${sh(place, place.profileSource)} 2>/dev/null || printf '%s\\n' ${shellQuote(profileSourceLine(place.profileFile))} >> ${sh(place, place.profileSource)}`]),
     // Login shells read it from the profile file; the daemon's ptys inherit it from the daemon, exported before it starts.
     ...(previewHostSuffix !== undefined
       ? [
@@ -658,7 +744,7 @@ export function removeDaemonScript(place: DaemonPlace): string {
           // 2026-09-11: a move turned one into a plain file). The working copy goes either way, and the write only
           // follows a read that worked, so a grep that could not read the file leaves them neither an empty one
           // nor a file of wsp's beside their own.
-          `if [ -f ${sh(place, place.profileSource)} ] && grep -qF ${shellQuote(`. ${place.profileFile}`)} ${sh(place, place.profileSource)}; then grep -vF ${shellQuote(`. ${place.profileFile}`)} ${sh(place, place.profileSource)} > ${sh(place, `${place.profileSource}.wsp-out`)} && cat ${sh(place, `${place.profileSource}.wsp-out`)} > ${sh(place, place.profileSource)}; rm -f ${sh(place, `${place.profileSource}.wsp-out`)}; fi`,
+          `if [ -f ${sh(place, place.profileSource)} ] && grep -qF ${shellQuote(profileSourceLine(place.profileFile))} ${sh(place, place.profileSource)}; then grep -vF ${shellQuote(profileSourceLine(place.profileFile))} ${sh(place, place.profileSource)} > ${sh(place, `${place.profileSource}.wsp-out`)} && cat ${sh(place, `${place.profileSource}.wsp-out`)} > ${sh(place, place.profileSource)}; rm -f ${sh(place, `${place.profileSource}.wsp-out`)}; fi`,
         ]),
     `echo ${DAEMON_GONE_LINE}`,
   ].join("\n");
@@ -759,7 +845,7 @@ export async function packBundle(stage: string, tgz: string): Promise<void> {
  * for how bytes reach it, so a machine whose provider mints no signed URL is deployed to over its own connection. */
 export async function deployDaemon(
   machine: Machine,
-  opts: { token?: string; daemonDir?: string; cliDir?: string; place?: DaemonPlace } = {},
+  opts: { token?: string; daemonDir?: string; cliDir?: string; place?: DaemonPlace; land?: readonly { path: string; bytes: Uint8Array }[]; onLine?: (line: string) => void } = {},
 ): Promise<{ token: string; node: string; port?: number }> {
   const place = opts.place ?? guestPlace(machine.daemonSupervisor ?? "systemd");
   const token = opts.token ?? randomBytes(24).toString("hex");
@@ -775,9 +861,12 @@ export async function deployDaemon(
     // Before the script rather than in it, where the place says the machine may carry other accounts: the bytes
     // go over the connection and no command on that machine ever names the token.
     if (place.tokenRoad === "bytes") await landBytes(machine, place.tokenPath, new TextEncoder().encode(token));
+    // Whatever else this place's script reads off disk rather than off its own command line, by the same road and
+    // for the same reason: a join code in a command sits in a world readable /proc/<pid>/cmdline while it runs.
+    for (const { path, bytes } of opts.land ?? []) await landBytes(machine, path, bytes);
 
     const suffix = await previewHostSuffix(machine);
-    const res = await machine.run(deployScript(place, token, suffix), { deadlineMs: 180_000 });
+    const res = await machine.run(deployScript(place, token, suffix), { deadlineMs: 180_000, ...(opts.onLine !== undefined ? { onLine: opts.onLine } : {}) });
     if (res.exitCode !== 0 || !res.stdout.includes("DAEMON_UP")) {
       throw new Error(`daemon deploy failed: ${res.stdout.slice(-300)} ${res.stderr.slice(-200)}`);
     }

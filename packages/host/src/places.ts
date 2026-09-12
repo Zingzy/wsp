@@ -19,12 +19,17 @@ import {
   ALREADY_JOINED_LINE,
   LOOPBACK,
   PLACE_FILE_MODE,
+  PLACE_ADD_WORDS,
   PLACE_LINK_NONCE_BYTES,
   PlaceJoinReply,
+  PlaceStageEvent,
   PlaceView,
   type PlaceFile,
   authority,
+  fmtBytes,
   fmtDuration,
+  fmtSize,
+  placeDaemonPaths,
   hostKeyRefusal,
   isLoopback,
   placeLinkTranscript,
@@ -32,8 +37,9 @@ import {
   usageRefusal,
   wsUrlOf,
 } from "@wsp/protocol";
-import { checkProviderKey, keyCheckLine, type KeyCheck, type MachineBackend } from "@wsp/engine";
-import { newPlaceKeyPair, signPlaceBytes, verifyPlaceBytes, type PlaceKeyPair, type PlaceWiring } from "@wsp/runtime";
+import { SshBackend, checkProviderKey, keyCheckLine, parseSshAddress, sshDialsThisComputer, sshMachineName, type KeyCheck, type MachineBackend } from "@wsp/engine";
+import { newPlaceKeyPair, signPlaceBytes, verifyPlaceBytes, type PlaceInstaller, type PlaceKeyPair, type PlaceWiring } from "@wsp/runtime";
+import { PLACE_JOINED_LINE, WSP_READY_LINE, deployDaemon, joinedPlace } from "./doctor.js";
 import { randomBytes } from "node:crypto";
 import WebSocket from "ws";
 import type { CliIO } from "./cli.js";
@@ -53,7 +59,7 @@ import {
   type ServiceAddress,
   type ServiceRunner,
 } from "./service.js";
-import { dialHost, type DialOpts, type HostClient } from "./verbs.js";
+import { dialHost, sshAsked, type DialOpts, type HostClient } from "./verbs.js";
 import { writeEnvFile, type Keys } from "./env-keys.js";
 
 /** What this computer is called when the person named no name: its own name lowercased, which is what they would
@@ -94,6 +100,13 @@ export function hostPlaceKey(statePath: string): PlaceKeyPair {
 export function placeWiring(statePath: string, keys: Keys, env: ProviderEnv): PlaceWiring {
   return {
     hostKey: hostPlaceKey(statePath),
+    // Read at each call: a host is bound while it runs and linked to a relay while it runs, so the addresses a
+    // computer joining now is given are the ones that answer now.
+    addresses: () => {
+      const lock = servingHost(statePath);
+      return joinUrls(lock?.address ?? LOOPBACK, lock?.port ?? 0, publicHostname(statePath)).map(at => at.url);
+    },
+    install: placeInstaller(),
     provider: () => {
       const module = providerModule({ keys, env });
       // A row that names no way of being added is no place to show: a host set up to fork nowhere has none.
@@ -114,14 +127,28 @@ export function placeWiring(statePath: string, keys: Keys, env: ProviderEnv): Pl
  * there is a typo in the address as often as it is a network. */
 const JOIN_MS = 20_000;
 
+/** One address a computer joining this host can dial it at, and why it is on the list. */
+export interface JoinUrl {
+  url: string;
+  note?: string;
+}
+
+/** Every address a joining computer can dial this host at, in the order a place file keeps them and a link tries
+ * them: the ones on its own network first, the tunnel hostname after. One reading, so the line a person types and
+ * the list the join reply hands a computer cannot name different addresses. */
+export function joinUrls(address: string, port: number, publicAt: string | undefined): JoinUrl[] {
+  return [
+    ...reachAddresses(address).map(at => ({ url: `http://${authority(at, port)}` })),
+    ...(publicAt === undefined ? [] : [{ url: relayUrlOf(publicAt), note: "when the host is linked to your relay" }]),
+  ];
+}
+
 /** The whole of what wsp add prints with no argument: the line to type on the computer being joined, at every
  * address this host answers on, and the other two roads in one line each. */
-export function addLines(code: string, expiresAt: number, now: number, addresses: readonly string[], port: number, publicAt: string | undefined): string[] {
-  const join = (url: string, note?: string): string => `  wsp join ${url} --code ${code}${note === undefined ? "" : `      (${note})`}`;
+export function addLines(code: string, expiresAt: number, now: number, urls: readonly JoinUrl[]): string[] {
   return [
     "wsp add: a computer you own joins by dialing this host. On that computer, with wsp installed:",
-    ...addresses.map(at => join(`http://${authority(at, port)}`)),
-    ...(publicAt === undefined ? [] : [join(relayUrlOf(publicAt), "when the host is linked to your relay")]),
+    ...urls.map(at => `  wsp join ${at.url} --code ${code}${at.note === undefined ? "" : `      (${at.note})`}`),
     `The code is spent by the first join and stops working in ${fmtDuration(Math.max(0, expiresAt - now))}. The computer shows in wsp places within a minute of joining.`,
     "Over ssh instead: wsp add user@host --name <name> installs the agent there and joins it for you.",
     `A provider instead: ${addableProviders().map(id => `wsp add ${id}`).join(", ")}.`,
@@ -142,15 +169,16 @@ export function addRefusal(word: string): string {
   return `wsp add ${word}: that is neither a provider this wsp can be set up for (${addableProviders().join(", ")}) nor an address over ssh (user@host). wsp add with no argument prints the line to type on a computer you are sitting at.`;
 }
 
-/** The one line wsp add user@host answers with until the installer that puts the agent on a box over ssh lands: the
- * road exists and the printed join line is the one that works today. */
-export const sshAddNotYetLine = (address: string): string =>
-  `wsp add ${address}: putting the agent on a computer over ssh is not wired yet. Run wsp add with no argument for the line to type on that computer, or wsp new --ssh ${address} for a workspace on it without joining it.`;
+/** The one line `--name`, `--ssh-port` and `--ssh-key` get when no address was typed beside them. All three belong
+ * to the road that installs the agent on a computer over ssh; the printed join line is typed on that computer,
+ * where `wsp join --name` is what names it. */
+export const ADD_FLAGS_REFUSAL =
+  "wsp add: --name, --ssh-port and --ssh-key belong to wsp add user@host, which installs the agent on a computer over ssh. On the computer you are sitting at, wsp join <address> --code <code> --name <name> names it.";
 
-/** The one line `--name` gets on `wsp add`. The flag is the ssh road's, which names the computer it installs the
- * agent on; the printed line is typed on that computer, where `wsp join --name` is what names it. */
-export const ADD_NAME_REFUSAL =
-  "wsp add: --name belongs to the road that installs the agent on a computer over ssh, which is not wired yet. On the computer you are sitting at, wsp join <address> --code <code> --name <name> names it.";
+/** The refusal an install gets when nothing but this computer's own loopback could be dialled back: the box would
+ * have no address to reach this host at, so the agent would be installed and never link. */
+export const ADD_LOOPBACK_REFUSAL =
+  "wsp add: this host answers on its own loopback alone, which a computer somewhere else cannot dial. Start it with --listen 0.0.0.0, or link it to your relay, and run this again.";
 
 /** What a remove prints: what came off that computer, what the workspaces on it said as they went, and the note for
  * a place that was not connected to sweep. */
@@ -179,6 +207,84 @@ export const NOT_A_PLACE_LINE = "this computer is not a place in any wsp; wsp jo
 
 /** The refusal wsp leave gets on the same computer. */
 export const NOTHING_TO_LEAVE_LINE = "this computer is not a place in any wsp, so there is nothing to leave";
+
+/** What a person may name beside the address on wsp add: the name the computer is known by here, and the port and
+ * key their own ssh would have been told. */
+export interface AddFlags {
+  name?: string;
+  sshPort?: number;
+  keyPath?: string;
+}
+
+/** The words a person gave beside the address, read by the one rule every ssh road on this command line reads
+ * them by: a port that is a number and a key that is a path on this computer. */
+export function addFlags(name?: string, port?: string, keyPath?: string): AddFlags {
+  const asked = sshAsked(name, port, keyPath);
+  return {
+    ...(asked.name !== undefined ? { name: asked.name } : {}),
+    ...(asked.port !== undefined ? { sshPort: asked.port } : {}),
+    ...(asked.keyPath !== undefined ? { keyPath: asked.keyPath } : {}),
+  };
+}
+
+/** How the agent is put on a computer over ssh, for the host that wires the runtime: the ssh road the workspace
+ * kind already had, reused as one function. The dial and the login read are one call (`adopt`), the bundle, the
+ * node and the join code go over the same connection, and the join itself is run on that computer by the deploy,
+ * so wsp never writes a unit of its own there.
+ *
+ * Nothing waits here for the link: the computer dials this host on its own, and the place door is what knows when
+ * it has. */
+export function placeInstaller(deps: { backend?: SshBackend; daemonDir?: string; cliDir?: string } = {}): PlaceInstaller {
+  return async (req, stage) => {
+    const reach = parseSshAddress(req.address, {
+      ...(req.sshPort !== undefined ? { port: req.sshPort } : {}),
+      ...(req.keyPath !== undefined ? { keyPath: req.keyPath } : {}),
+    });
+    // A computer somewhere else cannot dial this computer's own loopback, so an install that would leave the agent
+    // there with no address to come back on is refused before anything lands on it.
+    const hostUrls = sshDialsThisComputer(reach, [hostname()]) ? req.hostUrls : req.hostUrls.filter(at => !isLoopback(new URL(at).hostname));
+    if (hostUrls.length === 0) throw new Error(ADD_LOOPBACK_REFUSAL);
+    stage("connect", "running");
+    const backend = deps.backend ?? new SshBackend();
+    const { machine, login, hostKey } = await backend.adopt(reach);
+    const name = req.name?.trim() !== undefined && req.name.trim() !== "" ? req.name.trim() : sshMachineName(reach);
+    const at = placeDaemonPaths(login.HOME);
+    const place = joinedPlace({ home: login.HOME, path: login.PATH }, { hostUrls, codeFile: `${at.wsp}/join-code`, name });
+    stage("connect", "done", await osSaid(machine));
+    stage("node", "running");
+    await deployDaemon(machine, {
+      place,
+      // The code goes over the byte road and never into a command: what sits in a command line sits in a world
+      // readable /proc/<pid>/cmdline for as long as it runs, and this one buys a place in somebody's wsp.
+      land: [{ path: place.join!.codeFile, bytes: new TextEncoder().encode(`${req.code}\n`) }],
+      onLine: line => {
+        const node = /NODE_VERSION (v\S+)/.exec(line)?.[1];
+        if (node !== undefined) {
+          stage("node", "done", node);
+          stage("wsp", "running");
+        } else if (line.includes(WSP_READY_LINE)) {
+          stage("wsp", "done");
+          stage("service", "running");
+        } else if (line.includes(PLACE_JOINED_LINE)) {
+          stage("service", "done");
+        }
+      },
+      ...(deps.daemonDir !== undefined ? { daemonDir: deps.daemonDir } : {}),
+      ...(deps.cliDir !== undefined ? { cliDir: deps.cliDir } : {}),
+    });
+    return { name, ...(hostKey !== undefined ? { hostKey } : {}) };
+  };
+}
+
+/** What the computer says it is, for the line beside the step that reached it; nothing when it will not say, which
+ * is a fact about that computer and not a reason to stop. */
+async function osSaid(machine: { facts(): Promise<{ os: string }> }): Promise<string | undefined> {
+  try {
+    return (await machine.facts()).os;
+  } catch {
+    return undefined;
+  }
+}
 
 interface PlaceDeps {
   dial(statePath: string, opts: DialOpts): Promise<HostClient>;
@@ -212,19 +318,17 @@ function aimHere(word: string, opts: PlaceOpts): HostAim {
   return aim;
 }
 
-export async function addCommand(io: CliIO, opts: PlaceOpts, args: readonly string[], flags: { name?: string } = {}, deps: PlaceDeps = systemDeps): Promise<number> {
+export async function addCommand(io: CliIO, opts: PlaceOpts, args: readonly string[], flags: AddFlags = {}, deps: PlaceDeps = systemDeps): Promise<number> {
   const [word] = args;
-  if (args.length > 1) throw usageRefusal("usage: wsp add\n       wsp add <provider>\n       wsp add user@host [--name <name>]");
+  if (args.length > 1) throw usageRefusal("usage: wsp add\n       wsp add <provider>\n       wsp add user@host [--name <name>] [--ssh-port <port>] [--ssh-key <path>]");
   const aim = aimHere("add", opts);
-  if (flags.name !== undefined) {
-    io.error(ADD_NAME_REFUSAL);
+  const named = flags.name !== undefined || flags.sshPort !== undefined || flags.keyPath !== undefined;
+  if (word !== undefined && word.includes("@")) return addOverSsh(io, opts, aim, word, flags, deps);
+  if (named) {
+    io.error(ADD_FLAGS_REFUSAL);
     return 1;
   }
   if (word !== undefined && addableProviders().includes(word)) return addProvider(io, opts, word, deps);
-  if (word !== undefined && word.includes("@")) {
-    io.error(sshAddNotYetLine(word));
-    return 1;
-  }
   if (word !== undefined) {
     io.error(addRefusal(word));
     return 1;
@@ -237,11 +341,65 @@ export async function addCommand(io: CliIO, opts: PlaceOpts, args: readonly stri
     const publicAt = publicHostname(opts.statePath);
     // A host on loopback alone with no relay could not be dialled by anything, so the code would open nothing.
     if (isLoopback(address) && publicAt === undefined) io.error(pairOnLoopbackLine(address));
-    for (const line of addLines(code, expiresAt, deps.now(), reachAddresses(address), lock?.port ?? 0, publicAt)) io.log(line);
+    for (const line of addLines(code, expiresAt, deps.now(), joinUrls(address, lock?.port ?? 0, publicAt))) io.log(line);
     return 0;
   } finally {
     client.close();
   }
+}
+
+/** One typed address: the host logs in over ssh, installs the agent and waits for that computer to dial back. The
+ * work is the host's, over the socket this line opens, so what the app does and what this prints are one road; the
+ * steps come back as events and each is printed as it lands. */
+async function addOverSsh(io: CliIO, opts: PlaceOpts, aim: HostAim, address: string, flags: AddFlags, deps: PlaceDeps): Promise<number> {
+  const client = await deps.dial(opts.statePath, { aim });
+  // Minted here rather than read off the reply: the steps come back while the install runs and the reply lands
+  // only once it is over, so a line printed as it happens has to know which stream is this one's.
+  const addId = `a_${randomBytes(6).toString("hex")}`;
+  try {
+    const off = client.onFrame(frame => {
+      const stage = PlaceStageEvent.safeParse(frame);
+      if (!stage.success || stage.data.addId !== addId) return;
+      for (const line of stageLines(stage.data)) io.log(line);
+    });
+    await client.events();
+    try {
+      const added = await client.request<{ place: PlaceView; hostKey?: string }>("places.add", {
+        addId,
+        address,
+        ...(flags.name !== undefined ? { name: flags.name } : {}),
+        ...(flags.sshPort !== undefined ? { sshPort: flags.sshPort } : {}),
+        ...(flags.keyPath !== undefined ? { keyPath: flags.keyPath } : {}),
+      });
+      for (const line of addedLines(added.place, added.hostKey)) io.log(line);
+      return 0;
+    } finally {
+      off();
+    }
+  } finally {
+    client.close();
+  }
+}
+
+/** One step of an install as a terminal prints it: the step's own words, a tick where it is done and what the
+ * computer answered beside it. */
+export function stageLines(event: PlaceStageEvent): string[] {
+  const mark = event.state === "done" ? "·" : event.state === "failed" ? "x" : " ";
+  if (event.state === "running") return [`  ${mark} ${PLACE_ADD_WORDS[event.step]}`];
+  return [`  ${mark} ${PLACE_ADD_WORDS[event.step]}${event.note === undefined ? "" : `: ${event.note}`}`];
+}
+
+/** What an install prints once the computer is in: what it is, the key its ssh answered with so a person can check
+ * it against the computer in front of them, and what it can do. */
+export function addedLines(place: PlaceView, hostKey: string | undefined): string[] {
+  return [
+    `${place.name} joined this wsp${place.shape === undefined ? "" : ` · ${fmtSize(place.shape, "cores")}`}${place.diskFreeBytes === undefined ? "" : ` · ${fmtBytes(place.diskFreeBytes)} free`}`,
+    ...(hostKey === undefined ? [] : [`its ssh key      ${hostKey}`]),
+    place.docker === true
+      ? "docker: yes · it can hold copies of your image"
+      : "docker: no · it runs your agents as one workspace; install Docker there to hold copies of your image",
+    `wsp remove ${place.name} takes it back out and sweeps wsp off it.`,
+  ];
 }
 
 /** A provider as a place: the words name it, this computer is set up for it, and a provider that is opened by a key
@@ -301,6 +459,9 @@ export async function removeCommand(io: CliIO, opts: PlaceOpts, args: readonly s
   }
 }
 
+/** The two lines wsp join answers to, in one place, since both its refusals print them. */
+const JOIN_USAGE = "usage: wsp join <address>... --code <code> [--name <name>]\n       wsp join --serve";
+
 export interface JoinFlags {
   code?: string;
   codeFile?: string;
@@ -337,7 +498,7 @@ const joinDeps = (): JoinDeps => ({
 function joinCode(flags: JoinFlags): string {
   if (flags.code !== undefined && flags.codeFile !== undefined) throw usageRefusal("wsp join takes --code or --code-file, not both");
   if (flags.code !== undefined) return flags.code.trim();
-  if (flags.codeFile === undefined) throw usageRefusal("usage: wsp join <address> --code <code> [--name <name>]\n       wsp join --serve");
+  if (flags.codeFile === undefined) throw usageRefusal(JOIN_USAGE);
   const path = resolve(flags.codeFile);
   const code = readFileSync(path, "utf8").trim();
   rmSync(path, { force: true });
@@ -345,14 +506,47 @@ function joinCode(flags: JoinFlags): string {
   return code;
 }
 
+/** Every address in turn until one answers: a host on a network answers on several, and the one a person typed or
+ * an installer picked may be the one this computer cannot route to. An address that refuses the dial or says
+ * nothing is skipped; a host that answers with a refusal ends it, since the code is spent or was never this
+ * host's and the next address is the same host. */
+async function handshakeAt(io: CliIO, urls: readonly string[], code: string, name: string, deps: JoinDeps): Promise<Joined> {
+  let last: Error | undefined;
+  for (const url of urls) {
+    try {
+      return await handshake(io, url, code, name, deps);
+    } catch (e) {
+      if (e instanceof HostRefusal) throw e;
+      last = e instanceof Error ? e : new Error(String(e));
+      // Said as it happens rather than kept: a person watching a join wants to read which address went nowhere.
+      if (urls.length > 1) io.error(last.message);
+    }
+  }
+  throw last ?? usageRefusal("wsp join needs an address to dial");
+}
+
+/** A refusal the host itself sent back, as against an address that answered nothing: every address of one host
+ * would say the same, so the loop above stops at the first. */
+class HostRefusal extends Error {}
+
+/** What one join answers with: the place this computer became, the key it keeps and every address its host says it
+ * answers on, the one that answered first. */
+interface Joined {
+  placeId: string;
+  hostPublicKey: string;
+  privateKeyPem: string;
+  hostUrls: string[];
+  dialed: string;
+}
+
 /** One dial that joins this computer to a wsp: the key is made here, the host's own key is trusted on this first use
  * because the code proved the person meant it, and nothing is written until the host has proved that key back. */
-async function handshake(io: CliIO, url: string, code: string, name: string, deps: JoinDeps): Promise<{ placeId: string; hostPublicKey: string; privateKeyPem: string }> {
+async function handshake(io: CliIO, url: string, code: string, name: string, deps: JoinDeps): Promise<Joined> {
   const pair = newPlaceKeyPair();
   const nonce = randomBytes(PLACE_LINK_NONCE_BYTES).toString("base64");
   const report = { ...placeReport({ name, home: deps.home }), dialed: url };
   const ws = deps.dial(url);
-  let answered: { placeId: string; hostPublicKey: string } | undefined;
+  let answered: { placeId: string; hostPublicKey: string; hostUrls: string[] } | undefined;
   try {
     return await new Promise((done, fail) => {
       const deadline = setTimeout(() => fail(new Error(`the host at ${url} did not answer in ${Math.round(JOIN_MS / 1000)}s`)), JOIN_MS);
@@ -372,7 +566,8 @@ async function handshake(io: CliIO, url: string, code: string, name: string, dep
           return;
         }
         if (frame["ok"] !== true) {
-          end(new Error(String(frame["error"] ?? `${url} refused this join`)));
+          // The host itself said no, so no other address of its is going to say anything else.
+          end(new HostRefusal(String(frame["error"] ?? `${url} refused this join`)));
           return;
         }
         if (frame["id"] === 1) {
@@ -381,13 +576,15 @@ async function handshake(io: CliIO, url: string, code: string, name: string, dep
             end(new Error(`${url} answered the join with something this computer cannot read: ${reply.error.message}`));
             return;
           }
-          const { placeId, hostPublicKey, nonce: hostNonce, signature } = reply.data;
+          const { placeId, hostPublicKey, nonce: hostNonce, signature, hostUrls } = reply.data;
           // Nothing of this computer's is written or sent past here until the host has proved the key it sent.
           if (!verifyPlaceBytes(hostPublicKey, placeLinkTranscript("host", placeId, nonce, hostNonce), signature)) {
             end(new Error(hostKeyRefusal(url)));
             return;
           }
-          answered = { placeId, hostPublicKey };
+          // The address that was typed first, then every other one this host says it answers on: a laptop that
+          // joined over the network keeps dialling when the host moves to its tunnel hostname and back.
+          answered = { placeId, hostPublicKey, hostUrls: [url, ...(hostUrls ?? []).filter(at => at !== url)] };
           if (frame["notice"] !== undefined) io.error(String(frame["notice"]));
           ws.send(
             JSON.stringify({
@@ -401,7 +598,7 @@ async function handshake(io: CliIO, url: string, code: string, name: string, dep
         }
         if (frame["id"] === 2 && answered !== undefined) {
           clearTimeout(deadline);
-          done({ ...answered, privateKeyPem: pair.privateKeyPem });
+          done({ ...answered, privateKeyPem: pair.privateKeyPem, dialed: url });
         }
       });
     });
@@ -430,15 +627,17 @@ export async function joinCommand(io: CliIO, args: readonly string[], flags: Joi
     await new Promise<void>(() => {});
     return 0;
   }
-  const [address] = args;
-  if (address === undefined || args.length !== 1) throw usageRefusal("usage: wsp join <address> --code <code> [--name <name>]\n       wsp join --serve");
+  if (args.length === 0) throw usageRefusal(JOIN_USAGE);
   if (readPlaceFile(file) !== undefined) {
     io.error(ALREADY_JOINED_LINE);
     return 1;
   }
   const code = joinCode(flags);
   const name = flags.name?.trim() !== undefined && flags.name.trim() !== "" ? flags.name.trim() : placeNameHere();
-  const joined = await handshake(io, address, code, name, deps);
+  // More than one address is one host on more than one network: the first that answers is the one this computer
+  // can reach, and the rest ride in the place file for the days it moves.
+  const joined = await handshakeAt(io, args, code, name, deps);
+  const address = joined.dialed;
   const key = placeKeyPath(home);
   mkdirSync(dirname(key), { recursive: true, mode: 0o700 });
   writeFileSync(key, joined.privateKeyPem, { mode: PLACE_FILE_MODE });
@@ -446,7 +645,7 @@ export async function joinCommand(io: CliIO, args: readonly string[], flags: Joi
   const placeFile: PlaceFile = {
     placeId: joined.placeId,
     name,
-    hostUrls: [address],
+    hostUrls: joined.hostUrls,
     hostPublicKey: joined.hostPublicKey,
     keyPath: key,
     joinedAt: new Date(deps.now()).toISOString(),

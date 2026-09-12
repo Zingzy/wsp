@@ -7,25 +7,25 @@
 // side too, where the places list reads this computer's own row.
 
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statfsSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statfsSync, writeFileSync } from "node:fs";
 import { homedir, arch as osArch, platform, release, type as osType, userInfo } from "node:os";
 import type { PlaceSelfReport } from "@wsp/daemon";
 import { PLACE_FILE_MODE, parsePlaceFile, placeFileText, type PlaceFile } from "@wsp/protocol";
 import { LOGIN_READ, SSH_STORE_VARS, isPlainPath, localShape, plainPath, readValues } from "@wsp/engine";
 import { DAEMON_VERSION, placeDaemonPaths, workFolderIn } from "@wsp/protocol";
 import { dirname } from "node:path";
-import { daemonOwnedPaths, sshDaemonPlace } from "./doctor.js";
+import { daemonOwnedPaths, profileSourceLine, sshDaemonPlace, type DaemonPlace } from "./doctor.js";
 import { mcpServerCommand, onPath, runningWsp, type RunningWsp } from "./mcp-install.js";
 import { serviceManagerFor, systemRunner, type ServiceAddress, type ServiceManager, type ServiceRunner } from "./service.js";
 
 /** Where a place keeps the file naming the wsp it belongs to, and the private key it proves itself with. Both sit
  * in wsp's own folder under the person's home, beside the daemon's own files, so a leave takes one folder's worth. */
-export const placeFilePath = (home: string): string => `${placeDaemonPaths(home).wsp}/place.json`;
-export const placeKeyPath = (home: string): string => `${placeDaemonPaths(home).wsp}/place-key.pem`;
+export const placeFilePath = (home: string): string => placeDaemonPaths(home).placeFile;
+export const placeKeyPath = (home: string): string => placeDaemonPaths(home).placeKey;
 
 /** Where the agent's output goes, since nobody is watching a terminal: wsp's own folder under the person's home,
  * beside everything else the agent keeps, so the sweep takes it with the rest. */
-export const placeLogPath = (home: string): string => `${placeDaemonPaths(home).wsp}/place.log`;
+export const placeLogPath = (home: string): string => placeDaemonPaths(home).placeLog;
 
 /** The place file as it stands, or nothing when this computer is no place. The shape, the parse and the mode are
  * the protocol's; this is the read on the host's side of the wire.
@@ -199,11 +199,45 @@ export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSwe
     `${at.binDir}/xdg-open`,
   ];
   for (const path of owned) {
-    if (!existsSync(path)) continue;
+    // lstat, not exists: the browser name is a symlink to the shim beside it, and once the shim has gone the link
+    // is dangling, which every following-the-link read calls absent while the person is still left holding it.
+    if (!there(path)) continue;
     rmSync(path, { recursive: true, force: true });
     removed.push(path);
   }
+  const said = unsourced(sshDaemonPlace({ home, path: "" }));
+  if (said !== undefined) removed.push(said);
   return { removed, kept: [placeKeptLine(workFolderIn(home))] };
+}
+
+/** Whether a path is there at all, link or file. */
+function there(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Takes wsp's one line back out of the person's own login file, which would otherwise print an error at every
+ * login for a file that is gone. Their file, so it is opened only when wsp's own line is in it and written back
+ * through the same path rather than moved over: a .profile symlinked into a dotfiles checkout stays a symlink.
+ * Answers what it says it took, or nothing when the file never held it. */
+function unsourced(place: DaemonPlace): string | undefined {
+  const file = place.profileSource;
+  if (file === undefined || !there(file)) return undefined;
+  const line = profileSourceLine(place.profileFile);
+  let held: string;
+  try {
+    held = readFileSync(file, "utf8");
+  } catch {
+    return undefined;
+  }
+  const kept = held.split("\n").filter(row => row.trim() !== line);
+  if (kept.length === held.split("\n").length) return undefined;
+  writeFileSync(file, kept.join("\n"));
+  return `${line} (out of ${file})`;
 }
 
 /** Asks this computer's manager to stop the agent, once the caller has nothing left to say: on the host's own road
