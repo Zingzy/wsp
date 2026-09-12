@@ -1035,6 +1035,10 @@ export const SessionDeltaEvent = z.object({
   toolName: z.string().optional(),
   toolUseId: z.string().optional(),
   isError: z.boolean().optional(),
+  /** The tool call of this turn that launched the agent this line came from; absent on every line the thread's own
+   * agent wrote. A harness runs its subagents on the session that spawned them, so their lines arrive among the
+   * parent's and this is the only thing that tells them apart. */
+  parentToolUseId: z.string().optional(),
   /** The agent's tool shell folder after this tool_use, present only when the call moved it (a cd, or a file written
    * in a folder beside the one followed so far); the panes follow it while the harness folder stays put. */
   cwd: z.string().optional(),
@@ -1132,8 +1136,10 @@ export type SessionNotifyEvent = z.infer<typeof SessionNotifyEvent>;
 
 /** What picking one option on a permission prompt does to the tool call in front of it: run it, refuse it, or run it
  * and leave the rest of the turn in another access mode, which is how a harness offers "and stop asking about
- * edits". The runtime hands the option's id back to the adapter, which turns it into whatever its CLI takes. */
-export const PermissionEffect = z.enum(["allow", "deny", "mode"]);
+ * edits". answer is none of the three: the call in front of it only asks the person something, and the pick is what
+ * it answers with. The runtime hands the option's id back to the adapter, which turns it into whatever its CLI
+ * takes. */
+export const PermissionEffect = z.enum(["allow", "deny", "mode", "answer"]);
 export type PermissionEffect = z.infer<typeof PermissionEffect>;
 
 export const PermissionOption = z.object({
@@ -1163,6 +1169,9 @@ export const SessionPermissionEvent = z.object({
   /** The tool_use this prompt is about, so the row sits with the call it belongs to; absent where the harness
    * named none. */
   toolUseId: z.string().optional(),
+  /** The tool call that launched the agent this prompt came from; absent on every prompt the thread's own agent
+   * raised. The row sits inside that agent's own fold and says which of them is asking. */
+  parentToolUseId: z.string().optional(),
   /** The tool's input as the harness sent it, JSON, the same text a tool_use delta carries. */
   input: z.string(),
   /** The harness's own one phrase for the call (a file name, a command); absent where it named none. */

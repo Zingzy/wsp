@@ -240,6 +240,15 @@ function noOutputError(result: TurnResult, stderrTail: readonly string[]): strin
   return stderrTail.length === 0 ? head : `${head}: ${stderrTail.join("\n")}`;
 }
 
+/** The call that launched the subagent this line announces, by the CLI's own handle for that subagent. The CLI names
+ * a subagent by that handle on the prompts its run raises, and names the call only here, so a turn keeps the pair. */
+function subagentLaunch(event: Record<string, unknown>): { agentId: string; toolUseId: string } | undefined {
+  if (str(event.type) !== "system" || str(event.subtype) !== "task_started") return undefined;
+  const agentId = str(event.task_id);
+  const toolUseId = str(event.tool_use_id);
+  return agentId === undefined || toolUseId === undefined ? undefined : { agentId, toolUseId };
+}
+
 /** The CLI's own count of its live background tasks (commands and subagents the agent did not wait for), sent whole
  * each time the set changes; a CLI from before the signal never sends it, and its turns are never flagged. */
 function backgroundTasksOf(event: Record<string, unknown>): number | undefined {
@@ -256,6 +265,9 @@ function endedEarly(result: TurnResult, backgroundTasks: number): TurnResult {
 
 function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: string, refusal: { road?: string; cause?: TurnRefusal } | undefined): AdapterEvent[] {
   const sessionId = str(event.session_id) ?? fallbackSessionId;
+  // A subagent's lines ride the parent's stream and carry the call that launched it; the parent's own carry null.
+  const parent = str(event.parent_tool_use_id);
+  const from = parent === undefined ? {} : { parentToolUseId: parent };
   switch (str(event.type)) {
     case "system": {
       if (str(event.subtype) !== "init") return [];
@@ -280,7 +292,7 @@ function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: strin
         if (block === undefined) continue;
         switch (str(block.type)) {
           case "text":
-            deltas.push({ type: "turn.delta", sessionId, kind: "text", text: str(block.text) ?? "" });
+            deltas.push({ type: "turn.delta", sessionId, kind: "text", text: str(block.text) ?? "", ...from });
             break;
           case "thinking":
             deltas.push({
@@ -288,6 +300,7 @@ function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: strin
               sessionId,
               kind: "thinking",
               text: str(block.thinking) ?? "",
+              ...from,
             });
             break;
           case "tool_use":
@@ -298,6 +311,7 @@ function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: strin
               text: JSON.stringify(block.input ?? null),
               toolName: str(block.name),
               toolUseId: str(block.id),
+              ...from,
             });
             break;
           default:
@@ -320,6 +334,7 @@ function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: strin
           text: flattenContent(block.content),
           toolUseId: str(block.tool_use_id),
           isError: block.is_error === true,
+          ...from,
         });
       }
       return deltas;
@@ -371,6 +386,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
      * answers every one, and one still open when the channel shuts is settled rather than left waiting. */
     const asked = new Map<string, (outcome: AccessOutcome) => void>();
     let askedSeq = 0;
+    /** The call each running subagent was launched by, by the CLI's handle for the subagent. */
+    const launchedBy = new Map<string, string>();
     /** Set once this turn is moved to the mode that asks nobody: the CLI takes that one only at launch, so from here
      * every prompt it raises is allowed by this host and none of them reaches a person. */
     let skipsPrompts = false;
@@ -402,14 +419,17 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           const control = controlLine(event);
           if (control !== undefined) {
             switch (control.kind) {
-              case "ask":
+              case "ask": {
                 if (skipsPrompts) {
                   void stream.write(controlAllowLine(control.ask));
                   break;
                 }
-                pending.set(control.ask.askId, control.ask);
-                onEvent({ type: "permission.ask", sessionId: claudeSessionId, ask: control.ask });
+                const parent = control.agentId === undefined ? undefined : launchedBy.get(control.agentId);
+                const ask = parent === undefined ? control.ask : { ...control.ask, parentToolUseId: parent };
+                pending.set(ask.askId, ask);
+                onEvent({ type: "permission.ask", sessionId: claudeSessionId, ask });
                 break;
+              }
               case "cancel":
                 // The CLI withdrew its own question (its turn was interrupted, or another client answered it).
                 if (pending.has(control.requestId)) closeAsk(control.requestId, "cancelled");
@@ -426,6 +446,11 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
                 break;
               }
             }
+            continue;
+          }
+          const launch = subagentLaunch(event);
+          if (launch !== undefined) {
+            launchedBy.set(launch.agentId, launch.toolUseId);
             continue;
           }
           const tasks = backgroundTasksOf(event);

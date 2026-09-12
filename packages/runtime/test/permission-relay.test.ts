@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { PERMISSION_ALLOW, PERMISSION_DENY, PERMISSION_DENIED_LINE, askingLine, THIS_COMPUTER, threadWordOf, foldThreads, type PermissionAsk, type PermissionOutcome, type SessionEvent } from "@wsp/protocol";
+import { PERMISSION_ALLOW, PERMISSION_DENY, PERMISSION_DENIED_LINE, QUESTION_TOOL, pickedOptionId, questionOptions, askingLine, THIS_COMPUTER, threadWordOf, foldThreads, type PermissionAsk, type PermissionOutcome, type SessionEvent } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type LocalWiring, type Runtime, type SessionHandle } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -178,6 +178,36 @@ describe("a permission prompt relayed into the chat", () => {
     expect(await rt.sessions.answer(handle.id, { askId: "ask_1", optionId: PERMISSION_DENY })).toEqual({ outcome: "gone" });
     expect(turn.answers).toHaveLength(1);
     expect(closes(await history(workspaceId))).toHaveLength(1);
+    turn.reply();
+    await handle.finished;
+  });
+
+  it("carries a subagent's prompt and a subagent's lines to the chat with the call that launched them", async () => {
+    const { handle, turn, workspaceId } = await started();
+    turn.raise({ askId: "ask_child", parentToolUseId: "toolu_launch" });
+    await vi.waitFor(async () => expect(prompts(await history(workspaceId))).toHaveLength(1));
+    const row = prompts(await history(workspaceId))[0]!;
+    expect(row).toMatchObject({ askId: "ask_child", parentToolUseId: "toolu_launch" });
+    turn.reply();
+    await handle.finished;
+  });
+
+  it("a question's own choices reach the chat as the prompt's options, and a pick naming several is one answer", async () => {
+    const { handle, turn, workspaceId } = await started();
+    const input = JSON.stringify({
+      questions: [{ question: "Which checks?", header: "Checks", options: [{ label: "Types" }, { label: "Lint" }], multiSelect: true }],
+    });
+    const options = questionOptions(QUESTION_TOOL, input);
+    turn.raise({ askId: "ask_q", toolName: QUESTION_TOOL, input, options });
+    await vi.waitFor(async () => expect(prompts(await history(workspaceId))).toHaveLength(1));
+    const row = prompts(await history(workspaceId))[0]!;
+    // The words for a mode option are lent by the harness table; a question's own labels are lent nothing.
+    expect(row.type === "session.permission" ? row.options : []).toEqual(options);
+
+    const both = pickedOptionId(options.map(o => o.id));
+    expect(await rt.sessions.answer(handle.id, { askId: "ask_q", optionId: both })).toEqual({ outcome: "answered" });
+    // Several ticks are one pick, and it reaches the harness whole rather than being refused as no option.
+    expect(turn.answers[0]).toMatchObject({ optionId: both, outcome: "allowed" });
     turn.reply();
     await handle.finished;
   });

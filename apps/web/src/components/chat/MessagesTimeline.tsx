@@ -58,6 +58,7 @@ import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ChatImageRow } from "./ChatImages";
 import { useSentImages } from "./composerImages";
 import { PermissionPromptRow } from "./PermissionPromptRow";
+import { SubagentFoldRow } from "./SubagentFoldRow";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { TimelineRuleLine } from "./TimelineRuleLine";
 import { ChangedFilesCard } from "./ChangedFilesTree";
@@ -945,6 +946,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       ) : null}
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
       {row.kind === "permission" ? <PermissionTimelineRow row={row} /> : null}
+      {row.kind === "subagent" ? <SubagentTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
       {row.kind === "thinking" ? <ThinkingTimelineRow /> : null}
     </div>
@@ -1119,6 +1121,11 @@ function ProposedPlanTimelineRow({
 function PermissionTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "permission" }> }) {
   const ctx = use(TimelineRowCtx);
   return <PermissionPromptRow permission={row.permission} onAnswer={ctx.onAnswerPermission} />;
+}
+
+function SubagentTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "subagent" }> }) {
+  const ctx = use(TimelineRowCtx);
+  return <SubagentFoldRow onAnswer={ctx.onAnswerPermission} subagent={row.subagent} />;
 }
 
 function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "working" }> }) {

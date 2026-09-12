@@ -305,6 +305,9 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
     case "permission":
       return a.permission === (b as typeof a).permission;
 
+    case "subagent":
+      return a.subagent === (b as typeof a).subagent;
+
     case "work": {
       const bw = b as typeof a;
       return (
