@@ -22,6 +22,94 @@ export const SETTINGS_WORDS = {
   version: "Version",
 } as const;
 
+/** What the Where agents run section says beyond the words the wire already carries in PLACES_WORDS: the row's
+ * detail, its menu and the Remove dialog, which are this build's and are drawn nowhere else. No word is in both. */
+export const WHERE_WORDS = {
+  more: "More",
+  default: "default",
+  setDefault: "Set as default",
+  rename: "Rename",
+  remove: "Remove",
+  removing: "Removing\u2026",
+  cancel: "Cancel",
+  /** Why a row's action is held: the op that carries it is not on the wire yet. */
+  notYet: "not on this wsp yet",
+  system: "System",
+  agents: "Agents",
+  joined: "Joined",
+  answered: "Answered",
+  none: "none",
+  ago: (span: string): string => `${span} ago`,
+} as const;
+
+/** What Add a computer says beyond PLACES_WORDS.sheet: the two roads, every line the ssh road says, and the one
+ * description the sheet has that the wire's table does not, for a computer that can run copies of the image. */
+export const ADD_COMPUTER_WORDS = {
+  cancel: "Cancel",
+  app: {
+    road: "Runs the wsp app",
+    /** The words beside the esc keycap; PLACES_WORDS.sheet.escStays carries the keycap in its own string. */
+    escCloses: "closes, the code stays good",
+  },
+  ssh: {
+    road: "Linux box over ssh",
+    description: "The app logs in over ssh as your terminal would, installs wsp on the box, and the box connects to this Mac.",
+    login: "Login",
+    loginPlaceholder: "user@host",
+    port: "Port",
+    portWord: "port",
+    portPlaceholder: "22",
+    addon: "ssh",
+    note: "Your ssh agent and config are used as they stand. Nothing is asked for a key unless ssh refuses.",
+    add: "Add",
+    adds: "adds",
+    loginFirst: "type the login first",
+    /** Why Add is held on a wsp whose host cannot log in over ssh yet. */
+    noRoad: "this wsp cannot log in over ssh yet",
+    /** What to do about a login ssh would not take. There is no file picker on this road: the host reads the ssh
+     * agent and config as they stand, so the key a box wants is named where every other ssh client reads it. */
+    refusedFix: "Check the user and the address, or name a key for that host in your ssh config.",
+    running: "closing keeps it going",
+    named: "Named after its hostname. Rename it from its row.",
+  },
+  joinedWithDocker: "It can run copies of your image. Your image is built there the first time a workspace is created on it.",
+} as const;
+
+/** Connect a provider: the pick, the key and what the provider said. */
+export const CONNECT_PROVIDER_WORDS = {
+  title: "Connect a provider",
+  description: "A provider runs workspaces from your image on its computers and bills by the hour while they run. ASCII starts with a free trial.",
+  prices: "Prices are read from the provider for a 2 vCPU, 4 GB workspace. Your key stays on this Mac.",
+  cancel: "Cancel",
+  continueWord: "Continue",
+  back: "Back",
+  save: "Save",
+  saves: "saves",
+  tryAgain: "Try again",
+  pasteFirst: "paste the key first",
+  key: "API key",
+  keyTitle: (name: string): string => `Connect ${name}`,
+  keyDescription: (name: string): string => `Paste an API key from your ${name} account. It is checked with ${name} before it is saved.`,
+  where: (name: string): string => `Get one at ${name}`,
+  refused: (name: string, said: string): string => `${name} refused this key (${said}).`,
+  refusedFix: (name: string): string => `Paste one from your ${name} account, or make a new one there.`,
+  unreached: (name: string): string => `${name} could not be reached to check the key.`,
+  unreachedFix: "Check the network and try again.",
+  /** Why Save is held on a provider whose key has no road on the wire yet. */
+  noRoad: (name: string): string => `this wsp cannot save a ${name} key yet`,
+  /** The already connected state, opened again on a provider whose key this computer holds. */
+  savedWord: "saved",
+  change: "Change",
+  dots: "\u2022".repeat(12),
+  sizes: { size: "Size", memory: "Memory", rate: "Rate" },
+  connectedTitle: (name: string): string => `${name} connected`,
+  connectedDescription: (name: string): string => `Workspaces can be created on ${name}. Your image is built there the first time, about three minutes.`,
+  savedHere: "saved on this Mac \u00b7 never sent anywhere else",
+  accepted: "key accepted",
+  newWorkspace: (name: string): string => `New workspace on ${name}`,
+  close: "Close",
+} as const;
+
 /** Both halves on the about row: the shell holding the page and the host that served it, which are one release run
  * together and two run apart. A browser tab has no shell of its own, so it shows the host's alone; a shell from
  * before the bridge carried a version has one this page cannot name. */

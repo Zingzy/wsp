@@ -52,7 +52,7 @@ describe("runtime", () => {
 
     await expect(rt.workspaces.create({ golden: "snap_g", name: "odd", cpu: 8, memMb: 16384 })).rejects.toMatchObject({
       kind: "invalid",
-      message: "8x16 is not a size this provider offers; the sizes are 2x2 ($0.09/hr), 2x4 ($0.11/hr), 2x8 ($0.15/hr), 4x8 ($0.22/hr)",
+      message: "8x16 is not a size this provider offers; the sizes are 2x2 ($0.09/hr), 2x4 ($0.11/hr), 2x8 ($0.15/hr), 4x8 ($0.22/hr). Ask for one of those instead.",
     });
     expect(backend.machines).toHaveLength(1);
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["big"]);
@@ -716,7 +716,7 @@ describe("runtime session history", () => {
       expect(codex.isDefault).toBeUndefined();
       expect(codex.models).toEqual([{ value: "gpt-5-codex", label: "Codex", isDefault: true, efforts: ["high"], contextWindows: [] }]);
       // The table lends the words for values the binary only names.
-      expect(codex.permissionModes).toEqual([{ value: "read-only", label: "Read only", description: "No edits, no commands that write" }]);
+      expect(codex.permissionModes).toEqual([{ value: "read-only", label: "Read only", description: "Reads only; edits no files and runs no command that writes" }]);
       expect(probes(backend)).toHaveLength(1);
       expect(codexProbes(backend)).toHaveLength(1);
       await rt.close();
