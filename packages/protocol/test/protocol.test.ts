@@ -55,6 +55,7 @@ import {
   ProjectGolden,
   ProjectImportResult,
   ProjectPlan,
+  RUNTIME_OPS,
   RuntimeErrorResponse,
   RuntimeRequest,
   RuntimeResponse,
@@ -69,6 +70,7 @@ import {
   SnapshotLineage,
   SnapshotRollbackResult,
   SessionOrigin,
+  THREAD_OPS,
   SessionView,
   ThreadView,
   ExecEvent,
@@ -612,21 +614,26 @@ describe("runtime wire types", () => {
       { id: 13, op: "golden.get", name: "default" },
       { id: 14, op: "capabilities.get" },
       { id: 15, op: "sessions.history", workspaceId: "ws_1" },
-      { id: 16, op: "workspaces.daemonReach", workspaceId: "ws_1" },
+      { id: 16, op: "daemon.open", workspaceId: "ws_1" },
       { id: 17, op: "golden.prepare", name: "default" },
       { id: 18, op: "golden.prepare", name: "default", kind: "desktop" },
       { id: 19, op: "golden.seal", builderId: "m1" },
-      { id: 20, op: "golden.builderReach", builderId: "m1" },
+      { id: 20, op: "daemon.send", channel: "ch_1", frame: { op: "pty.write", ptyId: "p1", data: "ls\r" } },
       { id: 21, op: "sessions.interrupt", sessionId: "s1" },
       { id: 22, op: "workspaces.forget", workspaceId: "ws_1" },
       { id: 23, op: "workspaces.stopWake", workspaceId: "ws_1" },
+      { id: 24, op: "daemon.close", channel: "ch_1" },
     ];
     for (const r of reqs) expect(RuntimeRequest.parse(r)).toEqual(r);
     expect(() => RuntimeRequest.parse({ id: 21, op: "sessions.interrupt" })).toThrow(); // sessionId required
     expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.create" })).toThrow(); // golden+name required
     expect(() => RuntimeRequest.parse({ id: 1, op: "golden.prepare", name: "d", kind: "browser" })).toThrow();
     expect(() => RuntimeRequest.parse({ id: 1, op: "golden.seal" })).toThrow(); // builderId required
-    expect(() => RuntimeRequest.parse({ id: 1, op: "golden.builderReach" })).toThrow();
+    // The two roads that handed a daemon token out leave the wire with the relay: nothing outside the host dials a daemon.
+    expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.daemonReach", workspaceId: "ws_1" })).toThrow();
+    expect(() => RuntimeRequest.parse({ id: 1, op: "golden.builderReach", builderId: "m1" })).toThrow();
+    expect(RUNTIME_OPS).not.toContain("workspaces.daemonReach");
+    expect(RUNTIME_OPS).not.toContain("golden.builderReach");
     expect(RuntimeResponse.parse({ id: 4, ok: true, workspace: { id: "w" } })).toBeTruthy();
     expect(RuntimeResponse.parse({ id: 4, ok: false, error: "nope" })).toBeTruthy();
   });
@@ -642,6 +649,32 @@ describe("runtime wire types", () => {
     // A client on this computer names none, and nothing is added to what it sent.
     expect(RuntimeRequest.parse({ id: 5, op: "workspaces.list" })).toEqual({ id: 5, op: "workspaces.list" });
     expect(() => RuntimeRequest.parse({ id: 6, op: "workspaces.list", origin: "machine" })).toThrow();
+  });
+
+  it("the daemon channel ops carry a frame the host never authenticates for the page, and the panes' ops are not a thread's", () => {
+    const frame = { op: "fs.list", path: "/root", gitignore: true };
+    expect(wire.DaemonFrame.parse(frame)).toEqual(frame);
+    // The host sent the auth frame when it opened the channel; a page that could send one would pick the socket's identity.
+    expect(() => wire.DaemonFrame.parse({ op: "auth", token: "t" })).toThrow();
+    expect(() => wire.DaemonFrame.parse({ ptyId: "p1" })).toThrow();
+    expect(() => RuntimeRequest.parse({ id: 1, op: "daemon.send", channel: "ch_1", frame: { op: "auth", token: "t" } })).toThrow();
+    expect(() => RuntimeRequest.parse({ id: 1, op: "daemon.open" })).toThrow();
+    expect(() => RuntimeRequest.parse({ id: 1, op: "daemon.close" })).toThrow();
+
+    expect(wire.DaemonOpenReply.parse({ channel: "ch_1" })).toEqual({ channel: "ch_1" });
+    expect(wire.DaemonSendReply.parse({ reply: { id: 3, ok: true, ptyId: "p1" } })).toEqual({ reply: { id: 3, ok: true, ptyId: "p1" } });
+    expect(wire.DaemonSendReply.parse({ reply: { id: 3, ok: false, error: "no such pty", code: "not-found" } })).toBeTruthy();
+
+    const event = { type: "daemon.event", channel: "ch_1", event: { type: "pty.data", ptyId: "p1", data: "hi" } };
+    expect(wire.DaemonChannelEvent.parse(event)).toEqual(event);
+    // A daemon of another version may push a type this host does not know; the host carries it and the page validates it.
+    expect(wire.DaemonChannelEvent.parse({ type: "daemon.event", channel: "ch_1", event: { type: "future.thing" } })).toBeTruthy();
+    const closed = { type: "daemon.closed", channel: "ch_1", code: 4401, reason: "unauthorized" };
+    expect(wire.DaemonChannelEvent.parse(closed)).toEqual(closed);
+    expect(() => wire.DaemonChannelEvent.parse({ type: "daemon.closed", channel: "ch_1", code: "4401", reason: "x" })).toThrow();
+
+    // The panes are the person's: an agent inside a machine drives workspaces through the exec and session ops.
+    for (const op of ["daemon.open", "daemon.send", "daemon.close", "workspaces.daemonReach"]) expect(THREAD_OPS).not.toContain(op);
   });
 
   it("sessions.start carries the composer's model, effort and permission mode as the harness's own slugs", () => {

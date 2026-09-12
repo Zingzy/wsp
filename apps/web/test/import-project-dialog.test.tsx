@@ -14,6 +14,7 @@ import { useStore } from "../src/protocol/store.js";
 import { ImportProjectDialog } from "../src/sidebar/ImportProjectDialog.js";
 import { useLastFolderStore } from "../src/sidebar/lastFolderStore.js";
 import { caps } from "./caps.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 const workspace: WorkspaceView = { id: "ws_a", name: "api", machineId: "m_a", phase: "running", golden: "snap_g", createdAt: "2026-09-05T11:00:00Z" };
 
@@ -91,7 +92,7 @@ function fakeApi(plan: ProjectPlan = PLAN) {
     capabilities: vi.fn(async () => (caps())),
     startSession: vi.fn(async () => ({ id: "s1", workspaceId: "ws_a", harness: "claude", status: "running" as const })),
     portReach: vi.fn(async () => ({ url: "https://x", expiresAt: 0 })),
-    daemonReach: vi.fn(async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 })),
+    daemon: noDaemonApi,
     sessionHistory: vi.fn(async () => []),
     listSnapshots: vi.fn(async () => ({ name: "default", head: null, versions: [] })),
     snapshotStorage: async () => null,
