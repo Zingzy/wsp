@@ -263,6 +263,15 @@ describe("execDetached over a scripted guest", () => {
     await expect(execDetached(machine, BIG_SCRIPT, { deadlineMs: 1_000, pollMs: 1 })).rejects.toThrow(/a piece did not land on m9.*No space left/);
   });
 
+  it("a launch the machine answered nothing to names the handshake that never came, and never a bare exit 0", async () => {
+    // The exec landed and the guest printed neither the handshake nor a reason. Exit 0 reads as success on every
+    // other road, so the code on its own would say the run started.
+    const machine = { id: "m9", exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }) } as unknown as Machine;
+    await expect(execDetached(machine, "true", { deadlineMs: 1_000, pollMs: 1 })).rejects.toThrow(
+      "launch failed on m9: nothing came back saying WSP_LAUNCHED, the word the guest prints once the run is up; it printed nothing and exited 0",
+    );
+  });
+
   it("a launch that does not confirm fails the run before any poll", async () => {
     const machine = { id: "m9", exec: async () => ({ exitCode: 1, stdout: "", stderr: "bash: base64: not found" }) } as unknown as Machine;
     await expect(execDetached(machine, "true", { deadlineMs: 1_000, pollMs: 1 })).rejects.toThrow(/launch failed on m9.*base64: not found/);
@@ -360,7 +369,7 @@ describe("putFiles", () => {
   it("a piece that does not confirm fails before the last exec goes", async () => {
     const calls: string[] = [];
     const machine = { id: "m9", exec: async (cmd: string) => { calls.push(cmd); return { exitCode: 0, stdout: "", stderr: "" }; } } as unknown as Machine;
-    await expect(putFiles(machine, [{ path: "/tmp/wsp-run/t4.in", text: BIG_INPUT }])).rejects.toThrow(/a piece did not land on m9 \(exit 0\)/);
+    await expect(putFiles(machine, [{ path: "/tmp/wsp-run/t4.in", text: BIG_INPUT }])).rejects.toThrow(/a piece did not land on m9: nothing came back saying WSP_PIECE/);
     expect(calls).toHaveLength(1);
   });
 });

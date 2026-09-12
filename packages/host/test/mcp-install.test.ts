@@ -257,7 +257,7 @@ describe("installing the MCP server for a local agent", () => {
   it("a line that puts a flag before the word gets mcp's own usage, the way a verb's line gets its verb's", async () => {
     const flagFirst = io();
     expect(await cli(["--state", statePath, "mcp"], flagFirst)).toBe(3);
-    expect(flagFirst.errors).toEqual(["usage: wsp mcp [--host <alias>]\n       wsp mcp install --agent <id> [--agent <id>] [--host <alias>] [--json] [--remove]   (claude, codex, gemini, opencode)"]);
+    expect(flagFirst.errors).toEqual(["wsp mcp opens a line rather than being one. usage: wsp mcp [--host <alias>]\n       wsp mcp install --agent <id> [--agent <id>] [--host <alias>] [--json] [--remove]   (claude, codex, gemini, opencode)"]);
     expect(flagFirst.lines).toEqual([]);
     const verbLine = io();
     expect(await cli(["--state", statePath, "threads"], verbLine)).toBe(3);
@@ -296,7 +296,9 @@ describe("installing the MCP server for a local agent", () => {
     expect(written.mcpServers.wsp.args.slice(-3)).toEqual(["mcp", "--state", statePath]);
     const bare = { ...io(), isTTY: true };
     expect(await cli(["mcp", "install", "--state", statePath], bare)).toBe(3);
-    expect(bare.errors).toEqual(["usage: wsp mcp install --agent <id> [--agent <id>] [--host <alias>] [--json] [--remove]   (claude, codex, gemini, opencode)"]);
+    expect(bare.errors).toEqual([
+      "wsp mcp install writes the config of the agents it is given, and was given none. Name one with --agent.\n\nusage: wsp mcp install --agent <id> [--agent <id>] [--host <alias>] [--json] [--remove]   (claude, codex, gemini, opencode)",
+    ]);
     mkdirSync(join(home, ".gemini"), { recursive: true });
     writeFileSync(join(home, ".gemini", "settings.json"), '{\n  // the look\n  "theme": "dark"\n}\n');
     const commented = io();
@@ -378,7 +380,7 @@ describe("installing the MCP server for a local agent", () => {
     const none = io();
     expect(await cli(["mcp", "install", "--state", statePath], none)).toBe(3);
     expect(none.errors).toEqual([
-      "wsp mcp install: no agent of the catalog's is on this computer's PATH; name one with --agent.\nusage: wsp mcp install --agent <id> [--agent <id>] [--host <alias>] [--json] [--remove]   (claude, codex, gemini, opencode)",
+      "wsp mcp install: no agent of the catalog's is on this computer's PATH. Name one with --agent.\n\nusage: wsp mcp install --agent <id> [--agent <id>] [--host <alias>] [--json] [--remove]   (claude, codex, gemini, opencode)",
     ]);
   });
 

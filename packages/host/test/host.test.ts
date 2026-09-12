@@ -163,7 +163,7 @@ describe("wsp cli", () => {
 
     errs.length = 0;
     expect(await cli(["recipe", "--out", out, "--state", box.state, "--tick", "everything"], io)).toBe(3);
-    expect(errs.at(-1)).toBe('wsp recipe: --tick takes one of used, installed, default, not "everything"');
+    expect(errs.at(-1)).toBe('wsp recipe: --tick takes one of used, installed, default, and got "everything". Name one of those.');
     box.close();
   });
 
@@ -209,13 +209,13 @@ describe("wsp cli", () => {
 
     errs.length = 0;
     expect(await cli(["recipe", "sniff"], io)).toBe(3);
-    expect(errs.at(-1)).toBe("wsp recipe: wsp recipe takes no positional arguments; wsp recipe scan is its one subcommand");
+    expect(errs.at(-1)).toMatch(/^wsp recipe takes no positional arguments; wsp recipe scan is its one subcommand\. usage: wsp recipe /);
 
     // scan reads none of the write verb's flags, so one on its line is refused naming the verb it belongs to, with scan's own usage.
     logs.length = 0;
     errs.length = 0;
     expect(await cli(["recipe", "scan", "--state", state, "--tick", "installed", "--set", "go=on", "--out", out], io)).toBe(3);
-    expect(errs[0]).toBe("--tick belongs to wsp recipe; wsp recipe scan does not read it\n\nusage: wsp recipe scan [--project <folder>]");
+    expect(errs[0]).toBe("--tick belongs to wsp recipe; wsp recipe scan does not read it. usage: wsp recipe scan [--project <folder>]");
     expect(logs).toEqual([]);
     errs.length = 0;
     expect(await cli(["recipe", "scan", "--add", "jj"], io)).toBe(3);

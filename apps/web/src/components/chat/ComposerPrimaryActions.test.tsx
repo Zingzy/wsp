@@ -205,6 +205,16 @@ describe("ComposerPrimaryActions", () => {
     expect(renderSendButton()).not.toContain("title=");
   });
 
+  it("holds the send at the app's held weight and says why on hover, where an empty box only fades it", () => {
+    const held = renderSendButton("Connecting to wsp");
+    expect(held).toContain('title="Connecting to wsp"');
+    expect(held).toContain("disabled:opacity-64");
+    expect(held).not.toContain("disabled:opacity-30");
+    // Nothing typed is not a hold: no reason to give, and the fainter weight it has always had.
+    expect(renderSendButton()).toContain("disabled:opacity-30");
+    expect(renderSendButton()).not.toContain("disabled:opacity-64");
+  });
+
   it("offers Stop generation while a running turn is waiting for user input", () => {
     expect(renderPendingActions(true)).toContain('aria-label="Stop generation"');
   });
