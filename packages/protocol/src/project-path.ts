@@ -44,6 +44,9 @@ export function placeDaemonPaths(home: string): {
   /** Where a run's script, log and exit code go: wsp's own folder and not one every login on the machine shares,
    * since another account's temporary folder is theirs and a turn that cannot write in it would launch nothing. */
   runDir: string;
+  /** Where the parts of a file arriving over the link are appended before the whole of it is landed on a machine
+   * this computer holds. The same folder rule: wsp's own under the login's home, never one every account shares. */
+  putDir: string;
   openSocket: string;
   manifestPath: string;
   profileFile: string;
@@ -62,6 +65,7 @@ export function placeDaemonPaths(home: string): {
     tokenPath: `${wsp}/daemon-token`,
     portFile: `${wsp}/daemon.port`,
     runDir: `${wsp}/run`,
+    putDir: `${wsp}/put`,
     openSocket: `${wsp}/open.sock`,
     manifestPath: `${wsp}/manifest.json`,
     profileFile: `${wsp}/profile.sh`,

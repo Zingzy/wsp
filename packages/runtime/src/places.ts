@@ -10,12 +10,19 @@
 // from placeLinkTranscript, so this file holds the host's half of the
 // handshake and no rule of its own about how it is spelled.
 import { createPublicKey, createPrivateKey, generateKeyPairSync, randomBytes, sign as signBytes, verify as verifyBytes } from "node:crypto";
+import { createServer, type Server, type Socket } from "node:net";
 import {
+  LOOPBACK,
   PLACE_KEY_REFUSAL,
   PLACE_LINK_NONCE_BYTES,
+  forkRoom,
   placeLinkTranscript,
   placeAbsentLine,
+  noSuchPlaceRefusal,
+  placeHoldsForksRefusal,
+  placeForksNowhereLine,
   placeStillInstalledLine,
+  BackendFacts,
   type DaemonEvent,
   type PlaceAuthReply,
   type PlaceAuthRequest,
@@ -25,7 +32,7 @@ import {
   type PlaceView,
   type WorkspaceSize,
 } from "@wsp/protocol";
-import { SSH_STORE_VARS, isPlainPath, plainPath, type ExecResult } from "@wsp/engine";
+import { LinkBackend, PlaceAbsentError, SSH_STORE_VARS, isPlainPath, plainPath, type ExecResult, type MachineBackend, type MachineLink } from "@wsp/engine";
 import type { WebSocket } from "ws";
 import type { DeviceDoor } from "./devices.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
@@ -58,6 +65,10 @@ export interface PlaceRecord {
   report: PlaceReport;
   /** The workspace recorded on this computer at join, where the join could record one. */
   workspaceId?: string;
+  /** What the backend this computer offers said about itself the last time it was linked. Kept on the record so a
+   * fork standing on this place can be held at host start, before the computer has dialled in: the capabilities,
+   * the sizes and the budgets a road reads are facts about that computer, not about this moment's socket. */
+  backendFacts?: BackendFacts;
 }
 
 const isPlaceRecord = (v: unknown): v is PlaceRecord => {
@@ -104,6 +115,9 @@ export interface PlaceRecording {
    * somebody owns is upgraded, re-installed and given new tools under wsp rather than by it, so what a turn there
    * runs under is read again at every link and not once at the join. */
   refresh(place: PlaceRecord): Promise<void>;
+  /** The names of the forks standing on this place: machines wsp made there, which a remove refuses to take the
+   * place out from under. The workspace the place itself is is not one of them. */
+  forksOn(placeId: string): Promise<string[]>;
 }
 
 export interface PlaceDoorOptions {
@@ -133,6 +147,36 @@ export interface PlaceDoor {
   /** Takes the proved socket as this place's link, with the report `prove` answered; the previous link is cut. */
   attach(placeId: string, socket: WebSocket, report: PlaceReport, now: number): Promise<void>;
   link(placeId: string): DaemonReach | undefined;
+  /** Reads what this host holds about its places into memory, so the backend a fork on one stands on is answered
+   * without a read of the store; the hydration calls it once before it reads any workspace record. */
+  load(): Promise<void>;
+  /** The backend a place offers, off what it last said about it; undefined on a place that has never said. On a
+   * place that is not connected the backend is still answered, so a record standing on it can be held without a
+   * round trip, and every call on it rejects with PlaceAbsentError. */
+  backendOf(placeId: string): MachineBackend | undefined;
+  /** The same, asked of the place itself where this host has not heard yet: one frame, remembered on the record, so
+   * every road after it is answered without one. Refuses with placeForksNowhereLine on a computer that offers no
+   * backend at all. */
+  forkingBackend(placeId: string): Promise<MachineBackend>;
+  /** The name a place goes by, for the sentences a person reads; the id itself for a place this host holds no
+   * record of. Answered without a read, so a refusal built while a road is running names the computer. */
+  nameOf(placeId: string): string;
+  /** Which backend that computer offers, by the id of the row it serves; nothing until it has said. What a fork
+   * standing there was forked by, so a row names a real provider and not the one this host happens to be wired
+   * for. Answered without a read, since every view of every workspace asks it. */
+  offerOf(placeId: string): string | undefined;
+  /** A port on this computer's loopback carried to one port on the place's own, for as long as this host runs: the
+   * place's own daemon port and every fork's daemon port ride the same code. The same pair answers the same local
+   * port every time, and the listener stays bound while the link is down, so nothing cached goes stale. */
+  forward(placeId: string, placePort: number): Promise<{ localPort: number }>;
+  /** The place a person's word names: an id, a name, or this computer itself, which is answered with no id since
+   * the host's own backend is what a fork there lands on. Refuses with noSuchPlaceRefusal naming what is held. */
+  placeFor(word: string): Promise<{ placeId?: string }>;
+  /** Where a fork lands when nobody says: the last place added or used, or this computer when that mark names a
+   * row this host no longer holds. */
+  defaultPlace(): Promise<{ placeId?: string }>;
+  /** Writes the default mark: the last place a fork landed on. */
+  markUsed(placeId: string | undefined): Promise<void>;
   /** One command on that place over its link; the refusal names the place when it is not connected. */
   exec(placeId: string, cmd: string, opts: { timeoutMs?: number; stdin?: Uint8Array }): Promise<ExecResult>;
   /** What the place last reported about itself, off its record. */
@@ -159,6 +203,25 @@ export interface PlaceRemoved {
   swept: string[];
   dropped: string[];
   note?: string;
+}
+
+/** One promise with a bound of its own: a place that took a frame and went quiet fails the call rather than
+ * leaving a road waiting on a socket nothing is coming back on. */
+function bounded<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${what} was not answered in ${Math.round(ms / 1000)}s`)), ms);
+    timer.unref?.();
+    work.then(
+      v => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e: unknown) => {
+        clearTimeout(timer);
+        reject(e instanceof Error ? e : new Error(String(e)));
+      },
+    );
+  });
 }
 
 /** A fresh ed25519 pair in the two spellings the link uses. The one road that makes one, so the host's own key and
@@ -244,20 +307,53 @@ interface Live {
   seen: NodeJS.Timeout;
 }
 
+/** One port on this computer carried to one port on a place: the listener, which stays bound while the link comes
+ * and goes, and the connections riding it right now by the id the far side knows each by. */
+interface Forward {
+  server: Server;
+  localPort: number;
+  conns: Map<string, Socket>;
+}
+
+/** How long a machine frame waits for its answer when the caller named no bound of its own. A link that dies fails
+ * every frame on it at once, so this is the backstop for a place that took the frame and went quiet. */
+const LINK_FRAME_MS = 300_000;
+
+/** How long a place gets to say what its backend is, and how long the table asking what room it has left waits;
+ * a person is watching both, and a place that does not answer in time shows what this host already knows. */
+const BACKEND_FACTS_MS = 10_000;
+const CAPACITY_MS = 5_000;
+
 export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   const { store, devices, wiring, recording } = opts;
   const clockNow = opts.now ?? Date.now;
   const seenEveryMs = opts.seenEveryMs ?? SEEN_EVERY_MS;
   const live = new Map<string, Live>();
+  /** The records as they stand, by id: `load` fills it and every write below keeps it, so the one road that must
+   * answer without waiting (which backend a fork's record stands on) can. */
+  const kept = new Map<string, PlaceRecord>();
+  /** The backend each place offers, built once from what that place said about it and swapped when it says
+   * something else; the link under it is the door's, so the same object serves a place that comes and goes. */
+  const backends = new Map<string, MachineBackend>();
+  const forwards = new Map<string, Forward>();
+  /** The read of one place's backend facts that is in flight, so two roads asking at once send one frame. */
+  const asking = new Map<string, Promise<MachineBackend>>();
   const watchers = new Set<(e: PlaceEvent) => void>();
+  let tunnelSeq = 0;
   const emit = (e: PlaceEvent): void => {
     for (const fn of watchers) fn(e);
   };
 
   const records = async (): Promise<PlaceRecord[]> => (await store.list(PLACES)).filter(isPlaceRecord).sort((a, b) => a.joinedAt.localeCompare(b.joinedAt));
   const recordOf = async (placeId: string): Promise<PlaceRecord | undefined> => {
-    const held = await store.get(PLACES, placeId);
-    return isPlaceRecord(held) ? held : undefined;
+    const found = await store.get(PLACES, placeId);
+    return isPlaceRecord(found) ? found : undefined;
+  };
+  /** The one write of a place record: the store and the memory the sync roads read both move, so a backend answered
+   * without a read is never answered off a record the store has moved past. */
+  const keep = async (record: PlaceRecord): Promise<void> => {
+    kept.set(record.id, record);
+    await store.put(PLACES, record.id, record);
   };
   const defaultId = async (): Promise<string | undefined> => {
     const held = (await store.get(DEFAULT_COLLECTION, DEFAULT_ID)) as { placeId?: unknown } | undefined;
@@ -279,7 +375,45 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   const writeSeen = async (placeId: string, at: number): Promise<void> => {
     const held = await recordOf(placeId);
     if (held === undefined) return;
-    await store.put(PLACES, placeId, { ...held, lastSeenAt: new Date(at).toISOString() } satisfies PlaceRecord);
+    await keep({ ...held, lastSeenAt: new Date(at).toISOString() });
+  };
+
+  /** The road the engine drives one place's machines over: one frame and its answer, and the loopback forward a
+   * route into a machine there is taken by. A place that is not connected is PlaceAbsentError on every call, which
+   * is the one answer every road on an absent place reads. */
+  const linkTo = (placeId: string): MachineLink => ({
+    request: async (op, params, o) => {
+      const reach = live.get(placeId)?.reach;
+      if (reach === undefined) throw new PlaceAbsentError(placeAbsentLine(kept.get(placeId)?.name ?? placeId));
+      return bounded(reach.request(op, params), o?.timeoutMs ?? LINK_FRAME_MS, `${op} on ${kept.get(placeId)?.name ?? placeId}`);
+    },
+    forward: placePort => door.forward(placeId, placePort),
+  });
+
+  /** The backend a place offers, off the facts it last sent. Built once per place and kept: the link under it reads
+   * the live socket at every call, so one backend serves a computer that comes and goes. */
+  const backendFrom = (placeId: string, facts: BackendFacts): MachineBackend => {
+    const made = LinkBackend.of(linkTo(placeId), facts);
+    backends.set(placeId, made);
+    return made;
+  };
+
+  /** A frame the forward owns rather than the panes: the bytes of one connection riding a tunnel, or its end.
+   * Answers whether it was taken. */
+  const tunnelled = (placeId: string, e: DaemonEvent): boolean => {
+    if (e.type !== "tunnel.data" && e.type !== "tunnel.end") return false;
+    const conn = connOf(placeId, e.tunnelId);
+    if (e.type === "tunnel.data") conn?.write(Buffer.from(e.data, "base64"));
+    else conn?.end();
+    return true;
+  };
+  const connOf = (placeId: string, tunnelId: string): Socket | undefined => {
+    for (const [key, f] of forwards) {
+      if (!key.startsWith(`${placeId}:`)) continue;
+      const conn = f.conns.get(tunnelId);
+      if (conn !== undefined) return conn;
+    }
+    return undefined;
   };
 
   /** Frees what this host holds about one link: the poller, the reach and the socket. The place's own redial is
@@ -291,6 +425,33 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     clearInterval(held.seen);
     held.reach.close();
     held.socket.close(1000, reason);
+  };
+
+  /** How many forks a place holds and how many more it takes, off what its own backend says about the computer it
+   * runs on. Only what this host already knows is waited for: a table is something a person is watching, so a place
+   * that has not yet said what it forks with shows nothing in that column and is asked behind the listing, and one
+   * that does not answer in time shows nothing rather than a guess. */
+  const forksOf = async (record: PlaceRecord): Promise<{ running: number; room: number } | undefined> => {
+    const linked = live.has(record.id) && record.report.docker;
+    const backend = linked ? door.backendOf(record.id) : undefined;
+    if (backend === undefined) {
+      if (linked) void door.forkingBackend(record.id).catch(() => undefined);
+      return undefined;
+    }
+    if (backend.capacity === undefined) return undefined;
+    try {
+      const capacity = await bounded(backend.capacity(), CAPACITY_MS, `machine.capacity on ${record.name}`);
+      const image = capacity.images.reduce((most, i) => Math.max(most, i.sizeBytes), 0);
+      return {
+        // Every fork that computer is holding, napping ones included: a row that says napping is a machine the
+        // person still has there, so this column and the workspace list cannot disagree about how many.
+        running: capacity.machines.running + capacity.machines.paused,
+        // What a fork takes there, not what it would be asked for: a computer clamps a machine to its own share.
+        room: forkRoom(capacity, Math.min(backend.pricing.defaultSize.memMb, capacity.machineMemMb), image === 0 ? undefined : image),
+      };
+    } catch {
+      return undefined;
+    }
   };
 
   const viewOf = (record: PlaceRecord, defaulted: string | undefined): PlaceView => ({
@@ -321,11 +482,11 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const id = `p_${randomBytes(8).toString("hex")}`;
       const stamp = new Date(at).toISOString();
       const record: PlaceRecord = { id, name: taken.name, publicKey: req.publicKey, joinedAt: stamp, lastSeenAt: stamp, report: taken };
-      await store.put(PLACES, id, record);
+      await keep(record);
       // Last added is the default, which is what makes the computer somebody just joined the one a verb means.
       await markDefault(id);
       const recorded = await recording.record(record);
-      if (recorded.workspaceId !== undefined) await store.put(PLACES, id, { ...record, workspaceId: recorded.workspaceId } satisfies PlaceRecord);
+      if (recorded.workspaceId !== undefined) await keep({ ...record, workspaceId: recorded.workspaceId });
       const { nonce, signature, expect } = challenge(id, req.nonce);
       emit({ type: "place.joined", placeId: id, name: record.name });
       return {
@@ -363,18 +524,28 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         return;
       }
       const moved: PlaceRecord = { ...held, name: report.name, report, lastSeenAt: new Date(at).toISOString() };
-      await store.put(PLACES, placeId, moved);
+      await keep(moved);
       // What a turn there runs under is this link's report and not the join's: a person installs a tool on their own
       // computer and the next link is where wsp learns it.
       await recording.refresh(moved);
       const reach = connectDaemon({
         socket,
-        onEvent: e => opts.onDaemonEvent?.(placeId, e),
+        // A tunnel's bytes belong to the connection riding the forward and to nothing else on this host, so they
+        // are taken here rather than pushed at every watcher of the place.
+        onEvent: e => {
+          if (!tunnelled(placeId, e)) opts.onDaemonEvent?.(placeId, e);
+        },
       });
       const seen = setInterval(() => void writeSeen(placeId, clockNow()).catch(() => undefined), seenEveryMs);
       // The poller must not hold a host that is otherwise done open.
       seen.unref?.();
       live.set(placeId, { socket, reach, seen });
+      // A computer that says it no longer forks is taken at its word at once: what it said before is not a fact
+      // about the computer that is here now. One that says it does is asked what it forks with behind the attach
+      // and not in front of it, so the link is held whether or not that answer comes and the first listing after a
+      // join carries the room it has left.
+      if (!moved.report.docker) backends.delete(placeId);
+      else void door.forkingBackend(placeId).catch((e: unknown) => console.warn(`${moved.name} did not say what it forks with: ${e instanceof Error ? e.message : String(e)}`));
       socket.once("close", () => {
         const mine = live.get(placeId);
         if (mine?.socket !== socket) return;
@@ -388,6 +559,112 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     },
 
     link: placeId => live.get(placeId)?.reach,
+
+    async load() {
+      for (const record of await records()) {
+        kept.set(record.id, record);
+        if (record.backendFacts !== undefined && !backends.has(record.id)) backendFrom(record.id, record.backendFacts);
+      }
+    },
+
+    nameOf: placeId => kept.get(placeId)?.name ?? placeId,
+
+    offerOf: placeId => kept.get(placeId)?.backendFacts?.offer,
+
+    backendOf(placeId) {
+      const made = backends.get(placeId);
+      if (made !== undefined) return made;
+      const facts = kept.get(placeId)?.backendFacts;
+      return facts === undefined ? undefined : backendFrom(placeId, facts);
+    },
+
+    async forkingBackend(placeId) {
+      const record = (await recordOf(placeId)) ?? kept.get(placeId);
+      const name = record?.name ?? placeId;
+      if (record === undefined || !record.report.docker) {
+        backends.delete(placeId);
+        throw new Error(placeForksNowhereLine(name));
+      }
+      const made = door.backendOf(placeId);
+      if (made !== undefined) return made;
+      // The first fork on this computer is where the host learns what it forks with; every road after it reads the
+      // answer off the record, so this frame is sent once per computer and not once per fork.
+      const inflight = asking.get(placeId);
+      if (inflight !== undefined) return inflight;
+      const read = (async () => {
+        const answer = await bounded(linkTo(placeId).request("machine.backend"), BACKEND_FACTS_MS, `machine.backend on ${name}`);
+        const facts = BackendFacts.parse(answer);
+        await keep({ ...record, backendFacts: facts });
+        return backendFrom(placeId, facts);
+      })().finally(() => asking.delete(placeId));
+      asking.set(placeId, read);
+      return read;
+    },
+
+    async forward(placeId, placePort) {
+      const key = `${placeId}:${placePort}`;
+      const already = forwards.get(key);
+      if (already !== undefined) return { localPort: already.localPort };
+      const conns = new Map<string, Socket>();
+      const server = createServer(conn => {
+        const tunnelId = `p${++tunnelSeq}`;
+        const reach = live.get(placeId)?.reach;
+        conn.on("error", () => {});
+        if (reach === undefined) {
+          // The listener stays bound while the place is away: the route this host handed out keeps its port, and a
+          // connection made meanwhile is refused rather than held.
+          conn.destroy();
+          return;
+        }
+        conns.set(tunnelId, conn);
+        conn.pause();
+        conn.on("close", () => {
+          conns.delete(tunnelId);
+          void reach.request("tunnel.close", { tunnelId }).catch(() => undefined);
+        });
+        reach.request("tunnel.open", { tunnelId, port: placePort }).then(
+          () => {
+            conn.on("data", (d: Buffer) => void reach.request("tunnel.write", { tunnelId, data: d.toString("base64") }).catch(() => conn.destroy()));
+            conn.resume();
+          },
+          () => {
+            conns.delete(tunnelId);
+            conn.destroy();
+          },
+        );
+      });
+      const localPort = await new Promise<number>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(0, LOOPBACK, () => {
+          server.unref();
+          const addr = server.address();
+          resolve(typeof addr === "object" && addr !== null ? addr.port : 0);
+        });
+      });
+      forwards.set(key, { server, localPort, conns });
+      return { localPort };
+    },
+
+    async placeFor(word) {
+      const all = await records();
+      const found = all.find(r => r.id === word || r.name === word);
+      if (found !== undefined) return { placeId: found.id };
+      const here = wiring.here().name;
+      const provider = wiring.provider()?.id;
+      if (word === HERE_PLACE_ID || word === here || (provider !== undefined && word === provider)) return {};
+      throw new Error(noSuchPlaceRefusal(word, [here, ...all.map(r => r.name), ...(provider === undefined ? [] : [provider])]));
+    },
+
+    async defaultPlace() {
+      const marked = await defaultId();
+      if (marked === undefined) return {};
+      const found = (await records()).find(r => r.id === marked);
+      return found === undefined ? {} : { placeId: found.id };
+    },
+
+    async markUsed(placeId) {
+      await markDefault(placeId ?? wiring.provider()?.id ?? HERE_PLACE_ID);
+    },
 
     async exec(placeId, cmd, execOpts) {
       const reach = live.get(placeId)?.reach;
@@ -411,6 +688,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // This computer first, the computers joined to it after, the provider last; exactly one default, which falls
       // to this computer when the mark names a row that is no longer here.
       const marked = held.some(r => r.id === defaulted) || (provider !== undefined && provider.id === defaulted) ? defaulted : HERE_PLACE_ID;
+      const room = new Map(await Promise.all(held.map(async r => [r.id, await forksOf(r)] as const)));
       return [
         {
           id: HERE_PLACE_ID,
@@ -423,7 +701,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           ...(here.docker !== undefined ? { docker: here.docker } : {}),
           present: true,
         },
-        ...held.map(r => viewOf(r, marked)),
+        ...held.map(r => {
+          const forks = room.get(r.id);
+          return { ...viewOf(r, marked), ...(forks !== undefined ? { forks } : {}) };
+        }),
         ...(provider === undefined
           ? []
           : [{ id: provider.id, kind: "provider" as const, name: provider.id, default: marked === provider.id, rateUsdPerHour: provider.rateUsdPerHour }]),
@@ -433,6 +714,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     async remove(placeId) {
       const held = await recordOf(placeId);
       if (held === undefined) return { removed: false, swept: [], dropped: [] };
+      // The forks on it are wsp's own machines and the person's to delete: a place taken out from under them would
+      // leave containers on that computer nothing here can name again.
+      const forks = await recording.forksOn(placeId);
+      if (forks.length > 0) throw new Error(placeHoldsForksRefusal(held.name, forks));
       const reach = live.get(placeId)?.reach;
       let swept: string[] = [];
       let note: string | undefined;
@@ -450,6 +735,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       }
       // The workspaces standing on it go by the ordinary delete road, so their threads and transcripts go with them.
       const dropped = await recording.drop(placeId);
+      kept.delete(placeId);
+      backends.delete(placeId);
       await store.delete(PLACES, placeId);
       if ((await defaultId()) === placeId) await store.delete(DEFAULT_COLLECTION, DEFAULT_ID);
       emit({ type: "place.removed", placeId });
@@ -465,6 +752,12 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
 
     close: async () => {
       for (const placeId of [...live.keys()]) cut(placeId, "this host is stopping");
+      for (const [key, f] of forwards) {
+        for (const conn of f.conns.values()) conn.destroy();
+        f.conns.clear();
+        f.server.close();
+        forwards.delete(key);
+      }
     },
   };
   return door;

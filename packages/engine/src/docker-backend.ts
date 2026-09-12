@@ -10,12 +10,13 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { statfs } from "node:fs/promises";
 import { request as httpRequest, type RequestOptions } from "node:http";
 import { connect as netConnect } from "node:net";
 import { join, posix } from "node:path";
 import { Duplex } from "node:stream";
 import { connect as tlsConnect } from "node:tls";
-import { authority, type Capabilities } from "@wsp/protocol";
+import { authority, type Capabilities, type PauseMode, type PlaceCapacity } from "@wsp/protocol";
 import { classify, isMissing, type WspError } from "./errors.js";
 import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
@@ -91,7 +92,8 @@ export const DOCKER_PRICING: BackendPricing = {
 export const BOX_MEMORY_SHARE = 0.5;
 
 /** How a container's own status reads as a machine state. `removing` is folded into gone: the daemon has taken the
- * container and nothing will run on it again. */
+ * container and nothing will run on it again. `exited` is read by the pause mode: where a nap is a stop, a stopped
+ * container is a napped machine, and where a nap is the freezer nothing wsp napped is ever exited. */
 const STATE_MAP: Record<string, MachineState> = {
   created: "starting",
   restarting: "starting",
@@ -101,6 +103,10 @@ const STATE_MAP: Record<string, MachineState> = {
   dead: "gone",
   removing: "gone",
 };
+
+/** What one container's status is, under the mode this backend naps by. */
+const stateOfStatus = (status: string, pauseMode: PauseMode): MachineState =>
+  pauseMode === "disk" && status === "exited" ? "paused" : (STATE_MAP[status] ?? "gone");
 
 /** How a daemon is dialled. One road per kind and nothing else in this file knows the difference. */
 export type DockerDial =
@@ -383,6 +389,14 @@ export interface DockerBackendOptions {
   baseImage?: string;
   /** How a request reaches the daemon; tests hand in their own. */
   transport?: DockerTransport;
+  /** How the free bytes under the daemon's own root are read; this computer's own filesystem unless a test hands
+   * its own. Read on the computer the daemon runs on, which is where this backend runs when a place serves it. */
+  statfs?: (path: string) => Promise<{ bavail: number; bsize: number }>;
+  /** How a machine here goes idle: the freezer, which keeps the processes and every byte they hold, or a stop,
+   * which keeps the disk alone and comes back from the container's own layers. The freezer by default, which is
+   * what a machine wsp forks at a provider it pays for wants; a computer somebody owns wants the stop, so ten idle
+   * workspaces cost it nothing. */
+  pauseMode?: PauseMode;
 }
 
 // Frozen: one shared object every DockerBackend hands out, so nothing shrinks a budget for everyone by accident.
@@ -402,8 +416,13 @@ export class DockerBackend implements MachineBackend {
    * a desktop machine's own stream has no meaning here. */
   readonly baseTemplates: Readonly<Record<MachineKind, string>>;
 
+  /** How a machine here goes idle; the machines this backend hands out read it, since a stop and the freezer are
+   * two different moves and a stopped container reads as a different state. */
+  readonly pauseMode: PauseMode;
+
   private readonly transport: DockerTransport;
   private readonly dial: DockerDial;
+  private readonly statfs: (path: string) => Promise<{ bavail: number; bsize: number }>;
   /** Whether the daemon runs on the computer this host runs on. A container's published port lands on the daemon's
    * own loopback, so on this computer the host can dial it and on a box it cannot without a forward. Read once,
    * here, and every road that turns on it reads this. */
@@ -417,11 +436,15 @@ export class DockerBackend implements MachineBackend {
       ...(opts.knownHostsPath !== undefined ? { knownHostsPath: opts.knownHostsPath } : {}),
     });
     this.onThisComputer = this.dial.kind === "unix";
+    this.pauseMode = opts.pauseMode ?? "memory";
+    this.statfs = opts.statfs ?? (path => statfs(path));
     const image = opts.baseImage ?? DOCKER_BASE_IMAGE;
     this.baseTemplates = { sandbox: image, desktop: image };
     this.capabilities = {
       liveCloneForks: false, // a commit holds no memory, so a fork boots cold and wsp starts the agents again
-      pauseMode: "memory", // the freezer cgroup keeps the processes and every byte they hold: a nap saves CPU, never memory
+      // The freezer keeps the processes and every byte they hold, so a nap saves CPU and never memory; a stop keeps
+      // the disk alone and the wake boots the container again off its own layers.
+      pauseMode: this.pauseMode,
       resize: false,
       replacesMachine: true, // a fresh container from the same image with the vault restored, which is what a rebuild and an image move hand the workspace
       previewUrls: false, // a published port is bare TCP with no token and no expiry, so nothing public is minted
@@ -531,7 +554,7 @@ export class DockerBackend implements MachineBackend {
   async get(id: string): Promise<Machine> {
     const view = await this.inspect(id);
     return new DockerMachine(this, view.Id, "sandbox", this.onThisComputer, view.Config?.Labels, {
-      state: stateOf(view),
+      state: stateOf(view, this.pauseMode),
       ...(view.Created !== undefined ? { createdAt: view.Created } : {}),
     });
   }
@@ -566,7 +589,7 @@ export class DockerBackend implements MachineBackend {
       const size = sizeOf(row.HostConfig);
       return {
         id: row.Id,
-        state: STATE_MAP[row.State ?? ""] ?? "gone",
+        state: stateOfStatus(row.State ?? "", this.pauseMode),
         labels: row.Labels ?? {},
         ...(size !== undefined ? { size } : {}),
       };
@@ -623,6 +646,59 @@ export class DockerBackend implements MachineBackend {
   async checkKey(): Promise<void> {
     await this.request("GET", "/version");
   }
+
+  /** What this computer has left for one more machine: its cores and memory, the room left inside the share one
+   * machine's limit is held to, the free bytes under the daemon's own root, and the wsp images it holds. The
+   * machines counted are every one wsp holds here that is not gone, read by the mode this backend naps by, so a
+   * row that says napping is counted wherever it is read; the memory room counts only what actually holds memory. */
+  async capacity(): Promise<PlaceCapacity> {
+    const info = await this.request<{ NCPU?: number; MemTotal?: number; DockerRootDir?: string }>("GET", "/info");
+    const filters = JSON.stringify({ label: [`${WSP_LABEL}=1`] });
+    const containers = await this.request<{ Id: string; State?: string }[]>("GET", "/containers/json", { query: { all: "true", filters } });
+    const images = await this.request<ImageView[]>("GET", "/images/json", { query: { filters } });
+    const memMb = Math.floor((info.MemTotal ?? 0) / (1024 * 1024));
+    // Two readings of one listing, and they are not the same question. What wsp holds here is every machine of its
+    // own that is not gone, by the mode this backend naps by, so a row that says napping is counted as one; what
+    // holds memory is the container's own word, since a frozen container keeps every byte its processes hold and a
+    // stopped one keeps none whatever a row calls it.
+    const holds = containers.filter(c => stateOfStatus(c.State ?? "", this.pauseMode) !== "gone");
+    const live = containers.filter(c => {
+      const status = STATE_MAP[c.State ?? ""];
+      return status === "running" || status === "paused" || status === "starting";
+    });
+    // The limit each live container was given, read one container at a time: the listing carries a HostConfig of
+    // one field, the network mode, and nothing about memory (measured on Docker 29). A container the daemon lost
+    // between the two calls counts as nothing rather than losing the whole answer.
+    const limits = await Promise.all(live.map(c => this.inspect(c.Id).then(v => v.HostConfig?.Memory ?? 0, () => 0)));
+    const takenMb = limits.reduce((sum, bytes) => sum + Math.floor(bytes / (1024 * 1024)), 0);
+    let diskFreeBytes = 0;
+    // The daemon's root is a path on the computer that daemon runs on, so only a backend dialling this computer's
+    // own socket may stat it: one dialling a box over ssh would read this computer's disk and call it the box's.
+    // A place serves the backend on the computer whose daemon it dials, which is the road this answer is for.
+    if (this.onThisComputer) {
+      try {
+        const fs = await this.statfs(info.DockerRootDir === undefined || info.DockerRootDir === "" ? "/" : info.DockerRootDir);
+        diskFreeBytes = fs.bavail * fs.bsize;
+      } catch {
+        // A root this computer cannot stat leaves the disk at nothing rather than losing the whole answer.
+      }
+    }
+    return {
+      cores: info.NCPU ?? 0,
+      memMb,
+      memRoomMb: Math.max(0, Math.floor(memMb * BOX_MEMORY_SHARE) - takenMb),
+      machineMemMb: Math.floor(memMb * BOX_MEMORY_SHARE),
+      diskFreeBytes,
+      images: images.map(row => {
+        const name = row.Labels?.[SNAPSHOT_LABEL] ?? (row.RepoTags ?? []).find(tag => tag.endsWith(":template"));
+        return { id: row.Id, ...(name !== undefined ? { name } : {}), sizeBytes: row.Size ?? 0 };
+      }),
+      machines: {
+        running: holds.filter(c => stateOfStatus(c.State ?? "", this.pauseMode) !== "paused").length,
+        paused: holds.filter(c => stateOfStatus(c.State ?? "", this.pauseMode) === "paused").length,
+      },
+    };
+  }
 }
 
 function sizeOf(host: { Memory?: number; NanoCpus?: number } | undefined): { cpu: number; memMb: number } | undefined {
@@ -630,8 +706,8 @@ function sizeOf(host: { Memory?: number; NanoCpus?: number } | undefined): { cpu
   return { cpu: host.NanoCpus / 1_000_000_000, memMb: Math.round(host.Memory / (1024 * 1024)) };
 }
 
-function stateOf(view: ContainerView): MachineState {
-  return STATE_MAP[view.State?.Status ?? ""] ?? "gone";
+function stateOf(view: ContainerView, pauseMode: PauseMode): MachineState {
+  return stateOfStatus(view.State?.Status ?? "", pauseMode);
 }
 
 /** One container as a machine. Its daemon is the container's own boot rather than a service manager, since a
@@ -699,12 +775,14 @@ export class DockerMachine implements Machine {
     return res.Id;
   }
 
+  /** A nap: the freezer where the machine must keep what its processes hold, a stop where it must not. A stopped
+   * container keeps its disk and nothing else, so the wake boots it again off its own layers. */
   async pause(): Promise<void> {
-    await this.backend.request("POST", this.path("/pause"));
+    await this.backend.request("POST", this.path(this.backend.pauseMode === "disk" ? "/stop" : "/pause"));
   }
 
   async resume(): Promise<void> {
-    await this.backend.request("POST", this.path("/unpause"));
+    await this.backend.request("POST", this.path(this.backend.pauseMode === "disk" ? "/start" : "/unpause"));
   }
 
   /** Only this container, by the id this handle was made with: nothing here removes by name or by pattern. */
@@ -714,7 +792,7 @@ export class DockerMachine implements Machine {
 
   async state(): Promise<MachineState> {
     try {
-      return stateOf(await this.backend.inspect(this.id));
+      return stateOf(await this.backend.inspect(this.id), this.backend.pauseMode);
     } catch (e) {
       if (isMissing(e)) return "gone";
       throw e;

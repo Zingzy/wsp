@@ -4,7 +4,7 @@
 // liveness is an app-level ping op; every (re)connect re-subscribes and
 // rescans the inbox because events pushed during a gap are gone for good.
 
-import { DaemonEvent, type DaemonLinkStatus } from "@wsp/protocol";
+import { DaemonEvent, MachineErrorKind, type DaemonLinkStatus } from "@wsp/protocol";
 import WebSocket from "ws";
 
 export interface ReachOptions {
@@ -139,11 +139,22 @@ export function connectDaemon(opts: ReachOptions): DaemonReach {
       const p = pending.get(id)!;
       pending.delete(id);
       if (msg["ok"] === true) p.resolve(msg);
-      else p.reject(new Error(String(msg["error"] ?? "daemon error")));
+      else p.reject(refused(msg));
       return;
     }
     const parsed = DaemonEvent.safeParse(msg);
     if (parsed.success) opts.onEvent(parsed.data);
+  }
+
+  /** A refused frame as the caller's error. The two fields the machine ops answer with ride along, so a backend's
+   * own refusal keeps its meaning on the computer that asked: a machine the far side lost reads missing here. */
+  function refused(msg: Record<string, unknown>): Error {
+    const kind = MachineErrorKind.safeParse(msg["kind"]);
+    const status = msg["status"];
+    return Object.assign(new Error(String(msg["error"] ?? "daemon error")), {
+      ...(kind.success ? { kind: kind.data } : {}),
+      ...(typeof status === "number" ? { status } : {}),
+    });
   }
 
   function scheduleReconnect(): void {
