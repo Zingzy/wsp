@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, cloudCreateRefusal, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadFromHash, workspaceFromHash, workspaceStateOf, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, cloudCreateRefusal, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadFromHash, threadKeyOf, workspaceFromHash, workspaceStateOf, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { sidebarWorkspaceOrder } from "../adapt/workspaces.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
@@ -831,6 +831,22 @@ export function useOpenThread(workspaceId: string | null): ThreadView | null {
 /** The workspace's most recent session row, running or not; null before its first session this runtime remembers. */
 export function useLatestSession(id: string | null): SessionView | null {
   return useStore(s => (id ? s.sessions[id]?.at(-1) ?? null : null));
+}
+
+/** Every turn the runtime holds for one thread, oldest first: what that thread has already run with, which is what a
+ * composer reads its pickers off, its running turn included, so a second thread running in the same workspace paints
+ * neither. A view holding no thread of its own carries the workspace's id as its key, which no row carries: there the
+ * workspace's latest row is the turn that view shows and resumes, which is what the rest of this hook's readings take
+ * it to be, and rows from before the runtime stamped a thread on them are only reachable that way. Empty for a thread
+ * with no turn yet. */
+export function useThreadSessions(workspaceId: string | null, threadKey: string): ReadonlyArray<SessionView> {
+  const sessions = useStore(s => (workspaceId !== null ? s.sessions[workspaceId] : undefined) ?? NO_SESSIONS);
+  return useMemo(() => {
+    const own = sessions.filter(row => threadKeyOf(row) === threadKey);
+    if (own.length > 0 || threadKey !== workspaceId) return own;
+    const latest = sessions.at(-1);
+    return latest === undefined ? NO_SESSIONS : [latest];
+  }, [sessions, threadKey, workspaceId]);
 }
 
 /** Subscribe a component to raw protocol events (the thread, terminal and browser surfaces use this). */
