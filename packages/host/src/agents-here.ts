@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The agents the desktop's first run lists: the catalog's, each read off this
 // computer by the recipe scan's own detector, so the app and wsp recipe scan
-// agree on what is here; whether its MCP config already names wsp; the version
-// its command answers with; and, read apart since it takes a while, how many
-// sessions its own store holds.
+// agree on what is here; whether its MCP config already names wsp; and the
+// version its command answers with.
 import { CATALOG_AGENTS, MCP_AGENTS } from "@wsp/catalog";
-import { agentRowId, detectAgents, expand, firstLine, nodeHost, readHistories, type Host } from "@wsp/collect";
+import { agentRowId, detectAgents, expand, firstLine, nodeHost, type Host } from "@wsp/collect";
 import { MCP_SERVER_NAME } from "./mcp-install.js";
-import { historyCache } from "./recipe-file.js";
 
 export interface AgentHere {
   id: string;
@@ -51,17 +49,4 @@ export async function agentsHere(host: Host = nodeHost(), opts: { versions?: boo
       return { id: a.id, name: a.name, found: found.has(agentRowId(a.id)), configured: await configured(host, a.id), ...(version !== undefined ? { version } : {}) };
     }),
   );
-}
-
-export interface AgentSessions {
-  id: string;
-  sessions: number;
-}
-
-/** How many sessions each named agent's own store holds, through the history readers the recipe scan uses and its
- * cache when a state file is named; a store that is empty, unreadable or has no reader counts zero. */
-export async function agentHistories(ids: readonly string[], host: Host = nodeHost(), statePath?: string): Promise<AgentSessions[]> {
-  const agents = CATALOG_AGENTS.filter(a => ids.includes(a.id));
-  const histories = await readHistories(host, agents, statePath === undefined ? {} : { cache: historyCache(statePath) });
-  return histories.map(h => ({ id: h.agent, sessions: h.sessions }));
 }

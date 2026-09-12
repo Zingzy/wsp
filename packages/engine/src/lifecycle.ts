@@ -1,5 +1,5 @@
 import type { Machine, MachineSpec, PreviewReach } from "./machine.js";
-import { isMissing } from "./errors.js";
+import { GuestUnusableError, isMissing } from "./errors.js";
 import { DAEMON_PORT, refreshPreviewToken } from "./preview.js";
 
 export interface WorkspaceHooks {
@@ -136,6 +136,12 @@ export class Workspace {
           try {
             await this.move("resume");
           } catch (e) {
+            // A guest the provider left running but unusable answers nothing a second resume would mend, so it
+            // takes the road a vanished machine takes: no check, no re-pause, straight to the fresh fork.
+            if (e instanceof GuestUnusableError) {
+              faults.push(e.message);
+              break;
+            }
             if (!isMissing(e)) throw e;
             // Paused machines can vanish after hours (PoC overnight-pause finding).
             faults.push(`machine ${this.machine.id} vanished while paused`);

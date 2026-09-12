@@ -19,6 +19,6 @@ const machineLogin = (id: ThreadAgent): string => {
 };
 
 export const HARNESS_ADAPTERS: Readonly<Record<ThreadAgent, HarnessAdapterFactory>> = {
-  claude: ctx => createClaudeAdapter({ exec: ctx.execStream, configDir: ctx.home("claude"), baseEnv: ctx.env }),
+  claude: ctx => createClaudeAdapter({ exec: ctx.execStream, configDir: ctx.home("claude"), baseEnv: ctx.env, signInRefusal: ctx.signInRefusal }),
   codex: ctx => createCodexAdapter({ exec: ctx.execStream, home: ctx.home("codex"), login: machineLogin("codex"), baseEnv: ctx.env }),
 };

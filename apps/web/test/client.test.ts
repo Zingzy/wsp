@@ -154,12 +154,66 @@ describe("makeApi wrappers", () => {
     expect(lastSent()).toMatchObject({ op: "sessions.list", workspaceId: "ws_1" });
   });
 
-  it("daemonReach sends workspaces.daemonReach and unwraps the reach view", async () => {
-    const { api, lastSent } = await connect();
-    const reach = { url: "https://m1-7070.preview.example/?pt_token=e", expiresAt: 1, daemonToken: "d" };
-    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, reach });
-    expect(await api.daemonReach("ws_1")).toEqual(reach);
-    expect(lastSent()).toMatchObject({ op: "workspaces.daemonReach", workspaceId: "ws_1" });
+  it("the daemon api opens, sends and closes a channel, and never puts a route or a token on the wire", async () => {
+    const { api, sock, lastSent } = await connect();
+    ScriptedSocket.reply = f => (f["op"] === "daemon.open" ? { id: f["id"], ok: true, channel: "ch_1" } : { id: f["id"], ok: true, reply: { id: 3, ok: true, ptyId: "p1" } });
+    expect(await api.daemon.open("ws_1")).toEqual({ channel: "ch_1" });
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "daemon.open", workspaceId: "ws_1" });
+
+    expect(await api.daemon.send("ch_1", { op: "pty.write", ptyId: "p1", data: "ls\r" })).toEqual({ id: 3, ok: true, ptyId: "p1" });
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "daemon.send", channel: "ch_1", frame: { op: "pty.write", ptyId: "p1", data: "ls\r" } });
+
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true });
+    await api.daemon.close("ch_1");
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "daemon.close", channel: "ch_1" });
+    // The machine's route and its daemon token stay on the host: nothing this page sent could carry one.
+    expect(sock.sent.some(f => "reach" in f || "daemonToken" in f)).toBe(false);
+  });
+
+  it("a pushed daemon frame reaches its own channel's listener and no other, and never the event listeners", async () => {
+    const { api, sock } = await connect();
+    const events: unknown[] = [];
+    const mine: unknown[] = [];
+    const other: unknown[] = [];
+    api.subscribe(e => events.push(e));
+    const stop = api.daemon.onFrame("ch_1", e => mine.push(e));
+    api.daemon.onFrame("ch_2", e => other.push(e));
+
+    const data = { type: "daemon.event", channel: "ch_1", event: { type: "pty.data", ptyId: "p1", data: "hi" } };
+    sock.onmessage!({ data: JSON.stringify(data) });
+    sock.onmessage!({ data: JSON.stringify({ type: "daemon.closed", channel: "ch_1", code: 1006, reason: "" }) });
+    expect(mine).toEqual([data, { type: "daemon.closed", channel: "ch_1", code: 1006, reason: "" }]);
+    expect(other).toEqual([]);
+    // A pty chunk is not history: the store that folds the runtime's events never sees one.
+    expect(events).toEqual([]);
+
+    // A runtime event still reaches the subscribers, so the channel routing took only the frames meant for it.
+    const workspace = { type: "workspace.napped", workspaceId: "ws_1" };
+    sock.onmessage!({ data: JSON.stringify(workspace) });
+    expect(events).toEqual([workspace]);
+
+    stop();
+    sock.onmessage!({ data: JSON.stringify(data) });
+    expect(mine).toHaveLength(2);
+  });
+
+  it("a frame that lands before its channel has a listener is held and handed over, and a redial drops what is held", async () => {
+    const { api, sock } = await connect();
+    // The host writes the open reply and the daemon's hello back to back; two frames in one read reach the client
+    // before the microtask that resolves the open, so the hello must wait for the listener rather than be dropped.
+    const hello = { type: "daemon.event", channel: "ch_1", event: { type: "daemon.hello", root: "/root" } };
+    sock.onmessage!({ data: JSON.stringify(hello) });
+    const held: unknown[] = [];
+    api.daemon.onFrame("ch_1", e => held.push(e));
+    expect(held).toEqual([hello]);
+
+    // A channel dies with the socket that opened it, so nothing held for one outlives a redial.
+    sock.onmessage!({ data: JSON.stringify({ type: "daemon.event", channel: "ch_2", event: { type: "daemon.hello", root: "/root" } }) });
+    sock.drop(1006);
+    await until(() => ScriptedSocket.instances.length > 1);
+    const late: unknown[] = [];
+    api.daemon.onFrame("ch_2", e => late.push(e));
+    expect(late).toEqual([]);
   });
 
   it("portReach sends workspaces.portReach with the port and unwraps the reach view", async () => {

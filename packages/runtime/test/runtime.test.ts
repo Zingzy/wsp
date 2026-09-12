@@ -8,8 +8,8 @@ import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe } from "@wsp/adapter-claude";
 import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, type AdapterEvent, type EventUnion, type RecipeDigest, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
-import { BUILDER_IDLE_MS, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
-import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
+import { BUILDER_IDLE_MS, GuestUnusableError, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
+import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_PATH, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
 import { harnessCatalog } from "../src/harness-catalog.js";
 import { copyKey, CATALOG_TTL_MS, DAEMON_REVIVE_AGAIN_MS, GRACE_MS, GUEST_LOGIN_ENV, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type GoldenExec, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions } from "../src/runtime.js";
@@ -19,7 +19,7 @@ import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { until } from "./until.js";
 import { wsRequest } from "./ws-client.js";
-import { stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
+import { stubBackend, tokenGuest, type StubBackend, type StubMachine } from "./stub-backend.js";
 import { fakeClock } from "./fake-clock.js";
 import { WebSocketServer } from "ws";
 
@@ -3268,10 +3268,8 @@ describe("runtime guest hostname", () => {
   });
 });
 
-const TOKEN_PATH = "/root/.wsp-daemon-token";
+const TOKEN_PATH = DAEMON_TOKEN_PATH;
 const TOKEN = "deadbeef".repeat(3);
-/** A guest with a daemon: the token write lands, everything else is silently fine. */
-const tokenGuest = (_m: unknown, cmd: string) => (cmd.includes(TOKEN_PATH) ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
 
 /** A daemon on a loopback port that answers every op ok and announces the version it is set to right after the auth
  * reply, as the real one does: the one way a client learns a daemon's version, and the only way to stand an old one
@@ -5702,6 +5700,26 @@ describe("create idempotency keys", () => {
     expect(specs.slice(0, 2).map(s => s.cpu)).toEqual([2, 4]);
     expect(specs[1]!.idempotencyKey).not.toBe(specs[0]!.idempotencyKey);
     expect(await store.list("creates")).toEqual([]);
+  });
+
+  it("a create the backend gave up on because nothing on the guest could run spends its key, so the next attempt never sends the deleted box's key again", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    let dead = true;
+    const specs = intercept(backend, (spec, real) => {
+      if (dead) {
+        dead = false;
+        // The backend deleted the box it could not use before throwing; a key that outlived it would name it again.
+        throw new GuestUnusableError("bx_dead", "Box by ASCII", "bash: error while loading shared libraries: libtinfo.so.6: cannot open shared object file: Error 24", 200);
+      }
+      return real(spec);
+    });
+    await expect(rt.workspaces.rebuild(ws.id)).rejects.toThrow(/nothing on it can run/);
+    expect(await store.list("creates")).toEqual([]);
+    await rt.workspaces.rebuild(ws.id);
+    expect(specs[1]!.idempotencyKey).not.toBe(specs[0]!.idempotencyKey);
   });
 
   it("a replayed create is logged, and a replay naming a dead machine is created anew under a fresh key", async () => {

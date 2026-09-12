@@ -16,6 +16,7 @@ import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { ExportProjectDialog } from "../src/sidebar/ExportProjectDialog.js";
 import { caps } from "./caps.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 const workspace: WorkspaceView = { id: "ws_a", name: "api", machineId: "m_a", phase: "running", golden: "snap_g", createdAt: "2026-09-05T11:00:00Z" };
 const SOURCE = "/root/proj";
@@ -72,7 +73,7 @@ function fakeApi(sessions: SessionView[] = THREADS) {
     capabilities: vi.fn(async () => (caps())),
     startSession: vi.fn(async () => ({ id: "s1", workspaceId: "ws_a", harness: "claude", status: "running" as const })),
     portReach: vi.fn(async () => ({ url: "https://x", expiresAt: 0 })),
-    daemonReach: vi.fn(async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 })),
+    daemon: noDaemonApi,
     sessionHistory: vi.fn(async () => []),
     listSnapshots: vi.fn(async () => ({ name: "default", head: null, versions: [] })),
     snapshotStorage: async () => null,

@@ -8,6 +8,7 @@
 import { randomBytes } from "node:crypto";
 import { posix } from "node:path";
 import { EXEC_BODY_MAX, EXEC_CHUNK_BYTES, EXEC_DEADLINE_EXIT, shellQuote } from "@wsp/protocol";
+import { GuestUnusableError } from "./errors.js";
 import type { ExecResult, Machine, RunOptions } from "./machine.js";
 
 /** The longest one plain exec may take. The provider cuts any exec still running at about 29 s with a 502
@@ -112,10 +113,14 @@ export async function putFiles(machine: Machine, files: GuestWrite[], opts: PutF
  * after the script's streams are closed, so an exit file always means the streams are complete. */
 function launch(machine: Machine, base: string, script: string): Promise<ExecResult> {
   return putFiles(machine, [{ path: `${base}.sh`, text: script }], {
+    // The script carries whatever the caller put in it, which for a machine's environment is its keys: every file of
+    // a run is unreadable to any other account on the machine from the moment it is made, not chmodded after. The
+    // mask is the run's own; the script runs under the one the shell came with, since what it installs is not this
+    // road's to narrow.
     // exec honours no idempotency key and a launch whose answer was lost is retried; the claim makes the second a no-op.
-    before: [`b=${base}`, `mkdir "$b.d" 2>/dev/null || { echo WSP_LAUNCHED; exit 0; }`],
+    before: ["u=$(umask)", "umask 077", `b=${base}`, `mkdir "$b.d" 2>/dev/null || { echo WSP_LAUNCHED; exit 0; }`],
     after: [
-      `setsid nohup bash -c 'bash "$0.sh" > "$0.out" 2> "$0.err" < /dev/null; echo $? > "$0.exit"' "$b" > /dev/null 2>&1 &`,
+      `setsid nohup bash -c '( umask "$1"; exec bash "$0.sh" ) > "$0.out" 2> "$0.err" < /dev/null; echo $? > "$0.exit"' "$b" "$u" > /dev/null 2>&1 &`,
       'echo $! > "$b.pid"',
       "echo WSP_LAUNCHED",
     ],
@@ -139,8 +144,10 @@ function killCommand(base: string): string {
   return `b=${base}; p=$(cat "$b.pid" 2>/dev/null); if [ -n "$p" ]; then kill -TERM -- "-$p" "$p" 2>/dev/null; sleep 2; kill -KILL -- "-$p" "$p" 2>/dev/null; fi; true`;
 }
 
+/** Everything of one run: its script, its streams, its exit code, its pid, its claim, and the numbered pieces and
+ * append markers a large script left behind. The base is this run's own random name, so the glob reaches no other. */
 function cleanCommand(base: string): string {
-  return `rm -rf ${base}.sh ${base}.out ${base}.err ${base}.exit ${base}.pid ${base}.d`;
+  return `rm -rf ${base}.*`;
 }
 
 interface Poll {
@@ -198,14 +205,21 @@ export async function execDetached(machine: Machine, script: string, opts: RunOp
   const startedAt = Date.now();
   const exec = (cmd: string): Promise<ExecResult> => machine.exec(cmd, { timeoutMs: INLINE_EXEC_MS });
 
-  const launched = await launch(machine, base, script);
+  const quiet = (p: Promise<unknown>): Promise<void> => p.then(() => undefined, () => undefined);
+
+  // A launch that failed may have left the script, or the pieces of one, on the guest: nothing else will come back
+  // for them, and they hold whatever the caller put in the script.
+  const launched = await launch(machine, base, script).catch(async (e: unknown) => {
+    await quiet(exec(cleanCommand(base)));
+    throw e;
+  });
   if (launched.exitCode !== 0 || !launched.stdout.includes("WSP_LAUNCHED")) {
+    await quiet(exec(cleanCommand(base)));
     throw new Error(`launch failed on ${machine.id} (exit ${launched.exitCode}): ${launched.stderr.trim() || launched.stdout.trim()}`);
   }
 
   const out = new LineStream(opts.onLine);
   const err = new LineStream(opts.onLine);
-  const quiet = (p: Promise<unknown>): Promise<void> => p.then(() => undefined, () => undefined);
   const result = (exitCode: number, note?: string): ExecResult => {
     out.flush();
     err.flush();
@@ -231,7 +245,10 @@ export async function execDetached(machine: Machine, script: string, opts: RunOp
     let poll: Poll | undefined;
     try {
       poll = parsePoll((await exec(pollCommand(base, out.offset, err.offset))).stdout);
-    } catch {
+    } catch (e) {
+      // A guest that can no longer run anything will not answer a later poll either: waiting out the deadline
+      // would end in a bare 124 with nothing about whose fault it was.
+      if (e instanceof GuestUnusableError) throw e;
       poll = undefined;
     }
     if (poll === undefined) {

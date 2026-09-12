@@ -108,4 +108,28 @@ describe("a drop with memory near full", () => {
     expect(terminalPaneState({ state: "running", reach: "reachable", socket: "connecting" })).toEqual({ kind: "reconnecting" });
     expect(terminalPaneState({ state: "unreachable", reach: "no-daemon", socket: "dead" })).toEqual({ kind: "reconnecting" });
   });
+
+  it("a refused connection says what happened to this window and that threads keep running, in the ruled words", () => {
+    const reason = "the connection was refused with 403: cross-origin websocket denied";
+    const refused = terminalPaneState({ state: "running", reach: "reachable", socket: "refused", refusal: reason });
+    expect(refused).toEqual({ kind: "refused", reason });
+    // The words are the coordinator's ruling on this ticket, read against the word table of the design spec.
+    expect(terminalPaneTitle(refused)).toBe("The connection to this workspace was refused; its threads keep running");
+    expect(terminalEmptyLine(refused)).toBe(`No terminal opens from this window: ${reason}. The workspace's threads keep running.`);
+    expect(terminalInputRefusal(refused)).toBe("Typing is refused: the connection to this workspace was refused");
+    expect(terminalPaneHints(refused, size, sizes)).toEqual([]);
+    const lines = [terminalPaneTitle(refused)!, terminalEmptyLine(refused)!, terminalInputRefusal(refused)!];
+    // A person never reads machine or daemon, and nothing here says door either: the sentence is about this window.
+    for (const line of lines) expect(line).not.toMatch(/\bmachines?\b|\bdaemons?\b|\bdoors?\b/i);
+    // A connection that was turned away is not one that dropped, so nothing promises it back or offers a wait.
+    for (const line of lines) expect(line).not.toMatch(/reconnect|when it is back|when it does|try again/i);
+    // The work on the workspace is untouched by this window, and the pane says so where a person will read it.
+    expect(terminalPaneTitle(refused)).toContain("threads keep running");
+    expect(terminalEmptyLine(refused)).toContain("threads keep running");
+
+    // Without a sentence from the far side the pane still says what happened rather than falling back to reconnecting.
+    expect(terminalPaneState({ state: "running", reach: "reachable", socket: "refused" })).toEqual({ kind: "refused", reason: "" });
+    // Only a running workspace has a connection to be refused; a paused one says what it is.
+    expect(terminalPaneState({ state: "paused", reach: "napping", socket: "refused", refusal: reason })).toEqual({ kind: "paused", pausing: false });
+  });
 });

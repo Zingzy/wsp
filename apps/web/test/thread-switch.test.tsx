@@ -12,6 +12,7 @@ import { useStore } from "../src/protocol/store.js";
 import { press, typeInto } from "./composer-harness.js";
 import { installFakeLayout } from "./fake-layout.js";
 import { caps } from "./caps.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 const WS = "ws_switch";
 // An hour before the run, not a fixed date: these rows must stay on the idle shelf, and a fixed date walks past the
@@ -60,7 +61,7 @@ function fixtureApi(transcript: SessionEvent[] = [...SETTLED_A, ...RUNNING_B], r
       return { id: "s_x", workspaceId: o.workspaceId, harness: "claude", status: "running" };
     },
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
-    daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
+    daemon: noDaemonApi,
     sessionHistory: async () => [...history],
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     snapshotStorage: async () => null,

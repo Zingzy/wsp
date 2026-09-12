@@ -18,6 +18,7 @@ import { useComposerDraftStore } from "../src/components/chat/composerDraftStore
 import { requestComposerFocus, requestNewThread } from "../src/shell/shellRequests.js";
 import { CHAT_HARNESS, CHAT_STREAM, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
 import { caps } from "./caps.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 let restoreLayout: () => void = () => {};
 beforeAll(() => { restoreLayout = installFakeLayout(); });
@@ -55,7 +56,7 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
   const api: Api = {
     interruptSession: async id => { interrupted.push(id); return "accepted"; },
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
-    daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
+    daemon: noDaemonApi,
     sessionHistory: async id => history[id] ?? [],
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     snapshotStorage: async () => null,

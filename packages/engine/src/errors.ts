@@ -1,4 +1,4 @@
-import { machineUnreachedLine } from "@wsp/protocol";
+import { guestUnusableLine, machineUnreachedLine } from "@wsp/protocol";
 
 export type ErrorKind =
   | "concurrency" | "plan" | "missing" | "conflict"
@@ -42,6 +42,25 @@ export class NotFirstLifeError extends Error {
   ) {
     super(`${action} refused: machine ${machineId} is not first-life (it was resumed); snapshots only come from fresh machines`);
     this.name = "NotFirstLifeError";
+  }
+}
+
+/** Thrown by a backend whose machine the provider reports running while the road every command takes is dead in a
+ * way no wait mends: the guest's shell cannot start, or the provider's agent cannot spawn it. A create that meets it
+ * deletes the machine and fails with it; a wake reads it as a fault and forks the golden again. */
+export class GuestUnusableError extends Error {
+  constructor(
+    readonly machineId: string,
+    provider: string,
+    detail: string,
+    /** The status the provider answered the call with: the reading off a command it ran came on a 200, the one off
+     * its own agent on the status it refused with. A create that ends here has already deleted its machine, and a
+     * caller that keys its creates spends the key on an answer of any kind, so an error without one would send the
+     * same key again and name the machine that is gone. */
+    readonly status: number,
+  ) {
+    super(guestUnusableLine(provider, machineId, detail));
+    this.name = "GuestUnusableError";
   }
 }
 

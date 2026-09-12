@@ -4,7 +4,7 @@
 // real API.
 
 import { describe, expect, it, vi } from "vitest";
-import { MoveUnansweredError, isMissing, type RetryClock } from "../src/errors.js";
+import { GuestUnusableError, MoveUnansweredError, ROAD_TRIES, isMissing, type RetryClock } from "../src/errors.js";
 import { DAEMON_ENV_FILE, DEADLINE_EXIT, INLINE_EXEC_MS } from "../src/exec-detached.js";
 import { EXEC_ENV } from "../src/golden-import.js";
 import {
@@ -12,6 +12,7 @@ import {
   BOX_BASE_TEMPLATE,
   BOX_BUDGETS,
   BOX_CLASSES,
+  BOX_INLINE_MAX_MS,
   BOX_NAME_MAX,
   BOX_PRICING,
   BoxBackend,
@@ -120,6 +121,21 @@ const NAMED = (name: string, status: string, extra: Record<string, unknown> = {}
 /** The script inside one sudo wrapper, its shell quoting undone. */
 const inner = (command: string): string => command.replace(/^sudo -n bash -c '/, "").replace(/'$/, "").replaceAll("'\\''", "'");
 
+/** The text of the file one detached launch puts on the guest: the base64 its own exec carries. */
+const launchedText = (command: string): string => Buffer.from(/printf %s '([A-Za-z0-9+/=]*)'/.exec(inner(command))![1]!, "base64").toString("utf8");
+
+/** The commands endpoint answering as a guest that ran a detached script: the launch confirms, the first poll carries
+ * the exit code and the streams, and the cleanup says nothing. */
+const detachedGuest = (exitCode: number | string = 0, out = "", err = ""): ((seen: Seen) => Reply) => (seen: Seen) => {
+  const { command } = seen.body as { command: string };
+  if (command.includes("WSP_LAUNCHED")) return COMMAND("WSP_LAUNCHED\n");
+  if (command.includes("WSP_POLL")) return COMMAND(`WSP_POLL\n${exitCode}\n${Buffer.from(out).toString("base64")}\n${Buffer.from(err).toString("base64")}\ndown\nWSP_POLL_END\n`);
+  return COMMAND("");
+};
+
+/** Every command the fake was sent, in order. */
+const commandsSent = (api: FakeBox): string[] => api.seen.filter(s => s.path.endsWith("/commands")).map(s => (s.body as { command: string }).command);
+
 /** A clock whose sleeps cost nothing and move its own time. */
 function fakeClock(): RetryClock & { at: number } {
   const clock = {
@@ -190,6 +206,11 @@ describe("BoxBackend declarations", () => {
     expect(boxClassFor({}).type).toBe("small");
   });
 
+  it("an inline command is bounded well under the edge's cut, and above what the detached road's own execs ask for", () => {
+    expect(BOX_INLINE_MAX_MS).toBeGreaterThan(INLINE_EXEC_MS);
+    expect(BOX_INLINE_MAX_MS).toBeLessThan(70_000);
+  });
+
   it("declares its lifecycle: one wake attempt, two minutes for the daemon, no asking again, a backstop the runtime pushes", () => {
     const { backend } = backendOn(new FakeBox());
     expect(backend.lifecycle.budgets).toBe(BOX_BUDGETS);
@@ -249,7 +270,7 @@ describe("BoxBackend against a fake Box API", () => {
     const api = new FakeBox()
       .on("POST", "/boxes", { status: 202, body: { ok: true, type: "box.created", status: "provisioning", ttlSeconds: 7200, box: BOX("bx_tumrjngm", "provisioning") } })
       .on("GET", "/boxes/bx_tumrjngm", INFO("bx_tumrjngm", "provisioning", { name: "wsp;o=h_1a2b3c4d" }), INFO("bx_tumrjngm", "ready", { name: "wsp;o=h_1a2b3c4d" }))
-      .on("POST", "/boxes/bx_tumrjngm/commands", COMMAND(""));
+      .on("POST", "/boxes/bx_tumrjngm/commands", detachedGuest());
     const { backend } = backendOn(api);
     const machine = await backend.create({
       kind: "sandbox",
@@ -266,19 +287,20 @@ describe("BoxBackend against a fake Box API", () => {
     const create = api.took("POST", "/boxes")!;
     expect(create.body).toEqual({ type: "small", ttlSeconds: TRIAL_TTL_S, noEnv: true, name: "wsp;o=h_1a2b3c4d" });
     expect(create.headers["idempotency-key"]).toBe("wsp-golden-default-1");
-    // The environment lands where root's services read it: the systemd drop-in and the running manager.
-    const landed = api.took("POST", "/boxes/bx_tumrjngm/commands")!.body as { command: string };
-    expect(landed.command).toBe(sudoCommand(envLandingScript({ IS_SANDBOX: "1", ANTHROPIC_API_KEY: "sk-ant-x" })));
-    expect(inner(landed.command)).toContain(`cat > '${DAEMON_ENV_FILE}'`);
-    expect(inner(landed.command)).toContain('ANTHROPIC_API_KEY="sk-ant-x"');
-    expect(api.calls()).toEqual(["GET /limits", "POST /boxes", "GET /boxes/bx_tumrjngm", "GET /boxes/bx_tumrjngm", "POST /boxes/bx_tumrjngm/commands"]);
+    // The environment lands where root's services read it, carried onto the guest as the launched script's own file.
+    const landed = launchedText(commandsSent(api).find(c => c.includes("WSP_LAUNCHED"))!);
+    expect(landed).toBe(envLandingScript({ IS_SANDBOX: "1", ANTHROPIC_API_KEY: "sk-ant-x" }));
+    expect(landed).toContain(`cat > '${DAEMON_ENV_FILE}'`);
+    expect(landed).toContain('ANTHROPIC_API_KEY="sk-ant-x"');
+    expect(api.calls()).toEqual(["GET /limits", "POST /boxes", "GET /boxes/bx_tumrjngm", "GET /boxes/bx_tumrjngm", ...Array<string>(4).fill("POST /boxes/bx_tumrjngm/commands")]);
   });
 
   it("creates from a named snapshot with `from`, sets the name the provider replaced with the snapshot's, and off the trial asks no auto-stop", async () => {
     const api = new FakeBox()
       .on("POST", "/boxes", { status: 202, body: { ok: true, type: "box.created", status: "provisioning", ttlSeconds: null, from: "wsp-mac-default-v1", box: BOX("bx_uwepudz7", "provisioned", { name: "wsp-mac-default-v1" }) } })
       .on("GET", "/boxes/bx_uwepudz7", INFO("bx_uwepudz7", "cloning", { name: "wsp-mac-default-v1" }), INFO("bx_uwepudz7", "idle", { name: "wsp-mac-default-v1" }))
-      .on("PATCH", "/boxes/bx_uwepudz7", INFO("bx_uwepudz7", "idle", { name: "wsp;o=h_1" }));
+      .on("PATCH", "/boxes/bx_uwepudz7", INFO("bx_uwepudz7", "idle", { name: "wsp;o=h_1" }))
+      .on("POST", "/boxes/bx_uwepudz7/commands", COMMAND(""));
     const { backend } = backendOn(api, "standard");
     const machine = await backend.create({ kind: "sandbox", template: "wsp-mac-default-v1", cpu: 4, memMb: 8192, labels: { [OWNER_LABEL]: "h_1" } });
     expect(machine.id).toBe("bx_uwepudz7");
@@ -298,12 +320,14 @@ describe("BoxBackend against a fake Box API", () => {
   it("the create carries the runtime's idle window as the stop timer: the seconds to it off the trial, the cap on it when shorter", async () => {
     const off = new FakeBox()
       .on("POST", "/boxes", { status: 202, body: { ok: true, status: "provisioning", box: BOX("bx_t1", "provisioning", { name: "wsp" }) } })
-      .on("GET", "/boxes/bx_t1", INFO("bx_t1", "ready", { name: "wsp" }));
+      .on("GET", "/boxes/bx_t1", INFO("bx_t1", "ready", { name: "wsp" }))
+      .on("POST", "/boxes/bx_t1/commands", COMMAND(""));
     await backendOn(off, "standard").backend.create({ kind: "sandbox", onIdle: "pause", idleTimeoutMs: 40 * 60_000 });
     expect(off.took("POST", "/boxes")!.body).toMatchObject({ ttlSeconds: 40 * 60 });
     const trial = new FakeBox()
       .on("POST", "/boxes", { status: 202, body: { ok: true, status: "provisioning", box: BOX("bx_t2", "provisioning", { name: "wsp" }) } })
-      .on("GET", "/boxes/bx_t2", INFO("bx_t2", "ready", { name: "wsp" }));
+      .on("GET", "/boxes/bx_t2", INFO("bx_t2", "ready", { name: "wsp" }))
+      .on("POST", "/boxes/bx_t2/commands", COMMAND(""));
     const { backend } = backendOn(trial);
     await backend.create({ kind: "sandbox", onIdle: "pause", idleTimeoutMs: 6 * 60 * 60_000 });
     expect(trial.took("POST", "/boxes")!.body).toMatchObject({ ttlSeconds: TRIAL_TTL_S });
@@ -314,7 +338,8 @@ describe("BoxBackend against a fake Box API", () => {
   it("a create answered from an earlier key reads replayed, and the envs still land", async () => {
     const api = new FakeBox()
       .on("POST", "/boxes", { status: 202, body: { ok: true, type: "box.created", status: "ready", ttlSeconds: 7200, box: BOX("bx_tumrjngm", "idle", { name: "wsp" }) } })
-      .on("GET", "/boxes/bx_tumrjngm", INFO("bx_tumrjngm", "idle", { name: "wsp" }));
+      .on("GET", "/boxes/bx_tumrjngm", INFO("bx_tumrjngm", "idle", { name: "wsp" }))
+      .on("POST", "/boxes/bx_tumrjngm/commands", COMMAND(""));
     const { backend } = backendOn(api);
     const machine = await backend.create({ kind: "sandbox" });
     expect(machine.replayed).toBe(true);
@@ -334,23 +359,28 @@ describe("BoxBackend against a fake Box API", () => {
     expect(api.calls().filter(c => c.startsWith("DELETE"))).toHaveLength(2);
     // The environment failing to land ends the create the same way: nothing the caller cannot name is left running.
     api.on("GET", "/boxes/bx_e1", INFO("bx_e1", "ready", { name: "wsp" }));
-    api.on("POST", "/boxes/bx_e1/commands", COMMAND("", 1, { stderr: "systemctl: not found" }));
+    api.on("POST", "/boxes/bx_e1/commands", detachedGuest(1, "", "systemctl: not found"));
     await expect(backend.create({ kind: "sandbox", envs: { A: "1" } })).rejects.toThrow(/environment did not land on bx_e1/);
     expect(api.calls().filter(c => c.startsWith("DELETE"))).toHaveLength(3);
   });
 
-  it("a landing of the environment that times out on a box still taking its disk in is asked again, with a minute per try", async () => {
+  it("a landing of the environment runs detached and one that times out on a box still taking its disk in is launched again inside the budget", async () => {
     const api = new FakeBox()
       .on("POST", "/boxes", { status: 202, body: { ok: true, status: "provisioning", box: BOX("bx_l1", "provisioning", { name: "wsp" }) } })
       .on("GET", "/boxes/bx_l1", INFO("bx_l1", "ready", { name: "wsp" }))
-      .on("POST", "/boxes/bx_l1/commands", COMMAND("", null, { timedOut: true, signal: "SIGTERM" }), COMMAND(""));
+      .on("POST", "/boxes/bx_l1/commands", COMMAND(""), detachedGuest(DEADLINE_EXIT), detachedGuest(DEADLINE_EXIT), detachedGuest(DEADLINE_EXIT), detachedGuest());
     const { backend } = backendOn(api);
     const machine = await backend.create({ kind: "sandbox", envs: { A: "1" } });
     expect(machine.id).toBe("bx_l1");
-    const landings = api.seen.filter(s => s.path === "/boxes/bx_l1/commands").map(s => (s.body as { timeoutSeconds: number }).timeoutSeconds);
-    expect(landings).toEqual([60, 60]);
+    // Every command the road sends is an inline exec of its own, none of them near the edge's cut.
+    const asked = api.seen.filter(s => s.path === "/boxes/bx_l1/commands").map(s => (s.body as { timeoutSeconds: number }).timeoutSeconds);
+    expect(new Set(asked)).toEqual(new Set([INLINE_EXEC_MS / 1000]));
+    // The environment script travelled as the launched file's text, and the run that timed out was launched again.
+    const launches = commandsSent(api).filter(c => c.includes("WSP_LAUNCHED"));
+    expect(launches).toHaveLength(2);
+    for (const l of launches) expect(launchedText(l)).toBe(envLandingScript({ A: "1" }));
     // A landing that fails for another reason is the failure at once, and a timeout past the budget too.
-    api.on("POST", "/boxes/bx_l1/commands", COMMAND("", null, { timedOut: true, signal: "SIGTERM" })).on("DELETE", "/boxes/bx_l1", { status: 202, body: { ok: true, operation: { id: "bdop_l" } } });
+    api.on("POST", "/boxes/bx_l1/commands", detachedGuest(DEADLINE_EXIT)).on("DELETE", "/boxes/bx_l1", { status: 202, body: { ok: true, operation: { id: "bdop_l" } } });
     await expect(backend.create({ kind: "sandbox", envs: { A: "1" } })).rejects.toThrow(/environment did not land on bx_l1 \(exit 124\)/);
   });
 
@@ -369,6 +399,30 @@ describe("BoxBackend against a fake Box API", () => {
     const stuck = new FakeBox().on("POST", "/boxes/bx_tumrjngm/commands", { status: 409, body: ERROR(409, "box_restoring", "Box is restoring.") });
     await expect(machineOn(stuck).machine.exec("true")).rejects.toMatchObject({ code: "box_restoring" });
     expect(stuck.calls().length).toBeGreaterThan(5);
+  });
+
+  it("a box that reads ready and answers 502 to its first commands is asked again at the poll pace inside the restore budget, and past it the 502 is the caller's", async () => {
+    const gateway = { status: 502, body: ERROR(502, "bad_gateway", "Bad Gateway") };
+    const api = new FakeBox()
+      .on("POST", "/boxes/bx_tumrjngm/commands", gateway, gateway, gateway, gateway, gateway, COMMAND("up\n"))
+      .on("PUT", "/boxes/bx_tumrjngm/files", gateway, gateway, gateway, gateway, gateway, { status: 200, body: { ok: true } });
+    const { backend, clock } = backendOn(api, "trial", { restoreMs: 10_000 });
+    const machine = new BoxMachine(backend, "bx_tumrjngm", "sandbox");
+    const before = clock.at;
+    expect(await machine.exec("echo up")).toEqual({ exitCode: 0, stdout: "up\n", stderr: "" });
+    expect(api.calls().filter(c => c.endsWith("/commands"))).toHaveLength(6);
+    expect(clock.at - before).toBeGreaterThanOrEqual(10);
+    await machine.putBytes("/tmp/x", new Uint8Array([1]));
+    expect(api.calls().filter(c => c.endsWith("/files"))).toHaveLength(6);
+    // Past the budget the gateway answer is the caller's, in the kind the engine reads it as.
+    const stuck = new FakeBox().on("POST", "/boxes/bx_tumrjngm/commands", gateway);
+    const { backend: stuckBackend } = backendOn(stuck, "trial", { restoreMs: 10_000 });
+    await expect(new BoxMachine(stuckBackend, "bx_tumrjngm", "sandbox").exec("true")).rejects.toMatchObject({ kind: "transient", status: 502 });
+    expect(stuck.calls().filter(c => c.endsWith("/commands")).length).toBeGreaterThan(5);
+    // A refusal that is neither the restore conflicts nor a gateway status is the caller's after one round.
+    const refused = new FakeBox().on("POST", "/boxes/bx_tumrjngm/commands", { status: 400, body: ERROR(400, "invalid_timeout", "timeoutSeconds must be between 1 and 600.") });
+    await expect(machineOn(refused).machine.exec("true")).rejects.toMatchObject({ kind: "unknown", code: "invalid_timeout" });
+    expect(refused.calls().filter(c => c.endsWith("/commands"))).toHaveLength(1);
   });
 
   it("a refusal is the provider's own envelope: the code, the message and the request id, as the engine's kinds", async () => {
@@ -398,7 +452,7 @@ describe("BoxBackend against a fake Box API", () => {
     expect(api.calls()).toEqual(["GET /limits"]);
   });
 
-  it("runs every command as root through sudo under the exec environment, with the timeout in seconds under the cap", async () => {
+  it("runs every command as root through sudo under the exec environment, with the timeout in seconds", async () => {
     const api = new FakeBox().on("POST", "/boxes/bx_tumrjngm/commands", COMMAND("hi\n"), COMMAND("", null, { timedOut: true, signal: "SIGTERM" }), { status: 409, body: ERROR(409, "machine_not_running", "Box machine is not running.") });
     const { machine } = machineOn(api);
     expect(await machine.exec("echo hi")).toEqual({ exitCode: 0, stdout: "hi\n", stderr: "" });
@@ -410,10 +464,105 @@ describe("BoxBackend against a fake Box API", () => {
     expect(sent.command).not.toContain("-lc");
     expect(sent.timeoutSeconds).toBe(INLINE_EXEC_MS / 1000);
     // A command the provider cut off at its timeout reads as a run past its deadline does.
-    expect((await machine.exec("sleep 70", { timeoutMs: 700_000 })).exitCode).toBe(DEADLINE_EXIT);
-    expect((api.seen.at(-1)!.body as { timeoutSeconds: number }).timeoutSeconds).toBe(600);
+    expect((await machine.exec("true", { timeoutMs: BOX_INLINE_MAX_MS })).exitCode).toBe(DEADLINE_EXIT);
+    expect((api.seen.at(-1)!.body as { timeoutSeconds: number }).timeoutSeconds).toBe(BOX_INLINE_MAX_MS / 1000);
     // A box that is not running refuses the command; that is the provider's signal and it is thrown as itself.
     await expect(machine.exec("true")).rejects.toMatchObject({ kind: "conflict", code: "machine_not_running" });
+  });
+
+  it("an exec asked for longer than the edge allows goes through the detached road, and no command sent carries more than the inline cap", async () => {
+    const api = new FakeBox().on("POST", "/boxes/bx_tumrjngm/commands", (seen: Seen) => {
+      const { command, timeoutSeconds } = seen.body as { command: string; timeoutSeconds: number };
+      // The edge cuts a long request itself, whatever the command asked for.
+      if (timeoutSeconds > 30) return { status: 504, body: ERROR(504, "request_timeout", "Request timeout after 69998ms") };
+      if (command.includes("WSP_LAUNCHED")) return COMMAND("WSP_LAUNCHED\n");
+      if (command.includes("WSP_POLL")) return COMMAND(`WSP_POLL\n0\n${Buffer.from("late\n").toString("base64")}\n\ndown\nWSP_POLL_END\n`);
+      return COMMAND("");
+    });
+    const { machine } = machineOn(api);
+    expect(await machine.exec("sleep 100; echo late", { timeoutMs: 300_000 })).toEqual({ exitCode: 0, stdout: "late\n", stderr: "" });
+    const asked = api.seen.filter(s => s.path.endsWith("/commands")).map(s => (s.body as { timeoutSeconds: number }).timeoutSeconds);
+    expect(asked.length).toBeGreaterThan(1);
+    expect(Math.max(...asked)).toBeLessThanOrEqual(BOX_INLINE_MAX_MS / 1000);
+    // The script the caller asked for travelled as the launched file's text, not as one long request.
+    const launch = api.seen.find(s => (s.body as { command?: string }).command?.includes("WSP_LAUNCHED") === true)!;
+    expect(Buffer.from(/printf %s '([A-Za-z0-9+/=]*)'/.exec(inner((launch.body as { command: string }).command))![1]!, "base64").toString()).toBe("sleep 100; echo late");
+    // Nothing is left on the guest: the run cleans up after itself.
+    expect(api.seen.some(s => (s.body as { command?: string }).command?.includes("rm -rf") === true)).toBe(true);
+  });
+
+  it("a command road whose shell dies on the open-file limit is the provider's fault, not a command that failed", async () => {
+    const api = new FakeBox().on("POST", "/boxes/bx_tumrjngm/commands", COMMAND("", 127, { stderr: "bash: error while loading shared libraries: libtinfo.so.6: cannot open shared object file: Error 24\n" }));
+    const { machine } = machineOn(api);
+    const e = await machine.exec("true").catch((err: unknown) => err);
+    expect(e).toBeInstanceOf(GuestUnusableError);
+    expect((e as Error).message).toContain("Box by ASCII left bx_tumrjngm running but nothing on it can run");
+    expect((e as Error).message).toContain("libtinfo.so.6");
+    expect((e as GuestUnusableError).status).toBe(200);
+    // A command of its own that fails, even with a loader error of its own kind, is still a command's exit code.
+    const ordinary = new FakeBox().on("POST", "/boxes/bx_tumrjngm/commands", COMMAND("", 127, { stderr: "bash: nosuchthing: command not found\n" }));
+    expect((await machineOn(ordinary).machine.exec("nosuchthing")).exitCode).toBe(127);
+    // So is a child of the command that hits the same limit: the line is the box's only when what wsp starts died.
+    const child = new FakeBox().on("POST", "/boxes/bx_tumrjngm/commands", COMMAND("", 127, { stderr: "gh: error while loading shared libraries: libssl.so.3: cannot open shared object file: Error 24\n" }));
+    expect((await machineOn(child).machine.exec("gh auth status")).exitCode).toBe(127);
+    // The sudo that wraps every command is wsp's own and runs under the same limit, so it is the box's fault too.
+    const wrapper = new FakeBox().on("POST", "/boxes/bx_tumrjngm/commands", COMMAND("", 127, { stderr: "sudo: error while loading shared libraries: libaudit.so.1: cannot open shared object file: Error 24\n" }));
+    await expect(machineOn(wrapper).machine.exec("true")).rejects.toBeInstanceOf(GuestUnusableError);
+  });
+
+  it("a commands endpoint that answers 500 because its agent could not spawn the shell is the same fault, with the agent's words", async () => {
+    const api = new FakeBox().on("POST", "/boxes/bx_tumrjngm/commands", { status: 500, body: ERROR(500, "internal_error", "undefined is not an object (evaluating 'D.stdout.on')") });
+    const { machine } = machineOn(api);
+    const e = await machine.exec("true").catch((err: unknown) => err);
+    expect(e).toBeInstanceOf(GuestUnusableError);
+    expect((e as Error).message).toBe("Box by ASCII left bx_tumrjngm running but nothing on it can run: undefined is not an object (evaluating 'D.stdout.on')");
+    // The status the provider answered with rides along: a caller that keys its creates spends the key on it.
+    expect((e as GuestUnusableError).status).toBe(500);
+    // Every other refusal of the endpoint keeps its own kind.
+    const busy = new FakeBox().on("POST", "/boxes/bx_tumrjngm/commands", { status: 409, body: ERROR(409, "machine_not_running", "Box machine is not running.") });
+    await expect(machineOn(busy).machine.exec("true")).rejects.toMatchObject({ kind: "conflict", code: "machine_not_running" });
+  });
+
+  it("a create whose box reads ready and then cannot run a command is deleted, and fails with the provider's line", async () => {
+    const api = new FakeBox()
+      .on("POST", "/boxes", { status: 202, body: { ok: true, status: "provisioning", box: BOX("bx_d1", "provisioning", { name: "wsp" }) } })
+      .on("GET", "/boxes/bx_d1", INFO("bx_d1", "ready", { name: "wsp" }))
+      .on("POST", "/boxes/bx_d1/commands", COMMAND("", 127, { stderr: "bash: error while loading shared libraries: libtinfo.so.6: cannot open shared object file: Error 24\n" }))
+      .on("DELETE", "/boxes/bx_d1", { status: 202, body: { ok: true, operation: { id: "bdop_d" } } });
+    const { backend } = backendOn(api);
+    const e = await backend.create({ kind: "sandbox" }).catch((err: unknown) => err);
+    expect(e).toBeInstanceOf(GuestUnusableError);
+    expect((e as Error).message).toContain("Box by ASCII left bx_d1 running but nothing on it can run");
+    expect(api.calls().filter(c => c.startsWith("DELETE"))).toEqual(["DELETE /boxes/bx_d1"]);
+  });
+
+  it("a healthy create proves the road once, after the box reads ready and before the name and the environment", async () => {
+    const api = new FakeBox()
+      .on("POST", "/boxes", { status: 202, body: { ok: true, status: "provisioning", box: BOX("bx_p1", "provisioning", { name: "wsp-mac-default-v1" }) } })
+      .on("GET", "/boxes/bx_p1", INFO("bx_p1", "ready", { name: "wsp-mac-default-v1" }))
+      .on("PATCH", "/boxes/bx_p1", INFO("bx_p1", "ready", { name: "wsp" }))
+      .on("POST", "/boxes/bx_p1/commands", COMMAND(""), detachedGuest());
+    const { backend } = backendOn(api);
+    await backend.create({ kind: "sandbox", fromSnapshot: "wsp-mac-default-v1", envs: { A: "1" } });
+    expect(api.calls()).toEqual([
+      "GET /limits",
+      "POST /boxes",
+      "GET /boxes/bx_p1",
+      "POST /boxes/bx_p1/commands",
+      "PATCH /boxes/bx_p1",
+      "POST /boxes/bx_p1/commands",
+      "POST /boxes/bx_p1/commands",
+      "POST /boxes/bx_p1/commands",
+    ]);
+    expect(commandsSent(api)[0]).toBe(sudoCommand("true"));
+  });
+
+  it("a resume whose box reads ready and then cannot run a command ends the same way, so the wake reads it as a fault", async () => {
+    const api = new FakeBox()
+      .on("POST", "/boxes/bx_tumrjngm/resume", { status: 202, body: { ok: true, status: "resuming", box: BOX("bx_tumrjngm", "provisioned") } })
+      .on("GET", "/boxes/bx_tumrjngm", INFO("bx_tumrjngm", "ready"))
+      .on("POST", "/boxes/bx_tumrjngm/commands", COMMAND("", 127, { stderr: "bash: error while loading shared libraries: libtinfo.so.6: cannot open shared object file: Error 24\n" }));
+    await expect(machineOn(api).machine.resume()).rejects.toBeInstanceOf(GuestUnusableError);
   });
 
   it("the environment script writes the daemon's own file under /etc, one quoted line per variable, and nothing manager-wide", () => {
@@ -492,10 +641,12 @@ describe("BoxBackend against a fake Box API", () => {
   it("resumes with the account's auto-stop and reads the box until ready; one attempt, nothing about the address kept", async () => {
     const api = new FakeBox()
       .on("POST", "/boxes/bx_tumrjngm/resume", { status: 202, body: { ok: true, type: "box.resuming", id: "bx_tumrjngm", status: "resuming", box: BOX("bx_tumrjngm", "provisioned") } })
-      .on("GET", "/boxes/bx_tumrjngm", INFO("bx_tumrjngm", "provisioned"), INFO("bx_tumrjngm", "ready", { ip: "116.203.245.5" }));
+      .on("GET", "/boxes/bx_tumrjngm", INFO("bx_tumrjngm", "provisioned"), INFO("bx_tumrjngm", "ready", { ip: "116.203.245.5" }))
+      .on("POST", "/boxes/bx_tumrjngm/commands", COMMAND(""));
     const { machine } = machineOn(api);
     await machine.resume();
-    expect(api.calls()).toEqual(["GET /limits", "POST /boxes/bx_tumrjngm/resume", "GET /boxes/bx_tumrjngm", "GET /boxes/bx_tumrjngm"]);
+    // The road every command takes is proved once the box reads ready, before the handle is anyone's to use.
+    expect(api.calls()).toEqual(["GET /limits", "POST /boxes/bx_tumrjngm/resume", "GET /boxes/bx_tumrjngm", "GET /boxes/bx_tumrjngm", "POST /boxes/bx_tumrjngm/commands"]);
     expect(api.took("POST", "/boxes/bx_tumrjngm/resume")!.body).toEqual({ ttlSeconds: TRIAL_TTL_S });
     expect(JSON.stringify(machine)).not.toContain("116.203.245.5");
   });
@@ -505,7 +656,8 @@ describe("BoxBackend against a fake Box API", () => {
       .on("POST", "/boxes", { status: 202, body: { ok: true, status: "provisioning", box: BOX("bx_r1", "provisioning", { name: "wsp" }) } })
       .on("GET", "/boxes/bx_r1", INFO("bx_r1", "ready", { name: "wsp" }))
       .on("POST", "/boxes/bx_r1/resume", { status: 202, body: { ok: true, status: "resuming", box: BOX("bx_r1", "provisioned") } })
-      .on("PATCH", "/boxes/bx_r1", INFO("bx_r1", "idle", { name: "wsp" }));
+      .on("PATCH", "/boxes/bx_r1", INFO("bx_r1", "idle", { name: "wsp" }))
+      .on("POST", "/boxes/bx_r1/commands", COMMAND(""));
     const { backend, clock } = backendOn(api, "standard");
     const machine = await backend.create({ kind: "sandbox", onIdle: "pause", idleTimeoutMs: 40 * 60_000 });
     // Hours later, with no arming since the create: the create's window, from now, not the instant that has passed.
@@ -518,7 +670,7 @@ describe("BoxBackend against a fake Box API", () => {
     await machine.resume();
     expect(api.seen.filter(s => s.path === "/boxes/bx_r1/resume").at(-1)!.body).toEqual({ ttlSeconds: 90 * 60 });
     // A handle from get() has nothing on record: the cap, which off the trial is no timer.
-    api.on("POST", "/boxes/bx_r2/resume", { status: 202, body: { ok: true, status: "resuming", box: BOX("bx_r2", "provisioned") } }).on("GET", "/boxes/bx_r2", INFO("bx_r2", "ready"));
+    api.on("POST", "/boxes/bx_r2/resume", { status: 202, body: { ok: true, status: "resuming", box: BOX("bx_r2", "provisioned") } }).on("GET", "/boxes/bx_r2", INFO("bx_r2", "ready")).on("POST", "/boxes/bx_r2/commands", COMMAND(""));
     await new BoxMachine(backend, "bx_r2", "sandbox").resume();
     expect(api.took("POST", "/boxes/bx_r2/resume")!.body).toEqual({ ttlSeconds: null });
   });
@@ -541,6 +693,23 @@ describe("BoxBackend against a fake Box API", () => {
     const waiting = machine.resume(stop.signal);
     stop.abort(new Error("the person stopped waiting"));
     await expect(waiting).rejects.toThrow("the person stopped waiting");
+  });
+
+  it("a resume the caller stopped waiting on ends where the stop was, even while the probe is being refused", async () => {
+    const stop = new AbortController();
+    let refusals = 0;
+    const api = new FakeBox()
+      .on("POST", "/boxes/bx_tumrjngm/resume", { status: 202, body: { ok: true, status: "resuming", box: BOX("bx_tumrjngm", "provisioned") } })
+      .on("GET", "/boxes/bx_tumrjngm", INFO("bx_tumrjngm", "ready"))
+      .on("POST", "/boxes/bx_tumrjngm/commands", () => {
+        if (++refusals === 1) stop.abort(new Error("the person stopped waiting"));
+        return { status: 502, body: ERROR(502, "bad_gateway", "Bad Gateway") };
+      });
+    const { backend } = backendOn(api, "trial", { restoreMs: 10_000 });
+    const machine = new BoxMachine(backend, "bx_tumrjngm", "sandbox");
+    await expect(machine.resume(stop.signal)).rejects.toThrow("the person stopped waiting");
+    // The stop ends the probe's waiting too: no second round of commands goes to a box nobody is waiting for.
+    expect(refusals).toBeLessThanOrEqual(ROAD_TRIES);
   });
 
   it("routes the daemon's port public with no firewall call, since the provider opens its own firewall for a public route and the daemon's token is the gate", async () => {
@@ -857,7 +1026,8 @@ describe("BoxBackend against a fake Box API", () => {
   it("a desktop machine boots the same box with no stream: the desktop stays off until the seam reads it per open", async () => {
     const api = new FakeBox()
       .on("POST", "/boxes", { status: 202, body: { ok: true, status: "provisioning", box: BOX("bx_d1", "provisioning", { name: "wsp" }) } })
-      .on("GET", "/boxes/bx_d1", INFO("bx_d1", "ready", { name: "wsp" }));
+      .on("GET", "/boxes/bx_d1", INFO("bx_d1", "ready", { name: "wsp" }))
+      .on("POST", "/boxes/bx_d1/commands", COMMAND(""));
     const { backend } = backendOn(api);
     const machine = await backend.create({ kind: "desktop" });
     expect(machine.kind).toBe("desktop");
