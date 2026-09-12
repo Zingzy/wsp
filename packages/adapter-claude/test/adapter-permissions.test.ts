@@ -7,8 +7,9 @@
 // running turn moved to another access mode, settled on the CLI's own answer.
 import { describe, expect, it } from "vitest";
 import type { AdapterEvent, ExecStream, ExecStreamFactory } from "@wsp/protocol";
-import { PERMISSION_ALLOW, PERMISSION_DENY } from "@wsp/protocol";
+import { PERMISSION_ALLOW, PERMISSION_DENY, QUESTION_TOOL } from "@wsp/protocol";
 import { createClaudeAdapter } from "../src/adapter.js";
+import { AGENT_A_CALL, AGENT_A_ID, subagentFixtureFrame } from "./subagent-fixture.js";
 
 const SESSION = "6bb3cdb1-97af-4ad0-96ff-35160ba2bd0b";
 const ASK = "d9aa99d3-be4e-4a2b-8766-1b9494cde4f6";
@@ -101,6 +102,32 @@ const settle = async (): Promise<void> => {
   await new Promise(resolve => setTimeout(resolve, 0));
 };
 
+const QUESTION_INPUT = {
+  questions: [
+    {
+      question: "Tabs or spaces?",
+      header: "Indent",
+      options: [
+        { label: "Tabs", description: "Indent with tab characters." },
+        { label: "Spaces", description: "Indent with space characters." },
+      ],
+      multiSelect: false,
+    },
+  ],
+};
+/** The shape measured on the harness's own channel: a question carries requires_user_interaction and is answered by
+ * the input it hands back, never by an allow. */
+const questionAskLine = JSON.stringify({
+  type: "control_request",
+  request_id: ASK,
+  request: { subtype: "can_use_tool", tool_name: QUESTION_TOOL, input: QUESTION_INPUT, tool_use_id: "toolu_q", requires_user_interaction: true },
+});
+
+/** The two frames a prompt raised inside a subagent's run needs, off the recorded fixture rather than typed again:
+ * the binding of the CLI's handle to the launching call, and a can_use_tool naming that handle. */
+const launchFrame = subagentFixtureFrame(e => e["subtype"] === "task_started" && e["tool_use_id"] === AGENT_A_CALL);
+const childAskFrame = subagentFixtureFrame(e => (e["request"] as Record<string, unknown> | undefined)?.["agent_id"] === AGENT_A_ID);
+
 const asks = (events: readonly AdapterEvent[]) => events.filter(e => e.type === "permission.ask");
 const closes = (events: readonly AdapterEvent[]) => events.filter(e => e.type === "permission.close");
 
@@ -126,6 +153,52 @@ describe("a turn that raises a permission prompt", () => {
     expect(await session.answer(ASK, { optionId: PERMISSION_DENY, outcome: "denied", denyMessage: "no" })).toBe("gone");
     expect(io.stdin).toHaveLength(2);
     expect(closes(events)).toHaveLength(1);
+
+    io.push(resultLine);
+    io.end();
+    await session.finished;
+  });
+
+  it("puts a question's own choices on the prompt and sends the pick as the call's answer, with no allow in front", async () => {
+    const { events, session, io } = start();
+    io.push(initLine);
+    io.push(questionAskLine);
+    await settle();
+
+    const ask = asks(events);
+    expect(ask).toHaveLength(1);
+    const options = ask[0]!.type === "permission.ask" ? ask[0]!.ask.options : [];
+    // Two choices, two buttons, and neither an allow nor a deny: there is no consent in a question to give.
+    expect(options.map(o => o.label)).toEqual(["Tabs", "Spaces"]);
+    expect(options.map(o => o.effect)).toEqual(["answer", "answer"]);
+    expect(options.some(o => o.id === PERMISSION_ALLOW || o.id === PERMISSION_DENY)).toBe(false);
+
+    expect(await session.answer(ASK, { optionId: options[1]!.id, outcome: "allowed", denyMessage: "unused" })).toBe("answered");
+    const answer = JSON.parse(io.stdin[1]!);
+    // The harness reads the pick off the input it gets back, keyed by the question's own text.
+    expect(answer.response.response).toMatchObject({ behavior: "allow", updatedInput: { answers: { "Tabs or spaces?": "Spaces" } } });
+    expect(answer.response.response.updatedInput.questions).toEqual(QUESTION_INPUT.questions);
+    expect(answer.response.response.behavior).not.toBe("deny");
+
+    io.push(resultLine);
+    io.end();
+    await session.finished;
+  });
+
+  it("names the subagent a prompt came from by the call that launched it", async () => {
+    const { events, session, io } = start();
+    io.push(initLine);
+    // Both frames come off the recorded fixture: the CLI binds its own handle for a subagent to the launching call
+    // once, in task_started, and a prompt its run raises names only that handle.
+    io.push(launchFrame);
+    io.push(childAskFrame);
+    io.push(askLine);
+    await settle();
+
+    const relayed = asks(events).flatMap(e => (e.type === "permission.ask" ? [e.ask] : []));
+    expect(relayed.map(a => a.parentToolUseId)).toEqual([AGENT_A_CALL, undefined]);
+    // The launch itself is the CLI's own bookkeeping and is no line of the turn's.
+    expect(events.filter(e => e.type === "turn.delta")).toHaveLength(0);
 
     io.push(resultLine);
     io.end();

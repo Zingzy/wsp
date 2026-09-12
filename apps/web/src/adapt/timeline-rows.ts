@@ -151,6 +151,11 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
       continue;
     }
 
+    if (entry.kind === "subagent") {
+      rows.push({ kind: "subagent", id: entry.id, createdAt: entry.createdAt, subagent: entry.subagent });
+      continue;
+    }
+
     const m = entry.message;
     const stillInProgress = m.role === "assistant" && unsettledTurnId !== null && m.turnId === unsettledTurnId;
     const showAssistantMeta = m.role === "assistant" && terminalAssistantIds.has(m.id) && !stillInProgress;
@@ -271,6 +276,8 @@ function entryTurnId(entry: TimelineEntry): string | null {
       return entry.proposedPlan.turnId;
     case "permission":
       return entry.permission.turnId;
+    case "subagent":
+      return entry.subagent.turnId;
     case "work":
       return entry.entry.turnId;
     default: {

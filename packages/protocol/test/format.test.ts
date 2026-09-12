@@ -17,6 +17,15 @@ import {
   permissionPromptWords,
   permissionModeOptionLabel,
   permissionOutcomeLine,
+  QUESTION_TOOL,
+  askedQuestions,
+  questionOptions,
+  questionAnswerInput,
+  pickedOptions,
+  pickedOptionId,
+  internalToolResult,
+  subagentTaskLine,
+  subagentAskerLine,
   noModelsLine,
   type HarnessCatalog,
   MEMORY_NEAR_FULL,
@@ -1587,6 +1596,101 @@ describe("the words a relayed permission prompt shows", () => {
     expect(permissionOutcomeLine("cancelled")).toBe("Cancelled with the turn");
     expect(permissionOutcomeLine("unanswered", deny)).toBe("Nobody answered; denied");
     expect(permissionOutcomeLine("cancelled", mode)).toBe("Cancelled with the turn");
+  });
+
+  it("reads a call that asks the person as the question it is, with one answer per choice and no consent to give", () => {
+    const input = JSON.stringify({
+      questions: [
+        {
+          question: "This working directory is not a repository. What should I do?",
+          header: "Directory",
+          options: [
+            { label: "Clone it", description: "Fetch the remote into this folder." },
+            { label: "Start fresh", description: "Run git init here." },
+            { label: "Stop", description: "Do nothing and wait." },
+          ],
+          multiSelect: false,
+        },
+      ],
+    });
+    const asked = askedQuestions(QUESTION_TOOL, input)!;
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.header).toBe("Directory");
+    expect(asked[0]!.question).toBe("This working directory is not a repository. What should I do?");
+    expect(asked[0]!.multiSelect).toBe(false);
+    expect(asked[0]!.options.map(o => [o.label, o.description])).toEqual([
+      ["Clone it", "Fetch the remote into this folder."],
+      ["Start fresh", "Run git init here."],
+      ["Stop", "Do nothing and wait."],
+    ]);
+    // Three choices, three options on the wire, every one an answer: nothing here offers to allow or refuse a call
+    // that only asks.
+    const options = questionOptions(QUESTION_TOOL, input);
+    expect(options).toHaveLength(3);
+    expect(options.map(o => o.label)).toEqual(["Clone it", "Start fresh", "Stop"]);
+    expect(new Set(options.map(o => o.effect))).toEqual(new Set(["answer"]));
+    expect(options.map(o => o.id)).toEqual([...new Set(options.map(o => o.id))]);
+    // The whole prompt is the question; no raw input is left anywhere on it.
+    const words = permissionPromptWords(QUESTION_TOOL, input);
+    expect(words.questions).toEqual(asked);
+    expect(words.rest).toBe("");
+    expect(words.body).toBeUndefined();
+    expect(words.lead).toBe("This working directory is not a repository. What should I do?");
+    // The call itself reads as the question too: the tool's own name is no word a person knows.
+    expect(toolActivityLine(QUESTION_TOOL, input)).toBe("asked: This working directory is not a repository. What should I do?");
+    expect(toolActivityLine(QUESTION_TOOL, input)).not.toContain(QUESTION_TOOL);
+    // And the transcript's own row for it reads the same way: words a person knows, then the question under them.
+    const facts = toolCallFacts(QUESTION_TOOL, input);
+    expect(facts.title).toBe("Asked you");
+    // The prompt under that row is the question, whole, so the row itself repeats none of it.
+    expect(facts.detail).toBeUndefined();
+    // Every tool a person already knows the word for keeps the harness's own name.
+    expect(toolCallFacts("Bash", JSON.stringify({ command: "ls" })).title).toBeUndefined();
+    for (const raw of ["multiSelect", "questions:", "{", "}"]) expect(words.lead).not.toContain(raw);
+    // Every other kind of call keeps its own words and carries no questions.
+    expect(permissionPromptWords("Bash", JSON.stringify({ command: "ls" })).questions).toBeUndefined();
+    expect(askedQuestions("Bash", JSON.stringify({ command: "ls" }))).toBeUndefined();
+    expect(questionOptions("Bash", JSON.stringify({ command: "ls" }))).toEqual([]);
+  });
+
+  it("turns a pick into the answer the harness reads off the call's own input, one label or the several ticked", () => {
+    const one = JSON.stringify({
+      questions: [{ question: "Tabs or spaces?", header: "Indent", options: [{ label: "Tabs" }, { label: "Spaces" }], multiSelect: false }],
+    });
+    const options = questionOptions(QUESTION_TOOL, one);
+    const spaces = options[1]!.id;
+    expect(questionAnswerInput(QUESTION_TOOL, one, [spaces])).toMatchObject({ answers: { "Tabs or spaces?": "Spaces" } });
+    // The call's own fields ride back with it: the harness matches the answer to the question it asked.
+    expect(questionAnswerInput(QUESTION_TOOL, one, [spaces])!["questions"]).toEqual(JSON.parse(one).questions);
+    // One pick closes one prompt, so a question that takes several answers sends them as one id.
+    const many = JSON.stringify({
+      questions: [{ question: "Which checks?", header: "Checks", options: [{ label: "Types" }, { label: "Tests" }, { label: "Lint" }], multiSelect: true }],
+    });
+    const picks = questionOptions(QUESTION_TOOL, many);
+    const both = pickedOptionId([picks[0]!.id, picks[2]!.id]);
+    expect(pickedOptions(picks, both)!.map(o => o.label)).toEqual(["Types", "Lint"]);
+    expect(questionAnswerInput(QUESTION_TOOL, many, [picks[0]!.id, picks[2]!.id])).toMatchObject({ answers: { "Which checks?": ["Types", "Lint"] } });
+    // A pick naming anything this prompt does not carry names nothing at all.
+    expect(pickedOptions(picks, "q9:o9")).toBeUndefined();
+    expect(pickedOptions(picks, pickedOptionId([picks[0]!.id, "q9:o9"]))).toBeUndefined();
+    // An ordinary prompt's own ids still resolve through the one road every pick takes.
+    const plain = [{ id: "allow", label: "Allow", effect: "allow" as const }];
+    expect(pickedOptions(plain, "allow")!.map(o => o.id)).toEqual(["allow"]);
+    // A closed question says what was picked, since "Allowed" says nothing about an answer.
+    expect(permissionOutcomeLine("allowed", { label: "Types, Lint", effect: "answer" })).toBe("You answered: Types, Lint");
+  });
+
+  it("shows nobody a tool result the harness marked its own note to the agent, and titles a launch by its task", () => {
+    const note = "Async agent launched successfully. (This tool result is internal metadata, never quote or paste any part of it, including the agentId below, into a user-facing reply.)\nagentId: a057760";
+    expect(internalToolResult(note)).toBe(true);
+    expect(toolResultLine(note)).toBeUndefined();
+    // What a person may read is untouched.
+    expect(internalToolResult("acpi\nadduser.conf")).toBe(false);
+    expect(toolResultLine("acpi\nadduser.conf")).toBe("acpi");
+    // The fold's own line says what was launched, off the call that launched it.
+    expect(subagentTaskLine(JSON.stringify({ description: "count alpha files", prompt: "run ls" }))).toBe("count alpha files");
+    expect(subagentTaskLine(JSON.stringify({ prompt: "run ls" }))).toBeUndefined();
+    expect(subagentAskerLine("count alpha files")).toBe("count alpha files asks");
   });
 
   it("has one deny line, the person's own, and it points the agent at no other access mode", () => {

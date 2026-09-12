@@ -92,6 +92,9 @@ export interface PermissionPrompt {
   /** The tool's input as the harness sent it, JSON. */
   readonly input: string;
   readonly detail?: string;
+  /** The subagent whose run raised it, by the call that launched that subagent; absent on the thread's own agent's
+   * prompts. The row sits inside that subagent's fold. */
+  readonly parentToolUseId?: string;
   readonly options: ReadonlyArray<PermissionOption>;
   readonly createdAt: string;
   /** Null while nobody has answered; the outcome the wire recorded once one is closed. */
@@ -100,9 +103,42 @@ export interface PermissionPrompt {
   readonly optionId: string | null;
 }
 
+/** One line a subagent wrote, inside its own fold: its prose, its reasoning, or one tool call with what that call
+ * answered. Flat rather than the parent's own timeline, since a subagent's run is read as a list of what it did. */
+export interface SubagentLine {
+  readonly id: string;
+  readonly createdAt: string;
+  readonly kind: "text" | "thinking" | "tool";
+  readonly label: string;
+  readonly detail?: string;
+  readonly status?: WorkLogToolLifecycleStatus;
+}
+
+/** stopped is a subagent the turn ended under: the harness kills what it started, so a run whose launch never
+ * answered did not finish and did not fail either. */
+export type SubagentState = "running" | "done" | "failed" | "stopped";
+
+/** One subagent an agent launched inside its own turn, as its fold reads it: what it was asked to do, what it has
+ * written so far, what it is waiting on, and how it ended. Every line a subagent writes reaches the thread among
+ * the parent's, keyed by the call that launched it, and this is what that key gathers. */
+export interface SubagentRun {
+  /** The tool call that launched it, which is the only handle the wire gives it. */
+  readonly parentToolUseId: string;
+  readonly turnId: string | null;
+  /** The task's own description, the fold's title; the tool call's line where the call described none. */
+  readonly title: string;
+  readonly lines: ReadonlyArray<SubagentLine>;
+  /** The prompts this subagent's own run raised, open and closed, drawn inside its fold. */
+  readonly prompts: ReadonlyArray<PermissionPrompt>;
+  readonly state: SubagentState;
+  readonly startedAt: string;
+  readonly endedAt: string | null;
+}
+
 export type TimelineEntry =
   | { readonly id: string; readonly kind: "message"; readonly createdAt: string; readonly message: ChatMessage }
   | { readonly id: string; readonly kind: "permission"; readonly createdAt: string; readonly permission: PermissionPrompt }
+  | { readonly id: string; readonly kind: "subagent"; readonly createdAt: string; readonly subagent: SubagentRun }
   | { readonly id: string; readonly kind: "proposed-plan"; readonly createdAt: string; readonly proposedPlan: ProposedPlan }
   | { readonly id: string; readonly kind: "work"; readonly createdAt: string; readonly entry: WorkLogEntry };
 
@@ -176,6 +212,7 @@ export type MessagesTimelineRow =
     }
   | { readonly kind: "proposed-plan"; readonly id: string; readonly createdAt: string; readonly proposedPlan: ProposedPlan }
   | { readonly kind: "permission"; readonly id: string; readonly createdAt: string; readonly permission: PermissionPrompt }
+  | { readonly kind: "subagent"; readonly id: string; readonly createdAt: string; readonly subagent: SubagentRun }
   | { readonly kind: "working"; readonly id: string; readonly createdAt: string | null }
   | { readonly kind: "thinking"; readonly id: string; readonly createdAt: string | null };
 

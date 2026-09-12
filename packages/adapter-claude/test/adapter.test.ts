@@ -7,6 +7,7 @@ import type { AdapterEvent, ExecStream, ExecStreamFactory, TurnResult } from "@w
 import { createClaudeAdapter, type ClaudeSession } from "../src/adapter.js";
 import { CLAUDE_SCREEN_COMMANDS } from "../src/catalog.js";
 import { userMessageLine } from "../src/landmines.js";
+import { AGENT_A_CALL, AGENT_B_CALL, subagentFixtureLines } from "./subagent-fixture.js";
 
 const FIXTURE_SESSION_ID = "e16ed170-8257-4668-879e-fe836341633c";
 
@@ -14,6 +15,7 @@ function fixtureLines(): string[] {
   const raw = readFileSync(new URL("./fixtures/stream-session.jsonl", import.meta.url), "utf8");
   return raw.split("\n").filter((line) => line.trim().length > 0);
 }
+
 
 /** What the guest calls the run every scripted stream stands for. */
 const RUN_HANDLE = "/tmp/wsp-run/ab12";
@@ -271,6 +273,28 @@ describe("ClaudeAdapter over the recorded fixture", () => {
     expect(end.exitCode).toBe(0);
     expect(end.sawResult).toBe(true);
     expect(session.claudeSessionId).toBe(FIXTURE_SESSION_ID);
+  });
+
+  it("stamps every line a subagent wrote with the call that launched it, and leaves the thread's own unstamped", async () => {
+    const exec = scriptedExec(subagentFixtureLines());
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { events, onEvent } = collect();
+    await adapter.start({ prompt: "fan out", onEvent }).finished;
+
+    const deltas = events.filter(e => e.type === "turn.delta");
+    // The parent's own lines carry nothing; a child's carries the call that launched it, and the two children's
+    // identical sentences are told apart by that alone.
+    expect(deltas.map(d => d.parentToolUseId)).toEqual([
+      undefined, undefined, undefined,
+      AGENT_A_CALL, AGENT_B_CALL, AGENT_A_CALL, AGENT_B_CALL, AGENT_B_CALL, AGENT_A_CALL,
+      undefined, undefined,
+    ]);
+    const [saidA, saidB] = [deltas[3], deltas[4]];
+    expect(saidA?.text).toBe(saidB?.text);
+    expect(saidA?.parentToolUseId).not.toBe(saidB?.parentToolUseId);
+    // The frame that binds the CLI's handle for a subagent to its launching call is bookkeeping, not a line of
+    // the turn's: nothing is drawn for it.
+    expect(deltas.some(d => d.text.includes("task_started"))).toBe(false);
   });
 
   it("forwards system/init's slash_commands, permissionMode and agents as harness", async () => {

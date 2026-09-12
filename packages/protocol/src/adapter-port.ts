@@ -27,11 +27,14 @@ export interface PermissionAsk {
   askId: string;
   toolName: string;
   toolUseId?: string;
+  /** The tool call that launched the subagent this prompt came from; absent on the thread's own agent's prompts. */
+  parentToolUseId?: string;
   /** The tool's input as the CLI sent it, JSON, the same text a tool_use delta carries. */
   input: string;
   /** The CLI's own one phrase for the call; absent where it named none. */
   detail?: string;
-  /** Allow and deny always, plus whatever else the CLI suggested for this call. */
+  /** Allow and deny, plus whatever else the CLI suggested for this call; a call that only asks the person something
+   * carries its own answers instead, since there is no consent in it to give. */
   options: readonly PermissionOption[];
 }
 
@@ -52,6 +55,8 @@ export type AdapterEvent =
       toolName?: string;
       toolUseId?: string;
       isError?: boolean;
+      /** The tool call that launched the subagent this line came from; absent on the thread's own agent's lines. */
+      parentToolUseId?: string;
       /** The agent's tool shell folder after this tool_use, present only when the call moved it. */
       cwd?: string;
     }

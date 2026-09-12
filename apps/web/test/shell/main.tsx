@@ -16,7 +16,10 @@
 // whose init announced the CLI's slash commands, its own screens among them;
 // ?local=1&ws=ws_m&perm=1 replays a turn on this computer with one permission
 // prompt answered and one still open, so the relayed prompt row can be laid
-// out and photographed in both states; ?shell=desktop puts a desktop bridge on the page so the workspace
+// out and photographed in both states; ?local=1&ws=ws_m&fold=1 replays one that
+// fanned out to three subagents, one holding a prompt of its own and one
+// launched in the background, so a fold's body can be measured against its
+// header; ?shell=desktop puts a desktop bridge on the page so the workspace
 // switch chord reaches it; ?mac=1 marks the html the way the macOS preload
 // does; ?panel=terminal opens the right panel with a Browser tab and a
 // terminal over a fake daemon wire, the host answering a translucent Ghostty
@@ -306,6 +309,33 @@ const prompting: SessionEvent[] = [
   },
 ];
 
+/** A turn that fanned out to three subagents, so the fold's own geometry can be measured against its header: two
+ * running, one of them holding a prompt, one finished, and one launched in the background whose only answer so far
+ * is the harness's note that it started. */
+const fan = { workspaceId: MAC.id, sessionId: "s_fan", turnId: "turn_fan", threadId: "thr_fan" };
+const LAUNCH_NOTE =
+  "Async agent launched successfully. (This tool result is internal metadata, never quote or paste any part of it, including the agentId below, into a user-facing reply.)\nagentId: a057760";
+const launched = (id: string, description: string): SessionEvent => ({
+  type: "session.delta", ...fan, kind: "tool_use", toolName: "Agent", toolUseId: id,
+  text: JSON.stringify({ description, prompt: "go", subagent_type: "general-purpose" }),
+});
+const folding: SessionEvent[] = [
+  { type: "session.start", ...fan, prompt: "Count the alpha files, read beta's hostname, and watch gamma's disk." },
+  { type: "session.delta", ...fan, kind: "text", text: "Launching all three now." },
+  launched("toolu_a", "count alpha files"),
+  launched("toolu_b", "read beta hostname"),
+  launched("toolu_c", "check gamma disk"),
+  { type: "session.delta", ...fan, kind: "tool_result", toolUseId: "toolu_c", text: LAUNCH_NOTE },
+  { type: "session.delta", ...fan, kind: "text", text: "Reading the listing.", parentToolUseId: "toolu_a" },
+  {
+    type: "session.permission", ...fan, askId: "ask_child", toolName: "Bash", toolUseId: "toolu_a1",
+    parentToolUseId: "toolu_a", input: JSON.stringify({ command: "ls /etc | head -3" }), options: permOptions,
+  },
+  { type: "session.delta", ...fan, kind: "text", text: "Ran hostname.", parentToolUseId: "toolu_b" },
+  { type: "session.delta", ...fan, kind: "tool_result", toolUseId: "toolu_b", text: "dogfood-b1" },
+  { type: "session.delta", ...fan, kind: "text", text: "Root has 28G free.", parentToolUseId: "toolu_c" },
+];
+
 const linger = { workspaceId: "ws_a", sessionId: "s1", turnId: "turn_1", threadId: "thr_linger" };
 const lingering: SessionEvent[] = [
   { type: "session.start", ...linger, prompt: "Start the dev server in the background and reply when it is up." },
@@ -395,7 +425,9 @@ const api: Api = {
     id === MAC.id
       ? params.get("perm") === "1"
         ? prompting
-        : []
+        : params.get("fold") === "1"
+          ? folding
+          : []
       : id !== "ws_a"
         ? []
         : params.get("chat") === "1"

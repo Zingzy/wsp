@@ -191,8 +191,6 @@ function fakeApi(over: { setup?: InitSetup; refuse?: string; key?: KeyAnswer } =
 
 beforeEach(() => {
   useStore.setState({ api: null, capabilities: null, hasGolden: false, initJob: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, sessions: {}, ready: false });
-  // Base UI's checkbox and radio re-dispatch a click as a PointerEvent, which jsdom does not have.
-  vi.stubGlobal("PointerEvent", class extends MouseEvent {});
 });
 afterEach(() => {
   cleanup();
