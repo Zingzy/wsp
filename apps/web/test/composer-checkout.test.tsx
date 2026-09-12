@@ -29,7 +29,16 @@ vi.mock("../src/components/ui/menu.js", () => {
     const own = { className, onClick: () => ctx.set(!ctx.open), ...(props as Record<string, unknown>) };
     return element === undefined ? <button type="button" {...own}>{children}</button> : cloneElement(element, own, children);
   };
-  const MenuPopup = ({ children }: { children: ReactNode }) => (useContext(Ctx).open ? <div role="menu">{children}</div> : null);
+  // Base UI dismisses the popup on an Escape that reaches it, which is the whole of what a field inside one must
+  // not swallow, so the stand-in does the same.
+  const MenuPopup = ({ children }: { children: ReactNode }) => {
+    const ctx = useContext(Ctx);
+    return ctx.open ? (
+      <div role="menu" onKeyDown={e => (e.key === "Escape" ? ctx.set(false) : undefined)}>
+        {children}
+      </div>
+    ) : null;
+  };
   const MenuItem = ({ children, onClick, closeOnClick = true, disabled, ...props }: { children: ReactNode; onClick?: () => void; closeOnClick?: boolean; disabled?: boolean; [key: string]: unknown }) => {
     const ctx = useContext(Ctx);
     return (
@@ -174,6 +183,18 @@ const menuEntry = (path: string) => document.querySelector<HTMLElement>(`[data-c
 const menuPick = (path: string) => document.querySelector<HTMLElement>(`[data-composer-folder-pick="${path}"]`);
 const menuRoots = () =>
   Array.from(document.querySelectorAll<HTMLElement>("[data-composer-folder-root]")).map(el => [el.dataset["composerFolderRoot"], el.getAttribute("aria-checked")]);
+const pathField = () => document.querySelector<HTMLInputElement>('[data-k="folder-path"]');
+const refusalSlot = () => document.querySelector<HTMLElement>('[data-k="folder-path-refusal"]');
+const chooseRow = () => document.querySelector<HTMLElement>("[data-composer-folder-choose]");
+const openPicker = async (at: string) => {
+  fireEvent.click(screen.getByRole("button", { name: `Working folder: ${at}` }));
+  await waitFor(() => expect(pathField()).not.toBeNull());
+};
+const typePath = (path: string) => {
+  const field = pathField()!;
+  fireEvent.change(field, { target: { value: path } });
+  fireEvent.keyDown(field, { key: "Enter" });
+};
 
 describe("composer checkout row", () => {
   it("offers the folder before the first message, names its branch, and starts the session there", async () => {
@@ -475,6 +496,171 @@ describe("composer checkout row", () => {
     await waitFor(() => expect(menuEntry("/root/app")).not.toBeNull());
     expect(menuPick("/root")).not.toBeNull();
     expect(screen.queryByRole("button", { name: "New thread here" })).toBeNull();
+  });
+
+  it("picks a folder pasted into the field on Enter, whatever level the walk is on, and starts the session there", async () => {
+    const wire = fakeWire({ "fs.list": LISTING, "git.status": params => ({ ...STATUS, root: String(params["cwd"]) }) });
+    provideDaemonWire(WS, wire);
+    const { api, started } = fixtureApi();
+    await setup(api);
+    await openPicker("/root");
+    expect(refusalSlot()!.textContent).toBe("");
+
+    typePath("  /root/app/lib  ");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Working folder: /root/app/lib" })).toBeTruthy());
+    // The pick closes the picker, as a pick from a row does.
+    expect(pathField()).toBeNull();
+    expect(root()).toBe("/root/app/lib");
+    expect(wire.calls.filter(([op]) => op === "fs.list").map(([, p]) => p["path"])).toEqual(["/root", "/root/app/lib"]);
+
+    const editor = composerEditor();
+    await typeInto(editor, "work where I pasted");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]).toMatchObject({ prompt: "work where I pasted", cwd: "/root/app/lib" });
+  });
+
+  it("refuses a folder the workspace has not, in the two halves under the field, and moves nothing else", async () => {
+    const wire = fakeWire({ "fs.list": LISTING, "git.status": params => ({ ...STATUS, root: String(params["cwd"]) }) });
+    provideDaemonWire(WS, wire);
+    const { api, started } = fixtureApi();
+    await setup(api);
+    await openPicker("/root");
+    // The slot stands at its two lines before anything is refused, so a refusal arriving moves nothing under it.
+    expect(refusalSlot()!.textContent).toBe("");
+    expect(refusalSlot()!.className.split(" ")).toEqual(expect.arrayContaining(["min-h-9", "font-mono", "text-xs", "text-destructive-foreground"]));
+    expect(pathField()!.getAttribute("aria-invalid")).toBeNull();
+    expect(document.querySelector("[data-refused]")).toBeNull();
+
+    typePath("/root/nope");
+    await waitFor(() => expect(refusalSlot()!.textContent).toBe("No folder there. Check the path, or walk to it below."));
+    expect(refusalSlot()!.querySelector("span")!.className).toContain("text-foreground");
+    expect(pathField()!.getAttribute("aria-invalid")).toBe("true");
+    expect(document.querySelector("[data-refused]")).not.toBeNull();
+    expect(pathField()!.value).toBe("/root/nope");
+    // The picker is still up on the level it was on, the row still names the folder it named, and the panes did not move.
+    expect(menuPick("/root")).not.toBeNull();
+    expect(menuEntry("/root/app")).not.toBeNull();
+    expect(folder()).toBe("/root");
+    expect(root()).toBe("/root");
+
+    const editor = composerEditor();
+    await typeInto(editor, "hello");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]?.cwd).toBeUndefined();
+  });
+
+  it("refuses a path that is not a full one without asking the workspace, and the next edit clears the refusal", async () => {
+    const wire = fakeWire({ "fs.list": LISTING, "git.status": STATUS });
+    provideDaemonWire(WS, wire);
+    await setup(fixtureApi().api);
+    await openPicker("/root");
+
+    typePath("code/spoo");
+    await waitFor(() => expect(refusalSlot()!.textContent).toBe("That is not a full path. Start it with a slash."));
+    expect(wire.calls.filter(([op]) => op === "fs.list").map(([, p]) => p["path"])).toEqual(["/root"]);
+
+    fireEvent.change(pathField()!, { target: { value: "/root/app" } });
+    await waitFor(() => expect(refusalSlot()!.textContent).toBe(""));
+    expect(pathField()!.getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("keeps a slow read's refusal off a path typed after it", async () => {
+    let refuse: (() => void) | undefined;
+    const inner = fakeWire({ "fs.list": LISTING, "git.status": STATUS });
+    const wire: TerminalWire = {
+      request: (op, params = {}) =>
+        op === "fs.list" && params["path"] === "/root/slow"
+          ? new Promise((_ok, no) => {
+              refuse = () => no(Object.assign(new Error("/root/slow does not exist"), { code: "not-found" }));
+            })
+          : inner.request(op, params),
+    };
+    provideDaemonWire(WS, wire);
+    await setup(fixtureApi().api);
+    await openPicker("/root");
+
+    typePath("/root/slow");
+    fireEvent.change(pathField()!, { target: { value: "/root/app" } });
+    await act(async () => {
+      refuse!();
+      await Promise.resolve();
+    });
+    expect(refusalSlot()!.textContent).toBe("");
+    expect(pathField()!.value).toBe("/root/app");
+  });
+
+  it("wears the card field's own size and ghosts a path under the workspace's own home, not a Mac's", async () => {
+    provideDaemonHello(WS, { ...DAEMON_HELLO, root: "/root" });
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
+    await setup(fixtureApi().api);
+    await openPicker("/root");
+    // A workspace whose home is /root must not be told to type a Mac's path.
+    expect(pathField()!.placeholder).toBe("/root/code/project");
+    // The shipped compact size, so the typed path reads at the refusal's 12 px rather than the primitive's 14.
+    expect(pathField()!.className.split(" ")).toEqual(expect.arrayContaining(["text-xs"]));
+    expect(pathField()!.closest("[data-slot=input-control]")!.getAttribute("data-size")).toBe("compact");
+  });
+
+  it("opens the picker again empty: a refusal from last time is not still standing", async () => {
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
+    await setup(fixtureApi().api);
+    await openPicker("/root");
+    typePath("/root/nope");
+    await waitFor(() => expect(refusalSlot()!.textContent).toBe("No folder there. Check the path, or walk to it below."));
+
+    fireEvent.click(screen.getByRole("button", { name: "Working folder: /root" }));
+    await waitFor(() => expect(pathField()).toBeNull());
+    await openPicker("/root");
+    expect(pathField()!.value).toBe("");
+    expect(refusalSlot()!.textContent).toBe("");
+    expect(pathField()!.getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("closes on Escape typed in the field, the one key the field does not keep to itself", async () => {
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
+    await setup(fixtureApi().api);
+    await openPicker("/root");
+
+    fireEvent.change(pathField()!, { target: { value: "/root/app" } });
+    fireEvent.keyDown(pathField()!, { key: "Escape" });
+    await waitFor(() => expect(pathField()).toBeNull());
+    expect(menuPick("/root")).toBeNull();
+    expect(folder()).toBe("/root");
+  });
+
+  it("offers the system chooser only where the shell has one, and lands its folder as a pick", async () => {
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
+    await setup(fixtureApi().api);
+    await openPicker("/root");
+    expect(chooseRow()).toBeNull();
+    cleanup();
+
+    const pickFolder = vi.fn(async () => "/root/app");
+    (window as { wsp?: unknown }).wsp = { pickFolder };
+    try {
+      resetSurfaces();
+      provideDaemonHello(WS, DAEMON_HELLO);
+      provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
+      const { api, started } = fixtureApi();
+      await setup(api);
+      await openPicker("/root");
+      expect(chooseRow()!.textContent).toContain("Choose a folder");
+
+      fireEvent.click(chooseRow()!);
+      await waitFor(() => expect(screen.getByRole("button", { name: "Working folder: /root/app" })).toBeTruthy());
+      expect(pickFolder).toHaveBeenCalledTimes(1);
+      expect(root()).toBe("/root/app");
+
+      const editor = composerEditor();
+      await typeInto(editor, "work in the chosen folder");
+      await press(editor, "Enter");
+      await waitFor(() => expect(started).toHaveLength(1));
+      expect(started[0]).toMatchObject({ cwd: "/root/app" });
+    } finally {
+      delete (window as { wsp?: unknown }).wsp;
+    }
   });
 });
 

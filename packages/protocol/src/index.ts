@@ -2843,6 +2843,7 @@ const DAEMON_CONTENTS = [
   "01030623497a43f044916ca27731dbfa4c92c6b82765a9e9dbd6426d69b1ee4e",
   "a6ae68d8af502a8a5ecf9795ca11ca0b9b12cda2792e45eee3376c7e4d57917b",
   "055dcf11b2a17e8959ab3a6246c2d17f89eb3837c59b31d3a8138c6dc7b6c322",
+  "09e441a435678290871e210158d5f8fef3b43b307c5ec917086a201583c037a5",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -2883,7 +2884,8 @@ const DAEMON_CONTENTS = [
  * all until this. Version 20 takes every option as a flag,
  * one per option, reads its ports, load, processes and pty modes off one /proc root, logs its samplers' starts and
  * stops, and builds a place's report and sweep off the home it is pointed at, so a test suite drives it as a binary
- * and the words and numbers it answers with are the protocol's, held in one fixture set. */
+ * and the words and numbers it answers with are the protocol's, held in one fixture set. Version 21 takes
+ * --runtime-root, where a place's daemon keeps the layers and the workspaces it runs itself. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the daemon's sources, the dependency
@@ -3976,5 +3978,5 @@ export { addressFromHash, appHash, workspaceHash, type AppAddress } from "./app-
 export * from "./app-ports.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";
-export { HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, TURN_TOKEN_ENV } from "./env.js";
+export { FAKE_AS_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, TURN_TOKEN_ENV, WEB_DIR_ENV } from "./env.js";
 export type { AdapterAttachOptions, AdapterEvent, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";

@@ -12,6 +12,11 @@ pub enum WorkspaceKind {
 }
 
 impl WorkspaceKind {
+    /// The kind a word names on the wire, or nothing for a word that is not one.
+    pub fn from_word(word: &str) -> Option<WorkspaceKind> {
+        serde_json::from_value(serde_json::Value::String(word.to_owned())).ok()
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             WorkspaceKind::Cloud => "cloud",

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ASSETS_DIR, ASSET_KINDS, assetDir, assetProof, packedAsset, stageAsset, stagedAsset, workspaceAsset, type AssetKind } from "../src/assets.js";
+import { ASSETS_DIR, ASSET_KINDS, assetDir, assetProof, packedAsset, stageAsset, stagedAsset, webDirFor, workspaceAsset, type AssetKind } from "../src/assets.js";
 
 const KINDS = ASSET_KINDS;
 const made: string[] = [];
@@ -99,5 +99,16 @@ describe("the asset a run reads", () => {
   it("falls back to the workspace package in a checkout", () => {
     const { dist } = packed();
     for (const kind of KINDS) expect(assetDir(kind, dist)).toBe(workspaceAsset(kind));
+  });
+});
+
+describe("the folder a host serves the app out of", () => {
+  it("is the one a harness named, so a lab can serve its own copy of the app", () => {
+    const { dist } = packed();
+    expect(webDirFor({ WSP_WEB_DIR: "/Users/dev/wsp-lab/priya/app" }, dist)).toBe("/Users/dev/wsp-lab/priya/app");
+    // A build landing while a tester drives rewrites the checkout's own dist folder under them; a copy is what
+    // holds one app still for one run.
+    expect(webDirFor({}, dist)).toBe(assetDir("web", dist));
+    expect(webDirFor({ WSP_WEB_DIR: "" }, dist)).toBe(assetDir("web", dist));
   });
 });

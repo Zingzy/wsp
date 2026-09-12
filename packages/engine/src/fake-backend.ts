@@ -54,9 +54,11 @@ const PRICING: BackendPricing = {
 /** Instant everywhere: a wake that never has to ask twice and a daemon that is never waited for. */
 const LIFECYCLE: Lifecycle = { budgets: { wakeAttempts: 1, daemonAnswersMs: 1_000 } };
 
-/** What a road that reaches for the guest is told. One sentence, naming the stand-in and what it is not, the way
- * the no-provider module names itself rather than answering a provider's error. */
-export const FAKE_NO_GUEST = "this provider answers out of memory and holds no guest: nothing runs on its machines";
+/** What a road that reaches for the guest is told. Plain words a person who has never read this code can act on:
+ * every cloud persona in a lab round met the older sentence ("answers out of memory and holds no guest") and read
+ * it as the product's own word salad rather than as a harness saying the machine is not real. It names what this
+ * stand-in is, what it will not do, and that the screen around it is still worth reading. */
+export const FAKE_NO_GUEST = "this is a stand-in provider for testing: its machines are records in memory, so nothing runs on them and nothing can be opened inside them";
 
 const id = (prefix: string): string => `${prefix}_${randomBytes(6).toString("hex")}`;
 

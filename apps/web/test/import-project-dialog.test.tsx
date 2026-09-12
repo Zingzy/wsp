@@ -500,20 +500,42 @@ describe("import project dialog", () => {
     expect(api.importProject).toHaveBeenLastCalledWith({ workspaceId: "ws_a", source: "/var/proj", dest: "/private/var/proj", carry: [], rewrite: [".git/config"], replace: true });
   });
 
-  it("a folder the runtime cannot plan prints its words and leaves the summary empty", async () => {
+  it("a folder the runtime cannot plan is refused under the field, in the app's one folder slot, and leaves the summary empty", async () => {
     const { api } = fakeApi();
     api.planProject.mockRejectedValueOnce(new RequestError("git ls-files failed in /var/proj: not a git repository"));
     useStore.getState().bind(api);
     render(<ImportProjectDialog workspace={workspace} onClose={() => {}} />);
     const root = await dialog();
     const input = within(root).getByLabelText("Folder on this Mac");
+    // The one field the composer's folder picker draws, so the slot stands at its two lines before anything is said.
+    expect(root.querySelector('[data-k="folder-path"]')).toBe(input);
+    expect(value(root, "folder-path-refusal")).toBe("");
     fireEvent.change(input, { target: { value: "/var/proj" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(within(root).getByRole("status").textContent).toBe("Reading the folder.");
-    await waitFor(() => expect(within(root).getByRole("status").textContent).toBe("git ls-files failed in /var/proj: not a git repository"));
-    expect(within(root).getByRole("status").className).toContain("text-destructive-foreground");
+    await waitFor(() => expect(value(root, "folder-path-refusal")).toBe("git ls-files failed in /var/proj: not a git repository. Check the path, or pick another folder."));
+    expect(root.querySelector('[data-k="folder-path-refusal"]')!.className).toContain("text-destructive-foreground");
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(within(root).getByRole("status").textContent).toBe("");
     expect(value(root, "files")).toBe("");
     expect((within(root).getByRole("button", { name: "Import" }) as HTMLButtonElement).disabled).toBe(true);
+
+    // Editing the path away drops the refusal with the plan it was about.
+    fireEvent.change(input, { target: { value: "/var/other" } });
+    expect(value(root, "folder-path-refusal")).toBe("");
+    expect(input.getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("refuses a path that is not a full one without asking the runtime, in the same words the composer's picker uses", async () => {
+    const { api } = fakeApi();
+    useStore.getState().bind(api);
+    render(<ImportProjectDialog workspace={workspace} onClose={() => {}} />);
+    const root = await dialog();
+    const input = within(root).getByLabelText("Folder on this Mac");
+    fireEvent.change(input, { target: { value: "code/spoo" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(value(root, "folder-path-refusal")).toBe("That is not a full path. Start it with a slash."));
+    expect(api.planProject).not.toHaveBeenCalled();
   });
 
   it("with the desktop bridge the folder is a picker row, no typed field: the key opens the system picker, the path it returns reads in mono and the key becomes Change", async () => {

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { threadId } from "./fixture-state.mjs";
 import { indexMarkdown, readSurfaces, selectorFor, shotName, shotPlan, stepFor } from "./plan.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -15,6 +16,12 @@ describe("a click or wait word", () => {
 
   it("keeps a value with a colon in it whole", () => {
     expect(selectorFor("row-id=thread:th_redirect")).toBe('[data-row-id="thread:th_redirect"]');
+  });
+
+  it("names a fixture's thread by the word that fixture calls it, since the id itself is a minted UUID", () => {
+    expect(stepFor("row-id=thread:redirect", [1440])).toEqual({ click: `[data-row-id="thread:${threadId("redirect")}"]` });
+    // A word that is not a thread is left whole, the way a workspace's row is.
+    expect(stepFor("row-id=ws:ws_api", [1440])).toEqual({ click: '[data-row-id="ws:ws_api"]' });
   });
 
   it("escapes a quote rather than ending the selector's string", () => {
@@ -37,6 +44,11 @@ describe("a click or wait word", () => {
   it("reads a key: word as a press, kept for a width like any other step", () => {
     expect(stepFor("key:Escape", [1440, 390])).toEqual({ key: "Escape" });
     expect(stepFor("390:key:Escape", [1440, 390])).toEqual({ width: 390, key: "Escape" });
+  });
+
+  it("reads a type: word as typing into whatever the step before it focused", () => {
+    expect(stepFor("type:/does/not/exist", [1440, 390])).toEqual({ type: "/does/not/exist" });
+    expect(stepFor("390:type:/tmp", [1440, 390])).toEqual({ width: 390, type: "/tmp" });
   });
 
   it("refuses a width the list never shoots, which would silently never run", () => {
@@ -134,6 +146,8 @@ describe("the surfaces list this repo ships", () => {
       "threads-across-workspaces",
       "opener-transcript",
       "host-asleep",
+      "composer-folder",
+      "composer-folder-refused",
       "settings-where",
       "add-computer",
       "settings-image-fresh",

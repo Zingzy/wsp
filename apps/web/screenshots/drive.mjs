@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Hands for a tester: one browser command at a time, against a lab. Every run
-// opens the session's own Chromium profile, does the one thing it was asked,
-// says what changed on the page and exits, so a tester with no memory of the
-// last command still carries on from where it left them.
+// attaches to the session's own window, does the one thing it was asked, says
+// what changed on the page and lets go, so a tester with no memory of the last
+// command carries on from exactly where it left them.
 //
 //   node drive.mjs <session> goto <url>
 //   node drive.mjs <session> click "<visible text>" | click attr=<name>
@@ -11,6 +11,7 @@
 //   node drive.mjs <session> text
 //   node drive.mjs <session> shot <file.png> [--width <px>]
 //   node drive.mjs <session> wait "<visible text>" [ms]
+//   node drive.mjs <session> quit
 //   ... then <verb> ...   several of the above in one browser life
 //
 // A wait is for words the page has not said yet, and the draft a tester typed,
@@ -18,28 +19,28 @@
 // transcript are not the page saying anything: a wait on a word out of the task
 // just sent returns when the answer holds it, not when the echo does.
 //
-// The profile holds the cookies and the local storage, which is where the app
-// keeps the workspace a person picked and the shape of their window; the page
-// itself does not survive, since the browser is closed at the end of every
-// command, so the address is written down beside the profile and opened again
-// at the start of the next one. What that costs is the state a page holds in
-// memory alone: a menu left open closes between two commands, the way it would
-// if the tester had reloaded the tab. So a command takes as many steps as a
-// tester needs to keep: `click "New workspace" then shot new.png` opens the
-// dialog and photographs it before the browser goes. Four screens were lost
-// that way, each a menu or a dialog that closed before its own shot.
+// The browser stays up between commands. It is started once, detached, with a
+// debugging port of its own written down beside the session's profile, and
+// every later command attaches to that same window and leaves it running; the
+// page, and with it a menu, a dialog or a picker left open, is there for the
+// next command the way it would be for a person who never closed the tab.
+// Nine screens were lost in one round to a browser that closed at the end of
+// every command, each of them a menu or a dialog that went before its own
+// shot, and the testers who lost them had chained no steps. Steps still chain
+// with the word then, which is what keeps one screen through a whole sequence.
+// `quit` closes the window, by the pid the command that started it wrote down;
+// nothing else closes it, so a session left open outlives the lab it drove.
 //
-// This file stands where the browser vendor's own MCP server was planned, which
-// would have held that page open between commands. The reason is whose computer
-// this runs on: attaching that server to a tester's thread means editing the
-// owner's MCP configuration on their Mac, and no tester touches that. Steps in
-// one command are what stands in its place.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+// Attaching rather than launching through the driver is what keeps the window
+// alive: a browser the driver started goes when the process that started it
+// does, whatever is left unclosed.
+import { spawn } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { BROWSER_ARGS } from "./host.mjs";
+import { BROWSER_ARGS, freePort, sleep } from "./host.mjs";
 import { selectorFor } from "./plan.mjs";
 import { NOT_READY_LINE, PROMPT_ECHOES, whenReady } from "./ready.mjs";
 
@@ -50,6 +51,7 @@ const USAGE = `usage: node drive.mjs <session> goto <url>
        node drive.mjs <session> text
        node drive.mjs <session> shot <file.png> [--width <px>]
        node drive.mjs <session> wait "<visible text>" [ms]   (never the words you typed coming back)
+       node drive.mjs <session> quit   (closes this session's window)
 
        steps join with the word then, and run in one browser life:
        node drive.mjs <session> click "New workspace" then shot new-workspace.png`;
@@ -57,10 +59,13 @@ const USAGE = `usage: node drive.mjs <session> goto <url>
 const NAME = /^[a-z0-9][a-z0-9-]*$/;
 /** The window every session opens at: a laptop's, which is what the app lays out for by default. */
 const SIZE = { width: 1280, height: 800 };
-/** After an action, before the page is read: long enough for the app's own transition, which the stylesheet runs
- * on colours and on the panels' width. */
-const SETTLE_MS = 500;
+/** After an action, before the page is read: long enough for the app's own transitions to land. Half a second
+ * photographed a panel picker mid-open, its heading drawn behind its own cards, a frame no state of the app has,
+ * and a reviewer spent a round deciding whether it was a layout fault. */
+const SETTLE_MS = 1_200;
 const WAIT_MS = 15_000;
+/** How long a window started by this command is given to open its debugging port before the command gives up. */
+const BROWSER_UP_MS = 20_000;
 
 function die(why) {
   console.error(`${why}\n\n${USAGE}`);
@@ -69,6 +74,78 @@ function die(why) {
 
 const sessionDir = session => join(tmpdir(), `wsp-drive-${session}`);
 const seenPath = session => join(sessionDir(session), "seen.json");
+const windowPath = session => join(sessionDir(session), "window.json");
+
+/** The window this session is holding open, as the command that started it wrote it down: the port it listens for
+ * a driver on and the pid it runs as. Nothing when this session has no window, which is its first command and
+ * every command after a quit. */
+function heldWindow(session) {
+  try {
+    return JSON.parse(readFileSync(windowPath(session), "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether that window is still there to attach to. Its own port is the question, not its pid: a pid answers for
+ * as long as the process exists, and a browser shutting down is one that no longer takes a driver. */
+const answering = async port => fetch(`http://127.0.0.1:${port}/json/version`).then(r => r.ok, () => false);
+
+/** Starts the session's window and leaves it running, with the profile this session has always used. Detached and
+ * unreferenced on purpose: the window outlives the command that started it, which is the whole of holding a page
+ * between two commands, and the pid is written down so the only window anything here stops is this one. */
+async function openWindow(session) {
+  const dir = sessionDir(session);
+  const port = await freePort();
+  const child = spawn(
+    chromium.executablePath(),
+    [
+      `--remote-debugging-port=${port}`,
+      `--user-data-dir=${join(dir, "profile")}`,
+      `--window-size=${SIZE.width},${SIZE.height}`,
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--force-prefers-reduced-motion",
+      ...BROWSER_ARGS,
+      "about:blank",
+    ],
+    { detached: true, stdio: "ignore" },
+  );
+  child.unref();
+  const deadline = Date.now() + BROWSER_UP_MS;
+  while (Date.now() < deadline) {
+    if (await answering(port)) {
+      writeFileSync(windowPath(session), `${JSON.stringify({ port, pid: child.pid }, null, 2)}\n`);
+      return { port, pid: child.pid, fresh: true };
+    }
+    await sleep(200);
+  }
+  child.kill("SIGTERM");
+  throw new Error(`this session's browser did not open a driver port in ${BROWSER_UP_MS / 1000} s`);
+}
+
+/** The window to drive: the one this session left open, else a new one. `fresh` says which, since a command whose
+ * first step is a key press has nothing focused to press into on a window that has just opened. */
+async function windowFor(session) {
+  const held = heldWindow(session);
+  if (held !== undefined && (await answering(held.port))) return { ...held, fresh: false };
+  return openWindow(session);
+}
+
+/** Closes the window this session wrote down, by the pid it wrote down and nothing else: several sessions and
+ * several people's own browsers run on this computer, and a window found by name or by port is as likely to be
+ * somebody else's. */
+function closeWindow(session) {
+  const held = heldWindow(session);
+  rmSync(windowPath(session), { force: true });
+  if (held?.pid === undefined) return "this session had no window open";
+  try {
+    process.kill(held.pid, "SIGTERM");
+  } catch {
+    return `this session's window (pid ${held.pid}) had already gone`;
+  }
+  return `closed this session's window (pid ${held.pid})`;
+}
 
 /** What the last command left: the address the page was at, the window it was read at, and the text it read, which
  * is what the next command's answer is a difference from. */
@@ -84,7 +161,23 @@ function readSeen(session) {
  * alone is also something a page says, and a tester writes what they would say out loud. It breaks a command only
  * where a verb follows it, so `click then` still clicks the word a menu shows. */
 const STEP_BREAK = "then";
-const VERBS = ["goto", "click", "type", "press", "text", "shot", "wait"];
+const VERBS = ["goto", "click", "type", "press", "text", "shot", "wait", "quit"];
+
+/** The field a key press lands in, when an earlier step of the same command typed into one: the browser leaves the
+ * focus where the last click or fill put it, but a page that redrew between two steps takes it back, and the
+ * composer's editor is focused by the app only on a thread that has never run. Two testers pressed Enter into a
+ * composer holding their own words and watched nothing happen. Nothing when no earlier step typed. */
+export function typedField(steps, at) {
+  for (let i = at - 1; i >= 0; i -= 1) {
+    if (steps[i].verb === "type") return steps[i].words[0];
+    if (steps[i].verb === "goto") return undefined;
+  }
+  return undefined;
+}
+
+/** What a press is told when it is the first step on a window that has only just opened: nothing on the page is
+ * focused yet, so the key would go nowhere and read as the app ignoring it. */
+export const PRESS_NEEDS_FOCUS = "a key press needs something focused, and this window has only just opened: click or type first, or chain the press onto that step with then";
 
 /** One step's verb and words, from the words between two breaks. */
 function oneStep(words) {
@@ -272,7 +365,7 @@ const missed = word => {
   process.exit(1);
 };
 
-async function act({ verb, words, width }, page) {
+async function act({ verb, words, width, focus }, page) {
   switch (verb) {
     case "goto": {
       const url = words[0];
@@ -293,12 +386,19 @@ async function act({ verb, words, width }, page) {
       if (word === undefined || said === undefined) die("type takes the field's words and then what to type into it");
       const found = await findField(page, word);
       if (found === undefined) missed(word);
-      await found.fill(said, { timeout: WAIT_MS });
-      return {};
+      // The element itself, taken before it is filled, not the words it was found by: a composer holding a draft
+      // no longer reads the prompt it was empty under, so the same words looked up after the fill find nothing,
+      // and a key press meant for that field would land wherever the page left the focus.
+      const field = await found.elementHandle({ timeout: WAIT_MS });
+      await field.fill(said, { timeout: WAIT_MS });
+      return { field };
     }
     case "press": {
       const key = words[0];
       if (key === undefined) die("press takes the key, as Enter, Escape or Control+K");
+      // Into the field this command typed into, where it typed into one: the key belongs to those words, and a
+      // redraw between the two steps would otherwise have taken the focus off them.
+      if (focus !== null && focus !== undefined) await focus.focus();
       await page.keyboard.press(key);
       return {};
     }
@@ -342,13 +442,33 @@ async function steady(page, warn) {
   if (!(await whenReady(page, WAIT_MS))) warn();
 }
 
+/** The window this session drives at, in the size the command asked for or the one it was last read at. A window
+ * held open keeps whatever size it has, so the size is put to the page itself rather than to a context that was
+ * made one command ago. */
+async function sized(page, width) {
+  await page.setViewportSize({ width, height: SIZE.height }).catch(async () => {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Emulation.setDeviceMetricsOverride", { width, height: SIZE.height, deviceScaleFactor: 1, mobile: false });
+    await cdp.detach();
+  });
+}
+
 async function main() {
   const { session, steps } = parseArgs(process.argv.slice(2));
-  const seen = readSeen(session);
   const dir = sessionDir(session);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  if (steps[0].verb === "quit" && steps.length === 1) {
+    console.log(closeWindow(session));
+    return;
+  }
+  const seen = readSeen(session);
   const width = steps.find(step => step.width !== undefined)?.width ?? seen.width ?? SIZE.width;
-  const context = await chromium.launchPersistentContext(join(dir, "profile"), { viewport: { width, height: SIZE.height }, args: BROWSER_ARGS, reducedMotion: "reduce" });
+  const held = await windowFor(session);
+  if (steps[0].verb === "press" && held.fresh) {
+    console.error(PRESS_NEEDS_FOCUS);
+    process.exit(1);
+  }
+  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${held.port}`);
   let told = false;
   const warn = () => {
     if (told) return;
@@ -356,21 +476,32 @@ async function main() {
     console.error(NOT_READY_LINE);
   };
   try {
+    const context = browser.contexts()[0] ?? (await browser.newContext());
     const page = context.pages()[0] ?? (await context.newPage());
-    // The browser closed at the end of the last command, so the page is blank: the address it was left at is
-    // opened again before anything is done to it, and the profile carries what the app remembered.
-    if (steps[0].verb !== "goto" && seen.url !== undefined && page.url() !== seen.url) await open(page, seen.url);
+    await sized(page, width);
+    // The window this session left open is still on the page it was left on, so nothing is reopened: a menu, a
+    // dialog or a picker left open by the last command is there for this one. A window that has only just opened
+    // is blank, and the address the session was last at is opened on it.
+    if (steps[0].verb !== "goto" && seen.url !== undefined && held.fresh) await open(page, seen.url);
     if (steps[0].verb !== "goto" && seen.url === undefined) {
       console.error("this session has not been anywhere yet; start it with goto <url>");
       process.exit(1);
     }
     let url = seen.url;
     let before = seen.text;
-    for (const step of steps) {
+    /** The field the last type step of this command filled, which a press after it lands in. */
+    let typed;
+    for (const [at, step] of steps.entries()) {
+      if (step.verb === "quit") {
+        console.error("quit closes the window, so it stands alone rather than after then");
+        process.exit(1);
+      }
       // Not before a goto, which opens its own address: the page a command starts on is blank, and this app is not
       // on it yet to say anything about itself.
       if (step.verb !== "goto") await steady(page, warn);
-      const done = await act(step, page);
+      const focus = step.verb === "press" && typedField(steps, at) !== undefined ? typed : undefined;
+      const done = await act({ ...step, ...(focus === undefined ? {} : { focus }) }, page);
+      typed = done.field ?? typed;
       url = done.url ?? url;
       await steady(page, warn);
       await page.waitForTimeout(SETTLE_MS);
@@ -386,7 +517,8 @@ async function main() {
       before = read.text;
     }
   } finally {
-    await context.close();
+    // The connection goes; the window stays, which is what the next command attaches to.
+    await browser.close();
   }
 }
 
