@@ -142,7 +142,7 @@ pub(crate) async fn serve(tcp: TcpStream, ctx: Arc<Ctx>) {
             Message::Close(_) => break,
             _ => continue,
         };
-        if ws.send(Message::text(ops::handle(&conn, &raw))).await.is_err() {
+        if ws.send(Message::text(ops::handle(&conn, &ctx, &raw).await)).await.is_err() {
             break;
         }
     }
