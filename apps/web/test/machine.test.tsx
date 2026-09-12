@@ -44,7 +44,7 @@ const view = (id: string, name: string, phase: WorkspacePhase = "running"): Work
   machineId: `m_${id}_0123456789abcdef`,
   phase,
   golden: "snap_golden01",
-  createdAt: "2026-08-30T09:00:00Z",
+  createdAt: new Date(2026, 7, 30, 9, 0).toISOString(),
 });
 
 const status = statusOf;
@@ -95,7 +95,7 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
     importProject: vi.fn(async () => ({ dest: "/root/proj", files: 1, bytes: 20, parts: 1, cut: [], rewritten: [], agents: [] })),
     listProjectGoldens: vi.fn<() => Promise<ProjectGolden[]>>(async () => projects),
     snapshotWorkspace: vi.fn<(id: string) => Promise<ProjectGolden>>(async id => {
-      const taken = pg("snap_taken", "snap_golden-v12", { workspaceId: id, createdAt: "2026-09-07T08:00:00.000Z" });
+      const taken = pg(`snap_taken-${projects.length + 1}`, "snap_golden-v12", { workspaceId: id, createdAt: new Date(Date.now() + projects.length).toISOString() });
       projects = [...projects, taken];
       return taken;
     }),
@@ -176,7 +176,7 @@ const gv = (n: number) => ({
   snapshotId: `snap_golden-v${n}`,
   baseTemplate: "base",
   setupSha: `sha${n}`,
-  createdAt: `2026-08-${10 + n}T00:00:00.000Z`,
+  createdAt: new Date(2026, 7, 10 + n, 0, 0).toISOString(),
   smoke: { cmd: "true", exitCode: 0 },
 });
 const twoVersions: SnapshotLineage = { name: "default", head: 12, versions: [gv(11), gv(12)] };
@@ -190,7 +190,7 @@ const pg = (snapshotId: string, golden: string, over: Partial<ProjectGolden> = {
   version: Number(golden.slice(-2)),
   workspaceId: "ws_a",
   workspaceName: "api",
-  createdAt: "2026-09-06T10:06:00.000Z",
+  createdAt: new Date(2026, 8, 6, 11, 6).toISOString(),
   ...over,
 });
 
@@ -471,7 +471,7 @@ describe("lineage", () => {
   it("renders live disk and the image it started from while no image was ever sealed", async () => {
     await mount([view("ws_a", "api")]);
     expect(screen.getByText("Live disk")).toBeDefined();
-    expect(screen.getByText("created 2026-08-30")).toBeDefined();
+    expect(screen.getByText("created Aug 30 09:00")).toBeDefined();
     await waitFor(() => expect(fact("golden")).toBe("Image"));
   });
 
@@ -484,7 +484,7 @@ describe("lineage", () => {
     const word = document.querySelector("[data-mark='head']")!;
     expect(word.className).toContain("font-mono");
     expect(word.className).toContain("text-muted-foreground");
-    expect(screen.getByText("built 2026-08-22")).toBeDefined();
+    expect(screen.getByText("built Aug 22 00:00")).toBeDefined();
     const rows = [...document.querySelectorAll("[data-k^='v1']")].map(el => el.getAttribute("data-k"));
     expect(rows).toEqual(["v12", "v11"]);
     expect(screen.getByRole("button", { name: "roll back to v11" })).toBeDefined();
@@ -807,7 +807,7 @@ describe("a workspace behind the golden's head", () => {
 });
 
 describe("project goldens in the lineage", () => {
-  const goldens = [pg("snap_p1", "snap_golden-v12"), pg("snap_p2", "snap_golden-v12", { createdAt: "2026-09-06T11:00:00.000Z", workspaceName: "task-a", workspaceId: "ws_b" }), pg("snap_p3", "snap_golden-v11")];
+  const goldens = [pg("snap_p1", "snap_golden-v12"), pg("snap_p2", "snap_golden-v12", { createdAt: new Date(2026, 8, 6, 12, 0).toISOString(), workspaceName: "task-a", workspaceId: "ws_b" }), pg("snap_p3", "snap_golden-v11")];
   const rowsUnder = (version: string): string[] => [...document.querySelectorAll(`[data-k='${version}']`)[0]!.closest("li")!.querySelectorAll("[data-k^='pg-']")].map(el => el.getAttribute("data-k")!);
 
   it("lists each project golden under the version it stands on, newest first, marks the one this workspace forks from, and a fork creates a workspace from its snapshot", async () => {
@@ -817,9 +817,14 @@ describe("project goldens in the lineage", () => {
     expect(marks("v12")).toEqual([HEAD, VOLATILE]);
     expect(marks("pg-snap_p2")).toEqual([THIS_ONE]);
     expect(marks("pg-snap_p1")).toEqual([]);
-    expect(screen.getByText("snapshot 2026-09-06 · imported 2026-09-06 · from task-a")).toBeDefined();
+    // The row is stamped by the take alone: the project's import date sat here and read as the row's own, so two
+    // takes minutes apart read as one old row twice.
+    expect(screen.getByText("snapshot Sep 6 12:00 · from task-a")).toBeDefined();
     // What is on the disk is the projects section's to list; the lineage row says when the fork was made and no more.
-    expect(screen.getByText("created 2026-08-30")).toBeDefined();
+    // Every row of this list spells a stamp the one way, the disk it stands on and the versions above it included.
+    expect(screen.getByText("created Aug 30 09:00")).toBeDefined();
+    expect(screen.getByText("built Aug 22 00:00")).toBeDefined();
+    expect(screen.getAllByRole("button", { name: /^new workspace from the image of/ })[0]!.textContent).toBe("New workspace from this");
     fireEvent.click(screen.getByRole("button", { name: "new workspace from the image of proj taken on api, v12" }));
     // The name a person reads on the row it makes: a copy of the project, never the verb under it.
     await waitFor(() => // A fork of a project golden names no computer: it goes where the image it carries already stands.
@@ -844,15 +849,22 @@ describe("project goldens in the lineage", () => {
     expect(button.closest("section")!.textContent).toContain("Projects");
     fireEvent.click(button);
     await waitFor(() => expect(api.snapshotWorkspace).toHaveBeenCalledWith("ws_a"));
-    await waitFor(() => expect(rowsUnder("v12")).toEqual(["pg-snap_taken"]));
-    // The golden taken here is known here, so the list is not read again for it.
-    expect(api.listProjectGoldens).toHaveBeenCalledTimes(1);
-    expect(fact("projects-note")).toBe("Image of proj taken. New workspaces from it start with the projects in place.");
+    await waitFor(() => expect(rowsUnder("v12")).toEqual(["pg-snap_taken-1"]));
+    // What the host holds, read again on its answer: a list this tab appended to by itself showed the row while the
+    // count and the money beside it stood still.
+    await waitFor(() => expect(api.listProjectGoldens).toHaveBeenCalledTimes(2));
+    // The row the take added is stamped at the take, so it reads as the new thing it is.
+    expect(screen.getByText(/^snapshot today \d\d:\d\d · from api$/)).toBeDefined();
+    expect(fact("projects-note")).toBe("Image of proj taken. New workspace from this starts with the projects in place.");
+
+    fireEvent.click(button);
+    await waitFor(() => expect(rowsUnder("v12")).toEqual(["pg-snap_taken-2", "pg-snap_taken-1"]));
+    expect(api.listProjectGoldens).toHaveBeenCalledTimes(3);
 
     api.snapshotWorkspace.mockRejectedValueOnce(new Error("snapshot of api refused: machine m1 is not first-life (it was resumed); snapshots only come from fresh machines"));
     fireEvent.click(button);
     await waitFor(() => expect(fact("projects-note")).toBe("snapshot of api refused: machine m1 is not first-life (it was resumed); snapshots only come from fresh machines"));
-    expect(rowsUnder("v12")).toEqual(["pg-snap_taken"]);
+    expect(rowsUnder("v12")).toEqual(["pg-snap_taken-2", "pg-snap_taken-1"]);
   });
 });
 
