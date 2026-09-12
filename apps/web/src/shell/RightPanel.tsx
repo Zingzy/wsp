@@ -5,6 +5,7 @@
 // surfaces mount the Ghostty drawer in panel mode over the workspace's daemon
 // link. Files, file and diff share one diff worker pool so switching between
 // them keeps the highlighter warm.
+import { kindWords, workspaceKind } from "@wsp/protocol";
 import { useEffect, useMemo, type ReactNode } from "react";
 import { useWorkspacePorts } from "../browser/model.js";
 import { previewTabSnapshots, useBrowserTabs, useWorkspaceBrowserTabs } from "../browser/tabs.js";
@@ -26,6 +27,8 @@ import { openPanelTerminal } from "./shellCommands.js";
 import { useTerminalSurfaces, WorkspaceTerminalPanel } from "../components/WorkspaceTerminalPanel.js";
 
 const NO_PENDING: ReadonlySet<string> = new Set();
+/** The kind the card's sentence reads before a workspace is selected, when the card is greyed out anyway. */
+const LOCAL_UNTIL_KNOWN = { kind: "local" } as const;
 /** index.html pins the dark theme; the code views take it as a prop. */
 const THEME = "dark";
 
@@ -83,6 +86,7 @@ export function RightPanel({
       diffAvailable={workspace?.phase === "running"}
       filesAvailable={workspace?.phase === "running"}
       machineAvailable={workspace !== null}
+      machinePanelWords={kindWords(workspaceKind(workspace ?? LOCAL_UNTIL_KNOWN)).panel}
       processesAvailable={workspace?.phase === "running"}
       screenAvailable={status?.screen !== undefined}
     >

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The machine surface of the right panel: facts, the projects on the machine
 // with the import and the snapshot that images them, live utilisation, spend,
-// lineage with rollback, pause, wake, upgrade, rebuild and forget for one
-// workspace's machine. Pause, wake, rebuild, forget, import and copy id read
-// the workspace registry; the tab keeps its own confirmations for the two
+// the image's versions with rollback, pause, wake, resize, rebuild and forget
+// for one workspace's machine. Pause, wake, rebuild, forget, import and copy
+// id read the workspace registry; the tab keeps its own confirmations for the two
 // that ask. A button is offered only where its verb can run and its
 // capability is there; the panel ends where its content ends, with no
 // sentence explaining what is not on it.
@@ -14,7 +14,7 @@ import { CLIENT_CANNOT_REBUILD } from "../../actions/format.js";
 import { actionById, resolveActions, rowLabelOf } from "../../actions/registry.js";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { workspaceActions, workspaceTarget } from "../../actions/workspaceActions.js";
-import { FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, LINEAGE_MARKS, NOT_ON_THIS_KIND, agentsLine, behindGoldenLine, biggerSizeLine, diskTone, fmtBytes, fmtBytesOfTotal, fmtRate, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageKeptLine, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, resizesMachines, servesReading, sizeWord, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspaceProjects, workspaceState, workspaceStateOf, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SizeTone, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, LINEAGE_MARKS, NOT_ON_THIS_KIND, agentsLine, behindGoldenLine, biggerSizeLine, diskTone, fmtBytes, fmtBytesOfTotal, fmtRate, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageKeptLine, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, resizesMachines, servesReading, sizeWord, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspaceProjects, workspaceState, workspaceStateOf, workspaceWord, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SizeTone, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { isDesktopShell } from "../../lib/desktopShell.js";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, useOutOfMemoryReading, useWorkspaceLive } from "../../machine/live.js";
@@ -33,15 +33,7 @@ import { Button, WARN_BUTTON } from "../ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty.js";
 import { ForgetWorkspaceDialog } from "../ForgetWorkspaceDialog.js";
 import { ScrollArea } from "../ui/scroll-area.js";
-import {
-  divergentMachineState,
-  durationLabel,
-  idleLabel,
-  money,
-  percentLabel,
-  phaseLabel,
-  reachLabel,
-} from "./format.js";
+import { idleLabel, money, percentLabel } from "./format.js";
 import { TONE_TEXT } from "../../lib/tone.js";
 import { THIS_COMPUTER_WORD } from "../../settings/places.js";
 import { whereRuns } from "../../sidebar/workspaceRows.js";
@@ -69,7 +61,6 @@ export function MachineSurface({ workspaceId }: { workspaceId: string }) {
 function Surface({ workspace, series }: { workspace: WorkspaceView; series: WorkspaceCostEvent[] }) {
   const status = useStatus(workspace.id);
   const upgrade = useUpgrade(workspace.id);
-  const last = series[series.length - 1];
   const pendingSize = upgrade.phase.kind === "resizing" || upgrade.phase.kind === "settling" ? upgrade.phase.size : null;
   // A machine wsp neither forks nor pays for has no spend to chart, nothing to nap and no image behind it; its rows
   // say what it is instead.
@@ -79,7 +70,7 @@ function Surface({ workspace, series }: { workspace: WorkspaceView; series: Work
     <div className="flex h-full min-h-0 flex-col">
       <Header workspace={workspace} status={status} />
       <ScrollArea className="min-h-0 flex-1">
-        <Facts workspace={workspace} status={status} awakeMs={last ? last.awakeMs : null} pendingSize={pendingSize} kind={kind} />
+        <Facts workspace={workspace} status={status} pendingSize={pendingSize} kind={kind} />
         <Projects workspace={workspace} status={status} kind={kind} onTaken={goldens.add} />
         <Live workspace={workspace} />
         {kind.driven && <Usage workspace={workspace} status={status} series={series} />}
@@ -143,20 +134,21 @@ function Row({ label, k, title, children }: { label: string; k: string; title?: 
 interface FactsProps {
   workspace: WorkspaceView;
   status: WorkspaceStatus | null;
-  awakeMs: number | null;
-  /** Painted while an upgrade is in flight, before a status carries the new size. */
+  /** Painted while a resize is in flight, before a status carries the new size. */
   pendingSize: WorkspaceSize | null;
   kind: WorkspaceKindWords;
 }
 
-/** State, reach and size for every machine; awake time and the nap for one wsp drives; for one that already existed,
- * what it costs (nothing), the system it runs, how long it has been up and the folder its commands start in. */
-function Facts({ workspace, status, awakeMs, pendingSize, kind }: FactsProps) {
+/** State and size for every machine; the nap for one wsp drives; for one that already existed, what it costs
+ * (nothing), the system it runs, how long it has been up and the folder its commands start in. */
+function Facts({ workspace, status, pendingSize, kind }: FactsProps) {
   const capabilities = useCapabilities();
   const places = useStore(s => s.places);
   const now = useClock(status?.idleAt !== undefined);
-  const diverged = status ? divergentMachineState(workspace.phase, status.machineState) : null;
   const zombie = status?.reach.state === "zombie";
+  // Reach is not a row of its own: the protocol folds a machine that stopped answering into the state word, which
+  // is the word every other surface shows for it.
+  const stateWord = workspaceWord(workspaceStateOf(workspace, status));
   const rebuild = needsRebuild({ phase: workspace.phase, machineState: status?.machineState, reach: status?.reach.state, wakeRefused: workspace.wakeRefused });
   // The full reading of the ask the host is on; the sidebar row reads the same two numbers in the words its slot holds.
   const wakeAskLine = status?.wakeAsk === undefined ? null : wakeAskingAgainLine(status.wakeAsk.ask, status.wakeAsk.of);
@@ -172,21 +164,11 @@ function Facts({ workspace, status, awakeMs, pendingSize, kind }: FactsProps) {
   return (
     <Section label="Workspace">
       <div className="mt-1 divide-y divide-border/40">
-        <Row label="State" k="state" title={diverged ? `${phaseLabel(workspace.phase)} · computer ${diverged}` : phaseLabel(workspace.phase)}>
-          {phaseLabel(workspace.phase)}
-          {diverged && <span className="text-muted-foreground"> · computer {diverged}</span>}
+        <Row label="State" k="state" title={stateWord}>
+          <span className={cn(zombie && "text-destructive-foreground")}>{stateWord}</span>
         </Row>
         <Row label="Where" k="where" title={where}>
           {where}
-        </Row>
-        <Row label="Reach" k="reach" title={status ? reachLabel(status.reach.state, workspaceKind(workspace)) : "pending"}>
-          {status ? (
-            <span className={cn(zombie && "text-destructive-foreground")} data-reach={status.reach.state}>
-              {reachLabel(status.reach.state, workspaceKind(workspace))}
-            </span>
-          ) : (
-            "pending"
-          )}
         </Row>
         <Row label="Size" k="size" title={pendingSize ? `${fmtSize(pendingSize)} · resizing` : status ? fmtSize(status.size, kind.cpu) : "pending"}>
           {pendingSize ? (
@@ -202,9 +184,6 @@ function Facts({ workspace, status, awakeMs, pendingSize, kind }: FactsProps) {
         </Row>
         {kind.driven ? (
           <>
-            <Row label="Awake" k="awake">
-              {awakeMs === null ? "pending" : durationLabel(awakeMs)}
-            </Row>
             <Row label="Auto-nap" k="idle">
               {idleLabel(billing ? status?.idleAt : undefined, now)}
             </Row>
@@ -271,9 +250,9 @@ function Facts({ workspace, status, awakeMs, pendingSize, kind }: FactsProps) {
   );
 }
 
-/** Every project golden this host took, read once for the tab: the lineage lists them under their versions and the
- * projects section adds the one it takes, so the two never read two lists. Read only where a lineage draws, since a
- * machine with no image behind it neither lists goldens nor takes one. */
+/** Every project image this host took, read once for the tab: the Versions section lists them under their versions and the
+ * projects section adds the one it takes, so the two never read two lists. Read only where the versions draw, since a
+ * machine with no image behind it neither lists images nor takes one. */
 function useProjectGoldens(wanted: boolean): { list: ProjectGolden[]; add: (taken: ProjectGolden) => void } {
   const api = useStore(s => s.api);
   const [list, setList] = useState<ProjectGolden[]>([]);
@@ -296,7 +275,7 @@ function useProjectGoldens(wanted: boolean): { list: ProjectGolden[]; add: (take
 /** The projects on the machine, oldest import first, one mono row each: the name, the folder it landed at, its size
  * where the import measured one and the day it landed. Under them the two roads that change the list: the import
  * the row's menu offers, through the registry so it is refused where that is, and the snapshot that images the disk
- * with every project on it, offered only where the Lineage section draws: a machine with an image behind it. */
+ * with every project on it, offered only where the Versions section draws: a machine with an image behind it. */
 function Projects({ workspace, status, kind, onTaken }: { workspace: WorkspaceView; status: WorkspaceStatus | null; kind: WorkspaceKindWords; onTaken: (taken: ProjectGolden) => void }) {
   const api = useStore(s => s.api);
   const verbs = useWorkspaceVerbs();
@@ -311,7 +290,7 @@ function Projects({ workspace, status, kind, onTaken }: { workspace: WorkspaceVi
     try {
       const taken = await api.snapshotWorkspace(workspace.id);
       onTaken(taken);
-      setNote(`Project golden of ${taken.projects.map(p => p.name).join(", ")} taken. New workspaces from it start with the projects in place.`);
+      setNote(`Image of ${taken.projects.map(p => p.name).join(", ")} taken. New workspaces from it start with the projects in place.`);
     } catch (e) {
       setNote(errorText(e));
     } finally {
@@ -349,7 +328,7 @@ function Projects({ workspace, status, kind, onTaken }: { workspace: WorkspaceVi
           Import a folder
         </Button>
         {images && (
-          <Button size="xs" variant="outline" disabled={busy || projects.length === 0 || workspace.phase !== "running"} aria-label={`snapshot ${workspace.name} as a project golden`} onClick={() => void snapshot()}>
+          <Button size="xs" variant="outline" disabled={busy || projects.length === 0 || workspace.phase !== "running"} aria-label={`snapshot ${workspace.name} as an image`} onClick={() => void snapshot()}>
             Snapshot as image
           </Button>
         )}
@@ -400,7 +379,7 @@ function Rebuild({ workspace, status }: { workspace: WorkspaceView; status: Work
     setNote(null);
     try {
       await api.rebuild(workspace.id);
-      setNote("Workspace rebuilt from the golden.");
+      setNote("Workspace rebuilt from your image.");
     } catch (e) {
       setNote(errorText(e));
     } finally {
@@ -423,8 +402,8 @@ function Rebuild({ workspace, status }: { workspace: WorkspaceView; status: Work
           <AlertDialogHeader>
             <AlertDialogTitle>Rebuild {workspace.name}?</AlertDialogTitle>
             <AlertDialogDescription>
-              A fresh copy of the golden replaces this workspace's computer and imports its nap-time vault. The old one is stopped
-              whatever it reports; anything running on it ends. Starting a new one costs a wake.
+              A fresh copy of your image replaces this workspace's computer and brings back what was saved before its last nap.
+              The old one is stopped whatever it reports; anything running on it ends. Starting a new one costs a wake.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -663,7 +642,7 @@ function GoldenLineage({ workspace, projects }: { workspace: WorkspaceView; proj
   });
   const offered = api?.updateImage !== undefined;
   return (
-    <Section label="Lineage" aside={lineage?.head !== null && lineage?.head !== undefined ? `head v${lineage.head}` : undefined}>
+    <Section label="Versions" aside={lineage?.head !== null && lineage?.head !== undefined ? `newest v${lineage.head}` : undefined}>
       <ul className={cn("mt-1 divide-y divide-border/40", LINEAGE_GRID)}>
         <LineageRow
           dot={workspace.phase === "running" ? "bg-success" : "border border-muted-foreground/60"}
@@ -675,11 +654,11 @@ function GoldenLineage({ workspace, projects }: { workspace: WorkspaceView; proj
           <LineageRow
             dot="bg-muted-foreground/60"
             title={
-              <span className="truncate font-mono text-[.7rem]" data-k="golden">
-                {workspace.golden}
+              <span className="truncate font-mono" data-k="golden">
+                Image
               </span>
             }
-            detail="golden base"
+            detail="the image this workspace started from"
             below={under(workspace.golden)}
           />
         ) : (
@@ -748,8 +727,8 @@ function GoldenLineage({ workspace, projects }: { workspace: WorkspaceView; proj
           <AlertDialogHeader>
             <AlertDialogTitle>Roll back to v{armed?.version}?</AlertDialogTitle>
             <AlertDialogDescription>
-              New workspaces use v{armed?.version}; head moves from v{lineage?.head} to v{armed?.version}. Workspaces already made
-              keep their image.
+              New workspaces use v{armed?.version}; the newest moves from v{lineage?.head} to v{armed?.version}. Workspaces already
+              made keep their image.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -762,12 +741,12 @@ function GoldenLineage({ workspace, projects }: { workspace: WorkspaceView; proj
   );
 }
 
-/** The lineage list's columns: dot, title, marks, buttons. The list owns the grid and every row, nested lists included,
+/** The version list's columns: dot, title, marks, buttons. The list owns the grid and every row, nested lists included,
  * is a subgrid of it, so the marks sit in one column and the buttons in the next across the whole section. */
 const LINEAGE_GRID = "grid grid-cols-[0.375rem_minmax(0,1fr)_auto_auto] gap-x-2";
 const LINEAGE_SUBGRID = "col-span-4 grid grid-cols-subgrid";
 
-/** One row of the lineage grid at a button's height, so a wrapping detail or an appearing button moves nothing; a
+/** One row of the version grid at a button's height, so a wrapping detail or an appearing button moves nothing; a
  * nested row keeps the columns and indents its dot and title. */
 function LineageRow({ dot, title, detail, marks = [], aside, below, nested = false }: { dot: string; title: ReactNode; detail: string; marks?: readonly LineageMark[]; aside?: ReactNode; below?: ReactNode; nested?: boolean }) {
   return (
@@ -786,7 +765,7 @@ function LineageRow({ dot, title, detail, marks = [], aside, below, nested = fal
   );
 }
 
-/** One state word on a lineage row, muted mono like the row's other metadata: a state is text there, never a badge. */
+/** One state word on a version row, muted mono like the row's other metadata: a state is text there, never a badge. */
 function Mark({ kind }: { kind: LineageMark }) {
   return (
     <span className="font-mono text-muted-foreground" data-mark={kind}>
@@ -795,13 +774,13 @@ function Mark({ kind }: { kind: LineageMark }) {
   );
 }
 
-/** The project goldens taken on forks of one version, newest first: the version's disk plus every project as it stood,
- * each a fork away from a task with no upload. */
+/** The project images taken on forks of one version, newest first: the version's disk plus every project as it stood,
+ * each a copy away from a task with no upload. */
 function ProjectGoldens({ goldens, forkOf, busy, onFork }: { goldens: ProjectGolden[]; forkOf: string; busy: boolean; onFork: (g: ProjectGolden) => void }) {
   if (goldens.length === 0) return null;
   const rows = [...goldens].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return (
-    <ul className={cn(LINEAGE_SUBGRID, "mt-1 divide-y divide-border/40")} aria-label="project goldens">
+    <ul className={cn(LINEAGE_SUBGRID, "mt-1 divide-y divide-border/40")} aria-label="project images">
       {rows.map(g => (
         <LineageRow
           key={g.snapshotId}
@@ -815,7 +794,7 @@ function ProjectGoldens({ goldens, forkOf, busy, onFork }: { goldens: ProjectGol
           detail={`snapshot ${g.createdAt.slice(0, 10)} · imported ${g.projects.at(-1)?.importedAt.slice(0, 10) ?? "never"} · from ${g.workspaceName}`}
           marks={g.snapshotId === forkOf ? ["fork"] : []}
           aside={
-            <Button size="xs" variant="outline" disabled={busy} aria-label={`new workspace ${goldenForkName(g)} from ${g.snapshotId}`} onClick={() => onFork(g)}>
+            <Button size="xs" variant="outline" disabled={busy} aria-label={`new workspace from the image of ${goldenForkName(g)} taken on ${g.workspaceName}, v${g.version}`} onClick={() => onFork(g)}>
               New workspace
             </Button>
           }
@@ -825,7 +804,7 @@ function ProjectGoldens({ goldens, forkOf, busy, onFork }: { goldens: ProjectGol
   );
 }
 
-/** A list under one lineage row, behind a micro-label: what the version is missing, what it left behind, what it
+/** A list under one version row, behind a micro-label: what the version is missing, what it left behind, what it
  * retired. One wrapper so they read as one thing and only their rows differ. */
 function UnderVersion({ label, k, children }: { label: string; k: string; children: ReactNode }) {
   return (
@@ -884,9 +863,9 @@ function LineageNote({ k, label, text }: { k: string; label: string; text: strin
   );
 }
 
-/** Pause or wake, upgrade and forget, for a machine wsp drives; a machine that already existed takes none of them, so
+/** Pause or wake, resize and forget, for a machine wsp drives; a machine that already existed takes none of them, so
  * the tab ends at its facts. Each button is offered only while its verb can run: Pause while the machine bills, Wake
- * while it is paused, nothing while it moves between the two; Upgrade only on a provider that resizes and only while a
+ * while it is paused, nothing while it moves between the two; Resize only on a provider that resizes and only while a
  * bigger size is on offer; Forget once the machine is gone. */
 function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; status: WorkspaceStatus | null; upgrade: Upgrade }) {
   const verbs = useWorkspaceVerbs();
@@ -906,7 +885,7 @@ function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; sta
   const choice = picked ?? options[0] ?? null;
   const rate = status?.rateUsdPerHour ?? null;
   const driven = kindWords(workspaceKind(workspace)).driven;
-  const offersUpgrade = status !== null && !gone && options.length > 0;
+  const offersResize = status !== null && !gone && options.length > 0;
   const note = upgrade.phase.kind === "resizing" ? "Resizing…" : upgrade.phase.kind === "settling" ? "Resized." : null;
 
   const close = (): void => {
@@ -939,9 +918,9 @@ function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; sta
         {phase.buttonWord}
       </Button>
     ) : null,
-    offersUpgrade ? (
-      <Button key="upgrade" size="sm" className="flex-1" disabled={upgrade.phase.kind === "resizing"} aria-label={`upgrade ${workspace.name}`} onClick={() => (open ? close() : setOpen(true))}>
-        Upgrade
+    offersResize ? (
+      <Button key="resize" size="sm" className="flex-1" disabled={upgrade.phase.kind === "resizing"} aria-label={`resize ${workspace.name}`} onClick={() => (open ? close() : setOpen(true))}>
+        Resize
       </Button>
     ) : null,
   ].filter(button => button !== null);

@@ -33,13 +33,14 @@ vi.mock("../src/components/ui/tooltip.js", () => ({
   TooltipPopup: () => null,
 }));
 
-const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running"): WorkspaceView => ({
+const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running", over: Partial<WorkspaceView> = {}): WorkspaceView => ({
   id,
   name,
   machineId: `m_${id}`,
   phase,
   golden: "snap_g",
   createdAt: `2026-09-01T00:0${id.length}:00Z`,
+  ...over,
 });
 
 const session = (id: string, workspaceId: string, prompt: string, over: Partial<SessionView> = {}): SessionView => ({
@@ -111,6 +112,14 @@ const chordOn = (title: string): string | null => {
   return row.querySelector("[data-slot=command-shortcut]")?.textContent ?? null;
 };
 
+/** The meta line under a palette row's title, by that title. */
+const metaOn = (title: string): string | null => {
+  const rows = [...(palette()?.querySelectorAll<HTMLElement>("[data-slot=command-item]") ?? [])];
+  const row = rows.find(candidate => candidate.querySelector("span.truncate")?.textContent === title);
+  if (row === undefined) throw new Error(`no palette row titled ${title}`);
+  return row.querySelector("span.text-muted-foreground\\/70")?.textContent ?? null;
+};
+
 /** The caret asks for one workspace from this call on; one left pending by an earlier test is dropped. */
 const watchComposerFocus = (workspaceId: string): { asks: string[]; off: () => void } => {
   const asks: string[] = [];
@@ -171,6 +180,23 @@ describe("command palette", () => {
     expect(inPalette().getByText("fix the flaky test")).toBeTruthy();
     mod("k");
     await waitFor(() => expect(palette()).toBeNull());
+  });
+
+  it("a workspace row reads its state and where it runs, never the id wsp holds its machine under", async () => {
+    useStore.getState().bind(fakeApi([view("ws_a", "api", "running", { provider: "solari" }), view("ws_b", "worker", "napping")], []));
+    render(
+      <AppShell>
+        <div>center content</div>
+      </AppShell>,
+    );
+    await waitFor(() => expect(useStore.getState().workspaces.length).toBe(2));
+    mod("k");
+    await waitFor(() => expect(palette()).not.toBeNull());
+    // The provider its own record names, and, on a record that names none, what the machine is: a person picks a
+    // workspace by its state and where it runs, and the id the provider minted for the machine names neither.
+    expect(metaOn("api")).toBe("Running · solari · Current workspace");
+    expect(metaOn("worker")).toBe("Paused · a provider");
+    for (const title of ["api", "worker"]) expect(metaOn(title)).not.toMatch(/m_ws_/);
   });
 
   it("carries Add a computer, which opens Settings with the sheet over it", async () => {
@@ -337,9 +363,10 @@ describe("command palette", () => {
     const titles = [...palette()!.querySelectorAll<HTMLElement>("[data-slot=command-item] span.truncate")].map(node => node.textContent);
     expect(titles.filter(title => title === "migration on worker")).toHaveLength(1);
     expect(titles).toContain("run the migration across the fleet");
-    // The workspace it runs on and where that runs, which is what tells it from a thread of the opener's own.
+    // The workspace it runs on and where that runs, which is what tells it from a thread of the opener's own. This
+    // fixture's records name no provider, so where it runs is what the machine is.
     const row = inPalette().getByText("migration on worker").closest<HTMLElement>("[data-slot=command-item]")!;
-    expect(within(row).getByText("worker · m_ws_b")).toBeTruthy();
+    expect(within(row).getByText("worker · a provider")).toBeTruthy();
   });
 
   it("a thread the sidebar has folded into its archive is still found by title and still opens", async () => {

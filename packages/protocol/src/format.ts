@@ -910,9 +910,11 @@ export const NO_SUCH_TURN = "no turn on this host carries that token; only wsp r
 /** What a send meets when its thread's last turn has replied but its agent process is still running (a child it did
  * not wait for, a lingering task): the row still reads running and is not free for a new turn, so the message waits
  * for that process rather than starting a second agent in the same worktree. Not a refusal: it says where the
- * message went, and every door shows it in these words. */
-export function stillWorkingLine(threadId: string): string {
-  return `thread ${threadId.slice(0, 8)} replied, still working; the message runs as its next turn once that process exits`;
+ * message went, and every door shows it in these words. The thread is named by its title where the caller holds
+ * one; a caller without one says nothing, since an id names no thread to the person reading the line. */
+export function stillWorkingLine(title?: string): string {
+  const named = title === undefined || title.trim() === "" ? "This thread" : title.trim();
+  return `${named} replied, still working; the message runs as its next turn once that process exits`;
 }
 
 /** The send key's label while the thread's turn runs: Enter queues, nothing sends. */
@@ -1104,7 +1106,7 @@ export function storeUnreadLine(store: string, why: string): string {
 /** The napping status's line when the nap could not store a fresh vault and the previous one stands: a wake that has
  * to rebuild the machine restores older files than the person left, so they are told at the nap, not at the wake. */
 export function vaultKeptLine(why: string): string {
-  return `nap kept the previous vault; ${why}`;
+  return `the nap kept what was saved before it; ${why}`;
 }
 
 /** The day of a stamp in UTC, which is as far as this fact goes: the vault that stands can be days old, and the
@@ -1198,7 +1200,7 @@ export const BLANK_NAME_REFUSAL = "a workspace name cannot be blank";
 /** The one sentence every machine road answers with on a computer set up with no machine provider key: wsp init took
  * the local road, so this computer is a workspace and there is nothing to fork, pause or seal until a key is here.
  * The provider module a keyless host wires says it, and so does the command line before it asks for anything. */
-export const NO_PROVIDER_LINE = "no machine provider is set up on this computer, so wsp forks no machines here; set SOLARI_API_KEY and run wsp init again to seal a golden";
+export const NO_PROVIDER_LINE = "no machine provider is set up on this computer, so wsp forks no machines here; set SOLARI_API_KEY and run wsp init again to build your image";
 
 /** Where a Solari key comes from, spelled once for the terminal's ask, the modal's guide and its link. */
 export const SOLARI_CONSOLE = "console.getsolari.com";
@@ -2343,9 +2345,12 @@ export function behindGoldenLine(on: number, head: number): string {
   return `on image v${on}, v${head} available`;
 }
 
-/** The states a lineage row can be in, each as the muted mono word the row's marks column shows: state is text there,
- * never a badge, and a missing tool's outcome indexes this table as it is. */
-export const LINEAGE_MARKS = { now: "now", head: "head", fork: "this one", failed: "failed", skipped: "skipped", volatile: "volatile" } as const;
+/** The states a version row can be in, each as the muted mono word the row's marks column shows: state is text there,
+ * never a badge, and a missing tool's outcome indexes this table as it is. The keys are the wire's; the words are
+ * the person's, so a row says what the version is rather than the name the code holds it under. The volatile key's
+ * word says what such a version has behind it, a snapshot at the provider and no durable template, since that is
+ * the whole of what it is and what the provider can drop. */
+export const LINEAGE_MARKS = { now: "now", head: "newest", fork: "this one", failed: "failed", skipped: "skipped", volatile: "snapshot only" } as const;
 export type LineageMark = keyof typeof LINEAGE_MARKS;
 
 /** What is said for each folder git named no branch for, by door: the word the composer's branch slot and the diff
@@ -2415,25 +2420,25 @@ export function templateWaitedLine(templateId: string, status: string, waitedMs:
   return `the template ${templateId} still reads ${status} after ${fmtDuration(waitedMs)}`;
 }
 
-/** The doctor's line per version it made durable: the golden and version, the template it promoted, and when other
+/** The doctor's line per version it made durable: the image and version, the template it promoted, and when other
  * templates already carry the name (another host's, or a run that recorded nothing), how many; none when the count
  * is zero or the listing was not given. */
-export function templateRecordedLine(golden: string, version: number, templateId: string, sharing: number | undefined): string {
-  const head = `golden ${golden} v${version}: template ${templateId} promoted and recorded`;
+export function templateRecordedLine(image: string, version: number, templateId: string, sharing: number | undefined): string {
+  const head = `image ${image} v${version}: template ${templateId} promoted and recorded`;
   return sharing === undefined || sharing === 0 ? head : `${head}; ${sharing} other ${sharing === 1 ? "template carries" : "templates carry"} its name`;
 }
 
 /** The doctor's line per version it could not make durable and why: a lost snapshot in the provider's own words is
  * left to the doctor's rebuild road below it. */
-export function templateSkippedLine(golden: string, version: number, reason: string): string {
-  return `golden ${golden} v${version}: no template recorded, ${reason}`;
+export function templateSkippedLine(image: string, version: number, reason: string): string {
+  return `image ${image} v${version}: no template recorded, ${reason}`;
 }
 
 /** What a version's row says when the provider answers 404 for its snapshot: the vanish the templates exist to outlive. */
 export const SNAPSHOT_GONE_REASON = "its snapshot is gone at the provider";
 
 /** The doctor's line on a backend whose capabilities lack templates: nothing to promote, nothing wrong. */
-export const NO_TEMPLATES_LINE = "this backend has no templates; goldens stay as snapshots";
+export const NO_TEMPLATES_LINE = "this backend has no templates; image versions stay as snapshots";
 
 /** The doctor's line on a backend that cannot list snapshots: nothing to split, nothing to clean. */
 export const NO_SNAPSHOT_LISTING = "this backend lists no snapshots; nothing to split by owner";
@@ -2473,18 +2478,18 @@ export const SEAL_FAILED_BUILDER_GONE_LINE = "Seal failed and the builder is gon
 /** The update's last line when the snapshot of the new version failed and the provider still has the machine it
  * ran on: the golden stands, the machine is as it was, the retry runs on it or the sweep ends it. */
 export function upgradeSealFailedStaysLine(version: number, builderId: string, rateUsdPerHour: number): string {
-  return `Golden v${version} is unchanged. Builder ${builderId} is as it was, up at about $${rateUsdPerHour.toFixed(2)}/hr; run wsp init again to retry, and the sweep stops it once it is six hours old.`;
+  return `Image v${version} is unchanged. Builder ${builderId} is as it was, up at about $${rateUsdPerHour.toFixed(2)}/hr; run wsp init again to retry, and the sweep stops it once it is six hours old.`;
 }
 
 /** The update's last line when the snapshot failed and the provider would not say what became of the machine it
  * ran on: nothing on it was touched, the retry runs on it or the sweep ends it. */
 export function upgradeSealFailedUnreadLine(version: number, builderId: string): string {
-  return `Golden v${version} is unchanged. The provider could not be read about builder ${builderId}, so nothing on it was touched; run wsp init again to retry, and the sweep stops it once it is six hours old.`;
+  return `Image v${version} is unchanged. The provider could not be read about builder ${builderId}, so nothing on it was touched; run wsp init again to retry, and the sweep stops it once it is six hours old.`;
 }
 
 /** The update's last line when the snapshot failed and the provider answers 404 for the machine it ran on. */
 export function upgradeSealFailedGoneLine(version: number): string {
-  return `Golden v${version} is unchanged and the builder is gone: the provider dropped it after refusing the snapshot. Run wsp init again to retry.`;
+  return `Image v${version} is unchanged and the builder is gone: the provider dropped it after refusing the snapshot. Run wsp init again to retry.`;
 }
 
 /** The line under the import dialog's title: which workspace, and that the folder lands at the path it has here. */

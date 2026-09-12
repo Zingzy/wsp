@@ -198,15 +198,15 @@ mod tests {
         })
     }
 
-    fn client() -> (Listener, mpsc::UnboundedReceiver<String>) {
+    fn client() -> (Listener, mpsc::UnboundedReceiver<crate::Outgoing>) {
         let (tx, rx) = mpsc::unbounded_channel();
         (Listener { key: 1, out: Outbound(tx) }, rx)
     }
 
-    fn drain(rx: &mut mpsc::UnboundedReceiver<String>) -> Vec<Value> {
+    fn drain(rx: &mut mpsc::UnboundedReceiver<crate::Outgoing>) -> Vec<Value> {
         let mut out = Vec::new();
         while let Ok(t) = rx.try_recv() {
-            out.push(serde_json::from_str(&t).unwrap());
+            out.push(serde_json::from_str(t.text()).unwrap());
         }
         out
     }

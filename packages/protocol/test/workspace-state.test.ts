@@ -66,7 +66,7 @@ describe("workspaceState", () => {
       "no-agents": "the agents here have not answered yet",
     };
     for (const [kind, words] of Object.entries(blocks)) expect(sendRefusal(kind as SendBlock)).toBe(words);
-    expect(stillWorkingLine("thr_0001")).toBe("thread thr_0001 replied, still working; the message runs as its next turn once that process exits");
+    expect(stillWorkingLine("Fix the port list")).toBe("Fix the port list replied, still working; the message runs as its next turn once that process exits");
   });
 
   it("actionRefusal is the same sentence for any verb that needs the machine, and a send's is it with send", () => {
@@ -165,17 +165,17 @@ describe("what a workspace's kind changes about its words", () => {
   });
 
   it("a machine wsp drives has a state, a bill and an image; this computer has none of the three and its row reads its own size", () => {
-    expect(kindWords("cloud")).toEqual({ machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: null, driven: true, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "same path", agents: true, onDelete: { asked: "machine is deleted at the provider", done: expect.any(Function) } });
+    expect(kindWords("cloud")).toEqual({ machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: "a provider", driven: true, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "same path", agents: true, onDelete: { asked: "machine is deleted at the provider", done: expect.any(Function) }, panel: "Where it runs, its projects and what it costs." });
     // This computer's load is read where it runs, in the host's own process, so its Live rows stand whether or not
     // the daemon its terminal and its processes ride ever started. A folder is
     // already on this computer, so an import registers its path and copies nothing. Its row's second line is its
     // cores and memory in the size line a fork's row reads, in its own word for a cpu, since its cores are not virtual.
-    expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", imports: "registers", importsAt: "same path", agents: false, onDelete: { asked: "machine is left as it is", done: expect.any(Function) } });
+    expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", imports: "registers", importsAt: "same path", agents: false, onDelete: { asked: "machine is left as it is", done: expect.any(Function) }, panel: "What this Mac is running, its projects and how it is doing." });
     // A machine over ssh is the person's own too: wsp neither forks it, pauses it, resizes it nor pays for it. It
     // carries the same daemon a fork does, put there under the person's own login, so it serves the panes, reads
     // its own load off its own /proc and lists its own processes, and a folder is copied onto it the way one is
     // copied onto a fork. Its cpus are cores like this computer's, though its words win over any size today.
-    expect(kindWords("ssh")).toEqual({ machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "under home", agents: false, onDelete: { asked: "daemon, its unit and its login line come off the machine, which is otherwise left as it is", done: expect.any(Function) } });
+    expect(kindWords("ssh")).toEqual({ machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "under home", agents: false, onDelete: { asked: "daemon, its unit and its login line come off the machine, which is otherwise left as it is", done: expect.any(Function) }, panel: "What the computer is running, its projects and how it is doing." });
     // Only the machines wsp forks run agents that could drive this host: this computer answers no request relayed
     // from a machine, and a machine somebody already owns is handed no wsp to drive one with.
     expect(agentsMayDrive("cloud")).toBe(true);
