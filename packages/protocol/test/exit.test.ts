@@ -11,7 +11,7 @@ describe("the exit code every wsp verb answers with", () => {
   });
 
   it("classes an error by the kind stamped on it and never by its words: usage and invalid are usage, auth is auth, everything else is the provider's", () => {
-    expect(exitClassOf(usageRefusal("wsp new takes one name"))).toBe("usage");
+    expect(exitClassOf(usageRefusal("wsp new takes one name.", "usage: wsp new <name>"))).toBe("usage");
     expect(exitClassOf(Object.assign(new Error("2x9 is not a size"), { kind: "invalid" }))).toBe("usage");
     expect(exitClassOf(authRefusal("unauthorized"))).toBe("auth");
     expect(exitClassOf(Object.assign(new Error("unauthorized"), { kind: "auth", status: 401 }))).toBe("auth");
@@ -23,8 +23,8 @@ describe("the exit code every wsp verb answers with", () => {
   });
 
   it("the failure object is the message, the class and the code the class owns, and parses against its own schema", () => {
-    const failure = verbFailure(usageRefusal("wsp forget takes one workspace"));
-    expect(failure).toEqual({ error: "wsp forget takes one workspace", class: "usage", exit: 3 });
+    const failure = verbFailure(usageRefusal("wsp forget takes one workspace.", "usage: wsp forget <workspace>"));
+    expect(failure).toEqual({ error: "wsp forget takes one workspace. usage: wsp forget <workspace>", class: "usage", exit: 3 });
     expect(VerbFailure.parse(failure)).toEqual(failure);
     expect(verbFailure(authRefusal("the host's token file is missing: /x"))).toEqual({ error: "the host's token file is missing: /x", class: "auth", exit: 2 });
     expect(verbFailure(new Error("no workspace nope"))).toEqual({ error: "no workspace nope", class: "provider", exit: 1 });

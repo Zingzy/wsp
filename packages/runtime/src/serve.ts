@@ -475,6 +475,32 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, door: await opts.door.open() });
               return;
             }
+            case "places.add": {
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                return;
+              }
+              // The addresses the computer being installed on is to dial are the door's own reading, asked for here
+              // rather than read a second time inside the door: a host that opens none could never be dialled back.
+              if (opts.door === undefined) {
+                send({ id: msg.id, ok: false, error: PLACE_DOOR_UNSERVED });
+                return;
+              }
+              const at = await opts.door.open();
+              const added = await places().add(
+                {
+                  ...(msg.addId !== undefined ? { addId: msg.addId } : {}),
+                  address: msg.address,
+                  ...(msg.name !== undefined ? { name: msg.name } : {}),
+                  ...(msg.sshPort !== undefined ? { sshPort: msg.sshPort } : {}),
+                  ...(msg.keyPath !== undefined ? { keyPath: msg.keyPath } : {}),
+                  hostUrls: [...at.addresses, ...(at.relay === undefined ? [] : [at.relay])],
+                },
+                now(),
+              );
+              send({ id: msg.id, ok: true, ...added });
+              return;
+            }
             case "devices.list":
               if (!ownRoad()) {
                 send({ id: msg.id, ok: false, error: DEVICES_TICKET_REFUSAL });

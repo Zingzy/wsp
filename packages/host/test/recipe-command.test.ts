@@ -257,7 +257,7 @@ describe("wsp recipe", () => {
     // The install is the whole row: no catalog row appears for it and no sign-in is ever offered.
     expect(custom()?.every(r => !("signIn" in r))).toBe(true);
     expect(signInItems(applyRecipe(withCatalogAgents({ entries: [] }), Recipe.parse(JSON.parse(readFileSync(out, "utf8")))), new Map(), "darwin").items.map(i => i.id)).not.toContain("logins/just");
-    await expect(runRecipe(laptop(), { out, add: ["just"] }, quiet, at)).rejects.toThrow('--add takes <id>=<command>, not "just"');
+    await expect(runRecipe(laptop(), { out, add: ["just"] }, quiet, at)).rejects.toThrow('--add takes <id>=<command>, and got "just".');
   });
 
   it("keeps the wizard's ticks on this computer's tools rows outside the catalog through every run, rule or none, and hands them to the wizard beside the added rows and the pins", async () => {
@@ -342,7 +342,7 @@ describe("wsp recipe", () => {
   it("refuses an --add for a package one of this Mac's managers already has, by the scan's id or the package's own name, and names the --set word that ticks it instead", async () => {
     dir = mkdtempSync(join(tmpdir(), "wsp-recipe-add-here-"));
     const out = outPath();
-    const points = `tick it with --set ${DISKBLOOM.id}=on`;
+    const points = `Tick it with --set ${DISKBLOOM.id}=on.`;
     await expect(runRecipe(laptop(), { out, add: [`${DISKBLOOM.id}=${DISKBLOOM.install}`], alsoHere: also().alsoHere }, quiet, at)).rejects.toThrow(points);
     await expect(runRecipe(laptop(), { out, add: [`${DISKBLOOM.name}=${DISKBLOOM.install}`], alsoHere: also().alsoHere }, quiet, at)).rejects.toThrow(points);
     expect(existsSync(out)).toBe(false);
