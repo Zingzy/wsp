@@ -53,6 +53,7 @@ import {
   fmtMemGb,
   fmtRate,
   fmtSize,
+  placeFactsLine,
   fmtThreads,
   fmtUptime,
   forgetNotice,
@@ -176,6 +177,17 @@ describe("fmtBytes and fmtMemGb", () => {
     expect(fmtBytes(2048 * 1024 * 1024)).toBe("2 GB");
     expect(fmtBytes(250 * 1024 * 1024)).toBe("250 MB");
     expect(fmtBytes(250.4 * 1024 * 1024)).toBe("250 MB");
+  });
+});
+
+describe("a computer of the person's own in one line", () => {
+  it("names its cores, its memory and the room left where its threads work, as one unbreakable phrase", () => {
+    const line = placeFactsLine({ cpu: 4, memMb: 8192 }, 97_710_505_984);
+    expect(line).toBe("4 cores · 8 GB · 91 GB free".replace(/ /g, "\u00a0"));
+    // A computer that would not say how much room it has says the rest.
+    expect(placeFactsLine({ cpu: 8, memMb: 16384 })).toBe("8 cores · 16 GB".replace(/ /g, "\u00a0"));
+    // Cores, never vCPU: a computer somebody owns has the cores it has.
+    expect(line).not.toContain("vCPU");
   });
 });
 
