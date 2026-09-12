@@ -37,13 +37,15 @@ vi.mock("../src/components/ui/tooltip.js", () => ({
 const NOW = Date.now();
 const iso = (offsetMs: number) => NOW + offsetMs;
 
-const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running"): WorkspaceView => ({
+// The rows stand in the order the workspaces were made, so a test that reads the list by position says how long
+// ago each of its own was; an hour is the default, and workspaces sharing it fall to their ids.
+const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running", createdAgoMs = 60 * 60_000): WorkspaceView => ({
   id,
   name,
   machineId: `m_${id}`,
   phase,
   golden: "snap_g",
-  createdAt: new Date(NOW - 60 * 60_000).toISOString(),
+  createdAt: new Date(NOW - createdAgoMs).toISOString(),
 });
 
 const status = statusOf;
@@ -223,12 +225,12 @@ describe("rows from the fixture wire", () => {
     expect(rowOf("api").textContent).not.toContain("Permission for Bash");
   });
 
-  it("three workspaces in mixed states: the running one leads, then the paused, then the gone, whatever order they were created in; a creating row sits above them all", async () => {
-    const gone = { ...view("ws_gone", "scratch"), createdAt: new Date(NOW - 3 * 24 * 60 * 60_000).toISOString() };
-    const paused = { ...view("ws_nap", "spike", "napping"), createdAt: new Date(NOW - 2 * 60 * 60_000).toISOString() };
-    const running = { ...view("ws_run", "dev"), createdAt: new Date(NOW - 60_000).toISOString() };
+  it("three workspaces in mixed states stand in the order they were made, whatever each machine is doing; a creating row waits at the foot", async () => {
+    const gone = view("ws_gone", "scratch", "running", 3 * 24 * 60 * 60_000);
+    const paused = view("ws_nap", "spike", "napping", 2 * 60 * 60_000);
+    const running = view("ws_run", "dev", "running", 60_000);
     await mount(fakeApi([gone, paused, running], [status(gone, { machineState: "gone", reach: { state: "gone" } }), status(paused), status(running)]), "dev");
-    await waitFor(() => expect(rowIds()).toEqual(["ws:ws_run", "ws:ws_nap", "ws:ws_gone"]));
+    await waitFor(() => expect(rowIds()).toEqual(["ws:ws_gone", "ws:ws_nap", "ws:ws_run"]));
     // The state slot: the running row says nothing in words (the dot says it); every other state's word sits in it.
     expect(rowOf("dev").textContent).not.toContain("Running");
     expect(stateSlot(rowOf("dev")).textContent).toBe("");
@@ -243,8 +245,9 @@ describe("rows from the fixture wire", () => {
       expect(slot.className).toContain("shrink-0");
       expect(slot.className).not.toMatch(/success|emerald|green/);
     }
+    // The one being made is the newest thing here, so it waits where it will stand once it is a workspace.
     act(() => useStore.setState({ creations: [{ key: "creating:1", name: "beta", askedAt: Date.now(), workspaceId: null, lines: [], failed: null }] }));
-    expect(rowIds()).toEqual(["creating:1", "ws:ws_run", "ws:ws_nap", "ws:ws_gone"]);
+    expect(rowIds()).toEqual(["ws:ws_gone", "ws:ws_nap", "ws:ws_run", "creating:1"]);
   });
 
   it("every thread row carries the agent's own mark in its colour and who opened it in muted mono, with the agent named on hover", async () => {
@@ -1343,9 +1346,9 @@ function ThemeProbe() {
 const themed = (angle: number): WorkspaceTheme => ({ ...DEFAULT_THEME, dots: harmonyDots({ angle, radius: 0.5 }, "complementary"), harmony: "complementary" });
 
 describe("a workspace's own theme and glyph", () => {
-  const THEMED: WorkspaceView = { ...view("ws_a", "api"), theme: themed(200), glyph: "flask" };
-  const PLAIN = view("ws_b", "web", "napping");
-  const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
+  const THEMED: WorkspaceView = { ...view("ws_a", "api", "running", 3 * 60 * 60_000), theme: themed(200), glyph: "flask" };
+  const PLAIN = view("ws_b", "web", "napping", 2 * 60 * 60_000);
+  const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac", "running", 60 * 60_000), kind: "local", machineId: "local", golden: "" };
   const all = () => [{ ...THEMED }, { ...PLAIN }, { ...MAC }];
   const threads = () => [session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) }), session("s2", "ws_b", { prompt: "bump the lockfile", startedAt: iso(-4 * 60_000) })];
   const leadOf = (el: HTMLElement): HTMLElement => el.querySelector<HTMLElement>("span[aria-hidden]")!;
@@ -1366,9 +1369,9 @@ describe("a workspace's own theme and glyph", () => {
   it("the space bar is one icon per workspace and a plus: the kind's glyph by default, the picked icon where one is, the current one in the theme's ink, the others muted, a paused one dimmed, no state colour on any glyph, and no name on any of them", async () => {
     await mountSpaces(fakeApi(all(), [status(THEMED), status(PLAIN), { ...status(MAC), kind: "local", size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }], threads()));
     await waitFor(() => expect(icons()).toHaveLength(3));
-    // The sidebar's own order: the running ones first, so this computer sits before the paused fork.
-    const [api, mac, web] = icons() as [HTMLElement, HTMLElement, HTMLElement];
-    expect(icons().map(i => i.getAttribute("aria-label"))).toEqual(["api", "zingzy-mac", "web"]);
+    // The sidebar's own order, which is the order the three were made; the paused one keeps its place in it.
+    const [api, web, mac] = icons() as [HTMLElement, HTMLElement, HTMLElement];
+    expect(icons().map(i => i.getAttribute("aria-label"))).toEqual(["api", "web", "zingzy-mac"]);
     expect(icons().map(i => i.textContent)).toEqual(["", "", ""]);
     expect(api.querySelector("[data-space-glyph='flask']")).not.toBeNull();
     expect(web.querySelector("[data-space-kind-glyph]")!.getAttribute("class")).toContain("lucide-cloud");
@@ -1421,12 +1424,12 @@ describe("a workspace's own theme and glyph", () => {
     expect(header.querySelector("[data-space-state]")!.querySelector("span[aria-hidden]")).toBeNull();
   });
 
-  // The store keeps its workspaces sorted by id; the sidebar draws the running ones first, so a napping workspace
-  // whose id sorts first parts the two orders. A creation in flight holds its own key as the selection, which is in
-  // neither order, and both fall back to a first row: the shell's theme has to be the header's workspace even then.
+  // The store keeps its workspaces sorted by id; the sidebar draws them oldest first, so a workspace whose id sorts
+  // first but was made later parts the two orders. A creation in flight holds its own key as the selection, which is
+  // in neither order, and both fall back to a first row: the shell's theme has to be the header's workspace even then.
   it("the theme the shell paints and the header the body draws are the same workspace when the two orders differ", async () => {
-    const napping: WorkspaceView = { ...view("ws_aaa", "old", "napping"), theme: themed(100) };
-    const running: WorkspaceView = { ...view("ws_zzz", "api"), theme: themed(300) };
+    const napping: WorkspaceView = { ...view("ws_aaa", "old", "napping", 60_000), theme: themed(100) };
+    const running: WorkspaceView = { ...view("ws_zzz", "api", "running", 3 * 60 * 60_000), theme: themed(300) };
     const api = fakeApi([napping, running], [status(napping), status(running)]);
     api.createFromGoldenHead.mockImplementation(() => new Promise(() => {}));
     await mountSpaces(api);
@@ -1445,7 +1448,7 @@ describe("a workspace's own theme and glyph", () => {
         <WorkspaceSidebar />
       </SidebarProvider>,
     );
-    await waitFor(() => expect(workspaceRowIds()).toEqual(["ws:ws_a", "ws:ws_m", "ws:ws_b"]));
+    await waitFor(() => expect(workspaceRowIds()).toEqual(["ws:ws_a", "ws:ws_b", "ws:ws_m"]));
     expect(document.querySelector("[data-theme-probe]")!.textContent).toBe("none");
     // The paused row's lead glyph dims by the same rule the bar's icon does, and the running one is green, which the bar's never is.
     expect(rowOf("web").querySelector("[data-workspace-lead] svg")!.getAttribute("class")!.split(" ")).toContain(leadDimClass({ state: "paused" }));
@@ -1781,8 +1784,8 @@ describe("a thread another thread's agent opened", () => {
 describe("a thread an agent opened on another workspace", () => {
   // The orchestrator's own workspace is this computer and the builder it opened runs on a fork at a provider; the
   // sidebar files each thread under the workspace its session belongs to, which is what used to part the two.
-  const MAC = { ...view("ws_mac", "zingzy's Mac"), kind: "local" as const };
-  const BENCH = view("ws_bench", "spoo-bench");
+  const MAC = { ...view("ws_mac", "zingzy's Mac", "running", 3 * 60 * 60_000), kind: "local" as const };
+  const BENCH = view("ws_bench", "spoo-bench", "running", 60 * 60_000);
 
   const opened = async () =>
     mount(

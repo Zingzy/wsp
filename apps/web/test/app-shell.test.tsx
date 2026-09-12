@@ -451,6 +451,63 @@ describe("the header row", () => {
   });
 });
 
+describe("the breadcrumb of a thread an agent opened", () => {
+  const LEAD = "thr_lead";
+  const rows = [
+    { id: "s1", workspaceId: "ws_a", harness: "claude", status: "completed" as const, prompt: "queue migration across three services", threadId: LEAD },
+    { id: "s2", workspaceId: "ws_b", harness: "claude", status: "running" as const, startedBy: "agent" as const, prompt: "double redirect on short links", threadId: "thr_child", parentThreadId: LEAD },
+  ];
+
+  async function mountTwo() {
+    useStore.getState().bind(fakeApi([view("ws_a", "api"), view("ws_b", "box")]));
+    render(
+      <AppShell>
+        <div>center content</div>
+      </AppShell>,
+    );
+    await waitFor(() => expect(useStore.getState().selectedId).not.toBeNull());
+    act(() => useStore.setState({ sessions: { ws_a: [rows[0]!], ws_b: [rows[1]!] } }));
+  }
+
+  const crumb = () => banner().querySelector("[data-thread-breadcrumb]")!;
+
+  it("names the thread that opened it before its own workspace, and a thread nobody opened names no opener", async () => {
+    await mountTwo();
+    act(() => useStore.getState().select("ws_b", "thr_child"));
+    await waitFor(() => expect(crumb().textContent).toBe("queue migration across three services/box/double redirect on short links"));
+    act(() => useStore.getState().select("ws_a", LEAD));
+    expect(crumb().textContent).toBe("api/queue migration across three services");
+    expect(crumb().querySelector("[data-breadcrumb-opener]")).toBeNull();
+  });
+
+  it("the thread on screen keeps its whole name beside an opener, and the opener is what the room comes out of", async () => {
+    await mountTwo();
+    act(() => useStore.getState().select("ws_b", "thr_child"));
+    const own = await waitFor(() => crumb().querySelector<HTMLElement>("[data-breadcrumb-thread]")!);
+    // Beside an opener the thread's own name neither shrinks nor outgrows the line; the opener alone gives way.
+    expect(own.className).toContain("shrink-0");
+    expect(own.className).toContain("max-w-[70%]");
+    expect(crumb().querySelector<HTMLElement>("[data-breadcrumb-opener]")!.className).toContain("truncate");
+    // A cut opener is still readable: the whole name rides its hover text, the rule every cut line in the app follows.
+    expect(crumb().querySelector<HTMLElement>("[data-breadcrumb-opener]")!.getAttribute("title")).toBe("queue migration across three services");
+    // With no opener the name takes the line as it always did.
+    act(() => useStore.getState().select("ws_a", LEAD));
+    const alone = crumb().querySelector<HTMLElement>("[data-breadcrumb-thread]")!;
+    expect(alone.className).not.toContain("shrink-0");
+    expect(alone.className).not.toContain("max-w-");
+  });
+
+  it("the opener is the page's own address for that thread and takes the person back to it", async () => {
+    await mountTwo();
+    act(() => useStore.getState().select("ws_b", "thr_child"));
+    const opener = await waitFor(() => crumb().querySelector<HTMLAnchorElement>("[data-breadcrumb-opener]")!);
+    expect(opener.getAttribute("href")).toBe(`${window.location.origin}${window.location.pathname}#w/ws_a/t/${LEAD}`);
+    fireEvent.click(opener);
+    await waitFor(() => expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_a", LEAD]));
+    expect(crumb().textContent).toBe("api/queue migration across three services");
+  });
+});
+
 describe("the macOS desktop window", () => {
   const noDrag = (root: Element) => Array.from(root.querySelectorAll("button")).map(b => b.className.includes("[-webkit-app-region:no-drag]"));
   afterEach(() => document.documentElement.classList.remove("desktop-mac"));
