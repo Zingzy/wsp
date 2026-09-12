@@ -110,9 +110,11 @@ describe("the device code flow", () => {
     expect(approved.status).toBe(200);
 
     const res = await poll(relay, pollToken);
-    const answer = (await res.json()) as { state: string; hostId: string; token: string; name: string };
+    const answer = (await res.json()) as { state: string; hostId: string; token: string; name: string; login: string };
     expect(answer.state).toBe("approved");
     expect(answer.name).toBe("box");
+    // Whose account it is, so the box can say it without a second call and without a token that reads this relay back.
+    expect(answer.login).toBe("maya");
     const claims = await readToken(relay.env.RELAY_SIGNING_KEY, answer.token);
     expect(claims).toMatchObject({ kind: "host", subject: answer.hostId });
     const host = (await relay.db.prepare("SELECT * FROM hosts WHERE id = ?").bind(answer.hostId).first()) as Record<string, string>;
