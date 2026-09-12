@@ -798,10 +798,25 @@ export function useHarnessCatalog(harness: string, workspaceId: string | null = 
 
 type Catalogs = Pick<State, "harnesses" | "harnessesByWorkspace">;
 
+const withoutAccess = new WeakMap<HarnessCatalog[], HarnessCatalog[]>();
+
+/** The host-wide lists with their access modes dropped. Which mode a thread starts at is a fact about the machine it
+ * runs on, and the runtime decides it there, once, against that machine's kind: a machine the person keeps asks
+ * before a tool, a throwaway fork runs every tool. The host-wide lists were read against no machine, so they answer
+ * models and efforts for a workspace still waiting for its own and answer no access at all. The stripped array is
+ * kept beside the one it came from, so the selector hands React the same reading every render. */
+function hostWide(catalogs: HarnessCatalog[]): HarnessCatalog[] {
+  const known = withoutAccess.get(catalogs);
+  if (known !== undefined) return known;
+  const stripped = catalogs.map(c => ({ ...c, permissionModes: [] }));
+  withoutAccess.set(catalogs, stripped);
+  return stripped;
+}
+
 /** The one rule for which catalogs answer for a workspace, so a surface reading many workspaces' rows and one
  * reading its own read the same thing. */
 export const catalogsIn = (s: Catalogs, workspaceId: string | null): HarnessCatalog[] =>
-  (workspaceId !== null ? s.harnessesByWorkspace[workspaceId] : undefined) ?? s.harnesses;
+  (workspaceId !== null ? s.harnessesByWorkspace[workspaceId] : undefined) ?? hostWide(s.harnesses);
 export const catalogIn = (s: Catalogs, workspaceId: string | null, harness: string): HarnessCatalog | null =>
   catalogsIn(s, workspaceId).find(c => c.harness === harness) ?? null;
 /** The thread the centre shows for a workspace: the one picked in the sidebar, else the workspace's latest; null with no threads yet. */

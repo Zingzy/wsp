@@ -407,10 +407,11 @@ export function placeLines(places: readonly PlaceView[]): string[] {
     p.diskFreeBytes === undefined ? "" : fmtBytes(p.diskFreeBytes),
     p.docker === undefined ? "" : p.docker ? "yes" : "no",
     p.kind === "provider" ? `$${(p.rateUsdPerHour ?? 0).toFixed(3)}/h` : p.present === true ? "yes" : "no",
+    p.forks === undefined ? "" : `${p.forks.running} of ${p.forks.running + p.forks.room}`,
     p.kind === "provider" ? "" : (p.lastSeenAt ?? ""),
     p.default ? "default" : "",
   ]);
-  return table([["PLACE", "KIND", "CORES", "MEMORY", "DISK FREE", "DOCKER", "PRESENT", "LAST SEEN", "DEFAULT"], ...rows]);
+  return table([["PLACE", "KIND", "CORES", "MEMORY", "DISK FREE", "DOCKER", "PRESENT", "FORKS", "LAST SEEN", "DEFAULT"], ...rows]);
 }
 
 /** Columns padded to their widest cell, two spaces apart; the last column is never padded. */
@@ -883,10 +884,20 @@ export function threadTree(rows: readonly ThreadRow[]): { row: ThreadRow; depth:
  * drive has no state of its own to name, so that cell stays empty; every fact comes off the one kind table. The
  * state cell reads the status the sidebar reads, through the one predicate, so a machine the provider has paused or
  * one whose daemon is dark says here what it says there. The projects themselves are wsp projects' table. */
-function workspaceLine(w: WorkspaceListing): string[] {
+export function workspaceLine(w: WorkspaceListing, places: ReadonlyMap<string, string> = new Map()): string[] {
   const kind = kindWords(workspaceKind(w));
   const machine = kind.rowReadsMachine ? (kind.driven ? w.machineId : fmtSize(w.size, kind.cpu)) : kind.machine;
-  return [w.name, w.id, machine, kind.driven ? workspaceWord(workspaceStateOf(w, w)) : "", projectCountCell(workspaceProjects(w)), agentsWord(w.agents)];
+  // A fork on a computer the person joined says so beside its name: which computer it runs on is the first thing
+  // they ask of a row, and the id it is recorded by is not a word they typed.
+  const at = w.place === undefined ? "" : ` · ${places.get(w.place) ?? w.place}`;
+  return [`${w.name}${at}`, w.id, machine, kind.driven ? workspaceWord(workspaceStateOf(w, w)) : "", projectCountCell(workspaceProjects(w)), agentsWord(w.agents)];
+}
+
+/** What each place this host holds is called, by the id a record names it with: the rows carry the id, and a person
+ * reads the name they gave the computer. Asked only when a row names one. */
+export async function placeNames(client: HostClient): Promise<Map<string, string>> {
+  const { places } = await client.request<{ places: PlaceView[] }>("places.list");
+  return new Map(places.map(p => [p.id, p.name]));
 }
 
 /** One project's row: its name, the folder it landed at, its size where the import measured one, and the day it landed. */
@@ -923,12 +934,14 @@ async function forkable(client: HostClient): Promise<Capabilities> {
 }
 
 /** Forks the golden's head into a new workspace, the way the app's create does, with the stages streamed as they land. */
-export async function createFromHead(client: HostClient, out: Out, name: string, size?: string, agents?: Partial<WorkspaceAgents>): Promise<WorkspaceCreateResult> {
-  await forkable(client);
+export async function createFromHead(client: HostClient, out: Out, name: string, size?: string, agents?: Partial<WorkspaceAgents>, on?: string): Promise<WorkspaceCreateResult> {
+  // A fork that names a place is held to what that computer offers, which only the host can read; the check here
+  // is what this host's own provider can do, so it stands only where the fork lands there.
+  if (on === undefined) await forkable(client);
   const { manifest } = await client.request<{ manifest?: GoldenManifest }>("golden.get", { name: "default" });
   const head = goldenHead(manifest);
   if (head === undefined) throw new Error("no golden yet; run wsp init");
-  return create(client, out, head.snapshotId, name, size, agents);
+  return create(client, out, head.snapshotId, name, size, agents, on);
 }
 
 /** What a --spawn line asks for, the one reading of it: nothing when nobody named a switch, so a workspace made
@@ -955,6 +968,14 @@ function countAsked(flagName: string, word: string | number, least: number): num
   const n = Number(word);
   if (!Number.isInteger(n) || n < least) throw usageRefusal(`${flagName} takes a whole number of ${least === 0 ? "zero" : "one"} or more, not ${JSON.stringify(String(word))}`);
   return n;
+}
+
+/** The size a --size word names, read but not checked: on a joined computer what is on offer is that computer's to
+ * say, and the host refuses a size it does not offer with the same sentence this one would have. */
+function sizeWordOnly(word: string): WorkspaceSize {
+  const size = sizeFromWord(word);
+  if (size === undefined) throw usageRefusal(`--size takes a word like 2x4, not ${JSON.stringify(word)}`);
+  return size;
 }
 
 /** The size a --size word names, checked against what the host's provider offers before anything is minted. */
@@ -994,11 +1015,12 @@ export function projectGoldenLine(g: ProjectGolden): string {
 }
 
 /** `size` is the --size word; absent, the workspace takes the golden's size. */
-export async function create(client: HostClient, out: Out, golden: string, name: string, size?: string, agents?: Partial<WorkspaceAgents>): Promise<WorkspaceCreateResult> {
+export async function create(client: HostClient, out: Out, golden: string, name: string, size?: string, agents?: Partial<WorkspaceAgents>, on?: string): Promise<WorkspaceCreateResult> {
   // Read before a frame is followed, so a host that mints nothing says so once and streams no stage for a machine
-  // that will never exist.
-  const capabilities = await forkable(client);
-  const chosen = size === undefined ? undefined : sizeChosen(capabilities, size);
+  // that will never exist. A fork on a joined computer is that computer's to size and to refuse, so the host is
+  // left to answer for it.
+  const chosen = size === undefined ? undefined : on === undefined ? sizeChosen(await forkable(client), size) : sizeWordOnly(size);
+  if (size === undefined && on === undefined) await forkable(client);
   const pushed = pushedFrames(client);
   await client.events();
   pushed.follow(
@@ -1009,7 +1031,13 @@ export async function create(client: HostClient, out: Out, golden: string, name:
     },
   );
   try {
-    const { workspace, notice } = await client.request<{ workspace: WorkspaceOut; notice?: string }>("workspaces.create", { golden, name, ...chosen, ...(agents !== undefined ? { agents } : {}) });
+    const { workspace, notice } = await client.request<{ workspace: WorkspaceOut; notice?: string }>("workspaces.create", {
+      golden,
+      name,
+      ...chosen,
+      ...(agents !== undefined ? { agents } : {}),
+      ...(on !== undefined ? { on } : {}),
+    });
     const created: WorkspaceCreateResult = { workspace, ...(notice !== undefined ? { notice } : {}) };
     out.emit(created, `created ${workspace.name} ${workspace.id}${projectsInPlace(workspaceProjects(workspace))}${notice !== undefined ? `\n${notice}` : ""}`);
     return created;
@@ -1904,8 +1932,10 @@ export const VERBS: readonly Verb[] = [
     options: {},
     run: async ctx => {
       if (ctx.args.length !== 0) throw usageRefusal("wsp workspaces takes no positional arguments");
-      const rows = await workspaceStatuses(await ctx.client());
-      ctx.out.emit({ workspaces: rows }, table([["WORKSPACE", "ID", "MACHINE", "STATE", "PROJECTS", "AGENTS"], ...rows.map(workspaceLine)]).join("\n"));
+      const client = await ctx.client();
+      const rows = await workspaceStatuses(client);
+      const places = rows.some(w => w.place !== undefined) ? await placeNames(client) : new Map<string, string>();
+      ctx.out.emit({ workspaces: rows }, table([["WORKSPACE", "ID", "MACHINE", "STATE", "PROJECTS", "AGENTS"], ...rows.map(w => workspaceLine(w, places))]).join("\n"));
       return 0;
     },
     tool: tool({
@@ -2086,18 +2116,19 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "new",
-    usage: "wsp new <name> [--from <project golden>] [--size <cpu>x<memGb>] | wsp new --local [name] | wsp new --ssh <user@host> [name] [--ssh-port <port>] [--ssh-key <path>]",
-    about: "a workspace from the golden's head or, with --from, a project golden; --local is this computer, --ssh a machine of your own",
-    options: { from: { type: "string" }, size: { type: "string" }, local: { type: "boolean" }, ssh: { type: "string" }, "ssh-port": { type: "string" }, "ssh-key": { type: "string" }, spawn: { type: "string" }, "max-machines": { type: "string" }, "max-depth": { type: "string" } },
+    usage: "wsp new <name> [--on <place>] [--from <project golden>] [--size <cpu>x<memGb>] | wsp new --local [name] | wsp new --ssh <user@host> [name] [--ssh-port <port>] [--ssh-key <path>]",
+    about: "a workspace from the golden's head or, with --from, a project golden; --on forks on a computer you joined, --local is this computer, --ssh a machine of your own",
+    options: { from: { type: "string" }, size: { type: "string" }, on: { type: "string" }, local: { type: "boolean" }, ssh: { type: "string" }, "ssh-port": { type: "string" }, "ssh-key": { type: "string" }, spawn: { type: "string" }, "max-machines": { type: "string" }, "max-depth": { type: "string" } },
     run: async ctx => {
       const [name] = ctx.args;
       const from = flag(ctx.flags, "from");
       const size = flag(ctx.flags, "size");
+      const on = flag(ctx.flags, "on");
       const address = flag(ctx.flags, "ssh");
       // Neither forks anything, so both refuse the words that pick an image or a size.
       const agents = agentsAsked(flag(ctx.flags, "spawn"), flag(ctx.flags, "max-machines"), flag(ctx.flags, "max-depth"));
       const forksNothing = (word: string, kind: WorkspaceKind): void => {
-        if (from !== undefined || size !== undefined) throw usageRefusal(`${word} forks nothing, so it takes no --from or --size`);
+        if (from !== undefined || size !== undefined || on !== undefined) throw usageRefusal(`${word} forks nothing, so it takes no --from, --size or --on`);
         // The same rule and the same sentence the verb that sets the switch on a workspace that exists reads: the
         // kind is named here and the table is asked, so which kinds may have the switch has one home.
         if (agents?.spawn === true && !agentsMayDrive(kind)) throw usageRefusal(agentsKindRefusal(kind));
@@ -2122,8 +2153,8 @@ export const VERBS: readonly Verb[] = [
       }
       const client = await ctx.client();
       if (name === undefined || ctx.args.length !== 1) throw usageRefusal("wsp new takes one name");
-      if (from === undefined) await createFromHead(client, ctx.out, name, size, agents);
-      else await create(client, ctx.out, (await projectGoldenOf(client, from)).snapshotId, name, size, agents);
+      if (from === undefined) await createFromHead(client, ctx.out, name, size, agents, on);
+      else await create(client, ctx.out, (await projectGoldenOf(client, from)).snapshotId, name, size, agents, on);
       return 0;
     },
     tool: tool({
@@ -2132,6 +2163,7 @@ export const VERBS: readonly Verb[] = [
         name: z.string().optional().describe("the workspace name; required unless local or ssh, where it defaults to what the machine is called"),
         from: z.string().optional().describe("a project golden: its project's name (the newest taken of it) or its snapshot id, as snapshot returns them"),
         size: SizeIn,
+        on: z.string().optional().describe("the computer the fork lands on, by the name or the id wsp places lists; absent takes the place a fork last landed on, which on a host with no joined computer is its own provider"),
         local: z.boolean().optional().describe("true makes the one local workspace, this computer, forking nothing"),
         ssh: z.string().optional().describe("a machine of the person's own as user@host, reached over ssh; forks nothing"),
         spawn: SpawnIn,
@@ -2141,11 +2173,11 @@ export const VERBS: readonly Verb[] = [
         ssh_key: z.string().optional().describe("the private key file ssh logs in with, absolute; absent leaves ssh its own config and agent"),
       },
       output: Created.shape,
-      call: async ({ name, from, size: word, local, ssh, ssh_port: sshPort, ssh_key: sshKey, spawn, max_machines: maxMachines, max_depth: maxDepth }, deps) => {
+      call: async ({ name, from, size: word, on, local, ssh, ssh_port: sshPort, ssh_key: sshKey, spawn, max_machines: maxMachines, max_depth: maxDepth }, deps) => {
         const client = await deps.client();
         const agents = agentsAsked(spawn, maxMachines, maxDepth);
         if (local === true || ssh !== undefined) {
-          if (from !== undefined || word !== undefined) throw usageRefusal("a workspace on a machine that already exists forks nothing, so it takes no from or size");
+          if (from !== undefined || word !== undefined || on !== undefined) throw usageRefusal("a workspace on a machine that already exists forks nothing, so it takes no from, size or on");
           if (local === true && ssh !== undefined) throw usageRefusal("a workspace is local or reached over ssh, not both");
         }
         if (ssh !== undefined) return asJson(await createSshWorkspace(client, QUIET, ssh, sshAsked(name, sshPort === undefined ? undefined : String(sshPort), sshKey)));
@@ -2153,8 +2185,8 @@ export const VERBS: readonly Verb[] = [
           return asJson(await createLocalWorkspace(client, QUIET, name));
         }
         if (name === undefined) throw usageRefusal("a cloud workspace needs a name");
-        if (from === undefined) return asJson(await createFromHead(client, QUIET, name, word, agents));
-        return asJson(await create(client, QUIET, (await projectGoldenOf(client, from)).snapshotId, name, word, agents));
+        if (from === undefined) return asJson(await createFromHead(client, QUIET, name, word, agents, on));
+        return asJson(await create(client, QUIET, (await projectGoldenOf(client, from)).snapshotId, name, word, agents, on));
       },
     }),
   },

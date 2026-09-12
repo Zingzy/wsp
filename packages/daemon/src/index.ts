@@ -60,6 +60,7 @@ export {
   signPlaceBytes,
   verifyPlaceBytes,
   writePlaceFile,
+  type LinkOp,
   type LinkOps,
   type PlaceLinkOptions,
   type PlaceLinkStatus,
