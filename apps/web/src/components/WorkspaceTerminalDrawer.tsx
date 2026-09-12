@@ -7,16 +7,13 @@
 // closing the last never respawns.
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useShallow } from "zustand/react/shallow";
-import type { DaemonLinkStatus } from "@wsp/protocol";
-import { terminalPaneHints, terminalPaneState, type TerminalPaneState } from "../adapt/index.js";
-import { useOutOfMemoryReading } from "../machine/live.js";
-import { useCapabilities, useStatus, useStore, useWorkspace, useWorkspaceState } from "../protocol/store.js";
 import { selectPanelTerminalIds, useRightPanelStore } from "../rightPanelStore.js";
 import { openDrawerTerminal, reportTerminalFailure, splitDrawerTerminal, type SplitDirection } from "../shell/shellCommands.js";
 import { selectTerminalUiState, useTerminalDrawerStore } from "../terminal/drawerStore.js";
 import { useTerminalViewportConfig } from "../terminal/fontSetting.js";
 import { reconcileTerminalIds, type TerminalUiState } from "../terminal/groups.js";
 import { getTerminals, onTerminals, type PtyTabView, type WorkspaceTerminals } from "../terminal/link.js";
+import { useTerminalPane } from "../terminal/paneWords.js";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer.js";
 
 // One first-open spawn per link: concurrent mounts share the create and a
@@ -41,25 +38,6 @@ export function terminalLabels(tabs: readonly PtyTabView[]): ReadonlyMap<string,
 
 export function lostTerminals(tabs: readonly PtyTabView[]): ReadonlySet<string> {
   return new Set(tabs.filter(t => t.lost).map(t => t.ptyId));
-}
-
-/** The pane's state from the workspace's one vocabulary plus this link's socket and its last memory reading, the
- * lines under it, and the wake every pane offers. */
-export function useTerminalPane(workspaceId: string, socket: DaemonLinkStatus, refusal: string | null = null): { pane: TerminalPaneState; hints: string[]; onWake: () => void } {
-  const workspace = useWorkspace(workspaceId);
-  const status = useStatus(workspaceId);
-  const capabilities = useCapabilities();
-  const wake = useStore(s => s.wake);
-  const phase = status?.phase ?? workspace?.phase ?? "running";
-  const reach = status?.reach.state ?? null;
-  const state = useWorkspaceState(workspaceId) ?? "running";
-  const outOfMemory = useOutOfMemoryReading(workspaceId, phase);
-  const pane = useMemo(() => terminalPaneState({ state, reach, socket, outOfMemory, refusal }), [state, reach, socket, outOfMemory, refusal]);
-  const size = status?.size ?? null;
-  const sizes = capabilities?.sizes ?? null;
-  const hints = useMemo(() => terminalPaneHints(pane, size, sizes), [pane, size, sizes]);
-  const onWake = useCallback(() => void wake(workspaceId), [wake, workspaceId]);
-  return { pane, hints, onWake };
 }
 
 export function WorkspaceTerminalDrawer({ workspaceId }: { workspaceId: string }) {

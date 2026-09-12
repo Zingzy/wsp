@@ -28,3 +28,16 @@ export function catalogFromHarness(input: { readonly id: string; readonly harnes
   const slashCommands = screen.length === 0 ? offered : offered.filter(c => !screen.some(s => s.name === c.name));
   return { harness: input.id, slashCommands };
 }
+
+const ASK = "Ask anything";
+
+/** Whether the menu has a command to show. A menu opened on nothing answers a typed slash with its empty state, which
+ * reads as a promise the app cannot keep, so the words below and the menu itself are decided here and nowhere else. */
+export function offersSlashCommands(catalog: HarnessCatalog): boolean {
+  return catalog.slashCommands.length > 0;
+}
+
+/** The composer's placeholder: it names the slash menu only where the menu has something to offer. */
+export function composerPlaceholder(catalog: HarnessCatalog): string {
+  return offersSlashCommands(catalog) ? `${ASK}, or / for commands` : ASK;
+}

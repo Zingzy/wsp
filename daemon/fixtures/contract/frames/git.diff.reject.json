@@ -1,0 +1,20 @@
+[
+  {
+    "id": 1,
+    "op": "git.diff",
+    "cwd": "/root/app"
+  },
+  {
+    "id": 1,
+    "op": "git.diff",
+    "cwd": "/root/app",
+    "scope": "all"
+  },
+  {
+    "id": 1,
+    "op": "git.diff",
+    "cwd": "/root/app",
+    "scope": "branch",
+    "path": 3
+  }
+]

@@ -1,0 +1,11 @@
+[
+  {
+    "type": "browser.open",
+    "url": "https://accounts.example/auth?x=1"
+  },
+  {
+    "type": "browser.open",
+    "url": "http://localhost:8123/authorize",
+    "port": 8123
+  }
+]

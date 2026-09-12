@@ -1,0 +1,15 @@
+[
+  {
+    "id": 1,
+    "op": "manifest.record",
+    "cmd": "pnpm dev",
+    "cwd": "/root/app"
+  },
+  {
+    "id": 2,
+    "op": "manifest.record",
+    "cmd": "pnpm dev",
+    "cwd": "/root/app",
+    "port": 3000
+  }
+]

@@ -202,14 +202,42 @@ const STREAM_WITH_SCREENS: SessionEvent[] = CHAT_STREAM.map(e => (e.type === "se
 const listed = () => [...document.querySelectorAll("[data-composer-item-id]")].map(el => el.getAttribute("data-composer-item-id")?.split(":").pop());
 
 describe("composer slash menu", () => {
-  it("opens at prompt start before any session with the harness's seed, which offers nothing a headless turn cannot run", async () => {
+  it("promises no commands before a session announced any", async () => {
+    const { api } = fixtureApi([workspace]);
+    await setup(api);
+    expect(composerEditor().getAttribute("aria-placeholder")).toBe("Ask anything");
+  });
+
+  it("opens no menu for a slash typed before a session announced any, so nothing answers with an empty state", async () => {
     const { api } = fixtureApi([workspace]);
     await setup(api);
     const editor = composerEditor();
     await typeInto(editor, "/");
-    await waitFor(() => expect(menuDrawer()).not.toBeNull());
-    expect(listed()).toEqual([]);
-    expect(menuItem("model")).toBeNull();
+    await waitFor(() => expect(draft()).toBe("/"));
+    expect(menuDrawer()).toBeNull();
+    expect(screen.queryByText("No matching command.")).toBeNull();
+  });
+
+  it("names the menu in the placeholder once a session announced commands, and a slash opens it on them", async () => {
+    const { api } = fixtureApi([workspace], { [WS]: CHAT_STREAM.slice() });
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    const editor = composerEditor();
+    expect(editor.getAttribute("aria-placeholder")).toBe("Ask anything, or / for commands");
+    await typeInto(editor, "/");
+    await waitFor(() => expect(menuItem("compact")).not.toBeNull());
+    expect(screen.queryByText("No matching command.")).toBeNull();
+  });
+
+  it("takes the announcement as it lands, with no reload", async () => {
+    const { api, emit } = fixtureApi([workspace]);
+    await setup(api);
+    expect(composerEditor().getAttribute("aria-placeholder")).toBe("Ask anything");
+    emit({ type: "session.start", ...scope, prompt: "hi", harness: CHAT_HARNESS });
+    await waitFor(() => expect(composerEditor().getAttribute("aria-placeholder")).toBe("Ask anything, or / for commands"));
+    const editor = composerEditor();
+    await typeInto(editor, "/");
+    await waitFor(() => expect(menuItem("compact")).not.toBeNull());
   });
 
   it("offers what the session announced less the commands that work only in the CLI's own terminal, and every custom one", async () => {
