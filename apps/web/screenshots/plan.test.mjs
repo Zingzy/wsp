@@ -126,9 +126,13 @@ describe("the surfaces list this repo ships", () => {
       "sidebar",
       "workspace",
       "composer-thread",
+      "composer-slash-menu",
+      "composer-slash-filtered",
       "machine",
       "cloud-setup",
       "spawned-thread",
+      "threads-across-workspaces",
+      "opener-transcript",
       "host-asleep",
       "settings-where",
       "add-computer",
@@ -148,9 +152,10 @@ describe("the surfaces list this repo ships", () => {
     ]);
     // The one surface shot as a window on another computer, which is the only state the asleep line is drawn in.
     expect(read.surfaces.filter(s => s.remote).map(s => s.name)).toEqual(["host-asleep"]);
-    // Those served from a state of their own, since an image that is built cannot stand in the same state file as
-    // one that never was, and a person with nowhere to put a workspace has neither computer nor provider.
-    expect(read.surfaces.filter(s => s.fixture !== undefined).map(s => s.fixture)).toEqual(["image-built", "image-built", "mac-and-boxes", "mac-only", "mac-and-boxes"]);
+    // Those served from a state of their own: an image that is built cannot stand in the same state file as one
+    // that never was, a thread whose agent opened threads elsewhere needs the workspaces those threads run on, and
+    // a person with nowhere to put a workspace has neither computer nor provider.
+    expect(read.surfaces.filter(s => s.fixture !== undefined).map(s => s.fixture)).toEqual(["orchestrator", "orchestrator", "image-built", "image-built", "mac-and-boxes", "mac-only", "mac-and-boxes"]);
     // Four are shot at the two widths a design reading is held to; the rest take every width the list shoots.
     const narrowed = read.surfaces.filter(s => s.widths.length < read.widths.length);
     expect(narrowed.map(s => s.name)).toEqual(["new-workspace", "new-workspace-nowhere", "creating-workspace", "workspace-projects"]);

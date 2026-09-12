@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // One workspace's chat thread: the thread pinned from the sidebar, or the
 // last one of the persisted transcript, replayed from sessions.history on
-// mount, then that thread's live session.* events appended. Live events are
-// ignored until the history reply lands, because the socket is FIFO:
-// anything pushed before the reply is already in it, anything after is not.
+// mount and folded together with that thread's live session.* events. A row
+// sits where the runtime stamped it, never where this client first saw it,
+// so a reply and the socket build one thread whichever of them lands first.
+// The hook itself waits for the reply before it takes a live event, since
+// the socket is FIFO and anything pushed before the reply is already in it.
 // The adapter derives the view; this hook only keeps the event list, the
 // arrival clock for unstamped events, and the things the wire cannot know
 // yet: a prompt the user just sent, a send that failed locally, a new
@@ -95,12 +97,109 @@ export interface ThreadState {
 const EMPTY: ThreadState = { events: [], arrivals: [], pendingPrompt: null, localErrors: [], fresh: false, sending: null, known: [], named: null, stray: null };
 const now = () => new Date().toISOString();
 
+/** One row as the view holds it: the event and when this client saw it, which stamps a row the wire left unstamped. */
+interface HeldRow {
+  readonly event: SessionEvent;
+  readonly at: string;
+}
+
+function heldRows(state: ThreadState): HeldRow[] {
+  return state.events.map((event, index) => ({ event, at: state.arrivals[index] ?? "" }));
+}
+
+function withRows(rows: ReadonlyArray<HeldRow>): Pick<ThreadState, "events" | "arrivals"> {
+  return { events: rows.map(r => r.event), arrivals: rows.map(r => r.at) };
+}
+
+/**
+ * Whether a row already held belongs after one arriving. Between two lines of one turn the runtime's own counter
+ * decides, since that is the place it gave them and a restart writes the same line again under a new clock;
+ * everything else is placed by the stamp the runtime wrote. `seq` never reaches a history reply, so nothing else can
+ * place a reply's rows against the live ones a view holds, and a row from before the stamp existed has no order of
+ * its own and keeps the place it arrived in.
+ */
+function comesAfter(held: SessionEvent, arriving: SessionEvent): boolean {
+  if (
+    held.type === "session.delta" &&
+    arriving.type === "session.delta" &&
+    held.turnId === arriving.turnId &&
+    held.line !== undefined &&
+    arriving.line !== undefined
+  ) {
+    return held.line > arriving.line;
+  }
+  if (held.at === undefined || arriving.at === undefined) return false;
+  return held.at > arriving.at;
+}
+
+/**
+ * Where the protocol puts a row inside its turn, which every copy of that row carries: a delta's line, an ask's id,
+ * a steer's request id, and the one start, done or end a turn ever writes. Nothing for a row the wire gave no place.
+ */
+function ownPlace(e: SessionEvent): string | undefined {
+  if (e.type === "session.permission" || e.type === "session.permission.closed") return `${e.type}:${e.askId}`;
+  if (e.turnId === undefined) return undefined;
+  switch (e.type) {
+    case "session.start":
+    case "session.done":
+    case "session.end":
+      return `${e.type}:${e.turnId}`;
+    case "session.delta":
+      return e.line === undefined ? undefined : `session.delta:${e.turnId}:${e.line}`;
+    case "session.steer":
+      return e.requestId === undefined ? undefined : `session.steer:${e.turnId}:${e.requestId}`;
+    case "session.notify":
+      return `session.notify:${e.turnId}:${e.notify}`;
+    default: {
+      const _exhaustive: never = e;
+      return undefined;
+    }
+  }
+}
+
+/**
+ * The row itself. A host that re-opens a running turn reads its run again and writes the lines the store never got
+ * under a fresh clock with the same place, so the place is what says two copies are one row; `at` only says which
+ * host's clock wrote a copy. A row with no place of its own is named by its stamp and its words instead, and a
+ * transcript that truly holds one row twice is told by the fold's tally rather than by this.
+ */
+function rowIdentity(e: SessionEvent): string {
+  const words = e.type === "session.delta" ? `${e.kind}:${e.text}` : e.type === "session.steer" ? e.prompt : "";
+  return ownPlace(e) ?? `copy:${e.type}:${e.turnId ?? ""}:${e.at ?? ""}:${words}`;
+}
+
+/** Folds rows into the ones held, each by its own order rather than by when it arrived, each row written once. */
+function foldIn(held: ReadonlyArray<HeldRow>, arriving: ReadonlyArray<HeldRow>): HeldRow[] {
+  const written = new Map<string, number>();
+  for (const row of held) {
+    const id = rowIdentity(row.event);
+    written.set(id, (written.get(id) ?? 0) + 1);
+  }
+  const rows: HeldRow[] = [];
+  let next = 0;
+  for (const row of arriving) {
+    const id = rowIdentity(row.event);
+    const seen = written.get(id) ?? 0;
+    if (seen > 0) {
+      written.set(id, seen - 1);
+      continue;
+    }
+    while (next < held.length && !comesAfter(held[next]!.event, row.event)) rows.push(held[next++]!);
+    rows.push(row);
+  }
+  while (next < held.length) rows.push(held[next++]!);
+  return rows;
+}
+
+/** A live row is one this view has not seen, so it is placed rather than folded: no tally, one copy per list. */
 function append(state: ThreadState, e: SessionEvent, at: string): ThreadState {
   const starts = e.type === "session.start";
+  let index = state.events.length;
+  while (index > 0 && comesAfter(state.events[index - 1]!, e)) index--;
   return {
     ...state,
-    events: [...state.events, e],
-    arrivals: [...state.arrivals, at],
+    events: [...state.events.slice(0, index), e, ...state.events.slice(index)],
+    arrivals: [...state.arrivals.slice(0, index), at, ...state.arrivals.slice(index)],
     pendingPrompt: starts ? null : state.pendingPrompt,
     fresh: starts ? false : state.fresh,
   };
@@ -116,12 +215,6 @@ function knowing(known: ReadonlyArray<string>, events: ReadonlyArray<SessionEven
   return more.length === 0 ? known : [...known, ...more];
 }
 
-/** The last thread of a transcript: every event sharing the last event's thread id, a missing id being its own value. */
-function lastThread(events: ReadonlyArray<SessionEvent>): SessionEvent[] {
-  const id = events.at(-1)?.threadId;
-  return events.filter(e => e.threadId === id);
-}
-
 /**
  * The history reply, folded to the selected thread, or to its last thread when none is. A send in flight
  * decides otherwise: a view showing a thread keeps it, whether that send resumed its session or named it
@@ -130,17 +223,21 @@ function lastThread(events: ReadonlyArray<SessionEvent>): SessionEvent[] {
  * a new one, and stays where it was until the reply shows it, since any other new thread may be another
  * client's. A new-thread request that landed while history was in flight wins over the transcript it asked
  * to leave, unless the transcript already holds the thread that request opened, told the same way; a send
- * whose session.start the transcript cannot hold yet stays pending, its prompt still shown.
+ * whose session.start the transcript cannot hold yet stays pending, its prompt still shown. The reply's rows are
+ * folded into the ones this view already holds for that thread, each row by its own order and written once, so a
+ * live row of the running turn the reply was built too early to carry keeps its place among them.
  */
 export function reloadTranscript(s: ThreadState, events: ReadonlyArray<SessionEvent>, at: string, threadId: string | null = null): ThreadState {
   const own = foldTo(s, events, threadId);
-  const thread = own === undefined ? lastThread(events) : own === null ? [] : events.filter(e => e.threadId === own);
-  const arrivals = thread.map(() => at);
+  const chosen = own === undefined ? events.at(-1)?.threadId : own;
+  const thread = own === null ? [] : events.filter(e => e.threadId === chosen);
   const known = knowing(s.known, events);
   const strayed = replayStray(s, events);
   if (!s.fresh || thread.length > 0) {
+    const held = own === null ? [] : heldRows(s).filter(r => r.event.threadId === chosen);
+    const rows = foldIn(held, thread.map(event => ({ event, at })));
     const send = replaySend(s, thread, threadId);
-    return { ...EMPTY, events: thread, arrivals, known, stray: s.stray, pendingPrompt: send.sending === null ? null : s.pendingPrompt, ...send, ...strayed };
+    return { ...EMPTY, ...withRows(rows), known, stray: s.stray, pendingPrompt: send.sending === null ? null : s.pendingPrompt, ...send, ...strayed };
   }
   return { ...s, known, ...strayed };
 }
@@ -390,8 +487,9 @@ export function startedSession(events: ReadonlyArray<SessionEvent>): string | un
   return lastStart(events)?.sessionId;
 }
 
-/** A thread pinned from the sidebar, or the workspace's latest when none is. */
-export function useChatThread(workspaceId: string, threadId: string | null = null): ChatThreadHandle {
+/** A thread pinned from the sidebar, or the workspace's latest when none is; fresh opens the workspace's next
+ * thread, which is what the store says while the centre is on that screen. */
+export function useChatThread(workspaceId: string, threadId: string | null = null, fresh = false): ChatThreadHandle {
   const api = useStore(s => s.api);
   // Moves when a reconnect could not replay what the socket missed: the thread below is rebuilt from history.
   const gaps = useStore(s => s.gaps);
@@ -404,16 +502,38 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
   const [viewed, setViewed] = useState({ workspaceId, threadId });
   const [hydratedFor, setHydratedFor] = useState<string | null>(null);
   const hydratedRef = useRef<string | null>(null);
+  /** The view key a pin named for the transcript already in hand: that reading needs no reply, and asking for one
+   * would drop what the socket pushes between the ask and it. Taken once, so a gap still rebuilds. */
+  const carriedRef = useRef<string | null>(null);
   const previousEntries = useRef<ReadonlyArray<TimelineEntry>>([]);
 
   if (viewed.workspaceId !== workspaceId || viewed.threadId !== threadId) {
     const from = viewed;
     setViewed({ workspaceId, threadId });
-    setState(s => leaveView(s, from, { workspaceId, threadId }));
+    // A pin landing on the thread this view already holds is the same reading under a new name: the transcript
+    // stays, so a view whose own first turn opened the thread it is now pinned to never blinks through loading.
+    if (from.workspaceId === workspaceId && from.threadId === null && threadId !== null && heldThreadId(state) === threadId) {
+      carriedRef.current = viewKey;
+      setHydratedFor(viewKey);
+    } else if (fresh && from.workspaceId === workspaceId && threadId === null) {
+      // The pin left for the workspace's next thread: that screen shows nothing, so it needs no transcript and
+      // waits for no reply.
+      carriedRef.current = viewKey;
+      setHydratedFor(viewKey);
+      setState(s => ({ ...EMPTY, fresh: true, known: knowing(s.known, s.events), stray: s.stray }));
+    } else {
+      carriedRef.current = null;
+      setState(s => leaveView(s, from, { workspaceId, threadId }));
+    }
   }
 
   useEffect(() => {
     if (!api) return;
+    if (carriedRef.current === viewKey) {
+      carriedRef.current = null;
+      hydratedRef.current = viewKey;
+      return;
+    }
     let current = true;
     api.sessionHistory(workspaceId).then(
       events => {

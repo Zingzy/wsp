@@ -195,7 +195,7 @@ describe("what the daemon on such a machine may browse", () => {
   });
 
   it("says the kind lands folders, reads its load and lists its processes, since the daemon on it does", () => {
-    expect(kindWords("ssh")).toMatchObject({ daemon: true, metrics: true, processes: true, imports: "copies" });
+    expect(kindWords("ssh")).toMatchObject({ daemon: true, metrics: "daemon", processes: "daemon", imports: "copies" });
   });
 });
 

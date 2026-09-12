@@ -4,7 +4,7 @@
 // a person's answers count as consent, the one request those ticks become,
 // and the words for a row's tick. The app's dialog, the command line and the
 // MCP server read one plan the same way and send the same request.
-import { folderName } from "./projects.js";
+import { folderName } from "./project-path.js";
 import { kindWords, workspaceKind } from "./workspace-state.js";
 import type { ProjectAgent, ProjectPlan, ProjectSecret, WorkspaceView } from "./index.js";
 

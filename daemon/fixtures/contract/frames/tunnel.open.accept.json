@@ -4,11 +4,5 @@
     "op": "tunnel.open",
     "tunnelId": "t1",
     "port": 8123
-  },
-  {
-    "id": 2,
-    "op": "tunnel.open",
-    "tunnelId": "t2",
-    "port": 1
   }
 ]

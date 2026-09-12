@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SysSample } from "@wsp/protocol";
 import { cpuPercent, parseLoadavg, parseMeminfo, parseProcStat, SysSampler, type SysReadings } from "../src/sys.js";
+import { fixture } from "./fixtures.js";
 
 // Fixture provenance: hand-written in the proc(5) /proc/stat and /proc/meminfo
 // layouts. The two stat snapshots differ by 900 jiffies in total, 600 of them
 // idle or iowait, so the interval is one third busy.
-const fixture = (name: string): string => readFileSync(join(import.meta.dirname, "fixtures", name), "utf8");
 const statA = fixture("proc-stat-a.txt");
 const statB = fixture("proc-stat-b.txt");
 

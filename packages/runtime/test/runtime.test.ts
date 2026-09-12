@@ -9,7 +9,8 @@ import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe } from "@wsp/adapter-claude";
 import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, type AdapterEvent, type EventUnion, type RecipeDigest, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, GuestUnusableError, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
-import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_PATH, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
+import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
+import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
 import { harnessCatalog } from "../src/harness-catalog.js";
 import { copyKey, CATALOG_TTL_MS, DAEMON_REVIVE_AGAIN_MS, GRACE_MS, GUEST_LOGIN_ENV, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type GoldenExec, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions } from "../src/runtime.js";
@@ -6184,6 +6185,36 @@ describe("a start on a thread whose turn is running", () => {
     const other = await rt.sessions.start(ws.id, { prompt: "elsewhere" });
     expect(other.outcome).toBe("started");
     expect(h.starts.map(s => s.prompt)).toEqual(["one", "elsewhere"]);
+    await rt.close();
+  });
+});
+
+describe("what a turn cost, on the row it ran on", () => {
+  it("is kept on the row the listing answers with, and adds up over the turns that ran there, so a reader of the list needs no transcript to say what a thread spent", async () => {
+    const h = held(false);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const one = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
+    h.end(0, "done", { durationMs: 1_000, costUsd: 0.75 });
+    await one.finished;
+    expect(one.view().costUsd).toBeCloseTo(0.75, 10);
+    // A second turn on the same row: what the row says is what the turns on it have cost together.
+    const two = await rt.sessions.start(ws.id, { prompt: "and again", thread: one.view().threadId });
+    h.end(1, "done again", { durationMs: 1_000, costUsd: 0.39 });
+    await two.finished;
+    const rows = await rt.sessions.list(ws.id);
+    expect(rows.map(r => r.costUsd).filter(c => c !== undefined).reduce((a, b) => a + b, 0)).toBeCloseTo(1.14, 10);
+    await rt.close();
+  });
+
+  it("is absent on a row whose harness reported no figure, so nothing reads a missing number as nothing spent", async () => {
+    const h = held(false);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const turn = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
+    h.end(0, "done", { durationMs: 1_000 });
+    await turn.finished;
+    expect((await rt.sessions.list(ws.id))[0]!.costUsd).toBeUndefined();
     await rt.close();
   });
 });

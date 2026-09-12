@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { AgentHere, InstallReport } from "@wsp/host";
-import type { ContextMenuItem, DesktopBridge, HostConnectAsk, HostOutcome, HostsView, InitNeedsYou, LocalFontFace, ShellChord, ThemePreference } from "@wsp/protocol";
+import type { ContextMenuItem, DesktopBridge, HostConnectAsk, HostOutcome, HostsView, InitNeedsYou, JoinAsk, LocalFontFace, PlaceStanding, ShellChord, ThemePreference } from "@wsp/protocol";
 import { contextBridge, ipcRenderer, webUtils } from "electron";
-import type { JoinAsk, JoinOutcome } from "./join.js";
+import type { JoinOutcome } from "./join.js";
 import { shellArgFrom } from "./shell-args.js";
 
 /** What the first launch's page can ask the shell, answered only while that page is up. */
@@ -30,6 +30,9 @@ const bridge: DesktopBridge & OnboardingBridge = {
   switchHost: (alias: string | null): Promise<HostOutcome> => ipcRenderer.invoke("hosts:switch", alias),
   connectHost: (ask: HostConnectAsk): Promise<HostOutcome> => ipcRenderer.invoke("hosts:connect", ask),
   disconnectHost: (alias: string): Promise<HostOutcome> => ipcRenderer.invoke("hosts:disconnect", alias),
+  place: (): Promise<PlaceStanding | undefined> => ipcRenderer.invoke("place:standing"),
+  leaveWsp: (): Promise<HostOutcome> => ipcRenderer.invoke("place:leave"),
+  setStayAwake: (on: boolean): Promise<PlaceStanding> => ipcRenderer.invoke("place:awake", on),
   onConnectHostOpen: (handler: () => void): (() => void) => {
     const listen = (): void => handler();
     ipcRenderer.on("hosts:connect-open", listen);

@@ -1,10 +1,6 @@
 [
   {
     "type": "callback.port",
-    "port": 8123
-  },
-  {
-    "type": "callback.port",
-    "port": 1024
+    "port": 45543
   }
 ]

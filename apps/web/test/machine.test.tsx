@@ -17,12 +17,14 @@ import type {
   WorkspacePhase,
   WorkspaceSize,
   WorkspaceStatus,
+  WorkspaceSysEvent,
   WorkspaceView,
 } from "@wsp/protocol";
 import { MachineSurface } from "../src/components/machine/MachineSurface.js";
 import { onProjectTripRequest, type ProjectTripRequest } from "../src/shell/shellRequests.js";
 import { provideDaemonHello } from "../src/files/wire.js";
 import { getLive, resetLive } from "../src/machine/live.js";
+import { wireHostLive } from "../src/machine/hostLive.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { caps } from "./caps.js";
@@ -1400,6 +1402,44 @@ describe("this computer as a workspace", () => {
     await waitFor(() => expect(fact("size")).toBe("10 cores · 16 GB"));
     return api;
   }
+
+  it("fills its Live rows from the host's own reading, on a pane opened before anything dialled", async () => {
+    const api = fakeApi([MAC]);
+    api.watchStatuses = vi.fn(async () => [{ ...status(MAC), kind: "local" as const, size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }]);
+    const open = vi.fn(async () => ({ channel: "c1" }));
+    api.daemon = { ...noDaemonApi, open };
+    const asked: string[] = [];
+    let push: ((e: WorkspaceSysEvent) => void) | undefined;
+    api.watchSys = async id => void asked.push(id);
+    api.onSysSample = fn => {
+      push = fn;
+      return () => (push = undefined);
+    };
+    useStore.setState({ conn: "live" });
+    const unwire = wireHostLive(useStore);
+    try {
+      render(<MachineSurface workspaceId={MAC.id} />);
+      // The pane is mounted before anything is bound, as it is on a page opened straight onto this workspace.
+      await act(async () => {
+        useStore.getState().bind(api);
+        for (let i = 0; i < 100 && asked.length === 0; i++) await new Promise(r => setTimeout(r, 5));
+      });
+      expect(asked).toEqual([MAC.id]);
+      // Before the first reading the rows say a figure is coming, never that the machine cannot be reached.
+      expect(fact("cpu")).toBe("pending");
+      expect(liveRow("cpu").hasAttribute("data-stale")).toBe(false);
+
+      act(() => push!({ type: "workspace.sys", workspaceId: MAC.id, sample: sysSample(0) }));
+      await waitFor(() => expect(fact("cpu")).toBe("33%"));
+      expect(fact("mem")).toBe("1 GB of 4 GB");
+      expect(fact("disk")).toBe("20 GB of 100 GB");
+      expect(liveRow("disk").hasAttribute("data-stale")).toBe(false);
+      // Nothing was dialled to get them: no pane opened a channel to this computer's daemon.
+      expect(open).not.toHaveBeenCalled();
+    } finally {
+      act(() => unwire());
+    }
+  });
 
   it("shows this computer's cores and memory the way it shows a fork's size, in its own word for a cpu, and its state and reach beside them", async () => {
     await mountLocal();
