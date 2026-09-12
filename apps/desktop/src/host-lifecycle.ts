@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { defaultHomeIn, homeNamed, serve, servingHost, type CliIO, type RunningWsp, type UrlOpener } from "@wsp/host";
+import { defaultHomeIn, devCheckoutState, homeNamed, serve, servingHost, type CliIO, type RunningWsp, type UrlOpener } from "@wsp/host";
 import { hereWord } from "@wsp/protocol";
 import type { Runtime } from "@wsp/runtime";
 
@@ -91,12 +90,12 @@ function attached(port: number): HostSession {
   return { url: `http://127.0.0.1:${port}`, port, owned: false, remote: false, label: hereWord(process.platform === "darwin"), close: async () => {} };
 }
 
-/** Same rule as the bin: a .env in cwd marks a dev checkout whose .wsp state is shared with wspx. It holds for a
- * development run and nothing else, since a packaged app is launched from a folder it did not choose, and WSP_HOME
- * names the home over it in every case, which is what the locate doc says. */
+/** The bin's rule, read from the bin: a .env in cwd marks a dev checkout whose .wsp state is shared with wspx. It
+ * holds for a development run and nothing else, since a packaged app is launched from a folder it did not choose,
+ * and WSP_HOME names the home over it in every case, which is what the locate doc says. */
 export function statePathIn(home: string, launch: Launch): string {
-  if (!launch.packaged && homeNamed(launch.env) === undefined && existsSync(join(launch.cwd, ".env"))) return join(launch.cwd, ".wsp", "state.json");
-  return join(home, "state.json");
+  const dev = launch.packaged || homeNamed(launch.env) !== undefined ? undefined : devCheckoutState(launch.cwd);
+  return dev ?? join(home, "state.json");
 }
 
 /** The host whose lock sits next to this state file, once it answers as wsp. */
