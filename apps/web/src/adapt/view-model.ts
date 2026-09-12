@@ -315,6 +315,10 @@ export interface ProviderSlashCommand {
   readonly name: string;
   readonly description?: string;
   readonly input?: { readonly hint: string };
+  /** Where the announcement says this command came from, as the CLI spells it in the name itself; absent where the
+   * name says nothing about it. The menu groups on this and on nothing else, so a CLI that names no source is drawn
+   * in one list rather than under headings the client made up. */
+  readonly source?: string;
 }
 
 export interface HarnessCatalog {

@@ -800,8 +800,13 @@ export function takesMcpServers(catalog: Pick<HarnessCatalog, "mcpServers"> | nu
   return catalog?.mcpServers === true;
 }
 
+/** Whatever carries a harness's screen-only commands: the catalog itself, or a caller that holds the list alone. */
+export interface ScreenCommandsHolder {
+  readonly screenCommands?: ReadonlyArray<ScreenCommand>;
+}
+
 /** The commands of this harness that work only in its CLI's own terminal; none for a catalog from before the field. */
-export function screenCommandsOf(catalog: Pick<HarnessCatalog, "screenCommands"> | null | undefined): ReadonlyArray<ScreenCommand> {
+export function screenCommandsOf(catalog: ScreenCommandsHolder | null | undefined): ReadonlyArray<ScreenCommand> {
   return catalog?.screenCommands ?? NO_SCREEN_COMMANDS;
 }
 
@@ -809,7 +814,7 @@ const NO_SCREEN_COMMANDS: ReadonlyArray<ScreenCommand> = [];
 
 /** The screen-only command a message would hand the CLI, or null. Only a slash that opens the whole message is a
  * command to the CLI; anywhere else it reads the words as text, so this reads the first word alone. */
-export function screenCommandTyped(catalog: Pick<HarnessCatalog, "screenCommands"> | null | undefined, prompt: string): ScreenCommand | null {
+export function screenCommandTyped(catalog: ScreenCommandsHolder | null | undefined, prompt: string): ScreenCommand | null {
   const name = /^\/(\S+)/.exec(prompt.trim())?.[1];
   if (name === undefined) return null;
   return screenCommandsOf(catalog).find(c => c.name === name) ?? null;
@@ -2162,6 +2167,17 @@ export type PlaceView = z.infer<typeof PlaceView>;
 /** The id the computer the host runs on carries in that list. It is a place like every other, and the one nothing
  * was installed on, so both sides of the wire read the same word for it. */
 export const HERE_PLACE_ID = "here";
+
+/** The one written form of a workspace's machine on a joined computer: the id names the place the link belongs to
+ * and nothing else. Written here rather than in the backend that mints it because every client reads it back to
+ * say which computer a workspace stands on. */
+export const placeMachineId = (placeId: string): string => `place:${placeId}`;
+
+/** The place an id names, or nothing when the id is not one of ours: a record from another backend. */
+export function parsePlaceMachineId(id: string): string | undefined {
+  const placeId = id.startsWith("place:") ? id.slice("place:".length) : "";
+  return placeId === "" ? undefined : placeId;
+}
 
 /** A computer you own finished its join, with the address it dialled from as `ws` reported it. The view carries
  * what it said about itself, so the sheet fills its row off this one event. */
@@ -3923,11 +3939,11 @@ export {
   type Rgb,
   type ThemePreset,
 } from "./workspace-look.js";
-export { placeDaemonPaths, placeOwnedPaths, rootsPathIn, sshDaemonPaths, underProject, workFolderIn } from "./project-path.js";
+export { folderName, parentFolderName, placeDaemonPaths, placeOwnedPaths, rootsPathIn, sshDaemonPaths, underProject, workFolderIn } from "./project-path.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importDest, importRequest, registerRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
-export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";
+export { addressFromHash, appHash, workspaceHash, type AppAddress } from "./app-address.js";
 export * from "./app-ports.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";

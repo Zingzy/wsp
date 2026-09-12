@@ -1092,7 +1092,7 @@ describe("the cloud setup sheet", () => {
   });
 
   it("a turn that ended without the recipe says so on the agent step, with Retry starting the same agent again and Start over going back to the choice", async () => {
-    const stopped: InitJob = { ...AGENT_JOB, phase: "failed", line: "Permission for Bash: wsp recipe scan --json", error: "the thread ended without writing /Users/me/.wsp/recipe.json" };
+    const stopped: InitJob = { ...AGENT_JOB, phase: "failed", line: "Run: wsp recipe scan --json", error: "the thread ended without writing /Users/me/.wsp/recipe.json" };
     const { api, dialog } = await open({ setup: { ...HELD, job: stopped } });
     await waitFor(() => expect(k(dialog, "agent")).toBeDefined());
     expect(k(dialog, "title").textContent).toBe(CLOUD_SETUP_WORDS.agent.failed);

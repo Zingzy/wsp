@@ -21,9 +21,8 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { useDiffRevealStore } from "../diffs/reveal.js";
 import { daemonBehindLine } from "../machine/daemon.js";
-import { useWorkspace } from "../protocol/store.js";
+import { useStore, useWorkspace } from "../protocol/store.js";
 import { useRightPanelStore } from "../rightPanelStore.js";
-import { requestNewThread } from "../shell/shellRequests.js";
 import { focusPaneOnShow, FolderBreadcrumbs, useUpAFolder } from "./FolderBreadcrumbs.js";
 import { useWorkspaceListing } from "./listing.js";
 import { rootOf, usePinned, useRoot, useRootStore } from "./root.js";
@@ -39,6 +38,7 @@ export function FilesSurface({ workspaceId, theme }: { workspaceId: string; them
   const pin = useRootStore(s => s.pin);
   const unpin = useRootStore(s => s.unpin);
   const follow = useRootStore(s => s.follow);
+  const newThread = useStore(s => s.newThread);
   const { levels, ensure, refresh } = useWorkspaceListing(workspaceId);
   const openFile = useRightPanelStore(s => s.openFile);
   const openSurface = useRightPanelStore(s => s.open);
@@ -67,7 +67,7 @@ export function FilesSurface({ workspaceId, theme }: { workspaceId: string; them
   if (!wire || root === null) return <NotRunning />;
   const newThreadHere = () => {
     follow(workspaceId, root);
-    requestNewThread({ workspaceId });
+    newThread(workspaceId);
   };
 
   return (

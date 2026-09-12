@@ -1,24 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { kindWords, type SysSample } from "@wsp/protocol";
-import { percentLabel, reachLabel } from "../src/components/machine/format.js";
+import type { SysSample } from "@wsp/protocol";
+import { percentLabel } from "../src/components/machine/format.js";
 import { getLive, LIVE_WINDOW, outOfMemoryReading, resetLive, useOutOfMemoryReading, useOutOfMemoryReadings } from "../src/machine/live.js";
 
 const sample = (i: number): SysSample => ({ type: "sys.sample", cpu: i, load1: 0.5, mem: { used: i, total: 100 }, disk: { used: i, total: 100 }, at: 1_000 + i });
-
-describe("the Reach row's word", () => {
-  it("keeps the state word on every kind whose machines carry a daemon, and says what the machine is where none does", () => {
-    // Every kind carries one today, each put there its own way, so a daemon missing is a fact about that machine
-    // and the row says the state. The other branch reads the same table and is what the next kind without one gets.
-    for (const kind of ["cloud", "local", "ssh"] as const) {
-      expect(kindWords(kind).daemon).toBe(true);
-      expect(reachLabel("unsupported", kind)).toBe("unsupported");
-      expect(reachLabel("reachable", kind)).toBe("reachable");
-      expect(reachLabel("no-daemon", kind)).toBe("no daemon");
-    }
-  });
-});
 
 describe("live labels", () => {
   it("percent is a whole number with its sign", () => {

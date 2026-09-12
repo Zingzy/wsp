@@ -7,8 +7,8 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { WebSocketServer } from "ws";
-import { NO_PLACE_FILE_LINE, PLACE_UNKNOWN_REFUSAL, PlaceProveRequest, PlaceReport, hostKeyRefusal, hostQuietLine, linkedLine, placeDaemonPaths, placeLinkTranscript, type PlaceFile } from "@wsp/protocol";
+import WebSocket, { WebSocketServer } from "ws";
+import { NO_PLACE_FILE_LINE, NOT_ON_THIS_ROAD, PLACE_UNKNOWN_REFUSAL, PlaceProveRequest, PlaceReport, hostKeyRefusal, hostQuietLine, linkedLine, placeDaemonPaths, placeLinkTranscript, unknownOpLine, type PlaceFile } from "@wsp/protocol";
 import { placeBackoffMs, readPlaceFile, writePlaceFile } from "../src/link.js";
 import { closeFakePlaceHosts, fakePlaceHost, listening, placePair, settled } from "./fake-place-host.js";
 import { daemonUnderTest, type DaemonUnderTest, type DaemonUnderTestArgs } from "./harness.js";
@@ -204,6 +204,49 @@ describe("the socket a place proved, served as an inbound one", () => {
     await settled(50);
     expect(events.some(e => e["type"] === "daemon.hello")).toBe(true);
     expect(rejectedEvents(events)).toEqual([]);
+  });
+
+  it("refuses a machine op on both roads: the link has no backend behind it, and the place's own door is not the link", async () => {
+    const key = placePair();
+    const host = await fakePlaceHost({ key });
+    const place = placeFile([host.url], key.publicKey, placePair().privateKeyPem);
+    const d = await placeDaemon(place);
+    const ws = await host.socket;
+    const answers: Record<string, unknown>[] = [];
+    ws.on("message", raw => {
+      const f = JSON.parse(String(raw)) as Record<string, unknown>;
+      if (f["type"] === undefined) answers.push(f);
+    });
+    ws.send(JSON.stringify({ id: 31, op: "machine.list" }));
+    const onLink = await vi.waitFor(
+      () => {
+        const found = answers.find(a => a["id"] === 31);
+        expect(found).toBeDefined();
+        return found!;
+      },
+      { timeout: 5_000, interval: 10 },
+    );
+    // A daemon with no backend names the op it cannot answer, whichever words its runtime puts around it.
+    expect(onLink["ok"]).toBe(false);
+    expect(String(onLink["error"])).toContain("machine.list");
+    // The same op from a client holding the place's own token: a client on this machine does not drive its forks. A
+    // daemon that registers the machine ops on its link refuses by the road; one that registers none has never
+    // heard of the op. Both are refusals and neither serves it.
+    const own = new WebSocket(`ws://127.0.0.1:${d.port}`);
+    const inbound = await new Promise<Record<string, unknown>>((done, fail) => {
+      own.on("error", fail);
+      own.on("open", () => {
+        own.send(JSON.stringify({ id: 1, op: "auth", token: "link-token" }));
+        own.send(JSON.stringify({ id: 2, op: "machine.list" }));
+      });
+      own.on("message", raw => {
+        const f = JSON.parse(String(raw)) as Record<string, unknown>;
+        if (f["id"] === 2) done(f);
+      });
+    });
+    own.close();
+    expect(inbound["ok"]).toBe(false);
+    expect([NOT_ON_THIS_ROAD, unknownOpLine("machine.list")]).toContain(inbound["error"]);
   });
 
   it("answers place.leave with what the sweep took and then ends the process", async () => {

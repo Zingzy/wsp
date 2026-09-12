@@ -1180,8 +1180,9 @@ describe("the init job, agent road", () => {
     await f.jobs.start({ road: "agent", harness: "claude" });
     asks.say({ type: "turn.delta", kind: "tool_use", text: JSON.stringify({ command: "wsp recipe scan --json" }), toolName: "Bash", toolUseId: "toolu_1" });
     expect(f.jobs.view()!.line).toBe("$ wsp recipe scan --json");
-    asks.say({ type: "permission.ask", ask: { askId: "ask_1", toolName: "Bash", input: "{}", detail: "wsp recipe scan --json", options: [{ id: "allow", label: "Allow", effect: "allow" }] } });
-    expect(f.jobs.view()!.line).toBe("Permission for Bash: wsp recipe scan --json");
+    const scan = JSON.stringify({ command: "wsp recipe scan --json", description: "Read what the agents here use" });
+    asks.say({ type: "permission.ask", ask: { askId: "ask_1", toolName: "Bash", input: scan, detail: "Read what the agents here use", options: [{ id: "allow", label: "Allow", effect: "allow" }] } });
+    expect(f.jobs.view()!.line).toBe("Run: wsp recipe scan --json");
     asks.finish({ status: "completed", text: "done" });
     await expect(f.settled()).resolves.toBeUndefined();
   });

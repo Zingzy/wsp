@@ -237,7 +237,7 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
         <Button variant="ghost">Wake</Button>
         <Button variant="destructive">Delete</Button>
         <Button variant="destructive-outline">Discard</Button>
-        <Button variant="link">Lineage</Button>
+        <Button variant="link">Versions</Button>
         <Button variant="glass">Glass</Button>
         <Button size="xs">xs</Button>
         <Button size="sm">sm</Button>
@@ -301,7 +301,7 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
           <AlertTitle>Snapshot sealed</AlertTitle>
         </Alert>
         <Alert variant="info">
-          <AlertTitle>Upgrade available</AlertTitle>
+          <AlertTitle>A newer image is ready</AlertTitle>
         </Alert>
       </div>
     ),
@@ -475,7 +475,7 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
             <DialogHeader>
               <DialogTitle>New workspace</DialogTitle>
               <DialogDescription>
-                Forked from the golden image head.
+                A copy of your image where you pick.
               </DialogDescription>
             </DialogHeader>
             <DialogPanel>
@@ -497,7 +497,7 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
             <AlertDialogHeader>
               <AlertDialogTitle>Delete workspace?</AlertDialogTitle>
               <AlertDialogDescription>
-                The machine and its snapshots are removed.
+                The computer and the images on it are removed.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -517,7 +517,7 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
           <SheetPopup side="right">
             <SheetHeader>
               <SheetTitle>Workspace</SheetTitle>
-              <SheetDescription>pause, wake, upgrade</SheetDescription>
+              <SheetDescription>state, projects, live</SheetDescription>
             </SheetHeader>
             <SheetPanel>
               <p className="text-sm">Panel body.</p>
@@ -625,11 +625,11 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
         </Group>
         <Collapsible defaultOpen>
           <CollapsibleTrigger render={<Button variant="ghost" size="sm" />}>
-            <ChevronRightIcon /> lineage
+            <ChevronRightIcon /> versions
           </CollapsibleTrigger>
           <CollapsiblePanel>
             <p className="text-muted-foreground px-2 py-1 text-sm">
-              golden v4 → api → api-2
+              v4 → api → api-2
             </p>
           </CollapsiblePanel>
         </Collapsible>
@@ -703,7 +703,7 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
           </EmptyMedia>
           <EmptyTitle>No workspaces</EmptyTitle>
           <EmptyDescription>
-            Fork the golden image to start one.
+            Add a computer or connect a provider, then create one.
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
@@ -780,7 +780,7 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
                       </SidebarMenuSubItem>
                       <SidebarMenuSubItem>
                         <SidebarMenuSubButton size="sm" href="#gallery">
-                          upgrade node
+                          move to node 22
                         </SidebarMenuSubButton>
                       </SidebarMenuSubItem>
                     </SidebarMenuSub>

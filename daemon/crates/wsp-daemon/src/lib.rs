@@ -4,20 +4,32 @@
 //! passes a socket and nothing here binds anything but the address it was told.
 
 mod auth;
+mod awake;
 mod door;
+mod exec;
 mod fs;
 mod git;
+mod link;
+mod mode;
 mod ops;
 mod paths;
+mod place;
+mod pty;
+mod urls;
 
+pub use link::place_backoff_ms;
+
+use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::net::TcpListener;
-use wsp_frames::{numbers, WorkspaceKind};
+use tokio::sync::mpsc;
+use wsp_frames::{numbers, DaemonEvent, WorkspaceKind};
 
 /// What a daemon is started with: one field per flag the binary takes, so the harness and the deploy scripts spell
 /// one thing. Fields the door does not read yet are held for the modules that will.
@@ -93,18 +105,113 @@ impl Options {
     }
 }
 
-/// What every socket's handler reads: the options as given and the root the hello announces.
+/// Every frame the daemon writes is one JSON object; serialising the wire types cannot fail.
+pub(crate) fn frame_text(value: &impl serde::Serialize) -> String {
+    serde_json::to_string(value).expect("a frame serialises")
+}
+
+/// One item on a socket's outbound channel: a frame to write, or the leave's reply, after which the loop stops.
+pub(crate) enum Outgoing {
+    Text(String),
+    Leave(String),
+}
+
+impl Outgoing {
+    #[cfg(test)]
+    pub(crate) fn text(&self) -> &str {
+        match self {
+            Outgoing::Text(t) | Outgoing::Leave(t) => t,
+        }
+    }
+}
+
+/// The way frames reach one socket from anywhere in the daemon: its serve loop writes what arrives here, in order,
+/// so a handler's events and its reply cannot cross.
+#[derive(Clone)]
+pub(crate) struct Outbound(pub(crate) mpsc::UnboundedSender<Outgoing>);
+
+impl Outbound {
+    /// False once the socket is gone, which is how a listener learns it may be dropped.
+    pub(crate) fn send_text(&self, text: &str) -> bool {
+        self.0.send(Outgoing::Text(text.to_owned())).is_ok()
+    }
+
+    pub(crate) fn send(&self, out: Outgoing) -> bool {
+        self.0.send(out).is_ok()
+    }
+
+    pub(crate) fn send_event(&self, event: &DaemonEvent) -> bool {
+        self.send_text(&frame_text(event))
+    }
+}
+
+/// One socket's interest in a pty's data, its exit or its mode; the key is what detaches it when the socket closes.
+pub(crate) struct Listener {
+    pub(crate) key: u64,
+    pub(crate) out: Outbound,
+}
+
+/// What every socket's handler reads: the options as given, the root the hello announces, the ptys and their mode
+/// watcher, and every authed unscoped socket for the events the daemon pushes without being asked.
 pub(crate) struct Ctx {
     pub(crate) options: Options,
     pub(crate) root: String,
     pub(crate) auth_deadline: Duration,
+    pub(crate) ptys: Mutex<pty::PtyManager>,
+    pub(crate) modes: Arc<mode::ModeWatcher>,
+    /// Where the daemon's lines go: stderr in the binary, a test's own list otherwise.
+    log: Log,
+    /// Told once a leave has been answered, which is what ends the daemon.
+    pub(crate) stop: tokio::sync::Notify,
+    authed: Mutex<HashMap<u64, Outbound>>,
+    keys: AtomicU64,
 }
 
+/// One line of the daemon's log, as the binary prints it on stderr and the suite reads it.
+pub type Log = Box<dyn Fn(&str) + Send + Sync>;
+
 impl Ctx {
-    pub(crate) fn new(options: Options) -> Ctx {
+    pub(crate) fn new(options: Options, log: Log) -> Ctx {
         let root = resolved_root(options.root.as_deref());
         let auth_deadline = Duration::from_millis(options.auth_deadline_ms.unwrap_or(numbers::AUTH_DEADLINE_MS));
-        Ctx { options, root, auth_deadline }
+        let proc_root = options.proc_root.clone().unwrap_or_else(|| PathBuf::from("/proc"));
+        let interval = options.mode_interval_ms.map_or(mode::DEFAULT_INTERVAL, Duration::from_millis);
+        let modes = Arc::new(mode::ModeWatcher::new(mode::linux_mode_probe(&proc_root), interval));
+        Ctx {
+            options,
+            root,
+            auth_deadline,
+            ptys: Mutex::new(pty::PtyManager::default()),
+            modes,
+            log,
+            stop: tokio::sync::Notify::new(),
+            authed: Mutex::new(HashMap::new()),
+            keys: AtomicU64::new(1),
+        }
+    }
+
+    pub(crate) fn log(&self, line: &str) {
+        (self.log)(line);
+    }
+
+    /// A number no other socket or listener in this daemon has.
+    pub(crate) fn next_key(&self) -> u64 {
+        self.keys.fetch_add(1, Ordering::Relaxed)
+    }
+
+    pub(crate) fn add_authed(&self, key: u64, out: Outbound) {
+        self.authed.lock().unwrap_or_else(|e| e.into_inner()).insert(key, out);
+    }
+
+    pub(crate) fn remove_authed(&self, key: u64) {
+        self.authed.lock().unwrap_or_else(|e| e.into_inner()).remove(&key);
+    }
+
+    /// Pushed to every authed unscoped socket, not to subscribers: the host's link reconnects through the edge and
+    /// would lose a subscription with it. A port-scoped socket is there to tunnel one port and hears none of it.
+    pub(crate) fn broadcast(&self, event: &DaemonEvent) {
+        let text = frame_text(event);
+        self.authed.lock().unwrap_or_else(|e| e.into_inner()).retain(|_, out| out.send_text(&text));
     }
 }
 
@@ -116,22 +223,40 @@ pub struct Daemon {
 
 impl Daemon {
     /// Binds the address and reads the token file once, so a daemon with no token to check against never starts.
+    /// Lines go to stderr.
     pub async fn bind(options: Options) -> io::Result<Daemon> {
+        Daemon::bind_with(options, Box::new(|line| eprintln!("{line}"))).await
+    }
+
+    /// The same, with the log going where the caller says.
+    pub async fn bind_with(options: Options, log: Log) -> io::Result<Daemon> {
         if auth::current_token(&options.token_path).is_none() {
             return Err(io::Error::other(wsp_frames::words::NO_TOKEN_AT_START));
         }
         let listener = TcpListener::bind((options.host.as_str(), options.port)).await?;
-        Ok(Daemon { listener, ctx: Arc::new(Ctx::new(options)) })
+        Ok(Daemon { listener, ctx: Arc::new(Ctx::new(options, log)) })
     }
 
     pub fn local_addr(&self) -> SocketAddr {
         self.listener.local_addr().expect("a bound listener has an address")
     }
 
-    /// Accepts forever; each socket gets its own task and its own door.
+    /// Accepts until a leave answered on the link ends the daemon; each socket gets its own task and its own door.
+    /// A place file turns the outbound link on beside the listener, with the awake hold that reads the same file.
     pub async fn run(self) -> io::Result<()> {
+        if let Some(file) = self.ctx.options.place_file.clone() {
+            let port = self.local_addr().port();
+            tokio::spawn(link::run(Arc::clone(&self.ctx), port));
+            tokio::spawn(awake::hold_while_joined(Arc::clone(&self.ctx), file));
+        }
         loop {
-            let (stream, _) = self.listener.accept().await?;
+            let accepted = tokio::select! {
+                accepted = self.listener.accept() => accepted,
+                _ = self.ctx.stop.notified() => return Ok(()),
+            };
+            let (stream, _) = accepted?;
+            // As node's ws does: without it a pty's small frames sit behind the peer's delayed ACK, 40 ms measured.
+            let _ = stream.set_nodelay(true);
             let ctx = Arc::clone(&self.ctx);
             tokio::spawn(door::serve(stream, ctx));
         }
