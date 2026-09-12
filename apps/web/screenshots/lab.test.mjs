@@ -15,7 +15,7 @@ import { keptLog, labLines } from "./lab.mjs";
 
 describe("the fixtures a lab serves", () => {
   it("has one per kind of person the testers play", () => {
-    expect(FIXTURE_NAMES).toEqual(["mac-in-use", "mac-only", "mac-and-laptop", "mac-and-vps", "ascii-only", "solari-only", "both-providers", "no-sign-in", "orchestrator"]);
+    expect(FIXTURE_NAMES).toEqual(["mac-in-use", "mac-only", "mac-and-laptop", "mac-and-vps", "ascii-only", "solari-only", "both-providers", "no-sign-in", "orchestrator", "image-built"]);
   });
 
   it("gives the two personas who have this computer and nothing else an empty window named after it", () => {
@@ -106,6 +106,7 @@ describe("the provider a fixture's host runs under", () => {
       "both-providers": "fake",
       "no-sign-in": "none",
       orchestrator: "fake",
+      "image-built": "fake",
     });
   });
 
