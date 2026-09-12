@@ -31,10 +31,13 @@
 // turn it left behind: the runtime runs a workspace's threads side by side
 // and holds each to one turn, so the fresh composer opens at once. The slash
 // menu offers what the session's harness announced less the commands the
-// runtime catalog says run only in the CLI's own terminal, and Enter on one
-// of those sends nothing: the line names the wsp control that serves it and
-// goes with the next edit, and a block on the send outranks it. A slash
-// command nobody announced still goes as text, since the words may be meant.
+// runtime catalog says run only in the CLI's own terminal; with nothing left
+// to offer it does not open at all and the placeholder drops its half about
+// commands, since a menu that answers a typed slash with an empty state
+// promises what it cannot keep. Enter on a screen command sends nothing: the
+// line names the wsp control that serves it and goes with the next edit, and
+// a block on the send outranks it. A slash command nobody announced still
+// goes as text, since the words may be meant.
 // The checkout row under the composer picks the folder a fresh thread starts
 // in; a resumed one is started where its harness last said it was. The
 // model, effort, context window and access picks in the box's footer ride
@@ -50,7 +53,7 @@ import { useThreadStart } from "../../files/root";
 import { useLinkDownLine } from "../../terminal/paneWords";
 import { composerSubmissionIntentForEnter, detectComposerTrigger, replaceTextRange } from "../../composer-logic";
 import { ComposerPromptEditor, type ComposerCommandKey, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
-import { catalogFromHarness } from "./adapt";
+import { catalogFromHarness, composerPlaceholder, offersSlashCommands } from "./adapt";
 import { canPickFolder, ComposerCheckoutRow } from "./ComposerCheckoutRow";
 import { ComposerCommandMenu, type ComposerCommandItem } from "./ComposerCommandMenu";
 import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
@@ -66,7 +69,6 @@ import { ComposerSurface } from "./ComposerSurface";
 import { Button } from "../ui/button";
 import type { ChatThreadHandle } from "./useChatThread";
 
-const PLACEHOLDER = "Ask anything, or / for commands";
 const noop = () => {};
 
 /** What blocks a send right now, or null; the refusal table gives its words. The socket comes first: with it down
@@ -208,9 +210,9 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
 
   const trigger = useMemo(() => detectComposerTrigger(draft.prompt, draft.cursor), [draft]);
   const searchKey = trigger ? `${trigger.kind}:${trigger.query.trim().toLowerCase()}` : null;
-  const menuOpen = trigger !== null && trigger.rangeStart === 0 && dismissedSearchKey !== searchKey && unavailable === null;
   const { harness } = thread.view;
   const catalog = useMemo(() => catalogFromHarness({ id: harnessId, harness, screen: screenCommandsOf(harnessCatalog) }), [harness, harnessCatalog, harnessId]);
+  const menuOpen = offersSlashCommands(catalog) && trigger !== null && trigger.rangeStart === 0 && dismissedSearchKey !== searchKey && unavailable === null;
   const items = useMemo<ComposerCommandItem[]>(() => {
     if (!menuOpen || trigger === null) return [];
     const all = catalog.slashCommands.map(command => ({
@@ -534,7 +536,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
                       value={draft.prompt}
                       cursor={draft.cursor}
                       disabled={unavailable !== null}
-                      placeholder={PLACEHOLDER}
+                      placeholder={composerPlaceholder(catalog)}
                       onChange={onChange}
                       onCommandKeyDown={onCommandKeyDown}
                     />
