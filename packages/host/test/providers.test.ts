@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { BoxBackend, DockerBackend, LocalBackend, NoProviderBackend, SolariBackend, SshBackend, type MachineBackend } from "@wsp/engine";
+import { BoxBackend, DockerBackend, FakeBackend, LocalBackend, NoProviderBackend, SolariBackend, SshBackend, landsBytes, type MachineBackend } from "@wsp/engine";
 import { goldenRecipe, makeRuntime, optsFor, providerSlotOf, swapProvider } from "../src/cli.js";
 import { PROVIDER_MODULES, providerBackendFor, providerEnvNames, providerEnvWith, providerModule, type ProviderModule } from "../src/providers.js";
 
@@ -39,8 +39,23 @@ describe("provider modules", () => {
     expect(providerBackendFor(pick({}, { WSP_PROVIDER: "box", BOX_API_KEY: "box_x" })).capabilities).toMatchObject({ pauseMode: "disk", previewUrls: true, containers: true });
   });
 
+  it("takes the module that answers out of memory when a harness names it, and never otherwise", async () => {
+    // Named alone, whatever this computer holds: a fixture is served under it on a computer with a real key saved.
+    expect(providerModule(pick({ solari: "sk-ant-x" }, { WSP_PROVIDER: "fake" })).id).toBe("fake");
+    expect(providerModule(pick({}, { WSP_PROVIDER: "" })).id).toBe("none");
+    const backend = providerBackendFor(pick({}, { WSP_PROVIDER: "fake" }));
+    expect(backend).toBeInstanceOf(FakeBackend);
+    // A fixture names its machines before any process has held them, so a machine this backend never minted is
+    // answered for rather than refused, and the id is where a fixture says one is asleep.
+    const [awake, asleep] = [await backend.get("fk_c0ffee"), await backend.get("fk_c0ffee.paused")];
+    expect([awake.id, await awake.state()]).toEqual(["fk_c0ffee", "running"]);
+    expect(await asleep.state()).toBe("paused");
+    // Nothing lands on it, which is what keeps the daemon deploy off a machine that has no guest behind it.
+    expect(landsBytes(backend.capabilities, awake)).toBe(false);
+  });
+
   it("every row is reachable and the last one answers for any computer", () => {
-    expect(PROVIDER_MODULES.map(m => m.id)).toEqual(["docker", "box", "solari", "none"]);
+    expect(PROVIDER_MODULES.map(m => m.id)).toEqual(["docker", "box", "fake", "solari", "none"]);
     expect(PROVIDER_MODULES.at(-1)!.selects(pick())).toBe(true);
   });
 
@@ -49,18 +64,18 @@ describe("provider modules", () => {
     const built = PROVIDER_MODULES.map(m => [m.id, m.build(pick({ solari: "sk-ant-x" }, { DOCKER_HOST: "unix:///nonexistent/docker.sock", BOX_API_KEY: "box_x" }))] as const);
     const all: readonly (readonly [string, MachineBackend])[] = [...built, ["local", new LocalBackend({ root: "/tmp/wsp-providers" })], ["ssh", new SshBackend()]];
     const modes = Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.pauseMode]));
-    expect(modes).toEqual({ docker: "memory", box: "disk", solari: "memory", none: undefined, local: undefined, ssh: undefined });
+    expect(modes).toEqual({ docker: "memory", box: "disk", solari: "memory", fake: "memory", none: undefined, local: undefined, ssh: undefined });
     for (const [, b] of all) expect(b.capabilities.pauseMode === undefined || ["memory", "disk"].includes(b.capabilities.pauseMode)).toBe(true);
     // The runtime reads the budgets only where a pause exists, so the two are declared together or not at all.
     for (const [id, b] of all) expect([id, b.lifecycle !== undefined]).toEqual([id, b.capabilities.pauseMode !== undefined]);
     // Which providers copy a machine's disk into an image, the one fact the snapshot verb reads: a fork that boots
     // cold is still snapshotted, so this row is its own and never liveCloneForks.
-    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.diskSnapshots]))).toEqual({ docker: true, box: true, solari: true, none: false, local: false, ssh: false });
+    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.diskSnapshots]))).toEqual({ docker: true, box: true, solari: true, fake: true, none: false, local: false, ssh: false });
     // Which providers stand a fresh machine in for one a workspace is on, the fact the rebuild and the image move
     // read, and which give a machine a new size, the fact the resize reads. Each verb has its own row here, so a
     // provider added tomorrow answers for every road rather than being read off a neighbour's flag.
-    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.replacesMachine]))).toEqual({ docker: true, box: true, solari: true, none: false, local: false, ssh: false });
-    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.resize]))).toEqual({ docker: false, box: false, solari: false, none: false, local: false, ssh: false });
+    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.replacesMachine]))).toEqual({ docker: true, box: true, solari: true, fake: true, none: false, local: false, ssh: false });
+    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.resize]))).toEqual({ docker: false, box: false, solari: false, fake: false, none: false, local: false, ssh: false });
     for (const [, b] of all) if (b.lifecycle !== undefined) {
       expect(b.lifecycle.budgets.wakeAttempts).toBeGreaterThanOrEqual(1);
       expect(b.lifecycle.budgets.daemonAnswersMs).toBeGreaterThan(0);

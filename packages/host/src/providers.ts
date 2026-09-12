@@ -6,7 +6,7 @@
 // daemon say they have. Adding a provider is a row here and its backend in the
 // engine; nothing above this file compares a provider by name.
 
-import { BoxBackend, DockerBackend, NoProviderBackend, SolariBackend, type MachineBackend } from "@wsp/engine";
+import { BoxBackend, DockerBackend, FakeBackend, NoProviderBackend, SolariBackend, type MachineBackend } from "@wsp/engine";
 import type { Keys } from "./env-keys.js";
 
 /** The environment a provider is picked out of: the host's own, with whatever the command line's provider words put
@@ -57,6 +57,17 @@ export const PROVIDER_MODULES: readonly ProviderModule[] = [
     // provider's own 401 on the first call rather than a guess made here.
     selects: pick => pick.env[PROVIDER_ENV] === "box",
     build: pick => new BoxBackend({ apiKey: pick.env[BOX_KEY_ENV] ?? "" }),
+  },
+  {
+    id: "fake",
+    envNames: [PROVIDER_ENV],
+    // Named and never guessed: a provider that answers out of memory is what a harness serves a fixture state
+    // through, so it is reached by asking for it by name and by nothing else. Two roads beyond a harness reach it,
+    // both starting with the word typed: `wsp up --service` copies WSP_PROVIDER out of the installing shell into
+    // the unit, and `wsp init --provider fake` would seal a hollow golden, since these machines answer exit 0 to
+    // everything and the smoke gate reads an exit code.
+    selects: pick => pick.env[PROVIDER_ENV] === "fake",
+    build: () => new FakeBackend(),
   },
   {
     id: "solari",
