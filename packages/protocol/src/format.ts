@@ -1734,6 +1734,18 @@ export function relayedRecordRefusal(named: string): string {
  * thread the same way. */
 export const threadWord = (threadId: string): string => threadId.slice(0, 8);
 
+/** The one sentence a forget is refused with once a turn of the thread did work: the runtime raises it, the command
+ * line prints it and the app's row action shows it without asking, so all three say the same thing. */
+export function threadForgetRefusal(threadId: string): string {
+  return `thread ${threadWord(threadId)} has a turn that ran; only a thread no turn ever ran on can be forgotten`;
+}
+
+/** The one sentence a forget is refused with for a row from before threads: the fold keys such a row by its own
+ * turn id, so no thread here answers to it and nothing a forget could take is named. */
+export function threadWithoutIdRefusal(rowId: string): string {
+  return `${rowId} is a turn from before threads and carries no thread id of its own; no forget can name it`;
+}
+
 /** Every act a thread scoped token can be refused for, and the word each is refused by name with. The table is
  * the whole rule: an act absent from it is one no thread may ask for, and adding an act is one row here. */
 export const SPAWN_ACTS = {
