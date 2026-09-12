@@ -72,12 +72,13 @@ describe("the ranges the picker holds", () => {
 
 describe("the line under the chart", () => {
   it("says how long the workspace has been tracked when a range asks for more than that", () => {
-    expect(trackedLine(series(40 * MINUTE))).toMatch(/^tracked since \d{1,2}:\d{2}(?: [AP]M)? · 40 min$/);
+    // The clock is the app's own shape on every machine, so the pattern is exact rather than allowing a locale's.
+    expect(trackedLine(series(40 * MINUTE))).toMatch(/^tracked since \d{2}:\d{2} [AP]M · 40 min$/);
     expect(trackedLine(series(3 * HOUR))).toMatch(/ · 3 h$/);
   });
 
   it("says when tracking began and no more, once every range fits inside it", () => {
-    expect(trackedLine(series(60 * 24 * HOUR))).toMatch(/^tracked since [A-Z][a-z]{2} \d{1,2} \d{1,2}:\d{2}(?: [AP]M)?$/);
+    expect(trackedLine(series(60 * 24 * HOUR))).toMatch(/^tracked since [A-Z][a-z]{2} \d{1,2} \d{2}:\d{2} [AP]M$/);
   });
 
   it("says nothing about a workspace with no cost yet", () => {

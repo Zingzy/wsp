@@ -17,6 +17,7 @@ const state = (events: ReadonlyArray<SessionEvent>, extra: Partial<ThreadState> 
   known: [],
   named: null,
   stray: null,
+  refused: [],
   ...extra,
 });
 
@@ -903,5 +904,166 @@ describe("a reload while a turn runs", () => {
       "assistant: Then the banner.",
       "thinking",
     ]);
+  });
+});
+
+describe("a send whose turn never wrote a row of its own", () => {
+  const thread = { workspaceId: CHAT_WS, sessionId: "sess_1", threadId: "thr_1" };
+  const at = (ms: number) => new Date(Date.parse("2026-09-12T13:39:00.000Z") + ms).toISOString();
+  const ms = (offset: number) => Date.parse("2026-09-12T13:39:00.000Z") + offset;
+  const scoped = (turnId: string) => ({ ...thread, turnId });
+  /** The coordinator's turn: its reply is in, its process has not exited, so the thread still reads as working. */
+  const WORKING: SessionEvent[] = [
+    { type: "session.start", ...scoped("turn_a"), at: ms(1_000), prompt: "fan out five agents" },
+    { type: "session.delta", ...scoped("turn_a"), at: ms(2_000), line: 1, kind: "text", text: "Five agents are running." },
+    { type: "session.done", ...scoped("turn_a"), at: ms(66_000), result: { status: "failed", error: "Ended with 5 background tasks running", durationMs: 66_000, costUsd: 0.51 } },
+  ];
+  /** Road one, the runtime's: the start never reached a machine, so a session.end goes out on the bus alone
+   * carrying the sentence it was refused with. Nothing of that turn is ever recorded. */
+  const REFUSED: SessionEvent = {
+    type: "session.end", ...scoped("turn_b"), sessionId: "turn_b",
+    at: ms(120_000), exitCode: null, sawResult: false, reason: "the harness would not launch",
+  };
+  /** Road two, the harness's: it launched, answered nothing and exited, so the reply carries the sentence and the
+   * end is a plain one. Both are recorded, and neither is preceded by a start, since it died before it announced
+   * itself. A turn of its own, so the footer reads its duration and its cost. */
+  const ANSWERED_NOTHING: SessionEvent[] = [
+    { type: "session.done", ...scoped("turn_b"), at: ms(120_000), result: { status: "failed", error: "claude answered with no output and no usage after 48ms", durationMs: 48, costUsd: 0 } },
+    { type: "session.end", ...scoped("turn_b"), at: ms(120_050), exitCode: 1, sawResult: true },
+  ];
+  const NEXT: SessionEvent[] = [
+    { type: "session.start", ...scoped("turn_c"), at: ms(180_000), prompt: "try again", requestId: "req_3" },
+    { type: "session.delta", ...scoped("turn_c"), at: ms(181_000), line: 1, kind: "text", text: "Here is the tree." },
+  ];
+
+  const rendered = (s: ThreadState): string[] => {
+    const view = deriveChatThread(s);
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: view.entries,
+      turns: view.turns,
+      isWorking: view.running,
+      activeTurnStartedAt: view.activeTurnStartedAt,
+    });
+    return rows.map(row =>
+      row.kind === "message" ? `${row.message.role}: ${row.message.text}` : row.kind === "work" ? row.groupedEntries.map(e => e.label).join("|") : row.kind,
+    );
+  };
+  const busy = (s: ThreadState): boolean => s.sending !== null || deriveChatThread(s).running;
+  const fold = (s: ThreadState, events: ReadonlyArray<SessionEvent>): ThreadState => events.reduce((held, e) => reduceEvent(held, e, at(0)), s);
+  /** The thread the moment the person's second send died on one road or the other. The send is stamped by this
+   * browser and the rows around it by the runtime, so the two clocks disagree on purpose: this one reads later than
+   * every row the runtime wrote, as a browser running ahead of its host does. */
+  const afterRefusal = (road: ReadonlyArray<SessionEvent>): ThreadState =>
+    fold(
+      { ...fold(state([]), WORKING), sending: { after: "turn_a" }, pendingPrompt: { text: "stop the docs one", requestId: "req_2", at: at(900_000) } },
+      road,
+    );
+
+  const THREAD_SO_FAR = ["user: fan out five agents", "assistant: Five agents are running.", "Ended with 5 background tasks running"];
+
+  it("refused before it reached a machine: the words, then the line saying why, then the turn under them as it streams", () => {
+    expect(rendered(fold(afterRefusal([REFUSED]), NEXT))).toEqual([
+      ...THREAD_SO_FAR,
+      "user: stop the docs one",
+      "the harness would not launch",
+      "user: try again",
+      "working",
+      "assistant: Here is the tree.",
+      "thinking",
+    ]);
+  });
+
+  it("answered nothing and exited: the words sit above that turn's own reply, never after the turn that follows it", () => {
+    const refused = afterRefusal(ANSWERED_NOTHING);
+    expect(rendered(refused)).toEqual([...THREAD_SO_FAR, "user: stop the docs one", "claude answered with no output and no usage after 48ms"]);
+    expect(rendered(fold(refused, NEXT))).toEqual([
+      ...THREAD_SO_FAR,
+      "user: stop the docs one",
+      "claude answered with no output and no usage after 48ms",
+      "user: try again",
+      "working",
+      "assistant: Here is the tree.",
+      "thinking",
+    ]);
+  });
+
+  it("lets the send go again: the thread is not working once the turn that failed has ended", () => {
+    expect(busy(fold(state([]), WORKING))).toBe(true);
+    expect(busy(afterRefusal([REFUSED]))).toBe(false);
+    expect(busy(afterRefusal(ANSWERED_NOTHING))).toBe(false);
+  });
+
+  it("keeps the words the person sent: a send that never became a turn still has its row when the next send is typed", () => {
+    const refused = afterRefusal([REFUSED]);
+    expect(rendered(refused)).toContain("user: stop the docs one");
+    const typedAgain = { ...refused, pendingPrompt: { text: "try again", requestId: "req_3", at: at(910_000) } };
+    expect(rendered(typedAgain)).toContain("user: stop the docs one");
+    // A reload cannot carry them either: the runtime wrote no row for that send, so this view is their only home.
+    expect(rendered(reloadTranscript(typedAgain, [...WORKING], at(925_000)))).toContain("user: stop the docs one");
+  });
+
+  // A thread whose last turn had settled, one send, then a reply and an end for a turn no start ever opened:
+  // nothing is running when the send goes, so no turn is ended before this one is placed.
+  it("on a settled thread, a reply and an end for a turn with no start read as the words then the line", () => {
+    const settled: SessionEvent[] = [
+      { type: "session.start", ...scoped("turn_s"), at: ms(1_000), prompt: "look at the layout" },
+      { type: "session.delta", ...scoped("turn_s"), at: ms(2_000), line: 1, kind: "text", text: "The header is fine." },
+      { type: "session.done", ...scoped("turn_s"), at: ms(3_000), result: { status: "completed", durationMs: 2_100, costUsd: 0.01 } },
+      { type: "session.end", ...scoped("turn_s"), at: ms(3_100), exitCode: 0, sawResult: true },
+    ];
+    const sent = { ...fold(state([]), settled), sending: { after: "turn_s" }, pendingPrompt: { text: "have another look", requestId: "req_2", at: at(900_000) } };
+    expect(rendered(fold(sent, ANSWERED_NOTHING))).toEqual([
+      "user: look at the layout",
+      "assistant: The header is fine.",
+      "user: have another look",
+      "claude answered with no output and no usage after 48ms",
+    ]);
+  });
+
+  it("the kept words are a row of the list in their own right: the thread is one row longer for them, above the line", () => {
+    const held = fold(state([]), WORKING);
+    // The same turn failing with nobody's send behind it: the line alone, and no row for words that were never sent.
+    const nobody = rendered(fold(held, ANSWERED_NOTHING));
+    expect(nobody).toEqual([...THREAD_SO_FAR, "claude answered with no output and no usage after 48ms"]);
+    const mine = rendered(afterRefusal(ANSWERED_NOTHING));
+    expect(mine.length).toBe(nobody.length + 1);
+    expect(mine.filter(row => row === "user: stop the docs one")).toHaveLength(1);
+    expect(mine.indexOf("user: stop the docs one")).toBe(mine.indexOf("claude answered with no output and no usage after 48ms") - 1);
+  });
+
+  it("the runtime's own row takes the kept words back: a start carrying the send's request id draws them once", () => {
+    const settled: SessionEvent[] = [
+      { type: "session.start", ...scoped("turn_s"), at: ms(1_000), prompt: "first" },
+      { type: "session.delta", ...scoped("turn_s"), at: ms(2_000), line: 1, kind: "text", text: "done." },
+      { type: "session.done", ...scoped("turn_s"), at: ms(3_000), result: { status: "completed", durationMs: 900, costUsd: 0.01 } },
+      { type: "session.end", ...scoped("turn_s"), at: ms(3_100), exitCode: 0, sawResult: true },
+    ];
+    const sent = { ...fold(state([]), settled), sending: { after: "turn_s" }, pendingPrompt: { text: "mine", requestId: "req_b", at: at(900_000) } };
+    // Another client's send refused on this thread, inside this send's own launch window: the runtime emits that end
+    // only while the thread is not running, which is exactly where a send waiting for its start sits.
+    const strayEnd: SessionEvent = {
+      type: "session.end", ...scoped("turn_x"), sessionId: "turn_x",
+      at: ms(120_000), exitCode: null, sawResult: false, reason: "the harness would not launch",
+    };
+    const kept = fold(sent, [strayEnd]);
+    expect(rendered(kept)).toEqual(["user: first", "assistant: done.", "user: mine", "the harness would not launch"]);
+    const own: SessionEvent[] = [
+      { type: "session.start", ...scoped("turn_b"), at: ms(180_000), prompt: "mine", requestId: "req_b" },
+      { type: "session.delta", ...scoped("turn_b"), at: ms(181_000), line: 1, kind: "text", text: "ok" },
+    ];
+    const drawn = rendered(fold(kept, own));
+    expect(drawn.filter(row => row === "user: mine")).toHaveLength(1);
+    expect(drawn).toEqual(["user: first", "assistant: done.", "the harness would not launch", "user: mine", "working", "assistant: ok", "thinking"]);
+    // A reload that carries the start does the same: the reply's rows are the runtime's own.
+    const reloaded = reloadTranscript(kept, [...settled, ...own], at(930_000));
+    expect(rendered(reloaded).filter(row => row === "user: mine")).toHaveLength(1);
+  });
+
+  it("a reload that settles the send on an end with no start keeps its words under that turn too", () => {
+    const inFlight = { ...fold(state([]), WORKING), sending: { after: "turn_a" }, pendingPrompt: { text: "stop the docs one", requestId: "req_2", at: at(900_000) } };
+    const reloaded = reloadTranscript(inFlight, [...WORKING, ...ANSWERED_NOTHING], at(930_000));
+    expect(reloaded.sending).toBeNull();
+    expect(reloaded.pendingPrompt).toBeNull();
+    expect(rendered(reloaded)).toEqual([...THREAD_SO_FAR, "user: stop the docs one", "claude answered with no output and no usage after 48ms"]);
   });
 });

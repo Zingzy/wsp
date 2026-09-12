@@ -4,6 +4,7 @@
 // protocol's (accruedAt, rateAt, monthStart), read by the host's own month
 // total too. No DOM here so the rules test in node.
 import { accruedAt, monthStart, offlineFor, spentSince, spentThisMonth, type WorkspaceCostEvent } from "@wsp/protocol";
+import { APP_LOCALE } from "../../lib/timestampFormat.js";
 
 export type UsageRange = "hour" | "day" | "month" | "all";
 export const USAGE_RANGES: readonly UsageRange[] = ["hour", "day", "month", "all"];
@@ -122,11 +123,14 @@ function toTheSecond(span: Span): boolean {
   return (span.end - span.start) / (tickCount(span) - 1) < 60_000;
 }
 
-/** An axis instant in the person's zone: the clock, with the day in front once the span is longer than a day. */
+/** An axis instant in the person's zone: the clock, with the day in front once the span is longer than a day. The
+ * shape is the app's own tag, never the machine's locale, which is the rule every stamp in the app follows
+ * (APP_LOCALE): left to the runtime, one instant read `12:26 AM` on one Mac and `12:26 am` on the same Mac under
+ * another shell, and a chart a design review measures cannot be two shapes. The zone stays the person's. */
 export function timeLabel(t: number, span: Span): string {
   const d = new Date(t);
-  const clock = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", ...(toTheSecond(span) ? { second: "2-digit" } : {}) });
-  return span.end - span.start > RANGE_MS.day ? `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${clock}` : clock;
+  const clock = d.toLocaleTimeString(APP_LOCALE, { hour: "2-digit", minute: "2-digit", ...(toTheSecond(span) ? { second: "2-digit" } : {}) });
+  return span.end - span.start > RANGE_MS.day ? `${d.toLocaleDateString(APP_LOCALE, { month: "short", day: "numeric" })} ${clock}` : clock;
 }
 
 interface Xy {

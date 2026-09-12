@@ -26,6 +26,7 @@ import { provideDaemonHello } from "../src/files/wire.js";
 import { getLive, resetLive } from "../src/machine/live.js";
 import { wireHostLive } from "../src/machine/hostLive.js";
 import type { Api } from "../src/protocol/client.js";
+import { APP_LOCALE } from "../src/lib/timestampFormat.js";
 import { useStore } from "../src/protocol/store.js";
 import { caps } from "./caps.js";
 import { statusOf } from "./workspace-status.js";
@@ -361,8 +362,10 @@ describe("idle window", () => {
 });
 
 describe("usage", () => {
-  const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const clockToSecond = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  // The app's own tag, as the chart spells it: under a shell whose locale reads 12:26 am these read the machine's
+  // and the chart read the app's, and the two disagreed only on the gate's Mac.
+  const clock = (ms: number) => new Date(ms).toLocaleTimeString(APP_LOCALE, { hour: "2-digit", minute: "2-digit" });
+  const clockToSecond = (ms: number) => new Date(ms).toLocaleTimeString(APP_LOCALE, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   const T0 = Date.UTC(2026, 8, 5, 6, 0);
   const at = (minutes: number) => T0 + minutes * 60_000;
   const point = (minutes: number, rate: number, accruedUsd: number): EventUnion => ({
