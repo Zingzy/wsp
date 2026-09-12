@@ -2668,7 +2668,7 @@ export function hostsMenuItems(view: HostsView): ContextMenuItem[] {
     ...(view.place === undefined
       ? []
       : [
-          { id: `${HOST_MENU_AWAKE}${view.place.awake ? "off" : "on"}`, label: HOST_WORDS.place.awakeRow, group: "place", enabled: true, checked: view.place.awake },
+          { id: `${HOST_MENU_AWAKE}${view.place.awake ? "off" : "on"}`, label: HOST_WORDS.place.awakeRow, group: "place", enabled: true, checked: view.place.awake, hint: HOST_WORDS.place.awakeWhy },
           { id: HOST_MENU_LEAVE, label: HOST_WORDS.place.leaveRow(view.place.hostName), group: "place", enabled: true, destructive: true },
         ]),
   ];

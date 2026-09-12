@@ -13,6 +13,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { DEFAULT_PLACE_PORT, JOIN_ALREADY } from "@wsp/protocol";
 import type { Browser, CDPSession, Page } from "playwright";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { launchRender, renderSkipped, stopRender } from "../../web/test/render-browser.js";
@@ -62,7 +63,7 @@ const bridge = (agents: typeof AGENTS = AGENTS, join: unknown = { ok: true, here
   join: async () => (${JSON.stringify(join)}),
 };`;
 /** The refusals the join screen draws, each named by the word the shell answers with. */
-const REFUSED = (why: string): string => bridge(AGENTS, { ok: false, why, said: "http://192.168.1.20:7788 could not be reached: connect ECONNREFUSED 192.168.1.20:7788" });
+const REFUSED = (why: string): string => bridge(AGENTS, { ok: false, why, said: "http://192.168.1.20:4420 could not be reached: connect ECONNREFUSED 192.168.1.20:4420" });
 const NO_AGENTS = bridge(AGENTS.map(a => ({ ...a, found: false })));
 /** The catalog's six agents, every one here: the most names one refusal can ever have to carry. */
 const SIX = [
@@ -528,7 +529,7 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's screen laid out
     expect(Math.round((await box("#go")).y - foot.y)).toBe(56);
     expect(await box("#go").then(b => b.h)).toBe(40);
     // The ghosts, and the field's 13 px mono at 48 px with the app's own tracking.
-    expect(await page!.getAttribute("#address", "placeholder")).toBe("192.168.1.20:7788");
+    expect(await page!.getAttribute("#address", "placeholder")).toBe(`192.168.1.20:${DEFAULT_PLACE_PORT}`);
     expect(await page!.getAttribute("#code", "placeholder")).toBe("XXXX-XXXX");
     expect(await page!.$eval("#address", el => ({ font: `${getComputedStyle(el).fontSize}/${getComputedStyle(el).lineHeight}`, mono: /mono/i.test(getComputedStyle(el).fontFamily), tracking: getComputedStyle(el).letterSpacing }))).toEqual({
       font: "13px/48px",
@@ -541,7 +542,7 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's screen laid out
     expect(held.opacity).toBe("0.64");
     expect(await page!.getAttribute("#why", "title")).toBe("type the address and the code first");
     // Filled, it is the same fill at full weight: one loud thing, and it never changed hue to say it was held.
-    await page!.fill("#address", "192.168.1.20:7788");
+    await page!.fill("#address", "192.168.1.20:4420");
     await page!.fill("#code", "QW4K-7PZX");
     const live = await page!.$eval("#go", el => ({ disabled: (el as HTMLButtonElement).disabled, opacity: getComputedStyle(el).opacity, fill: getComputedStyle(el).backgroundColor }));
     expect(live).toEqual({ disabled: false, opacity: "1", fill: held.fill });
@@ -553,7 +554,7 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's screen laid out
   it.each(["dark", "light"] as const)("in the %s appearance an address nothing answered at fills its own slot, marks its own field, and moves nothing", async theme => {
     await open(theme, "reduce", REFUSED("answer"), JUDGE);
     await toJoin();
-    await page!.fill("#address", "192.168.1.20:7788");
+    await page!.fill("#address", "192.168.1.20:4420");
     await page!.fill("#code", "QW4K-7PZX");
     const before = { head: await box("#joining .head"), content: await box("#joining .content"), keycap: await box("#go"), back: await box("#back"), code: await box("#code") };
     await page!.click("#go");
@@ -600,7 +601,7 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's screen laid out
     await away();
     await page!.screenshot({ path: join(SHOTS, `02b2-first-run-join-refused-1440${theme === "dark" ? "-dark" : ""}.png`) });
     // Typing into the field takes the refusal off it, since it described what is no longer there.
-    await page!.fill("#address", "192.168.1.21:7788");
+    await page!.fill("#address", "192.168.1.21:4420");
     expect(await page!.textContent("#address-said")).toBe("");
     expect(await page!.getAttribute("#address", "aria-invalid")).toBeNull();
   });
@@ -608,7 +609,7 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's screen laid out
   it.each(["dark", "light"] as const)("in the %s appearance a code the host would not take fills the code's own slot, inside the two lines it stands at at 140 px", async theme => {
     await open(theme, "reduce", REFUSED("code"), JUDGE);
     await toJoin();
-    await page!.fill("#address", "192.168.1.20:7788");
+    await page!.fill("#address", "192.168.1.20:4420");
     await page!.fill("#code", "QW4K-7PZX");
     const before = { content: await box("#joining .content"), keycap: await box("#go"), address: await box("#address") };
     await page!.click("#go");
@@ -631,7 +632,7 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's screen laid out
     // A refusal about neither field goes to the footer's own slot, 18 px into its gap, as SetupScreen draws it.
     await open("light", "reduce", REFUSED("already"), JUDGE);
     await toJoin();
-    await page!.fill("#address", "192.168.1.20:7788");
+    await page!.fill("#address", "192.168.1.20:4420");
     await page!.fill("#code", "QW4K-7PZX");
     const standing = { content: await box("#joining .content"), keycap: await box("#go") };
     await page!.click("#go");
@@ -641,7 +642,8 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's screen laid out
     expect(Math.round(slot.y - foot.y)).toBe(18);
     expect(slot.w).toBe(560);
     expect(slot.h).toBe(36);
-    expect(await page!.textContent("#join-said")).toBe("This Mac already runs threads for another wsp. Take it out of that one first, with wsp leave in a terminal.");
+    // What to do is the protocol's own sentence, since the sidebar of a joined Mac carries the way out.
+    expect(await page!.textContent("#join-said")).toBe(`This Mac already runs threads for another wsp. ${JOIN_ALREADY.fix}`);
     expect(await page!.getAttribute("#address", "aria-invalid")).toBeNull();
     expect({ content: await box("#joining .content"), keycap: await box("#go") }).toEqual(standing);
     await page!.close();
@@ -668,7 +670,7 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's screen laid out
   it("answers Enter on a focused Back by leaving the screen, never by joining", async () => {
     await open("light", "reduce", bridge(), JUDGE);
     await toJoin();
-    await page!.fill("#address", "192.168.1.20:7788");
+    await page!.fill("#address", "192.168.1.20:4420");
     await page!.fill("#code", "QW4K-7PZX");
     // The keyboard walks to Back and presses it: that is leaving, and the screen's own Enter stands aside for it.
     await page!.focus("#back");
@@ -685,7 +687,7 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's screen laid out
   it.each(["dark", "light"] as const)("in the %s appearance a join that landed swaps in the joined screen: one card of two rows, this computer's facts, and one keycap", async theme => {
     await open(theme, "reduce", bridge(), JUDGE);
     await toJoin();
-    await page!.fill("#address", "192.168.1.20:7788");
+    await page!.fill("#address", "192.168.1.20:4420");
     await page!.fill("#code", "QW4K-7PZX");
     await page!.click("#go");
     await page!.waitForFunction(() => document.getElementById("joined")?.hidden === false);
@@ -730,7 +732,7 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's screen laid out
     await open(theme, "reduce", bridge());
     await toJoin();
     await page!.screenshot({ path: join(SHOTS, `join${dark}-1280x800.png`) });
-    await page!.fill("#address", "192.168.1.20:7788");
+    await page!.fill("#address", "192.168.1.20:4420");
     await page!.fill("#code", "QW4K-7PZX");
     await page!.click("#go");
     await page!.waitForFunction(() => document.getElementById("joined")?.hidden === false);
@@ -739,7 +741,7 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's screen laid out
     await page!.close();
     await open(theme, "reduce", REFUSED("answer"));
     await toJoin();
-    await page!.fill("#address", "192.168.1.20:7788");
+    await page!.fill("#address", "192.168.1.20:4420");
     await page!.fill("#code", "QW4K-7PZX");
     await page!.click("#go");
     await page!.waitForFunction(() => (document.querySelector("#address-said")?.textContent ?? "") !== "");
