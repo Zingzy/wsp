@@ -81,13 +81,14 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     keptMode: "default",
     bypassMode: "bypassPermissions",
     permissionModes: [
-      option("default", "Default", "Every tool that needs permission is asked about in the chat"),
-      option("acceptEdits", "Accept edits", "Edits land without asking; commands that need permission are asked about"),
-      option("plan", "Plan", "Read and plan only; no changes"),
-      { ...option("bypassPermissions", "Bypass", "Run every tool without asking"), isDefault: true },
-      option("auto", "Auto", "The auto mode classifier decides each permission; runs as Default where it is not enabled"),
-      option("manual", "Manual", "Ask before every tool; the CLI reports Default for it in print mode"),
-      option("dontAsk", "Don't ask", "Tools that need permission are refused, without a prompt"),
+      option("default", "Default", "Asks in the chat about each action that needs permission"),
+      option("acceptEdits", "Accept edits", "Edits files without asking; asks about commands that need permission"),
+      option("plan", "Plan", "Reads and plans only; changes nothing"),
+      { ...option("bypassPermissions", "Bypass", "Runs every action without asking"), isDefault: true },
+      option("auto", "Auto", "The agent decides which actions to ask about; where the account has no such mode it asks as Default does"),
+      // A turn launched in manual comes back naming default as the mode it ran in, so its own report is no proof of it.
+      option("manual", "Manual", "Asks before every action"),
+      option("dontAsk", "Don't ask", "Refuses any action that needs permission, without asking"),
     ],
   }),
   fromTable({
@@ -112,9 +113,9 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     keptMode: "workspace-write",
     bypassMode: "danger-full-access",
     permissionModes: [
-      option("read-only", "Read only", "No edits, no commands that write"),
-      option("workspace-write", "Workspace write", "Edits and commands inside the working folder"),
-      { ...option("danger-full-access", "Full access", "No sandbox, as every turn on a throwaway machine runs"), isDefault: true },
+      option("read-only", "Read only", "Reads only; edits no files and runs no command that writes"),
+      option("workspace-write", "Workspace write", "Edits files and runs commands inside the working folder"),
+      { ...option("danger-full-access", "Full access", "Runs every action without asking, with no folder off limits"), isDefault: true },
     ],
   }),
   fromTable({
@@ -125,9 +126,9 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     keptMode: "default",
     bypassMode: "yolo",
     permissionModes: [
-      option("default", "Default", "Ask before every tool"),
-      option("auto_edit", "Auto edit", "Edits land without asking"),
-      option("yolo", "Yolo", "Run every tool without asking"),
+      option("default", "Default", "Asks before every action"),
+      option("auto_edit", "Auto edit", "Edits files without asking"),
+      option("yolo", "Yolo", "Runs every action without asking"),
     ],
   }),
   fromTable({
@@ -137,7 +138,7 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     efforts: [],
     keptMode: "default",
     bypassMode: "auto",
-    permissionModes: [option("default", "Default", "Ask as configured"), option("auto", "Auto", "Approve everything not explicitly denied")],
+    permissionModes: [option("default", "Default", "Asks as its own settings say"), option("auto", "Auto", "Runs every action its own settings do not deny")],
   }),
   fromTable({
     harness: "pi",
@@ -153,7 +154,7 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     efforts: levels(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]),
     keptMode: "default",
     bypassMode: "yolo",
-    permissionModes: [option("default", "Default", "Ask before dangerous commands"), option("yolo", "Yolo", "Run dangerous commands without asking")],
+    permissionModes: [option("default", "Default", "Asks before a command that could do damage"), option("yolo", "Yolo", "Runs a command that could do damage without asking")],
   }),
 ];
 
