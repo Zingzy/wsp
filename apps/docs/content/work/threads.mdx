@@ -99,7 +99,7 @@ Every thread carries who opened it: `you` from the app, `cli` from the command l
 
 - `claude was not found on PATH (exit 127)`: the golden does not carry Claude Code.
 - `claude answered with no output and no usage after 4.2s`: the CLI refused the turn, usually a transcript a kill left half written; the stderr lines follow.
-- `Codex is not signed in on this machine; run codex login --device-auth there`.
+- `Codex is not signed in where this workspace runs; run codex login --device-auth there`.
 - `Codex's model provider reads its key from the environment variable OPENAI_API_KEY, which is not set on this machine`.
 - `stopped after 1m 30s of Codex reconnecting to its model provider with no answer`: the CLI itself never gives up, so wsp does.
 - `cut by a host restart after 15m 00s`: the host could not re-open the run when it came back.

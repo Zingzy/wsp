@@ -30,6 +30,7 @@ import { accessFromNextMessage, contextWindowsFor, effortsFor, type HarnessCatal
 import { baseName } from "../../files/entries";
 import { useChosenFolder, useDefaultProject, useProjects, useRootStore } from "../../files/root";
 import { useHarnessCatalog, useHarnessCatalogs, useLatestSession, useStore, useWorkspace } from "../../protocol/store";
+import { useWhereWord } from "../../sidebar/workspaceRows";
 import { Button } from "../ui/button";
 import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { canPickFolder } from "./ComposerCheckoutRow";
@@ -325,6 +326,7 @@ export function ComposerOptionPickers({
   const pick = useComposerOptionsStore(s => s.pick);
   const catalogs = useHarnessCatalogs(workspaceId);
   const projects = useProjects(workspaceId);
+  const where = useWhereWord(workspaceId);
   const { catalog, model, picks, pinned } = useComposerPicks(workspaceId, thread);
   if (catalog === null || picks === null) return null;
   const efforts = effortsFor(catalog, model);
@@ -336,6 +338,7 @@ export function ComposerOptionPickers({
         catalog={catalog}
         model={model}
         pinned={pinned}
+        where={where}
         onPickHarness={harness => pick(workspaceId, "harness", harness)}
         onPickModel={(harness, value) => {
           if (harness !== catalog.harness) pick(workspaceId, "harness", harness);

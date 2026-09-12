@@ -11,7 +11,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, accessFromNextMessage, applyPreferencesPatch, keptAccess, THIS_COMPUTER, type HarnessCatalog, type PreferencesPatch, type SessionAccessOutcome, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, accessFromNextMessage, applyPreferencesPatch, codexNotSignedInLine, keptAccess, THIS_COMPUTER, type HarnessCatalog, type PreferencesPatch, type SessionAccessOutcome, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../src/components/ui/menu.js", () => {
   const Ctx = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
@@ -263,7 +263,7 @@ describe("composer pickers", () => {
     await waitFor(() => expect(within(menu).getAllByRole("option").map(el => el.dataset["composerOption"])).toEqual(["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"]));
     expect(within(menu).getByText("Best for everyday, complex tasks")).toBeTruthy();
     expect(within(menu).getAllByRole("option")[0]?.textContent).toMatch(/⌘1|Ctrl\+1/);
-    expect(menu.querySelector("[data-composer-catalog-source]")?.textContent).toBe("Claude Code 2.1.257 on this machine");
+    expect(menu.querySelector("[data-composer-catalog-source]")?.textContent).toBe("Claude Code 2.1.257 on m1");
     fireEvent.change(within(menu).getByLabelText("Search models"), { target: { value: "son" } });
     await waitFor(() => expect(within(menu).getAllByRole("option")).toHaveLength(1));
     fireEvent.click(option("claude-sonnet-5")!);
@@ -333,8 +333,37 @@ describe("composer pickers", () => {
     await waitFor(() => expect(source()).toBe("claude table · --help 2.1.257, 2026-09-05"));
   });
 
+  it("the foot says a turn runs on the agent's own sign-in on this computer and costs this wsp nothing", async () => {
+    const { api } = fixtureApi({ table: [CLAUDE], workspace: { ...BARE, kind: "local" } });
+    await setup(api);
+    await waitFor(() => expect(picker("model")).not.toBeNull());
+    const menu = await openModelMenu();
+    const foot = menu.querySelector<HTMLElement>("[data-composer-model-foot]")!;
+    expect([...foot.children].map(el => el.textContent)).toEqual([
+      "Claude Code 2.1.257 on this computer",
+      "Threads run on Claude Code's own sign-in on this computer, which costs this wsp nothing.",
+      "The prices are its list prices, not a bill.",
+    ]);
+    expect(foot.textContent).not.toMatch(/machine/i);
+  });
+
+  it("the foot on a workspace somewhere else names that place, in the same sentences", async () => {
+    const { api } = fixtureApi({ table: [CLAUDE], workspace: { ...BARE, kind: "cloud", provider: "hetzner" } });
+    await setup(api);
+    await waitFor(() => expect(picker("model")).not.toBeNull());
+    const menu = await openModelMenu();
+    const foot = menu.querySelector<HTMLElement>("[data-composer-model-foot]")!;
+    expect([...foot.children].map(el => el.textContent)).toEqual([
+      "Claude Code 2.1.257 on hetzner",
+      "Threads run on Claude Code's own sign-in on hetzner, which costs this wsp nothing.",
+      "The prices are its list prices, not a bill.",
+    ]);
+    expect(foot.textContent).not.toContain(THIS_COMPUTER);
+    expect(foot.textContent).not.toMatch(/machine/i);
+  });
+
   it("a binary that answered and named a sign-in as why says that in the footer, with its own pin behind it", async () => {
-    const refused = { ...CODEX_TABLE, refusal: "Codex is not signed in on this machine; run codex login --device-auth there" };
+    const refused = { ...CODEX_TABLE, refusal: codexNotSignedInLine("codex login --device-auth") };
     const { api } = fixtureApi({ table: [CLAUDE_TABLE, refused], machine: [CLAUDE_TABLE, refused] });
     await setup(api);
     await waitFor(() => expect(picker("model")).not.toBeNull());
@@ -342,7 +371,7 @@ describe("composer pickers", () => {
     fireEvent.click(modelMenu()!.querySelector<HTMLElement>('[data-composer-harness="codex"]')!);
     await waitFor(() =>
       expect(modelMenu()!.querySelector("[data-composer-catalog-source]")?.textContent).toBe(
-        "Codex is not signed in on this machine; run codex login --device-auth there · app-server 0.153.0, 2026-09-07",
+        "Codex is not signed in where this workspace runs; run codex login --device-auth there · app-server 0.153.0, 2026-09-07",
       ),
     );
     expect(within(modelMenu()!).getAllByRole("option").length).toBe(CODEX_TABLE.models.length);

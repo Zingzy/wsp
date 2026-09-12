@@ -24,7 +24,7 @@ describe("harness catalogs", () => {
       // The bug this walks: a tab whose binary never answered showed no model and another agent's pin.
       expect(table.models.length).toBeGreaterThan(0);
       expect(table.version).toMatch(/^\S+ \d+\.\d+\.\d+, \d{4}-\d{2}-\d{2}$/);
-      const line = catalogSourceLine(table);
+      const line = catalogSourceLine(table, THIS_COMPUTER);
       expect(line).toBe(`${id} table · ${table.version!}`);
       // One line at the popup's width: 48 characters of the 10px mono the footer draws in (measured in Chromium).
       expect(line.length).toBeLessThanOrEqual(48);
@@ -38,10 +38,10 @@ describe("harness catalogs", () => {
   it("the pin is what was run on the row's own binary, and a row written from a CLI's docs claims none", () => {
     expect(harnessCatalog("claude")!.version).toBe("--help 2.1.257, 2026-09-05");
     expect(harnessCatalog("codex")!.version).toBe("app-server 0.153.0, 2026-09-07");
-    expect(catalogSourceLine(harnessCatalog("codex")!)).toBe("codex table · app-server 0.153.0, 2026-09-07");
+    expect(catalogSourceLine(harnessCatalog("codex")!, THIS_COMPUTER)).toBe("codex table · app-server 0.153.0, 2026-09-07");
     for (const id of ["gemini", "opencode", "pi", "hermes"]) {
       expect(harnessCatalog(id)!.version, id).toBeNull();
-      expect(catalogSourceLine(harnessCatalog(id)!)).toBe(`${id} table`);
+      expect(catalogSourceLine(harnessCatalog(id)!, THIS_COMPUTER)).toBe(`${id} table`);
     }
   });
 
@@ -282,8 +282,8 @@ describe("catalogFromProbe", () => {
 
   it("a probe without a version says so instead of pretending to the table's pin", () => {
     expect(catalogFromProbe(harnessCatalog("claude")!, { ...probe, version: null }).version).toBeNull();
-    expect(catalogSourceLine(catalogFromProbe(harnessCatalog("claude")!, { ...probe, version: null }))).toBe("Claude Code on this machine");
-    expect(catalogSourceLine(catalogFromProbe(harnessCatalog("claude")!, probe))).toBe("Claude Code 2.1.257 on this machine");
+    expect(catalogSourceLine(catalogFromProbe(harnessCatalog("claude")!, { ...probe, version: null }), THIS_COMPUTER)).toBe("Claude Code on this computer");
+    expect(catalogSourceLine(catalogFromProbe(harnessCatalog("claude")!, probe), "hetzner")).toBe("Claude Code 2.1.257 on hetzner");
   });
 
   it("a model whose efforts the binary did not name keeps none of its own, so every effort the catalog lists stays open to it", () => {
