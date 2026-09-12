@@ -1571,7 +1571,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       ...(opened !== undefined ? { workspace: { id: opened.id, name: opened.name } } : { forkCommand: opts.forkCommand }),
     });
     log.step(logLine(), out);
-    outro(`Done. Golden v${version} is sealed; ${opts.upCommand} starts the app${opened === undefined ? `, and ${opts.forkCommand} forks a workspace from it` : ""}.`, out);
+    outro(`Done. Golden v${version} is sealed${opened === undefined ? `; ${opts.forkCommand} forks a workspace from it, and ${opts.upCommand} opens the app` : `; ${opts.upCommand} opens the app`}.`, out);
     await closeRuntime();
     return result;
   }

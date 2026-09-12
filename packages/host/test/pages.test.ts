@@ -96,6 +96,15 @@ describe("the pages wsp prints", () => {
     const nope = captured();
     expect(await cli(["--help", "nope"], nope, undefined, {}, false)).toBe(EXIT_CODES.usage);
     expect(nope.errors[0]).toContain("wsp --help takes a page, and got nope.");
+    // The word and the flag are one road: help before a command is that command's own help.
+    const byWord = captured();
+    expect(await cli(["help", "up"], byWord, undefined, {}, false)).toBe(0);
+    const byFlag = captured();
+    expect(await cli(["up", "--help"], byFlag, undefined, {}, false)).toBe(0);
+    expect(byWord.lines).toEqual(byFlag.lines);
+    const folded = captured();
+    expect(await cli(["help", "host", "pair"], folded, undefined, {}, false)).toBe(0);
+    expect(folded.lines[0]).toContain("usage: wsp host pair");
   });
 
   it("a command's own help is its usage, what it does and its own flags, and a flag another command reads is refused naming it", async () => {

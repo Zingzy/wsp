@@ -6,7 +6,7 @@ This is how wsp gets built: tickets go out as threads on workspaces, opened by a
 
 ## The loop
 
-1. **One workspace with the repo imported.** `wsp import <workspace>` <folder> on a fresh workspace, the app's import dialog, or `wsp new <name> --from <project golden>` from a snapshot taken after an import. `wsp threads <workspace>` shows what is on it.
+1. **One workspace with the repo imported.** `wsp import <workspace> <folder>` on a fresh workspace, the app's import dialog, or `wsp new <name> --from <project golden>` from a snapshot taken after an import. `wsp threads <workspace>` shows what is on it.
 
 2. **One thread per ticket, each in its own worktree.** The brief opens with `git worktree add -b ticket/<n>-<slug> <folder> origin/main`, and `--cwd` points at the repo. Two threads writing in one checkout collide.
 

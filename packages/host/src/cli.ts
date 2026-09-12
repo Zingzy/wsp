@@ -2009,55 +2009,46 @@ export async function cli(
     io.log(`wsp ${VERSION}`);
     return 0;
   }
-  const word = positionals[0];
+  // `help` is the word for the flag: a person reaching for it types one as readily as the other, and answering the
+  // word with a typo's refusal is the tool arguing about punctuation. A line that opens with it is that same line
+  // with the flag on it, so what follows selects a page or a command as it would either way. A line with no word at
+  // all asks the same question: typing the program's name asks what it is, and answering by serving made a second
+  // host of it.
+  const asked = positionals[0] === "help" ? positionals.slice(1) : positionals;
+  const wantsHelp = values.help === true || positionals[0] === "help" || asked.length === 0;
+  const word = asked[0];
   // The word the plumbing folds under prints its own page, by itself or with the flag every other line answers to.
-  if (word === HOST_WORD && positionals.length === 1) {
+  if (word === HOST_WORD && asked.length === 1) {
     io.log(hostPage());
     return 0;
   }
-  // `help` is the word for the flag: a person reaching for it types one as readily as the other, and answering the
-  // word with a typo's refusal is the tool arguing about punctuation. A line with no word at all is the same
-  // question: typing the program's name asks what it is, and answering by serving made a second host of it. A page
-  // named after either of them is that page; a command asking for its own help falls through to the parse below.
-  if (values.help === true || word === undefined || word === "help") {
-    const asked = word === "help" ? positionals.slice(1) : positionals;
-    const named = asked[0];
-    if (named === undefined) {
+  if (wantsHelp && findCommand(asked) === undefined) {
+    // A command asking for its own help falls through to the parse below; only a word no command answers to is
+    // read as the name of a page.
+    if (word === undefined) {
       io.log(HELP);
       return 0;
     }
-    // A command asking for its own help falls through to the parse below; only a word no command answers to is
-    // read as the name of a page.
-    if (findCommand(asked) === undefined) {
-      const page = HELP_PAGES.find(p => p === named);
-      if (page !== undefined) {
-        io.log(page === "agent" ? agentPage() : devPage());
-        return 0;
-      }
-      if (named === HOST_WORD) {
-        io.log(hostPage());
-        return 0;
-      }
-      // A word that opens lines rather than being one answers with the lines it opens, as it does without the flag.
-      const opens = commandUsage(named);
-      if (opens !== undefined) {
-        io.log(opens);
-        return 0;
-      }
-      return failed(io, values.json === true, usageRefusal(`wsp --help takes a page, and got ${named}.`, `The pages are ${HELP_PAGES.map(p => `wsp --help ${p}`).join(", ")} and wsp host --help.`));
+    const page = HELP_PAGES.find(p => p === word);
+    if (page !== undefined) {
+      io.log(page === "agent" ? agentPage() : devPage());
+      return 0;
     }
-  }
-  const opts = optsFor(values, env, line => io.error(line));
-  const found = findCommand(positionals);
-  const json = values.json === true;
-  // The word the plumbing folds under prints its own page, whether it is asked for by the word alone or with the
-  // flag every other line answers it with.
-  if (word === HOST_WORD && (found === undefined || positionals.length === 1) && values.help !== false) {
-    if (positionals.length === 1) {
+    if (word === HOST_WORD) {
       io.log(hostPage());
       return 0;
     }
+    // A word that opens lines rather than being one answers with the lines it opens, as it does without the flag.
+    const opens = commandUsage(word);
+    if (opens !== undefined) {
+      io.log(opens);
+      return 0;
+    }
+    return failed(io, values.json === true, usageRefusal(`wsp --help takes a page, and got ${word}.`, `The pages are ${HELP_PAGES.map(p => `wsp --help ${p}`).join(", ")} and wsp host --help.`));
   }
+  const opts = optsFor(values, env, line => io.error(line));
+  const found = findCommand(asked);
+  const json = values.json === true;
   if (found === undefined) {
     // A word that opens a line but is no line of its own gets the lines it opens; one no command answers to gets
     // the pointer, since the help behind it runs to hundreds of rows.
@@ -2067,7 +2058,7 @@ export async function cli(
   }
   const { words, command } = found;
   // The line's own help, in place of the whole front page: its usage, what it does and its own flags.
-  if (values.help === true) {
+  if (wantsHelp) {
     io.log(commandPage(words, command));
     return 0;
   }
@@ -2084,7 +2075,7 @@ export async function cli(
     return failed(io, json, usageRefusal(foreignFlagLine(`--${foreign.name}`, foreign.on.map(w => `wsp ${w}`), `wsp ${words}`), `usage: ${command.usage}`));
   }
   try {
-    return await command.run(io, opts, values, positionals.slice(words.split(" ").length));
+    return await command.run(io, opts, values, asked.slice(words.split(" ").length));
   } catch (e) {
     return failed(io, json, e);
   }

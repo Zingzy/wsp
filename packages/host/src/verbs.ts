@@ -186,8 +186,9 @@ import {
   HERE_PLACE_ID,
   isLocalWorkspace,
   noSuchPlaceRefusal,
-  placeForksNowhereFix,
   placeForksNowhereLine,
+  placeRunsOneWorkspaceFix,
+  placeRunsOneWorkspaceLine,
 } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
 import { gitRootOf } from "./repo-root.js";
@@ -1184,9 +1185,11 @@ export async function onPlaceItself(
   // The same rule and the same sentence the verb that sets the switch on a workspace that exists reads.
   if (asked.agents?.spawn === true && !agentsMayDrive("local")) throw usageRefusal(agentsKindRefusal("local"), "Drop --spawn on, or name a place that forks.");
   const already = await workspaceOnPlace(client, place);
-  if (already !== undefined) throw usageRefusal(placeForksNowhereLine(place.name), placeForksNowhereFix(already.name));
-  // The one place a line compares against the protocol's word for the computer the host runs on: every other place
-  // that forks nothing already holds its workspace, and only this one can still have its first recorded.
+  if (already !== undefined) throw usageRefusal(placeRunsOneWorkspaceLine(place.name, already.name), placeRunsOneWorkspaceFix(already.name));
+  // The extension law's one named exception: every other road here reads a fact off the row, and this reads which
+  // row it is. It stands because only the computer the host runs on can reach this line with no workspace to name.
+  // A joined computer records one at its join, and a provider never takes this road at all, so the branch is the
+  // guard for a record that went missing rather than a road a person takes.
   if (place.id !== HERE_PLACE_ID) throw usageRefusal(placeForksNowhereLine(place.name), "Run wsp places.");
   return createLocalWorkspace(client, out, name);
 }

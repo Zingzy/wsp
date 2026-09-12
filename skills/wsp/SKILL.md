@@ -32,7 +32,7 @@ Asked to set a person up, read this section before running a single verb: a verb
 
    Expect: the tables again with every flip in them and the total moved by their sizes, then `Recipe written to <path>.` opening the last line, `~/.wsp/recipe.json` when the state file is the default one and a path beside their state file when it is not. That path is the one step 5 runs with.
 
-5. Build the golden. Run init yourself, detached, with the recipe step 5 wrote:
+5. Build the golden. Run init yourself, detached, with the recipe step 4 wrote:
 
    ```
    nohup wsp init --recipe ~/.wsp/recipe.json --non-interactive --json > /tmp/wsp-init.jsonl 2> /tmp/wsp-init.log &
@@ -48,7 +48,7 @@ Asked to set a person up, read this section before running a single verb: a verb
 
    Expect: `created dev <id>`, printed when the machine is booted and reachable, or with `--json` the creating stages and then the workspace, one JSON line each. `wsp new: no golden yet; run wsp init` instead means the host is serving without a sealed golden, because an init is still running or ended without sealing: wait for it, or go back to step 5. A refusal that names the account's machine cap means two are already up; the builder stays up ten minutes after a seal and counts as one, so right after a seal that is `first` and the builder, and the person chooses which workspace to pause.
 
-7. Import the project: `wsp import first` <folder> prints the plan (the repository, the files and their size, the caches left behind, each secret-shaped file with its default, cut unless a rewrite is offered, and the agents with sessions for the folder) and moves nothing; put the secret-shaped rows to the person, then run it again with `--yes` for the defaults or `--keep <path>` for a row they want on the machine. It lands at the same path on the machine. Take `wsp snapshot first` once it lands, so the next workspace starts from a project golden with the project in place and no second upload.
+7. Import the project: `wsp import first <folder>` prints the plan (the repository, the files and their size, the caches left behind, each secret-shaped file with its default, cut unless a rewrite is offered, and the agents with sessions for the folder) and moves nothing; put the secret-shaped rows to the person, then run it again with `--yes` for the defaults or `--keep <path>` for a row they want on the machine. It lands at the same path on the machine. Take `wsp snapshot first` once it lands, so the next workspace starts from a project golden with the project in place and no second upload.
 
    Expect: `wsp exec first -- ls <folder>` lists the repo on the machine with the command's own exit code, 0, and `wsp snapshot first` prints a `project golden <id>` line naming the project.
 
@@ -240,7 +240,7 @@ The folder must not exist on this computer unless `--replace`. `--from` is the f
 
 ## The loop for building with wsp
 
-1. One workspace with the repo imported (`wsp import <workspace>` <folder> on a fresh workspace, the app's import dialog, or `new --from` a project golden taken after an import). `wsp threads <workspace>` shows what is on it.
+1. One workspace with the repo imported (`wsp import <workspace> <folder>` on a fresh workspace, the app's import dialog, or `new --from` a project golden taken after an import). `wsp threads <workspace>` shows what is on it.
 2. One thread per ticket, each in its own worktree: the brief opens with `git worktree add -b ticket/<n>-<slug> <folder> origin/main`, and `--cwd` points at the repo. Two threads writing in one checkout collide.
 3. The brief names the ticket, the files to read whole, the laws (the repo's review skill), the exact test commands and the proof required, and says to run every command in the foreground and wait for it, since a reply that lands with a command still running in the background reads failed, and the thread takes no send until that process exits. A brief that says "fix the bug" comes back with a guess.
 4. Start builder threads with `--detach` (`detach` true on `run`) and `--notify me`, which prints each thread's id and returns, then end your turn: each builder's finished line comes back to you as a message carrying its whole report, in the order they finish, and nothing is polled or waited on. When you are not a thread yourself and the job is more than one turn, this whole loop is a coordinator thread's on the local workspace: give it the job, hand off, and tell the person where to read it. Without `--detach`, `wsp run` and `run` follow the first turn and return only at its reply, which is the right call for a short turn you read at once.

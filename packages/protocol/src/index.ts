@@ -2174,9 +2174,11 @@ export const PlaceView = z.object({
   rateUsdPerHour: z.number().optional(),
   /** How many forks the place holds and how many more it takes, by forkRoom; absent on a place that forks nowhere. */
   forks: z.object({ running: z.number().int(), room: z.number().int() }).optional(),
-  /** Whether a workspace can be forked here at all: a provider, or a computer with Docker on it. Absent or false is
-   * a computer used directly, which runs the person's agents as its own one workspace. The one fact wsp new reads
-   * to decide which road a place takes, so no line outside this list switches on a place's kind. */
+  /** Whether a workspace can be forked here at all: a provider, or a computer somebody joined that has Docker of
+   * its own. Absent or false is a computer used directly, which runs the person's agents as its own one workspace;
+   * the computer the host itself runs on is one of those whether or not it has Docker, since a copy of the image
+   * on a Docker here is the provider row's. The one fact wsp new reads to decide which road a place takes, so no
+   * line outside this list switches on a place's kind. */
   takesForks: z.boolean().optional(),
 });
 export type PlaceView = z.infer<typeof PlaceView>;
@@ -2745,9 +2747,11 @@ export const placeHoldsForksRefusal = (place: string, names: readonly string[]):
 export const placeForksNowhereLine = (place: string): string =>
   `${place} runs your agents but has no Docker, so it takes no forks; install Docker on it to fork there`;
 
-/** The second half of that refusal where the caller knows which workspace the place already runs: the person asked
- * for a workspace there and there is one, so the line names it rather than leaving them to look it up. */
-export const placeForksNowhereFix = (workspace: string): string => `Use ${workspace}, or install Docker on it.`;
+/** What a person asking for a workspace on a place that forks nothing is told when that place already runs one: the
+ * place is its own one workspace, so the line names the one there is rather than making a second. The reason is not
+ * Docker, which the computer the host runs on may well have: it is that the person's own agents run there. */
+export const placeRunsOneWorkspaceLine = (place: string, workspace: string): string => `${place} runs your agents as its own one workspace, ${workspace}`;
+export const placeRunsOneWorkspaceFix = (workspace: string): string => `Use ${workspace}, or name a place that forks: wsp places.`;
 
 /** What a word that names no place this host holds is refused with, naming the ones it does. */
 export const noSuchPlaceRefusal = (word: string, held: readonly string[]): string => `no place named ${word}; you have ${held.join(", ")}`;

@@ -9,7 +9,7 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { NoProviderBackend, passphraseCipher } from "@wsp/engine";
-import { runForTheList, agentsKindRefusal, askingLine, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, noSuchPlaceRefusal, placeForksNowhereFix, placeForksNowhereLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { runForTheList, agentsKindRefusal, askingLine, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, noSuchPlaceRefusal, placeRunsOneWorkspaceFix, placeRunsOneWorkspaceLine, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { copyKey, createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -219,7 +219,7 @@ describe("wsp verbs over the host", () => {
     // A place that forks nothing runs one workspace, so a second is refused naming the one there is.
     const again = await run("new", "other", "--on", HERE);
     expect(again.code).toBe(EXIT_CODES.usage);
-    expect(again.io.errors[0]).toBe(`wsp new: ${placeForksNowhereLine(HERE)}. ${placeForksNowhereFix("mac")}`);
+    expect(again.io.errors[0]).toBe(`wsp new: ${placeRunsOneWorkspaceLine(HERE, "mac")}. ${placeRunsOneWorkspaceFix("mac")}`);
     // A word that names no place is refused with the ones there are.
     const nowhere = await run("new", "x", "--on", "srv");
     expect(nowhere.code).toBe(EXIT_CODES.usage);
