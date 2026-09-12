@@ -65,9 +65,10 @@ function LinkedPanel({
 }) {
   const tabs = useSyncExternalStore(fn => terms.onTabs(fn), () => terms.tabs());
   const status = useSyncExternalStore(fn => terms.onStatus(fn), () => terms.status());
+  const refusal = useSyncExternalStore(fn => terms.onStatus(fn), () => terms.refusal());
   const labels = useMemo(() => terminalLabels(tabs), [tabs]);
   const lost = useMemo(() => lostTerminals(tabs), [tabs]);
-  const { pane, hints, onWake } = useTerminalPane(workspaceId, status);
+  const { pane, hints, onWake } = useTerminalPane(workspaceId, status, refusal);
   const terminalIo = useCallback((id: string) => terms.io(id), [terms]);
   const terminalConfig = useTerminalViewportConfig(workspaceId);
   const activateTerminal = useRightPanelStore(s => s.activateTerminal);

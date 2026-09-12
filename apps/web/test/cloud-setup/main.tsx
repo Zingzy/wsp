@@ -16,6 +16,7 @@ import { useStore } from "../../src/protocol/store";
 import { CloudSetupDialog } from "../../src/sidebar/CloudSetupDialog";
 import "../../src/index.css";
 import { caps } from "../caps.js";
+import { noDaemonApi } from "../fake-daemon-api.js";
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.classList.toggle("dark", params.get("theme") !== "light");
@@ -264,7 +265,7 @@ const api: Api = {
     throw new Error("none");
   },
   capabilities: async () => (caps({ resize: false, containers: false, templates: true })),
-  daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
+  daemon: noDaemonApi,
   portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
   startSession: async () => ({ id: "s1", workspaceId: "ws", harness: "claude", status: "running" }),
   listSessions: async () => [],

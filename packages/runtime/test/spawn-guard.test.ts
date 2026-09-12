@@ -535,6 +535,11 @@ describe("agents spawning agents", () => {
       // sibling's: that guard is the person's on the agent, and an agent moving it is the guard moving itself.
       expect(refused).toContain("sessions.access");
       expect(refused).toContain("sessions.answer");
+      // The panes a person types into are the person's: a thread drives its workspace through the exec and session
+      // ops, and the channel that carries a pty, a file read and a git status to a browser is shut to it by name.
+      expect(refused).toContain("daemon.open");
+      expect(refused).toContain("daemon.send");
+      expect(refused).toContain("daemon.close");
       // A client of the person's own reaches every one of them, so the gate is the token's and not the op's.
       const mine = await WsClient.connect(srv.port, { token: "secret" });
       expect((await mine.request("preferences.get", {}))["ok"]).toBe(true);

@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Production wiring: every running workspace in the store gets a
-// WorkspaceTerminals in the registry, dialed through the api's daemonReach.
-import { mkdtempSync, rmSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
-import { startDaemon, type DaemonHandle } from "@wsp/daemon";
+// WorkspaceTerminals in the registry, linked through the host's relay.
+import { rmSync } from "node:fs";
+import { homedir } from "node:os";
 import { fakeProcTree } from "../../../packages/daemon/test/fake-proc.js";
 import { startOldDaemon, type OldDaemon } from "../../../packages/daemon/test/old-daemon.js";
 import { DAEMON_VERSION, type WorkspaceView } from "@wsp/protocol";
@@ -17,8 +15,7 @@ import { getProcs, resetProcs } from "../src/machine/procs.js";
 import { getTerminals } from "../src/terminal/link.js";
 import { wireTerminals } from "../src/terminal/wiring.js";
 import { caps } from "./caps.js";
-
-const TOKEN = "wiring-token";
+import { HARNESS_DAEMON_TOKEN, startRelayHarness, type RelayHarness } from "./relay-harness.js";
 
 async function until(cond: () => boolean, ms = 5000): Promise<void> {
   const deadline = Date.now() + ms;
@@ -37,9 +34,8 @@ const view = (id: string, phase: "running" | "napping" = "running"): WorkspaceVi
   createdAt: "2026-09-01T00:00:00Z",
 });
 
-function fakeApi(workspaces: WorkspaceView[], daemonPort: () => number) {
+function fakeApi(workspaces: WorkspaceView[], relay: () => RelayHarness) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
-  let reaches = 0;
   const touches: string[] = [];
   const api: Api = {
     touch: async id => {
@@ -61,9 +57,12 @@ function fakeApi(workspaces: WorkspaceView[], daemonPort: () => number) {
     snapshotStorage: async () => null,
     rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
-    daemonReach: async () => {
-      reaches++;
-      return { url: `ws://127.0.0.1:${daemonPort()}`, expiresAt: Date.now() + 3_600_000, daemonToken: TOKEN };
+    // Every workspace here rides one host's relay; the harness's own workspace id is what its daemon answers for.
+    daemon: {
+      open: async () => relay().api.daemon.open(relay().workspaceId),
+      send: (channel, frame) => relay().api.daemon.send(channel, frame),
+      close: channel => relay().api.daemon.close(channel),
+      onFrame: (channel, fn) => relay().api.daemon.onFrame(channel, fn),
     },
     getGolden: async () => undefined,
     subscribe: fn => {
@@ -74,48 +73,41 @@ function fakeApi(workspaces: WorkspaceView[], daemonPort: () => number) {
   const emit = (e: ProtocolEvent) => {
     for (const fn of [...listeners]) fn(e);
   };
-  return { api, emit, reaches: () => reaches, touches };
+  return { api, emit, touches };
 }
 
-let daemon: DaemonHandle | undefined;
+let relay: RelayHarness | undefined;
 let oldDaemon: OldDaemon | undefined;
-let inboxDir: string | undefined;
 let procRoot: string | undefined;
 let unwire: (() => void) | undefined;
 
 beforeEach(async () => {
-  useStore.setState({ api: null, capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false });
+  useStore.setState({ api: null, capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false, conn: "live" });
   resetLive();
   resetProcs();
-  inboxDir = mkdtempSync(join(tmpdir(), "wsp-wiring-inbox-"));
-  daemon = await startDaemon({
-    port: 0,
-    token: TOKEN,
-    inboxDir,
-    portsSource: async () => [],
-    portsIntervalMs: 1000,
-    sysSource: async () => ({ cpu: { idle: 0, total: 0 }, load1: 0.1, mem: { used: 1, total: 2 }, disk: { used: 3, total: 4 } }),
-    sysIntervalMs: 20,
-    procRoot: (procRoot = fakeProcTree([{ pid: 1, comm: "init" }, { pid: 2, ppid: 1, comm: "node" }])),
-    procIntervalMs: 20,
+  relay = await startRelayHarness({
+    daemonOptions: {
+      sysSource: async () => ({ cpu: { idle: 0, total: 0 }, load1: 0.1, mem: { used: 1, total: 2 }, disk: { used: 3, total: 4 } }),
+      sysIntervalMs: 20,
+      procRoot: (procRoot = fakeProcTree([{ pid: 1, comm: "init" }, { pid: 2, ppid: 1, comm: "node" }])),
+      procIntervalMs: 20,
+    },
   });
 });
 afterEach(async () => {
   unwire?.();
   unwire = undefined;
-  await daemon?.close();
-  daemon = undefined;
+  await relay?.close();
+  relay = undefined;
   await oldDaemon?.close();
   oldDaemon = undefined;
-  if (inboxDir) rmSync(inboxDir, { recursive: true, force: true });
-  inboxDir = undefined;
   if (procRoot) rmSync(procRoot, { recursive: true, force: true });
   procRoot = undefined;
 });
 
 describe("wireTerminals", () => {
   it("links every running workspace, parks napping ones, and forgets deleted ones", async () => {
-    const { api, emit } = fakeApi([view("ws_run"), view("ws_nap", "napping")], () => daemon!.port);
+    const { api, emit } = fakeApi([view("ws_run"), view("ws_nap", "napping")], () => relay!);
     unwire = wireTerminals(useStore, { backoffMs: () => 30 });
     useStore.getState().bind(api);
 
@@ -137,7 +129,7 @@ describe("wireTerminals", () => {
     expect(napping!.status()).toBe("connecting");
 
     const tab = await getTerminals("ws_run")!.open({ shell: "/bin/sh" });
-    expect(daemon!.ptys.list().map(p => p.id)).toEqual([tab.ptyId]);
+    expect(relay!.daemon.ptys.list().map(p => p.id)).toEqual([tab.ptyId]);
 
     // napped: the socket goes away, the model (and its tabs) stays for the wake
     emit({ type: "workspace.napped", workspaceId: "ws_run" });
@@ -160,7 +152,7 @@ describe("wireTerminals", () => {
   }, 15_000);
 
   it("typing into a terminal touches the workspace once per throttle window, not per keystroke", async () => {
-    const { api, touches } = fakeApi([view("ws_a")], () => daemon!.port);
+    const { api, touches } = fakeApi([view("ws_a")], () => relay!);
     unwire = wireTerminals(useStore, { backoffMs: () => 30, touchMinMs: 200 });
     useStore.getState().bind(api);
     await until(() => getTerminals("ws_a")?.status() === "live");
@@ -176,7 +168,7 @@ describe("wireTerminals", () => {
 
   it("a workspace created after wiring gets its link too", async () => {
     const workspaces = [view("ws_a")];
-    const { api, emit } = fakeApi(workspaces, () => daemon!.port);
+    const { api, emit } = fakeApi(workspaces, () => relay!);
     unwire = wireTerminals(useStore, { backoffMs: () => 30 });
     useStore.getState().bind(api);
     await until(() => getTerminals("ws_a")?.status() === "live");
@@ -185,9 +177,9 @@ describe("wireTerminals", () => {
   }, 15_000);
 
   it("a daemon from before the version says so in its hello, its refusals read unavailable instead of pending, and a redeployed daemon fills the rows", async () => {
-    oldDaemon = await startOldDaemon(TOKEN);
-    let port = oldDaemon.port;
-    const { api } = fakeApi([view("ws_a")], () => port);
+    oldDaemon = await startOldDaemon(HARNESS_DAEMON_TOKEN);
+    relay!.setRoad(`ws://127.0.0.1:${oldDaemon.port}`);
+    const { api } = fakeApi([view("ws_a")], () => relay!);
     unwire = wireTerminals(useStore, { backoffMs: () => 30 });
     useStore.getState().bind(api);
     await until(() => getTerminals("ws_a")?.status() === "live");
@@ -202,8 +194,8 @@ describe("wireTerminals", () => {
     expect(getProcs("ws_a").snapshot()).toEqual({ snapshot: null, reach: "live", unavailable: "unknown op: proc.watch" });
     expect(oldDaemon.ops.filter(op => op === "sys.watch" || op === "proc.watch")).toEqual(["sys.watch", "proc.watch"]);
 
-    // The update: the old daemon goes down and the current one answers the next dial on the same reach.
-    port = daemon!.port;
+    // The update: the old daemon goes down and the current one answers the next dial on the same road.
+    relay!.setRoad(`ws://127.0.0.1:${relay!.daemon.port}`);
     await oldDaemon.close();
     oldDaemon = undefined;
     await until(() => getDaemonVersion("ws_a") === DAEMON_VERSION);
@@ -214,8 +206,28 @@ describe("wireTerminals", () => {
     release();
   }, 15_000);
 
+  it("a host socket that leaves live parks every link, and relinks them when it is back", async () => {
+    const { api } = fakeApi([view("ws_a")], () => relay!);
+    unwire = wireTerminals(useStore, { backoffMs: () => 30 });
+    useStore.getState().bind(api);
+    await until(() => getTerminals("ws_a")?.status() === "live");
+    const tab = await getTerminals("ws_a")!.open({ shell: "/bin/sh" });
+
+    // Every channel rides the host's socket, so a host that is redialling is a pane with nothing to type into.
+    useStore.getState().setConn("reconnecting");
+    await until(() => getTerminals("ws_a")!.status() === "connecting");
+    expect(getLive("ws_a").snapshot().reach).toBe("unreachable");
+    expect(getProcs("ws_a").snapshot().reach).toBe("unreachable");
+    // The model is kept across the park, as it is across a nap: the tab and its scrollback are still there.
+    expect(getTerminals("ws_a")!.tabs().map(t => t.ptyId)).toEqual([tab.ptyId]);
+
+    useStore.getState().setConn("live");
+    await until(() => getTerminals("ws_a")!.status() === "live");
+    expect(getLive("ws_a").snapshot().reach).toBe("live");
+  }, 20_000);
+
   it("unwiring closes every link and empties the registry", async () => {
-    const { api } = fakeApi([view("ws_a")], () => daemon!.port);
+    const { api } = fakeApi([view("ws_a")], () => relay!);
     unwire = wireTerminals(useStore, { backoffMs: () => 30 });
     useStore.getState().bind(api);
     await until(() => getTerminals("ws_a")?.status() === "live");
