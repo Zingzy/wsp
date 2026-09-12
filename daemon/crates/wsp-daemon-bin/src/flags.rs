@@ -12,7 +12,7 @@ use wsp_frames::{numbers, WorkspaceKind};
 
 use crate::verbs::Verb;
 
-pub(crate) const USAGE: &str = "usage: wsp-daemon [--host <addr>] [--port <n>] [--token-path <file>] [--root <dir>] [--roots-path <file>] [--kind cloud|local|ssh|place] [--work-folder <dir>] [--inbox <dir>] [--inbox-quiet-ms <n>] [--inbox-poll-ms <n>] [--manifest <file>] [--run-dir <dir>] [--log-dir <dir>] [--open-socket <path>] [--port-file <file>] [--proc-root <dir>] [--passwd <file>] [--ports-interval-ms <n>] [--sys-interval-ms <n>] [--proc-interval-ms <n>] [--mode-interval-ms <n>] [--auth-deadline-ms <n>] [--place-file <file>] [--home <dir>] [--wsp-argv <word>]... [--agents id=bin,...] [--link-connect-ms <n>] [--link-quiet-ms <n>] [--link-refused-retry-ms <n>] [--link-backoff-ms <n>]";
+pub(crate) const USAGE: &str = "usage: wsp-daemon [--host <addr>] [--port <n>] [--token-path <file>] [--root <dir>] [--roots-path <file>] [--kind cloud|local|ssh|place] [--work-folder <dir>] [--inbox <dir>] [--inbox-quiet-ms <n>] [--inbox-poll-ms <n>] [--manifest <file>] [--run-dir <dir>] [--log-dir <dir>] [--open-socket <path>] [--port-file <file>] [--proc-root <dir>] [--passwd <file>] [--ports-interval-ms <n>] [--sys-interval-ms <n>] [--proc-interval-ms <n>] [--mode-interval-ms <n>] [--auth-deadline-ms <n>] [--place-file <file>] [--home <dir>] [--wsp-argv <word>]... [--agents id=bin,...] [--link-connect-ms <n>] [--link-quiet-ms <n>] [--link-refused-retry-ms <n>] [--link-backoff-ms <n>] [--runtime-root <dir>]";
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub(crate) enum Kind {
@@ -105,6 +105,9 @@ pub(crate) struct Flags {
     pub(crate) link_refused_retry_ms: Option<u64>,
     #[arg(long, value_name = "n")]
     pub(crate) link_backoff_ms: Option<u64>,
+    /// Where a place's daemon keeps the layers and the workspaces it runs; /var/lib/wsp when absent.
+    #[arg(long, value_name = "dir")]
+    pub(crate) runtime_root: Option<PathBuf>,
 }
 
 impl Flags {
@@ -156,6 +159,7 @@ impl Flags {
             link_quiet_ms: self.link_quiet_ms,
             link_refused_retry_ms: self.link_refused_retry_ms,
             link_backoff_ms: self.link_backoff_ms,
+            runtime_root: self.runtime_root,
         }
     }
 }
@@ -243,6 +247,8 @@ mod tests {
             "8",
             "--link-backoff-ms",
             "9",
+            "--runtime-root",
+            "/var/lib/wsp-test",
         ])
         .unwrap();
         let o = f.into_options();
@@ -253,6 +259,7 @@ mod tests {
         assert_eq!((o.inbox_quiet_ms, o.inbox_poll_ms, o.auth_deadline_ms), (Some(10), Some(20), Some(5)));
         assert_eq!((o.link_connect_ms, o.link_quiet_ms, o.link_refused_retry_ms, o.link_backoff_ms), (Some(6), Some(7), Some(8), Some(9)));
         assert_eq!(o.open_socket_path, Some(PathBuf::from("/o.sock")));
+        assert_eq!(o.runtime_root, Some(PathBuf::from("/var/lib/wsp-test")));
     }
 
     #[test]

@@ -29,6 +29,7 @@ import {
   DAEMON_TOKEN_REFUSED,
   DAEMON_VERSION,
   DaemonAuthRequest,
+  DaemonErrorResponse,
   DaemonEvent,
   DaemonRequest,
   EXEC_BODY_MAX,
@@ -43,6 +44,14 @@ import {
   GUEST_INBOX_DIR,
   GUEST_MANIFEST_PATH,
   HTTP_URL_MAX,
+  MachineAnswersReply,
+  MachineBackendReply,
+  MachineCapacityReply,
+  MachineExecReply,
+  MachineHandleReply,
+  MachineListReply,
+  MachineShapeReply,
+  MachineStateReply,
   NO_PLACE_FILE_LINE,
   NOT_ON_THIS_KIND,
   NOT_ON_THIS_ROAD,
@@ -218,6 +227,141 @@ const numbers = (): Record<string, number | string> => ({
   daemonNice: DAEMON_NICE,
   workOomScoreAdj: WORK_OOM_SCORE_ADJ,
   workScoreLine: workScoreLine(),
+});
+
+/** The replies a daemon answers the machine ops with, one file per reply schema under replies/, each holding samples
+ * that use every optional field once and leave every one out once. A daemon in another language reads the same
+ * files through its own reply types and must write them back byte for byte in meaning; the schemas here parse them,
+ * so a field renamed on either side fails one of the two. Only the replies such a daemon answers today are listed. */
+const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
+  MachineBackendReply: {
+    schema: MachineBackendReply,
+    samples: [
+      {
+        offer: "runtime",
+        capabilities: {
+          liveCloneForks: false,
+          pauseMode: "disk",
+          resize: false,
+          replacesMachine: true,
+          previewUrls: false,
+          signedUrls: false,
+          containers: false,
+          callbackRelay: true,
+          diskSnapshots: true,
+          snapshotListing: true,
+          templates: true,
+          sizes: [
+            { cpu: 2, memMb: 4096, rateUsdPerHour: 0 },
+            { cpu: 4, memMb: 8192, rateUsdPerHour: 0 },
+          ],
+          kept: false,
+        },
+        pricing: { defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: { freeGb: 0, usdPerGbMonth: 0, billedFrom: "" }, builderDiskGb: 40 },
+        lifecycle: { budgets: { wakeAttempts: 1, daemonAnswersMs: 30000, resumeAsks: { everyMs: 5000, forMs: 60000 } } },
+        baseTemplates: { sandbox: "ubuntu:24.04", desktop: "ubuntu:24.04" },
+      },
+      {
+        offer: "docker",
+        capabilities: {
+          liveCloneForks: false,
+          resize: false,
+          replacesMachine: true,
+          previewUrls: false,
+          signedUrls: false,
+          containers: false,
+          callbackRelay: false,
+          diskSnapshots: true,
+          snapshotListing: true,
+          templates: true,
+          sizes: [],
+          kept: false,
+        },
+        pricing: { defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: { freeGb: 0, usdPerGbMonth: 0, billedFrom: "" } },
+      },
+    ],
+  },
+  MachineCapacityReply: {
+    schema: MachineCapacityReply,
+    samples: [
+      {
+        cores: 4,
+        memMb: 7751,
+        memRoomMb: 2851,
+        machineMemMb: 3875,
+        diskFreeBytes: 47400000000,
+        images: [
+          { id: "sha256:a61567bd31828687156d735ea8eb01ba4e37636e225dd6a48ba94136a70d9d61", name: "ubuntu:24.04", sizeBytes: 29763253 },
+          { id: "sha256:0000000000000000000000000000000000000000000000000000000000000000", sizeBytes: 0 },
+        ],
+        machines: { running: 1, paused: 1 },
+      },
+    ],
+  },
+  MachineHandleReply: {
+    schema: MachineHandleReply,
+    samples: [
+      {
+        machine: {
+          id: "wsp-live-665-build",
+          kind: "sandbox",
+          streamUrl: "https://stream.example/x",
+          labels: { wsp: "1", "wsp-owner": "state-1" },
+          seen: { state: "running", createdAt: "2026-09-12T13:00:00.000Z" },
+          replayed: true,
+          daemonSupervisor: "entrypoint",
+          roads: { previewUrl: false, daemonAnswers: true, putBytes: true, describe: true, facts: false, metrics: true },
+        },
+      },
+      { machine: { id: "wsp-8fef733ad77786dc", kind: "desktop", roads: { previewUrl: true, daemonAnswers: true, putBytes: false, describe: false, facts: true, metrics: false } } },
+      { machine: { id: "c1", kind: "sandbox", seen: { state: "paused" }, roads: { previewUrl: false, daemonAnswers: false, putBytes: false, describe: false, facts: false, metrics: false } } },
+    ],
+  },
+  MachineListReply: {
+    schema: MachineListReply,
+    samples: [
+      {
+        machines: [
+          { id: "wsp-a", state: "running", labels: { wsp: "1", row: "yes" }, size: { cpu: 2, memMb: 1024 } },
+          { id: "wsp-b", state: "gone", labels: {} },
+        ],
+      },
+      { machines: [] },
+    ],
+  },
+  MachineExecReply: { schema: MachineExecReply, samples: [{ result: { exitCode: 7, stdout: "out\n", stderr: "err\n" } }, { result: { exitCode: 124, stdout: "", stderr: "" } }] },
+  MachineStateReply: { schema: MachineStateReply, samples: [{ state: "starting" }, { state: "running" }, { state: "paused" }, { state: "gone" }] },
+  MachineShapeReply: { schema: MachineShapeReply, samples: [{ shape: { cpu: 2, memMb: 1024, diskGb: 20, createdAt: "2026-09-12T13:00:00.000Z" } }, { shape: {} }] },
+  MachineAnswersReply: { schema: MachineAnswersReply, samples: [{ answers: true }, { answers: false }] },
+  DaemonErrorResponse: {
+    schema: DaemonErrorResponse,
+    samples: [
+      { id: 7, ok: false, error: "no such workspace: wsp-x", kind: "missing", status: 404 },
+      { id: "a", ok: false, error: "this computer's backend has no facts" },
+      { id: null, ok: false, error: "invalid json" },
+    ],
+  },
+};
+
+describe("the replies are what the schemas parse and what the fixture set holds", () => {
+  for (const [name, { schema, samples }] of Object.entries(REPLIES)) {
+    it(`replies/${name}.json parses and equals its regeneration`, () => {
+      for (const sample of samples) {
+        const parsed = schema.safeParse(sample);
+        expect(parsed.success, `${name} must accept ${JSON.stringify(sample).slice(0, 200)}: ${parsed.success ? "" : parsed.error.message}`).toBe(true);
+      }
+      const text = `${JSON.stringify(samples, null, 2)}\n`;
+      const regenerated = join(tmpdir(), `wsp-contract-reply-${name}.json`);
+      writeFileSync(regenerated, text);
+      const path = join(CONTRACT, "replies", `${name}.json`);
+      expect(existsSync(path), `daemon/fixtures/contract/replies/${name}.json is missing. The regenerated file is at ${regenerated}: copy it there and commit it`).toBe(true);
+      expect(readFileSync(path, "utf8"), `daemon/fixtures/contract/replies/${name}.json is behind the protocol. The regenerated file is at ${regenerated}: copy it over and commit it`).toBe(text);
+    });
+  }
+
+  it("names one file per reply and no other", () => {
+    expect(readdirSync(join(CONTRACT, "replies")).map(f => f.replace(/\.json$/, "")).sort()).toEqual(Object.keys(REPLIES).sort());
+  });
 });
 
 describe("the words and numbers are what this package exports", () => {

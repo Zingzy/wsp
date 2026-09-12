@@ -188,6 +188,7 @@ async fn place_daemon(place: &Place, tune: impl FnOnce(&mut Options)) -> Running
     options.root = Some(place.home.path().to_path_buf());
     options.home = Some(place.home.path().to_path_buf());
     options.place_file = Some(place.file.clone());
+    options.runtime_root = Some(place.home.path().join("runtime"));
     options.roots_path = Some(place_daemon_paths(place.home.path()).roots_path);
     tune(&mut options);
     let lines = Arc::new(Mutex::new(Vec::new()));
@@ -378,7 +379,7 @@ async fn hands_the_host_a_daemon_that_answers_ping_and_pushes_only_frames_the_pr
 }
 
 #[tokio::test]
-async fn on_the_link_every_machine_op_is_refused_by_the_runtime_stub_and_inbound_by_the_road() {
+async fn on_the_link_the_machine_ops_are_the_runtimes_to_answer_and_inbound_the_roads_to_refuse() {
     let key = place_pair();
     let mut host = fake_place_host(HostOpts { key: Some(key), ..HostOpts::default() }).await;
     let place = place_file(&[&host.url], &host.public_key, &place_pair().private_key_pem);
@@ -386,7 +387,10 @@ async fn on_the_link_every_machine_op_is_refused_by_the_runtime_stub_and_inbound
     let mut ws = host.held().await;
     let mut events = Vec::new();
     let answer = ask(&mut ws, 31, "machine.list", &mut events).await;
-    assert_eq!(answer, json!({"id": 31, "ok": false, "error": "this computer's backend has no machine.list"}));
+    assert_eq!(answer, json!({"id": 31, "ok": true, "machines": []}));
+    // An op the runtime does not serve yet still reads the refusal that names it.
+    let later = ask(&mut ws, 32, "machine.listSnapshots", &mut events).await;
+    assert_eq!(later, json!({"id": 32, "ok": false, "error": "this computer's backend has no machine.listSnapshots"}));
     // The same op on the place's own door, from a client holding its token, is not the link's to answer.
     let (mut inbound, _) = tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{}/", d.port)).await.unwrap();
     inbound.send(Message::text(json!({"id": 1, "op": "auth", "token": "link-token"}).to_string())).await.unwrap();
