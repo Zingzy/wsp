@@ -49,9 +49,11 @@ import { ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, THREE_LINE_ROW_CLASS, 
 import { SearchRow } from "./SearchRow.js";
 import { SectionRow } from "./SectionRow.js";
 import { foldArchivedThreads, resolveAdjacentThreadId, resolveSettledTimestamp, splitSidebarThreads } from "./Sidebar.logic.js";
+import { threadTree, workspaceOf } from "./threadTree.js";
 import { CloudSetupRow } from "./CloudSetupRow.js";
 import { SettingsRow } from "./SettingsRow.js";
 import { HostFoot } from "../hosts/HostFoot.js";
+import { PlaceFoot } from "../hosts/PlaceFoot.js";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
 import { useSidebarMode, useSpaceWorkspaceId } from "./sidebarMode.js";
 import { SpaceBar } from "./SpaceBar.js";
@@ -83,7 +85,8 @@ const workspaceIdsCodec: Codec<ReadonlyArray<string>> = {
  * rename leaves the name as text, so nothing opens a field the runtime would turn away. */
 const openerOf = (rename: ResolvedAction): (() => void) | undefined => (rename.refusal === null ? () => void runAction(rename) : undefined);
 
-/** The machine every thread of one workspace runs on: what a rename has to reach. */
+/** The machine one workspace runs on, read per row off the workspace that row's thread runs on: what a rename has
+ * to reach. */
 interface RowMachine {
   readonly state: WorkspaceState;
   readonly goneWords?: string | undefined;
@@ -99,8 +102,8 @@ interface VisibleProject {
 /** Each workspace's threads split into the working ones, the settled shelf, and the ones the shelf has held long
  * enough to archive. The archive is a reading of the clock, so it comes from the same minute tick the countdowns do. */
 function visibleProjects(projects: ReadonlyArray<SidebarProjectSnapshot>, nowMs: number): VisibleProject[] {
-  return projects.map(project => {
-    const { active, settled } = splitSidebarThreads(project.threads);
+  return threadTree(projects).map(({ project, threads }) => {
+    const { active, settled } = splitSidebarThreads(threads);
     return { project, active, ...foldArchivedThreads(settled, nowMs) };
   });
 }
@@ -314,12 +317,14 @@ export function WorkspaceSidebar() {
 
   /** One thread's row, wherever it is listed: the active list and the idle shelf read the same props. The row is
    * told the workspace the thread itself runs in, which is the one it is drawn under except where an agent opened
-   * a thread on another workspace, and the workspace whose rows it sits among, which is what it names against. */
-  const threadRow = (thread: SidebarThreadSnapshot, time: string, machine: RowMachine, under: SidebarProjectSnapshot) => {
-    const target = threadTarget(thread, { catalog: catalogIn({ harnesses, harnessesByWorkspace }, thread.workspaceId, thread.harness), ...machine });
+   * a thread on another workspace, and the workspace whose rows it sits among, which is what it names against.
+   * Its verbs reach the machine that workspace runs on, never the one whose rows it sits among: a rename or a stop
+   * travels to the thread's own machine, so a thread on a machine that is gone is refused wherever it is drawn. */
+  const threadRow = (thread: SidebarThreadSnapshot, time: string, under: SidebarProjectSnapshot) => {
+    const owner = workspaceOf(projects, thread) ?? under;
+    const target = threadTarget(thread, { catalog: catalogIn({ harnesses, harnessesByWorkspace }, thread.workspaceId, thread.harness), ...machineOf(owner) });
     const actionsOf = resolveActions(threadActions, target, threadVerbs);
     const rowId = threadRowId(thread.id);
-    const owner = projects.find(candidate => candidate.id === thread.workspaceId) ?? under;
     return (
       <ThreadRow
         key={thread.id}
@@ -339,19 +344,24 @@ export function WorkspaceSidebar() {
     );
   };
 
-  /** What both bodies need about one workspace: the actions every surface of it reads, the action that opens its
-   * first thread, and the machine its threads run on. */
-  const blockOf = (project: SidebarProjectSnapshot) => {
+  /** The machine one workspace runs on, as a thread's verbs read it: the state its row shows and, where it is gone,
+   * the words that say so. Read per thread off the workspace the thread itself runs on. */
+  const machineOf = (project: SidebarProjectSnapshot): RowMachine => {
     const workspace = workspaceTarget(project.workspace, project.status);
-    const actions = resolveActions(workspaceActions, workspace, verbs, labs);
-    const machine: RowMachine = { state: workspaceState(workspace), ...(workspace.reason !== null ? { goneWords: workspace.reason } : {}) };
-    return { actions, newThreadAction: actionById(actions, "new-thread"), machine };
+    return { state: workspaceState(workspace), ...(workspace.reason !== null ? { goneWords: workspace.reason } : {}) };
+  };
+
+  /** What both bodies need about one workspace: the actions every surface of it reads, and the action that opens
+   * its first thread. */
+  const blockOf = (project: SidebarProjectSnapshot) => {
+    const actions = resolveActions(workspaceActions, workspaceTarget(project.workspace, project.status), verbs, labs);
+    return { actions, newThreadAction: actionById(actions, "new-thread") };
   };
 
   /** The rows under one workspace, whichever body draws them: the line that opens its first thread while it has
    * none, the working rows, then the idle shelf under its own header with the archive nested inside it. The list
    * and Spaces both read this, so the row grammar has one home. */
-  const threadsOf = ({ project, active, settled, archived }: VisibleProject, newThreadAction: ResolvedAction, machine: RowMachine, shut: boolean) => {
+  const threadsOf = ({ project, active, settled, archived }: VisibleProject, newThreadAction: ResolvedAction, shut: boolean) => {
     const settledOpen = !settledCollapsed.includes(project.id);
     const archivedOpen = archivedOpenIds.includes(project.id);
     /** Everything the shelf holds, the archived rows included, since shutting it hides the archive with them: the
@@ -377,15 +387,15 @@ export function WorkspaceSidebar() {
         ) : null}
         {!shut && active.length + shelved > 0 ? (
           <SidebarMenuSub>
-            {active.map(thread => threadRow(thread, compactTimeLabel(thread.startedAt), machine, project))}
+            {active.map(thread => threadRow(thread, compactTimeLabel(thread.startedAt), project))}
             {shelved > 0 ? (
               <ThreadGroupRow rowId={groupRowId("settled", project.id)} label="Idle" count={shelved} open={settledOpen} onToggle={() => toggleSettled(project.id)} />
             ) : null}
-            {settledOpen ? settled.map(thread => threadRow(thread, compactTimeLabel(resolveSettledTimestamp(thread)), machine, project)) : null}
+            {settledOpen ? settled.map(thread => threadRow(thread, compactTimeLabel(resolveSettledTimestamp(thread)), project)) : null}
             {settledOpen && archived.length > 0 ? (
               <ThreadGroupRow rowId={groupRowId("archived", project.id)} label="Archived" count={archived.length} open={archivedOpen} onToggle={() => toggleArchived(project.id)} />
             ) : null}
-            {settledOpen && archivedOpen ? archived.map(thread => threadRow(thread, compactTimeLabel(resolveSettledTimestamp(thread)), machine, project)) : null}
+            {settledOpen && archivedOpen ? archived.map(thread => threadRow(thread, compactTimeLabel(resolveSettledTimestamp(thread)), project)) : null}
           </SidebarMenuSub>
         ) : null}
       </>
@@ -395,7 +405,7 @@ export function WorkspaceSidebar() {
   /** One workspace in the list body: its row and the rows under it. */
   const listItem = (visibleProject: VisibleProject) => {
     const { project } = visibleProject;
-    const { actions, newThreadAction, machine } = blockOf(project);
+    const { actions, newThreadAction } = blockOf(project);
     const isCollapsed = collapsed.has(project.id);
     const rebuildAsked = rebuilding[project.id] !== undefined && rebuilding[project.id] === (project.status?.machineId ?? project.workspace.machineId);
     const naming = renaming?.rowId === workspaceRowId(project.id);
@@ -428,7 +438,7 @@ export function WorkspaceSidebar() {
           onRenameOpen={openerOf(actionById(actions, "rename"))}
         />
         )}
-        {threadsOf(visibleProject, newThreadAction, machine, isCollapsed)}
+        {threadsOf(visibleProject, newThreadAction, isCollapsed)}
       </SidebarMenuItem>
     );
   };
@@ -437,7 +447,7 @@ export function WorkspaceSidebar() {
    * takes the same name box the row has, keyed the same way, so a rename asked for anywhere reaches one editor. */
   const spaceItem = (visibleProject: VisibleProject) => {
     const { project } = visibleProject;
-    const { actions, newThreadAction, machine } = blockOf(project);
+    const { actions, newThreadAction } = blockOf(project);
     const naming = renaming?.rowId === workspaceRowId(project.id);
     return (
       <SidebarMenuItem key={project.id}>
@@ -454,7 +464,7 @@ export function WorkspaceSidebar() {
           onRenameCancel={() => setRenaming(null)}
           onRenameOpen={openerOf(actionById(actions, "rename"))}
         />
-        {threadsOf(visibleProject, newThreadAction, machine, false)}
+        {threadsOf(visibleProject, newThreadAction, false)}
       </SidebarMenuItem>
     );
   };
@@ -647,6 +657,7 @@ export function WorkspaceSidebar() {
           ) : null}
           <CloudSetupRow />
           <SettingsRow />
+          <PlaceFoot />
           <HostFoot />
         </SidebarChromeFooter>
       </div>
