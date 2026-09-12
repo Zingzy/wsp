@@ -60,6 +60,7 @@ import {
   goneWords,
   harnessExitLine,
   isCodeSearchTool,
+  guestUnusableLine,
   kindWords,
   listedName,
   loginPathLine,
@@ -705,6 +706,13 @@ describe("loginPathLine", () => {
   it("names why the login shell gave no PATH and says the one the launch handed the host stands", () => {
     expect(loginPathLine("/bin/zsh printed nothing")).toBe("login shell: no PATH read (/bin/zsh printed nothing); this host keeps the PATH it was started with");
     expect(loginPathLine("SHELL names no login shell")).toBe("login shell: no PATH read (SHELL names no login shell); this host keeps the PATH it was started with");
+  });
+});
+
+describe("guestUnusableLine", () => {
+  it("names the provider, the machine it left running and what the guest said when nothing on it would run", () => {
+    expect(guestUnusableLine("Box by ASCII", "bx_tumrjngm", "bash: error while loading shared libraries: libtinfo.so.6: cannot open shared object file: Error 24"))
+      .toBe("Box by ASCII left bx_tumrjngm running but nothing on it can run: bash: error while loading shared libraries: libtinfo.so.6: cannot open shared object file: Error 24");
   });
 });
 

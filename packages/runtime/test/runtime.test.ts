@@ -8,7 +8,7 @@ import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe } from "@wsp/adapter-claude";
 import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, type AdapterEvent, type EventUnion, type RecipeDigest, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
-import { BUILDER_IDLE_MS, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
+import { BUILDER_IDLE_MS, GuestUnusableError, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
 import { harnessCatalog } from "../src/harness-catalog.js";
@@ -5702,6 +5702,26 @@ describe("create idempotency keys", () => {
     expect(specs.slice(0, 2).map(s => s.cpu)).toEqual([2, 4]);
     expect(specs[1]!.idempotencyKey).not.toBe(specs[0]!.idempotencyKey);
     expect(await store.list("creates")).toEqual([]);
+  });
+
+  it("a create the backend gave up on because nothing on the guest could run spends its key, so the next attempt never sends the deleted box's key again", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    let dead = true;
+    const specs = intercept(backend, (spec, real) => {
+      if (dead) {
+        dead = false;
+        // The backend deleted the box it could not use before throwing; a key that outlived it would name it again.
+        throw new GuestUnusableError("bx_dead", "Box by ASCII", "bash: error while loading shared libraries: libtinfo.so.6: cannot open shared object file: Error 24", 200);
+      }
+      return real(spec);
+    });
+    await expect(rt.workspaces.rebuild(ws.id)).rejects.toThrow(/nothing on it can run/);
+    expect(await store.list("creates")).toEqual([]);
+    await rt.workspaces.rebuild(ws.id);
+    expect(specs[1]!.idempotencyKey).not.toBe(specs[0]!.idempotencyKey);
   });
 
   it("a replayed create is logged, and a replay naming a dead machine is created anew under a fresh key", async () => {
