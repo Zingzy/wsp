@@ -26,6 +26,9 @@ interface Asset {
   dir: string;
   /** The file inside it whose absence means it was never built, or the copy never finished. */
   proof: string;
+  /** Whether a stage outside the release may go on without it: a folder no node build fills is skipped with a line
+   * where it is missing, and required only where the release stages the package with it in place. */
+  optional?: true;
   /** Where it comes from in a checkout. */
   workspace(): string;
   /** Copies it, the folder it was built in to the folder a packed command reads. */
@@ -70,8 +73,13 @@ const ASSETS: Record<AssetKind, Asset> = {
     // filled by packages/wspx/scripts/daemon-binary.mjs out of a cargo build, since nothing in a node build makes it.
     workspace: () => join(here(), "..", "..", "wspx", "daemon"),
     stage: (from, to) => cpSync(from, to, { recursive: true }),
+    optional: true,
   },
 };
+
+/** Set to 1 where the release stages the package with every daemon binary placed, so a missing one fails the build
+ * there and nowhere else. */
+export const REQUIRE_DAEMON_ENV = "WSP_REQUIRE_DAEMON";
 
 /** A package as npm installs it and nothing else: its package.json and its dist, out of a folder that in a checkout
  * also holds sources, tests and a node_modules. */
@@ -100,6 +108,20 @@ export function stageAsset(from: string, packageRoot: string, kind: AssetKind): 
   const to = stagedAsset(packageRoot, kind);
   copyAsset(kind, from, to);
   return to;
+}
+
+/** Stages an asset as stageAsset does, except an optional one whose source was never filled: outside the release
+ * it is skipped, and the line answered says so and names the file that would have proved it, so a checkout builds
+ * the command without a daemon binary and a person reads why the command carries none. Nothing where the asset
+ * was staged. */
+export function stageAssetOrSkip(from: string, packageRoot: string, kind: AssetKind, env: Readonly<Record<string, string | undefined>> = process.env): string | undefined {
+  const asset = ASSETS[kind];
+  const proof = join(from, asset.proof);
+  if (asset.optional === true && env[REQUIRE_DAEMON_ENV] !== "1" && !existsSync(proof)) {
+    return `${asset.name} not staged: ${proof} is missing, so the command carries none; packages/wspx/scripts/daemon-binary.mjs places one`;
+  }
+  stageAsset(from, packageRoot, kind);
+  return undefined;
 }
 
 /** Copies an asset the way its own entry says, wherever it is going: the packed layout, or a bundle a machine gets.
