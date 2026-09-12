@@ -70,7 +70,7 @@ const event = (thread, rest, workspaceId = "ws_api") => ({ workspaceId, sessionI
 /** A whole turn as the transcript holds it: the person's words, a thought, one tool call and its result,
  * the reply, and the two events that close it. */
 const replay = (thread, minutes, workspaceId = "ws_api") => [
-  event(thread, { type: "session.start", at: ago(minutes), prompt: thread.prompt, model: "opus", cwd: thread.cwd ?? join(HOME, "spoo") }, workspaceId),
+  event(thread, { type: "session.start", at: ago(minutes), prompt: thread.prompt, model: "opus", cwd: thread.cwd ?? join(HOME, "spoo"), ...(thread.harness === undefined ? {} : { harness: thread.harness }) }, workspaceId),
   event(thread, { type: "session.delta", at: ago(minutes - 1), kind: "thinking", text: thread.thought }, workspaceId),
   event(thread, { type: "session.delta", at: ago(minutes - 1), kind: "tool_use", toolName: thread.tool.name, toolUseId: `tu_${thread.id}`, text: thread.tool.input }, workspaceId),
   event(thread, { type: "session.delta", at: ago(minutes - 2), kind: "tool_result", toolName: thread.tool.name, toolUseId: `tu_${thread.id}`, text: thread.tool.result }, workspaceId),
@@ -79,8 +79,13 @@ const replay = (thread, minutes, workspaceId = "ws_api") => [
   event(thread, { type: "session.end", at: ago(minutes - 3), exitCode: 0, sawResult: true }, workspaceId),
 ];
 
+/** What a real init announces, cut to what fits a shot: a run of bare names, the CLI's own screens among them,
+ * and the commands two plugins named themselves in. The menu groups on the source those names carry. */
+const ANNOUNCED_COMMANDS = ["compact", "context", "cost", "init", "review", "login", "model", "unslop", "why", "wizard", "code-review:code-review", "ralph-loop:ralph-loop", "ralph-loop:cancel-ralph"];
+
 const REDIRECT = {
   id: "redirect",
+  harness: { slashCommands: ANNOUNCED_COMMANDS },
   prompt: "the short links are 302ing twice, find out why",
   title: "Double redirect on short links",
   thought: "Both forms of the path answer, so the rewrite and the canonical host check are probably fighting each other. Read the middleware order before anything else.",
