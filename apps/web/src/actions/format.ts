@@ -11,18 +11,18 @@ export const WORKSPACE_WORDS = {
   pause: "Pause workspace",
   wake: "Wake workspace",
   stopWake: "Stop waking",
-  rebuild: "Rebuild machine",
+  rebuild: "Rebuild workspace",
   newThread: "New thread",
   openTerminal: "Open terminal",
   openBrowser: "Open browser",
-  openMachine: "Open machine",
+  openMachine: "Open the workspace pane",
   importProject: "Import project",
   exportProject: "Export project",
   rename: "Rename workspace",
   theme: "Edit theme colour",
   icon: "Change icon",
-  fork: "Fork workspace",
-  copyId: "Copy machine id",
+  fork: "Run a copy",
+  copyId: "Copy computer id",
   forget: "Forget workspace",
 } as const;
 
@@ -32,6 +32,10 @@ export const SIDEBAR_MODE_WORDS: Record<SidebarMode, { readonly name: string; re
   spaces: { name: "Spaces", title: "Show Spaces", hint: "One workspace at a time, with an icon per workspace at the bottom" },
   list: { name: "List", title: "Show the workspace list", hint: "Every workspace and its threads" },
 };
+
+/** What the creation log and the sidebar's creation row say before the runtime's first stage line lands; one
+ * sentence in one place, since both surfaces stand in for the same silence. */
+export const CREATION_ASKED = "Asking wsp to start it.";
 
 export const THREAD_WORDS = {
   stop: "Stop thread",
@@ -82,9 +86,9 @@ export const phaseButtonWord = (state: WorkspaceState): string => PHASE_SLOT[sta
 export const phaseCannot = (state: WorkspaceState): string => PHASE_SLOT[state].cannot;
 
 export const phaseHint = (state: WorkspaceState): string =>
-  state === "waking" ? "Stop asking the provider to resume this machine" : isBilling(state) ? "Suspend the VM and keep the disk" : "Boot the VM from its disk";
-export const FORGET_HINT = "The machine is gone; forget the workspace to drop it from this computer";
-export const REBUILD_HINT = "The machine answers nothing; rebuild it from the golden image";
+  state === "waking" ? "Stop asking the provider to wake this workspace" : isBilling(state) ? "Suspend the VM and keep the disk" : "Boot the VM from its disk";
+export const FORGET_HINT = "Its computer is gone; forget the workspace to drop it from this computer";
+export const REBUILD_HINT = "The workspace answers nothing; rebuild it from the golden image";
 
 export function phaseRefusal(state: WorkspaceState): string | null {
   switch (state) {
@@ -106,7 +110,7 @@ export function phaseRefusal(state: WorkspaceState): string | null {
   }
 }
 
-export const CLIENT_CANNOT_REBUILD = "This client cannot rebuild machines";
+export const CLIENT_CANNOT_REBUILD = "This client cannot rebuild workspaces";
 export const CLIENT_CANNOT_FORGET = "This client cannot forget workspaces";
 export const NEW_THREAD_WAITS = "New threads wait for the rebuild";
 export const PROJECTS_WAIT = "Projects wait for the rebuild";
@@ -114,10 +118,10 @@ export const CLIENT_CANNOT_IMPORT = "This client cannot import projects";
 export const CLIENT_CANNOT_EXPORT = "This client cannot export projects";
 export const CLIENT_CANNOT_RENAME_WORKSPACE = "This client cannot rename workspaces";
 export const CLIENT_CANNOT_LOOK = "This client cannot set a workspace's theme or icon";
-export const NO_WORKSPACE_FORK = "Forking a workspace is not in the runtime yet; take a project snapshot in the Machine tab and start a workspace from it";
+export const NO_WORKSPACE_FORK = "Running a copy of a workspace is not in the runtime yet; take a project snapshot in the Workspace tab and start a workspace from it";
 
 export function forgetRefusal(state: WorkspaceState): string | null {
-  return state === "gone" ? null : `Only a workspace whose machine is gone can be forgotten; this one is ${workspaceWord(state).toLowerCase()}`;
+  return state === "gone" ? null : `Only a workspace whose computer is gone can be forgotten; this one is ${workspaceWord(state).toLowerCase()}`;
 }
 
 export const openTerminalRefusal = (state: WorkspaceState): string | null => (state === "gone" ? goneRefusal("open a terminal") : null);
@@ -150,9 +154,9 @@ export function renameNotTakenLine(harness: string, outcome: Exclude<SessionRena
     case "unsupported":
       return notKeptLine(harness);
     case "no-session":
-      return `${agentName(harness)} on the machine has no session for this thread yet`;
+      return `${agentName(harness)} on the workspace has no session for this thread yet`;
     case "failed":
-      return error ?? "The machine said nothing about the write";
+      return error ?? "The workspace said nothing about the write";
     case "not-found":
       return "The runtime has no such thread any more";
     default: {
@@ -183,7 +187,7 @@ export const rowNewThread = (name: string): string => `New thread in ${name}`;
 /** What the road to this computer says under its name: what a pick will do, since there is one local workspace per
  * host and the second pick is a selection, and why it cannot be picked at all. */
 export const THIS_COMPUTER_HINTS = {
-  fresh: "This computer itself, no machine to fork",
+  fresh: "This computer itself, nothing to copy",
   existing: "Already a workspace; go to it",
   offline: "Not connected to wsp",
 } as const;

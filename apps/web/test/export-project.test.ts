@@ -95,8 +95,8 @@ describe("the landed line", () => {
   const result: ProjectExportResult = { dest: "/Users/me/code/proj", files: 11, bytes: 2_900, excluded: [], agents: [] };
 
   it("names the folder on this Mac once, leaving the caches and each agent's outcome to their rows, and says when the machine had no sessions", () => {
-    expect(exportLandedLine(result, "/root/proj")).toBe("proj is at /Users/me/code/proj on this Mac; no agent sessions for it on the machine.");
-    expect(exportLandedLine({ ...result, excluded: ["node_modules"] }, "/root/proj/")).toBe("proj is at /Users/me/code/proj on this Mac; no agent sessions for it on the machine.");
+    expect(exportLandedLine(result, "/root/proj")).toBe("proj is at /Users/me/code/proj on this Mac; no agent sessions for it on the workspace.");
+    expect(exportLandedLine({ ...result, excluded: ["node_modules"] }, "/root/proj/")).toBe("proj is at /Users/me/code/proj on this Mac; no agent sessions for it on the workspace.");
     expect(exportLandedLine({ ...result, excluded: ["node_modules", "dist"], agents: [{ agent: "claude", files: 2, bytes: 100, outcome: "moved", sessions: 2 }] }, "/root/proj")).toBe("proj is at /Users/me/code/proj on this Mac.");
   });
 });

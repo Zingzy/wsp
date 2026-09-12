@@ -6,6 +6,8 @@
 // two-line thread row's, the leading slot the workspace kind's glyph sits in,
 // and the one id each row wears, which the keyboard traversal walks and the
 // name box is opened by.
+import { cutLine } from "@wsp/protocol";
+
 export const TOP_ROW_CLASS = "px-2 transition-[background-color,color] duration-150";
 const ROW_META_GRAMMAR = "font-mono text-[11px] tabular-nums";
 export const ROW_META_CLASS = `${ROW_META_GRAMMAR} text-[var(--top-row-meta)]`;
@@ -16,6 +18,13 @@ export const TWO_LINE_ROW_CLASS = "h-11 items-start py-1.5 text-left";
 /** A workspace row: name, the machine, what it cost, one fixed slot each, so every row has one shape and height. */
 export const THREE_LINE_ROW_CLASS = "h-15 items-start py-1.5 text-left";
 export const ROW_LEAD_CLASS = "mt-0.5 flex size-3.5 shrink-0 items-center justify-center";
+
+/** The most characters the third line of a workspace row holds: the row leaves 201 px for text at the sidebar's
+ * default 256 px and 11 px mono fits 30 of them there, so a longer line would be cut by the width with no say in
+ * where. Every line written for this slot is under it; the cut is what keeps a line nobody measured from taking
+ * the half that says what to do, and the whole sentence rides the row's hover text. */
+export const ROW_LINE_MAX = 30;
+export const rowLineCut = (line: string): string => cutLine(line, ROW_LINE_MAX);
 
 export const workspaceRowId = (workspaceId: string): string => `ws:${workspaceId}`;
 export const threadRowId = (threadId: string): string => `thread:${threadId}`;
