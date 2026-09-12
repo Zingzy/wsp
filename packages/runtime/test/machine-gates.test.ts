@@ -138,7 +138,7 @@ describe("what a refusal calls a machine wsp forks", () => {
     const restarted = createRuntime({ backend: new NoProviderBackend(), store, adapters: {} });
     for (const run of [() => restarted.workspaces.rebuild(ws.id), () => restarted.workspaces.upgrade(ws.id, { cpu: 4 }), () => restarted.workspaces.updateImage(ws.id)]) {
       const said = await run().then(() => "", (e: unknown) => (e as Error).message);
-      expect([said, said.includes("not a machine wsp runs")]).toEqual([NO_PROVIDER_LINE, false]);
+      expect([said, said.includes("which wsp does not run")]).toEqual([NO_PROVIDER_LINE, false]);
     }
     await restarted.close();
   });

@@ -995,7 +995,7 @@ describe("daemon files and diff ops", () => {
       expect(machineLacksShort(line).length).toBeLessThanOrEqual(30);
       expect(line.length).toBeGreaterThan(machineLacksShort(line).length);
     }
-    expect(noImportRoadLine("box", OVER_SSH)).toBe("box is a machine over ssh, which lands no folder yet; import to a fork, or register the folder on this computer");
+    expect(noImportRoadLine("box", OVER_SSH)).toBe("box is a computer over ssh, which lands no folder yet; import to a fork, or register the folder on this computer");
   });
 });
 

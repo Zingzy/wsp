@@ -295,7 +295,7 @@ describe("the cloud setup sheet", () => {
     expect(where.getAttribute("href")).toBe("https://console.getsolari.com");
     expect(where.getAttribute("target")).toBe("_blank");
     expect(where.querySelector("svg")).not.toBeNull();
-    expect(k(dialog, "sentence").textContent).toBe("Solari runs the machines. A 2\u00a0vCPU\u00a0·\u00a04\u00a0GB machine costs about $0.11 an hour while it runs and naps when idle");
+    expect(k(dialog, "sentence").textContent).toBe("Solari runs the computers your workspaces sit on. A 2\u00a0vCPU\u00a0·\u00a04\u00a0GB workspace costs about $0.11 an hour while it runs and naps when idle");
     expect(dialog.querySelector("input")!.getAttribute("placeholder")).toBe(CLOUD_SETUP_WORDS.keys.placeholder);
     expect(dialog.querySelectorAll('[data-k="keys"] [data-k=content] [class*=rounded-\\[10px\\]]'), "no card around one field").toHaveLength(0);
     expect((k(dialog, "primary") as HTMLButtonElement).disabled).toBe(true);

@@ -68,7 +68,7 @@ describe.skipIf(renderSkipped !== undefined)("the lineage's missing tools laid o
     }
     // The version rows carry their states the same way, words in a column beside the title.
     const head = await page!.locator("[data-k=v12]").locator("xpath=ancestor::li[1]").locator(":scope > span [data-mark]").allTextContents();
-    expect(head).toEqual(["head", "this fork"]);
+    expect(head).toEqual(["head", "this one"]);
     expect(await page!.locator("text=Raycast").count()).toBe(0);
     await page!.locator("[data-testid=machine-tab]").screenshot({ path: join(SHOTS, `lineage-missing-${theme}.png`) });
     expect(existsSync(join(SHOTS, `lineage-missing-${theme}.png`))).toBe(true);

@@ -126,7 +126,7 @@ describe("export project dialog", () => {
     const root = await dialog();
     expect(within(root).getByText("Export a project")).toBeDefined();
     expect(within(root).getByText(exportFromLine("api"))).toBeDefined();
-    expect(field(root, "Folder on the machine").value).toBe(SOURCE);
+    expect(field(root, "Folder on the workspace").value).toBe(SOURCE);
     expect(field(root, "Folder on this Mac").value).toBe(SOURCE);
     await codexRow(root);
     expect(sections(root).map(s => s.dataset["k"])).toEqual(["source", "dest", "agents", "summary"]);
@@ -154,9 +154,9 @@ describe("export project dialog", () => {
     useStore.getState().bind(api);
     render(<ExportProjectDialog workspace={workspace} onClose={() => {}} />);
     const root = await dialog();
-    expect(field(root, "Folder on the machine").value).toBe("");
+    expect(field(root, "Folder on the workspace").value).toBe("");
     expect(button(root, "Export").disabled).toBe(true);
-    fireEvent.change(field(root, "Folder on the machine"), { target: { value: "/root/other" } });
+    fireEvent.change(field(root, "Folder on the workspace"), { target: { value: "/root/other" } });
     expect(field(root, "Folder on this Mac").value).toBe("/root/other");
     expect(button(root, "Export").disabled).toBe(false);
     fireEvent.change(field(root, "Folder on this Mac"), { target: { value: "/Users/me/other" } });
@@ -185,11 +185,11 @@ describe("export project dialog", () => {
     const root = await dialog();
     expect(within(root).queryByLabelText("Folder on this Mac")).toBeNull();
     expect(value(root, "path")).toBe(SOURCE);
-    fireEvent.change(field(root, "Folder on the machine"), { target: { value: "/root/work/spoo" } });
+    fireEvent.change(field(root, "Folder on the workspace"), { target: { value: "/root/work/spoo" } });
     expect(value(root, "path")).toBe("/root/work/spoo");
     fireEvent.click(button(root, "Change"));
     await waitFor(() => expect(value(root, "path")).toBe("/Users/me/code/spoo"));
-    fireEvent.change(field(root, "Folder on the machine"), { target: { value: "/root/work/other" } });
+    fireEvent.change(field(root, "Folder on the workspace"), { target: { value: "/root/work/other" } });
     expect(value(root, "path")).toBe("/Users/me/code/spoo");
     pickFolder.mockResolvedValueOnce(undefined as unknown as string);
     fireEvent.click(button(root, "Change"));
@@ -209,7 +209,7 @@ describe("export project dialog", () => {
     await waitFor(() => expect(rows()).toEqual(["code"]));
     expect(asked).toEqual([undefined]);
     expect(value(root, "browse-state")).toBe("1 folder in /Users/me.");
-    fireEvent.change(field(root, "Folder on the machine"), { target: { value: "/root/work/spoo" } });
+    fireEvent.change(field(root, "Folder on the workspace"), { target: { value: "/root/work/spoo" } });
     fireEvent.click(root.querySelector<HTMLElement>('[data-folder="/Users/me/code"]')!);
     await waitFor(() => expect(rows()).toEqual(["archive"]));
     // Walking does not name a destination; the one action does.

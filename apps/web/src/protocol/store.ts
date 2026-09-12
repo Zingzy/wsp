@@ -52,7 +52,7 @@ export function explainCreateRefusal(error: unknown): CreateRefusal {
   const message = error instanceof Error ? error.message : String(error);
   // The runtime names the machines holding the slots and the move that frees one; a second wording here would say less.
   if (error instanceof RequestError && error.kind === "concurrency") {
-    return { title: "The provider refused: machine cap reached", detail: message };
+    return { title: "The provider refused: no more workspaces can run there now", detail: message };
   }
   if (error instanceof DisconnectedError) {
     return { title: "Not connected to the runtime", detail: message };

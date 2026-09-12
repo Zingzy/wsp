@@ -7,6 +7,7 @@
 // after the daemon's pty.list has been adopted and attached, so a consumer
 // that sees live can trust tabs() and spawn only when it is truly empty.
 import { PtyListReply, type DaemonEvent, type DaemonLinkStatus } from "@wsp/protocol";
+import { SHELL_ENDED_LINE } from "../adapt/terminal-pane.js";
 import type { PtyModeReport } from "./compose.js";
 import { composedPtyIo, type TerminalIo } from "./pty-io.js";
 
@@ -334,7 +335,7 @@ export class WorkspaceTerminals {
         if (!p.exited) {
           p.exited = true;
           p.lost = true;
-          const note = "\r\n[This shell ended when the machine was replaced]\r\n";
+          const note = `\r\n[${SHELL_ENDED_LINE}]\r\n`;
           this.#mirror(p, note);
           for (const s of p.sinks) s.data(note);
           this.#notifyTabs();

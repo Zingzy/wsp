@@ -286,7 +286,7 @@ describe("local workspace", () => {
   it("every verb its machine cannot take refuses with the capability's sentence", async () => {
     const rt = runtime();
     const ws = await rt.workspaces.createLocal("mac");
-    const cannot = /is this computer, not a machine wsp runs; it cannot/;
+    const cannot = /is this computer, which wsp does not run; it cannot/;
     await expect(rt.workspaces.nap(ws.id)).rejects.toThrow(cannot);
     // A computer is running while the host is: the wake every thread road sends first is a no-op, not a refusal.
     expect((await rt.workspaces.wake(ws.id)).phase).toBe("running");

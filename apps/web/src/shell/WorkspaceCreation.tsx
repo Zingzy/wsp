@@ -4,6 +4,7 @@
 // A failure keeps the log with the failing line and offers a retry; success
 // is the store swapping this for the thread.
 import { useEffect, useRef } from "react";
+import { CREATION_ASKED } from "../actions/format.js";
 import { Button } from "../components/ui/button.js";
 import { ScrollArea } from "../components/ui/scroll-area.js";
 import { cn } from "../lib/utils.js";
@@ -29,7 +30,7 @@ export function WorkspaceCreation({ creation }: { creation: Creation }) {
         <div data-testid="creation-log" className="mt-6 h-32 w-full rounded-md border border-border/60 text-left">
           <ScrollArea scrollFade>
             <ol ref={log} aria-label="Creation log" aria-live="polite" className="flex flex-col gap-1.5 p-3 font-mono text-xs tabular-nums">
-              {creation.lines.length === 0 ? <li className="text-muted-foreground">Asking the runtime for a fork.</li> : null}
+              {creation.lines.length === 0 ? <li className="text-muted-foreground">{CREATION_ASKED}</li> : null}
               {creation.lines.map((line, i) => (
                 <LogLine key={i} line={line} current={i === creation.lines.length - 1} />
               ))}
