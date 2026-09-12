@@ -15,7 +15,7 @@ import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES
 import { runLogPath } from "../src/init-log.js";
 import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { localWiring, type Keys } from "../src/cli.js";
+import { localWiring } from "../src/cli.js";
 import { InitJobs, type InitJobDeps } from "../src/init-job.js";
 import { loadRecipe, saveSmallRecipe, smallRecipePath } from "../src/recipe-file.js";
 import { workspaceRoads } from "../src/server.js";
@@ -87,7 +87,7 @@ interface Fake {
   /** Subscribes to the views alone, for a test that watches the job move; the need's own event is not a view. */
   onJob(fn: (job: InitJob) => void): () => void;
   saved: Record<string, string>[];
-  swapped: Keys[];
+  swapped: Readonly<Record<string, string>>[];
   installed: string[][];
   prompts: { prompt: string; harness?: string; model?: string; title?: string }[];
   /** Every launch the harness took, as the runtime handed it over: what the agent road's options are read off. */
@@ -127,7 +127,7 @@ function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string
   let link = scriptedLink({ signedIn: true, hold: false, missing: false });
   const relay: Fake["relay"] = { hooks: [], closed: 0 };
   const saved: Record<string, string>[] = [];
-  const swapped: Keys[] = [];
+  const swapped: Readonly<Record<string, string>>[] = [];
   const installed: string[][] = [];
   let env: Record<string, string> = over.env ?? { SOLARI_API_KEY: SOLARI };
   const deps: InitJobDeps = {
@@ -142,6 +142,7 @@ function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string
     },
     provider: k => void swapped.push(k),
     // The provider module the typed key would name is this test's stub, so the check the keys step runs is its own.
+    keyEnv: () => "SOLARI_API_KEY",
     checkKey: () => checkProviderKey(backend),
     pricing: () => PRICING,
     agents: async () =>
@@ -236,7 +237,7 @@ describe("the init job, manual road", () => {
     expect((await f.jobs.get()).keys).toEqual({ solari: false });
     const setup = await f.jobs.keys({ solari: "slr_live_typed" });
     expect(f.saved).toEqual([{ SOLARI_API_KEY: "slr_live_typed" }]);
-    expect(f.swapped).toEqual([{ solari: "slr_live_typed" }]);
+    expect(f.swapped).toEqual([{ SOLARI_API_KEY: "slr_live_typed" }]);
     expect(setup.keys).toEqual({ solari: true });
     expect(JSON.stringify(setup)).not.toMatch(/slr_live_typed/);
     // Nothing typed: nothing written, nothing swapped.
