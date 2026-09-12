@@ -69,6 +69,16 @@ export function hostTokenPath(statePath: string): string {
   return join(dirname(statePath), "host-token");
 }
 
+/** What the host serving this state file presents on its own socket, as every tool on this computer reads it: the
+ * token file beside the state, or nothing when no host has written one. */
+export function hostTokenFor(statePath: string): string | undefined {
+  try {
+    return readFileSync(hostTokenPath(statePath), "utf8").trim();
+  } catch {
+    return undefined;
+  }
+}
+
 /** Where a host nobody is watching writes what a terminal run would have shown, beside the lock and the token. */
 export function hostLogPath(statePath: string): string {
   return join(dirname(statePath), "host.log");
