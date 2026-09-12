@@ -2,6 +2,7 @@
 // Differs from upstream: the settings hook and the sidebar stage artwork inside the send button are removed (no settings, no artwork), so the send button keeps the plain branch; the unavailable label says workspace, not environment; the stop button takes isInterruptPending and, while it holds, is disabled, labelled Stopping and shows the send button's spinner in place of the square; the send button takes wakesFirst and reads Wake and send while the machine is paused, since the send wakes it.
 import { memo, type PointerEventHandler } from "react";
 import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
+import { COMPOSER_STATE_WORDS } from "../../composer-state-words.js";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
@@ -40,9 +41,10 @@ interface ComposerPrimaryActionsProps {
   onImplementPlanInNewThread: () => void;
 }
 
-/** The send button's name while the machine is paused: one send wakes it and sends, so the button says both. */
-export const WAKE_AND_SEND_LABEL = "Wake and send";
-export const SEND_LABEL = "Send message";
+/** The send button's name while the machine is paused: one send wakes it and sends, so the button says both. Both
+ * words, and every other state's below, come from the one file the harness that drives this app reads too. */
+export const WAKE_AND_SEND_LABEL = COMPOSER_STATE_WORDS.wakeAndSend;
+export const SEND_LABEL = COMPOSER_STATE_WORDS.send;
 
 export const formatPendingPrimaryActionLabel = (input: {
   compact: boolean;
@@ -246,15 +248,15 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       }
       aria-label={
         isEnvironmentUnavailable
-          ? "Workspace disconnected"
+          ? COMPOSER_STATE_WORDS.workspaceUnavailable
           : sendDisabledReason
             ? sendDisabledReason
             : isConnecting
-              ? "Connecting"
+              ? COMPOSER_STATE_WORDS.connecting
               : isPreparingWorktree
-                ? "Preparing worktree"
+                ? COMPOSER_STATE_WORDS.preparingWorktree
                 : isSendBusy
-                  ? "Sending"
+                  ? COMPOSER_STATE_WORDS.sending
                   : wakesFirst
                     ? WAKE_AND_SEND_LABEL
                     : SEND_LABEL
