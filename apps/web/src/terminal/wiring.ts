@@ -6,7 +6,7 @@
 // re-attaches its ptys. The same link is the browser's only source of ports:
 // the daemon pushes port events only to sockets that asked with ports.watch,
 // and a subscription dies with the channel, so every live transition asks again.
-import { daemonVersionOf } from "@wsp/protocol";
+import { daemonVersionOf, type DaemonLinkStatus } from "@wsp/protocol";
 import { getBrowser } from "../browser/model.js";
 import { provideDaemonHello, provideDaemonWire } from "../files/wire.js";
 import { errorText } from "../lib/utils.js";
@@ -15,7 +15,7 @@ import { getProcs } from "../machine/procs.js";
 import type { useStore } from "../protocol/store.js";
 import { useSignInStore } from "../shell/signInStore.js";
 import { connectDaemonLink, type DaemonLink, type DaemonLinkOptions } from "./daemon-link.js";
-import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "./link.js";
+import { NOT_OPENED_YET, provideTerminals, WorkspaceTerminals, type TerminalWire } from "./link.js";
 
 export interface WiringOptions extends Pick<DaemonLinkOptions, "heartbeatMs" | "backoffMs"> {
   /** Keystrokes reach the runtime as one workspaces.touch per this window; the idle window is minutes, so 30 s loses nothing. */
@@ -73,6 +73,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
           ...linkOpts,
           daemon: api.daemon,
           workspaceId: w.id,
+          wasLive: wt.everLive(),
           onEvent: e => {
             if (e.type === "port.open" || e.type === "port.close") {
               browser.feedEvent({ ...e, workspaceId: w.id });
@@ -83,7 +84,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
             else if (e.type === "proc.snapshot") getProcs(w.id).feedSnapshot(e);
             else wt.feedEvent(e);
           },
-          // "dead" is the link we closed on purpose; the model hears "connecting" instead.
+          // "dead" is the link we closed on purpose; the model keeps the word it had instead.
           onStatus: (s, refusal) => {
             if (s === "live") {
               link.request("ports.watch").then(r => browser.syncPorts(r["ports"]), () => {});
@@ -101,10 +102,14 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
         });
         entry.link = link;
       } else if (!up && entry.link) {
+        // The model keeps its tabs and their scrollback across a park, so what a person is waiting on is what the
+        // model has been and not how old this link object is: one that has been live is coming back, one that never
+        // was is still starting.
+        const parked: DaemonLinkStatus = wt.everLive() ? "connecting" : NOT_OPENED_YET;
         unlink(entry);
-        wt.feedStatus("connecting");
-        getLive(w.id).feedStatus("connecting");
-        getProcs(w.id).feedStatus("connecting");
+        wt.feedStatus(parked);
+        getLive(w.id).feedStatus(parked);
+        getProcs(w.id).feedStatus(parked);
       }
     }
     for (const [id, entry] of wired) {

@@ -35,6 +35,7 @@ const report = async (): Promise<PlaceSelfReport> => ({
   login: { HOME: "/home/maya", USER: "maya", PATH: "/usr/bin" },
   docker: true,
   daemonVersion: 17,
+  agents: [],
   wsp: ["/usr/bin/wsp"],
 });
 
@@ -48,7 +49,7 @@ function placeFile(hostUrls: string[], hostPublicKey: string, keyPem: string): s
   dirs.push(dir);
   const keyPath = join(dir, "place-key.pem");
   writeFileSync(keyPath, keyPem);
-  const file: PlaceFile = { placeId: "p_ab12cd34", name: "old-macbook", hostUrls, hostPublicKey, keyPath, joinedAt: new Date(0).toISOString() };
+  const file: PlaceFile = { placeId: "p_ab12cd34", name: "old-macbook", hostName: "zingzy-mbp", hostUrls, hostPublicKey, keyPath, joinedAt: new Date(0).toISOString(), awake: false };
   const path = join(dir, "place.json");
   writePlaceFile(path, file);
   return path;

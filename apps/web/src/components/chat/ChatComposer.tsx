@@ -50,6 +50,7 @@ import { hostAsleep } from "../../boot";
 import { useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { onComposerFocusRequest } from "../../shell/shellRequests";
 import { useThreadStart } from "../../files/root";
+import { useLinkDownLine } from "../../terminal/paneWords";
 import { composerSubmissionIntentForEnter, detectComposerTrigger, replaceTextRange } from "../../composer-logic";
 import { ComposerPromptEditor, type ComposerCommandKey, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
 import { catalogFromHarness, composerPlaceholder, offersSlashCommands } from "./adapt";
@@ -154,6 +155,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const [highlightedSearchKey, setHighlightedSearchKey] = useState<string | null>(null);
   const [dismissedSearchKey, setDismissedSearchKey] = useState<string | null>(null);
 
+  const linkDown = useLinkDownLine(workspaceId);
   const blocked = composerSendBlock({ conn, hasApi: api !== null, state, hydrated: thread.hydrated });
   // A send wakes a paused machine by itself, so paused is not a refusal here: the box takes the words and the send
   // button says it wakes first.
@@ -189,7 +191,8 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   // One line in the slot above the box: the newest failure, else what blocks a send, else the screen command Enter
   // refused, since a box the block disabled has nothing to edit and the block is the one thing to say, else the turn
   // that replied but still runs, in the runtime's own words, since a message sent now waits for that process and runs
-  // as the next turn, else an access pick the running turn's harness would not take mid-turn.
+  // as the next turn, else an access pick the running turn's harness would not take mid-turn, else the workspace's
+  // link being down, which blocks no send and so comes after everything a person is being stopped by.
   const line =
     imageRefusal !== null
       ? imageRefusal
@@ -203,7 +206,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
             ? screenLine
             : runningTurn?.replied === true
               ? stillWorkingLine(threadKey)
-              : accessPick.line;
+              : (accessPick.line ?? linkDown);
 
   const trigger = useMemo(() => detectComposerTrigger(draft.prompt, draft.cursor), [draft]);
   const searchKey = trigger ? `${trigger.kind}:${trigger.query.trim().toLowerCase()}` : null;

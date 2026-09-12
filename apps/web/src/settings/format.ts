@@ -3,6 +3,11 @@
 // preference value where a value has words of its own.
 import { fmtPx, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
 
+/** The caps mono label over a section, and the muted mono a fact wears in a row's slot. Two class strings the page,
+ * the table and the sheet all draw with, so one type ladder holds across the three files. */
+export const ZONE_LABEL = "font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground";
+export const FACT = "font-mono text-[11px] tabular-nums text-muted-foreground";
+
 export const SETTINGS_WORDS = {
   title: "Settings",
   hint: "Theme, sidebar and terminal",

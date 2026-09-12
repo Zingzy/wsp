@@ -7,7 +7,7 @@
 // are about, in a slot that is always there so nothing moves. On success the
 // sheet closes and the window is already on the new host.
 import { useState, type KeyboardEvent } from "react";
-import { HOST_WORDS, PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH, isUrl, type HostConnectAsk, type HostOutcome, type HostRoad } from "@wsp/protocol";
+import { HOST_WORDS, PAIR_CODE_LENGTH, isUrl, type HostConnectAsk, type HostOutcome, type HostRoad } from "@wsp/protocol";
 import { Dialog, DialogSheet, DialogTitle } from "../components/ui/dialog.js";
 import { Input } from "../components/ui/input.js";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
@@ -15,6 +15,7 @@ import { desktopBridge } from "../lib/desktopShell.js";
 import { cn, errorText } from "../lib/utils.js";
 import { FIELD_LABEL, LONE_FIELD } from "../sidebar/cloud-setup/rows.js";
 import { SetupScreen } from "../sidebar/cloud-setup/SetupScreen.js";
+import { sentCode, shownCode } from "./pairingCode.js";
 
 const WORDS = HOST_WORDS.sheet;
 const ROADS = [
@@ -26,19 +27,6 @@ const ROADS = [
 type Field = "url" | "code" | "address" | "port";
 type Values = Record<Field, string>;
 type Refusal = Exclude<HostOutcome, { ok: true }>;
-
-const NOT_CODE = new RegExp(`[^${PAIR_CODE_ALPHABET}-]`, "g");
-
-/** The code as the field shows it: upper case, the pairing alphabet and one dash, no longer than a code with a dash. */
-export function shownCode(typed: string): string {
-  const upper = typed.toUpperCase().replace(NOT_CODE, "");
-  const dashAt = upper.indexOf("-");
-  const letters = upper.replace(/-/g, "").slice(0, PAIR_CODE_LENGTH);
-  return dashAt > 0 && dashAt < letters.length ? `${letters.slice(0, dashAt)}-${letters.slice(dashAt)}` : letters;
-}
-
-/** The code as the host takes it: the letters alone. */
-export const sentCode = (shown: string): string => shown.replace(/-/g, "");
 
 interface FieldSpec {
   at: Field;
