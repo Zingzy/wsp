@@ -41,6 +41,7 @@ import {
   ProjectGolden,
   ProjectImportResult,
   ProjectPlan,
+  SealedImageView,
   type SessionEvent,
   type SessionView,
   type SnapshotLineage,
@@ -381,9 +382,10 @@ export interface Api {
    * host refuses one whose turn reached its agent. Optional so fixtures that never forget one need not fake it; a
    * client without it offers no forget. */
   forgetThread?(threadId: string): Promise<void>;
-  /** What each harness's CLI takes at launch; the composer's pickers render from it. With a workspace the runtime
-   * asks the binaries on its machine, else its table answers. Optional so fixtures without pickers need not fake it;
-   * without it the composer shows none. */
+  /** What each harness's CLI takes at launch; the composer's pickers render from it, and every start rides the model,
+   * effort, context window and access resolved out of it. With a workspace the runtime asks the binaries on its
+   * machine, else its table answers. Optional so fixtures without pickers need not fake it; without it the composer
+   * has no agent to send to and is held with that reason. */
   listHarnesses?(workspaceId?: string): Promise<HarnessCatalog[]>;
   /** One level of the folders on the computer running the host, for the picker a browser tab has instead of the
    * desktop shell's dialog. `dir` absent, or a folder inside the roots that is gone, answers with the first root; a
@@ -457,6 +459,9 @@ export interface Api {
   snapshotWorkspace?(id: string): Promise<ProjectGolden>;
   /** Every project golden the runtime took; the Lineage section lists each under the version it stands on. */
   listProjectGoldens?(): Promise<ProjectGolden[]>;
+  /** The image this host owns and the copy each place holds of it, as Settings > Image reads them. Optional so a
+   * fixture that shows no image section need not fake it. */
+  image?(name?: string): Promise<SealedImageView>;
 }
 
 /** The page's one transport to a daemon. The route the machine answers on and the token that opens it never leave
@@ -625,6 +630,8 @@ export function makeApi(c: ProtocolClient): Api {
     // Parsed, not trusted: the lineage renders and forks only snapshots the wire type vouches for.
     snapshotWorkspace: async id => ProjectGolden.parse((await c.request<{ projectGolden?: unknown }>("workspaces.snapshot", { workspaceId: id })).projectGolden),
     listProjectGoldens: async () => ProjectGolden.array().parse((await c.request<{ projectGoldens?: unknown }>("projectGoldens.list")).projectGoldens),
+    // Parsed, not trusted: the section draws a record and its copies only as the wire type vouches for them.
+    image: async name => SealedImageView.parse((await c.request<{ view?: unknown }>("image.get", name !== undefined ? { name } : {})).view),
     rollbackSnapshot: async (version, name) => {
       const { lineage, existingWorkspaces } = await c.request<SnapshotRollbackResult>("snapshots.rollback", {
         version,

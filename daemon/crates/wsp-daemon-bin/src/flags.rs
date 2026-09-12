@@ -1,0 +1,262 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+//! One flag per daemon option, so the test harness and the deploy scripts spell the same thing. The interval and
+//! deadline flags exist for the suite; the deploy scripts never name them.
+
+use std::path::PathBuf;
+
+use clap::error::ErrorKind;
+use clap::{Parser, ValueEnum};
+use wsp_daemon::Options;
+use wsp_frames::{numbers, WorkspaceKind};
+
+pub(crate) const USAGE: &str = "usage: wsp-daemon [--host <addr>] [--port <n>] [--token-path <file>] [--root <dir>] [--roots-path <file>] [--kind cloud|local|ssh|place] [--work-folder <dir>] [--inbox <dir>] [--inbox-quiet-ms <n>] [--inbox-poll-ms <n>] [--manifest <file>] [--run-dir <dir>] [--log-dir <dir>] [--open-socket <path>] [--port-file <file>] [--proc-root <dir>] [--passwd <file>] [--ports-interval-ms <n>] [--sys-interval-ms <n>] [--proc-interval-ms <n>] [--mode-interval-ms <n>] [--auth-deadline-ms <n>] [--place-file <file>] [--home <dir>] [--wsp-argv <word>]... [--agents id=bin,...] [--link-connect-ms <n>] [--link-quiet-ms <n>] [--link-refused-retry-ms <n>] [--link-backoff-ms <n>]";
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum Kind {
+    Cloud,
+    Local,
+    Ssh,
+    Place,
+}
+
+impl From<Kind> for WorkspaceKind {
+    fn from(kind: Kind) -> WorkspaceKind {
+        match kind {
+            Kind::Cloud => WorkspaceKind::Cloud,
+            Kind::Local => WorkspaceKind::Local,
+            Kind::Ssh => WorkspaceKind::Ssh,
+            Kind::Place => WorkspaceKind::Place,
+        }
+    }
+}
+
+#[derive(Debug, Parser)]
+#[command(name = "wsp-daemon", disable_version_flag = true, override_usage = USAGE)]
+pub(crate) struct Flags {
+    /// The address to bind: 0.0.0.0 in a guest, 127.0.0.1 on a computer somebody owns.
+    #[arg(long, default_value = numbers::DEFAULT_HOST, value_name = "addr")]
+    pub(crate) host: String,
+    /// 0 takes any free port; the listening line and --port-file say which.
+    #[arg(long, default_value_t = numbers::DEFAULT_PORT, value_name = "n")]
+    pub(crate) port: u16,
+    #[arg(long, default_value = numbers::DEFAULT_TOKEN_PATH, value_name = "file")]
+    pub(crate) token_path: PathBuf,
+    #[arg(long, value_name = "dir")]
+    pub(crate) root: Option<PathBuf>,
+    #[arg(long, value_name = "file")]
+    pub(crate) roots_path: Option<PathBuf>,
+    #[arg(long, value_enum, default_value_t = Kind::Cloud)]
+    pub(crate) kind: Kind,
+    #[arg(long, value_name = "dir")]
+    pub(crate) work_folder: Option<PathBuf>,
+    #[arg(long, value_name = "dir")]
+    pub(crate) inbox: Option<PathBuf>,
+    #[arg(long, value_name = "n")]
+    pub(crate) inbox_quiet_ms: Option<u64>,
+    #[arg(long, value_name = "n")]
+    pub(crate) inbox_poll_ms: Option<u64>,
+    #[arg(long, value_name = "file")]
+    pub(crate) manifest: Option<PathBuf>,
+    #[arg(long, value_name = "dir")]
+    pub(crate) run_dir: Option<PathBuf>,
+    #[arg(long, value_name = "dir")]
+    pub(crate) log_dir: Option<PathBuf>,
+    #[arg(long, value_name = "path")]
+    pub(crate) open_socket: Option<PathBuf>,
+    #[arg(long, value_name = "file")]
+    pub(crate) port_file: Option<PathBuf>,
+    #[arg(long, value_name = "dir")]
+    pub(crate) proc_root: Option<PathBuf>,
+    #[arg(long, value_name = "file")]
+    pub(crate) passwd: Option<PathBuf>,
+    #[arg(long, value_name = "n")]
+    pub(crate) ports_interval_ms: Option<u64>,
+    #[arg(long, value_name = "n")]
+    pub(crate) sys_interval_ms: Option<u64>,
+    #[arg(long, value_name = "n")]
+    pub(crate) proc_interval_ms: Option<u64>,
+    #[arg(long, value_name = "n")]
+    pub(crate) mode_interval_ms: Option<u64>,
+    #[arg(long, value_name = "n")]
+    pub(crate) auth_deadline_ms: Option<u64>,
+    /// Turns the outbound link on: the file the join wrote, read on every attempt.
+    #[arg(long, value_name = "file")]
+    pub(crate) place_file: Option<PathBuf>,
+    /// Where the place keeps its files and what the sweep takes.
+    #[arg(long, value_name = "dir")]
+    pub(crate) home: Option<PathBuf>,
+    /// The line that runs wsp on this place, one word per flag.
+    #[arg(long = "wsp-argv", value_name = "word", action = clap::ArgAction::Append)]
+    pub(crate) wsp_argv: Vec<String>,
+    /// The agents to look for on this place, as catalog id and binary name.
+    #[arg(long, value_name = "id=bin,...", value_delimiter = ',')]
+    pub(crate) agents: Vec<String>,
+    #[arg(long, value_name = "n")]
+    pub(crate) link_connect_ms: Option<u64>,
+    #[arg(long, value_name = "n")]
+    pub(crate) link_quiet_ms: Option<u64>,
+    #[arg(long, value_name = "n")]
+    pub(crate) link_refused_retry_ms: Option<u64>,
+    #[arg(long, value_name = "n")]
+    pub(crate) link_backoff_ms: Option<u64>,
+}
+
+impl Flags {
+    /// The flags, or the usage line the node bin prints and exit 2; --help prints clap's own and exits 0.
+    pub(crate) fn parse_or_exit() -> Flags {
+        match Flags::try_parse() {
+            Ok(flags) => flags,
+            Err(e) if matches!(e.kind(), ErrorKind::DisplayHelp | ErrorKind::DisplayVersion) => {
+                let _ = e.print();
+                std::process::exit(0)
+            }
+            Err(e) => {
+                let rendered = e.render().to_string();
+                eprintln!("{}", rendered.lines().next().unwrap_or("bad flags"));
+                eprintln!("{USAGE}");
+                std::process::exit(2)
+            }
+        }
+    }
+
+    pub(crate) fn into_options(self) -> Options {
+        Options {
+            host: self.host,
+            port: self.port,
+            token_path: self.token_path,
+            root: self.root,
+            roots_path: self.roots_path,
+            kind: self.kind.into(),
+            work_folder: self.work_folder,
+            inbox_dir: self.inbox,
+            inbox_quiet_ms: self.inbox_quiet_ms,
+            inbox_poll_ms: self.inbox_poll_ms,
+            manifest_path: self.manifest,
+            run_dir: self.run_dir,
+            log_dir: self.log_dir,
+            open_socket_path: self.open_socket,
+            proc_root: self.proc_root,
+            passwd_path: self.passwd,
+            ports_interval_ms: self.ports_interval_ms,
+            sys_interval_ms: self.sys_interval_ms,
+            proc_interval_ms: self.proc_interval_ms,
+            mode_interval_ms: self.mode_interval_ms,
+            auth_deadline_ms: self.auth_deadline_ms,
+            place_file: self.place_file,
+            home: self.home,
+            wsp_argv: self.wsp_argv,
+            agents: self.agents,
+            link_connect_ms: self.link_connect_ms,
+            link_quiet_ms: self.link_quiet_ms,
+            link_refused_retry_ms: self.link_refused_retry_ms,
+            link_backoff_ms: self.link_backoff_ms,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Result<Flags, clap::Error> {
+        Flags::try_parse_from(std::iter::once("wsp-daemon").chain(args.iter().copied()))
+    }
+
+    #[test]
+    fn defaults_to_the_in_guest_shape() {
+        let f = parse(&[]).unwrap();
+        assert_eq!(f.host, "0.0.0.0");
+        assert_eq!(f.port, 7070);
+        assert_eq!(f.token_path, PathBuf::from("/root/.wsp-daemon-token"));
+        assert!(matches!(f.kind, Kind::Cloud));
+        assert!(f.root.is_none());
+    }
+
+    #[test]
+    fn parses_every_flag_in_the_list() {
+        let f = parse(&[
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "7171",
+            "--token-path",
+            "/tmp/tok",
+            "--root",
+            "/srv/work",
+            "--roots-path",
+            "/srv/roots",
+            "--kind",
+            "place",
+            "--work-folder",
+            "/w",
+            "--inbox",
+            "/i",
+            "--inbox-quiet-ms",
+            "10",
+            "--inbox-poll-ms",
+            "20",
+            "--manifest",
+            "/m.json",
+            "--run-dir",
+            "/r",
+            "--log-dir",
+            "/l",
+            "--open-socket",
+            "/o.sock",
+            "--port-file",
+            "/p",
+            "--proc-root",
+            "/proc2",
+            "--passwd",
+            "/pw",
+            "--ports-interval-ms",
+            "1",
+            "--sys-interval-ms",
+            "2",
+            "--proc-interval-ms",
+            "3",
+            "--mode-interval-ms",
+            "4",
+            "--auth-deadline-ms",
+            "5",
+            "--place-file",
+            "/pf",
+            "--home",
+            "/h",
+            "--wsp-argv",
+            "node",
+            "--wsp-argv",
+            "bin.js",
+            "--agents",
+            "one=one-bin,two=two-bin",
+            "--link-connect-ms",
+            "6",
+            "--link-quiet-ms",
+            "7",
+            "--link-refused-retry-ms",
+            "8",
+            "--link-backoff-ms",
+            "9",
+        ])
+        .unwrap();
+        let o = f.into_options();
+        assert_eq!((o.host.as_str(), o.port), ("127.0.0.1", 7171));
+        assert_eq!(o.kind, WorkspaceKind::Place);
+        assert_eq!(o.wsp_argv, vec!["node", "bin.js"]);
+        assert_eq!(o.agents, vec!["one=one-bin", "two=two-bin"]);
+        assert_eq!((o.inbox_quiet_ms, o.inbox_poll_ms, o.auth_deadline_ms), (Some(10), Some(20), Some(5)));
+        assert_eq!((o.link_connect_ms, o.link_quiet_ms, o.link_refused_retry_ms, o.link_backoff_ms), (Some(6), Some(7), Some(8), Some(9)));
+        assert_eq!(o.open_socket_path, Some(PathBuf::from("/o.sock")));
+    }
+
+    #[test]
+    fn refuses_a_missing_value_a_bad_port_and_an_unknown_flag() {
+        assert!(parse(&["--host"]).is_err());
+        assert!(parse(&["--port", "abc"]).is_err());
+        assert!(parse(&["--port", "70000"]).is_err());
+        assert!(parse(&["--token-path"]).is_err());
+        assert!(parse(&["--kind", "moon"]).is_err());
+        let e = parse(&["--wat"]).unwrap_err();
+        assert!(e.render().to_string().contains("--wat"));
+    }
+}

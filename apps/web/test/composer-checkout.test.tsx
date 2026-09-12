@@ -75,6 +75,7 @@ vi.mock("../src/components/ui/tooltip.js", () => ({
 
 import { BUTTON_GLYPH_INSET } from "../src/components/ui/button.js";
 import { installFakeLayout } from "./fake-layout.js";
+import { TABLE_CATALOG, whenAgentsAnswered } from "./agents.js";
 import { composerEditor, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
 import type { TerminalWire } from "../src/terminal/link.js";
@@ -130,6 +131,7 @@ function fixtureApi(history: SessionEvent[] = [], rows: SessionView[] = [], ws: 
     upgrade: async () => ws,
     capabilities: async () => (caps()),
     listSessions: async () => rows,
+    listHarnesses: async () => [TABLE_CATALOG],
     watchStatuses: async () => [],
     createFromGoldenHead: async () => ws,
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
@@ -148,6 +150,7 @@ async function setup(api: Api, threadId: string | null = null) {
   useStore.getState().bind(api);
   useStore.getState().setConn("live");
   await waitFor(() => expect(useStore.getState().workspaces.length).toBeGreaterThan(0));
+  await whenAgentsAnswered();
   render(<WorkspaceThread workspaceId={WS} threadId={threadId} />);
   await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
 }

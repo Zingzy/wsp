@@ -27,7 +27,7 @@ import {
   type SshWiring,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portsAsked, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, usageRefusal, WS_PORT_OFFSET, type WorkspaceCreatingEvent } from "@wsp/protocol";
+import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portsAsked, runForTheList, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, unknownWordLine, usageRefusal, WS_PORT_OFFSET, type WorkspaceCreatingEvent } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, parseSshAddress, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshIdentity, sshMachineName, sshReachOf, type SshReach } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerModule, type ProviderEnv } from "./providers.js";
 import { assetDir } from "./assets.js";
@@ -80,7 +80,7 @@ import { publicHostname, readRelayRecord, relayCommand, relayOnLoopbackLine, sta
 import { aimAddress, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnoredLine, wspHome } from "./hosts.js";
 import { currentHome, currentHomePointer, homeNamed, servingHome } from "./serving-home.js";
 import { advertiseWord, devicesCommand, hostReach, pairCommand } from "./pairing.js";
-import { addCommand, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
+import { addCommand, addFlags, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, registeredLine, removeEach, removeLines, runningWsp, type RunningWsp } from "./mcp-install.js";
@@ -221,8 +221,12 @@ options:
   --name ALIAS       connect: the name to call that host here (default what its
                      address calls it); relay link: the name the approval page
                      shows for this computer (default what it calls itself);
-                     join: the name the wsp calls the computer being joined
-                     (default its own name lowercased)
+                     add, join: the name the wsp calls the computer being
+                     joined (default its own name lowercased)
+  --ssh-port PORT    add, new --ssh: the port ssh dials that computer on
+                     (default 22)
+  --ssh-key PATH     add, new --ssh: the key file ssh logs in with (default
+                     whatever your own ssh config and agent already use)
   --relay HOST       connect: reach that host through your relay by the name it
                      has there, instead of giving an address. The code is still
                      the one wsp pair printed on it: the relay never carries one
@@ -321,6 +325,10 @@ export interface CliIO {
   ask(question: string): Promise<string>;
   /** A person is at the keyboard (stdin and stdout are terminals); absent means an agent or a pipe, and nothing is asked. */
   isTTY?: boolean;
+  /** What the stream writes and what log prints land in front of the same eyes (stdout and stderr are both
+   * terminals), so text the stream has already shown is not printed a second time under it. Absent, the two part:
+   * stdout carries the answer whole and the stream is somebody else's view of the work. */
+  sameScreen?: boolean;
   /** A key, typed without echo. Lines after the first are shown under the question. `variable` is what a caller
    * with no terminal is told to set instead, so a refusal in a service log names the key to put in a file rather
    * than saying it. */
@@ -368,6 +376,7 @@ export function terminalIO(input: Stream<Readable> = process.stdin, output: Stre
     stream: text => process.stderr.write(text),
     muted: text => muted(text, colourDepth(isTTY(process.stderr))),
     isTTY: screen,
+    sameScreen: isTTY(output) && isTTY(process.stderr),
     ask: q => (screen ? answered(confirmPrompt(split(q))).then(yes => (yes ? "yes" : "no")) : nobody(q)),
     askSecret: (q, variable) => (screen ? answered(passwordPrompt(split(q))) : noKey(q, variable)),
   };
@@ -1063,11 +1072,11 @@ async function init(
   opts: SharedOpts,
   flags: { yes: boolean; nonInteractive: boolean; json: boolean; noLocal: boolean; recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string; upCommand: string; forkCommand: string },
 ): Promise<number> {
-  if (flags.json && flags.yes) throw usageRefusal("wsp init: --json prints the sign-ins as they are handed to you, and --yes skips the sign-ins, so there would be nothing to print. Drop one of them.");
+  if (flags.json && flags.yes) throw usageRefusal("wsp init: --json prints the sign-ins as they are handed to you, and --yes skips the sign-ins, so there would be nothing to print.", "Drop one of them.");
   await adoptLoginPath(line => io.log(line));
   const held = servingHost(opts.statePath);
   const flag = projectFlag("init", flags.project);
-  if (!flag.ok) throw usageRefusal(flag.message);
+  if (!flag.ok) throw usageRefusal(flag.message, "Give --project a folder that is already here, or drop the flag and let the run ask.");
   const project = flag.path;
   // Under --json every line this run says, the host's own included, goes to stderr so stdout is the objects' alone.
   const say = flags.json ? jsonCliIO() : io;
@@ -1075,7 +1084,7 @@ async function init(
   // The objects --json prints are the build's own, and a build handed over is that host's run: its objects land on
   // its job, where wsp setup reads them, not on this stdout. Refused rather than printing an empty stream.
   if (held !== undefined && flags.json) {
-    throw usageRefusal(`wsp init --json prints the build's own objects, and the host serving ${opts.statePath} (pid ${held.pid}) is what runs this build: its sign-ins and stages ride its own setup, which wsp setup --json reads. Drop --json, or take that host down (wsp down) and run this again.`);
+    throw usageRefusal(`wsp init --json prints the build's own objects, and the host serving ${opts.statePath} (pid ${held.pid}) is what runs this build: its sign-ins and stages ride its own setup, which wsp setup --json reads.`, "Drop --json, or take that host down (wsp down) and run this again.");
   }
   // A host already serving this state file is the process that writes it and holds the provider, so this run asks
   // its screens and hands the build to that host. Read before the opening: a refusal here is the whole run, and it
@@ -1087,12 +1096,12 @@ async function init(
   // A provider with no size to boot a builder on has no image to build, so the run makes this computer the workspace
   // and serves the app on it. Every flag about the golden is about a road this run does not take.
   if (beside === undefined && forksNoMachines(providerBackendFor(providerEnv).capabilities)) {
-    if (flags.noLocal) throw usageRefusal(`wsp init: with no provider key ${THIS_COMPUTER} is all this run makes, so --no-local would leave it with nothing. Drop it${orSetTheKey(providerEnv)}.`);
+    if (flags.noLocal) throw usageRefusal(`wsp init: with no provider key ${THIS_COMPUTER} is all this run makes, so --no-local would leave it with nothing.`, `Drop it${orSetTheKey(providerEnv)}.`);
     // Every other flag is about a golden: what goes on the image, what forks from it and what lands on that fork.
     // This road builds no image, and the workspace it makes is this computer, whose files are already here.
     const aboutGolden = GOLDEN_FLAGS.filter(([, given]) => given(flags)).map(([name]) => name);
     if (aboutGolden.length > 0) {
-      throw usageRefusal(`wsp init: with no provider key there is no image to build and nothing to fork, and ${THIS_COMPUTER} already has your files, so ${aboutGolden.join(", ")} would do nothing here. Drop them${orSetTheKey(providerEnv)}.`);
+      throw usageRefusal(`wsp init: with no provider key there is no image to build and nothing to fork, and ${THIS_COMPUTER} already has your files, so ${aboutGolden.join(", ")} would do nothing here.`, `Drop them${orSetTheKey(providerEnv)}.`);
     }
     const local = await runLocalInit(
       {
@@ -1527,6 +1536,8 @@ interface SharedFlags {
   service?: boolean;
   code?: string;
   "code-file"?: string;
+  "ssh-port"?: string;
+  "ssh-key"?: string;
   serve?: boolean;
   awake?: boolean;
   name?: string;
@@ -1646,7 +1657,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     host: "hostSide",
     cliOnly: "hands out a code that lets another computer join this wsp, or takes a provider's key into this person's own files; both belong with the terminal the host runs at",
     run: (io, opts, values, args) =>
-      addCommand(io, { ...aimPick(opts, values), providerEnv: opts.providerEnv }, args, values.name !== undefined ? { name: values.name } : {}),
+      addCommand(io, { ...aimPick(opts, values), providerEnv: opts.providerEnv }, args, addFlags(values.name, values["ssh-port"], values["ssh-key"])),
   },
   remove: {
     json: false,
@@ -1754,7 +1765,7 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
   try {
     ({ values, positionals: words } = parseArgs({ args: argv, options: MCP_OPTIONS, allowPositionals: true }));
   } catch (e) {
-    return failed(io, jsonAsked(argv), usageRefusal(`${e instanceof Error ? e.message : String(e)}\n\n${usage}`));
+    return failed(io, jsonAsked(argv), usageRefusal(e instanceof Error ? e.message : String(e), usage));
   }
   if (values.help === true) {
     io.log(usage);
@@ -1767,13 +1778,16 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
     return 0;
   }
   const json = values.json === true;
-  if (words[0] !== "install" || words.length !== 1) return failed(io, json, usageRefusal(`unknown command: ${MCP_COMMAND} ${words.join(" ")}\n\n${usage}`));
+  if (words[0] !== "install" || words.length !== 1) return failed(io, json, usageRefusal(unknownWordLine(`${MCP_COMMAND} ${words.join(" ")}`), runForTheList(`wsp ${MCP_COMMAND} --help`)));
   // Nobody named an agent: at a terminal that is a line half typed, but an agent running this has no terminal to be
   // asked at, so every agent whose own command is on this computer's PATH takes it.
   const agents = values.agent ?? (io.isTTY === true ? [] : agentsOnPath(run.PATH));
   if (agents.length === 0) {
-    const none = io.isTTY !== true ? "wsp mcp install: no agent of the catalog's is on this computer's PATH; name one with --agent.\n" : "";
-    return failed(io, json, usageRefusal(`${none}usage: ${mcpInstallUsage()}`));
+    const none =
+      io.isTTY !== true
+        ? "wsp mcp install: no agent of the catalog's is on this computer's PATH."
+        : "wsp mcp install writes the config of the agents it is given, and was given none.";
+    return failed(io, json, usageRefusal(none, `Name one with --agent.\n\nusage: ${mcpInstallUsage()}`));
   }
   const project = process.cwd();
   if (values.remove === true) {
@@ -1816,6 +1830,8 @@ export const SHARED_OPTIONS: Options = {
   service: { type: "boolean" },
   code: { type: "string" },
   "code-file": { type: "string" },
+  "ssh-port": { type: "string" },
+  "ssh-key": { type: "string" },
   serve: { type: "boolean" },
   awake: { type: "boolean" },
   name: { type: "string" },
@@ -1882,24 +1898,34 @@ export async function cli(argv: string[], io: CliIO = terminalIO(), run: Running
   try {
     ({ values, positionals } = parseArgs({ args: argv, options: SHARED_OPTIONS, allowPositionals: true }));
   } catch (e) {
-    return failed(io, jsonAsked(argv), usageRefusal(e instanceof Error ? e.message : String(e)));
+    return failed(io, jsonAsked(argv), usageRefusal(e instanceof Error ? e.message : String(e), runForTheList("wsp --help")));
   }
   if (values.version) {
     io.log(`wsp ${VERSION}`);
     return 0;
   }
-  if (values.help) {
+  const word = positionals[0] ?? "up";
+  // `help` is the word for the flag: a person reaching for it types one as readily as the other, and answering the
+  // word with a typo's refusal is the tool arguing about punctuation.
+  if (values.help === true || word === "help") {
     io.log(HELP);
     return 0;
   }
   const opts = optsFor(values, env, line => io.error(line));
-  const word = positionals[0] ?? "up";
   const command = COMMANDS[word];
   const json = values.json === true;
-  if (command === undefined) return failed(io, json, usageRefusal(commandUsage(word) ?? `unknown command: ${word}\n\n${HELP}`));
-  if (json && !command.json) return failed(io, json, usageRefusal(`Unknown option '--json' for wsp ${word}: only ${JSON_COMMANDS.map(w => `wsp ${w}`).join(", ")} prints JSON.`));
+  if (command === undefined) {
+    // A word that opens a line but is no line of its own gets the lines it opens; one no command answers to gets
+    // the pointer, since the help behind it runs to hundreds of rows.
+    const usage = commandUsage(word);
+    const refusal = usage === undefined ? usageRefusal(unknownWordLine(word), runForTheList("wsp --help")) : usageRefusal(`wsp ${word} opens a line rather than being one.`, usage);
+    return failed(io, json, refusal);
+  }
+  if (json && !command.json) {
+    return failed(io, json, usageRefusal(`Unknown option '--json' for wsp ${word}: it answers in prose.`, `That flag belongs to ${JSON_COMMANDS.map(w => `wsp ${w}`).join(", ")}, and to every verb.`));
+  }
   if (values.host !== undefined && command.host === "refused") {
-    return failed(io, json, usageRefusal(`Unknown option '--host' for wsp ${word}: it runs on this computer. ${HOST_COMMANDS.map(w => `wsp ${w}`).join(", ")} reads it, and so does every verb.`));
+    return failed(io, json, usageRefusal(`Unknown option '--host' for wsp ${word}: it runs on this computer.`, `That flag belongs to ${HOST_COMMANDS.map(w => `wsp ${w}`).join(", ")}, and to every verb.`));
   }
   try {
     return await command.run(io, opts, values, positionals.slice(1));

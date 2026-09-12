@@ -1,0 +1,12 @@
+[
+  {
+    "id": 1,
+    "op": "fs.list"
+  },
+  {
+    "id": 1,
+    "op": "fs.list",
+    "path": ".",
+    "gitignore": "yes"
+  }
+]

@@ -9,7 +9,7 @@
 import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname as thisComputer } from "node:os";
 import { dirname, join } from "node:path";
-import { fmtDuration, relayUrlOf, usageRefusal } from "@wsp/protocol";
+import { fmtDuration, relayUrlOf, runForTheList, unknownWordLine, usageRefusal } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
 import { CLOUDFLARED, connectorRunning, ensureCloudflared, startConnector, stopRecordedConnector, type Connector } from "./connector.js";
 import { publicAddressLine } from "./host-lock.js";
@@ -176,10 +176,10 @@ async function relayClient(io: CliIO, home: string, deps: RelayDeps, url?: strin
   const held = readRelayClient(home);
   if (held !== undefined && (url === undefined || trimUrl(url) === held.relayUrl)) return held;
   if (held !== undefined) {
-    throw usageRefusal(`this computer is signed in to the relay at ${held.relayUrl}; one at a time, so sign out of that one before ${trimUrl(url ?? "")}`);
+    throw usageRefusal(`this computer is signed in to the relay at ${held.relayUrl}, and one at a time is the rule.`, `Sign out of that one before ${trimUrl(url ?? "")}.`);
   }
   const relayUrl = trimUrl(url ?? "");
-  if (relayUrl === "") throw usageRefusal("this computer has signed in to no relay; give the relay's address: wsp relay hosts <url>");
+  if (relayUrl === "") throw usageRefusal("this computer has signed in to no relay.", "Give the relay's address: wsp relay hosts <url>.");
   const name = deps.deviceName();
   const approved = await linkThrough(io, deps, relayUrl, "client", name);
   const record: RelayClientRecord = { relayUrl, token: approved.token, name, linkedAt: new Date(deps.now()).toISOString() };
@@ -204,18 +204,18 @@ async function relayHosts(record: RelayClientRecord, deps: RelayDeps): Promise<R
  * code still comes from wsp pair on the box itself. */
 export async function relayHostUrl(home: string, name: string, deps: RelayDeps = systemRelayDeps): Promise<string> {
   const record = readRelayClient(home);
-  if (record === undefined) throw usageRefusal("this computer has signed in to no relay; run wsp relay hosts <url> first, which signs in and lists the boxes on your account");
+  if (record === undefined) throw usageRefusal("this computer has signed in to no relay.", "Run wsp relay hosts <url> first, which signs in and lists the boxes on your account.");
   const hosts = await relayHosts(record, deps);
   const named = hosts.filter(h => h.name === name);
   // Two boxes under one name is not a guess to make: the ids are what tells them apart, so the line names them.
-  if (named.length > 1) throw usageRefusal(`the relay holds ${named.length} hosts called ${name}; name the one you mean by its id: ${named.map(h => h.id).join(", ")}`);
+  if (named.length > 1) throw usageRefusal(`the relay holds ${named.length} hosts called ${name}.`, `Name the one you mean by its id: ${named.map(h => h.id).join(", ")}.`);
   const found = named[0] ?? hosts.find(h => h.id === name);
   if (found === undefined) {
     const known = hosts.map(h => h.name).join(", ");
-    throw usageRefusal(`the relay holds no host called ${name}; it holds ${known === "" ? "none at all" : known}`);
+    throw usageRefusal(`the relay holds no host called ${name}.`, `It holds ${known === "" ? "none at all" : known}; run wsp relay hosts to read them.`);
   }
   if (found.hostname === null || found.hostname === "") {
-    throw usageRefusal(`the relay has no address for ${name} yet; start it there with wsp up, which asks the relay for a tunnel and says where it landed`);
+    throw usageRefusal(`the relay has no address for ${name} yet.`, "Start it there with wsp up, which asks the relay for a tunnel and says where it landed.");
   }
   return relayUrlOf(found.hostname);
 }
@@ -261,16 +261,16 @@ export interface RelayCommandOpts {
 
 export async function relayCommand(io: CliIO, opts: RelayCommandOpts, args: readonly string[], values: { name?: string }, deps: RelayDeps = systemRelayDeps): Promise<number> {
   const [word, second, third, ...rest] = args;
-  if (word === undefined || rest.length > 0) throw usageRefusal(RELAY_USAGE);
+  if (word === undefined || rest.length > 0) throw usageRefusal("wsp relay takes one of its five lines.", RELAY_USAGE);
   const noMore = (): void => {
-    if (third !== undefined) throw usageRefusal(RELAY_USAGE);
+    if (third !== undefined) throw usageRefusal(`wsp relay ${word} takes no word beside ${third}.`, RELAY_USAGE);
   };
   if (word === "link") {
     noMore();
     return relayLink(io, opts, second, values, deps);
   }
   if (word === "unlink") {
-    if (second !== undefined) throw usageRefusal(`wsp relay unlink takes the relay this computer is already on, so it needs no address\n\n${RELAY_USAGE}`);
+    if (second !== undefined) throw usageRefusal("wsp relay unlink takes the relay this computer is already on, so it needs no address.", RELAY_USAGE);
     return relayUnlink(io, opts, deps);
   }
   if (word === "hosts") {
@@ -278,10 +278,12 @@ export async function relayCommand(io: CliIO, opts: RelayCommandOpts, args: read
     return relayHostsCommand(io, opts, second, deps);
   }
   if (word === "clients") {
-    if (second !== undefined && (second !== "revoke" || third === undefined)) throw usageRefusal(RELAY_USAGE);
+    if (second !== undefined && (second !== "revoke" || third === undefined)) throw usageRefusal("wsp relay clients takes nothing, or revoke and one id.", RELAY_USAGE);
     return relayClientsCommand(io, opts, second === "revoke" ? third : undefined, deps);
   }
-  throw usageRefusal(`unknown command: wsp relay ${word}\n\n${RELAY_USAGE}`);
+  // The relay lines are all in the top-level help, and `wsp relay --help` is read by the shared parse before this
+  // function ever sees it, so the pointer names the one that lists them.
+  throw usageRefusal(unknownWordLine(`relay ${word}`), runForTheList("wsp --help"));
 }
 
 /** The computers signed in to this person's relay, and the one line that takes one away. A token that walked off
@@ -300,8 +302,8 @@ async function relayClientsCommand(io: CliIO, opts: RelayCommandOpts, revoke: st
 
 async function relayLink(io: CliIO, opts: RelayCommandOpts, address: string | undefined, values: { name?: string }, deps: RelayDeps): Promise<number> {
   const held = readRelayRecord(opts.statePath);
-  if (held !== undefined) throw usageRefusal(`this computer is already linked to the relay at ${held.relayUrl} as ${held.name}; wsp relay unlink takes it off first`);
-  if (address === undefined || !/^https?:\/\//i.test(address)) throw usageRefusal(`wsp relay link takes the address of the relay, starting http:// or https://\n\n${RELAY_USAGE}`);
+  if (held !== undefined) throw usageRefusal(`this computer is already linked to the relay at ${held.relayUrl} as ${held.name}.`, "Run wsp relay unlink to take it off first.");
+  if (address === undefined || !/^https?:\/\//i.test(address)) throw usageRefusal("wsp relay link takes the address of the relay, starting http:// or https://.", RELAY_USAGE);
   const relayUrl = trimUrl(address);
   const name = values.name ?? deps.deviceName();
   const approved = await linkThrough(io, deps, relayUrl, "host", name);
@@ -316,7 +318,7 @@ async function relayLink(io: CliIO, opts: RelayCommandOpts, address: string | un
 
 async function relayUnlink(io: CliIO, opts: RelayCommandOpts, deps: RelayDeps): Promise<number> {
   const record = readRelayRecord(opts.statePath);
-  if (record === undefined) throw usageRefusal("this computer is on no relay; wsp relay link <url> puts it on one");
+  if (record === undefined) throw usageRefusal("this computer is on no relay.", "Run wsp relay link <url> to put it on one.");
   // The record goes first of all, so the host that is serving starts no connector in place of the one stopped next,
   // and the connector goes before the relay is told: a tunnel with connections still registered cannot be deleted.
   removeRelayRecord(opts.statePath);
