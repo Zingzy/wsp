@@ -4,7 +4,7 @@
 // but for the one hook beside the where word, which reads that word off the
 // store for the surfaces that hold a workspace's id and no snapshot.
 import { agentName } from "@wsp/catalog";
-import { FREE_WORD, fmtSize, isBilling, isLocalWorkspace, kindWords, machineLacksShort, outOfMemoryRowLine, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspaceStateOf, type AbsentComputer, type MemoryReading, type ReachState, type SessionOrigin, type PlaceView, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
+import { FREE_WORD, fmtCost, fmtSize, isBilling, isLocalWorkspace, kindWords, machineLacksShort, outOfMemoryRowLine, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspaceStateOf, type AbsentComputer, type MemoryReading, type ReachState, type SessionOrigin, type PlaceView, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
 import { PLACE_KIND_WORDS, THIS_COMPUTER_WORD, placeName, placeOf } from "../settings/places.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
@@ -87,11 +87,11 @@ export interface WorkspaceMetaInput {
 }
 
 /** The workspace row's third line, one string in one order: what it cost today, the edge note, the nap countdown
- * last. The cost always leads, an honest zero before the meter's first tick, so no row draws
- * a blank line. The row cuts it at its own cap; nothing here decides what to leave out. What the runtime is doing
- * to the machine's daemon, a drop with memory near full, or a daemon that is not there at all takes the whole line
- * while it lasts, and a computer that is not answering takes it over all of them: it is the one thing on the row a
- * person may be waiting on, and it reads in the ink prose gets. A
+ * last. The cost leads once the meter has ticked; before that the row says nothing about spend rather than a
+ * $0.00 it changes into a real figure a second later. The row cuts it at its own cap; nothing here decides what to
+ * leave out. What the runtime is doing to the machine's daemon, a drop with memory near full, or a daemon that is
+ * not there at all takes the whole line while it lasts, and a computer that is not answering takes it over all of
+ * them: it is the one thing on the row a person may be waiting on, and it reads in the ink prose gets. A
  * machine wsp does not drive spends nothing and naps never, so its line says so in one word. */
 export function workspaceMetaLine({ project, absent, cost, outOfMemory, nowMs }: WorkspaceMetaInput): string {
   const [sentence] = metaSentences({ project, absent, outOfMemory });
@@ -105,18 +105,17 @@ export function workspaceMetaLine({ project, absent, cost, outOfMemory, nowMs }:
  * Rate row rather than crowding out what a person is waiting on. */
 function costLine({ project, cost, nowMs }: Omit<WorkspaceMetaInput, "outOfMemory">): string {
   if (!kindWords(workspaceKind(project.workspace)).driven) return FREE_WORD;
-  return [accruedTodayLabel(cost?.accruedUsd ?? 0), wakeAskNote(project.status), reachNote(project.reach), idleCountdownLabel(project.status, nowMs)]
+  return [accruedTodayLabel(cost?.accruedUsd ?? null), wakeAskNote(project.status), reachNote(project.reach), idleCountdownLabel(project.status, nowMs)]
     .filter((part): part is string => part !== null)
     .join(" · ");
 }
 
 /** What the machine costs, as the row's line and the Spaces header both lead with: free for a machine wsp does not
- * pay for, else what it cost today with the rate while it bills. */
-function spendLine({ project, cost }: Pick<WorkspaceMetaInput, "project" | "cost">): string {
+ * pay for, else what it cost today with the rate while it bills, and nothing at all before the meter has ticked. */
+function spendLine({ project, cost }: Pick<WorkspaceMetaInput, "project" | "cost">): string | null {
   if (!kindWords(workspaceKind(project.workspace)).driven) return FREE_WORD;
-  return [accruedTodayLabel(cost?.accruedUsd ?? 0), isBilling(project.state) ? rateLabel(cost?.rateUsdPerHour ?? project.status?.rateUsdPerHour ?? null) : null]
-    .filter((part): part is string => part !== null)
-    .join(" · ");
+  const parts = [accruedTodayLabel(cost?.accruedUsd ?? null), isBilling(project.state) ? rateLabel(cost?.rateUsdPerHour ?? project.status?.rateUsdPerHour ?? null) : null].filter((part): part is string => part !== null);
+  return parts.length === 0 ? null : parts.join(" · ");
 }
 
 /** What the machine is, the row's second line and one of the Spaces header's: the size its status carries in the
@@ -142,9 +141,11 @@ export function daemonNote(project: Pick<SidebarProjectSnapshot, "status" | "wor
   return project.status !== null ? project.status.daemonNote : project.workspace.daemonNote;
 }
 
-/** What a workspace has cost since the meter's midnight, in cents; the sidebar row and the switcher card read the one rule. */
+/** What a workspace has cost since the meter's midnight, in the one shape every spend figure reads in; the sidebar
+ * row and the switcher card read the one rule. Null before the meter's first tick: a row that paints $0.00 and
+ * changes it a second later has told the person something that was never true. */
 export function accruedTodayLabel(accruedUsd: number | null): string | null {
-  return accruedUsd === null ? null : `$${accruedUsd.toFixed(2)} today`;
+  return accruedUsd === null ? null : `${fmtCost(accruedUsd)} today`;
 }
 
 /** The awake rate as every sidebar surface prints it, to the tenth of a cent; null before the meter's first tick. */
@@ -154,8 +155,8 @@ export const rateLabel = (rateUsdPerHour: number | null): string | null => (rate
  * screen is where a person waits on them: what the runtime is doing to the daemon, a drop with memory near full,
  * then a daemon that is not there at all. Then what the machine is, what it costs, and when it naps. A line nothing
  * is known for is left out rather than drawn half: no size yet means no machine line, as no nap scheduled means no
- * nap line. The cost line leads with the same honest zero the row's does and carries the rate only while the machine
- * bills; a machine wsp does not drive reads free there, as its row does, and naps never. */
+ * nap line. The cost line waits for the meter's first tick as the row's does and carries the rate only while the
+ * machine bills; a machine wsp does not drive reads free there, as its row does, and naps never. */
 export function spaceHeaderLines({ project, absent, cost, outOfMemory, nowMs }: WorkspaceMetaInput): string[] {
   const nap = kindWords(workspaceKind(project.workspace)).driven ? idleCountdownLabel(project.status, nowMs) : null;
   const lines: (string | null)[] = [...metaSentences({ project, absent, outOfMemory }), machineLine(project), spendLine({ project, cost }), nap === NO_NAP_SCHEDULED ? null : nap];

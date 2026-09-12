@@ -1063,13 +1063,13 @@ describe("wsp verbs over the host", () => {
     const { code, io } = await run("run", "alpha", "say hi");
     expect(code).toBe(EXIT_CODES.auth);
     expect(io.lines).toEqual([expect.stringMatching(/^thread /)]);
-    expect(io.streamed.split("\n").filter(l => l !== "")).toEqual(["failed · Worked for 88ms · $0.0000"]);
+    expect(io.streamed.split("\n").filter(l => l !== "")).toEqual(["failed · Worked for 88ms · $0.00"]);
     expect(io.errors).toEqual([`wsp run: ${refusal}`]);
 
     const [row] = await rt.sessions.list();
     const read = await run("thread", "read", row!.threadId!);
     expect(read.code).toBe(0);
-    expect(read.io.lines.join("\n")).toContain(`failed · Worked for 88ms · $0.0000: ${refusal}`);
+    expect(read.io.lines.join("\n")).toContain(`failed · Worked for 88ms · $0.00: ${refusal}`);
     expect(read.io.lines.join("\n").split("Not logged in")).toHaveLength(2);
   });
 
