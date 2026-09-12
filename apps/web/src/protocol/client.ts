@@ -28,7 +28,10 @@ import {
   InitSetup,
   type InitRoad,
   PlaceDoorView,
+  PlaceStageEvent,
   PlaceView,
+  placeAddSheetWord,
+  type PlaceAddStep,
   type InitScreenId,
   type ImageAttachment,
   TerminalConfig,
@@ -333,9 +336,11 @@ export interface SshLogin {
   port?: number;
 }
 
-/** One line of the installer's progress as the sheet draws it: the words, whether it is running, and the figure at
- * its right end where the stage carries one. */
+/** One line of the installer's progress as the sheet draws it: the step it belongs to, the words, whether it is
+ * running, and the figure at its right end where the stage carries one. The step is what a line is: the words it
+ * wears change when it is done, so a list keyed by them would draw the finished step as a second line. */
 export interface InstallStage {
+  step: PlaceAddStep;
   word: string;
   state: "running" | "done";
   fact?: string;
@@ -387,8 +392,8 @@ export interface Api {
   removePlace?(placeId: string): Promise<PlaceRemoved>;
   /** The ssh road of Add a computer: the host logs in as the person's terminal would, installs wsp on the box and
    * waits for the box to dial back, calling `onStage` with each stage as the installer reaches it. Resolves with the
-   * computer once it has joined. This is the one seam the sheet's ssh road calls; no op on the wire carries the
-   * installer yet, so a host without it holds the road's Add rather than pretending to run one. */
+   * computer once it has joined and rejects with the step's own sentence when the install stops. A client without
+   * it holds the road's Add rather than pretending to run one. */
   addComputerOverSsh?(login: SshLogin, onStage: (stage: InstallStage) => void): Promise<PlaceView>;
   capabilities(): Promise<Capabilities>;
   /** The road to every workspace's daemon: the host holds the socket and relays the frames. */
@@ -660,6 +665,26 @@ export function makeApi(c: ProtocolClient): Api {
       HostFolderListing.parse((await c.request<{ listing?: unknown }>("host.folders", { ...(dir !== undefined ? { dir } : {}), ...(hidden !== undefined ? { hidden } : {}) })).listing),
     // Parsed, not trusted: the pane paints only values the wire type vouches for.
     hostTerminalConfig: async scheme => TerminalConfig.parse((await c.request<{ config?: unknown }>("host.terminalConfig", { scheme })).config),
+    addComputerOverSsh: async (login, onStage) => {
+      // Minted here, not read off the reply: the stages come back while the install runs and the reply lands only
+      // once it is over, so a caller drawing them has to know which stream is its own before it asks.
+      const addId = `a_${[...crypto.getRandomValues(new Uint8Array(6))].map(b => b.toString(16).padStart(2, "0")).join("")}`;
+      const off = c.subscribe(event => {
+        // Parsed, not trusted: a line is drawn only for a stage the wire type vouches for, and the words come from
+        // the one table that also holds the terminal's, so neither road invents a step the other has not got.
+        const stage = PlaceStageEvent.safeParse(event);
+        // A step that failed draws no line: the request rejects with that same sentence, which the sheet lands in
+        // its refusal slot, and a line saying it twice would move the list under it.
+        if (!stage.success || stage.data.addId !== addId || stage.data.state === "failed") return;
+        onStage({ step: stage.data.step, word: placeAddSheetWord(stage.data.step, stage.data.state), state: stage.data.state, ...(stage.data.note === undefined ? {} : { fact: stage.data.note }) });
+      });
+      try {
+        const answer = await c.request<{ place?: unknown }>("places.add", { addId, address: login.address, ...(login.port === undefined ? {} : { sshPort: login.port }) });
+        return PlaceView.parse(answer.place);
+      } finally {
+        off();
+      }
+    },
     placesList: async () => PlaceView.array().parse((await c.request<{ places?: unknown }>("places.list")).places),
     placesDoor: async () => PlaceDoorView.parse((await c.request<{ door?: unknown }>("places.door")).door),
     pairIssue: async () => await c.request<{ code: string; expiresAt: number }>("pair.issue"),

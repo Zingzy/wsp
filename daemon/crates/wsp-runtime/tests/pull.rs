@@ -5,7 +5,7 @@
 
 mod registry;
 
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::time::{Duration, Instant};
 
 use registry::{Layout, Server};
@@ -316,4 +316,43 @@ fn a_body_that_stalls_is_resumed_where_it_moved_or_given_up_by_name() {
         other => panic!("expected a transport error by name, got {other}"),
     }
     assert!(!store.has_blob(&w.os_release));
+}
+
+#[test]
+fn whiteouts_in_a_layer_become_what_overlayfs_reads_when_root_unpacks_it() {
+    if std::fs::metadata("/proc/self").map(|m| m.uid()).unwrap_or(1) != 0 {
+        eprintln!("skipped: whiteouts are made by root");
+        return;
+    }
+    let mut layout = Layout::new();
+    let base = layout.layer(&[
+        ("usr/", b"", 0o755, 0),
+        ("usr/bin/", b"", 0o755, 0),
+        ("usr/bin/passwd", b"x", 0o755, 0),
+        ("home/", b"", 0o755, 0),
+        ("home/agent/", b"", 0o755, 0),
+        ("home/agent/old", b"o", 0o644, 0),
+    ]);
+    let top = layout.layer(&[
+        ("usr/", b"", 0o755, 0),
+        ("usr/bin/", b"", 0o755, 0),
+        ("usr/bin/.wh.passwd", b"", 0o644, 0),
+        ("home/", b"", 0o755, 0),
+        ("home/agent/", b"", 0o755, 0),
+        ("home/agent/.wh..wh..opq", b"", 0o644, 0),
+        ("home/agent/new", b"n", 0o644, 0),
+    ]);
+    layout.image("deletes", "1", &[base, top.clone()]);
+    let server = Server::start(layout.dir().to_path_buf());
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    store.pull("deletes:1", &source(&server, "deletes", "1"), &mut Client::new()).unwrap();
+    let unpacked = store.unpacked(&top).unwrap();
+    let passwd = std::fs::symlink_metadata(unpacked.join("usr/bin/passwd")).unwrap();
+    assert!(passwd.file_type().is_char_device(), "the whiteout is a character device");
+    assert_eq!(passwd.rdev(), 0, "device 0:0");
+    assert!(!unpacked.join("usr/bin/.wh.passwd").exists());
+    assert!(!unpacked.join("home/agent/.wh..wh..opq").exists());
+    assert_eq!(xattr::get(unpacked.join("home/agent"), "trusted.overlay.opaque").unwrap().as_deref(), Some(&b"y"[..]));
+    assert_eq!(std::fs::read(unpacked.join("home/agent/new")).unwrap(), b"n");
 }

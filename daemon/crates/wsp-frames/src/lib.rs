@@ -21,7 +21,13 @@ pub use auth::DaemonAuthRequest;
 pub use enums::{DaemonErrorCode, FsEntryType, FsReadEncoding, GitDiffScope, ProcSignal, PtyMode, WorkspaceKind};
 pub use event::{DaemonEvent, ProcEntry, Usage};
 pub use id::RequestId;
-pub use machine::{MachineErrorKind, MachineKind, MachineLife, MachineLinkRequest, MachineOp, MachineSpec, OnIdle, MACHINE_OPS};
+pub use machine::{
+    BackendFacts, BackendPricing, BaseTemplates, Capabilities, DaemonSupervisor, ExecResult, Lifecycle, LifecycleBudgets,
+    MachineAnswersReply, MachineCounts, MachineErrorKind, MachineExecReply, MachineHandle, MachineHandleReply, MachineKind, MachineLife,
+    MachineLinkRequest, MachineListReply, MachineListRow, MachineOp, MachineReachReply, MachineRoads, MachineSeen, MachineShape,
+    MachineShapeReply, MachineSizeOffer, MachineSpec, MachineState, MachineStateReply, OnIdle, PauseMode, PlaceCapacity, PlaceImage,
+    PreviewReach, ResumeAsks, SnapshotStoragePricing, MACHINE_OPS,
+};
 pub use place::{
     place_link_transcript, Base64Bytes, LinkRole, PlaceAuthReply, PlaceAuthRequest, PlaceFile, PlaceNonce, PlaceProveRequest,
     PlacePublicKey, PlaceReport, PlaceSignature, Platform, WorkspaceSize,
