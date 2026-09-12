@@ -19,6 +19,11 @@ export const TWO_LINE_ROW_CLASS = "h-11 items-start py-1.5 text-left";
 export const THREE_LINE_ROW_CLASS = "h-15 items-start py-1.5 text-left";
 export const ROW_LEAD_CLASS = "mt-0.5 flex size-3.5 shrink-0 items-center justify-center";
 
+/** The sidebar footer's own row: 28 px, muted mono, the whole width a button, with the same hover and focus every
+ * other row wears. The host switcher and the Settings row are both one of these, so the foot reads as one column. */
+export const FOOT_ROW_CLASS =
+  "flex h-7 w-full items-center gap-1.5 rounded-md px-2 font-mono text-[11px] text-sidebar-muted-foreground transition-colors duration-150 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none";
+
 /** The most characters the third line of a workspace row holds: the row leaves 201 px for text at the sidebar's
  * default 256 px and 11 px mono fits 30 of them there, so a longer line would be cut by the width with no say in
  * where. Every line written for this slot is under it; the cut is what keeps a line nobody measured from taking

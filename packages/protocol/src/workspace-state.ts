@@ -221,7 +221,9 @@ export type SendBlock = "connecting" | "reconnecting" | "closed" | "not-found" |
 /** Every kind of send refusal: a block, or a state other than running. */
 export type SendRefusalKind = WorkspaceState | SendBlock;
 
-const BLOCK_WORDS: Record<SendBlock, string> = {
+/** What the composer says on the send button for each block, and the one table of those words: a harness driving
+ * the built app reads them to know the app is not ready for a key press yet. */
+export const SEND_BLOCK_WORDS: Record<SendBlock, string> = {
   connecting: "Connecting to wsp",
   reconnecting: "wsp is not running, reconnecting",
   closed: "wsp is not running",
@@ -233,10 +235,10 @@ const BLOCK_WORDS: Record<SendBlock, string> = {
  * throws the state rows, so the two say the same thing about a machine. A thread whose turn replied but still runs
  * has stillWorkingLine, which says the message waits for it. */
 export function sendRefusal(kind: SendRefusalKind, goneWords?: string): string | null {
-  return isBlock(kind) ? BLOCK_WORDS[kind] : actionRefusal(kind, "send", goneWords);
+  return isBlock(kind) ? SEND_BLOCK_WORDS[kind] : actionRefusal(kind, "send", goneWords);
 }
 
-const isBlock = (kind: SendRefusalKind): kind is SendBlock => kind in BLOCK_WORDS;
+const isBlock = (kind: SendRefusalKind): kind is SendBlock => kind in SEND_BLOCK_WORDS;
 
 const CONTROL_WORDS: Record<Exclude<ScreenControl, "sign-in">, string> = {
   model: "pick the model in the row under the box",

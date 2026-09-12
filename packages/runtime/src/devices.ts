@@ -82,6 +82,10 @@ export interface DeviceDoor {
    * own from the join on, so the code buys the record and never a token. One code store, so a code spent by either
    * road is spent for both. */
   spend(code: string, now: number): Promise<boolean>;
+  /** A device with no code and no scope behind it: a road that proved the person's intent another way (a place's
+   * join spent the code the person carried across the room) asks for the token its own window will hold. Stored,
+   * hashed, listed and revoked exactly as every other device is. */
+  admit(name: string, now: number): Promise<PairedDevice>;
   /** A device with no pairing code behind it: the host itself minting a token for a turn it is about to launch,
    * scoped to that turn's thread. The same door as a redeem, so a scoped token is revoked, listed and read by the
    * one road every other token takes. */
@@ -154,6 +158,7 @@ export function makeDevices(store: Store): DeviceDoor {
       }),
     redeem: (code, name, now) => oneAtATime(async () => ((await spendCode(code, now)) ? admit(name, undefined, now) : undefined)),
     spend: (code, now) => oneAtATime(() => spendCode(code, now)),
+    admit: (name, now) => oneAtATime(() => admit(name, undefined, now)),
     mint: (name, scope, now) => oneAtATime(() => admit(name, scope, now)),
     match: async token => {
       const digest = hashOf(token);

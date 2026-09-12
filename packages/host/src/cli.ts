@@ -27,7 +27,7 @@ import {
   type SshWiring,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, portsAsked, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, usageRefusal, WS_PORT_OFFSET, type WorkspaceCreatingEvent } from "@wsp/protocol";
+import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portsAsked, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, usageRefusal, WS_PORT_OFFSET, type WorkspaceCreatingEvent } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, parseSshAddress, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshIdentity, sshMachineName, sshReachOf, type SshReach } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerModule, type ProviderEnv } from "./providers.js";
 import { assetDir } from "./assets.js";
@@ -214,6 +214,8 @@ options:
                      join: the code wsp add printed on the host
   --code-file PATH   join: read the code off this file and delete the file
                      before dialing, so a code never sits on a disk
+  --awake            join: hold this computer out of idle sleep while it is
+                     joined, for as long as the agent runs
   --serve            join: hold the link open in this terminal, which is what
                      the service installed by a join runs
   --name ALIAS       connect: the name to call that host here (default what its
@@ -590,6 +592,9 @@ export const localWorkFolder = (home: string): string => join(home, "wsp-work");
  * made is the one a turn uses, and the work folder is the workspace's own. */
 export function localWiring(home = homedir(), env: Readonly<Record<string, string | undefined>> = process.env): LocalWiring {
   const root = localWorkFolder(home);
+  // The person whose sign-ins a turn here reads. Their login home, except under a harness serving a fixture out of
+  // a home of its own: that home holds this host's files, and a turn started under it finds no sign-in at all.
+  const person = homeNamed(env[PERSON_HOME_ENV]) ?? home;
   // Started on the first dial and kept: a host nobody opens a pane on never binds a port on this computer, and
   // never dlopens the native module @wsp/daemon's import of node-pty loads. The desktop package ships that module
   // beside its bundle, so the deferred edge is about the port and the load, not about a missing file.
@@ -599,9 +604,9 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
   return {
     backend,
     execStream: o => localExecStream({ root: backend.workFolder(), ...o }),
-    home: id => agentHome(home, id, env),
+    home: id => agentHome(person, id, env),
     homeDir: home,
-    env: () => Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined)),
+    env: () => ({ ...Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined)), HOME: person }),
     daemonRoad: async () => {
       // The panes stay on the person's home: the files and terminal tabs are theirs to look around in, where a
       // turn's own folder is the workspace's.
@@ -1255,6 +1260,9 @@ async function hostFor(
   // alone and not the flag: a connector an earlier run left behind carries the tunnel to this same port whatever
   // this run was asked for, and --no-relay stops that one rather than serving a token past it.
   const linked = readRelayRecord(opts.statePath) !== undefined;
+  // A computer that already joined dials the port its place file names, so the door binds as this host starts
+  // rather than waiting for somebody to open the Add a computer sheet again.
+  const joined = (await rt.places?.list(Date.now()).catch(() => []))?.some(p => p.kind === "computer" && p.joinedAt !== undefined) === true;
   try {
     const handle = await startHost({
       runtime: rt,
@@ -1262,6 +1270,8 @@ async function hostFor(
       wsPort: opts.wsPort,
       listen: address,
       beyondThisComputer: linked,
+      door: joined ? "open" : "closed",
+      doorLine: line => io.log(line),
       webDir: opts.webDir ?? assetDir("web"),
       // Read at each fork, not once at start: the init job saves a key while this host serves.
       workspaceEnvs: golden => workspaceEnvsFor(keysFound()).workspaceEnvs?.(golden) ?? {},
@@ -1518,6 +1528,7 @@ interface SharedFlags {
   code?: string;
   "code-file"?: string;
   serve?: boolean;
+  awake?: boolean;
   name?: string;
   relay?: string;
   host?: string;
@@ -1653,6 +1664,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
         ...(values["code-file"] !== undefined ? { codeFile: values["code-file"] } : {}),
         ...(values.name !== undefined ? { name: values.name } : {}),
         ...(values.serve === true ? { serve: true } : {}),
+        ...(values.awake === true ? { awake: true } : {}),
       }),
   },
   leave: {
@@ -1805,6 +1817,7 @@ export const SHARED_OPTIONS: Options = {
   code: { type: "string" },
   "code-file": { type: "string" },
   serve: { type: "boolean" },
+  awake: { type: "boolean" },
   name: { type: "string" },
   relay: { type: "string" },
   host: { type: "string" },

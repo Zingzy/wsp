@@ -6,7 +6,7 @@
 // pick goes to the host's preferences record and paints at once, so a browser
 // tab on the same host follows. About is the one section that takes no pick:
 // it names the release each half of the app is on.
-import { SidebarMode, TerminalSizeSource, ThemePreference, fmtPx, type TerminalConfig } from "@wsp/protocol";
+import { PLACES_WORDS, SidebarMode, TerminalSizeSource, ThemePreference, fmtPx, type TerminalConfig } from "@wsp/protocol";
 import { useEffect, useState, type ReactNode } from "react";
 import { SIDEBAR_MODE_WORDS } from "../actions/format.js";
 import { Button } from "../components/ui/button.js";
@@ -14,15 +14,15 @@ import { NumberField, NumberFieldDecrement, NumberFieldGroup, NumberFieldIncreme
 import { ScrollArea } from "../components/ui/scroll-area.js";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
 import { cn } from "../lib/utils.js";
-import { usePreferences, useStore } from "../protocol/store.js";
+import { useAddComputerOpen, useLabs, usePreferences, useStore } from "../protocol/store.js";
 import { SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "../shell/sidebarWidth.js";
 import { appTerminalFontSize } from "../terminal/ghostty/surface.js";
 import { appScheme } from "../terminal/ghosttyConfig.js";
 import { shellVersions } from "../shell/shellVersion.js";
-import { SETTINGS_WORDS, TERMINAL_SIZE_FACT, TERMINAL_SIZE_WORDS, THEME_WORDS, versionFact } from "./format.js";
+import { FACT, SETTINGS_WORDS, TERMINAL_SIZE_FACT, TERMINAL_SIZE_WORDS, THEME_WORDS, ZONE_LABEL, versionFact } from "./format.js";
+import { AddComputerSheet } from "./AddComputerSheet.js";
+import { WhereAgentsRun } from "./WhereAgentsRun.js";
 
-const ZONE_LABEL = "font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground";
-const FACT = "font-mono text-[11px] tabular-nums text-muted-foreground";
 
 const THEMES = ThemePreference.options.map(theme => ({ value: theme, label: THEME_WORDS[theme] }));
 const BODIES = SidebarMode.options.map(mode => ({ value: mode, label: SIDEBAR_MODE_WORDS[mode].name }));
@@ -34,6 +34,9 @@ export function SettingsPage() {
   const readHostConfig = useStore(s => s.api?.hostTerminalConfig);
   const [file, setFile] = useState<TerminalConfig | null>(null);
   const versions = shellVersions();
+  const labs = useLabs();
+  const addComputer = useAddComputerOpen();
+  const closeAddComputer = useStore(s => s.closeAddComputer);
   // The file's size is a fact the host already reads for the pane; the page shows it beside the pick that would use it.
   useEffect(() => {
     if (readHostConfig === undefined) return;
@@ -51,6 +54,7 @@ export function SettingsPage() {
   return (
     <ScrollArea className="min-h-0 flex-1">
       <div data-settings-page className="mx-auto flex w-full max-w-xl flex-col gap-8 px-6 py-6">
+        {labs ? (
         <Section id="settings-appearance" title={SETTINGS_WORDS.appearance}>
           <Row id="settings-theme" label={SETTINGS_WORDS.theme}>
             <SegmentedControl aria-labelledby="settings-theme" value={preferences.theme} segments={THEMES} onChange={theme => void setPreferences({ theme })} />
@@ -88,6 +92,8 @@ export function SettingsPage() {
             </NumberField>
           </Row>
         </Section>
+        ) : null}
+        {labs ? (
         <Section id="settings-terminal" title={SETTINGS_WORDS.terminal}>
           <Row id="settings-text-size" label={SETTINGS_WORDS.textSize}>
             <span className={FACT} data-k="terminal-size">
@@ -95,6 +101,10 @@ export function SettingsPage() {
             </span>
             <SegmentedControl aria-labelledby="settings-text-size" value={preferences.terminalSize} segments={SIZES} onChange={terminalSize => void setPreferences({ terminalSize })} />
           </Row>
+        </Section>
+        ) : null}
+        <Section id="settings-where" title={PLACES_WORDS.section}>
+          <WhereAgentsRun />
         </Section>
         <Section id="settings-about" title={SETTINGS_WORDS.about}>
           <Row id="settings-version" label={SETTINGS_WORDS.version}>
@@ -105,6 +115,7 @@ export function SettingsPage() {
           </Row>
         </Section>
       </div>
+      {addComputer ? <AddComputerSheet onClose={closeAddComputer} /> : null}
     </ScrollArea>
   );
 }
