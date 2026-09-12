@@ -15,8 +15,12 @@ const OUTLINE_SURFACE = "border-input bg-popover not-dark:bg-clip-padding shadow
 /** The outline's faint dark-theme edge light, on the border pixel rather than inside it. */
 const OUTLINE_DARK_EDGE = "dark:not-disabled:before:shadow-[0_-1px_--theme(--color-white/2%)] dark:not-disabled:not-active:not-data-pressed:before:shadow-[0_-1px_--theme(--color-white/6%)]";
 
+/** The inset a button pulls its glyphs in by. A control that is not a button but has to line up with one beside it
+ * wears the same inset, so it is read from here rather than spelled again. */
+const BUTTON_GLYPH_INSET = "[&_svg]:-mx-0.5";
+
 const buttonVariants = cva(
-  "[--control-icon-color:currentColor] [&_svg]:-mx-0.5 relative inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-[var(--control-radius)] border font-medium text-base outline-none transition-shadow before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--control-radius)-1px)] pointer-coarse:after:absolute pointer-coarse:after:size-full pointer-coarse:after:min-h-11 pointer-coarse:after:min-w-11 focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-64 sm:text-sm [&_svg:not([class*='text-'])]:text-[var(--control-icon-color)] [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+  `[--control-icon-color:currentColor] ${BUTTON_GLYPH_INSET} relative inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-[var(--control-radius)] border font-medium text-base outline-none transition-shadow before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--control-radius)-1px)] pointer-coarse:after:absolute pointer-coarse:after:size-full pointer-coarse:after:min-h-11 pointer-coarse:after:min-w-11 focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-64 sm:text-sm [&_svg:not([class*='text-'])]:text-[var(--control-icon-color)] [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0`,
   {
     defaultVariants: {
       size: "default",
@@ -89,4 +93,4 @@ function Button({ className, variant, size, render, ...props }: ButtonProps) {
 /** The orange confirm tier on an outline button: the one look for an action after which something does not come back. */
 const WARN_BUTTON = "border-warning/50 text-warning-foreground [:hover,[data-pressed]]:border-warning [:hover,[data-pressed]]:bg-warning/8";
 
-export { Button, buttonVariants, WARN_BUTTON };
+export { Button, BUTTON_GLYPH_INSET, buttonVariants, WARN_BUTTON };

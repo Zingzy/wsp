@@ -7,7 +7,7 @@
 // (its positioner loops and a close hangs the run), so the menu primitives
 // are stood in by a plain open/closed context here and the picker's own
 // browsing and picking run for real.
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { cloneElement, createContext, useContext, useState, type ReactElement, type ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { REPO_STATE_WORDS, type EventUnion, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
@@ -22,13 +22,12 @@ vi.mock("../src/components/ui/menu.js", () => {
     };
     return <Ctx.Provider value={{ open: open ?? own, set }}>{children}</Ctx.Provider>;
   };
-  const MenuTrigger = ({ children, render: _render, className, ...props }: { children: ReactNode; render?: unknown; className?: string; [key: string]: unknown }) => {
+  // Base UI renders the element the trigger is handed, so the stand-in clones it rather than painting a bare button:
+  // the trigger a test reads then carries the same merged classes the app's does, the button's own among them.
+  const MenuTrigger = ({ children, render: element, className, ...props }: { children: ReactNode; render?: ReactElement<Record<string, unknown>>; className?: string; [key: string]: unknown }) => {
     const ctx = useContext(Ctx);
-    return (
-      <button type="button" className={className} onClick={() => ctx.set(!ctx.open)} {...(props as Record<string, unknown>)}>
-        {children}
-      </button>
-    );
+    const own = { className, onClick: () => ctx.set(!ctx.open), ...(props as Record<string, unknown>) };
+    return element === undefined ? <button type="button" {...own}>{children}</button> : cloneElement(element, own, children);
   };
   const MenuPopup = ({ children }: { children: ReactNode }) => (useContext(Ctx).open ? <div role="menu">{children}</div> : null);
   const MenuItem = ({ children, onClick, closeOnClick = true, disabled, ...props }: { children: ReactNode; onClick?: () => void; closeOnClick?: boolean; disabled?: boolean; [key: string]: unknown }) => {
@@ -74,6 +73,7 @@ vi.mock("../src/components/ui/tooltip.js", () => ({
   TooltipPopup: ({ children }: { children: ReactNode }) => <div role="tooltip">{children}</div>,
 }));
 
+import { BUTTON_GLYPH_INSET } from "../src/components/ui/button.js";
 import { installFakeLayout } from "./fake-layout.js";
 import { composerEditor, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
@@ -159,6 +159,12 @@ const branch = () => branchSlot()?.dataset["composerBranch"];
 const BRANCH_NOTE = "The folder's branch as the workspace reports it. Nothing here switches it; check out another branch from the terminal.";
 /** The height pair the folder label and the size-xs picker button carry; an empty slot with it keeps the row from moving. */
 const SLOT_HEIGHT = ["h-7", "sm:h-6"];
+/** The folder's own item in either form: it is the one that gives its width up, and it keeps what it cannot hold inside its box. */
+const FOLDER_ITEM = ["min-w-0", "shrink", "overflow-hidden"];
+/** The path inside it, cut with an ellipsis at its head. */
+const FOLDER_PATH = ["min-w-0", "truncate", "font-mono", "[direction:rtl]"];
+const folderItem = () => document.querySelector<HTMLElement>("[data-composer-folder]")!;
+const folderPath = () => folderItem().querySelector<HTMLElement>("span")!;
 const settle = () => act(() => new Promise<void>(resolve => setTimeout(resolve, 0)));
 const root = () => selectRoot(useRootStore.getState().byWorkspaceId, WS, [DAEMON_ROOT]);
 const menuEntry = (path: string) => document.querySelector<HTMLElement>(`[data-composer-folder-entry="${path}"]`);
@@ -236,6 +242,44 @@ describe("composer checkout row", () => {
     expect(slot.textContent).toBe(REPO_STATE_WORDS.refused.word);
     expect(slot.className.split(" ")).toEqual(expect.arrayContaining(SLOT_HEIGHT));
     expect(screen.getByText(REPO_STATE_WORDS.refused.note).getAttribute("role")).toBe("tooltip");
+  });
+
+  it("draws the path the one way in both forms, inside a box that gives its width up, so a long one never reaches the branch slot", async () => {
+    const LONG = "/var/folders/xx/90zsjs6n7yjgw9bb1vp6_tx00000gn/T/checkouts/acme-platform/services/gateway-and-edge-router";
+    provideDaemonHello(WS, { ...DAEMON_HELLO, root: LONG });
+
+    // Before the first message: the picker button.
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
+    await setup(fixtureApi().api);
+    await waitFor(() => expect(branch()).toBe("feature/panes"));
+    expect(folder()).toBe(LONG);
+    const picker = { item: folderItem().className.split(" "), path: folderPath().className, text: folderPath().textContent };
+    // The button's own no-shrink rule is what grew it over the branch, so that it loses the merge is read first.
+    expect(picker.item).not.toContain("shrink-0");
+    expect(picker.item).toEqual(expect.arrayContaining(FOLDER_ITEM));
+    expect(branchSlot()!.className.split(" ")).toContain("shrink-0");
+    cleanup();
+
+    // On a thread that has run: the plain label, carrying that thread's own folder.
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
+    await setup(fixtureApi(CHAT_STREAM.map(e => (e.type === "session.start" ? { ...e, cwd: LONG } : e))).api);
+    await screen.findByText(/Server is live at :3000\./);
+    expect(row()?.dataset["pickable"]).toBeUndefined();
+    expect(folder()).toBe(LONG);
+    const label = { item: folderItem().className.split(" "), path: folderPath().className, text: folderPath().textContent };
+    expect(label.item).not.toContain("shrink-0");
+    expect(label.item).toEqual(expect.arrayContaining(FOLDER_ITEM));
+    expect(branchSlot()!.className.split(" ")).toContain("shrink-0");
+
+    // The glyph inset the picker button brings with it, so the path starts on the same pixel in both forms.
+    expect(label.item).toContain(BUTTON_GLYPH_INSET);
+    expect(picker.item).toContain(BUTTON_GLYPH_INSET);
+
+    // One rule for the path, written once, and the whole path in the DOM: the cut is the box's, not a shortened string.
+    expect(label.path).toBe(picker.path);
+    expect(label.path.split(" ")).toEqual(expect.arrayContaining(FOLDER_PATH));
+    expect(label.text).toBe(LONG);
+    expect(picker.text).toBe(LONG);
   });
 
   it("leaves the branch slot empty, no glyph and no words, while the ask is still out", async () => {
