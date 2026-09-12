@@ -3,8 +3,8 @@
 // dispatches and unwraps the field its reply carries. The same socket plays a
 // runtime that dies and comes back for the reconnect tests.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLOUD_SETUP_WORDS } from "@wsp/protocol";
-import { DisconnectedError, makeApi, ProtocolClient, type ConnStatus, type ProtocolClientOptions } from "../src/protocol/client.js";
+import { CLOUD_SETUP_WORDS, PLACE_ADD_WORDS } from "@wsp/protocol";
+import { DisconnectedError, makeApi, ProtocolClient, type ConnStatus, type InstallStage, type ProtocolClientOptions } from "../src/protocol/client.js";
 import { ScriptedSocket, type Frame } from "./scripted-socket.js";
 import { caps } from "./caps.js";
 
@@ -16,6 +16,23 @@ async function until(cond: () => boolean, ms = 2000): Promise<void> {
     await new Promise(r => setTimeout(r, 5));
   }
 }
+
+const push = (sock: ScriptedSocket, e: Record<string, unknown>) => sock.onmessage?.({ data: JSON.stringify(e) });
+/** Lets the scripted socket deliver a reply, which a real socket puts on the wire before any event. */
+const replied = () => new Promise(r => setTimeout(r, 0));
+
+/** The Linux box the ssh road's installer hands back once it has dialled this host. */
+const box = {
+  id: "p_2",
+  kind: "computer",
+  name: "hetzner",
+  default: false,
+  present: true,
+  docker: true,
+  os: "Ubuntu 24.04",
+  shape: { cpu: 2, memMb: 4096 },
+  diskFreeBytes: 40_802_189_312,
+};
 
 async function connect() {
   ScriptedSocket.instances.length = 0;
@@ -256,6 +273,44 @@ describe("makeApi wrappers", () => {
     ScriptedSocket.reply = f => ({ id: f["id"], ok: false, error: "workspace is napping" });
     await expect(api.startSession({ workspaceId: "ws_1", prompt: "x" })).rejects.toThrow("workspace is napping");
   });
+
+  it("addComputerOverSsh sends places.add with a stream of its own, reads the stages that ride it in the runtime's words, and answers the computer", async () => {
+    const { api, sock, lastSent } = await connect();
+    const stages: InstallStage[] = [];
+    ScriptedSocket.reply = f => (f["op"] === "places.add" ? { id: f["id"], ok: true, addId: f["addId"], place: box } : { id: f["id"], ok: true });
+    const road = api.addComputerOverSsh!({ address: "root@65.21.4.12", port: 2222 }, stage => stages.push(stage));
+    await until(() => sock.frames("places.add").length === 1);
+    const sent = lastSent();
+    expect(sent).toMatchObject({ op: "places.add", address: "root@65.21.4.12", sshPort: 2222, addId: expect.any(String) });
+    const addId = String(sent["addId"]);
+    push(sock, { type: "place.stage", addId, step: "connect", state: "running" });
+    push(sock, { type: "place.stage", addId, step: "connect", state: "done", note: "Ubuntu 24.04" });
+    // Another install running on the same wsp: its stages belong to its own list and never to this one.
+    push(sock, { type: "place.stage", addId: "a_other", step: "node", state: "running" });
+    // The step an install stopped on: the sentence lands as the road's own refusal, so it draws no line here.
+    push(sock, { type: "place.stage", addId, step: "join", state: "failed", note: "it never dialled back" });
+    await until(() => stages.length === 2);
+    expect(stages).toEqual([
+      { step: "connect", word: PLACE_ADD_WORDS.connect, state: "running" },
+      { step: "connect", word: PLACE_ADD_WORDS.connect, state: "done", fact: "Ubuntu 24.04" },
+    ]);
+    expect(await road).toEqual(box);
+  });
+
+  it("addComputerOverSsh leaves the port out when nothing was typed, refuses a place the wire type does not vouch for, and stops reading stages once it settles", async () => {
+    const { api, sock, lastSent } = await connect();
+    const stages: InstallStage[] = [];
+    ScriptedSocket.reply = f => (f["op"] === "places.add" ? { id: f["id"], ok: true, place: box } : { id: f["id"], ok: true });
+    await api.addComputerOverSsh!({ address: "root@65.21.4.12" }, stage => stages.push(stage));
+    const sent = lastSent();
+    expect(sent["sshPort"]).toBeUndefined();
+    push(sock, { type: "place.stage", addId: String(sent["addId"]), step: "node", state: "running" });
+    await replied();
+    expect(stages).toEqual([]);
+
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, place: { ...box, kind: "toaster" } });
+    await expect(api.addComputerOverSsh!({ address: "root@65.21.4.12" }, () => {})).rejects.toThrow();
+  });
 });
 
 describe("makeApi golden wrappers", () => {
@@ -423,9 +478,6 @@ describe("ProtocolClient event cursor", () => {
   /** The runtime's subscribe reply: head first, the same head after a redial unless a test overrides it. */
   const subscribeReply = (seq: number, gap = false, stream = "stream-a") => (f: Frame) =>
     f["op"] === "events.subscribe" ? { id: f["id"], ok: true, seq, stream, ...(gap ? { gap: true } : {}) } : undefined;
-  const push = (sock: ScriptedSocket, e: Record<string, unknown>) => sock.onmessage?.({ data: JSON.stringify(e) });
-  /** Lets the scripted socket deliver the subscribe reply, which a real socket puts on the wire before any event. */
-  const replied = () => new Promise(r => setTimeout(r, 0));
   const redial = async (client: ProtocolClient, sock: ScriptedSocket) => {
     sock.drop(1006);
     await until(() => client.status === "live");

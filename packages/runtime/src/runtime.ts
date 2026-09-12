@@ -278,9 +278,10 @@ export interface HarnessSession {
    * caller names the outcome, since only it knows whether the answer is the person's or its own for a prompt nobody
    * came to, and the adapter emits the permission.close that carries it. `gone` when no such prompt is open. */
   answer?(askId: string, answer: { optionId: string; outcome: PermissionOutcome; denyMessage: string }): Promise<"answered" | "gone">;
-  /** Puts this running turn into another access mode from its next tool call on; absent on a harness whose CLI takes
-   * no such change once a turn is under way, and the person's pick then waits for their next message. `refused` is
-   * the CLI's own no to that mode, `gone` a turn whose channel takes nothing any more. */
+  /** Puts this running turn into another access mode from its next tool call on, and to the prompt it is stopped on
+   * where the mode answers one; absent on a harness whose CLI takes no such change once a turn is under way, and the
+   * person's pick then waits for their next message. `refused` is the CLI's own no to that mode with no road left to
+   * stand in for it, `gone` a turn whose channel takes nothing any more. */
   setAccess?(mode: string): Promise<"set" | "refused" | "gone">;
 }
 
@@ -303,6 +304,9 @@ export interface HarnessAdapter {
   /** The commands this CLI runs only in its own terminal, which a headless turn answers are not available; the catalog
    * carries them so the composer lists none and sends nothing for one. Absent means none. */
   readonly screenCommands?: ReadonlyArray<ScreenCommand>;
+  /** Whether an access picked while a turn runs reaches that turn, so the picker says what a pick does before it is
+   * made. Absent means it does not, and a pick waits for the person's next message. */
+  readonly movesAccess?: true;
   /** Asks the binary on the workspace's machine what it takes: its lists, its own words for why it has none, or null
    * when it does not answer at all; absent, the table alone answers and nothing runs. */
   probeCatalog?(exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer>;
@@ -635,7 +639,8 @@ export interface SessionHandle {
   /** Answers a permission prompt this turn raised, by the prompt's id and one of its options. Only a person answers
    * one: the prompt stands for as long as the turn does. Absent on a harness that raises none. */
   answer?(askId: string, opts: { optionId: string }): Promise<SessionAnswerResult["outcome"]>;
-  /** Moves this running turn to another access mode; absent on a harness that takes none mid-turn. */
+  /** Moves this running turn to another access mode, the prompt it is stopped on included; absent on a harness that
+   * takes none mid-turn. */
   setAccess?(mode: string): Promise<"set" | "refused" | "gone">;
 }
 
@@ -4523,6 +4528,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       renames: adapter.renameSession !== undefined,
       images: adapter.attachments !== undefined,
       ...(adapter.mcpServers === true ? { mcpServers: true } : {}),
+      ...(adapter.movesAccess === true ? { movesAccess: true } : {}),
       ...(adapter.screenCommands !== undefined ? { screenCommands: [...adapter.screenCommands] } : {}),
     };
     if (adapter.probeCatalog === undefined) return Promise.resolve(forMachine(known));
@@ -5695,9 +5701,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // start refuses it with rather than travelling to the machine as a request it will not answer.
       if (table !== undefined) startPicks(await catalogOn(table, entry, adapter), { permissionMode }, false);
       const outcome = await s.handle.setAccess(permissionMode);
-      // A CLI that refused a mode its own list carries is one that will not take it on a turn already under way
-      // (Claude Code's bypass, which is a launch flag): the pick stands and the person's next message carries it,
-      // which is what unsupported tells the composer to say.
+      // A CLI that refused a mode its own list carries is one that will not take it on a turn already under way and
+      // whose adapter had no way to stand in for it: the pick stands and the person's next message carries it, which
+      // is what unsupported tells the composer to say.
       return { outcome: outcome === "set" ? "set" : outcome === "refused" ? "unsupported" : "not-running" };
     },
 
