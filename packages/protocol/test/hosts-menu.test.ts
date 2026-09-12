@@ -63,6 +63,15 @@ describe("the two rows a computer that joined another wsp adds", () => {
     ]);
   });
 
+  it("carries on the awake row what the hold does not reach, so the row says it on hover", () => {
+    const awake = hostsMenuItems(joined).at(-2)!;
+    // A hold that lasts while the lid is open and the power is in is not what the label says, and the row can run,
+    // so the words ride the hover slot a dimmed row would carry its reason in.
+    expect(awake.hint).toBe(HOST_WORDS.place.awakeWhy);
+    expect(awake.refusal).toBeUndefined();
+    expect(hostsMenuItems(joined).at(-1)!.hint).toBeUndefined();
+  });
+
   it("reads both rows back, and the awake row asks for the state it is not in", () => {
     const held = hostsMenuItems(joined).slice(-2);
     expect(held.map(r => hostMenuAction(r.id))).toEqual([{ kind: "awake", on: false }, { kind: "leave" }]);
