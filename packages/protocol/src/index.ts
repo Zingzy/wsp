@@ -3106,7 +3106,7 @@ export type AccountView = z.infer<typeof AccountView>;
 
 /** The refusal a socket let in on a ticket gets for reading the account: who this wsp is signed in to is read at
  * the terminal of the computer it runs on, as the devices and the places are. */
-export const ACCOUNT_TICKET_REFUSAL = "a socket let in on a ticket cannot see the account this host is signed in to; run wsp relay hosts on the computer the host runs on";
+export const ACCOUNT_TICKET_REFUSAL = "a socket let in on a ticket cannot see the account this host is signed in to; run wsp host linked on the computer the host runs on";
 
 /** The refusal for a host that keeps no records of its own to read an account from, which a bare runtime does not. */
 export const ACCOUNT_UNSERVED = "this host keeps no account records; wsp up serves them";

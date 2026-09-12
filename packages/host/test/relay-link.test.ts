@@ -603,7 +603,7 @@ describe("who this wsp is signed in to", () => {
   it("names the account this computer signed in under, a wsp home apart from the box's state", async () => {
     const relay = await fakeRelay();
     const { statePath, home, dir } = box();
-    await relayCommand(io(), { statePath, home }, ["hosts", relay.url], {}, deps(dir));
+    await relayCommand(io(), { statePath, home }, ["linked", relay.url], {}, deps(dir));
     expect(accountHere(statePath, home)).toEqual({ signedIn: true, login: "zingzy" });
   });
 
