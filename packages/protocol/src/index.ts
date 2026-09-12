@@ -560,6 +560,11 @@ export const SessionView = z.object({
    * absent on a turn waiting on nobody. The harness is stopped on the question while it stands, so this is the one
    * fact that says a thread is waiting on the person rather than working. */
   asking: z.string().optional(),
+  /** The process this turn leads on the computer the host runs on, where the turn runs there: the pid the Processes
+   * pane heads this thread's tree with. Absent on a turn running on another machine, whose pids are not this
+   * computer's, and on a turn that is over. It is never written down: a pid outlives nothing, and the computer is
+   * free to hand it to a stranger the moment the turn ends. */
+  pid: z.number().int().optional(),
 });
 export type SessionView = z.infer<typeof SessionView>;
 
@@ -593,6 +598,8 @@ export const ThreadView = z.object({
   asking: z.string().optional(),
   /** What this thread has cost: its rows' figures added up. Absent where no row of it carries one. */
   costUsd: z.number().optional(),
+  /** The latest turn's process on the computer the host runs on, as SessionView.pid carries it. */
+  pid: z.number().int().optional(),
 });
 export type ThreadView = z.infer<typeof ThreadView>;
 
@@ -639,6 +646,7 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.endedAt !== undefined ? { endedAt: latest.endedAt } : {}),
       ...(latest.cwd !== undefined ? { cwd: latest.cwd } : {}),
       ...(latest.asking !== undefined ? { asking: latest.asking } : {}),
+      ...(latest.pid !== undefined ? { pid: latest.pid } : {}),
       turns: turns.length,
       ran: threadRan(turns),
       ...(first.parentThreadId !== undefined ? { parentThreadId: first.parentThreadId } : {}),
