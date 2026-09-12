@@ -821,6 +821,15 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "cost.history":
               send({ id: msg.id, ok: true, points: await rt.status.history(msg.workspaceId, origin) });
               return;
+            case "cost.spend":
+              // What the person's computers and providers have cost them is read on the same road their list is:
+              // a socket let in on a ticket sees neither.
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                return;
+              }
+              send({ id: msg.id, ok: true, places: await rt.status.spend((await rt.places?.list(now())) ?? []) });
+              return;
             case "snapshots.rollback": {
               const name = msg.name ?? "default";
               const manifest = await rt.golden.rollback(msg.version, name);

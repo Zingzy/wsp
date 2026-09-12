@@ -16,6 +16,7 @@ import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouE
 import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
 import { WorkspaceGlyph, WorkspaceLook, WorkspaceTheme } from "./workspace-look.js";
+import { isLocalWorkspace } from "./workspace-state.js";
 
 /** The one rule for a URL a guest may hand to the laptop: http or https in any
  * case, no whitespace or control characters, at most HTTP_URL_MAX bytes, and
@@ -2276,6 +2277,29 @@ export function workspacePlace(view: Pick<WorkspaceView, "place" | "machineId">)
   return view.place ?? parsePlaceMachineId(view.machineId ?? "");
 }
 
+/** What one row of the places list holds of the person's money: the spend it has taken since the first of the
+ * month, over every workspace that stood on it in that month, deleted ones included, and what it is burning right
+ * now over the ones still there. How many workspaces that is, the caller counts off its own list. */
+export const PlaceSpend = z.object({ place: z.string(), monthUsd: z.number(), rateUsdPerHour: z.number() });
+export type PlaceSpend = z.infer<typeof PlaceSpend>;
+
+/** Which row of the places list a workspace stands on, by id: the computer its record names, this computer for a
+ * workspace that is this computer, and for a fork the provider its record was stamped with. A fork written before
+ * records carried that word stands at the first provider row, which is where a host that forks at one provider put
+ * it. Nothing for a workspace whose row this list does not hold, a stamped fork included: a provider that has been
+ * removed takes its money off the list with it, and standing its workspaces on whatever provider is left would put
+ * one provider's spend on another's row.
+ *
+ * The one reading, so the settings table, the sidebar's rows and the host's own spend fold cannot disagree about
+ * which row a workspace belongs to. */
+export function workspacePlaceId(view: Pick<WorkspaceView, "kind" | "machineId" | "place" | "provider">, places: readonly Pick<PlaceView, "id" | "kind">[]): string | undefined {
+  const named = workspacePlace(view);
+  if (named !== undefined) return places.find(p => p.id === named)?.id;
+  if (isLocalWorkspace(view)) return places.find(p => p.id === HERE_PLACE_ID)?.id ?? places[0]?.id;
+  const providers = places.filter(p => p.kind === "provider");
+  return view.provider === undefined ? providers[0]?.id : providers.find(p => p.id === view.provider)?.id;
+}
+
 /** A computer you own finished its join, with the address it dialled from as `ws` reported it. The view carries
  * what it said about itself, so the sheet fills its row off this one event. */
 export const PlaceJoinedEvent = z.object({ type: z.literal("place.joined"), place: PlaceView, from: z.string() });
@@ -3653,6 +3677,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Replies with { points: WorkspaceCostEvent[] }: the workspace's cost ticks since metering began, across host
    * restarts, folded to the ticks where the rate changed plus the newest (appendCostPoint); empty before the first tick. */
   z.object({ id: reqId, op: z.literal("cost.history"), workspaceId: z.string() }),
+  /** Replies with { places: PlaceSpend[] }: one row per place this host holds anything metered for, with what it
+   * has taken since the first of the month and what it burns now. Refused on a socket let in on a ticket, as the
+   * places list itself is: what a person's computers cost is that person's computer's to answer. */
+  z.object({ id: reqId, op: z.literal("cost.spend") }),
   /** Moves the golden's head to a version already in its manifest; replies with a
    * SnapshotRollbackResult. A version outside the manifest fails with kind "missing". */
   z.object({ id: reqId, op: z.literal("snapshots.rollback"), version: z.number(), name: z.string().optional() }),
@@ -4041,7 +4069,7 @@ export { psCpuSeconds } from "./ps-time.js";
 export { compareVersions } from "./semver.mjs";
 export { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS, IMAGE_TYPES, IMAGE_TYPE_WORDS, ImageAttachment, ImageRecord, imageBytes, imageLine, imagePathIn, imageRecord, imageTypeOf, imagesBlocked, imagesRefusal, noImagesLine, notAFileLine, notAnImageLine, threadImagesDir, turnImagesDir } from "./attachments.js";
 export * from "./oom.js";
-export { appendCostPoint, COST_HISTORY_CAP } from "./cost-history.js";
+export { accruedAt, appendCostPoint, COST_HISTORY_CAP, monthStart, rateAt, spentSince } from "./cost-history.js";
 export { ThreadMessage, threadMessages, threadReplyRows, threadResult, ThreadVoice } from "./thread-read.js";
 export { inFolder, shellLine, shellQuote } from "./shell-quote.js";
 export {
