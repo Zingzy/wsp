@@ -1662,6 +1662,12 @@ export function spawnReachRefusal(threadId: string, name: string): string {
   return `thread ${threadWord(threadId)} may drive the workspace it runs on and the ones it forked, and ${name} is neither`;
 }
 
+/** The one sentence a name no workspace of this host carries is refused with. Absence is the only thing it says: a
+ * workspace that exists and cannot be driven from here is refused by the rule that hides it, never as missing. */
+export function noWorkspaceRefusal(ref: string): string {
+  return `no workspace ${ref}`;
+}
+
 /** The workspace table's cell for the switch: empty where agents spawn nothing, which is nearly every row, so the
  * column is quiet until a workspace has one. */
 export function agentsWord(agents: { spawn: boolean; maxMachines: number } | undefined): string {

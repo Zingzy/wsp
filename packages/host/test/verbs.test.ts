@@ -8,14 +8,14 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { agentsKindRefusal, effortsFor, EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { agentsKindRefusal, DEFAULT_PREFERENCES, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { HELP, cli, localWiring, localWorkFolder, serve } from "../src/cli.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
-import { PLAN_ONLY, deleteQuestion, deletedLine, dialHost, firstEnded, messageTo, threadRows, threadTree, threadsOf } from "../src/verbs.js";
+import { PLAN_ONLY, deleteQuestion, deletedLine, dialHost, firstEnded, lastTarget, messageTo, threadRows, threadTree, threadsOf, type HostClient } from "../src/verbs.js";
 import { withRefused } from "../../runtime/test/fs-refusal.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { guestAnswer, stubBackend, type StubBackend } from "./stub-backend.js";
@@ -90,6 +90,8 @@ describe("wsp verbs over the host", () => {
     return { code: await ended, io };
   }
   const json = (io: Captured): unknown[] => io.lines.map(l => JSON.parse(l) as unknown);
+  /** The workspace column of the table wsp workspaces prints, which is the list a person reads names off. */
+  const names = (listed: { io: Captured }): string[] => listed.io.lines[0]!.split("\n").slice(1).map(row => row.split(/\s+/)[0]!);
   /** A verb run with a person at the keyboard: every question it asks is recorded and answered with reply. */
   const asked: string[] = [];
   async function answer(reply: string, ...argv: string[]): Promise<{ code: number; io: Captured }> {
@@ -341,6 +343,9 @@ describe("wsp verbs over the host", () => {
     const ran = await run("exec", "alpha", "--", "echo", "hi");
     expect(ran.code).toBe(1);
     expect(ran.io.errors).toEqual([`wsp exec: Workspace machine is gone; rebuild it to exec (${words})`]);
+    // The workspace is on the listing throughout: what the machine is, is the machine's trouble to say, and no verb
+    // answers for a machine by calling the workspace missing.
+    expect(names(await run("workspaces"))).toEqual(["alpha"]);
     const woken = await run("wake", "alpha");
     expect(woken.code).toBe(1);
     expect(woken.io.errors).toEqual([`wsp wake: Workspace machine is gone; rebuild it to wake (${words})`]);
@@ -1791,6 +1796,54 @@ describe("wsp verbs over the host", () => {
     expect(bare.io.errors).toEqual(["wsp exec: wsp exec takes a workspace, then -- and the command"]);
   });
 
+  describe("one list behind every verb", () => {
+    /** The workspace a thread of this host's runs on, its agents allowed to spawn. */
+    async function leadWorkspace(): Promise<WorkspaceView> {
+      await run("new", "alpha", "--spawn", "on");
+      return (await rt.workspaces.list()).find(w => w.name === "alpha")!;
+    }
+    /** What a turn's launch hands the thread running on that workspace: the address of this host and a token scoped
+     * to the thread, which is the pair a wsp line inside a turn dials with. Every line after this runs as that thread. */
+    async function asThread(workspace: WorkspaceView, threadId: string): Promise<void> {
+      const scoped = await rt.devices.mint(`thread ${threadId}`, { kind: "thread", threadId, workspaceId: workspace.id, rootThreadId: threadId }, Date.now());
+      env[HOST_URL_ENV] = `ws://127.0.0.1:${handle!.wsPort}`;
+      env[HOST_TOKEN_ENV] = scoped.deviceToken;
+    }
+    /** A line as that thread types it: no --state, since the pair in its environment says which host it runs against. */
+    async function line(...argv: string[]): Promise<{ code: number; io: Captured }> {
+      const io = captured();
+      return { code: await cli(argv, io, undefined, env), io };
+    }
+
+    it("every verb takes the workspaces the caller's own listing prints, by name and by id", async () => {
+      const alpha = await leadWorkspace();
+      await run("thread", "new", "--in", "alpha", "hello");
+      const [row] = await rt.sessions.list();
+      await asThread(alpha, "t_lead");
+      expect(names(await line("workspaces"))).toEqual(["alpha"]);
+      execGuest(backend, "Linux\n", 0);
+      expect((await line("exec", "alpha", "--", "uname")).io.lines).toEqual(["Linux"]);
+      expect((await line("exec", alpha.id, "--", "uname")).io.lines).toEqual(["Linux"]);
+      expect((await line("threads", "--in", "alpha")).code).toBe(0);
+      expect((await line("send", row!.threadId!, "and the rest")).code).toBe(0);
+    });
+
+    it("a workspace the caller's reach hides is refused by the rule that hides it, never as one that does not exist", async () => {
+      const alpha = await leadWorkspace();
+      await run("new", "beta");
+      const beta = (await rt.workspaces.list()).find(w => w.name === "beta")!;
+      await asThread(alpha, "t_lead");
+      const hidden = spawnReachRefusal("t_lead", "beta");
+      // The listing leaves beta out; every verb that takes a name says why it is not there rather than that it is not.
+      expect(names(await line("workspaces"))).toEqual(["alpha"]);
+      expect((await line("exec", "beta", "--", "uname")).io.errors).toEqual([`wsp exec: ${hidden}`]);
+      expect((await line("exec", beta.id, "--", "uname")).io.errors).toEqual([`wsp exec: ${hidden}`]);
+      expect((await line("threads", "--in", "beta")).io.errors).toEqual([`wsp threads: ${hidden}`]);
+      // A name nothing here carries is still absent, which is the one thing that sentence says.
+      expect((await line("exec", "gamma", "--", "uname")).io.errors).toEqual([`wsp exec: ${noWorkspaceRefusal("gamma")}`]);
+    });
+  });
+
   it("exec hands the machine each argument as it was given: a quoted word stays one word", async () => {
     await run("new", "alpha");
     execGuest(backend, "", 0);
@@ -1890,7 +1943,16 @@ describe("wsp verbs over the host", () => {
     old.on("connection", socket => {
       socket.on("message", raw => {
         const { id, op } = JSON.parse(String(raw)) as { id: number; op: string };
-        const reply = op === "workspaces.list" ? { workspaces: [workspace] } : op === "workspaces.wake" ? { workspace } : op === "harnesses.list" ? { harnesses: [] } : op === "sessions.start" ? { session } : {};
+        const reply =
+          op === "workspaces.list"
+            ? { workspaces: [workspace] }
+            : op === "workspaces.resolve" || op === "workspaces.wake"
+              ? { workspace }
+              : op === "harnesses.list"
+                ? { harnesses: [] }
+                : op === "sessions.start"
+                  ? { session }
+                  : {};
         socket.send(JSON.stringify({ id, ok: true, ...reply }));
       });
     });
@@ -2015,6 +2077,37 @@ describe("wsp verbs over the host", () => {
     expect((await rt.workspaces.get(beta!.id)).projects?.map(p => p.name)).toEqual(["proj"]);
     expect(landings()).toHaveLength(0);
     expect(backend.machines.find(m => m.id === beta!.machineId)!.runLog.some(s => s.includes("mv "))).toBe(true);
+  });
+
+  it("the last target is resolved through the host, so one this caller may not drive is refused in that rule's words and never read as no target", async () => {
+    const ops: string[] = [];
+    /** A host that holds a last target and answers for that id however this case wants, and that has no listing to
+     * scan: a caller that reached for one here is asking the wrong door. */
+    const holding = (answer: Record<string, unknown> | Error): HostClient => ({
+      request: async (op: string) => {
+        ops.push(op);
+        if (op === "preferences.get") return { preferences: { ...DEFAULT_PREFERENCES, target: { workspace: "ws_beta" } } } as never;
+        if (op !== "workspaces.resolve") throw new Error(`the last target asked this host for ${op}`);
+        if (answer instanceof Error) throw answer;
+        return answer as never;
+      },
+      events: async () => {},
+      onFrame: () => () => {},
+      closed: new Promise<void>(() => {}),
+      closeWords: () => "closed",
+      close: () => {},
+      terminate: () => {},
+    });
+    const said: string[] = [];
+    const hidden = spawnReachRefusal("t_lead", "beta");
+    await expect(lastTarget(holding(new Error(hidden)), "--to <workspace>", l => said.push(l))).rejects.toThrow(hidden);
+    // Only a target this host no longer holds at all is no last target.
+    await expect(lastTarget(holding(new Error(noWorkspaceRefusal("ws_beta"))), "--to <workspace>", l => said.push(l))).rejects.toThrow(noLastTargetLine("--to <workspace>"));
+    expect(said).toEqual([]);
+    const beta = { id: "ws_beta", name: "beta", machineId: "m1", phase: "running", kind: "cloud", golden: "snap_g", createdAt: "2026-09-12T00:00:00.000Z" };
+    expect((await lastTarget(holding({ workspace: beta }), "--to <workspace>", l => said.push(l))).name).toBe("beta");
+    expect(said).toEqual([lastTargetLine("beta")]);
+    expect([...new Set(ops)]).toEqual(["preferences.get", "workspaces.resolve"]);
   });
 
   it("import --to this computer registers the folder at its own path with no plan, no question and no copy, says so, and projects lists it", async () => {
