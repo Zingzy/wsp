@@ -16,7 +16,7 @@ import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
 import { isDesktopMac } from "../lib/desktopShell.js";
 import { cn } from "../lib/utils.js";
-import { useSelectedWorkspaceId, useStore } from "../protocol/store.js";
+import { useSelectedWorkspaceId, useSettingsOpen, useStore } from "../protocol/store.js";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY, sidebarMaxWidthBeside } from "../rightPanelLayout.js";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "./sidebarWidth.js";
 import { trackThreadHistory } from "./threadHistory.js";
@@ -54,12 +54,15 @@ export function AppShell({ children }: { children: ReactNode }) {
   const toggleVisibility = useRightPanelStore(s => s.toggleVisibility);
   const terminalOpen = useTerminalDrawerStore(s => selectTerminalUiState(s.byWorkspaceId, workspaceId).terminalOpen);
   const toggleTerminal = useTerminalDrawerStore(s => s.toggle);
+  // Settings is a page, not a panel of a workspace: it takes the whole region right of the sidebar while it is
+  // open. The panel's own record is untouched, so every surface is back as it was the moment Settings closes.
+  const settingsOpen = useSettingsOpen();
   const useSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const viewportWidth = useViewportWidth();
   // The current space's theme rides the sidebar element, so the glass recipe and the macOS material both take it.
   const spaceTheme = useSpaceTheme();
   const appDark = useAppDark();
-  const rightPanelOpen = workspaceId !== null && panel.isOpen;
+  const rightPanelOpen = workspaceId !== null && panel.isOpen && !settingsOpen;
   const panelInline = rightPanelOpen && !useSheet;
   // The switch chord in Spaces walks the threads last opened, so every selection is remembered from here on.
   useEffect(() => trackThreadHistory(), []);
@@ -69,10 +72,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       terminalAvailable={workspaceId !== null}
       terminalOpen={terminalOpen}
       terminalShortcutLabel={TERMINAL_SHORTCUT_LABEL}
-      rightPanelAvailable={workspaceId !== null}
+      rightPanelAvailable={workspaceId !== null && !settingsOpen}
       rightPanelOpen={rightPanelOpen}
       rightPanelShortcutLabel={RIGHT_PANEL_SHORTCUT_LABEL}
-      rightPanelUnavailableLabel="Select a workspace to open the right panel"
+      rightPanelUnavailableLabel={settingsOpen ? "Close Settings to open the right panel" : "Select a workspace to open the right panel"}
       liveAgentCount={0}
       onToggleTerminal={() => {
         if (workspaceId) toggleTerminal(workspaceId);

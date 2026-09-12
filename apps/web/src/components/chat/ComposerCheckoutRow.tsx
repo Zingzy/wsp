@@ -3,8 +3,10 @@
 // its git branch. Before the first message the folder is the one the runtime's
 // rule will open, the picked project's or the machine's own, and a picker over
 // the daemon's listings, one level at a time, across the same roots the panes
-// browse (its home and every project), with a field at its top for a folder
-// typed or pasted whole and, in the desktop app, the system chooser beside it;
+// browse (its home and every project), the machine's own hidden folders left
+// out of the walk, with a field at its top for a folder typed or pasted whole,
+// which is the road to one of those, and, in the desktop app, the system
+// chooser beside it;
 // a folder picked here is what sessions.start names as cwd, over every
 // project, and where the panes root.
 // Whether the picker is open is the composer's to say, so the project pick in
@@ -15,13 +17,14 @@
 // agent's tool calls move it, is what the panes follow. The branch is read,
 // not switched: the daemon has no checkout op.
 import { ArrowLeftIcon, ChevronDownIcon, CheckIcon, FolderGitIcon, FolderIcon, FolderSearchIcon, GitBranchIcon, LoaderCircleIcon, MessageSquarePlusIcon } from "lucide-react";
-import { useEffect, useState } from "react";
-import { REPO_STATE_WORDS, type RepoStateWord } from "@wsp/protocol";
+import { useEffect, useMemo, useState } from "react";
+import { hiddenFolder, isMacMachine, REPO_STATE_WORDS, type FolderMachine, type RepoStateWord } from "@wsp/protocol";
 import { baseName } from "../../files/entries";
 import { FolderPathField, folderGhost, folderPathRefusal, useFolderPick, type FolderRefusal } from "../../files/FolderPathField";
 import { useWorkspaceListing } from "../../files/listing";
 import { parentWithin, rootOf, useRoots, useRootStore, useThreadFolder } from "../../files/root";
-import { useDaemonWire } from "../../files/wire";
+import { useDaemonRoot, useDaemonWire } from "../../files/wire";
+import { useStatus } from "../../protocol/store";
 import { repoAbsence } from "../../adapt/git";
 import { desktopBridge } from "../../lib/desktopShell";
 import { cn } from "../../lib/utils";
@@ -95,6 +98,7 @@ function FolderMenu({
   workspaceId,
   wire,
   roots,
+  machine,
   folder,
   open,
   onOpenChange,
@@ -103,6 +107,8 @@ function FolderMenu({
   workspaceId: string;
   wire: TerminalWire;
   roots: readonly string[];
+  /** The home this workspace's daemon announced and whether that machine is a Mac: what the walk hides reads it. */
+  machine: FolderMachine;
   folder: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -116,7 +122,7 @@ function FolderMenu({
   const level = levels.get(dir);
   const parent = parentWithin(roots, dir);
   const current = rootOf(roots, dir);
-  const folders = level?.entries?.filter(entry => entry.kind === "directory") ?? null;
+  const folders = level?.entries?.filter(entry => entry.kind === "directory" && !hiddenFolder(entry.path, machine)) ?? null;
   const setOpen = (next: boolean): void => {
     onOpenChange(next);
     setWalked(null);
@@ -175,7 +181,7 @@ function FolderMenu({
           <>
             <MenuRadioGroup aria-label="Browsable folders" value={current} onValueChange={next => typeof next === "string" && setDir(next)}>
               {roots.map(candidate => (
-                <MenuRadioItem key={candidate} value={candidate} title={candidate} data-composer-folder-root={candidate}>
+                <MenuRadioItem key={candidate} value={candidate} closeOnClick={false} title={candidate} data-composer-folder-root={candidate}>
                   <span className="flex min-w-0 items-center gap-2">
                     <FolderIcon className="text-muted-foreground" aria-hidden />
                     <span className="truncate font-mono">{candidate}</span>
@@ -237,6 +243,11 @@ export function ComposerCheckoutRow({
 }) {
   const wire = useDaemonWire(workspaceId);
   const roots = useRoots(workspaceId);
+  const home = useDaemonRoot(workspaceId);
+  const os = useStatus(workspaceId)?.facts?.os;
+  // The machine's own two answers, which is all the walk needs to know a home's Library from a folder of that name
+  // somebody made: a machine that has reported neither hides the dot folders alone.
+  const machine = useMemo<FolderMachine>(() => ({ home, mac: isMacMachine(os) }), [home, os]);
   const follow = useRootStore(s => s.follow);
   const shell = useRootStore(s => s.shell);
   const choose = useRootStore(s => s.choose);
@@ -266,7 +277,7 @@ export function ComposerCheckoutRow({
     <ComposerSurface.ContextStrip data-composer-checkout data-pickable={pickable || undefined}>
       <div className="flex min-w-0 flex-1 items-center gap-1">
         {pickable && canPick ? (
-          <FolderMenu workspaceId={workspaceId} wire={wire} roots={roots} folder={folder} open={pickerOpen} onOpenChange={onPickerOpenChange} onPick={dir => choose(workspaceId, dir)} />
+          <FolderMenu workspaceId={workspaceId} wire={wire} roots={roots} machine={machine} folder={folder} open={pickerOpen} onOpenChange={onPickerOpenChange} onPick={dir => choose(workspaceId, dir)} />
         ) : (
           <>
             <Tooltip>

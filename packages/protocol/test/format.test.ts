@@ -11,7 +11,9 @@ import {
   whoPaysLines,
   THIS_COMPUTER,
   PERMISSION_DENIED_LINE,
-  accessFromNextMessage,
+  ACCESS_REFUSED_LINE,
+  ACCESS_REFUSED_WORDS,
+  accessReachLine,
   askingLine,
   permissionAskLine,
   permissionPromptWords,
@@ -1607,14 +1609,22 @@ describe("the words a relayed permission prompt shows", () => {
     expect(permissionModeOptionLabel("Accept edits")).toBe("Allow, then Accept edits");
   });
 
-  it("a pick the running turn's harness would not take says when it lands, in the picker's own words for the mode", () => {
-    const line = accessFromNextMessage("Bypass on this computer");
-    expect(line).toBe("Bypass on this computer from your next message");
-    // It says what happens, not that something failed: the pick is kept either way.
-    expect(line).not.toMatch(/could not|failed|unsupported/);
-    // The slot is one line that truncates from the right, and the longest label this can carry is the one that
-    // names the machine; the render test measures the paint, this holds the budget the measurement was against.
-    expect(line.length).toBeLessThan(54);
+  it("the access menu says what a pick does to the turn running now, before the pick is made", () => {
+    expect(accessReachLine(true)).toBe("Applies to the turn running now");
+    expect(accessReachLine(false)).toBe("Applies from your next message");
+    // Said of the pick, not of a failure: the line stands over the list before anything has been picked.
+    for (const moves of [true, false]) expect(accessReachLine(moves)).not.toMatch(/could not|failed|unsupported/);
+  });
+
+  it("a pick a harness said it would take and then refused is a refusal in two halves, inside the slot's one line", () => {
+    expect(ACCESS_REFUSED_WORDS.said).toBe("The turn refused it.");
+    expect(ACCESS_REFUSED_WORDS.fix).toBe("Your next message carries it.");
+    expect(ACCESS_REFUSED_LINE).toBe(`${ACCESS_REFUSED_WORDS.said} ${ACCESS_REFUSED_WORDS.fix}`);
+    // Both halves: what happened, then what to do about it, which is the shape every refusal in this app has.
+    expect(ACCESS_REFUSED_WORDS.fix).toMatch(/next message/);
+    // The slot is one line that truncates from the right; the render test measures the paint, this holds the budget
+    // the measurement was against, so the half carrying the answer is never the half that is cut.
+    expect(ACCESS_REFUSED_LINE.length).toBeLessThan(54);
   });
 });
 

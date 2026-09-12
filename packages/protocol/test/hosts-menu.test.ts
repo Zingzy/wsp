@@ -3,7 +3,7 @@
 // app's own computer first, every saved host with the current one marked, the
 // connect row, and the disconnect row for the host the window is on.
 import { describe, expect, it } from "vitest";
-import { HOST_WORDS, hereWord, hostMenuAction, hostsMenuItems, placeStateWord, placeWorkspacesCell, shellVersionNotice, type HostsView, type PlaceView } from "../src/index.js";
+import { HOST_WORDS, hereWord, hostMenuAction, hostsMenuItems, placeAwayWord, placeStateWord, placeWorkspacesCell, shellVersionNotice, type HostsView, type PlaceView } from "../src/index.js";
 
 const VIEW: HostsView = {
   here: "This Mac",
@@ -90,11 +90,17 @@ describe("what the Where agents run table says about a computer", () => {
   const view = (over: Partial<PlaceView> = {}): PlaceView => ({ id: "p_1", kind: "computer", name: "old-macbook", default: false, present: true, docker: true, takesForks: true, workspaceId: "ws_1", ...over });
   const now = Date.parse("2026-09-12T12:00:00.000Z");
 
-  it("says nothing while the computer holds its link, and how long it has been away when it does not", () => {
-    expect(placeStateWord(view(), now)).toBe("");
-    expect(placeStateWord(view({ present: false, lastSeenAt: "2026-09-12T10:00:00.000Z" }), now)).toBe("offline · 2 h");
-    expect(placeStateWord(view({ present: false, lastSeenAt: "2026-09-12T11:48:00.000Z" }), now)).toBe("offline · 12 min");
-    expect(placeStateWord(view({ present: false }), now)).toBe("offline");
+  it("says nothing in the table's slot while the computer holds its link, and one word when it does not", () => {
+    expect(placeStateWord(view())).toBe("");
+    expect(placeStateWord(view({ present: false, lastSeenAt: "2026-09-12T10:00:00.000Z" }))).toBe("offline");
+    expect(placeStateWord(view({ present: false }))).toBe("offline");
+  });
+
+  it("keeps how long it has been away for the row's title, where there is room for the figure", () => {
+    expect(placeAwayWord(view(), now)).toBe("");
+    expect(placeAwayWord(view({ present: false, lastSeenAt: "2026-09-12T10:00:00.000Z" }), now)).toBe("offline · 2 h");
+    expect(placeAwayWord(view({ present: false, lastSeenAt: "2026-09-12T11:48:00.000Z" }), now)).toBe("offline · 12 min");
+    expect(placeAwayWord(view({ present: false }), now)).toBe("offline");
   });
 
   it("counts the workspaces on it and names the one thing that changes what may go there", () => {

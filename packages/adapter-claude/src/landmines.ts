@@ -4,7 +4,7 @@
 import { randomUUID } from "node:crypto";
 import { inFolder, shellQuote } from "@wsp/protocol";
 import type { McpServerSpec, TurnImage } from "@wsp/protocol";
-import { PERMISSION_PROMPT_TOOL } from "./permissions.js";
+import { PERMISSION_PROMPT_TOOL, SKIP_PROMPTS_MODE } from "./permissions.js";
 
 // Inherited CLAUDE_CODE_*/CLAUDECODE mark the child as nested inside another
 // Claude Code run; FORCE_CODE_TERMINAL flips terminal detection (t3code unsets
@@ -112,7 +112,7 @@ function modelWithContext(model: string | undefined, contextWindow: string | und
  * this process over the control channel; without the flag the CLI denies every such call by itself.
  */
 function permissionFlags(mode: string | undefined): string[] {
-  if (mode === undefined || mode === "bypassPermissions") return ["--dangerously-skip-permissions"];
+  if (mode === undefined || mode === SKIP_PROMPTS_MODE) return ["--dangerously-skip-permissions"];
   return [...slugFlag("--permission-mode", "permissionMode", mode), `--permission-prompt-tool ${PERMISSION_PROMPT_TOOL}`];
 }
 
