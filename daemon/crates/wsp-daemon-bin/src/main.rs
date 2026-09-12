@@ -4,6 +4,7 @@
 
 mod flags;
 mod score;
+mod verbs;
 
 use std::io;
 use std::os::unix::fs::OpenOptionsExt;
@@ -19,7 +20,10 @@ const BLOCKING_STACK_BYTES: usize = 256 * 1024;
 
 fn main() {
     let started = Instant::now();
-    let flags = flags::Flags::parse_or_exit();
+    let mut flags = flags::Flags::parse_or_exit();
+    if let Some(verb) = flags.verb.take() {
+        std::process::exit(verbs::run(verb));
+    }
     let host = flags.host.clone();
     let port_file = flags.port_file.clone();
     let options = flags.into_options();
