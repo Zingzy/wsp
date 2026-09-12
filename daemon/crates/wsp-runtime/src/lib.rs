@@ -1,8 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! The workspace manager behind the machine ops on a place link. Until a backend exists here, every machine op
-//! the link carries is answered with one refusal that names it.
+//! The workspace manager behind the machine ops on a place link. The layer store and the registry fetch live
+//! here; until a backend exists, every machine op the link carries is answered with one refusal that names it.
+
+pub mod fetch;
+pub mod store;
 
 use wsp_frames::{DaemonErrorResponse, RequestId};
+
+/// Where the runtime keeps everything it owns on a computer somebody joined, layers under it.
+pub const DEFAULT_ROOT: &str = "/var/lib/wsp";
 
 /// What a machine op gets on a computer whose daemon holds no backend yet.
 pub fn no_backend_refusal(op: &str) -> String {

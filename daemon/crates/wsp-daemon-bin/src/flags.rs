@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! One flag per daemon option, so the test harness and the deploy scripts spell the same thing. The interval and
-//! deadline flags exist for the suite; the deploy scripts never name them.
+//! deadline flags exist for the suite; the deploy scripts never name them. A verb in front of the flags runs a
+//! debug verb instead of the daemon.
 
 use std::path::PathBuf;
 
@@ -8,6 +9,8 @@ use clap::error::ErrorKind;
 use clap::{Parser, ValueEnum};
 use wsp_daemon::Options;
 use wsp_frames::{numbers, WorkspaceKind};
+
+use crate::verbs::Verb;
 
 pub(crate) const USAGE: &str = "usage: wsp-daemon [--host <addr>] [--port <n>] [--token-path <file>] [--root <dir>] [--roots-path <file>] [--kind cloud|local|ssh|place] [--work-folder <dir>] [--inbox <dir>] [--inbox-quiet-ms <n>] [--inbox-poll-ms <n>] [--manifest <file>] [--run-dir <dir>] [--log-dir <dir>] [--open-socket <path>] [--port-file <file>] [--proc-root <dir>] [--passwd <file>] [--ports-interval-ms <n>] [--sys-interval-ms <n>] [--proc-interval-ms <n>] [--mode-interval-ms <n>] [--auth-deadline-ms <n>] [--place-file <file>] [--home <dir>] [--wsp-argv <word>]... [--agents id=bin,...] [--link-connect-ms <n>] [--link-quiet-ms <n>] [--link-refused-retry-ms <n>] [--link-backoff-ms <n>]";
 
@@ -33,6 +36,9 @@ impl From<Kind> for WorkspaceKind {
 #[derive(Debug, Parser)]
 #[command(name = "wsp-daemon", disable_version_flag = true, override_usage = USAGE)]
 pub(crate) struct Flags {
+    /// A debug verb instead of serving: runs, prints, exits.
+    #[command(subcommand)]
+    pub(crate) verb: Option<Verb>,
     /// The address to bind: 0.0.0.0 in a guest, 127.0.0.1 on a computer somebody owns.
     #[arg(long, default_value = numbers::DEFAULT_HOST, value_name = "addr")]
     pub(crate) host: String,
