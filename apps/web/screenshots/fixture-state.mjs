@@ -74,6 +74,7 @@ const workspace = (id, name, extra = {}) => ({
   createdAt: new Date(ago(60 * 26)).toISOString(),
   home: HOME,
   folder: HOME,
+  spec: {},
   ...extra,
 });
 
@@ -167,6 +168,10 @@ const fork = (id, name, machineId, extra = {}) => ({
   createdAt: new Date(ago(60 * 8)).toISOString(),
   home: "/root",
   size: { cpu: 4, memMb: 8192 },
+  // The environment and labels a create was asked for, empty here as a create that named none writes them. A
+  // record without this field is one the runtime reads through on the road a wake takes, where it re-forks and
+  // reads the envs off it: two testers met the TypeError that raises as a toast in the app.
+  spec: {},
   ...extra,
 });
 
@@ -271,6 +276,7 @@ const onPlace = (id, name, placeId, size, login = { HOME: "/root", USER: "root",
   login,
   size,
   shape: size,
+  spec: {},
 });
 
 /** A computer somebody joined, as the host's record of it: what it last reported about itself, and when it was
@@ -425,9 +431,11 @@ const macAndVps = () =>
  * contradicting itself. */
 const asciiOnly = () =>
   store({
-    workspaces: [fork("ws_api", "api", "fk_ascii_1.paused", { phase: "napping", projects: [project("api", 48_200_000, 60 * 20)] })],
+    workspaces: [fork("ws_api", "api", "fk_ascii_1", { phase: "napping", projects: [project("api", 48_200_000, 60 * 20)] })],
     goldens: sealed(),
-    meters: Object.fromEntries([meter("ws_api", { rateUsdPerHour: FORK_RATE, hours: 3, phase: "napping" })]),
+    // Nothing on the clock: this persona is on the trial they opened minutes ago, and a sidebar reading $0.48
+    // before they had pasted a key was read as the product billing them for a machine they never made.
+    meters: Object.fromEntries([meter("ws_api", { rateUsdPerHour: FORK_RATE, hours: 0, phase: "napping" })]),
   });
 
 /** Forks on Solari and nothing else, one of them napping, which is where most of a fleet sits. */
@@ -435,7 +443,7 @@ const solariOnly = () =>
   store({
     workspaces: [
       fork("ws_api", "api", "fk_slr_1", { projects: [project("api", 48_200_000, 60 * 20)] }),
-      fork("ws_web", "web", "fk_slr_2.paused", { phase: "napping", vaultedAt: new Date(ago(90)).toISOString() }),
+      fork("ws_web", "web", "fk_slr_2", { phase: "napping", vaultedAt: new Date(ago(90)).toISOString() }),
     ],
     goldens: sealed(),
     meters: Object.fromEntries([meter("ws_api", { rateUsdPerHour: FORK_RATE, hours: 8 }), meter("ws_web", { rateUsdPerHour: FORK_RATE, hours: 3, phase: "napping" })]),
@@ -449,7 +457,7 @@ const bothProviders = () =>
     workspaces: [
       workspace("ws_here", THIS_COMPUTER, { projects: [project("wsp", 133_000_000, 60 * 5)] }),
       fork("ws_api", "api", "fk_slr_1", { projects: [project("api", 48_200_000, 60 * 20)] }),
-      fork("ws_web", "web", "fk_slr_2.paused", { phase: "napping" }),
+      fork("ws_web", "web", "fk_slr_2", { phase: "napping" }),
     ],
     goldens: sealed(),
     meters: Object.fromEntries([meter("ws_api", { rateUsdPerHour: FORK_RATE, hours: 8 }), meter("ws_web", { rateUsdPerHour: FORK_RATE, hours: 4, phase: "napping" })]),
@@ -541,7 +549,7 @@ const orchestrator = () => {
       workspace("ws_here", THIS_COMPUTER, { agents: { spawn: true, maxMachines: 3, maxDepth: 1 }, projects: [project("wsp", 133_000_000, 60 * 5)] }),
       fork("ws_api", "api", "fk_run_1", { ...tree, createdAt: new Date(ago(60 * 8)).toISOString() }),
       fork("ws_web", "web", "fk_run_2", { ...tree, createdAt: new Date(ago(60 * 8 - 2)).toISOString() }),
-      fork("ws_docs", "docs", "fk_run_3.paused", { ...tree, phase: "napping", createdAt: new Date(ago(60 * 8 - 4)).toISOString() }),
+      fork("ws_docs", "docs", "fk_run_3", { ...tree, phase: "napping", createdAt: new Date(ago(60 * 8 - 4)).toISOString() }),
     ],
     ...merge(
       threadsOn("ws_here", [[root, 120]]),
@@ -628,6 +636,34 @@ export function fixtureSnapshots(state) {
     manifest.versions.map(v => ({ id: v.snapshotId, name: `wsp-standin-${golden.replace(/[^a-z0-9]+/g, "-")}-v${v.version}`, sizeBytes: SNAPSHOT_BYTES, createdAt: v.createdAt })),
   );
 }
+
+/** The disk every fork in a fixture reads as, the same figure the stand-in gives a machine it mints itself. */
+const STANDIN_DISK_GB = 20;
+
+/** Every machine a fixture names, in the state that fixture says it is in, for the stand-in's own records. The
+ * state belongs in the records rather than in the machine's id: the stand-in used to read a suffix on the id to
+ * know a machine slept, and the id is what `wsp workspaces` prints, so a tester read `fk_slr_2.paused` in the
+ * MACHINE column beside a STATE column saying Running. The records file is the one place a fixture and the
+ * provider can both read the same fact, and a lab writes it before the host comes up. */
+export function fixtureMachines(state) {
+  return Object.fromEntries(
+    Object.values(state.workspaces ?? {})
+      .filter(w => w.kind === "cloud")
+      .map(w => [
+        w.machineId,
+        {
+          state: w.phase === "napping" ? "paused" : "running",
+          shape: { cpu: w.size.cpu, memMb: w.size.memMb, diskGb: STANDIN_DISK_GB, createdAt: w.createdAt },
+          labels: {},
+        },
+      ]),
+  );
+}
+
+/** Everything the stand-in behind a fixture holds before the host comes up: its machines and its snapshots, in the
+ * shape its own records file takes. Both harnesses seed it, so a fork reads the state its fixture gave it whether
+ * or not the machines have a folder to run commands in. */
+export const fixtureFleet = state => ({ machines: fixtureMachines(state), snapshots: fixtureSnapshots(state) });
 
 /** Every folder a fixture expects to exist, so whoever serves it can make them: the projects imported into its
  * workspaces, which is where a turn on one of them starts. */

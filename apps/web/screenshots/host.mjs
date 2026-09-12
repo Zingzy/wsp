@@ -5,30 +5,53 @@
 // and the persona lab both take this road, so the environment a fixture is
 // served under is written once rather than once per harness.
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { FAKE_AS_ENV, FAKE_ROOT_ENV, PERSON_HOME_ENV, WEB_DIR_ENV } from "@wsp/protocol";
+import { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, PERSON_HOME_ENV, WEB_DIR_ENV } from "@wsp/protocol";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const SCREENSHOTS_DIR = dirname(fileURLToPath(import.meta.url));
 export const WEB_DIR = resolve(SCREENSHOTS_DIR, "..");
 export const REPO = resolve(WEB_DIR, "..", "..");
 export const HOST_BIN = join(REPO, "packages", "host", "dist", "bin.js");
+export const HOST_PACKAGE = join(REPO, "packages", "host", "dist", "index.js");
 export const APP_PAGE = join(WEB_DIR, "dist", "index.html");
 
-/** What a fixture's host must find built, and the command that builds each: the app it serves and the wsp command
- * that serves it. Answers the sentence to print, or nothing when both are there. */
-export function whatIsNotBuilt() {
+/** What builds the binary this computer's workspace runs. No node build makes it, which is why a checkout that has
+ * built everything else still has none. */
+export const DAEMON_BUILD = "cargo build --release in daemon/, then node packages/wspx/scripts/daemon-binary.mjs";
+
+/** Where this computer's own wsp-daemon binary sits in this checkout, read out of the built wsp command: which
+ * binary a machine runs is that command's own table, and the app a lab serves is a package that command depends
+ * on, so naming the table here would be a circle and spelling the path again would be a second copy of it.
+ * Nothing on a platform wsp builds no daemon for. */
+export async function daemonBinaryHere(load = () => import(pathToFileURL(HOST_PACKAGE).href)) {
+  const { daemonBinaryIn, daemonTargetHere, workspaceAsset } = await load();
+  const target = daemonTargetHere();
+  return target === undefined ? undefined : daemonBinaryIn(workspaceAsset("daemon"), target.triple);
+}
+
+const notBuilt = (what, path, how) => `${what} is not built: ${path} is missing. Run ${how} first, or use the coordinator's screenshots.sh or lab.sh, which build.`;
+
+/** What a fixture's host must find built, and the command that builds each: the app it serves, the wsp command
+ * that serves it, and the daemon that command starts for this computer's own workspace. Answers the sentence to
+ * print, or nothing when all three are there. A whole round of nine served a host whose daemon binary was never
+ * built, and no tester on a Mac alone could type a message: the turn does not need it, but the terminal, the files,
+ * the process list and the composer's own reading of the machine all do. */
+export async function whatIsNotBuilt({ exists = existsSync, daemon = daemonBinaryHere } = {}) {
   for (const [what, path, how] of [
     ["the web app", APP_PAGE, "pnpm --filter @wsp/web build"],
     ["the wsp command", HOST_BIN, "pnpm --filter @wsp/host build"],
   ]) {
-    if (!existsSync(path)) return `${what} is not built: ${path} is missing. Run ${how} first, or use the coordinator's screenshots.sh or lab.sh, which build.`;
+    if (!exists(path)) return notBuilt(what, path, how);
   }
-  return undefined;
+  // Asked after the command, since the path is read out of that command's own build.
+  const bin = await daemon();
+  if (bin === undefined) return `wsp builds no daemon for ${process.platform} ${process.arch}, so a host here cannot serve its own workspace and every tester would meet a computer that answers nothing.`;
+  return exists(bin) ? undefined : notBuilt("this computer's daemon", bin, DAEMON_BUILD);
 }
 
 /** What every browser this harness opens is started with. Chromium's shared memory files land on the root disk, and
@@ -75,9 +98,11 @@ export const providerFor = state => (Object.values(state.workspaces ?? {}).some(
  * A folder for the stand-in's own machines rides with it where the caller names one. A lab does: its testers open
  * panes on those machines, and a fork with a folder has a daemon, so its terminal, its processes and its live
  * readings answer instead of reading unreachable six ways. The screenshot run names none, since it photographs
- * screens rather than driving machines and a daemon per fork is a process per fork on this computer.
+ * screens rather than driving machines and a daemon per fork is a process per fork on this computer; it names the
+ * stand-in's records file instead, so the fixture's sleeping forks come up asleep with nothing running on any of
+ * them.
  */
-export function hostEnv({ home, state, personHome = homedir(), appDir, cloud, binDir, standIn }) {
+export function hostEnv({ home, state, personHome = homedir(), appDir, cloud, binDir, standIn, records }) {
   const path = process.env["PATH"] ?? "/usr/bin:/bin";
   return {
     // A lab's own wsp leads the path where it has one, so a turn that shells out to wsp reaches the lab's host
@@ -91,6 +116,9 @@ export function hostEnv({ home, state, personHome = homedir(), appDir, cloud, bi
     ...(personHome === home ? agentStores(home) : {}),
     ...(cloud === undefined || providerFor(state) !== "fake" ? {} : { [FAKE_AS_ENV]: cloud }),
     ...(standIn === undefined || providerFor(state) !== "fake" ? {} : { [FAKE_ROOT_ENV]: standIn }),
+    // The records alone where no folder was named: the fixture's forks come up in the state it gave them and
+    // nothing runs on any of them. A folder carries its own records, so the two are never both named.
+    ...(records === undefined || standIn !== undefined || providerFor(state) !== "fake" ? {} : { [FAKE_RECORDS_ENV]: records }),
   };
 }
 
@@ -106,12 +134,12 @@ export const agentStores = home => Object.fromEntries(agentStoreRows(home).map((
 /** Starts the built wsp command on a throwaway home holding one fixture state, and answers once it serves. A
  * secret is handed to the child and never written into the environment this answers with: the lab records and
  * prints what it started the host with, and a key in that record would be a key in a log. */
-export async function startHost({ home, state, port, wsPort, logPath, detached = false, personHome, appDir, cloud, binDir, standIn, secrets = {} }) {
+export async function startHost({ home, state, port, wsPort, logPath, detached = false, personHome, appDir, cloud, binDir, standIn, records, secrets = {} }) {
   const statePath = join(home, ".wsp", "state.json");
   mkdirSync(dirname(statePath), { recursive: true });
   writeFileSync(statePath, JSON.stringify(state, null, 2));
   const out = logPath === undefined ? "pipe" : openSync(logPath, "a");
-  const env = hostEnv({ home, state, personHome, appDir, cloud, binDir, standIn });
+  const env = hostEnv({ home, state, personHome, appDir, cloud, binDir, standIn, records });
   const child = spawn(process.execPath, [HOST_BIN, "up", "--state", statePath, "--port", String(port), "--ws-port", String(wsPort)], {
     cwd: home,
     env: { ...env, ...secrets },
@@ -133,6 +161,18 @@ export async function startHost({ home, state, port, wsPort, logPath, detached =
   }
   child.kill("SIGTERM");
   throw new Error(`the host did not serve ${base} in 30 s:\n${said()}`);
+}
+
+/** What this computer's own workspace reads on a host that has come up: the word its row carries in that host's own
+ * listing, which is the one reading that says whether its daemon answered. A lab prints it, since a daemon that
+ * never started is the one fault a tester can neither work around nor see the cause of: every pane reads
+ * unreachable and nothing on the screen says why. */
+export async function localReach(base) {
+  const answered = await fetch(`${base}/api/workspaces`).then(
+    r => (r.ok ? r.json() : undefined),
+    () => undefined,
+  );
+  return answered?.workspaces?.find(w => w.kind === "local")?.reach?.state;
 }
 
 /** SIGTERM to the pid this run started, and nothing else: four builders share this machine and a host found by port
