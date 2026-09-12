@@ -30,6 +30,20 @@ import { EXPORT_SOURCE, PAGE, bornDeadAgent, captured, execGuest, exportGuest, s
 
 const BIN = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
 
+/** The image record a host owns once a seal has written one, with the recipe a copy would be built from; the hashes
+ * are plainly fake, as every fixture key here is. */
+const RECORD = {
+  name: "default",
+  version: 1,
+  hash: "a".repeat(64),
+  recipeHash: "rh",
+  recipe: { version: 1, at: "2026-09-12T00:00:00.000Z", histories: [], rows: [] },
+  logins: [],
+  sealedAt: "2026-09-12T00:00:00.000Z",
+  sealedFrom: "h1",
+  vault: { sha256: "b".repeat(64), bytes: 10, paths: 1, takenAt: "2026-09-12T00:00:00.000Z" },
+};
+
 describe("the agent contract on the command line and the tool door", () => {
   let dir: string;
   let statePath: string;
@@ -54,7 +68,16 @@ describe("the agent contract on the command line and the tool door", () => {
     const claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`), () => ({ kind: "written" }));
     // The confirming read a gone verdict waits for runs on the same tick: this backend's 404 is the whole truth, so
     // the wait only buys the contract a five second pause on the road to a rebuild.
-    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: bornDeadAgent(prompt => `re: ${prompt}`).adapter }, goneConfirmMs: 0, placeLinks: placeWiring(statePath, {}) });
+    rt = createRuntime({
+      backend,
+      store,
+      adapters: { claude: claude.adapter, codex: bornDeadAgent(prompt => `re: ${prompt}`).adapter },
+      goneConfirmMs: 0,
+      placeLinks: placeWiring(statePath, {}),
+      // Two places over one backend: this host's own, and one more for the image build road, which never boots a
+      // machine here because the place already stands on the record.
+      places: { wired: "default", backend: place => (place === "default" || place === "elsewhere" ? backend : undefined), list: () => ["default", "elsewhere"] },
+    });
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
     vi.stubEnv("SOLARI_API_KEY", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "");
@@ -133,6 +156,11 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(await last("image move", "image", "move", "alpha")).toEqual({ workspace: expect.objectContaining({ name: "alpha" }), moved: false, kept: [] });
     // The seeded golden was sealed before records existed, so the record reads off its head and holds no sign-ins.
     expect(await last("image", "image")).toMatchObject({ image: expect.objectContaining({ version: 1 }), copies: [expect.objectContaining({ place: "default" })], projects: expect.any(Array) });
+    // A place already standing on the record answers with the copy it holds and builds nothing, which is the road
+    // that costs no machine: the record and that place's copy are written here at one hash.
+    await store.put("images", "default", RECORD);
+    await store.put("goldens", copyKey("elsewhere", "default"), { ...SEALED_GOLDEN, versions: [{ ...SEALED_GOLDEN.versions[0]!, snapshotId: "snap_elsewhere", imageHash: RECORD.hash }] });
+    expect(await last("image build", "image", "build", "elsewhere")).toEqual({ copy: expect.objectContaining({ place: "elsewhere", version: 1, hash: RECORD.hash }), built: false });
     const opened = (await last("thread new", "thread", "new", "--in", "alpha", "hello")) as { threadId: string; text: string };
     expect(opened).toMatchObject({ threadId: expect.any(String), text: "re: hello", outcome: "started" });
     await last("send", "send", opened.threadId, "again");

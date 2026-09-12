@@ -9,6 +9,7 @@
 
 import { BoxBackend, DockerBackend, FakeBackend, NoProviderBackend, SolariBackend, type MachineBackend } from "@wsp/engine";
 import { PROVIDER_KEY_WORDS } from "@wsp/protocol";
+import type { PlaceBackends } from "@wsp/runtime";
 import { keyIn } from "./env-keys.js";
 
 /** The environment a provider is picked out of: the host's own, with whatever the command line's provider words put
@@ -140,6 +141,51 @@ export function providerModule(env: ProviderEnv, modules: readonly ProviderModul
 
 export function providerBackendFor(env: ProviderEnv): MachineBackend {
   return providerModule(env).build(env);
+}
+
+/** Every provider this computer is set up for, in the table's own order: a row a person can add as a place, whose
+ * key, where it reads one, is here. These are the places a copy of the image can be built at beyond the one this
+ * host forks on. A row that is no place at all says so on itself, and a row whose key nobody has typed is one the
+ * provider would only refuse, so neither is offered; nothing here compares an id. */
+export function placeProviders(env: ProviderEnv, modules: readonly ProviderModule[] = PROVIDER_MODULES): ProviderModule[] {
+  return modules.filter(m => addedBy(m) !== undefined && (m.keyEnv === undefined || keyIn(env, m.keyEnv) !== undefined));
+}
+
+/** What a row reads out of the environment, as one string: every variable it declares and its key. A row whose
+ * reading has changed is a different provider to reach, so the backend built on the old reading is not handed out
+ * again; a key rotated while the host serves is the case this is for. */
+const providerReading = (m: ProviderModule, env: ProviderEnv): string =>
+  [...new Set([...m.envNames, ...(m.keyEnv !== undefined ? [m.keyEnv] : [])])].map(name => `${name}=${env[name] ?? ""}`).join("\n");
+
+/** Where this host can build a copy of its image, as one table: the provider it forks on now, under the id of the
+ * module it is wired with, and every other provider this computer is set up for. The wired row answers with the
+ * runtime's own backend, so a key saved while the host serves moves it with everything else; every other row is
+ * built at the first ask and kept while what it reads stands, since a module that holds its machines in memory
+ * would lose them if this handed out a fresh one each time. Only the places a person can name are listed: a host
+ * whose own module is no place lists the others and still answers for its own. */
+export function providerPlaces(wired: () => string, backend: MachineBackend, env: () => ProviderEnv): PlaceBackends {
+  const built = new Map<string, { reading: string; backend: MachineBackend }>();
+  const rows = (): ProviderModule[] => placeProviders(env());
+  return {
+    get wired() {
+      return wired();
+    },
+    backend: place => {
+      if (place === wired()) return backend;
+      const row = rows().find(m => m.id === place);
+      if (row === undefined) return undefined;
+      const reading = providerReading(row, env());
+      const held = built.get(row.id);
+      if (held !== undefined && held.reading === reading) return held.backend;
+      const made = row.build(env());
+      built.set(row.id, { reading, backend: made });
+      return made;
+    },
+    list: () => {
+      const ids = rows().map(m => m.id);
+      return ids.includes(wired()) ? [wired(), ...ids.filter(id => id !== wired())] : ids;
+    },
+  };
 }
 
 /** Stands for any key at all, so a row can be asked which one it would be wired by without one being typed first. */

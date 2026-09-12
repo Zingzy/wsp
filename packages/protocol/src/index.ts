@@ -207,6 +207,13 @@ export function forksNoMachines(capabilities: { sizes: readonly MachineSizeOffer
   return capabilities.sizes.length === 0;
 }
 
+/** Whether a place can build a copy of the image at all: it has to fork a builder and then copy that builder's disk
+ * into something a fork can stand on. A computer somebody joined does neither, and nor does a host with no provider
+ * key. The one place that reading is made, so the refusal and any road that offers the build read one rule. */
+export function buildsImages(capabilities: Pick<Capabilities, "diskSnapshots"> & { sizes: readonly MachineSizeOffer[] }): boolean {
+  return !forksNoMachines(capabilities) && capabilities.diskSnapshots;
+}
+
 /** Whether this provider can give a machine that already exists a new size, which is both halves of that one road:
  * a resize replaces the machine with a fresh fork of its image, then asks for that one at a size the old was not
  * made at. The one place the pair is read, so the gate that refuses a resize and the button that offers a size
@@ -2059,6 +2066,12 @@ export const SealedImageCopy = z.object({
 });
 export type SealedImageCopy = z.infer<typeof SealedImageCopy>;
 
+/** What a build at a place came to: the copy that place holds now, and whether this call built it. A place already
+ * standing on the record is answered with its copy and `built: false` rather than refused, so the road that builds
+ * a copy on first use and a person typing the line twice both get the copy they asked for. */
+export const SealedImageBuilt = z.object({ copy: SealedImageCopy, built: z.boolean() });
+export type SealedImageBuilt = z.infer<typeof SealedImageBuilt>;
+
 /** What an export wrote on this computer. */
 export const SealedImageExport = z.object({ path: z.string(), bytes: z.number().int().nonnegative(), hash: z.string().length(64) });
 export type SealedImageExport = z.infer<typeof SealedImageExport>;
@@ -2719,6 +2732,11 @@ export const placeForksNowhereLine = (place: string): string =>
 
 /** What a word that names no place this host holds is refused with, naming the ones it does. */
 export const noSuchPlaceRefusal = (word: string, held: readonly string[]): string => `no place named ${word}; you have ${held.join(", ")}`;
+
+/** What a build of the image at a place that cannot take one is refused with: a copy needs a builder forked there
+ * and that builder's disk copied, and a computer somebody joined does neither. */
+export const placeBuildsNoImageLine = (place: string): string =>
+  `${place} takes no copy of your image: a copy is built by forking a machine there and copying its disk, and ${place} does neither`;
 
 export const DaemonErrorCode = z.enum([
   "unsupported",
@@ -3626,9 +3644,11 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Replies with { view: SealedImageView }. */
   z.object({ id: reqId, op: z.literal("image.get"), name: z.string().optional() }),
   /** Builds this host's image at `place` from the record: prepare there, import the vault, seal. Replies with
-   * { copy: SealedImageCopy }; progress rides golden.stage frames carrying `place`. Refused (kind "conflict") when
-   * the place already holds a copy with the record's hash, when no record exists, and when the record holds no
-   * vault and `force` is not set. */
+   * { build: SealedImageBuilt }; progress rides golden.stage frames carrying `place`. A place that already holds a
+   * copy built from this record is answered with that copy and `built: false`, so asking twice costs nothing.
+   * Refused (kind "missing") when no place of that name is held, and (kind "conflict") when the place is the one
+   * this host forks on, when the place builds no copy at all, when no record exists, when the record was sealed
+   * without the recipe it was built from, and when the record holds no vault and `force` is not set. */
   z.object({ id: reqId, op: z.literal("image.build"), place: z.string().min(1), name: z.string().optional(), force: z.boolean().optional() }),
   /** Writes the record and the vault, sealed to the passphrase, to `dest` on this computer. Replies with
    * { exported: SealedImageExport }. The passphrase is never logged and never kept. */

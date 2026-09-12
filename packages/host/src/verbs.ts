@@ -40,15 +40,19 @@ import {
   ProjectExportResult,
   ProjectGolden,
   SealedImage,
+  SealedImageBuilt,
   SealedImageCopy,
   SealedImageView,
   NO_SEALED_IMAGE,
   IMAGE_PASSPHRASE_ENV,
   IMAGE_PASSPHRASE_MIN,
+  GOLDEN_STAGE_WORDS,
+  sealedBuiltLine,
   sealedCopyLine,
   sealedExportLine,
   sealedImageLine,
   sealedProjectLine,
+  type GoldenStageEvent,
   type SealedImageExport,
   ProjectImportResult,
   PlaceView,
@@ -685,6 +689,30 @@ export function rebuiltLine(workspace: WorkspaceView): string {
 async function imageView(client: HostClient): Promise<SealedImageView> {
   const { view } = await client.request<{ view: unknown }>("image.get", {});
   return SealedImageView.parse(view);
+}
+
+/** Builds this host's image at a place, streaming the build's lines as the runtime reports them: one line per stage,
+ * the same words the creation log prints. The record is read back after it, so the copy is said in the words `wsp
+ * image` says it in; every refusal is the host's. */
+export async function buildImageAt(client: HostClient, out: Out, place: string, force?: boolean): Promise<{ image: SealedImage; built: SealedImageBuilt }> {
+  const pushed = pushedFrames(client);
+  await client.events();
+  pushed.follow(
+    f => f.type === "golden.stage" && (f as unknown as GoldenStageEvent).place === place,
+    f => {
+      const e = f as unknown as GoldenStageEvent;
+      const words = e.stage === "failed" ? "Failed" : GOLDEN_STAGE_WORDS[e.stage];
+      out.stream(`${[`${place}: ${words}`, ...(e.detail !== undefined ? [e.detail] : [])].join(" · ")}\n`);
+    },
+  );
+  try {
+    const { build } = await client.request<{ build: unknown }>("image.build", { place, ...(force === true ? { force } : {}) });
+    const view = await imageView(client);
+    if (view.image === null) throw new Error(NO_SEALED_IMAGE);
+    return { image: view.image, built: SealedImageBuilt.parse(build) };
+  } finally {
+    pushed.stop();
+  }
 }
 
 /** What every director prints for the image: the record, a row per place, and the project images under it. */
@@ -2447,6 +2475,29 @@ export const VERBS: readonly Verb[] = [
       call: async (_args, deps) => {
         const view = await imageView(await deps.client());
         return asText(imageLines(view).join("\n"), view);
+      },
+    }),
+  },
+  {
+    name: "image build",
+    usage: "wsp image build <place> [--force]",
+    about: "builds this host's image at a place from the record, its sign-ins coming from the vault and no sign-in run again",
+    options: { force: { type: "boolean" } },
+    run: async ctx => {
+      const [place] = ctx.args;
+      if (place === undefined || ctx.args.length !== 1) throw usageRefusal("wsp image build takes one place.", usageIs(ctx));
+      const { image, built } = await buildImageAt(await ctx.client(), ctx.out, place, ctx.flags["force"] === true);
+      ctx.out.emit(built, sealedBuiltLine(image, built));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Builds this host's image at a place from the record alone: a builder is forked there with the recipe the image was sealed from and every sign-in set to skip, the sign-ins the seal held are landed on it out of the vault, and the copy is sealed and recorded under that place at the record's hash. Nothing signs in again and no Keychain is read. A place that already holds a copy built from this record is answered with that copy and `built` false, so asking twice costs nothing. Refused in one line for a place this host does not hold, for the place this host forks on, whose copy is what wsp init builds, for a place that takes no copy at all, and for a record sealed without the recipe it was built from. A record holding no sign-ins is refused too, since every copy of it would ask for them again; `force` builds it anyway.",
+      input: { place: z.string().describe("the place to build the copy at, by the name wsp places lists"), force: z.boolean().optional().describe("build even where the record holds no sign-ins, so the copy asks for every one of them again") },
+      output: { copy: SealedImageCopy, built: z.boolean() },
+      call: async ({ place, force }, deps) => {
+        const { image, built } = await buildImageAt(await deps.client(), QUIET, place, force);
+        return asText(sealedBuiltLine(image, built), built);
       },
     }),
   },
