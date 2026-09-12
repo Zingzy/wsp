@@ -158,17 +158,30 @@ export function offeredSize(sizes: readonly WorkspaceSize[], size: WorkspaceSize
   return sizes.some(s => s.cpu === size.cpu && s.memMb === size.memMb);
 }
 
-/** An awake rate in dollars an hour, to the cent. */
+/** An awake rate in dollars an hour, at the fewest places that do not round the price: cents where cents are the
+ * whole of it, three places where they are not, since a workspace at $0.018 an hour reads as $0.02 to the cent and
+ * that is a fifth of the price. A third place that says nothing is not added: $0.09 is $0.09, not $0.090.
+ *
+ * Which it is, is read off the rounded thousandth and never off the number itself: a provider computes its rate
+ * (Solari charges per vCPU-hour plus per GB-hour), so a real one arrives as 0.09000000000000001, and any test of
+ * the float against its own cent form calls that noise a third place. The one rate rule, read by the size refusal,
+ * the places table, the size pickers and the provider rows alike. */
 export function fmtRate(usdPerHour: number): string {
-  return `$${usdPerHour.toFixed(2)}/hr`;
+  const mils = usdPerHour.toFixed(3);
+  return `$${mils.endsWith("0") ? usdPerHour.toFixed(2) : mils}/hr`;
 }
 
 /** The one refusal every road gives a size the provider does not offer, malformed or merely absent: the word as it
- * was given, then every size that is offered with its rate. */
+ * was given, then every size that is offered with its rate. What happened, alone: each road joins its own fix to it
+ * through refusalLine, since what to do about it is the road's (a flag at a terminal, a pick in the app). */
 export function sizeRefusal(word: string, sizes: readonly MachineSizeOffer[]): string {
   const offered = sizes.map(s => `${sizeWord(s)} (${fmtRate(s.rateUsdPerHour)})`).join(", ");
   return `${word} is not a size this provider offers; the sizes are ${offered}`;
 }
+
+/** What to do about such a size on a road with no flag to name: the app's picker and the wire both ask for one of
+ * the sizes the half above just listed. The command line names its own flag instead. */
+export const SIZE_PICK_FIX = "Ask for one of those instead.";
 
 /** The one refusal a create or a fork gives when the provider is at its machine cap and no builder was left to stop
  * for room: the machines this host knows hold the slots, and the two moves that free one. The provider's own
@@ -1167,6 +1180,15 @@ export const NO_PROVIDER_LINE = "no machine provider is set up on this computer,
 
 /** Where a Solari key comes from, spelled once for the terminal's ask, the modal's guide and its link. */
 export const SOLARI_CONSOLE = "console.getsolari.com";
+
+/** What a person calls a provider's key and where they get one, keyed by the word WSP_PROVIDER holds. The host's
+ * provider registry reads its keyName and keyConsole from here and the app's provider rows read the same, so the
+ * screen that asks for a key and the terminal that asks for it say one thing. A provider that takes no key has no
+ * row. */
+export const PROVIDER_KEY_WORDS: Record<string, { keyName: string; keyConsole?: string }> = {
+  box: { keyName: "Box API key", keyConsole: "ascii.dev" },
+  solari: { keyName: "Solari API key", keyConsole: SOLARI_CONSOLE },
+};
 
 /** The quiet row at the sidebar's bottom while no golden is sealed, and every word of the modal it opens: the init
  * job drawn in the app. Micro-labels are the caps mono words over a screen, headlines the one sentence under them,
@@ -2563,7 +2585,7 @@ export const HOST_WORDS = {
 } as const;
 
 /** How long a computer has been away, coarse on purpose: the figure is read once in a table, not watched. */
-function offlineFor(ms: number): string {
+export function offlineFor(ms: number): string {
   const minutes = Math.max(0, Math.floor(ms / 60_000));
   if (minutes < 60) return `${minutes} min`;
   const hours = Math.floor(minutes / 60);
