@@ -3,12 +3,12 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { rootsPathIn } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { connectDaemonLink, type DaemonLink } from "../src/terminal/daemon-link.js";
 import { DaemonOpError, fsList, fsRead, gitDiff, gitStatus } from "../src/terminal/daemon-fs.js";
 import type { TerminalWire } from "../src/terminal/link.js";
+import { startRelayHarness, type RelayHarness } from "./relay-harness.js";
 
 function fakeWire(replies: Record<string, Record<string, unknown>>): TerminalWire & { calls: [string, Record<string, unknown>][] } {
   const calls: [string, Record<string, unknown>][] = [];
@@ -75,8 +75,7 @@ describe("daemon-fs wrapper over a wire", () => {
   });
 });
 
-const TOKEN = "fs-link-token";
-let daemon: DaemonHandle | undefined;
+let relay: RelayHarness | undefined;
 let link: DaemonLink | undefined;
 let root: string | undefined;
 
@@ -91,13 +90,13 @@ async function until(cond: () => boolean, ms = 5000): Promise<void> {
 afterEach(async () => {
   link?.close();
   link = undefined;
-  await daemon?.close();
-  daemon = undefined;
+  await relay?.close();
+  relay = undefined;
   if (root) rmSync(root, { recursive: true, force: true });
   root = undefined;
 });
 
-describe("daemon-fs over a real daemon link", () => {
+describe("daemon-fs over a real daemon link through the host", () => {
   it("lists, reads, reports status and diffs a repo inside the root", async () => {
     root = mkdtempSync(join(tmpdir(), "wsp-web-fs-"));
     const repo = join(root, "repo");
@@ -116,10 +115,11 @@ describe("daemon-fs over a real daemon link", () => {
     writeFileSync(join(repo, "a.txt"), "two\n");
 
     // Its roots file goes beside its own root: the option's default names the guest's /root, another user's folder here.
-    daemon = await startDaemon({ port: 0, token: TOKEN, root, rootsPath: rootsPathIn(root), portsSource: async () => [] });
+    relay = await startRelayHarness({ daemonOptions: { root, rootsPath: rootsPathIn(root) } });
     const statuses: string[] = [];
     link = connectDaemonLink({
-      reach: async () => ({ url: `http://127.0.0.1:${daemon!.port}/`, daemonToken: TOKEN }),
+      daemon: relay.api.daemon,
+      workspaceId: relay.workspaceId,
       onEvent: () => {},
       onStatus: s => statuses.push(s),
     });

@@ -52,6 +52,19 @@ export {
 export { ProcessManifest, type ManifestEntry, type ManifestOptions } from "./manifest.js";
 export { InboxWatcher, type InboxOptions, type InboxFileEvent } from "./inbox.js";
 export { OpError, resolveInside, type OpErrorCode } from "./workspace-paths.js";
+export { runExec, type ExecOptions } from "./exec.js";
+export {
+  PlaceLink,
+  placeBackoffMs,
+  readPlaceFile,
+  signPlaceBytes,
+  verifyPlaceBytes,
+  writePlaceFile,
+  type LinkOps,
+  type PlaceLinkOptions,
+  type PlaceLinkStatus,
+  type PlaceSelfReport,
+} from "./link.js";
 export {
   listDir,
   readFileBounded,

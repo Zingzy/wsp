@@ -7,6 +7,8 @@ export interface Store {
   get(collection: string, id: string): Promise<unknown | undefined>;
   put(collection: string, id: string, value: unknown): Promise<void>;
   list(collection: string): Promise<unknown[]>;
+  /** The ids in the collection; what a migration that has to move a document to another key reads. */
+  keys(collection: string): Promise<string[]>;
   delete(collection: string, id: string): Promise<void>;
   getBlob(collection: string, id: string): Promise<Buffer | undefined>;
   putBlob(collection: string, id: string, bytes: Buffer): Promise<void>;
@@ -27,6 +29,9 @@ export function memoryStore(): Store {
     },
     async list(collection) {
       return Object.values(data[collection] ?? {});
+    },
+    async keys(collection) {
+      return Object.keys(data[collection] ?? {});
     },
     async delete(collection, id) {
       delete data[collection]?.[id];
@@ -70,6 +75,9 @@ export function jsonFileStore(path: string): Store {
     },
     async list(collection) {
       return Object.values(load()[collection] ?? {});
+    },
+    async keys(collection) {
+      return Object.keys(load()[collection] ?? {});
     },
     async delete(collection, id) {
       const data = load();

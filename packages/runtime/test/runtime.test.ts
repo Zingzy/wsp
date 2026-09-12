@@ -9,17 +9,17 @@ import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe } from "@wsp/adapter-claude";
 import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, type AdapterEvent, type EventUnion, type RecipeDigest, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
-import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
+import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_PATH, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
 import { harnessCatalog } from "../src/harness-catalog.js";
-import { CATALOG_TTL_MS, DAEMON_REVIVE_AGAIN_MS, GRACE_MS, GUEST_LOGIN_ENV, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type GoldenExec, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions } from "../src/runtime.js";
+import { copyKey, CATALOG_TTL_MS, DAEMON_REVIVE_AGAIN_MS, GRACE_MS, GUEST_LOGIN_ENV, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type GoldenExec, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions } from "../src/runtime.js";
 import { POLL_INTERVAL_MS } from "../src/status.js";
 import { machineExecStream } from "../src/machine-exec.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { until } from "./until.js";
 import { wsRequest } from "./ws-client.js";
-import { stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
+import { stubBackend, tokenGuest, type StubBackend, type StubMachine } from "./stub-backend.js";
 import { fakeClock } from "./fake-clock.js";
 import { WebSocketServer } from "ws";
 
@@ -3126,7 +3126,7 @@ describe("runtime golden rollback", () => {
 
   it("moves head to an earlier version, persists it, and leaves existing workspaces on their image", async () => {
     const store = memoryStore();
-    await store.put("goldens", "default", { head: 2, versions: [version(1), version(2)] });
+    await store.put("goldens", copyKey("default", "default"), { head: 2, versions: [version(1), version(2)] });
     const rt = createRuntime({ backend: stubBackend(), store, adapters: {} });
     const ws = await rt.workspaces.create({ golden: "snap_golden-v2", name: "a" });
 
@@ -3138,7 +3138,7 @@ describe("runtime golden rollback", () => {
 
   it("refuses a version that is not in the manifest, and a golden that does not exist, as kind missing", async () => {
     const store = memoryStore();
-    await store.put("goldens", "default", { head: 1, versions: [version(1)] });
+    await store.put("goldens", copyKey("default", "default"), { head: 1, versions: [version(1)] });
     const rt = createRuntime({ backend: stubBackend(), store, adapters: {} });
     await expect(rt.golden.rollback(7)).rejects.toMatchObject({ kind: "missing", message: expect.stringContaining("v7") });
     await expect(rt.golden.rollback(1, "nope")).rejects.toMatchObject({ kind: "missing" });
@@ -3158,7 +3158,7 @@ describe("runtime machine context", () => {
     const backend = stubBackend();
     backend.execImpl = (_m, cmd) => (cmd.includes("echo WSP_CTX") ? { exitCode: 0, stdout: probe, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
     const store = memoryStore();
-    await store.put("goldens", "default", { head: 4, versions: [version] });
+    await store.put("goldens", copyKey("default", "default"), { head: 4, versions: [version] });
     const rt = createRuntime({ backend, store, adapters: {} });
     await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
     const m = backend.machines[0]!;
@@ -3268,10 +3268,8 @@ describe("runtime guest hostname", () => {
   });
 });
 
-const TOKEN_PATH = "/root/.wsp-daemon-token";
+const TOKEN_PATH = DAEMON_TOKEN_PATH;
 const TOKEN = "deadbeef".repeat(3);
-/** A guest with a daemon: the token write lands, everything else is silently fine. */
-const tokenGuest = (_m: unknown, cmd: string) => (cmd.includes(TOKEN_PATH) ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
 
 /** A daemon on a loopback port that answers every op ok and announces the version it is set to right after the auth
  * reply, as the real one does: the one way a client learns a daemon's version, and the only way to stand an old one
@@ -3916,7 +3914,7 @@ describe("runtime workspace size", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const version = { version: 1, snapshotId: "snap_golden-v1", baseTemplate: "base", setupSha: "s", createdAt: "2026-09-01T00:00:00.000Z", smoke: { cmd: "true", exitCode: 0 }, size: { cpu: 2, memMb: 8192 } };
-    await store.put("goldens", "big", { head: 1, versions: [version] });
+    await store.put("goldens", copyKey("default", "big"), { head: 1, versions: [version] });
     const rt = createRuntime({ backend, store, adapters: {} });
     await rt.workspaces.create({ golden: "snap_golden-v1", name: "a" });
     await rt.workspaces.create({ golden: "snap_golden-v1", name: "b", memMb: 2048 });
@@ -4014,7 +4012,7 @@ describe("runtime fork kind", () => {
   it("forks a desktop golden as kind desktop on create, resurrect and upgrade, carrying the stream on the view", async () => {
     const backend = stubBackend();
     const store = memoryStore();
-    await store.put("goldens", "default", { head: 1, versions: [version("desktop")] });
+    await store.put("goldens", copyKey("default", "default"), { head: 1, versions: [version("desktop")] });
     const rt = createRuntime({ backend, store, adapters: {} });
 
     const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "a" });
@@ -4035,7 +4033,7 @@ describe("runtime fork kind", () => {
   it("a manifest sealed before versions recorded a kind still forks sandbox", async () => {
     const backend = stubBackend();
     const store = memoryStore();
-    await store.put("goldens", "default", { head: 1, versions: [version()] });
+    await store.put("goldens", copyKey("default", "default"), { head: 1, versions: [version()] });
     const rt = createRuntime({ backend, store, adapters: {} });
     const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "a" });
     expect(backend.machines[0]!.spec.kind).toBe("sandbox");
@@ -4926,7 +4924,7 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(await again.store.list("builders")).toEqual([]);
     const sealedAt = new Date(clock.now()).toISOString();
     expect(await store.get("builders", b.id)).toMatchObject({ firstLife: true, sealed: { at: sealedAt, version: 1 }, import: { recipeHash: "h1" } });
-    expect(await store.get("golden-recipes", "default@v1")).toEqual(snapshot("h1", [".zshrc"]));
+    expect(await store.get("golden-recipes", copyKey("default", "default@v1"))).toEqual(snapshot("h1", [".zshrc"]));
     expect(await rt.golden.recipe()).toEqual(snapshot("h1", [".zshrc"]));
     expect(await rt.golden.builders()).toEqual([expect.objectContaining({ id: b.id, firstLife: true, sealed: { at: sealedAt, version: 1 } })]);
     expect(await rt.reap()).toEqual({ reaped: [], spared: [] });
@@ -5017,7 +5015,7 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(ran.some(c => c.includes("npm install -g cowsay"))).toBe(true);
     expect(backend.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_wsp-h1-default-v1", true], ["snap_wsp-h1-default-v2", true]]);
     expect(await store.get("builders", b.id)).toMatchObject({ sealed: { at: new Date(clock.now()).toISOString(), version: 2 }, import: { recipeHash: "h2", recipe: snapshot("h2", [".zshrc", ".config/starship.toml"]) } });
-    expect(await store.get("golden-recipes", "default@v2")).toEqual(snapshot("h2", [".zshrc", ".config/starship.toml"]));
+    expect(await store.get("golden-recipes", copyKey("default", "default@v2"))).toEqual(snapshot("h2", [".zshrc", ".config/starship.toml"]));
     expect(await rt.golden.recipe()).toEqual(snapshot("h2", [".zshrc", ".config/starship.toml"]));
     // Nine minutes after the second save the builder is still there; the window ran from that save, not the first.
     advance(9 * 60_000);
@@ -5092,8 +5090,8 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(fork.killed).toBe(false);
     expect(backend.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_wsp-h1-default-v1", true], ["snap_wsp-h1-default-v1", false], ["snap_wsp-h1-default-v2", true]]);
     expect(await store.list("builders")).toEqual([expect.objectContaining({ id: fork.id, firstLife: true, sealed: { at: expect.any(String), version: 2 } })]);
-    expect(await store.get("golden-recipes", "default@v1")).toBeDefined();
-    expect(await store.get("golden-recipes", "default@v2")).toBeDefined();
+    expect(await store.get("golden-recipes", copyKey("default", "default@v1"))).toBeDefined();
+    expect(await store.get("golden-recipes", copyKey("default", "default@v2"))).toBeDefined();
   });
 
   it("keepPrevious false deletes the previous version's snapshot and drops it from the manifest; a snapshot that will not delete keeps its version", async () => {
@@ -5106,8 +5104,8 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(two.previousDropped).toBe(true);
     expect(two.manifest).toEqual({ head: 2, versions: [expect.objectContaining({ version: 2 })] });
     expect(await rt.golden.get()).toEqual(two.manifest);
-    expect(await store.get("golden-recipes", "default@v1")).toBeUndefined();
-    expect(await store.get("golden-recipes", "default@v2")).toBeDefined();
+    expect(await store.get("golden-recipes", copyKey("default", "default@v1"))).toBeUndefined();
+    expect(await store.get("golden-recipes", copyKey("default", "default@v2"))).toBeDefined();
 
     deleted.mockRejectedValueOnce(Object.assign(new Error("SnapshotHasChildren"), { status: 409 }));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -5115,7 +5113,7 @@ describe("runtime golden update and the post-seal grace", () => {
     warn.mockRestore();
     expect(three.previousDropped).toBe(false);
     expect(three.manifest).toMatchObject({ head: 3, versions: [{ version: 2 }, { version: 3 }] });
-    expect(await store.get("golden-recipes", "default@v2")).toBeDefined();
+    expect(await store.get("golden-recipes", copyKey("default", "default@v2"))).toBeDefined();
   });
 
   it("keepPrevious false leaves a durable version alone while a workspace stands on it: its template would delete under the workspace's feet", async () => {
@@ -6825,7 +6823,7 @@ describe("a workspace behind the golden's head", () => {
   const seeded = async () => {
     const backend = stubBackend();
     const store = memoryStore();
-    await store.put("goldens", "default", { head: 2, versions: [version(1), version(2)] });
+    await store.put("goldens", copyKey("default", "default"), { head: 2, versions: [version(1), version(2)] });
     return { backend, store, rt: createRuntime({ backend, store, adapters: {} }) };
   };
 
@@ -6957,7 +6955,7 @@ describe("what a move onto a newer image does with the files the image itself wr
     const store = memoryStore();
     const home = on.home ?? HOME;
     const fork = on.fork ?? ON_FORK;
-    await store.put("goldens", "default", { head: 2, versions });
+    await store.put("goldens", copyKey("default", "default"), { head: 2, versions });
     backend.execImpl = (_m, cmd) => {
       if (cmd.startsWith("ls -A /root")) return { exitCode: 0, stdout: `${home.join("\n")}\n`, stderr: "" };
       // The guest hashes what it was asked for and nothing else, so a path the read never names cannot reach the

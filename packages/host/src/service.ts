@@ -16,9 +16,21 @@ import { homeNamed } from "./serving-home.js";
 
 export type ServiceKind = "launchd" | "systemd";
 
+/** What a wsp service on a computer is: the host serving a state file, or the agent holding a place's link open. */
+export type ServiceRole = "host" | "place";
+
+/** The word the managers' names and the unit's own description carry. One reading, so a manager cannot name a
+ * service by one word and describe it by another. */
+const roleWord = (at: { role?: ServiceRole }): ServiceRole => at.role ?? "host";
+
 /** Which service this is, for every manager that only has to name it: one service per state file. */
 export interface ServiceAddress {
-  /** The state file the service's host serves, absolute. */
+  /** Which of the two services this is: the host serving a state file, or the agent on a computer joined to one as
+   * a place. It is the one word the manager's names turn on, so one computer can hold both at once. Absent is the
+   * host, which is what every caller that names none means. */
+  role?: ServiceRole;
+  /** The state file the service's host serves, absolute; on a place, its own place file, since that is the one
+   * thing there is one of per service. */
   statePath: string;
   /** The person's home folder, where the manager reads unit files from. */
   home: string;
@@ -61,6 +73,12 @@ export interface ServiceManager {
   load(at: ServiceAddress): ReadonlyArray<readonly string[]>;
   /** Run in order to stop it and leave the manager holding nothing. */
   unload(at: ServiceAddress): ReadonlyArray<readonly string[]>;
+  /** Run in order to make the manager forget it at the next login while what is running keeps running. A manager
+   * that reads its units off files alone has none of these: taking the file away is the whole of it. Its one caller
+   * is the sweep on a computer joined as a place, which runs inside the service it is taking away: the file has to
+   * go before the stop, and a manager that keeps a link of its own beside that file would be left holding one that
+   * points at nothing. */
+  forget?(at: ServiceAddress): ReadonlyArray<readonly string[]>;
   /** Exits 0 when the manager holds it, non-zero when it does not. */
   holds(at: ServiceAddress): readonly string[];
   /** Whether a non-zero `holds` answer is this manager saying it does not have the unit. A manager that is not on
@@ -95,7 +113,7 @@ export function serviceEnv(env: Record<string, string | undefined>): Record<stri
 
 const xml = (value: string): string => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
-const launchdName = (at: ServiceAddress): string => `com.wsp.host.${serviceTag(at.statePath)}`;
+const launchdName = (at: ServiceAddress): string => `com.wsp.${roleWord(at)}.${serviceTag(at.statePath)}`;
 const launchdUnit = (at: ServiceAddress): ServiceUnit => ({ name: launchdName(at), path: join(at.home, "Library", "LaunchAgents", `${launchdName(at)}.plist`) });
 
 const launchd: ServiceManager = {
@@ -134,7 +152,7 @@ const launchd: ServiceManager = {
   absent: answer => answer.code === 113 || /could not find service/i.test(answer.output),
 };
 
-const systemdName = (at: ServiceAddress): string => `wsp-host-${serviceTag(at.statePath)}.service`;
+const systemdName = (at: ServiceAddress): string => `wsp-${roleWord(at)}-${serviceTag(at.statePath)}.service`;
 const systemdUnit = (at: ServiceAddress): ServiceUnit => ({ name: systemdName(at), path: join(at.home, ".config", "systemd", "user", systemdName(at)) });
 
 const systemd: ServiceManager = {
@@ -143,7 +161,7 @@ const systemd: ServiceManager = {
   text: plan =>
     [
       "[Unit]",
-      `Description=wsp host serving ${plan.statePath}`,
+      `Description=wsp ${roleWord(plan)} serving ${plan.statePath}`,
       "",
       "[Service]",
       "Type=simple",
@@ -169,6 +187,9 @@ const systemd: ServiceManager = {
     ["systemctl", "--user", "daemon-reload"],
   ],
   holds: at => ["systemctl", "--user", "is-enabled", systemdName(at)],
+  // systemd enables a unit by a symlink beside its file, so the file alone is not the whole of what it holds: a
+  // disable while the unit file is still there takes that link with it and leaves the service running.
+  forget: at => [["systemctl", "--user", "disable", systemdName(at)]],
   // is-enabled exits 1 both for a unit systemd does not have and for a systemctl that never reached the user bus
   // ("Failed to connect to bus: No medium found" on a box without one), so the word it printed is the answer and
   // the code is not.

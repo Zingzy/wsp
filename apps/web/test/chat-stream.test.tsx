@@ -11,6 +11,7 @@ import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { ChatView } from "../src/components/chat/ChatView.js";
 import { CHAT_T0, CHAT_WS } from "./fixtures/chat-stream.js";
 import { caps } from "./caps.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 const renders = new Map<string, number>();
 vi.mock("../src/components/ChatMarkdown.js", () => ({
@@ -41,7 +42,7 @@ function fixtureApi(history: SessionEvent[]) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
   const api: Api = {
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
-    daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
+    daemon: noDaemonApi,
     sessionHistory: async () => history,
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     snapshotStorage: async () => null,

@@ -35,7 +35,16 @@ export interface VaultOptions {
   onPart?: (progress: UploadProgress) => void;
   /** Export only: called as the archive comes down, with the bytes received so far of its total. */
   onProgress?: (progress: DownloadProgress) => void;
+  /** Export only: how the archive comes off the machine. The provider's signed URL by default, which is every
+   * caller that has one. `exec` reads it back as base64 through the one call every backend has, for a machine
+   * whose provider mints no URL (a container, one reached over ssh, this computer); it holds the whole archive in
+   * memory twice on the way, so it is refused over EXEC_READ_CAP and is only for archives known to be small. */
+  readRoad?: "signed-url" | "exec";
 }
+
+/** The most an archive read back through exec may weigh. Measured nothing: it is the bound that keeps a road with
+ * no streaming from being handed a disk image, and the refusal above it names the size. */
+export const EXEC_READ_CAP = 16 * 1024 * 1024;
 
 export interface DownloadProgress {
   bytes: number;
@@ -56,6 +65,7 @@ const feed = async (sink: Writable, chunk: Buffer): Promise<void> => {
 /** The archive at path on the guest, brought down over its signed URL into `sink` as it arrives; total is the size
  * read on the guest when the caller has it, else the bytes seen so far. */
 async function download(machine: Machine, path: string, sink: Writable, opts: VaultOptions, total?: number): Promise<void> {
+  if (opts.readRoad === "exec") return execRead(machine, path, sink, opts, total);
   const doFetch = opts.fetch ?? globalThis.fetch;
   const url = await machine.downloadUrl(path);
   const res = await doFetch(url);
@@ -72,6 +82,22 @@ async function download(machine: Machine, path: string, sink: Writable, opts: Va
     bytes += next.value.length;
     opts.onProgress?.({ bytes, total: known ?? bytes });
   }
+}
+
+/** The archive read back through the one call every backend has, base64 on stdout. Its size is read on the guest
+ * first, so an archive too big for a road with no streaming is refused before any of it is in memory. */
+async function execRead(machine: Machine, path: string, sink: Writable, opts: VaultOptions, total?: number): Promise<void> {
+  const bytes = total ?? (await guestFileSize(machine, path));
+  if (bytes > EXEC_READ_CAP) {
+    throw Object.assign(new Error(`the archive on the machine is ${bytes} bytes and this provider mints no download URL, so it comes back through one command, which is capped at ${EXEC_READ_CAP}`), { kind: "vaultTooLarge", bytes });
+  }
+  opts.onProgress?.({ bytes: 0, total: bytes });
+  const read = await machine.exec(`base64 < ${shellQuote(path)}`, { timeoutMs: opts.timeoutMs ?? 120_000 });
+  if (read.exitCode !== 0) throw new Error(`vault export read failed (exit ${read.exitCode}): ${read.stderr.slice(-500)}`);
+  const body = Buffer.from(read.stdout.replace(/\s+/g, ""), "base64");
+  if (body.length !== bytes) throw new Error(`vault export read failed: the machine held ${bytes} bytes and ${body.length} came back`);
+  await feed(sink, body);
+  opts.onProgress?.({ bytes: body.length, total: bytes });
 }
 
 /** A download held in memory: the road for an archive a caller keeps as bytes, like the vault a wake stores. */

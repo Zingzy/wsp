@@ -26,6 +26,7 @@ import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { caps } from "./caps.js";
 import { statusOf } from "./workspace-status.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 // Base UI's tooltip opens on pointer hover, which jsdom cannot stage; the popup renders inline instead.
 vi.mock("../src/components/ui/tooltip.js", () => ({
@@ -96,7 +97,7 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
     updateImage: vi.fn(async (id: string) => ({ workspace: { ...view(id, "?", "running"), golden: `snap_golden-v${current.head ?? 0}` }, moved: true, kept: [] })),
     capabilities: vi.fn(async () => capabilities),
     portReach: vi.fn(async (_id: string, port: number) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 })),
-    daemonReach: vi.fn(async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 })),
+    daemon: noDaemonApi,
     startSession: vi.fn(async (o: { workspaceId: string }) => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" as const })),
     sessionHistory: vi.fn(async () => []),
     listSnapshots: vi.fn<() => Promise<SnapshotLineage>>(async () => current),

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { createRuntime } from "../src/runtime.js";
+import { copyKey, createRuntime } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { stubBackend } from "./stub-backend.js";
 
@@ -22,10 +22,10 @@ async function seeded(versions: ReturnType<typeof version>[], head = versions.at
   const store = memoryStore();
   const backend = stubBackend();
   backend.capabilities.templates = true;
-  await store.put("goldens", "default", { head, versions });
+  await store.put("goldens", copyKey("default", "default"), { head, versions });
   for (const v of versions) {
     backend.snapshots.push({ id: v.snapshotId, sizeBytes: (7 + v.version) * GB, createdAt: v.createdAt });
-    await store.put("golden-recipes", `default@v${v.version}`, { ticks: [], files: [] });
+    await store.put("golden-recipes", copyKey("default", `default@v${v.version}`), { ticks: [], files: [] });
   }
   const rt = createRuntime({ backend, store, adapters: {}, hostId: "h1" });
   return { store, backend, rt };
@@ -41,9 +41,9 @@ describe("golden templates", () => {
     expect(backend.promoted[0]!.name).toMatch(/^[a-z0-9-]+$/);
     // The doctor's road names a version the same way the seal does.
     const store = memoryStore();
-    await store.put("goldens", "default", { head: 1, versions: [version(1)] });
+    await store.put("goldens", copyKey("default", "default"), { head: 1, versions: [version(1)] });
     // The snapshot the build sealed carries the same name as its template, since one rule names both.
-    await store.put("goldens", "default", { head: 1, versions: [{ ...version(1), snapshotId: "snap_wsp-9f3a1c2b-default-v1" }] });
+    await store.put("goldens", copyKey("default", "default"), { head: 1, versions: [{ ...version(1), snapshotId: "snap_wsp-9f3a1c2b-default-v1" }] });
     const doctorRt = createRuntime({ backend, store, adapters: {}, hostId: "zingzys-MacBook-Pro.local:9f3a1c2b" });
     expect(await doctorRt.golden.promote()).toEqual([{ golden: "default", version: 1, templateId: "tpl_wsp-9f3a1c2b-default-v1", sharing: 1 }]);
   });

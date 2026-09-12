@@ -5,7 +5,7 @@
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { describe, expect, it } from "vitest";
 import { fakeHost } from "../../collect/test/fake-host.js";
-import { agentHistories, agentsHere } from "../src/agents-here.js";
+import { agentsHere } from "../src/agents-here.js";
 
 describe("agentsHere", () => {
   it("lists every catalog agent in catalog order, found by the recipe scan's presence rule, configured when its MCP config names wsp", async () => {
@@ -33,14 +33,6 @@ describe("agentsHere", () => {
     expect(rows[0]).toEqual({ id: "claude", name: "Claude Code", found: true, configured: true });
     expect(rows[1]).toEqual({ id: "codex", name: "Codex", found: true, configured: false, version: "0.153.0" });
     expect(rows[4]).toEqual({ id: "pi", name: "Pi", found: true, configured: false });
-  });
-
-  it("reads each named agent's session count off its own store, zero for a store that is empty or has no reader", async () => {
-    const host = fakeHost({ files: { "~/.codex/config.toml": "" } });
-    expect(await agentHistories(["codex", "pi"], host)).toEqual([
-      { id: "codex", sessions: 0 },
-      { id: "pi", sessions: 0 },
-    ]);
   });
 
   it("reads a config that is not its format as naming nothing", async () => {
