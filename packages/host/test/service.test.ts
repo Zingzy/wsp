@@ -651,7 +651,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
   it("a command that runs on this computer refuses --host rather than taking it and aiming nowhere", async () => {
     const errors: string[] = [];
     expect(await cli(["up", "--host", "box"], quietIO([], errors))).toBe(EXIT_CODES.usage);
-    expect(errors).toEqual(["Unknown option '--host' for wsp up: it runs on this computer. wsp status reads it, and so does every verb."]);
+    expect(errors).toEqual(["Unknown option '--host' for wsp up: it runs on this computer. That flag belongs to wsp status, and to every verb."]);
   });
 
   it("wsp down stops a service the manager still holds after the unit file went, rather than refusing with the one thing that could stop it gone", async () => {

@@ -3,9 +3,11 @@
 // kept in local storage so the next thread in that workspace starts the same
 // way. A key absent means nothing was picked and the CLI's own default runs.
 // Values are the harness's slugs; the runtime passes them through unchanged.
-// The access pick is the one that is not here: the host reads it too, to open
-// a thread nobody named an access for, so it lives on the preferences record
-// and useComposerOptions folds it in beside these.
+// The access pick is the one whose value is not here: the host reads it too, to
+// open a thread nobody named an access for, so it lives on the preferences
+// record and useComposerOptions folds it in beside these; the thread it was
+// picked on is kept here with the others, since that record holds no room for
+// one.
 import { useMemo } from "react";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
@@ -14,22 +16,25 @@ import { useStore } from "../../protocol/store";
 /** The picks this browser keeps. */
 export type ComposerOptionKey = "harness" | "model" | "effort" | "contextWindow";
 
-/** Every pick the composer's pickers read: the four above and the access, which is the host's record's. */
-export type ComposerOptions = Partial<Record<ComposerOptionKey | "permissionMode", string>>;
+/** Every pick the composer's pickers read: the four this browser keeps and the access, which is the host's record's. */
+export type ComposerPickKey = ComposerOptionKey | "permissionMode";
+
+export type ComposerOptions = Partial<Record<ComposerPickKey, string>>;
 
 const STORAGE_KEY = "wsp:composer-options:v1";
-const KEYS: readonly ComposerOptionKey[] = ["harness", "model", "effort", "contextWindow"];
+/** The picks this browser keeps a value for; the access is not one of them, and is stamped with a thread all the same. */
+const KEPT: readonly ComposerPickKey[] = ["harness", "model", "effort", "contextWindow"];
 const NONE: ComposerOptions = {};
 const NO_THREADS: PickThreads = {};
 
-/** The picks a thread that has run takes only from its own picker: the model, and the window that rides inside it on
- * the wire. Each names its own thread, never one stamp for the pair, or a window picked here would carry a model
- * picked on another thread onto this one. Effort and access are not scoped yet, which is #643; that is one more
- * entry here and in the pickers that write them. */
-export const THREAD_SCOPED_PICKS: readonly ComposerOptionKey[] = ["model", "contextWindow"];
+/** The picks a thread that has run takes only from its own picker, since each is something that thread already runs
+ * with and a pick made elsewhere would move it under the person on the next send. Each names its own thread, never
+ * one stamp for several, or a window picked here would carry a model picked on another thread onto this one. One
+ * more pick scoped to its thread is one more entry here and the thread key handed to the picker that writes it. */
+export const THREAD_SCOPED_PICKS: readonly ComposerPickKey[] = ["model", "contextWindow", "effort", "permissionMode"];
 
 /** The thread each of a workspace's scoped picks was made in, by the pick's own key. */
-export type PickThreads = Partial<Record<ComposerOptionKey, string>>;
+export type PickThreads = Partial<Record<ComposerPickKey, string>>;
 
 interface ComposerOptionsState {
   byWorkspaceId: Record<string, ComposerOptions>;
@@ -38,7 +43,7 @@ interface ComposerOptionsState {
    * slot per pick per workspace is the whole of it: pick on thread A, leave without sending, pick the same key on
    * thread B, and A's button is back on its own model, which is where a thread that ran belongs anyway. */
   pickedOn: Record<string, PickThreads>;
-  pick: (workspaceId: string, key: ComposerOptionKey, value: string, thread?: string) => void;
+  pick: (workspaceId: string, key: ComposerPickKey, value: string, thread?: string) => void;
 }
 
 function normalizeThreads(persisted: unknown): Record<string, PickThreads> {
@@ -65,7 +70,7 @@ function normalizePersisted(persisted: unknown): { byWorkspaceId: Record<string,
   for (const [workspaceId, options] of Object.entries(raw as Record<string, unknown>)) {
     if (!options || typeof options !== "object") continue;
     const clean: ComposerOptions = {};
-    for (const key of KEYS) {
+    for (const key of KEPT) {
       const value = (options as Record<string, unknown>)[key];
       if (typeof value === "string" && value !== "") clean[key] = value;
     }
@@ -82,7 +87,10 @@ export const useComposerOptionsStore = create<ComposerOptionsState>()(
       pick: (workspaceId, key, value, thread) =>
         set(s => {
           const current = s.byWorkspaceId[workspaceId] ?? NONE;
-          const moved = current[key] !== value;
+          // The access pick's value is not one this browser keeps: it lives on the host's own record, where the next
+          // thread here reads it whoever opens it. Its thread is stamped here all the same, so every pick is scoped
+          // by the one list rather than the access taking a road of its own.
+          const moved = KEPT.includes(key) && current[key] !== value;
           // This pick names the thread it was made in, and only this pick: the same value picked again on another
           // thread still moves it there, and no other key's thread moves with it.
           const threads = s.pickedOn[workspaceId] ?? NO_THREADS;
