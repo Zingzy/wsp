@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_AGENT } from "@wsp/catalog";
 import { DEFAULT_HARNESS } from "../src/components/chat/ComposerOptionPickers.js";
-import { HARNESS_CLIENTS, catalogFor, catalogFromHarness, composerPlaceholder, deriveSession, harnessClient, offersSlashCommands } from "../src/adapt/index.js";
+import { HARNESS_CLIENTS, catalogFor, catalogFromHarness, composerPlaceholder, deriveSession, harnessClient, offersSlashCommands, slashHoldLine } from "../src/adapt/index.js";
 import { CHAT_HARNESS, CHAT_STREAM } from "./fixtures/chat-stream.js";
 
 describe("the client's harness registry", () => {
@@ -64,5 +64,51 @@ describe("the composer's placeholder", () => {
     const screenOnly = catalogFromHarness({ id: "claude", harness: { slashCommands: ["login"] }, screen: [{ name: "login", control: "sign-in" }] });
     expect(offersSlashCommands(screenOnly)).toBe(false);
     expect(composerPlaceholder(screenOnly)).toBe("Ask anything");
+  });
+});
+
+describe("the source an announced name carries", () => {
+  it("is read by the harness's own module, since only it knows how its CLI spells one", () => {
+    // The harness this module is registered for names a plugin's or a scoped skill's command <source>:<command>.
+    const claude = catalogFromHarness({ id: "claude", harness: { slashCommands: ["compact", "code-review:code-review", "apps/web:deploy", "my-skill"] } });
+    expect(claude.slashCommands).toEqual([
+      { name: "compact" },
+      { name: "code-review:code-review", source: "code-review" },
+      { name: "apps/web:deploy", source: "apps/web" },
+      { name: "my-skill" },
+    ]);
+    // A harness whose module registers no reading announces bare names, and its menu is one list.
+    expect(harnessClient("codex")?.announced).toBeUndefined();
+    expect(catalogFromHarness({ id: "codex", harness: { slashCommands: ["a:b"] } }).slashCommands).toEqual([{ name: "a:b" }]);
+  });
+});
+
+describe("a draft that is a slash and nothing more", () => {
+  const catalog = catalogFromHarness({ id: "claude", harness: { slashCommands: ["compact", "my-skill"] } });
+  const screen = [{ name: "login", control: "sign-in" as const }];
+
+  it("is held, and says why in the composer's own words", () => {
+    expect(slashHoldLine({ prompt: "/", catalog })).toBe("a slash on its own is not a command");
+    expect(slashHoldLine({ prompt: "  /  ", catalog })).toBe("a slash on its own is not a command");
+    expect(slashHoldLine({ prompt: "/heapdump", catalog })).toBe("no command here is called /heapdump");
+  });
+
+  it("goes as it always did once it is a command that was announced, or words that may be meant", () => {
+    expect(slashHoldLine({ prompt: "/compact", catalog })).toBeNull();
+    expect(slashHoldLine({ prompt: "/my-skill", catalog })).toBeNull();
+    expect(slashHoldLine({ prompt: "/heapdump of the daemon", catalog })).toBeNull();
+    expect(slashHoldLine({ prompt: "read /etc/hosts", catalog })).toBeNull();
+    expect(slashHoldLine({ prompt: "", catalog })).toBeNull();
+  });
+
+  it("leaves a command that runs only in the CLI's own terminal to the line that names wsp's road for it", () => {
+    expect(slashHoldLine({ prompt: "/login", catalog, screen })).toBeNull();
+    expect(slashHoldLine({ prompt: "/login", catalog })).toBe("no command here is called /login");
+  });
+
+  it("holds the lone slash even where nothing was announced, and holds no name there, since any name may be meant", () => {
+    const fresh = catalogFromHarness({ id: "claude", harness: null });
+    expect(slashHoldLine({ prompt: "/", catalog: fresh })).toBe("a slash on its own is not a command");
+    expect(slashHoldLine({ prompt: "/compact", catalog: fresh })).toBeNull();
   });
 });

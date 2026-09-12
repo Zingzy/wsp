@@ -40,6 +40,38 @@
       "wait": "testid=composer-editor"
     },
     {
+      "name": "composer-slash-menu",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:th_redirect",
+        "390:key:Escape",
+        "390:key:Escape",
+        "testid=composer-editor",
+        "key:/"
+      ],
+      "wait": "composer-command-drawer",
+      "settleMs": 700
+    },
+    {
+      "name": "composer-slash-filtered",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:th_redirect",
+        "390:key:Escape",
+        "390:key:Escape",
+        "testid=composer-editor",
+        "key:/",
+        "key:r",
+        "key:e"
+      ],
+      "wait": "composer-command-drawer",
+      "settleMs": 700
+    },
+    {
       "name": "machine",
       "at": "/",
       "steps": [
