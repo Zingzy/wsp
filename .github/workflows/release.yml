@@ -38,10 +38,8 @@ jobs:
         include:
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
-            zig: true
           - target: aarch64-unknown-linux-musl
-            os: ubuntu-latest
-            zig: true
+            os: ubuntu-24.04-arm
           - target: aarch64-apple-darwin
             os: macos-14
           - target: x86_64-apple-darwin
@@ -66,20 +64,20 @@ jobs:
           key: daemon-release-${{ matrix.target }}-${{ hashFiles('daemon/Cargo.lock', 'daemon/rust-toolchain.toml') }}
           restore-keys: |
             daemon-release-${{ matrix.target }}-
-      # The two Linux binaries are static musl builds cross-compiled on one runner; ring carries C, and zig is the
-      # one C toolchain that targets both chips from it. The wheel brings zig as a python module, which cargo-zigbuild
-      # finds through the python3 on PATH, so both go into the runner's own python rather than a tool's venv.
-      - name: cargo-zigbuild and zig for the musl targets
-        if: matrix.zig
+      # Each Linux binary is a static musl build on its own chip's runner: ring carries C, which musl-tools compiles
+      # for the musl target, and libcontainer links a libseccomp built against musl by the script, from its pinned
+      # release. The darwin builds link no C library of their own.
+      - name: C compiler for the musl target, and libseccomp built against musl
+        if: runner.os == 'Linux'
         run: |
-          pip3 install --user --break-system-packages cargo-zigbuild
-          python3 -m ziglang version
+          sudo apt-get install -y --no-install-recommends musl-tools gperf
+          ./scripts/libseccomp-archive.sh musl
       - name: Build
         env:
           TARGET: ${{ matrix.target }}
         run: |
-          if [ "${{ matrix.zig }}" = "true" ]; then
-            cargo zigbuild --release --target "$TARGET" -p wsp-daemon-bin
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            LIBSECCOMP_LIB_PATH="$PWD/target/libseccomp/musl" cargo build --release --target "$TARGET" -p wsp-daemon-bin
           else
             cargo build --release --target "$TARGET" -p wsp-daemon-bin
           fi

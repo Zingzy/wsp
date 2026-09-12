@@ -572,7 +572,8 @@ describe("putting the agent on a computer over ssh", () => {
     expect(stages.map(s => `${s.step} ${s.state}`)).toEqual(["connect done", "join running", "join done"]);
     expect(added.addId).toBe("a_mine");
     expect(stages.every(s => s.addId === "a_mine")).toBe(true);
-    expect(stages.at(-1)?.note).toContain("cores");
+    // The one fact the box's own row does not already carry: a size here as well cuts the line the app draws.
+    expect(stages.at(-1)?.note).toBe("docker yes");
   });
 
   it("waits for the link the agent dials, not the socket the join itself opened and closed", async () => {

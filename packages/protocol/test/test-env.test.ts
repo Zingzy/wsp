@@ -26,6 +26,7 @@ const GATES: Record<string, string> = {
   WSP_DOCKER_LIVE_SSH: "the daemon on a box the live Docker tests take their second pass against",
   WSP_DOCKER_LIVE_SSH_KEY: "the key that second pass dials the box with",
   WSP_DOCKER_LIVE_SSH_KNOWN_HOSTS: "the file that second pass checks the box's key against",
+  WSP_RUNTIME_LIVE: "runs the tests that drive the workspace runtime on this computer, which take root and cgroup v2",
   WSP_RENDER: "runs the Chromium render tests",
   WSP_PACK_SMOKE: "runs the npm pack smoke",
   WSP_DESKTOP_SMOKE: "runs the packaged desktop smoke",

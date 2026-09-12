@@ -53,11 +53,16 @@ jobs:
           key: daemon-rust-${{ runner.os }}-${{ hashFiles('daemon/Cargo.lock', 'daemon/rust-toolchain.toml') }}
           restore-keys: |
             daemon-rust-${{ runner.os }}-
-      - name: C compiler for the musl target
-        run: sudo apt-get install -y --no-install-recommends musl-tools
+      # ring carries C, which musl-tools compiles for the musl target; libcontainer links libseccomp statically, and
+      # the archive has to be one built against musl, so the script builds it from its pinned release first.
+      - name: C compiler for the musl target, and libseccomp built against musl
+        working-directory: daemon
+        run: |
+          sudo apt-get install -y --no-install-recommends musl-tools gperf
+          ./scripts/libseccomp-archive.sh musl
       - name: The daemon this runner runs
         working-directory: daemon
-        run: cargo build --release --target x86_64-unknown-linux-musl -p wsp-daemon-bin
+        run: LIBSECCOMP_LIB_PATH=$PWD/target/libseccomp/musl cargo build --release --target x86_64-unknown-linux-musl -p wsp-daemon-bin
       - run: node packages/wspx/scripts/daemon-binary.mjs --triple x86_64-unknown-linux-musl
       - run: pnpm install --frozen-lockfile
       - name: Build

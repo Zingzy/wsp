@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# libseccomp is the one C library the daemon links: static, so the binary runs on a rootfs that lacks it and the
+# musl build stays one file. scripts/libseccomp-archive.sh puts the archive at this path first.
+[env]
+LIBSECCOMP_LINK_TYPE = "static"
+LIBSECCOMP_LIB_PATH = { value = "target/libseccomp", relative = true }

@@ -1,0 +1,85 @@
+[
+  {
+    "offer": "runtime",
+    "capabilities": {
+      "liveCloneForks": false,
+      "pauseMode": "disk",
+      "resize": false,
+      "replacesMachine": true,
+      "previewUrls": false,
+      "signedUrls": false,
+      "containers": false,
+      "callbackRelay": true,
+      "diskSnapshots": true,
+      "snapshotListing": true,
+      "templates": true,
+      "sizes": [
+        {
+          "cpu": 2,
+          "memMb": 4096,
+          "rateUsdPerHour": 0
+        },
+        {
+          "cpu": 4,
+          "memMb": 8192,
+          "rateUsdPerHour": 0
+        }
+      ],
+      "kept": false
+    },
+    "pricing": {
+      "defaultSize": {
+        "cpu": 2,
+        "memMb": 4096
+      },
+      "snapshotStorage": {
+        "freeGb": 0,
+        "usdPerGbMonth": 0,
+        "billedFrom": ""
+      },
+      "builderDiskGb": 40
+    },
+    "lifecycle": {
+      "budgets": {
+        "wakeAttempts": 1,
+        "daemonAnswersMs": 30000,
+        "resumeAsks": {
+          "everyMs": 5000,
+          "forMs": 60000
+        }
+      }
+    },
+    "baseTemplates": {
+      "sandbox": "ubuntu:24.04",
+      "desktop": "ubuntu:24.04"
+    }
+  },
+  {
+    "offer": "docker",
+    "capabilities": {
+      "liveCloneForks": false,
+      "resize": false,
+      "replacesMachine": true,
+      "previewUrls": false,
+      "signedUrls": false,
+      "containers": false,
+      "callbackRelay": false,
+      "diskSnapshots": true,
+      "snapshotListing": true,
+      "templates": true,
+      "sizes": [],
+      "kept": false
+    },
+    "pricing": {
+      "defaultSize": {
+        "cpu": 2,
+        "memMb": 4096
+      },
+      "snapshotStorage": {
+        "freeGb": 0,
+        "usdPerGbMonth": 0,
+        "billedFrom": ""
+      }
+    }
+  }
+]

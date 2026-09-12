@@ -37,14 +37,17 @@ describe("the release workflow", () => {
   });
 
   it("builds one static daemon per target the host names, uploads each under the artifact name the host spells, and places all of them before every build", () => {
+    // Each Linux binary is built natively on its own chip's runner, so the static link needs no cross toolchain.
+    const runners: Record<string, string> = { "x86_64-unknown-linux-musl": "ubuntu-latest", "aarch64-unknown-linux-musl": "ubuntu-24.04-arm", "aarch64-apple-darwin": "macos-14", "x86_64-apple-darwin": "macos-14" };
     for (const target of DAEMON_TARGETS) {
       const row = daemonJob.slice(daemonJob.indexOf(`- target: ${target.triple}\n`));
       expect(row.length).toBeGreaterThan(0);
-      expect(/os: (\S+)/.exec(row)![1]).toBe(target.platform === "linux" ? "ubuntu-latest" : "macos-14");
+      expect(/os: (\S+)/.exec(row)![1]).toBe(runners[target.triple]);
     }
     expect(daemonJob).toContain(`name: ${daemonArtifactName("${{ matrix.target }}")}`);
-    expect(daemonJob).toContain('cargo zigbuild --release --target "$TARGET" -p wsp-daemon-bin');
-    expect(daemonJob).toContain('cargo build --release --target "$TARGET" -p wsp-daemon-bin');
+    expect(daemonJob).toContain("./scripts/libseccomp-archive.sh musl");
+    expect(daemonJob).toContain('LIBSECCOMP_LIB_PATH="$PWD/target/libseccomp/musl" cargo build --release --target "$TARGET" -p wsp-daemon-bin');
+    expect(daemonJob).not.toContain("zig");
     // Every job that builds the command or the app reads the binaries back first, through the one script.
     for (const job of [macJob, linuxJob, npmJob]) {
       expect(job).toContain("pattern: wsp-daemon-*");
