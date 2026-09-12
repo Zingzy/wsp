@@ -17,7 +17,7 @@ import { SolariBackend, type BackendPricing } from "@wsp/engine";
 import { createRuntime, jsonFileStore } from "@wsp/runtime";
 import { afterAll, describe, expect, it } from "vitest";
 import { LIVE, liveEnv } from "../../engine/test/live.js";
-import { deployDaemon } from "../src/doctor.js";
+import { DAEMON_DEPLOYED_LINE, deployDaemon } from "../src/doctor.js";
 import { importResultPath } from "../src/init-import.js";
 import { runInit, type InitIO, type InitOptions } from "../src/init.js";
 import { startCallbackRelay, systemOpener, type CallbackRelay } from "../src/relay.js";
@@ -144,7 +144,7 @@ describe.runIf(LIVE)("sign-in stage (live)", () => {
           backend,
           store: jsonFileStore(statePath),
           adapters: {},
-          goldenRecipe: { ...recipe, setup: SETUP, deployDaemon: async m => `node ${(await deployDaemon(m)).node}` },
+          goldenRecipe: { ...recipe, setup: SETUP, deployDaemon: async m => deployDaemon(m).then(() => DAEMON_DEPLOYED_LINE) },
         }),
       ports: { port: 0, wsPort: 0, named: true },
       upCommand: "wsp up",
