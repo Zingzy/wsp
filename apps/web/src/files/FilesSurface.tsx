@@ -118,7 +118,7 @@ export function NotRunning() {
     <Empty className="flex-1">
       <EmptyHeader>
         <EmptyTitle>The workspace is not running.</EmptyTitle>
-        <EmptyDescription>Files and diffs are read over the machine's daemon; wake it to browse them.</EmptyDescription>
+        <EmptyDescription>Files and diffs are read over the workspace's daemon; wake it to browse them.</EmptyDescription>
       </EmptyHeader>
     </Empty>
   );

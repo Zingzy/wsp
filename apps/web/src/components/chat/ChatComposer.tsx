@@ -41,8 +41,9 @@
 // every start, so a change mid-thread applies at the next turn.
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent } from "react";
 import { ImageIcon } from "lucide-react";
-import { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
+import { HOST_ASLEEP_SEND, IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
+import { hostAsleep } from "../../boot";
 import { useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { onComposerFocusRequest } from "../../shell/shellRequests";
 import { useThreadStart } from "../../files/root";
@@ -157,7 +158,9 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   // A send wakes a paused machine by itself, so paused is not a refusal here: the box takes the words and the send
   // button says it wakes first.
   const wakesFirst = blocked === "paused";
-  const unavailable = blocked === null || wakesFirst ? null : sendRefusal(blocked);
+  // A window on another computer whose wsp has gone quiet says which computer is asleep, not that wsp is not
+  // running: nothing here is broken, and the turn starts when that computer wakes.
+  const unavailable = blocked === null || wakesFirst ? null : hostAsleep(conn) ? HOST_ASLEEP_SEND : sendRefusal(blocked);
   const sendDisabledReason = unavailable ?? (thread.busy ? TURN_IN_FLIGHT : null);
   const hasText = draft.prompt.trim().length > 0;
   // The catalog answers before the click; a row the runtime's table stood in for is no answer, so the picker is

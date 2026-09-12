@@ -106,8 +106,9 @@ describe("the words a link gets", () => {
     const pane = paneOf(link);
     expect(pane).toEqual({ kind: "reconnecting" });
     // The sentence itself is pinned where the state table's own test pins every other one; what this test owns is
-    // that a drop is the state that gets it, and that it is said once.
+    // that a drop is the state that gets it, said once, in words that do not call a workspace a machine.
     expect(terminalPaneTitle(pane)).toMatch(/^Reconnecting to /);
+    saysNoMachine(pane);
     expect(statuses.filter(s => s === "connecting")).toHaveLength(1);
   }, 20_000);
 
@@ -122,7 +123,8 @@ describe("the words a link gets", () => {
     // Two halves: what did not answer, then the one thing a person can do about it.
     expect(terminalPaneTitle(pane)).toBe(`Nothing has answered on ${THIS_COMPUTER}`);
     expect(terminalPaneHints(pane, null, null)).toEqual([`wsp keeps trying; look at the terminal you started wsp in on ${THIS_COMPUTER}`]);
-    expect(terminalPaneHints(paneOf(link, false), null, null)).toEqual(["wsp keeps trying; the Machine panel says what this workspace is doing"]);
+    expect(terminalPaneHints(paneOf(link, false), null, null)).toEqual(["wsp keeps trying; the Workspace panel says what this workspace is doing"]);
+    saysNoMachine(paneOf(link, false));
     for (const line of saidBy(pane)) expect(line).not.toMatch(/reconnect/i);
     saysNoMachine(pane);
 

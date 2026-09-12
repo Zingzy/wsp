@@ -127,7 +127,7 @@ describe("workspace creation view", () => {
     expect(wave.querySelector("svg")!.getAttribute("data-state")).toBe("moving");
     expect(wave.querySelector("pattern path")!.getAttribute("stroke")).toBe("currentColor");
     const log = within(view).getByRole("list", { name: "Creation log" });
-    expect(log.textContent).toContain("Asking the runtime for a fork.");
+    expect(log.textContent).toContain("Asking wsp to start it.");
 
     emit(stage({}));
     emit(stage({ stage: "machine-booting", message: "Machine m1 is booting.", elapsedMs: 3_400 }));
@@ -179,7 +179,7 @@ describe("workspace creation view", () => {
     expect(lines[1]!.className).toContain("text-destructive-foreground");
     expect(lines[0]!.className).not.toContain("text-destructive-foreground");
     // The runtime's words are the refusal: they appear once, on the failing line, and no second wording follows the title.
-    const lead = within(view).getByText("The provider refused: machine cap reached");
+    const lead = within(view).getByText("The provider refused: no more workspaces can run there now");
     expect(lead.nextElementSibling).toBeNull();
     expect(view.textContent!.split(CAP_LINE)).toHaveLength(2);
 

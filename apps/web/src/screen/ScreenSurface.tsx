@@ -28,8 +28,8 @@ function NoDisplay() {
   return (
     <Empty className="h-full bg-[var(--terminal-background)]">
       <EmptyHeader>
-        <EmptyTitle>This machine has no display</EmptyTitle>
-        <EmptyDescription>Sandbox machines run headless. A desktop workspace would stream here.</EmptyDescription>
+        <EmptyTitle>This workspace has no display</EmptyTitle>
+        <EmptyDescription>Workspaces run headless. A desktop workspace would stream here.</EmptyDescription>
       </EmptyHeader>
     </Empty>
   );

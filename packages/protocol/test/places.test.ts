@@ -96,7 +96,7 @@ describe("the words a place's workspace carries", () => {
   });
 
   it("says the computer stays joined when a workspace on it is deleted, since wsp remove is what takes the agent off", () => {
-    expect(deleteNotice(0, "place")).toContain("computer stays joined as a place");
+    expect(deleteNotice(0, "place")).toContain("computer stays joined to this wsp");
     expect(deleteNotice(0, "place")).toContain("wsp remove");
   });
 });

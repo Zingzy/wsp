@@ -3,7 +3,7 @@
 // pill rollup over wsp thread snapshots, plus our row labels and the
 // new-workspace helpers.
 import { describe, expect, it } from "vitest";
-import { FREE_WORD, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, OVER_SSH, THREAD_ARCHIVE_MS, kindWords, machineLacksShort, wakeAskingAgainLine, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, OVER_SSH, THIS_COMPUTER, THREAD_ARCHIVE_MS, kindWords, machineLacksShort, wakeAskingAgainLine, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { RequestError } from "../src/protocol/client.js";
 import { explainCreateRefusal } from "../src/protocol/store.js";
 import {
@@ -20,6 +20,7 @@ import {
   topSidebarThread,
 } from "../src/sidebar/Sidebar.logic.js";
 import { spaceWorkspaceId } from "../src/sidebar/sidebarMode.js";
+import { ROW_LINE_MAX, rowLineCut } from "../src/sidebar/rowGrammar.js";
 import {
   compactTimeLabel,
   defaultWorkspaceName,
@@ -34,6 +35,8 @@ import {
   reachNote,
   daemonGoneLine,
   wakeAskNote,
+  whereWord,
+  threadMetaWords,
   workspaceMetaLine,
 } from "../src/sidebar/workspaceRows.js";
 import { formatRelativeTimeLabel } from "../src/lib/timestampFormat.js";
@@ -159,17 +162,17 @@ describe("workspace row labels", () => {
   };
   const tick = (accruedUsd: number, rateUsdPerHour = 0.11) => ({ rateUsdPerHour, accruedUsd });
 
-  it("the meta line: what it cost today first, in cents, the rate while the machine is up (running or unreachable), the edge note, the nap countdown last; the cost leads before the first tick too, as an honest zero", () => {
+  it("the meta line: what it cost today first, in cents, then the edge note and the nap countdown last, the hourly rate left to the pane; the cost leads before the first tick too, as an honest zero", () => {
     const meta = (over: Partial<WorkspaceStatus>, cost: ReturnType<typeof tick> | null) => workspaceMetaLine({ project: project(over), cost, outOfMemory: undefined, nowMs: now });
-    expect(meta({ idleAt: now + 14.5 * 60_000, reach: { state: "slow" } }, tick(0.0037))).toBe("$0.00 today · $0.110/hr · edge slow · naps in 14m");
-    expect(meta({ idleAt: now + 14.5 * 60_000 }, tick(0.29))).toBe("$0.29 today · $0.110/hr · naps in 14m");
-    expect(meta({ reach: { state: "unreachable" } }, tick(1.235))).toBe("$1.24 today · $0.110/hr · active");
+    expect(meta({ idleAt: now + 14.5 * 60_000, reach: { state: "slow" } }, tick(0.0037))).toBe("$0.00 today · edge slow · naps in 14m");
+    expect(meta({ idleAt: now + 14.5 * 60_000 }, tick(0.29))).toBe("$0.29 today · naps in 14m");
+    expect(meta({ reach: { state: "unreachable" } }, tick(1.235))).toBe("$1.24 today · active");
     expect(meta({ phase: "napping", machineState: "paused", reach: { state: "napping" }, idleAt: now + 60_000 }, tick(0.18, 0))).toBe("$0.18 today");
     expect(meta({ machineState: "gone", reach: { state: "gone" }, idleAt: now + 60_000 }, tick(0.18))).toBe("$0.18 today");
-    expect(meta({}, null)).toBe("$0.00 today · $0.110/hr · active");
+    expect(meta({}, null)).toBe("$0.00 today · active");
     expect(meta({ phase: "napping", machineState: "paused", reach: { state: "napping" } }, null)).toBe("$0.00 today");
-    // The tick's rate leads the size's: a resize is priced from the meter, not the status.
-    expect(meta({}, tick(0.5, 0.15))).toBe("$0.50 today · $0.150/hr · active");
+    // The rate is the pane's row, not this line's: the spend and the countdown are what fit the row's 30 characters.
+    expect(meta({}, tick(0.5, 0.15))).toBe("$0.50 today · active");
   });
 
   it("a wake the provider has not taken puts the ask it is on beside the spend, in the two words the slot holds", () => {
@@ -191,7 +194,7 @@ describe("workspace row labels", () => {
     // Before a status arrives the record's own note is the line; a status without one says nothing about the helper.
     expect(workspaceMetaLine({ project: { ...project({}), status: null }, cost: null, outOfMemory: undefined, nowMs: now })).toBe("$0.00 today");
     expect(workspaceMetaLine({ project: { ...project({}, { daemonNote: "updating the helper" }), status: null }, cost: null, outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
-    expect(workspaceMetaLine({ project: project({}, { daemonNote: "updating the helper" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("$0.00 today · $0.110/hr · active");
+    expect(workspaceMetaLine({ project: project({}, { daemonNote: "updating the helper" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("$0.00 today · active");
   });
 
   it("a nap that could not store a vault says the machine's files are not backed up, on the row and in the Spaces header", () => {
@@ -265,7 +268,7 @@ describe("workspace row labels", () => {
     const line = (reach: ReachState) => workspaceMetaLine({ project: local(reach), cost: tick(0.29), outOfMemory: undefined, nowMs: now });
     // The two are different facts: nothing answering on the port, and no daemon road at all.
     expect(line("no-daemon")).toBe("no daemon answering");
-    expect(line("unsupported")).toBe("no daemon on this machine");
+    expect(line("unsupported")).toBe("no daemon on it");
     expect(line("reachable")).toBe(FREE_WORD);
     // Its state word is still empty by design, which is why the line is where this goes.
     expect(stateSlotWord({ ...local("no-daemon"), indicator: { label: "Unreachable", tone: "neutral", pulse: false } })).toBe("");
@@ -282,21 +285,21 @@ describe("workspace row labels", () => {
     const line = (reach: ReachState) => workspaceMetaLine({ project: driven(reach), cost: tick(0.29), outOfMemory: undefined, nowMs: now });
     expect(line("no-daemon")).toBe("no daemon answering");
     // Nothing else changed: a reach that says nothing about the daemon leaves the spend and the countdown alone.
-    expect(line("reachable")).toBe("$0.29 today · $0.110/hr · active");
-    expect(line("slow")).toBe("$0.29 today · $0.110/hr · edge slow · active");
+    expect(line("reachable")).toBe("$0.29 today · active");
+    expect(line("slow")).toBe("$0.29 today · edge slow · active");
     // While the runtime is putting the daemon back, that is what the row says instead.
     expect(workspaceMetaLine({ project: project({ reach: { state: "no-daemon" }, daemonNote: "restarting the helper" }), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toBe("restarting the helper");
     // The Spaces header leads with it above the size, where the row's line sits.
     expect(spaceHeaderLines({ project: driven("no-daemon"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })[0]).toBe("no daemon answering");
     // Only the daemon that died crosses to a driven kind. A machine wsp forks is built with the road to a daemon,
     // so a fork's row saying there is none would be saying something that cannot be true of it.
-    expect(line("unsupported")).toBe("$0.29 today · $0.110/hr · active");
-    expect(spaceHeaderLines({ project: driven("unsupported"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).not.toContain("no daemon on this machine");
+    expect(line("unsupported")).toBe("$0.29 today · active");
+    expect(spaceHeaderLines({ project: driven("unsupported"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).not.toContain("no daemon on it");
     expect(daemonGoneLine("unsupported", kindWords("cloud"))).toBeUndefined();
-    expect(daemonGoneLine("unsupported", kindWords("local"))).toBe("no daemon on this machine");
+    expect(daemonGoneLine("unsupported", kindWords("local"))).toBe("no daemon on it");
     // A machine over ssh carries one under the person's own login, so a row saying there is none is a fact about
     // that machine, the way it is on this computer.
-    expect(daemonGoneLine("unsupported", kindWords("ssh"))).toBe("no daemon on this machine");
+    expect(daemonGoneLine("unsupported", kindWords("ssh"))).toBe("no daemon on it");
   });
 
   it("a machine over ssh says what the machine is and that it is free, and says when its daemon is missing", () => {
@@ -307,11 +310,11 @@ describe("workspace row labels", () => {
     expect(machineLine(over("unsupported"))).toBe(OVER_SSH);
     // A daemon is put on it under the person's own login, so one missing is a fact the row carries, as on this
     // computer; what the runtime is doing about it still leads on both surfaces.
-    expect(line("unsupported")).toBe("no daemon on this machine");
+    expect(line("unsupported")).toBe("no daemon on it");
     expect(spaceHeaderLines({ project: over("reachable"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toEqual([OVER_SSH, FREE_WORD]);
     expect(workspaceMetaLine({ project: project({ reach: { state: "unsupported" }, daemonNote: "updating the helper" }, { kind: "ssh" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
     // This computer reads the same rule: its host wires a daemon, so one missing is a fact worth the line.
-    expect(workspaceMetaLine({ project: project({ reach: { state: "unsupported" } }, { kind: "local" }), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toBe("no daemon on this machine");
+    expect(workspaceMetaLine({ project: project({ reach: { state: "unsupported" } }, { kind: "local" }), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toBe("no daemon on it");
   });
 
   it("a machine that told the host what it lacks says that on its row, in the first clause of what it said", () => {
@@ -326,7 +329,7 @@ describe("workspace row labels", () => {
     expect(NO_LINGER_LINE).toContain("loginctl enable-linger");
     expect(machineLacksShort(NO_LINGER_LINE)).not.toContain("loginctl");
     // Nothing said, nothing new: the row keeps the fact it always had.
-    expect(daemonGoneLine("unsupported", kindWords("ssh"))).toBe("no daemon on this machine");
+    expect(daemonGoneLine("unsupported", kindWords("ssh"))).toBe("no daemon on it");
   });
 
   it("thread pills key on the session status, wear the adapter's word, and use tokens: only the running dot is the success colour", () => {
@@ -364,7 +367,7 @@ describe("new workspace helpers", () => {
   it("a concurrency refusal keeps the runtime's words, which name the machines holding the slots, under the cap title", () => {
     const line = "both machine slots are in use: first, t-cap. Pause one or wait for a nap.";
     const explained = explainCreateRefusal(new RequestError(line, "concurrency"));
-    expect(explained.title).toMatch(/machine cap/i);
+    expect(explained.title).toMatch(/no more workspaces/i);
     expect(explained.detail).toBe(line);
   });
 
@@ -419,5 +422,56 @@ describe("what a space walks", () => {
     expect(spaceWorkspaceId(ids, null)).toBe("ws_a");
     expect(spaceWorkspaceId(ids, "creating:1")).toBe("ws_a");
     expect(spaceWorkspaceId([], "ws_a")).toBeNull();
+  });
+});
+
+describe("a thread row's words", () => {
+  const spawned = { parentThreadId: "th_lead", project: "spoo", startedBy: "agent" as const };
+  const own = { parentThreadId: null, project: "spoo", startedBy: "person" as const };
+  const runs = (over: Partial<WorkspaceStatus>, view: Partial<WorkspaceView> = {}) => ({ status: status(over), workspace: { ...status(over), ...view } });
+
+  it("a spawned row holds its workspace where a top row holds the project, and drops it when it is the row it is drawn under", () => {
+    expect(threadMetaWords(spawned, { workspace: "spoo-bench", where: "ascii" }, "spoo-fix")).toEqual(["spoo-bench", "ascii"]);
+    expect(threadMetaWords(spawned, { workspace: "spoo-fix", where: "hetzner" }, "spoo-fix")).toEqual(["hetzner"]);
+  });
+
+  it("a row a person or the command line opened keeps the project and who opened it, and never names a workspace", () => {
+    expect(threadMetaWords(own, { workspace: "spoo-fix", where: "hetzner" }, "spoo-fix")).toEqual(["spoo", "you"]);
+    expect(threadMetaWords({ ...own, startedBy: "cli" }, { workspace: "spoo-bench", where: "ascii" }, "spoo-fix")).toEqual(["spoo", "cli"]);
+    expect(threadMetaWords({ ...own, project: null }, { workspace: "spoo-fix", where: "hetzner" }, "spoo-fix")).toEqual(["you"]);
+  });
+
+  it("where a workspace runs: the provider the record carries, the kind's own word where it has one, and the name wsp holds for the machine where it has neither", () => {
+    expect(whereWord(runs({}, { kind: "local" }))).toBe(THIS_COMPUTER);
+    // A fork runs at the provider its own record names, never the opaque id that provider minted for the machine,
+    // and never a word read off the kind: this host is wired to one provider of several and only the record says which.
+    expect(whereWord(runs({ machineId: "sb_9f2c1d8a", provider: "solari" }))).toBe("solari");
+    expect(whereWord(runs({ machineId: "bx_4c11e0", provider: "box" }))).toBe("box");
+    expect(whereWord(runs({ machineId: "wsp-api", provider: "docker" }))).toBe("docker");
+    // A record from before the provider rode the wire has only the machine's own name to go by.
+    expect(whereWord(runs({ machineId: "sb_9f2c1d8a" }))).toBe("sb_9f2c1d8a");
+    expect(whereWord(runs({ machineId: "dev@box" }, { kind: "ssh" }))).toBe("dev@box");
+    expect(whereWord({ status: null, workspace: { ...status({}), kind: "ssh", machineId: "m_recorded" } })).toBe("m_recorded");
+  });
+});
+
+describe("the row's third line is cut at the sidebar's own room", () => {
+  const now = Date.parse("2026-09-03T12:00:00Z");
+
+  it("a line within the cap is whole, one over it is cut at a word boundary with the ellipsis inside the cap", () => {
+    expect(ROW_LINE_MAX).toBe(30);
+    expect(rowLineCut("no answer 2 h · threads go on")).toBe("no answer 2 h · threads go on");
+    expect(rowLineCut("$0.09 today · naps in 12m")).toBe("$0.09 today · naps in 12m");
+    const long = "no backup since 2026-09-08, over the cap";
+    expect(rowLineCut(long).length).toBeLessThanOrEqual(ROW_LINE_MAX);
+    expect(rowLineCut(long)).toBe("no backup since 2026-09-08…");
+    expect(rowLineCut("x".repeat(40))).toBe(`${"x".repeat(29)}…`);
+  });
+
+  it("the cost line leaves the hourly rate to the pane, so a row that bills and naps stays inside the cap", () => {
+    const project = { state: "running" as const, status: status({ idleAt: now + 12.5 * 60_000 }), reach: "reachable" as const, workspace: status({}) };
+    const line = workspaceMetaLine({ project, cost: { rateUsdPerHour: 0.018, accruedUsd: 0.09 }, outOfMemory: undefined, nowMs: now });
+    expect(line).toBe("$0.09 today · naps in 12m");
+    expect(line.length).toBeLessThanOrEqual(ROW_LINE_MAX);
   });
 });
