@@ -4,7 +4,12 @@
   },
   {
     "type": "port.close",
-    "port": 3000,
-    "exited": 1
+    "port": 8080,
+    "exited": "yes"
+  },
+  {
+    "type": "port.close",
+    "port": 8080,
+    "at": 1
   }
 ]

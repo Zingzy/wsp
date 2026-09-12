@@ -1,9 +1,5 @@
 [
   {
     "op": "ping"
-  },
-  {
-    "id": null,
-    "op": "ping"
   }
 ]

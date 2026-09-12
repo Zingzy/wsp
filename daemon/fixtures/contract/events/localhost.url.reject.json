@@ -1,7 +1,10 @@
 [
   {
+    "type": "localhost.url"
+  },
+  {
     "type": "localhost.url",
-    "port": 1023
+    "port": 0
   },
   {
     "type": "localhost.url",

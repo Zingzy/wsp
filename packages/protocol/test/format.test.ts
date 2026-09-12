@@ -7,10 +7,14 @@ import {
   psCpuSeconds,
   biggerSizeLine,
   catalogSourceLine,
+  codexNotSignedInLine,
+  whoPaysLines,
+  THIS_COMPUTER,
   PERMISSION_DENIED_LINE,
   accessFromNextMessage,
   askingLine,
   permissionAskLine,
+  permissionPromptWords,
   permissionModeOptionLabel,
   permissionOutcomeLine,
   noModelsLine,
@@ -129,6 +133,8 @@ import {
   TURN_WALL_MS,
   turnCutLine,
   turnEndLine,
+  openedSpendPart,
+  turnSpendPart,
   turnSettledLine,
   turnSettledParts,
   refusedTurn,
@@ -319,36 +325,72 @@ describe("where the composer's model lists came from, in one line", () => {
   };
 
   it("names the agent's own binary and its own pin when its table stood in, never another agent's", () => {
-    expect(catalogSourceLine(TABLE)).toBe("codex table · app-server 0.153.0, 2026-09-07");
-    expect(catalogSourceLine({ ...TABLE, harness: "claude", label: "Claude Code", version: "--help 2.1.257, 2026-09-05" })).toBe("claude table · --help 2.1.257, 2026-09-05");
+    expect(catalogSourceLine(TABLE, THIS_COMPUTER)).toBe("codex table · app-server 0.153.0, 2026-09-07");
+    expect(catalogSourceLine({ ...TABLE, harness: "claude", label: "Claude Code", version: "--help 2.1.257, 2026-09-05" }, THIS_COMPUTER)).toBe("claude table · --help 2.1.257, 2026-09-05");
     // One line at the popup's width: 48 characters of the 10px mono the footer draws in, measured in Chromium.
-    expect(catalogSourceLine(TABLE).length).toBeLessThanOrEqual(48);
+    expect(catalogSourceLine(TABLE, THIS_COMPUTER).length).toBeLessThanOrEqual(48);
   });
 
   it("says the adapter's own reason where the binary answered and named one, in place of naming the table", () => {
-    expect(catalogSourceLine({ ...TABLE, refusal: "Codex is not signed in on this machine; run codex login there" })).toBe(
-      "Codex is not signed in on this machine; run codex login there · app-server 0.153.0, 2026-09-07",
+    expect(catalogSourceLine({ ...TABLE, refusal: codexNotSignedInLine("codex login") }, THIS_COMPUTER)).toBe(
+      "Codex is not signed in where this workspace runs; run codex login there · app-server 0.153.0, 2026-09-07",
     );
   });
 
-  it("a table with no pin of its own claims none, and the binary that answered carries its version", () => {
-    expect(catalogSourceLine({ ...TABLE, harness: "gemini", label: "Gemini CLI", version: null })).toBe("gemini table");
-    expect(catalogSourceLine({ ...TABLE, source: "harness", version: "0.153.0" })).toBe("Codex 0.153.0 on this machine");
-    expect(catalogSourceLine({ ...TABLE, source: "harness", version: null })).toBe("Codex on this machine");
+  it("a table with no pin of its own claims none, and the binary that answered carries the version and where it ran", () => {
+    expect(catalogSourceLine({ ...TABLE, harness: "gemini", label: "Gemini CLI", version: null }, THIS_COMPUTER)).toBe("gemini table");
+    expect(catalogSourceLine({ ...TABLE, source: "harness", version: "0.153.0" }, THIS_COMPUTER)).toBe("Codex 0.153.0 on this computer");
+    expect(catalogSourceLine({ ...TABLE, source: "harness", version: null }, "hetzner")).toBe("Codex on hetzner");
     // The reason belongs to the fallback: a binary that filled the lists has nothing to explain.
-    expect(catalogSourceLine({ ...TABLE, source: "harness", version: "0.153.0", refusal: "not signed in" })).toBe("Codex 0.153.0 on this machine");
+    expect(catalogSourceLine({ ...TABLE, source: "harness", version: "0.153.0", refusal: "not signed in" }, THIS_COMPUTER)).toBe("Codex 0.153.0 on this computer");
   });
 
   it("an empty model list reads as the source that gave it: what the binary reported, or what the table holds", () => {
     expect(noModelsLine({ ...TABLE, source: "harness", models: [] })).toBe("Codex reported no models");
     expect(noModelsLine({ ...TABLE, models: [] })).toBe("No model in the Codex table");
   });
+
+  it("the foot on this computer says whose sign-in the turn runs on and that the prices are the agent's own", () => {
+    const claude: HarnessCatalog = { ...TABLE, harness: "claude", label: "Claude Code", source: "harness", version: "2.1.257" };
+    expect([catalogSourceLine(claude, THIS_COMPUTER), ...whoPaysLines(claude, THIS_COMPUTER)]).toEqual([
+      "Claude Code 2.1.257 on this computer",
+      "Threads run on Claude Code's own sign-in on this computer, which costs this wsp nothing.",
+      "The prices are its list prices, not a bill.",
+    ]);
+  });
+
+  it("the foot on a workspace somewhere else names that place in the same sentences", () => {
+    const claude: HarnessCatalog = { ...TABLE, harness: "claude", label: "Claude Code", source: "harness", version: "2.1.257" };
+    expect([catalogSourceLine(claude, "hetzner"), ...whoPaysLines(claude, "hetzner")]).toEqual([
+      "Claude Code 2.1.257 on hetzner",
+      "Threads run on Claude Code's own sign-in on hetzner, which costs this wsp nothing.",
+      "The prices are its list prices, not a bill.",
+    ]);
+    // The prices sentence goes where the menu has no row to put a price on.
+    expect(whoPaysLines({ ...claude, models: [] }, "hetzner")).toEqual(["Threads run on Claude Code's own sign-in on hetzner, which costs this wsp nothing."]);
+  });
+
+  it("neither foot says machine, the word the app never uses to a person", () => {
+    const kinds: HarnessCatalog[] = [
+      { ...TABLE, source: "harness", version: "2.1.257" },
+      { ...TABLE, source: "harness", version: null },
+      { ...TABLE, refusal: codexNotSignedInLine("codex login") },
+      { ...TABLE, models: [] },
+      TABLE,
+    ];
+    for (const where of [THIS_COMPUTER, "hetzner"]) {
+      for (const catalog of kinds) {
+        for (const line of [catalogSourceLine(catalog, where), ...whoPaysLines(catalog, where)]) expect(line).not.toMatch(/machine/i);
+      }
+    }
+  });
 });
 
 describe("one home for the words under the composer's model lists", () => {
   const HOME = join("packages", "protocol", "src", "format.ts");
-  // A footer assembled anywhere else took its binary word from whichever agent's catalog it was written against.
-  const RULE = /\} table`|reported no models|no model in the/;
+  // A footer assembled anywhere else took its binary word from whichever agent's catalog it was written against,
+  // and a second copy of the sentences about whose sign-in pays would be the one a screen was left reading.
+  const RULE = /\} table`|reported no models|no model in the|costs this wsp nothing|list prices, not a bill/;
 
   it("no other source file spells the footer's words", () => {
     expect(sourceFiles().filter(rel => rel !== HOME && RULE.test(readFileSync(join(ROOT, rel), "utf8")))).toEqual([]);
@@ -489,6 +531,18 @@ describe("a turn's activity in one line each", () => {
     expect(turnSettledLine({ status: "interrupted", durationMs: 1_500 })).toBe("interrupted · Worked for 1.5s");
     expect(turnSettledParts({ durationMs: null, costUsd: null })).toEqual([]);
     expect(turnSettledParts({ durationMs: 72_000, costUsd: 0.22 })).toEqual(["Worked for 1m 12s", "$0.22"]);
+  });
+
+  it("says what the threads a thread opened spent beside its own figure, and says what each figure counts, so neither reads as the other", () => {
+    expect(openedSpendPart(2.3)).toBe("$2.30 in threads it opened");
+    expect(turnSpendPart(1.14)).toBe("$1.14 this turn");
+    // One turn against whole threads: with both on the line each says its own scope.
+    expect(turnSettledParts({ durationMs: 72_000, costUsd: 1.14 }, 2.3)).toEqual(["Worked for 1m 12s", "$1.14 this turn", "$2.30 in threads it opened"]);
+    // Nothing opened anything, so there is no second figure to weigh the first against and the cost stands bare.
+    expect(turnSettledParts({ durationMs: 72_000, costUsd: 1.14 })).toEqual(["Worked for 1m 12s", "$1.14"]);
+    expect(turnSettledParts({ durationMs: 72_000, costUsd: 1.14 }, 0)).toEqual(["Worked for 1m 12s", "$1.14"]);
+    // The line a stream with no footer prints never carries a second figure, so it is untouched.
+    expect(turnSettledLine({ status: "completed", durationMs: 72_000, costUsd: 1.14 })).toBe("completed · Worked for 1m 12s · $1.14");
   });
 });
 
@@ -1454,12 +1508,68 @@ describe("terminalConfigLines", () => {
 });
 
 describe("the words a relayed permission prompt shows", () => {
-  it("leads with the tool and what it is about, and drops the detail where the harness named none", () => {
-    expect(permissionAskLine("Write", "out.txt")).toBe("Permission for Write: out.txt");
-    expect(permissionAskLine("Bash")).toBe("Permission for Bash");
-    expect(permissionAskLine("Bash", "")).toBe("Permission for Bash");
+  it("words a file write by the file, the folder holding it and how much is going in", () => {
+    // The path and the file's own text are what a person cannot read at a glance; the name, the folder and the size are.
+    expect(permissionAskLine("Write", JSON.stringify({ file_path: "/Users/dev/wsp-work/index.html", content: "x".repeat(2_100) }))).toBe(
+      "Write index.html in wsp-work (2 KB)",
+    );
+    expect(permissionAskLine("Write", JSON.stringify({ file_path: "out.txt", content: "hi" }))).toBe("Write out.txt (2 B)");
+    // The lead is the whole of it: a write's own words carry no code part, since a file's name is not read character by character.
+    expect(permissionPromptWords("Write", JSON.stringify({ file_path: "/root/out.txt", content: "hi" })).code).toBeUndefined();
     // The options under it are the question, so the line never asks one.
-    expect(permissionAskLine("Write", "out.txt")).not.toContain("?");
+    expect(permissionAskLine("Write", JSON.stringify({ file_path: "/root/out.txt", content: "hi" }))).not.toContain("?");
+  });
+
+  it("words a command as the whole command, kept apart from the words so a client can draw it as code", () => {
+    // A command goes in whole, its later lines and its length alike: one cut anywhere is one nobody can judge.
+    const long = `cat > out.py <<'PY'\nprint(${"1 + ".repeat(60)}1)\nPY`;
+    expect(permissionAskLine("Bash", JSON.stringify({ command: long, description: "Write and run a sum" }))).toBe(`Run: ${long}`);
+    // The two parts are apart, so a face that blurs two hyphens into one dash never draws the command.
+    const gate = "pnpm exec vitest run --minWorkers=1 --maxWorkers=1";
+    expect(permissionPromptWords("Bash", JSON.stringify({ command: gate }))).toMatchObject({ says: "Run:", code: gate, lead: `Run: ${gate}` });
+  });
+
+  it("words a tool a server lends as the server and the tool, and never the server's own paragraph", () => {
+    expect(permissionAskLine("mcp__wsp__workspaces", "{}", "wsp runs cloud machines called workspaces, forked in seconds")).toBe("Use the wsp tools: workspaces");
+    expect(permissionAskLine("mcp__wsp__thread_new", "{}")).toBe("Use the wsp tools: thread new");
+    expect(permissionPromptWords("mcp__wsp__workspaces", "{}", "wsp runs cloud machines").code).toBeUndefined();
+  });
+
+  it("words a skill as its own name, and never the description paragraph the harness sends", () => {
+    expect(permissionAskLine("Skill", JSON.stringify({ skill: "agent-browser" }), "Browser automation CLI for AI agents. Use when the user needs")).toBe(
+      "Run the skill agent-browser",
+    );
+  });
+
+  it("falls back to the harness's own phrase under the tool's name for a kind with no rule and for input it cannot read", () => {
+    expect(permissionAskLine("Read", JSON.stringify({ file_path: "/root/out.txt" }), "out.txt")).toBe("Permission for Read: out.txt");
+    expect(permissionAskLine("Read", "{}")).toBe("Permission for Read");
+    expect(permissionAskLine("Read", "{}", "")).toBe("Permission for Read");
+    // Input that is not an object yet, and a call whose input carries none of what its rule needs, fall back the same way.
+    expect(permissionAskLine("Bash", "{\"comm", "rm -rf build")).toBe("Permission for Bash: rm -rf build");
+    expect(permissionAskLine("Write", "{}", "out.txt")).toBe("Permission for Write: out.txt");
+  });
+
+  it("folds a file's body away and shows the rest of the input under the lead", () => {
+    const body = "line\n".repeat(400);
+    const write = permissionPromptWords("Write", JSON.stringify({ file_path: "/Users/dev/wsp-work/index.html", content: body }));
+    expect(write.lead).toBe("Write index.html in wsp-work (2 KB)");
+    // The file is behind the fold, whole, and nowhere else: the buttons stay in reach.
+    expect(write.body).toEqual({ label: "show the file", text: body });
+    expect(write.rest).toBe("");
+    // The lead already carries the command, and the harness's phrase for it is never the row's words.
+    expect(permissionPromptWords("Bash", JSON.stringify({ command: "rm -rf build", description: "Clean the build" })).rest).toBe("");
+    expect(permissionPromptWords("Skill", JSON.stringify({ skill: "agent-browser" }), "Browser automation CLI").rest).toBe("");
+    // What the lead does not carry still shows, each field apart from the next: this is the row consent is given on.
+    expect(permissionPromptWords("Bash", JSON.stringify({ command: "ls", timeout: 5_000 })).rest).toBe("timeout: 5000");
+    expect(permissionPromptWords("mcp__wsp__send", JSON.stringify({ threadId: "thr_1", message: "go" })).rest).toBe("threadId: thr_1 · message: go");
+    // A field a tool really calls description is the call's own, not the harness's paragraph, so it shows like any other.
+    expect(permissionPromptWords("mcp__linear__create_issue", JSON.stringify({ title: "Fix login", description: "The button does\n\nnothing on Safari." })).rest).toBe(
+      "title: Fix login · description: The button does nothing on Safari.",
+    );
+    // A tool that carries no file body folds nothing away, and input that is not an object is shown as it stands.
+    expect(permissionPromptWords("Bash", JSON.stringify({ command: "ls" })).body).toBeUndefined();
+    expect(permissionPromptWords("Bash", "not json").rest).toBe("not json");
   });
 
   it("says how a closed prompt closed, naming the option only where it says something the outcome does not", () => {
@@ -1485,8 +1595,11 @@ describe("the words a relayed permission prompt shows", () => {
 
   it("what a thread says it is waiting on is the prompt row's own lead, worded in one place off the whole prompt", () => {
     const ask = { toolName: "Write", input: '{"file_path":"/root/out.txt","content":"hi"}', detail: "out.txt" };
-    expect(askingLine(ask)).toBe(permissionAskLine("Write", "out.txt"));
-    expect(askingLine({ ...ask, detail: undefined })).toBe(permissionAskLine("Write"));
+    expect(askingLine(ask)).toBe(permissionAskLine(ask.toolName, ask.input, ask.detail));
+    // The whole prompt is in hand, so the lead reads the call's own fields and not only the phrase the harness named.
+    expect(askingLine(ask)).toContain("out.txt");
+    const bare = { toolName: "mcp__wsp__workspaces", input: "{}", detail: undefined };
+    expect(askingLine(bare)).toBe(permissionAskLine(bare.toolName, bare.input, bare.detail));
   });
 
   it("a mode option reads as an allow that also stops the asking, in the picker's own words for the mode", () => {

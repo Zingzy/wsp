@@ -178,6 +178,18 @@ describe("wireTerminals", () => {
     await until(() => getTerminals("ws_b")?.status() === "live");
   }, 15_000);
 
+  it("asks no daemon for the readings of the workspace that is this computer, and puts no link's health on its rows", async () => {
+    const { api } = fakeApi([{ ...view("ws_here"), kind: "local" }, view("ws_fork")], () => relay!);
+    unwire = wireTerminals(useStore, { backoffMs: () => 30 });
+    useStore.getState().bind(api);
+
+    await until(() => getTerminals("ws_here")?.status() === "live" && getTerminals("ws_fork")?.status() === "live");
+    // The fork reads its own machine and pushes over its link; this computer is read in the host, so asking its
+    // daemon for the same stream would set a second sampler going on the one machine both would be reading.
+    await until(() => getLive("ws_fork").snapshot().samples.length > 1);
+    expect(getLive("ws_here").snapshot()).toEqual({ samples: [], reach: "unreachable", unavailable: null });
+  }, 15_000);
+
   it("a daemon from before the version says so in its hello, its refusals read unavailable instead of pending, and a redeployed daemon fills the rows", async () => {
     oldDaemon = await startOldDaemon(HARNESS_DAEMON_TOKEN);
     relay!.setRoad(`ws://127.0.0.1:${oldDaemon.port}`);

@@ -382,10 +382,10 @@ describe("the header row", () => {
     await collapse();
     const crumb = () => banner().querySelector("[data-thread-breadcrumb]")!;
     expect(crumb().textContent).toBe("api/add a health route");
-    act(() => useStore.setState({ sessions: rows("Permission for Bash: Check wsp version") }));
+    act(() => useStore.setState({ sessions: rows("Run: wsp --version") }));
     expect(crumb().textContent).toBe("api/add a health routeNeeds you");
     // The whole sentence is the hover text; the header shows the word alone.
-    expect(crumb().querySelector("[title]")!.getAttribute("title")).toBe("Permission for Bash: Check wsp version");
+    expect(crumb().querySelector("[title]")!.getAttribute("title")).toBe("Run: wsp --version");
     act(() => useStore.setState({ sessions: rows() }));
     expect(crumb().textContent).toBe("api/add a health route");
   });

@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { passphraseCipher } from "@wsp/engine";
-import { agentsKindRefusal, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { runForTheList, agentsKindRefusal, askingLine, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { copyKey, createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -92,6 +92,12 @@ describe("wsp verbs over the host", () => {
   async function run(...argv: string[]): Promise<{ code: number; io: Captured }> {
     const { io, ended } = starting(...argv);
     return { code: await ended, io };
+  }
+  /** A line exactly as it was typed, with nothing moved or added: where a shared flag sits is the question here, so
+   * the helpers that put --state at the end are no use. */
+  async function typed(...argv: string[]): Promise<{ code: number; io: Captured }> {
+    const io = captured();
+    return { code: await cli(argv, io, undefined, env), io };
   }
   const json = (io: Captured): unknown[] => io.lines.map(l => JSON.parse(l) as unknown);
   /** The workspace column of the table wsp workspaces prints, which is the list a person reads names off. */
@@ -1113,6 +1119,7 @@ describe("wsp verbs over the host", () => {
   });
 
   it("threads reads a thread stopped on a permission prompt as needing the person, and as working again once it is answered", async () => {
+    const ASKED: PermissionAsk = { askId: "ask_1", toolName: "Write", detail: "out.txt", input: '{"file_path":"/root/out.txt"}', options: [{ id: PERMISSION_ALLOW, label: "Allow", effect: "allow" }] };
     const held = heldAgent(false);
     await restartHost({ claude: held.adapter });
     await run("new", "alpha");
@@ -1121,8 +1128,8 @@ describe("wsp verbs over the host", () => {
     const working = await run("threads");
     expect(working.io.lines[0]!.split("\n")[1]).toContain("Working");
 
-    held.ask(0, { askId: "ask_1", toolName: "Write", detail: "out.txt", input: '{"file_path":"/root/out.txt"}', options: [{ id: PERMISSION_ALLOW, label: "Allow", effect: "allow" }] });
-    await vi.waitFor(async () => expect((await rt.sessions.list())[0]!.asking).toBe("Permission for Write: out.txt"));
+    held.ask(0, ASKED);
+    await vi.waitFor(async () => expect((await rt.sessions.list())[0]!.asking).toBe(askingLine(ASKED)));
     const waiting = await run("threads");
     expect(waiting.io.lines[0]!.split("\n")[1]).toContain("Needs you");
 
@@ -2034,6 +2041,75 @@ describe("wsp verbs over the host", () => {
     const missing = await run("thread", "read", "nope");
     expect(missing.code).toBe(1);
     expect(missing.io.errors).toEqual(["wsp thread read: no thread nope"]);
+  });
+
+  it("takes --state wherever it sits: before the verb's words, between them and after them", async () => {
+    await run("new", "alpha");
+    await run("thread", "new", "--in", "alpha", "build it");
+    const id = (await rt.sessions.list())[0]!.threadId!;
+
+    const before = await typed("--state", statePath, "thread", "read", id);
+    const between = await typed("thread", "--state", statePath, "read", id);
+    const after = await typed("thread", "read", id, "--state", statePath);
+    expect([before.code, between.code, after.code]).toEqual([0, 0, 0]);
+    expect([before.io.errors, between.io.errors, after.io.errors]).toEqual([[], [], []]);
+    expect(before.io.lines).toEqual(after.io.lines);
+    expect(between.io.lines).toEqual(after.io.lines);
+    expect(after.io.lines[0]).toContain("build it");
+  });
+
+  it("takes --json wherever it sits, so a line that asks for JSON before the verb's words prints JSON", async () => {
+    await run("new", "alpha");
+    await run("thread", "new", "--in", "alpha", "build it");
+    const id = (await rt.sessions.list())[0]!.threadId!;
+    const answer = [{ threadId: id, messages: [{ who: "agent", at: expect.any(Number), text: "re: build it" }] }];
+
+    const before = await typed("--json", "thread", "read", id, "--last", "--state", statePath);
+    const between = await typed("thread", "--json", "read", id, "--last", "--state", statePath);
+    const after = await typed("thread", "read", id, "--last", "--json", "--state", statePath);
+    expect([before.code, between.code, after.code]).toEqual([0, 0, 0]);
+    expect(json(before.io)).toEqual(answer);
+    expect(json(between.io)).toEqual(answer);
+    expect(json(after.io)).toEqual(answer);
+  });
+
+  it("hands the verb the rest of the line in the order it was typed, so its own flags are read beside a shared one", async () => {
+    await run("new", "alpha");
+    await run("thread", "new", "--in", "alpha", "build it");
+    const id = (await rt.sessions.list())[0]!.threadId!;
+
+    // The shared flag between the verb's words, the verb's own flag at the end.
+    const { code, io } = await typed("thread", "--state", statePath, "read", id, "--last");
+    expect(code).toBe(0);
+    expect(io.errors).toEqual([]);
+    expect(io.lines).toEqual([expect.stringContaining("re: build it")]);
+  });
+
+  it("refuses a shared flag left at the end of the line by its own name, never reading the verb's word as its value", async () => {
+    for (const name of ["--state", "--host"]) {
+      const { code, io } = await typed("thread", "read", "th_one", name);
+      const refusal = io.errors.join("\n");
+      expect(code, name).toBe(EXIT_CODES.usage);
+      expect(refusal, name).toContain(`Option '${name} <value>' argument missing`);
+      // The word the verb was given is its own, so nothing about it is read back as the flag's value.
+      expect(refusal, name).not.toContain("th_one");
+    }
+  });
+
+  it("refuses a misspelt shared flag by the word that was typed, in two halves, wherever it sits", async () => {
+    const threads = CLI_VERBS.find(v => v.name === "threads")!;
+    for (const [argv, fix] of [
+      [["--stat", statePath, "threads"], runForTheList("wsp --help")],
+      [["thread", "--stat", statePath, "read", "th_one"], runForTheList("wsp --help")],
+      [["threads", "--stat", statePath], `usage: ${threads.usage}`],
+    ] as [string[], string][]) {
+      const { code, io } = await typed(...argv);
+      const refusal = io.errors.join("\n");
+      expect(code, argv.join(" ")).toBe(EXIT_CODES.usage);
+      // Two halves: the word as it was typed, then what to do about it after it.
+      expect(refusal, argv.join(" ")).toContain("--stat'");
+      expect(refusal.indexOf(fix), argv.join(" ")).toBeGreaterThan(refusal.indexOf("--stat'"));
+    }
   });
 
   it("thread new, send and fork --send return with the reply on the turn's session.done; a session.end that never comes is not waited for", async () => {

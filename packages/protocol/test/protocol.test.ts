@@ -1185,6 +1185,16 @@ describe("thread provenance", () => {
     for (const t of threads) expect(ThreadView.parse(t)).toEqual(t);
   });
 
+  it("foldThreads adds up what a thread's turns cost, and says nothing where no turn of it reported a figure", () => {
+    const [spent, said] = foldThreads([
+      { ...row, id: "s1", threadId: "thr_a", claudeSessionId: "c1", costUsd: 0.75, startedAt: 1_000, endedAt: 2_000 },
+      { ...row, id: "s2", threadId: "thr_a", claudeSessionId: "c1", costUsd: 0.39, startedAt: 3_000, endedAt: 4_000 },
+      { ...row, id: "s3", threadId: "thr_b", claudeSessionId: "c2", startedAt: 5_000, endedAt: 6_000 },
+    ]);
+    expect(spent!.costUsd).toBeCloseTo(1.14, 10);
+    expect("costUsd" in said!).toBe(false);
+  });
+
   it("a thread reads as run once a turn of it did work: announcing a session is not enough, since both CLIs announce before they learn they have no sign-in", () => {
     const [worked, neverAnnounced, working, refused] = foldThreads([
       { ...row, id: "s1", threadId: "thr_a", status: "failed", claudeSessionId: "c1" },

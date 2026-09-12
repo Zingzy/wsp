@@ -2,18 +2,18 @@
   {
     "id": 1,
     "op": "proc.kill",
-    "pid": 4242
+    "pid": 50
   },
   {
     "id": 1,
     "op": "proc.kill",
-    "pid": 4242,
+    "pid": 50,
     "signal": "HUP"
   },
   {
     "id": 1,
     "op": "proc.kill",
-    "pid": 0,
+    "pid": -1,
     "signal": "TERM"
   }
 ]

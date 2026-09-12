@@ -132,6 +132,7 @@ function deriveThread(thread: ThreadView, workspace: Pick<WorkspaceView, "projec
     project: projectAt(workspaceProjects(workspace), thread.cwd)?.name ?? null,
     parentThreadId: thread.parentThreadId ?? null,
     asking: thread.asking ?? null,
+    costUsd: thread.costUsd ?? null,
   };
 }
 

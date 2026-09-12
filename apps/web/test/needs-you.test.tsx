@@ -6,7 +6,7 @@
 // roads run here against a stubbed Notification and a stubbed bridge; nothing
 // real is shown and nothing makes a sound.
 import { act, render } from "@testing-library/react";
-import { NEEDS_YOU, permissionAskLine, workspaceAwakeLine, type InitNeedsYou } from "@wsp/protocol";
+import { NEEDS_YOU, askingLine, workspaceAwakeLine, type InitNeedsYou } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -190,7 +190,7 @@ describe("a thread stopped on a permission prompt while the person looked away",
     render(<Harness />);
     const focus = vi.spyOn(window, "focus").mockImplementation(() => {});
     act(() => emit(ASKED));
-    expect(FakeNotification.built).toEqual([{ title: NEEDS_YOU, body: permissionAskLine("Bash", "Check wsp version"), silent: true }]);
+    expect(FakeNotification.built).toEqual([{ title: NEEDS_YOU, body: askingLine(ASKED), silent: true }]);
     FakeNotification.last!.onclick!();
     expect(focus).toHaveBeenCalled();
     expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_1", "thr_1"]);

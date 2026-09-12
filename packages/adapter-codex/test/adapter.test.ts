@@ -175,7 +175,7 @@ describe("CodexAdapter over a codex exec --json turn", () => {
     const exec = scriptedExec(fixtureLines("failed-turn"), { exitCode: 1 });
     const { events, onEvent } = collect();
     const result = await adapterOver(exec).start({ prompt: "x", onEvent }).finished;
-    expect(NOT_SIGNED_IN).toBe("Codex is not signed in on this machine; run codex login --device-auth there");
+    expect(NOT_SIGNED_IN).toBe("Codex is not signed in where this workspace runs; run codex login --device-auth there");
     // The cause rides the result, as it does on the other CLI: a turn refused for want of a sign-in did no work.
     expect(result).toMatchObject({ status: "failed", error: NOT_SIGNED_IN, refusal: "sign-in" });
     expect(events.at(-1)).toEqual({ type: "session.end", sessionId: FAILED_THREAD_ID, exitCode: 1, sawResult: true });

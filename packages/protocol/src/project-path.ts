@@ -13,6 +13,16 @@ export function underProject(path: string, root: string): boolean {
   return path === root || path.startsWith(`${root}/`);
 }
 
+/** A folder's own name, its last segment: what a project is called, what the import dialog and the register line
+ * call the folder, and what a permission prompt names a file by. */
+export const folderName = (path: string): string => path.replace(/\/+$/, "").split("/").at(-1) ?? path;
+
+/** The name of the folder a path sits in, empty where it sits at the root or is a bare name. */
+export const parentFolderName = (path: string): string => {
+  const parts = path.replace(/\/+$/, "").split("/");
+  return parts.length < 2 ? "" : parts[parts.length - 2]!;
+};
+
 /** The file naming the imported project folders a daemon may browse, one absolute path per line. It sits beside the
  * home of whichever daemon reads it: DAEMON_ROOTS_PATH is this answered for a guest, whose home is /root, and this
  * computer's own daemon answers it for the person's home. */
@@ -83,6 +93,15 @@ export function placeDaemonPaths(home: string): {
     placeKey: `${wsp}/place-key.pem`,
     placeLog: `${wsp}/place.log`,
   };
+}
+
+/** Every path a leave takes off a computer joined as a place, in the order they go: the place file, its key and the
+ * agent's log, then everything the daemon and an installer over ssh put under wsp's own folder, then the browser
+ * shim and its xdg-open name. The work folder is not here: what the person's threads wrote there is theirs. The
+ * daemon sweeps by this list when its host asks over the link and wsp leave sweeps by it at the terminal. */
+export function placeOwnedPaths(home: string): string[] {
+  const at = placeDaemonPaths(home);
+  return [at.placeFile, at.placeKey, at.placeLog, at.dir, at.bundle, at.inbox, at.tokenPath, at.rootsPath, at.nodeDir, at.profileFile, at.openSocket, at.runDir, `${at.wsp}/wsp-npm.log`, at.portFile, `${at.binDir}/wsp-open`, `${at.binDir}/xdg-open`];
 }
 
 /** The same paths under the name the ssh road has always called them. One function, two names, so nothing keeps a

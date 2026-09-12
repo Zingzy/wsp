@@ -13,6 +13,7 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
+use tokio::sync::mpsc;
 use tokio::time::{timeout, timeout_at, Instant};
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::protocol::{CloseFrame, WebSocketConfig};
@@ -21,7 +22,7 @@ use tokio_tungstenite::WebSocketStream;
 use wsp_frames::{numbers, words, DaemonAuthRequest, DaemonEvent, Empty, Reply};
 
 use crate::ops::{self, Conn};
-use crate::{auth, Ctx};
+use crate::{auth, Ctx, Outbound};
 
 /// The most one message may be; node's ws holds the same ceiling, and the pre-auth cap sits far under it.
 const MESSAGE_MAX_BYTES: usize = 100 * 1024 * 1024;
@@ -134,18 +135,40 @@ pub(crate) async fn serve(tcp: TcpStream, ctx: Arc<Ctx>) {
     if ws.feed(text(&Reply::new(Some(auth.id), Empty {}))).await.is_err() || ws.send(text(&hello)).await.is_err() {
         return;
     }
-    let conn = Conn { scope: auth.port };
-    while let Some(Ok(msg)) = ws.next().await {
-        let raw = match msg {
-            Message::Text(t) => t.to_string(),
-            Message::Binary(b) => String::from_utf8_lossy(&b).into_owned(),
-            Message::Close(_) => break,
-            _ => continue,
-        };
-        if ws.send(Message::text(ops::handle(&conn, &raw))).await.is_err() {
-            break;
+    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+    let key = ctx.next_key();
+    let conn = Arc::new(Conn::new(auth.port, Outbound(tx)));
+    if auth.port.is_none() {
+        ctx.add_authed(key, conn.out.clone());
+    }
+    // Each frame is answered on its own task, as the node daemon answers them: a heartbeat is not held behind an
+    // exec that runs for a minute. Replies and events share one channel, so what a handler sends stays in order.
+    loop {
+        tokio::select! {
+            incoming = ws.next() => {
+                let raw = match incoming {
+                    Some(Ok(Message::Text(t))) => t.to_string(),
+                    Some(Ok(Message::Binary(b))) => String::from_utf8_lossy(&b).into_owned(),
+                    Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                    Some(Ok(_)) => continue,
+                };
+                let (conn, ctx) = (Arc::clone(&conn), Arc::clone(&ctx));
+                tokio::spawn(async move {
+                    let reply = ops::handle(&conn, &ctx, &raw).await;
+                    conn.out.send_text(&reply);
+                });
+            }
+            outgoing = rx.recv() => {
+                let Some(text) = outgoing else { break };
+                if ws.send(Message::text(text)).await.is_err() {
+                    break;
+                }
+            }
         }
     }
+    // The client is gone; ptys keep running. Only this socket's subscriptions die with it.
+    ctx.remove_authed(key);
+    conn.close();
     let _ = ws.close(None).await;
 }
 

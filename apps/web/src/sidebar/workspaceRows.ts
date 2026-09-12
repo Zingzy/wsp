@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Row labels and dialog helpers for the workspace sidebar, all pure. The
-// adapter names the state; this file turns it into the words and classes a
-// row shows.
+// Row labels and dialog helpers for the workspace sidebar. The adapter names
+// the state; this file turns it into the words and classes a row shows. Pure
+// but for the one hook beside the where word, which reads that word off the
+// store for the surfaces that hold a workspace's id and no snapshot.
 import { agentName } from "@wsp/catalog";
 import { FREE_WORD, fmtSize, isBilling, isLocalWorkspace, kindWords, machineLacksShort, outOfMemoryRowLine, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspaceStateOf, type MemoryReading, type ReachState, type SessionOrigin, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
 import { formatRelativeTimeLabel } from "../lib/timestampFormat.js";
+import { useStatus, useWorkspace } from "../protocol/store.js";
 import { formatWorkingDurationLabel, type ThreadStatusPill } from "./Sidebar.logic.js";
 
 export const NEW_THREAD_SHORTCUT = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new");
@@ -172,6 +174,16 @@ const PLAIN = { colorClass: "text-sidebar-whisper/70", dotClass: "bg-sidebar-whi
 export function whereWord(project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string {
   const record = project.status ?? project.workspace;
   return record.provider ?? kindWords(workspaceKind(project.workspace)).where ?? record.machineId;
+}
+
+/** The same word for a surface that holds the workspace's id and no snapshot: the record and its status off the
+ * store, and the id itself until the record has arrived, which is what a window opened straight onto a workspace
+ * has for the first frames. Written once because two surfaces ask it, and a second copy of the fallback would be a
+ * second answer to give a person. */
+export function useWhereWord(workspaceId: string): string {
+  const workspace = useWorkspace(workspaceId);
+  const status = useStatus(workspaceId);
+  return workspace === null ? workspaceId : whereWord({ workspace, status });
 }
 
 /** The words a thread row's meta line carries after the agent's mark, in the order it draws them. A thread a

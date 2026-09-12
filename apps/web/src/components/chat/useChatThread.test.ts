@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionEvent } from "@wsp/protocol";
 import { CHAT_STREAM, CHAT_WS } from "../../../test/fixtures/chat-stream";
+import { deriveMessagesTimelineRows } from "./adapt";
 import { deriveChatThread, dropEvent, leaveView, reduceEvent, reloadTranscript, stabilizeEntries, startedSession, type ThreadState } from "./useChatThread";
 
 const T0 = "2026-09-01T02:00:00.000Z";
@@ -820,5 +821,87 @@ describe("a send a view change left in flight", () => {
     const latest = reloadTranscript(state([], { known: ["thr_a"], stray }), [...A, N_START], T0);
     expect(latest.events).toEqual([N_START]);
     expect(latest.named).toEqual({ key: CHAT_WS, thread: "thr_n" });
+  });
+});
+
+describe("a reload while a turn runs", () => {
+  const THREAD = "thr_r";
+  const R0 = Date.parse("2026-09-12T12:18:00.000Z");
+  const first = { workspaceId: CHAT_WS, sessionId: "sess_r", turnId: "turn_r1", threadId: THREAD };
+  const second = { workspaceId: CHAT_WS, sessionId: "sess_r", turnId: "turn_r2", threadId: THREAD };
+  // A finished first turn (a stray slash) and a second one still running, as the transcript holds them.
+  const HISTORY: SessionEvent[] = [
+    { type: "session.start", ...first, at: R0, prompt: "/" },
+    { type: "session.delta", ...first, at: R0 + 500, line: 1, kind: "tool_use", toolName: "Bash", toolUseId: "tu_1", text: '{"command":"ls"}' },
+    { type: "session.delta", ...first, at: R0 + 900, line: 2, kind: "tool_result", toolUseId: "tu_1", text: "ok" },
+    { type: "session.delta", ...first, at: R0 + 3_000, line: 3, kind: "text", text: "Nothing to run." },
+    { type: "session.done", ...first, at: R0 + 3_100, result: { status: "completed", durationMs: 3_100, text: "Nothing to run." } },
+    { type: "session.end", ...first, at: R0 + 3_200, exitCode: 0, sawResult: true },
+    { type: "session.start", ...second, at: R0 + 60_000, prompt: "add the banner" },
+    { type: "session.delta", ...second, at: R0 + 61_000, line: 1, kind: "text", text: "On it." },
+  ];
+  // The running turn's open prompt: recorded after the reply this reload reads was built, so only the socket has it.
+  const PROMPT: SessionEvent = {
+    type: "session.permission", ...second, at: R0 + 62_000, askId: "ask_1", toolName: "Bash",
+    input: '{"command":"pnpm build"}', options: [{ id: "allow", label: "Allow", effect: "allow" }],
+  };
+  const SEEN = "2026-09-12T13:00:00.000Z";
+  const LANDED = "2026-09-12T13:00:01.000Z";
+
+  /** The thread as it renders, one word per row. */
+  const rendered = (s: ThreadState): string[] => {
+    const view = deriveChatThread(s);
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: view.entries,
+      turns: view.turns,
+      isWorking: view.running,
+      activeTurnStartedAt: view.activeTurnStartedAt,
+    });
+    return rows.map(row =>
+      row.kind === "message" ? `${row.message.role}: ${row.message.text}` : row.kind === "turn-fold" ? row.label : row.kind === "permission" ? `permission: ${row.permission.toolName}` : row.kind,
+    );
+  };
+  const ORDER = ["user: /", "Worked for 3.1s", "assistant: Nothing to run.", "user: add the banner", "working", "assistant: On it.", "permission: Bash", "thinking"];
+
+  it("a live row that reached the socket before the history reply keeps its place: the completed turn renders first and the running turn's prompt last", () => {
+    const early = reduceEvent(state([]), PROMPT, SEEN);
+    expect(rendered(reloadTranscript(early, HISTORY, LANDED))).toEqual(ORDER);
+  });
+
+  it("a live row that reached the socket after the history stays after the reply's rows, and a rebuild that cannot carry it yet leaves it there", () => {
+    const loaded = reduceEvent(reloadTranscript(state([]), HISTORY, LANDED), PROMPT, SEEN);
+    expect(rendered(loaded)).toEqual(ORDER);
+    expect(rendered(reloadTranscript(loaded, HISTORY, LANDED))).toEqual(ORDER);
+  });
+
+  // The running turn's next two lines, taken live; the reply above carries neither.
+  const READING: SessionEvent = { type: "session.delta", ...second, at: R0 + 61_500, line: 2, kind: "text", text: " Reading the layout." };
+  const BANNER: SessionEvent = { type: "session.delta", ...second, at: R0 + 61_800, line: 3, kind: "text", text: " Adding the banner." };
+  const spoken = (s: ThreadState): string | undefined => {
+    const said = rendered(s).filter(row => row.startsWith("assistant: "));
+    return said[said.length - 1];
+  };
+
+  it("a held line the reply writes again under a new clock is one line, not two: a restart numbers it the same", () => {
+    const live = [READING, BANNER].reduce((held, e) => reduceEvent(held, e, SEEN), reloadTranscript(state([]), HISTORY, LANDED));
+    expect(spoken(live)).toBe("assistant: On it. Reading the layout. Adding the banner.");
+    // The host restarted, read the run from its first byte and wrote the lines the store never got, minutes later.
+    const restarted = [READING, BANNER].map(e => ({ ...e, at: R0 + 180_000 }));
+    expect(spoken(reloadTranscript(live, [...HISTORY, ...restarted], LANDED))).toBe("assistant: On it. Reading the layout. Adding the banner.");
+  });
+
+  it("a held line sits between the reply's own, by the counter its turn gave it and not by which list it came from", () => {
+    const held = reduceEvent(reloadTranscript(state([]), HISTORY, LANDED), READING, SEEN);
+    expect(spoken(reloadTranscript(held, [...HISTORY, BANNER], LANDED))).toBe("assistant: On it. Reading the layout. Adding the banner.");
+  });
+
+  it("a held row the turn gives no counter sits by its stamp, between the reply's rows on either side of it", () => {
+    const later: SessionEvent = { type: "session.delta", ...second, at: R0 + 62_500, line: 2, kind: "text", text: "Then the banner." };
+    const held = reduceEvent(reloadTranscript(state([]), HISTORY, LANDED), PROMPT, SEEN);
+    expect(rendered(reloadTranscript(held, [...HISTORY, later], LANDED))).toEqual([
+      ...ORDER.slice(0, -1),
+      "assistant: Then the banner.",
+      "thinking",
+    ]);
   });
 });

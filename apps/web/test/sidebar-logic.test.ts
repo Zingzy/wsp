@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { FREE_WORD, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, OVER_SSH, THIS_COMPUTER, THREAD_ARCHIVE_MS, kindWords, machineLacksShort, wakeAskingAgainLine, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../src/adapt/index.js";
 import { RequestError } from "../src/protocol/client.js";
+import { threadTree, threadsOpenedBy, workspaceOf } from "../src/sidebar/threadTree.js";
 import { explainCreateRefusal } from "../src/protocol/store.js";
 import {
   foldArchivedThreads,
@@ -195,19 +196,19 @@ describe("workspace row labels", () => {
   });
 
   it("a thread stopped on a permission prompt puts what it is asking on the row's third line, ahead of the spend and of the helper's own note", () => {
-    const asked = [{ asking: "Permission for Write: out.txt" }, { asking: null }];
+    const asked = [{ asking: "Write out.txt in root (2 B)" }, { asking: null }];
     const line = (threads: { asking: string | null }[], over: Partial<WorkspaceStatus> = {}) =>
       workspaceMetaLine({ project: project(over, {}, threads), cost: tick(0.5), outOfMemory: undefined, nowMs: now });
-    expect(line(asked)).toBe("Permission for Write: out.txt");
+    expect(line(asked)).toBe("Write out.txt in root (2 B)");
     // Even while the helper has something to say: the prompt is the one thing on the row a person can answer now.
-    expect(line(asked, { daemonNote: "updating the helper" })).toBe("Permission for Write: out.txt");
+    expect(line(asked, { daemonNote: "updating the helper" })).toBe("Write out.txt in root (2 B)");
     // The oldest waiting thread's, so a second prompt never takes the line from the one that has waited longest.
-    expect(line([{ asking: "Permission for Bash: ls" }, ...asked])).toBe("Permission for Bash: ls");
+    expect(line([{ asking: "Run: ls" }, ...asked])).toBe("Run: ls");
     expect(line([{ asking: null }])).toBe("$0.50 today · active");
     // The row cuts it at its own cap, as it does every line three; the whole sentence rides the row's title.
-    const long = "Permission for Bash: Check wsp version, host, and connected hosts";
+    const long = "Run: wsp --version && wsp hosts && wsp workspaces";
     const cut = rowLineCut(line([{ asking: long }]));
-    expect(cut).toBe("Permission for Bash: Check…");
+    expect(cut).toBe("Run: wsp --version && wsp…");
     expect(cut.length).toBeLessThanOrEqual(ROW_LINE_MAX);
   });
 
@@ -368,8 +369,7 @@ describe("workspace row labels", () => {
     // A thread stopped on a question carries its word whatever the turn's own status says, and it does not pulse:
     // nothing is moving until the person answers.
     const waiting = { label: "Needs you", tone: "neutral" as const, pulse: false };
-    expect(pill({ status: "running", indicator: waiting, asking: "Permission for Write: out.txt" })).toMatchObject({ label: "Needs you", pulse: false });
-    expect(pill({ status: "completed", indicator: waiting, asking: "Permission for Write: out.txt" })).toMatchObject({ label: "Needs you" });
+    expect(pill({ status: "running", indicator: waiting, asking: "Write out.txt in root (2 B)" })).toMatchObject({ label: "Needs you", pulse: false });
     // One emerald in the sidebar: the running dot wears the token the row's kind glyph wears while running.
     expect(dotClassForTone("running")).toBe("bg-success-foreground");
     for (const cls of [dotClassForTone("paused"), dotClassForTone("neutral")]) expect(cls).toContain("muted-foreground");
@@ -453,6 +453,71 @@ describe("what a space walks", () => {
     expect(spaceWorkspaceId(ids, null)).toBe("ws_a");
     expect(spaceWorkspaceId(ids, "creating:1")).toBe("ws_a");
     expect(spaceWorkspaceId([], "ws_a")).toBeNull();
+  });
+});
+
+describe("the tree a thread's own threads make", () => {
+  const thread = (id: string, workspaceId: string, parentThreadId: string | null): SidebarThreadSnapshot => ({
+    id,
+    threadId: id,
+    sessionId: `s_${id}`,
+    workspaceId,
+    title: id,
+    status: "running",
+    ran: true,
+    startedAt: "2026-09-01T00:00:00Z",
+    endedAt: null,
+    indicator: { label: "Working", tone: "neutral", pulse: true },
+    harness: "claude",
+    startedBy: parentThreadId === null ? "person" : "agent",
+    project: null,
+    parentThreadId,
+    asking: null,
+    costUsd: null,
+  });
+  const project = (id: string, threads: SidebarThreadSnapshot[]): SidebarProjectSnapshot =>
+    ({ id, displayName: id, threads }) as unknown as SidebarProjectSnapshot;
+  const drawn = (projects: SidebarProjectSnapshot[]) => threadTree(projects).map(group => [group.project.id, group.threads.map(t => t.id)]);
+
+  it("puts a thread an agent opened on another workspace among its opener's rows, and takes it off the workspace it runs on", () => {
+    const mac = project("mac", [thread("lead", "mac", null)]);
+    const bench = project("bench", [thread("builder", "bench", "lead")]);
+    expect(drawn([mac, bench])).toEqual([
+      ["mac", ["lead", "builder"]],
+      ["bench", []],
+    ]);
+  });
+
+  it("follows the chain to the thread a person opened, however many workspaces it crosses", () => {
+    const mac = project("mac", [thread("lead", "mac", null)]);
+    const bench = project("bench", [thread("builder", "bench", "lead")]);
+    const web = project("web", [thread("helper", "web", "builder")]);
+    expect(drawn([mac, bench, web])).toEqual([
+      ["mac", ["lead", "builder", "helper"]],
+      ["bench", []],
+      ["web", []],
+    ]);
+  });
+
+  it("leaves a thread whose opener this window does not hold where it runs, and never loses one to a circle", () => {
+    const mac = project("mac", [thread("orphan", "mac", "gone")]);
+    const bench = project("bench", [thread("a", "bench", "b"), thread("b", "bench", "a")]);
+    expect(drawn([mac, bench])).toEqual([
+      ["mac", ["orphan"]],
+      ["bench", ["a", "b"]],
+    ]);
+  });
+
+  it("answers the threads one thread opened with the workspace each runs on, whichever workspace that is", () => {
+    const mac = project("mac", [thread("lead", "mac", null), thread("near", "mac", "lead")]);
+    const bench = project("bench", [thread("far", "bench", "lead"), thread("other", "bench", null)]);
+    expect(threadsOpenedBy([mac, bench], "lead").map(({ thread: t, runs }) => [t.id, runs.id])).toEqual([
+      ["near", "mac"],
+      ["far", "bench"],
+    ]);
+    expect(threadsOpenedBy([mac, bench], "other")).toEqual([]);
+    expect(workspaceOf([mac, bench], { workspaceId: "bench" })?.id).toBe("bench");
+    expect(workspaceOf([mac, bench], { workspaceId: "nowhere" })).toBeUndefined();
   });
 });
 

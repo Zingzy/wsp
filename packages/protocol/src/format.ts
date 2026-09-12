@@ -7,6 +7,7 @@ import type { ContextMenuItem, GoldenMissingTool, GoldenStage, HarnessCatalog, H
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
 import { DEFAULT_PORT } from "./app-ports.js";
 import { compareVersions } from "./semver.mjs";
+import { folderName, parentFolderName } from "./project-path.js";
 import { shellLine } from "./shell-quote.js";
 import type { ThreadMessage } from "./thread-read.js";
 const KIB = 1024;
@@ -288,12 +289,27 @@ export function waitTimedOutLine(threadIds: readonly string[], ms: number): stri
   return `${who} still running after ${fmtDuration(ms)}`;
 }
 
-/** What a settled turn says beside its outcome word, in the order every client shows it: how long it worked, then
- * what it cost. The app's chat footer and the command line's last line read from this one list. */
-export function turnSettledParts(turn: { durationMs?: number | null; costUsd?: number | null }): string[] {
+/** What the threads a thread opened have spent, said as its own fact: this is their whole life, and the turn's own
+ * figure counts none of their work. */
+export function openedSpendPart(costUsd: number): string {
+  return `${fmtCost(costUsd)} in threads it opened`;
+}
+
+/** The turn's own cost where a second figure stands beside it. The two count different things, one turn against
+ * whole threads, so where both are shown each says which spend it is and neither can be read as the other. */
+export function turnSpendPart(costUsd: number): string {
+  return `${fmtCost(costUsd)} this turn`;
+}
+
+/** What a settled turn says beside its outcome word, in the order every client shows it: how long it worked, what
+ * it cost, and what the threads it opened cost where it opened any. The app's chat footer and the command line's
+ * last line read from this one list. */
+export function turnSettledParts(turn: { durationMs?: number | null; costUsd?: number | null }, openedCostUsd?: number | null): string[] {
+  const opened = typeof openedCostUsd === "number" && openedCostUsd > 0;
   const parts: string[] = [];
   if (typeof turn.durationMs === "number") parts.push(`Worked for ${fmtDuration(turn.durationMs)}`);
-  if (typeof turn.costUsd === "number") parts.push(fmtCost(turn.costUsd));
+  if (typeof turn.costUsd === "number") parts.push(opened ? turnSpendPart(turn.costUsd) : fmtCost(turn.costUsd));
+  if (opened) parts.push(openedSpendPart(openedCostUsd));
   return parts;
 }
 
@@ -384,6 +400,12 @@ interface ToolRow {
 function toolField(input: ToolInput, name: string): string | undefined {
   const value = input[name];
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+/** A tool a server lends the agent, whose name carries both: `mcp__<server>__<tool>` as every harness spells it. */
+function serverTool(toolName: string): { server: string; tool: string } | undefined {
+  const parts = toolName.split("__");
+  return parts.length >= 3 && parts[0] === "mcp" && parts[1] !== "" ? { server: parts[1]!, tool: parts.slice(2).join("__") } : undefined;
 }
 
 function firstField(input: ToolInput, fields: readonly string[]): string | undefined {
@@ -502,7 +524,7 @@ export interface ToolCallFacts {
 
 export function toolCallFacts(toolName: string, input: string): ToolCallFacts {
   const row = TOOL_ROWS.get(toolName);
-  const itemType = row?.itemType ?? (toolName.startsWith("mcp__") ? "mcp_tool_call" : undefined);
+  const itemType = row?.itemType ?? (serverTool(toolName) === undefined ? undefined : "mcp_tool_call");
   const kinds = {
     ...(itemType !== undefined ? { itemType } : {}),
     ...(row?.requestKind !== undefined ? { requestKind: row.requestKind } : {}),
@@ -958,9 +980,11 @@ export const EMPTY_TASK_LINE = "the task is empty; say what the thread is to do"
 export const EMPTY_TITLE_LINE = "the name is empty; say what the thread is called";
 
 /** The one line a codex turn fails with when its provider wants an OpenAI login the machine has not got: the CLI
- * itself only retries the 401 and dies. `login` is the catalog's command for signing in on a machine. */
+ * itself only retries the 401 and dies. `login` is the catalog's command for signing in on a machine. It is also
+ * what the composer's model menu shows in place of its footer's source line, which is why it names the workspace
+ * rather than the machine it runs on. */
 export function codexNotSignedInLine(login: string): string {
-  return `Codex is not signed in on this machine; run ${login} there`;
+  return `Codex is not signed in where this workspace runs; run ${login} there`;
 }
 
 /** The line when codex's provider reads its key from an environment variable the machine does not set. */
@@ -970,13 +994,26 @@ export function codexMissingEnvLine(name: string): string {
 
 /** The one line under the composer's model lists: the binary that filled them, else whose table stood in and what it
  * was pinned from, or the adapter's own words for why the binary gave nothing. Every word comes from the catalog being
- * shown, so a tab never borrows another agent's binary, reason or pin. The slot is one line at the popup's width, 290px
- * of the 10px mono it draws in, so the agent is named once and the pin's own words carry the rest. */
-export function catalogSourceLine(catalog: HarnessCatalog): string {
+ * shown, so a tab never borrows another agent's binary, reason or pin. `where` is the word for where the turn runs,
+ * which the caller reads off the workspace: the binary the line names is the one on that computer and on no other.
+ * The slot is one line at the popup's width, 290px of the 10px mono it draws in, so the agent is named once and the
+ * pin's own words carry the rest. */
+export function catalogSourceLine(catalog: HarnessCatalog, where: string): string {
   const version = catalog.version;
-  if (catalog.source === "harness") return `${catalog.label}${version === null ? "" : ` ${version}`} on this machine`;
+  if (catalog.source === "harness") return `${catalog.label}${version === null ? "" : ` ${version}`} on ${where}`;
   const why = catalog.refusal ?? `${catalog.harness} table`;
   return version === null ? why : `${why} · ${version}`;
+}
+
+/** What the foot of the composer's model menu says after that line, and the only place it is said. The rows above it
+ * carry the agent's own dollar prices per million tokens, which a person with no account anywhere read as a bill from
+ * wsp: so the foot names whose sign-in the turn runs on and where that sign-in is, and says the prices are the agent's
+ * own. Both sentences hold on every workspace and only the word for where the turn runs changes, so a person who moves
+ * a thread to another computer reads the same two sentences with one word swapped. The prices sentence is dropped
+ * where the menu lists no model, since there is then no price on the screen for it to be about. */
+export function whoPaysLines(catalog: HarnessCatalog, where: string): string[] {
+  const runs = `Threads run on ${catalog.label}'s own sign-in on ${where}, which costs this wsp nothing.`;
+  return catalog.models.length === 0 ? [runs] : [runs, "The prices are its list prices, not a bill."];
 }
 
 /** The one line in place of the model rows: what the binary reported, or what the table holds, and never a count the
@@ -1969,24 +2006,142 @@ export function threadWorkingLine(e: SessionEvent): string | undefined {
     case "session.delta":
       return e.kind === "text" || e.kind === "thinking" ? lastLine(e.text) : e.kind === "tool_use" ? toolActivityLine(e.toolName, e.text) : undefined;
     case "session.permission":
-      return permissionAskLine(e.toolName, e.detail);
+      return permissionAskLine(e.toolName, e.input, e.detail);
     default:
       return undefined;
   }
 }
 
-/** The prompt row's lead, the same on every surface that shows a relayed permission prompt: the tool the harness
- * wants to run, and what it wants to run it on where the harness named one. No question mark: the options under it
- * are the question. */
-export function permissionAskLine(toolName: string, detail?: string): string {
-  return detail === undefined || detail === "" ? `Permission for ${toolName}` : `Permission for ${toolName}: ${detail}`;
+/** A prompt's lead in two parts: the words, and the call's own text where the call has some. They are apart because
+ * a command is judged by characters a sentence face blurs, two hyphens reading as one dash among them, so a client
+ * with more than one face draws the second part as code while a one-face surface joins them back into a sentence. */
+interface AskLead {
+  readonly says: string;
+  readonly code?: string;
+}
+
+/** How one kind of call is put to a person when the harness asks permission for it: the lead they judge it by,
+ * the input fields that lead already carries, and the field holding a file's body. */
+interface PermissionWords {
+  readonly lead: (input: ToolInput, toolName: string) => AskLead | undefined;
+  /** Fields the lead says itself, left out of the values shown under it so nothing is read twice. */
+  readonly named: readonly string[];
+  readonly body?: string;
+}
+
+const writeAsk: PermissionWords = {
+  lead: input => {
+    const path = toolField(input, "file_path");
+    if (path === undefined) return undefined;
+    const folder = parentFolderName(path);
+    const content = input["content"];
+    const size = typeof content === "string" ? ` (${fmtBytes(new TextEncoder().encode(content).length)})` : "";
+    return { says: `Write ${folderName(path)}${folder === "" ? "" : ` in ${folder}`}${size}` };
+  },
+  named: ["file_path", "content"],
+  body: "content",
+};
+
+const commandAsk: PermissionWords = {
+  lead: input => {
+    const command = toolField(input, "command");
+    return command === undefined ? undefined : { says: "Run:", code: command };
+  },
+  named: ["command", "description"],
+};
+
+const skillAsk: PermissionWords = {
+  lead: input => {
+    const skill = toolField(input, "skill");
+    return skill === undefined ? undefined : { says: `Run the skill ${skill}` };
+  },
+  named: ["skill"],
+};
+
+const serverAsk: PermissionWords = {
+  lead: (_input, toolName) => {
+    const lent = serverTool(toolName);
+    return lent === undefined ? undefined : { says: `Use the ${lent.server} tools: ${lent.tool.replace(/_/g, " ")}` };
+  },
+  named: [],
+};
+
+/** A kind with no words of its own yet: the lead falls back to the harness's own phrase under the tool's name. */
+const plainAsk: PermissionWords = { lead: () => undefined, named: [] };
+
+/** Every kind of call a permission prompt is worded for, one row per kind. The chat row and the command line both
+ * read this table, so the words live here and in neither of them, and a kind worded later is a row and nothing
+ * else. A name no row matches is a server's tool where its name carries one, else the plain row. */
+const PERMISSION_ASKS: ReadonlyMap<string, PermissionWords> = new Map<string, PermissionWords>([
+  ["Write", writeAsk],
+  ["Bash", commandAsk],
+  ["Skill", skillAsk],
+]);
+
+function permissionWords(toolName: string): PermissionWords {
+  return PERMISSION_ASKS.get(toolName) ?? (serverTool(toolName) === undefined ? plainAsk : serverAsk);
+}
+
+/** What the disclosure a file's body sits behind reads: the buttons stay in reach and the file is one click away. */
+const BODY_LABEL = "show the file";
+
+/** The lead its kind words the call by, or the harness's own phrase under the tool's name for a call whose input
+ * carries none of what its rule needs and for a kind with no rule. */
+function askLead(toolName: string, input: string, detail?: string): AskLead {
+  const fields = toolInput(input);
+  const lead = fields === undefined ? undefined : permissionWords(toolName).lead(fields, toolName);
+  if (lead !== undefined) return lead;
+  return { says: detail === undefined || detail === "" ? `Permission for ${toolName}` : `Permission for ${toolName}: ${detail}` };
+}
+
+/** The two parts joined back into one line, the one rule for it. */
+const leadLine = (lead: AskLead): string => (lead.code === undefined ? lead.says : `${lead.says} ${lead.code}`);
+
+/** The prompt row's lead as one line, for a surface with one face: the command line's. No question mark, since the
+ * options under it are the question. */
+export function permissionAskLine(toolName: string, input: string, detail?: string): string {
+  return leadLine(askLead(toolName, input, detail));
+}
+
+/** One value as the row reads it: its own whitespace collapsed, so a field holding a paragraph is one line rather
+ * than a wall, while the fields stay apart under their separator. */
+const restValue = (value: unknown): string => (typeof value === "string" ? value : JSON.stringify(value) ?? "").replace(/\s+/g, " ").trim();
+
+/** The whole of a relayed permission prompt as a client draws it: the lead in its two parts, the input values that
+ * lead does not already carry, and the file body folded away behind its own disclosure. Nothing here is cut, since
+ * this is the row consent is given on, which is also why a file's text is folded rather than shown: a wall of it
+ * between the question and the buttons is what nobody reads. */
+export interface PermissionPromptWords {
+  /** The lead as one line, the two parts joined, which is what a surface with one face shows. */
+  readonly lead: string;
+  readonly says: string;
+  /** The call's own text, where the call has some: a client with a code face draws this in it, breaks it at no
+   * character inside a token and scrolls it sideways rather than cutting it. */
+  readonly code?: string;
+  readonly rest: string;
+  readonly body?: { readonly label: string; readonly text: string };
+}
+
+export function permissionPromptWords(toolName: string, input: string, detail?: string): PermissionPromptWords {
+  const lead = askLead(toolName, input, detail);
+  const parts = { lead: leadLine(lead), says: lead.says, ...(lead.code === undefined ? {} : { code: lead.code }) };
+  const fields = toolInput(input);
+  if (fields === undefined) return { ...parts, rest: input };
+  const words = permissionWords(toolName);
+  const named = new Set(words.named);
+  const body = words.body === undefined ? undefined : toolField(fields, words.body);
+  const rest = Object.entries(fields)
+    .filter(([key]) => !named.has(key))
+    .map(([key, value]) => `${key}: ${restValue(value)}`)
+    .join(" · ");
+  return { ...parts, rest, ...(body === undefined ? {} : { body: { label: BODY_LABEL, text: body } }) };
 }
 
 /** That lead taken off the prompt itself, which is what a thread's row says it is waiting on and what the app says
  * outside the thread's own pane. The one call both make, so the whole prompt is in hand here and reading another of
  * its fields to word the lead is an edit to this body alone. */
 export function askingLine(ask: Pick<SessionPermissionEvent, "toolName" | "input" | "detail">): string {
-  return permissionAskLine(ask.toolName, ask.detail);
+  return permissionAskLine(ask.toolName, ask.input, ask.detail);
 }
 
 /** What an answered prompt row reads once it is closed, one word per outcome. The option's own label rides beside it
@@ -2653,7 +2808,7 @@ export function hostsMenuItems(view: HostsView): ContextMenuItem[] {
     ...(view.place === undefined
       ? []
       : [
-          { id: `${HOST_MENU_AWAKE}${view.place.awake ? "off" : "on"}`, label: HOST_WORDS.place.awakeRow, group: "place", enabled: true, checked: view.place.awake },
+          { id: `${HOST_MENU_AWAKE}${view.place.awake ? "off" : "on"}`, label: HOST_WORDS.place.awakeRow, group: "place", enabled: true, checked: view.place.awake, hint: HOST_WORDS.place.awakeWhy },
           { id: HOST_MENU_LEAVE, label: HOST_WORDS.place.leaveRow(view.place.hostName), group: "place", enabled: true, destructive: true },
         ]),
   ];

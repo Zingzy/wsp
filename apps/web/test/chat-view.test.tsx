@@ -6,7 +6,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { installFakeLayout } from "./fake-layout.js";
-import type { EventUnion, SessionEvent, WorkspaceView } from "@wsp/protocol";
+import type { EventUnion, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { ChatView } from "../src/components/chat/ChatView.js";
@@ -50,7 +50,7 @@ const FIXTURE: EventUnion[] = [
   ...CHAT_STREAM.slice(7),
 ];
 
-function fixtureApi(workspaces: WorkspaceView[], history: Record<string, SessionEvent[]> = {}) {
+function fixtureApi(workspaces: WorkspaceView[], history: Record<string, SessionEvent[]> = {}, sessions: SessionView[] = []) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
   const api: Api = {
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
@@ -66,7 +66,7 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
     wake: async id => workspaces.find(w => w.id === id)!,
     upgrade: async id => workspaces.find(w => w.id === id)!,
     capabilities: async () => (caps()),
-    listSessions: async () => [],
+    listSessions: async () => sessions,
     watchStatuses: async () => [],
     createFromGoldenHead: async () => workspaces[0]!,
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
@@ -416,11 +416,17 @@ describe("ChatView", () => {
 
     const row = await waitFor(() => document.querySelector<HTMLElement>('[data-permission-prompt="ask_1"]')!);
     expect(row.getAttribute("data-permission-open")).toBe("true");
-    expect(within(row).getByText("Permission for Write: out.txt")).toBeDefined();
-    // The tool's own input reads as the muted mono every tool row wears, values not braces.
-    const input = within(row).getByText("file_path: /root/out.txt content: hi");
-    expect(input.className).toContain("font-mono");
-    expect(input.className).toContain("text-muted-foreground");
+    // A sentence, not the tool's code name and not the file: what is being written, where, and how much of it.
+    expect(within(row).getByText("Write out.txt in root (2 B)")).toBeDefined();
+    // The file's own text is behind a fold, so the question and the buttons are what the row opens with.
+    expect(row.querySelector("[data-permission-body]")).toBeNull();
+    const fold = row.querySelector<HTMLElement>("[data-permission-body-trigger]")!;
+    expect(fold.textContent).toBe("show the file");
+    fireEvent.click(fold);
+    const body = await waitFor(() => row.querySelector<HTMLElement>("[data-permission-body]")!);
+    expect(body.textContent).toBe("hi");
+    expect(body.className).toContain("font-mono");
+    expect(body.className).toContain("text-muted-foreground");
     // Every option the harness offered, as buttons: nothing here is a chip or a badge.
     expect([...row.querySelectorAll("[data-permission-option]")].map(b => b.textContent)).toEqual(["Allow", "Deny", "Allow, then Accept edits"]);
 
@@ -463,11 +469,90 @@ describe("ChatView", () => {
     await setup(api);
     const waited = await waitFor(() => document.querySelector<HTMLElement>('[data-permission-prompt="ask_wait"]')!);
     expect(within(waited).getByText("Nobody answered; denied")).toBeDefined();
-    // A prompt with no detail leads on the tool alone.
-    expect(within(waited).getByText("Permission for Bash")).toBeDefined();
+    // A command is the whole command on the lead, with no code name in front of it, and it is drawn as code beside
+    // the words rather than inside them, so the sentence face never closes two hyphens into one dash.
+    expect(waited.querySelector("[data-permission-says]")!.textContent).toBe("Run:");
+    const command = waited.querySelector<HTMLElement>("[data-permission-code]")!;
+    expect(command.textContent).toBe("rm -rf build");
+    expect(command.className).toContain("font-mono");
+    expect(command.className).toContain("break-normal");
+    expect(command.className).toContain("overflow-x-auto");
     const stopped = document.querySelector<HTMLElement>('[data-permission-prompt="ask_stop"]')!;
     expect(within(stopped).getByText("Cancelled with the turn")).toBeDefined();
     // Neither offers an option any more: there is nothing left to pick.
     for (const row of [waited, stopped]) expect(row.querySelectorAll("[data-permission-option]")).toHaveLength(0);
+  });
+});
+
+describe("the threads a thread opened", () => {
+  const BENCH: WorkspaceView = { id: "ws_bench", name: "spoo-bench", machineId: "m2", provider: "ascii", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
+  const PARENT = "thr_lead";
+  const scoped = { workspaceId: WS, sessionId: "sess_lead", turnId: "turn_lead", threadId: PARENT };
+  const lead: SessionEvent[] = [
+    { type: "session.start", ...scoped, at: T0, model: "claude-sonnet-5", prompt: "run the migration across the fleet" },
+    { type: "session.delta", ...scoped, at: T0 + 300, kind: "text", text: "Three workspaces are up." },
+    { type: "session.done", ...scoped, at: T0 + 900, result: { status: "completed", durationMs: 178_000, costUsd: 1.14 } },
+    { type: "session.end", ...scoped, at: T0 + 950, exitCode: 0, sawResult: true },
+  ];
+  const rows: SessionView[] = [
+    { id: "sess_lead", workspaceId: WS, harness: "claude", status: "completed", threadId: PARENT, prompt: "run the migration across the fleet", costUsd: 1.14 },
+    { id: "sess_bench", workspaceId: "ws_bench", harness: "claude", status: "running", startedBy: "agent", threadId: "thr_bench", parentThreadId: PARENT, prompt: "benchmark the new index", costUsd: 2 },
+    { id: "sess_web", workspaceId: WS, harness: "claude", status: "failed", startedBy: "agent", threadId: "thr_web", parentThreadId: PARENT, prompt: "rewrite the web client", costUsd: 0.3 },
+  ];
+
+  it("each get a row in the opener's transcript naming the thread, its workspace, where it runs and its state, with the page's own address for it", async () => {
+    const { api } = fixtureApi([workspace, BENCH], { [WS]: lead }, rows);
+    await setup(api);
+    await screen.findByText("Three workspaces are up.");
+    const opened = await waitFor(() => {
+      const found = Array.from(document.querySelectorAll<HTMLElement>("[data-opened-thread]"));
+      expect(found).toHaveLength(2);
+      return found;
+    });
+    expect(opened.map(row => row.textContent)).toEqual([
+      "openedbenchmark the new index · spoo-bench · ascii · Working",
+      "openedrewrite the web client · api · solari · Ended",
+    ]);
+    const link = opened[0]!.querySelector<HTMLAnchorElement>("a")!;
+    expect(link.textContent).toBe("benchmark the new index");
+    expect(link.getAttribute("href")).toBe(`${window.location.origin}${window.location.pathname}#w/ws_bench/t/thr_bench`);
+  });
+
+  it("leaves the transcript alone on a thread that opened none", async () => {
+    const { api } = fixtureApi([workspace], { [WS]: lead });
+    await setup(api);
+    await screen.findByText("Three workspaces are up.");
+    expect(document.querySelectorAll("[data-opened-thread]")).toHaveLength(0);
+  });
+
+  it("are totalled beside the turn's own figure in the footer, each figure saying what it counts", async () => {
+    const { api } = fixtureApi([workspace, BENCH], { [WS]: lead }, rows);
+    await setup(api);
+    await screen.findByText("Three workspaces are up.");
+    const footer = await waitFor(() => {
+      const found = screen.getByTestId("settled-footer");
+      expect(found.textContent).toContain("in threads it opened");
+      return found;
+    });
+    expect(footer.textContent).toBe("completed·Worked for 2m 58s·$1.14 this turn·$2.30 in threads it opened");
+    // The line carries facts and a state word, so it reads at the ladder's 11 px mono, as the rows above it do.
+    expect(footer.className).toContain("font-mono");
+    expect(footer.className).toContain("text-[11px]");
+    // A narrow window breaks the line between facts, never inside one.
+    expect(footer.className).toContain("flex-wrap");
+    for (const part of footer.querySelectorAll("span")) {
+      if (part.getAttribute("aria-hidden") === "true") continue;
+      expect(part.className).toContain("whitespace-nowrap");
+    }
+  });
+
+  it("says nothing about a total on a thread that opened none, and leaves its own figure unqualified", async () => {
+    const { api } = fixtureApi([workspace], { [WS]: lead });
+    await setup(api);
+    await screen.findByText("Three workspaces are up.");
+    const footer = screen.getByTestId("settled-footer");
+    expect(footer.textContent).toBe("completed·Worked for 2m 58s·$1.14");
+    expect(footer.textContent).not.toContain("in threads it opened");
+    expect(footer.textContent).not.toContain("this turn");
   });
 });

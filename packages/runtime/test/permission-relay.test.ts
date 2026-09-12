@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { PERMISSION_ALLOW, PERMISSION_DENY, PERMISSION_DENIED_LINE, permissionAskLine, THIS_COMPUTER, threadWordOf, foldThreads, type PermissionAsk, type PermissionOutcome, type SessionEvent } from "@wsp/protocol";
+import { PERMISSION_ALLOW, PERMISSION_DENY, PERMISSION_DENIED_LINE, askingLine, THIS_COMPUTER, threadWordOf, foldThreads, type PermissionAsk, type PermissionOutcome, type SessionEvent } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type LocalWiring, type Runtime, type SessionHandle } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -218,7 +218,7 @@ describe("a permission prompt relayed into the chat", () => {
     const thread = async () => foldThreads(await rt.sessions.list(workspaceId))[0]!;
     expect(threadWordOf(await thread())).toBe("Working");
     turn.raise();
-    await vi.waitFor(async () => expect((await thread()).asking).toBe(permissionAskLine("Write", "out.txt")));
+    await vi.waitFor(async () => expect((await thread()).asking).toBe(askingLine(ASK)));
     expect(threadWordOf(await thread())).toBe("Needs you");
     await rt.sessions.answer(handle.id, { askId: "ask_1", optionId: PERMISSION_ALLOW });
     await vi.waitFor(async () => expect((await thread()).asking).toBeUndefined());

@@ -1,25 +1,25 @@
 [
   {
     "type": "sys.sample",
-    "cpu": 12.5,
-    "load1": 0.42,
+    "cpu": 25,
+    "load1": 1.25,
     "mem": {
-      "used": 1,
-      "total": 2
+      "used": 2000,
+      "total": 8000
     },
-    "at": 1
+    "at": 1757000000000
   },
   {
     "type": "sys.sample",
-    "cpu": "12",
-    "load1": 0.42,
+    "cpu": "25",
+    "load1": 1.25,
     "mem": {
-      "used": 1,
-      "total": 2
+      "used": 2000,
+      "total": 8000
     },
     "disk": {
-      "used": 1,
-      "total": 2
+      "used": 30000,
+      "total": 100000
     },
     "at": 1
   }

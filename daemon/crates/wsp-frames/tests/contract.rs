@@ -148,87 +148,76 @@ fn every_event_frame_reads_as_the_protocol_does() {
     assert_eq!(seen, expected);
 }
 
-/// The sample arguments the fixture renders every sentence with a hole in it at.
-const SAMPLE_OP: &str = "sys.explode";
-const SAMPLE_PORT: u16 = 8123;
-const SAMPLE_URL: &str = "http://192.168.1.20:7080";
-const SAMPLE_REASON: &str = "connect ECONNREFUSED";
-const SAMPLE_KIND: &str = "cloud";
-
+/// The fixture set is generated from the protocol package's exports, so its keys are that package's names and a
+/// sentence with a hole in it is kept as a template whose braces name what the daemon fills in. This table is the
+/// one place a Rust name meets a fixture key, and every hole is rendered with the same placeholder word the protocol
+/// test renders it with, so the two halves compare the same text. Sentences the node daemon never emits and no
+/// client matches on (the bin's failure prefix, the link's close reasons, the ready line) stay Rust-only.
 fn rendered_words() -> BTreeMap<&'static str, String> {
     let mut m = BTreeMap::new();
-    m.insert("AUTH_TOKEN_REFUSED", words::AUTH_TOKEN_REFUSED.to_owned());
-    m.insert("AUTH_FIRST_FRAME", words::AUTH_FIRST_FRAME.to_owned());
-    m.insert("AUTH_TOO_MANY_BYTES", words::AUTH_TOO_MANY_BYTES.to_owned());
-    m.insert("AUTH_NO_FRAME_IN_TIME", words::AUTH_NO_FRAME_IN_TIME.to_owned());
-    m.insert("INVALID_JSON", words::INVALID_JSON.to_owned());
-    m.insert("NO_TOKEN_AT_START", words::NO_TOKEN_AT_START.to_owned());
-    m.insert("FAILED_TO_START", words::FAILED_TO_START.to_owned());
-    m.insert("PLACE_LEAVE_ROAD_REFUSAL", words::PLACE_LEAVE_ROAD_REFUSAL.to_owned());
-    m.insert("NOT_ON_THIS_ROAD", words::NOT_ON_THIS_ROAD.to_owned());
-    m.insert("NOT_ON_THIS_KIND", words::NOT_ON_THIS_KIND.to_owned());
-    m.insert("HOST_REFUSED_PLACE", words::HOST_REFUSED_PLACE.to_owned());
-    m.insert("NO_PLACE_FILE", words::NO_PLACE_FILE.to_owned());
-    m.insert("LINK_CLOSE_STOPPING", words::LINK_CLOSE_STOPPING.to_owned());
-    m.insert("LINK_CLOSE_ATTEMPT_OVER", words::LINK_CLOSE_ATTEMPT_OVER.to_owned());
-    m.insert("LINK_CLOSE_QUIET", words::LINK_CLOSE_QUIET.to_owned());
-    m.insert("unknownOp", words::unknown_op(SAMPLE_OP));
-    m.insert("portScopeRefusal", words::port_scope_refusal(SAMPLE_PORT));
-    m.insert("notOnThisKind", words::not_on_this_kind(SAMPLE_KIND));
-    m.insert("hostKeyRefusal", words::host_key_refusal(SAMPLE_URL));
-    m.insert("listeningLine", words::listening_line(numbers::DEFAULT_HOST, numbers::DEFAULT_PORT));
-    m.insert("readyLine", words::ready_line(12));
-    m.insert("oomNotSet", words::oom_not_set(SAMPLE_REASON));
-    m.insert("priorityNotSet", words::priority_not_set(SAMPLE_REASON));
-    m.insert("linkCouldNotDial", words::link_could_not_dial(SAMPLE_URL, SAMPLE_REASON));
-    m.insert("linkNoAnswerIn", words::link_no_answer_in(SAMPLE_URL, 10));
-    m.insert("linkNotAFrame", words::link_not_a_frame(SAMPLE_URL));
-    m.insert("linkRefused", words::link_refused(SAMPLE_URL, words::HOST_REFUSED_PLACE));
-    m.insert("linkUnreadableAuthReply", words::link_unreadable_auth_reply(SAMPLE_URL, SAMPLE_REASON));
-    m.insert("linkNoAnswerToDial", words::link_no_answer_to_dial(SAMPLE_URL));
-    m.insert("linkLinked", words::link_linked(SAMPLE_URL));
-    m.insert("linkQuiet", words::link_quiet(SAMPLE_URL, 30));
+    m.insert("tokenRefused", words::AUTH_TOKEN_REFUSED.to_owned());
+    m.insert("firstFrameNotAuth", words::AUTH_FIRST_FRAME.to_owned());
+    m.insert("preAuthBytesExceeded", words::AUTH_TOO_MANY_BYTES.to_owned());
+    m.insert("authDeadlinePassed", words::AUTH_NO_FRAME_IN_TIME.to_owned());
+    m.insert("invalidJson", words::INVALID_JSON.to_owned());
+    m.insert("noToken", words::NO_TOKEN_AT_START.to_owned());
+    m.insert("unknownOp", words::unknown_op("{op}"));
+    m.insert("portScopeRefusal", words::port_scope_refusal("{port}"));
+    m.insert("notOnThisRoad", words::NOT_ON_THIS_ROAD.to_owned());
+    m.insert("notOnThisKind", words::NOT_ON_THIS_KIND.to_owned());
+    m.insert("hostKeyRefusal", words::host_key_refusal("{url}"));
+    m.insert("listening", words::listening_line("{host}", "{port}"));
+    m.insert("sysSamplerStarted", words::SYS_SAMPLER_STARTED.to_owned());
+    m.insert("sysSamplerStopped", words::SYS_SAMPLER_STOPPED.to_owned());
+    m.insert("procSamplerStarted", words::PROC_SAMPLER_STARTED.to_owned());
+    m.insert("procSamplerStopped", words::PROC_SAMPLER_STOPPED.to_owned());
+    m.insert("noPlaceFile", words::NO_PLACE_FILE.to_owned());
+    m.insert("linked", words::link_linked("{url}"));
+    m.insert("hostQuiet", words::link_quiet("{url}", "{seconds}"));
+    m.insert("dialUnanswered", words::link_no_answer_to_dial("{url}"));
+    m.insert("dialTimedOut", words::link_no_answer_in("{url}", "{seconds}"));
+    m.insert("dialFailed", words::link_could_not_dial("{url}", "{error}"));
+    m.insert("notAFrame", words::link_not_a_frame("{url}"));
+    m.insert("authUnreadable", words::link_unreadable_auth_reply("{url}", "{error}"));
+    m.insert("hostRefused", words::link_refused("{url}", "{refusal}"));
     m
 }
 
+/// The numbers the set pins, under the protocol's names. The run and log dirs, the exec timeout ceiling, the auth
+/// close code and the second spelling of the open body cap are Rust-only until the protocol exports them.
 fn rendered_numbers() -> BTreeMap<&'static str, Value> {
     let mut m = BTreeMap::new();
-    m.insert("DAEMON_VERSION", Value::from(numbers::DAEMON_VERSION));
-    m.insert("DEFAULT_HOST", Value::from(numbers::DEFAULT_HOST));
-    m.insert("DEFAULT_PORT", Value::from(numbers::DEFAULT_PORT));
-    m.insert("DEFAULT_TOKEN_PATH", Value::from(numbers::DEFAULT_TOKEN_PATH));
-    m.insert("DEFAULT_INBOX_DIR", Value::from(numbers::DEFAULT_INBOX_DIR));
-    m.insert("DEFAULT_MANIFEST_PATH", Value::from(numbers::DEFAULT_MANIFEST_PATH));
-    m.insert("DEFAULT_RUN_DIR", Value::from(numbers::DEFAULT_RUN_DIR));
-    m.insert("DEFAULT_LOG_DIR", Value::from(numbers::DEFAULT_LOG_DIR));
-    m.insert("GUEST_DAEMON_DIR", Value::from(numbers::GUEST_DAEMON_DIR));
-    m.insert("DAEMON_ROOTS_PATH", Value::from(numbers::DAEMON_ROOTS_PATH));
-    m.insert("OPEN_SHIM_PATH", Value::from(numbers::OPEN_SHIM_PATH));
-    m.insert("XDG_OPEN_PATH", Value::from(numbers::XDG_OPEN_PATH));
-    m.insert("OPEN_SOCKET_PATH", Value::from(numbers::OPEN_SOCKET_PATH));
-    m.insert("PRE_AUTH_MAX_BYTES", Value::from(numbers::PRE_AUTH_MAX_BYTES));
-    m.insert("AUTH_DEADLINE_MS", Value::from(numbers::AUTH_DEADLINE_MS));
-    m.insert("AUTH_CLOSE_CODE", Value::from(words::AUTH_CLOSE_CODE));
-    m.insert("TUNNEL_CAP", Value::from(numbers::TUNNEL_CAP));
-    m.insert("EXEC_BODY_MAX", Value::from(numbers::EXEC_BODY_MAX));
-    m.insert("EXEC_OUTPUT_MAX", Value::from(numbers::EXEC_OUTPUT_MAX));
-    m.insert("EXEC_TIMEOUT_DEFAULT_MS", Value::from(numbers::EXEC_TIMEOUT_DEFAULT_MS));
-    m.insert("EXEC_TIMEOUT_MAX_MS", Value::from(numbers::EXEC_TIMEOUT_MAX_MS));
-    m.insert("EXEC_DEADLINE_EXIT", Value::from(numbers::EXEC_DEADLINE_EXIT));
-    m.insert("FS_READ_CAP_BYTES", Value::from(numbers::FS_READ_CAP_BYTES));
-    m.insert("FS_LIST_CAP_ENTRIES", Value::from(numbers::FS_LIST_CAP_ENTRIES));
-    m.insert("GIT_DIFF_CAP_BYTES", Value::from(numbers::GIT_DIFF_CAP_BYTES));
-    m.insert("SCROLLBACK_CAP_BYTES", Value::from(numbers::SCROLLBACK_CAP_BYTES));
-    m.insert("CMDLINE_BYTES", Value::from(numbers::CMDLINE_BYTES));
-    m.insert("PORT_CMDLINE_CAP_BYTES", Value::from(numbers::PORT_CMDLINE_CAP_BYTES));
-    m.insert("PROC_CAP", Value::from(numbers::PROC_CAP));
-    m.insert("PID_MAX", Value::from(numbers::PID_MAX));
-    m.insert("OPEN_BODY_CAP", Value::from(numbers::OPEN_BODY_CAP));
-    m.insert("OPEN_URL_MAX", Value::from(numbers::OPEN_URL_MAX));
-    m.insert("PLACE_LINK_NONCE_BYTES", Value::from(numbers::PLACE_LINK_NONCE_BYTES));
-    m.insert("DAEMON_OOM_SCORE_ADJ", Value::from(numbers::DAEMON_OOM_SCORE_ADJ));
-    m.insert("DAEMON_NICE", Value::from(numbers::DAEMON_NICE));
-    m.insert("WORK_OOM_SCORE_ADJ", Value::from(numbers::WORK_OOM_SCORE_ADJ));
+    m.insert("daemonVersion", Value::from(numbers::DAEMON_VERSION));
+    m.insert("execBodyMax", Value::from(numbers::EXEC_BODY_MAX));
+    m.insert("execOutputMax", Value::from(numbers::EXEC_OUTPUT_MAX));
+    m.insert("execTimeoutDefaultMs", Value::from(numbers::EXEC_TIMEOUT_DEFAULT_MS));
+    m.insert("execDeadlineExit", Value::from(numbers::EXEC_DEADLINE_EXIT));
+    m.insert("placeLinkNonceBytes", Value::from(numbers::PLACE_LINK_NONCE_BYTES));
+    m.insert("preAuthMaxBytes", Value::from(numbers::PRE_AUTH_MAX_BYTES));
+    m.insert("authDeadlineMs", Value::from(numbers::AUTH_DEADLINE_MS));
+    m.insert("tunnelCap", Value::from(numbers::TUNNEL_CAP));
+    m.insert("fsReadCapBytes", Value::from(numbers::FS_READ_CAP_BYTES));
+    m.insert("fsListCapEntries", Value::from(numbers::FS_LIST_CAP_ENTRIES));
+    m.insert("gitDiffCapBytes", Value::from(numbers::GIT_DIFF_CAP_BYTES));
+    m.insert("ptyScrollbackCapBytes", Value::from(numbers::SCROLLBACK_CAP_BYTES));
+    m.insert("procCmdlineBytes", Value::from(numbers::CMDLINE_BYTES));
+    m.insert("portCommandBytes", Value::from(numbers::PORT_CMDLINE_CAP_BYTES));
+    m.insert("procCap", Value::from(numbers::PROC_CAP));
+    m.insert("pidMax", Value::from(numbers::PID_MAX));
+    m.insert("openBodyMax", Value::from(numbers::OPEN_BODY_CAP));
+    m.insert("daemonDefaultHost", Value::from(numbers::DEFAULT_HOST));
+    m.insert("daemonDefaultPort", Value::from(numbers::DEFAULT_PORT));
+    m.insert("daemonTokenPath", Value::from(numbers::DEFAULT_TOKEN_PATH));
+    m.insert("daemonRootsPath", Value::from(numbers::DAEMON_ROOTS_PATH));
+    m.insert("guestInboxDir", Value::from(numbers::DEFAULT_INBOX_DIR));
+    m.insert("guestManifestPath", Value::from(numbers::DEFAULT_MANIFEST_PATH));
+    m.insert("openShimPath", Value::from(numbers::OPEN_SHIM_PATH));
+    m.insert("xdgOpenPath", Value::from(numbers::XDG_OPEN_PATH));
+    m.insert("openSocketPath", Value::from(numbers::OPEN_SOCKET_PATH));
+    m.insert("guestDaemonDir", Value::from(numbers::GUEST_DAEMON_DIR));
+    m.insert("daemonOomScoreAdj", Value::from(numbers::DAEMON_OOM_SCORE_ADJ));
+    m.insert("daemonNice", Value::from(numbers::DAEMON_NICE));
+    m.insert("workOomScoreAdj", Value::from(numbers::WORK_OOM_SCORE_ADJ));
     m.insert("workScoreLine", Value::from(numbers::work_score_line()));
     m
 }
