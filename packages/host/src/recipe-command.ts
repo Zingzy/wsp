@@ -6,7 +6,7 @@
 import { existsSync } from "node:fs";
 import { THREAD_AGENTS, agentName, catalogEntry, readsRowRoad } from "@wsp/catalog";
 import { type AgentHistory, type HistoryCache, type HistoryProgress, type Host, computeRecipe, unknownCommands } from "@wsp/collect";
-import { LOGIN_CHOICES, RECIPE_TICKS, addAlreadyHereLine, customRows, plural, thisComputer, usageRefusal, type Recipe, type RecipeCustomRow, type RecipeHistory, type LoginChoice, type RecipeTick, type ToolPin } from "@wsp/protocol";
+import { LOGIN_CHOICES, RECIPE_TICKS, addAlreadyHereFix, addAlreadyHereLine, customRows, plural, thisComputer, usageRefusal, type Recipe, type RecipeCustomRow, type RecipeHistory, type LoginChoice, type RecipeTick, type ToolPin } from "@wsp/protocol";
 import { loadRecipe, outsideRow, outsideRowsOf, ownRowIdOf, ownRowOf, pinsOf, saveSmallRecipe, withPins } from "./recipe-file.js";
 import { customFromFlags, customFromScan, withCustom, withoutCustom } from "./recipe-custom.js";
 import { recipeAnswer, recipeScan, type RecipeAnswer, type RecipeScan } from "./recipe-answer.js";
@@ -49,7 +49,7 @@ export function parseSet(word: string): { id: string; on: boolean } {
   const eq = word.indexOf("=");
   const id = eq < 0 ? word : word.slice(0, eq);
   const value = eq < 0 ? "" : word.slice(eq + 1);
-  if (value !== "on" && value !== "off") throw usageRefusal(`--set takes <id>=on or <id>=off, not ${JSON.stringify(word)}`);
+  if (value !== "on" && value !== "off") throw usageRefusal(`--set takes <id>=on or <id>=off, and got ${JSON.stringify(word)}.`, "Write the row id, an equals sign, then on or off.");
   return { id, on: value === "on" };
 }
 
@@ -74,8 +74,8 @@ export function parseSignIn(word: string): { id: string; choice: LoginChoice } {
   const eq = word.indexOf("=");
   const id = eq < 0 ? word : word.slice(0, eq);
   const choice = eq < 0 ? "" : word.slice(eq + 1);
-  if (!(LOGIN_CHOICES as readonly string[]).includes(choice)) throw usageRefusal(`--signin takes <id>=${LOGIN_CHOICES.join("|")}, not ${JSON.stringify(word)}`);
-  if (catalogEntry(id) === undefined) throw usageRefusal(`--signin ${word}: the catalog has no row called ${JSON.stringify(id)}`);
+  if (!(LOGIN_CHOICES as readonly string[]).includes(choice)) throw usageRefusal(`--signin takes <id>=${LOGIN_CHOICES.join("|")}, and got ${JSON.stringify(word)}.`, `Write the row id, an equals sign, then one of ${LOGIN_CHOICES.join(", ")}.`);
+  if (catalogEntry(id) === undefined) throw usageRefusal(`--signin ${word}: the catalog has no row called ${JSON.stringify(id)}.`, "Run wsp recipe scan to read the rows this computer offers.");
   return { id, choice: choice as LoginChoice };
 }
 
@@ -244,12 +244,12 @@ export async function runRecipe(host: Host, input: RecipeInput, io: RecipeIo = Q
   const here = needsScan && input.alsoHere !== undefined ? await input.alsoHere(saved === undefined ? [] : customRows(saved)) : [];
   for (const row of added) {
     const already = scannedFor(row, here);
-    if (already !== undefined) throw usageRefusal(addAlreadyHereLine(host.platform, row.id, already.id));
+    if (already !== undefined) throw usageRefusal(addAlreadyHereLine(host.platform, row.id), addAlreadyHereFix(already.id));
   }
   const looked = input.alsoHere !== undefined ? `, and no package a manager on ${thisComputer(host.platform)} has that id` : "";
   const targets = [...sets].map(([id, on]) => {
     const target = setTarget(id, saved, here);
-    if (target === undefined) throw usageRefusal(`--set ${id}=${on ? "on" : "off"}: ${JSON.stringify(id)} is no catalog row and no row of ${input.out} outside the catalog${looked}`);
+    if (target === undefined) throw usageRefusal(`--set ${id}=${on ? "on" : "off"}: ${JSON.stringify(id)} is no catalog row and no row of ${input.out} outside the catalog${looked}.`, "Run wsp recipe scan to read the rows this computer offers.");
     return { ...target, on };
   });
   // A package whose road the build cannot read off a row of its own is ticked as an added row carrying the scan's

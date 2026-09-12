@@ -414,9 +414,10 @@ export interface Api {
    * host refuses one whose turn reached its agent. Optional so fixtures that never forget one need not fake it; a
    * client without it offers no forget. */
   forgetThread?(threadId: string): Promise<void>;
-  /** What each harness's CLI takes at launch; the composer's pickers render from it. With a workspace the runtime
-   * asks the binaries on its machine, else its table answers. Optional so fixtures without pickers need not fake it;
-   * without it the composer shows none. */
+  /** What each harness's CLI takes at launch; the composer's pickers render from it, and every start rides the model,
+   * effort, context window and access resolved out of it. With a workspace the runtime asks the binaries on its
+   * machine, else its table answers. Optional so fixtures without pickers need not fake it; without it the composer
+   * has no agent to send to and is held with that reason. */
   listHarnesses?(workspaceId?: string): Promise<HarnessCatalog[]>;
   /** One level of the folders on the computer running the host, for the picker a browser tab has instead of the
    * desktop shell's dialog. `dir` absent, or a folder inside the roots that is gone, answers with the first root; a
