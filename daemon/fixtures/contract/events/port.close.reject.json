@@ -1,0 +1,10 @@
+[
+  {
+    "type": "port.close"
+  },
+  {
+    "type": "port.close",
+    "port": 3000,
+    "exited": 1
+  }
+]

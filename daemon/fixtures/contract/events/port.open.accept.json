@@ -1,0 +1,13 @@
+[
+  {
+    "type": "port.open",
+    "port": 3000
+  },
+  {
+    "type": "port.open",
+    "port": 8123,
+    "pid": 4242,
+    "process": "node",
+    "loopback": true
+  }
+]
