@@ -37,10 +37,16 @@
 // runtime catalog says run only in the CLI's own terminal; with nothing left
 // to offer it does not open at all and the placeholder drops its half about
 // commands, since a menu that answers a typed slash with an empty state
-// promises what it cannot keep. Enter on a screen command sends nothing: the
-// line names the wsp control that serves it and goes with the next edit, and
-// a block on the send outranks it. A slash command nobody announced still
-// goes as text, since the words may be meant.
+// promises what it cannot keep. What it offers is grouped by the source the
+// announcement named, in the order it named them. Enter on a screen command
+// sends nothing: the line names the wsp control that serves it and goes with
+// the next edit, and a block on the send outranks it. A draft that is a slash
+// alone, or a slash and a name nothing announced, is held the way every other
+// held send is held, in the same slot and on the same button, with the box
+// still open since the next keystroke is what lifts it: sent, it would reach
+// the agent as a command it does not have, and come back as a question about
+// a stray slash with a turn's price on it. A slash command nobody announced
+// with words after it still goes as text, since the words may be meant.
 // The checkout row under the composer picks the folder a fresh thread starts
 // in; a resumed one is started where its harness last said it was. The
 // model, effort, context window and access picks in the box's footer ride
@@ -56,9 +62,10 @@ import { useThreadStart } from "../../files/root";
 import { useLinkDownLine } from "../../terminal/paneWords";
 import { composerSubmissionIntentForEnter, detectComposerTrigger, replaceTextRange } from "../../composer-logic";
 import { ComposerPromptEditor, type ComposerCommandKey, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
-import { catalogFromHarness, composerPlaceholder, offersSlashCommands } from "./adapt";
+import { catalogFromHarness, composerPlaceholder, offersSlashCommands, slashHoldLine } from "./adapt";
 import { canPickFolder, ComposerCheckoutRow } from "./ComposerCheckoutRow";
 import { ComposerCommandMenu, type ComposerCommandItem } from "./ComposerCommandMenu";
+import { composerCommandGroups, type ComposerCommandGroup } from "./composerCommandGroups";
 import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
 import { ChatImageThumb } from "./ChatImages";
 import { attachmentOf, recordOf, useComposerImages, useComposerImagesStore } from "./composerImages";
@@ -67,7 +74,7 @@ import { ComposerOptionPickers, useAccessPick, useComposerPicks } from "./Compos
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerQueue } from "./ComposerQueue";
-import { searchSlashCommandItems, slashCommandItemsForPromptPosition } from "./composerSlashCommandSearch";
+import { slashCommandItemsForPromptPosition } from "./composerSlashCommandSearch";
 import { ComposerSurface } from "./ComposerSurface";
 import { Button } from "../ui/button";
 import type { ChatThreadHandle } from "./useChatThread";
@@ -164,6 +171,8 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const [dismissedSearchKey, setDismissedSearchKey] = useState<string | null>(null);
 
   const linkDown = useLinkDownLine(workspaceId);
+  const { harness } = thread.view;
+  const catalog = useMemo(() => catalogFromHarness({ id: harnessId, harness, screen: screenCommandsOf(harnessCatalog) }), [harness, harnessCatalog, harnessId]);
   const blocked = composerSendBlock({ conn, hasApi: api !== null, state, hydrated: thread.hydrated, agents: harnessCatalogs.length > 0 });
   // A send wakes a paused machine by itself, so paused is not a refusal here: the box takes the words and the send
   // button says it wakes first.
@@ -171,7 +180,11 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   // A window on another computer whose wsp has gone quiet says which computer is asleep, not that wsp is not
   // running: nothing here is broken, and the turn starts when that computer wakes.
   const unavailable = blocked === null || wakesFirst ? null : hostAsleep(conn) ? HOST_ASLEEP_SEND : sendRefusal(blocked);
-  const sendDisabledReason = unavailable ?? (thread.busy ? TURN_IN_FLIGHT : null);
+  // Everything that holds this send, in one reading: what blocks every send in this workspace, then what this draft
+  // alone cannot be sent as. The slot, the send button and the Enter path all take it from here, so a person is told
+  // once and told the same thing wherever they look.
+  const sendHeld = unavailable ?? slashHoldLine({ prompt: draft.prompt, catalog, screen: screenCommandsOf(harnessCatalog) });
+  const sendDisabledReason = sendHeld ?? (thread.busy ? TURN_IN_FLIGHT : null);
   const hasText = draft.prompt.trim().length > 0;
   // The catalog answers before the click; a row the runtime's table stood in for is no answer, so the picker is
   // offered and the runtime refuses in the agent's name if that binary turns out to read none.
@@ -205,8 +218,8 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   // as the next turn, then an access pick the running turn's harness would not take mid-turn, then the workspace's
   // link being down, which blocks no send and so comes after everything a person is being stopped by.
   const line =
-    unavailable !== null
-      ? unavailable
+    sendHeld !== null
+      ? sendHeld
       : imageRefusal !== null
         ? imageRefusal
         : stopAttempt !== null && stopAttempt.error !== null
@@ -221,11 +234,9 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
 
   const trigger = useMemo(() => detectComposerTrigger(draft.prompt, draft.cursor), [draft]);
   const searchKey = trigger ? `${trigger.kind}:${trigger.query.trim().toLowerCase()}` : null;
-  const { harness } = thread.view;
-  const catalog = useMemo(() => catalogFromHarness({ id: harnessId, harness, screen: screenCommandsOf(harnessCatalog) }), [harness, harnessCatalog, harnessId]);
-  const menuOpen = offersSlashCommands(catalog) && trigger !== null && trigger.rangeStart === 0 && dismissedSearchKey !== searchKey && unavailable === null;
-  const items = useMemo<ComposerCommandItem[]>(() => {
-    if (!menuOpen || trigger === null) return [];
+  const menuTriggered = offersSlashCommands(catalog) && trigger !== null && trigger.rangeStart === 0 && dismissedSearchKey !== searchKey && unavailable === null;
+  const groups = useMemo<ComposerCommandGroup[]>(() => {
+    if (!menuTriggered || trigger === null) return [];
     const all = catalog.slashCommands.map(command => ({
       id: `provider-slash-command:${catalog.harness}:${command.name}`,
       type: "provider-slash-command" as const,
@@ -234,8 +245,13 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
       label: `/${command.name}`,
       description: command.description ?? command.input?.hint ?? "",
     }));
-    return searchSlashCommandItems(slashCommandItemsForPromptPosition(all, trigger.rangeStart === 0), trigger.query);
-  }, [catalog, menuOpen, trigger]);
+    return composerCommandGroups(slashCommandItemsForPromptPosition(all, trigger.rangeStart === 0), trigger.query);
+  }, [catalog, menuTriggered, trigger]);
+  // The keyboard walks the menu as it is drawn, so the groups decide the order the arrows take and not the other way round.
+  const items = useMemo<ComposerCommandItem[]>(() => groups.flatMap(group => group.items), [groups]);
+  // A slash that matched nothing draws no menu: the slot above the box already holds the one line that says so, and
+  // an empty drawer under it would say it a second time in other words.
+  const menuOpen = groups.length > 0;
   const activeItemId = resolveComposerMenuActiveItemId({ items, highlightedItemId, currentSearchKey: searchKey, highlightedSearchKey });
 
   useEffect(() => {
@@ -337,12 +353,12 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const send = useCallback(() => {
     // The same reading the slot and the send button are already wearing: an Enter that lands here leaves the draft
     // where it was typed and that line standing.
-    if (unavailable !== null) return;
+    if (sendHeld !== null) return;
     const snapshot = editorRef.current?.readSnapshot() ?? { value: draft.prompt, cursor: draft.cursor };
     const prompt = snapshot.value.trim();
     if (prompt === "") return;
-    // A command the CLI runs only in its own terminal would come back as not available; the draft stays for editing,
-    // and the menu's empty state goes so the line alone speaks.
+    // A command the CLI runs only in its own terminal would come back as not available, so the draft stays for
+    // editing and the line names the wsp control that serves it instead.
     const screen = screenCommandTyped(harnessCatalog, prompt);
     if (screen !== null && harnessCatalog !== null) {
       setScreenLine(screenCommandLine(screen, harnessCatalog, workspace ?? {}));
@@ -370,7 +386,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     }
     enqueue(threadKey, prompt, held ? "head" : "tail");
     release(threadKey);
-  }, [busy, draft, enqueue, harnessCatalog, held, images, release, searchKey, sending, setDraft, start, threadKey, unavailable, workspace, workspaceId]);
+  }, [busy, draft, enqueue, harnessCatalog, held, images, release, searchKey, sendHeld, sending, setDraft, start, threadKey, workspace, workspaceId]);
 
   // The head row goes as soon as nothing blocks a send; starting flips busy, so the rest wait for the next end.
   const head = queue[0];
@@ -536,7 +552,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
                     {menuOpen ? (
                       <ComposerCommandMenuLayer anchor={menuAnchor}>
                         <ComposerCommandMenu
-                          items={items}
+                          groups={groups}
                           triggerKind={trigger?.kind ?? null}
                           activeItemId={activeItemId}
                           onHighlightedItemChange={highlight}

@@ -22,9 +22,9 @@ pub enum DaemonOp {
     #[serde(rename = "pty.create", rename_all = "camelCase")]
     PtyCreate {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        cols: Option<u16>,
+        cols: Option<NonZeroU16>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        rows: Option<u16>,
+        rows: Option<NonZeroU16>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         shell: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -37,7 +37,8 @@ pub enum DaemonOp {
     #[serde(rename = "pty.write", rename_all = "camelCase")]
     PtyWrite { pty_id: String, data: String },
     #[serde(rename = "pty.resize", rename_all = "camelCase")]
-    PtyResize { pty_id: String, cols: u16, rows: u16 },
+    /// A size of zero is refused here as node-pty refuses it; the protocol's number says only "number".
+    PtyResize { pty_id: String, cols: NonZeroU16, rows: NonZeroU16 },
     #[serde(rename = "pty.kill", rename_all = "camelCase")]
     PtyKill { pty_id: String },
     #[serde(rename = "pty.list")]

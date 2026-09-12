@@ -13,6 +13,7 @@ import {
   PERMISSION_DENIED_LINE,
   accessFromNextMessage,
   permissionAskLine,
+  permissionPromptWords,
   permissionModeOptionLabel,
   permissionOutcomeLine,
   permissionUnansweredLine,
@@ -1508,12 +1509,68 @@ describe("terminalConfigLines", () => {
 });
 
 describe("the words a relayed permission prompt shows", () => {
-  it("leads with the tool and what it is about, and drops the detail where the harness named none", () => {
-    expect(permissionAskLine("Write", "out.txt")).toBe("Permission for Write: out.txt");
-    expect(permissionAskLine("Bash")).toBe("Permission for Bash");
-    expect(permissionAskLine("Bash", "")).toBe("Permission for Bash");
+  it("words a file write by the file, the folder holding it and how much is going in", () => {
+    // The path and the file's own text are what a person cannot read at a glance; the name, the folder and the size are.
+    expect(permissionAskLine("Write", JSON.stringify({ file_path: "/Users/dev/wsp-work/index.html", content: "x".repeat(2_100) }))).toBe(
+      "Write index.html in wsp-work (2 KB)",
+    );
+    expect(permissionAskLine("Write", JSON.stringify({ file_path: "out.txt", content: "hi" }))).toBe("Write out.txt (2 B)");
+    // The lead is the whole of it: a write's own words carry no code part, since a file's name is not read character by character.
+    expect(permissionPromptWords("Write", JSON.stringify({ file_path: "/root/out.txt", content: "hi" })).code).toBeUndefined();
     // The options under it are the question, so the line never asks one.
-    expect(permissionAskLine("Write", "out.txt")).not.toContain("?");
+    expect(permissionAskLine("Write", JSON.stringify({ file_path: "/root/out.txt", content: "hi" }))).not.toContain("?");
+  });
+
+  it("words a command as the whole command, kept apart from the words so a client can draw it as code", () => {
+    // A command goes in whole, its later lines and its length alike: one cut anywhere is one nobody can judge.
+    const long = `cat > out.py <<'PY'\nprint(${"1 + ".repeat(60)}1)\nPY`;
+    expect(permissionAskLine("Bash", JSON.stringify({ command: long, description: "Write and run a sum" }))).toBe(`Run: ${long}`);
+    // The two parts are apart, so a face that blurs two hyphens into one dash never draws the command.
+    const gate = "pnpm exec vitest run --minWorkers=1 --maxWorkers=1";
+    expect(permissionPromptWords("Bash", JSON.stringify({ command: gate }))).toMatchObject({ says: "Run:", code: gate, lead: `Run: ${gate}` });
+  });
+
+  it("words a tool a server lends as the server and the tool, and never the server's own paragraph", () => {
+    expect(permissionAskLine("mcp__wsp__workspaces", "{}", "wsp runs cloud machines called workspaces, forked in seconds")).toBe("Use the wsp tools: workspaces");
+    expect(permissionAskLine("mcp__wsp__thread_new", "{}")).toBe("Use the wsp tools: thread new");
+    expect(permissionPromptWords("mcp__wsp__workspaces", "{}", "wsp runs cloud machines").code).toBeUndefined();
+  });
+
+  it("words a skill as its own name, and never the description paragraph the harness sends", () => {
+    expect(permissionAskLine("Skill", JSON.stringify({ skill: "agent-browser" }), "Browser automation CLI for AI agents. Use when the user needs")).toBe(
+      "Run the skill agent-browser",
+    );
+  });
+
+  it("falls back to the harness's own phrase under the tool's name for a kind with no rule and for input it cannot read", () => {
+    expect(permissionAskLine("Read", JSON.stringify({ file_path: "/root/out.txt" }), "out.txt")).toBe("Permission for Read: out.txt");
+    expect(permissionAskLine("Read", "{}")).toBe("Permission for Read");
+    expect(permissionAskLine("Read", "{}", "")).toBe("Permission for Read");
+    // Input that is not an object yet, and a call whose input carries none of what its rule needs, fall back the same way.
+    expect(permissionAskLine("Bash", "{\"comm", "rm -rf build")).toBe("Permission for Bash: rm -rf build");
+    expect(permissionAskLine("Write", "{}", "out.txt")).toBe("Permission for Write: out.txt");
+  });
+
+  it("folds a file's body away and shows the rest of the input under the lead", () => {
+    const body = "line\n".repeat(400);
+    const write = permissionPromptWords("Write", JSON.stringify({ file_path: "/Users/dev/wsp-work/index.html", content: body }));
+    expect(write.lead).toBe("Write index.html in wsp-work (2 KB)");
+    // The file is behind the fold, whole, and nowhere else: the buttons stay in reach.
+    expect(write.body).toEqual({ label: "show the file", text: body });
+    expect(write.rest).toBe("");
+    // The lead already carries the command, and the harness's phrase for it is never the row's words.
+    expect(permissionPromptWords("Bash", JSON.stringify({ command: "rm -rf build", description: "Clean the build" })).rest).toBe("");
+    expect(permissionPromptWords("Skill", JSON.stringify({ skill: "agent-browser" }), "Browser automation CLI").rest).toBe("");
+    // What the lead does not carry still shows, each field apart from the next: this is the row consent is given on.
+    expect(permissionPromptWords("Bash", JSON.stringify({ command: "ls", timeout: 5_000 })).rest).toBe("timeout: 5000");
+    expect(permissionPromptWords("mcp__wsp__send", JSON.stringify({ threadId: "thr_1", message: "go" })).rest).toBe("threadId: thr_1 · message: go");
+    // A field a tool really calls description is the call's own, not the harness's paragraph, so it shows like any other.
+    expect(permissionPromptWords("mcp__linear__create_issue", JSON.stringify({ title: "Fix login", description: "The button does\n\nnothing on Safari." })).rest).toBe(
+      "title: Fix login · description: The button does nothing on Safari.",
+    );
+    // A tool that carries no file body folds nothing away, and input that is not an object is shown as it stands.
+    expect(permissionPromptWords("Bash", JSON.stringify({ command: "ls" })).body).toBeUndefined();
+    expect(permissionPromptWords("Bash", "not json").rest).toBe("not json");
   });
 
   it("says how a closed prompt closed, naming the option only where it says something the outcome does not", () => {
