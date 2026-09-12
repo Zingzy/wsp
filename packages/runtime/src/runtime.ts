@@ -801,6 +801,9 @@ export interface RuntimeOptions {
   vaultCaches?: CacheRule;
   /** Defaults for the status poller / cost ticker (tests shrink the intervals). */
   status?: StatusWatchOptions;
+  /** Defaults for a turn's stream on a machine: the poll pace and the clock its launch retry and its polls wait on
+   * (tests hand in one they move by hand). Each road's own options win over these. */
+  machineExec?: MachineExecOptions;
   idle?: { defaultWindowMs?: number };
   /** Drives the idle window and the transcript debounce; tests inject one they advance by hand. */
   clock?: Clock;
@@ -1384,7 +1387,6 @@ const PREFERENCES_ID = "default";
 /** What the timeline shows as the last row of a turn the runtime ended, not the harness. */
 const PAUSED_REASON = "machine paused while the agent was working";
 const DELETED_REASON = "machine deleted while the agent was working";
-const UNANSWERING_REASON = "machine stopped answering while the agent was working";
 const RESTARTED_REASON = "host restarted while the agent was working";
 const GONE_REASON = "machine gone at the provider while the agent was working";
 /** The host log's one line for a workspace found gone, from the road and from the record load alike. */
@@ -2055,7 +2057,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (lifecycle === undefined) throw new Error(`${entry.record.kind} machines declare no lifecycle`);
     return lifecycle;
   };
-  const execFactoryFor = (entry: LiveWorkspace, o?: MachineExecOptions, waiting?: TurnWaiting): ExecStreamFactory => moduleOf(entry.record.kind).execStream(entry, o, waiting);
+  const execFactoryFor = (entry: LiveWorkspace, o?: MachineExecOptions, waiting?: TurnWaiting): ExecStreamFactory =>
+    moduleOf(entry.record.kind).execStream(entry, opts.machineExec === undefined ? o : { ...opts.machineExec, ...o }, waiting);
   /** The folder a turn or a command starts in, the one rule every road reads: the folder the caller named, else the
    * project named, else the project a thread last landed in on this workspace, else its only project, else the
    * kind's own folder, where a kind that names none leaves the shell in the machine's home. Both roads that launch a
@@ -3511,7 +3514,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
   bus.on("workspace.status", e => {
     if (e.type !== "workspace.status") return;
-    if (e.status.reach.state === "zombie") endSessions(e.status.id, UNANSWERING_REASON);
+    // No session ends on a reach verdict: the probe reads this computer's own road, and a resolver that dropped one
+    // name for three minutes on 2026-09-12 read two live machines dark and cost every turn on them its process.
     const entry = live.get(e.status.id);
     if (entry === undefined) return;
     if (e.status.phase === "running" && e.status.machineState === "paused") void adoptPause(entry);

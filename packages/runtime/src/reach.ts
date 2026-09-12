@@ -4,7 +4,7 @@
 // liveness is an app-level ping op; every (re)connect re-subscribes and
 // rescans the inbox because events pushed during a gap are gone for good.
 
-import { DaemonEvent, MachineErrorKind, type DaemonLinkStatus } from "@wsp/protocol";
+import { DaemonEvent, linkBackoffMs, MachineErrorKind, type DaemonLinkStatus } from "@wsp/protocol";
 import WebSocket from "ws";
 
 export interface ReachOptions {
@@ -20,6 +20,8 @@ export interface ReachOptions {
   /** Fires on every transition; reauth-needed and dead are terminal. */
   onStatus?: (s: DaemonLinkStatus) => void;
   heartbeatMs?: number;
+  /** The wait before each re-dial; the link rule's unless a test pins one. A dial that keeps failing is made again
+   * for as long as this link is held, since only the daemon's own word ends anything running behind it. */
   backoffMs?: (attempt: number) => number;
 }
 
@@ -47,7 +49,6 @@ export function daemonWsUrl(previewUrl: string): string {
 }
 
 const DEFAULT_HEARTBEAT_MS = 10_000;
-const defaultBackoff = (attempt: number): number => Math.min(10_000, 500 * 2 ** (attempt - 1));
 
 interface Pending {
   resolve: (m: Record<string, unknown>) => void;
@@ -59,7 +60,7 @@ export function connectDaemon(opts: ReachOptions): DaemonReach {
   if (opts.previewUrl !== undefined && opts.token === undefined) throw new Error("connectDaemon needs the daemon's token to dial a previewUrl");
   const url = opts.previewUrl === undefined ? "" : daemonWsUrl(opts.previewUrl);
   const heartbeatMs = opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
-  const backoff = opts.backoffMs ?? defaultBackoff;
+  const backoff = opts.backoffMs ?? linkBackoffMs;
 
   let ws: WebSocket | null = null;
   let closed = false;
