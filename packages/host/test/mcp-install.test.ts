@@ -254,14 +254,17 @@ describe("installing the MCP server for a local agent", () => {
     expect(recipeHelp.lines[0]).toMatch(/^usage: wsp recipe \[--tick used\|installed\|default\]/);
   });
 
-  it("a line that puts a flag before the word gets mcp's own usage, the way a verb's line gets its verb's", async () => {
+  it("a line that puts a shared flag before the word still selects the word's own line, and a word no line answers to is named", async () => {
     const flagFirst = io();
-    expect(await cli(["--state", statePath, "mcp"], flagFirst)).toBe(3);
-    expect(flagFirst.errors).toEqual(["usage: wsp mcp [--host <alias>]\n       wsp mcp install --agent <id> [--agent <id>] [--host <alias>] [--json] [--remove]   (claude, codex, gemini, opencode)"]);
-    expect(flagFirst.lines).toEqual([]);
+    expect(await cli(["--state", statePath, "mcp", "--help"], flagFirst)).toBe(0);
+    expect(flagFirst.lines).toEqual(["usage: wsp mcp [--host <alias>]\n       wsp mcp install --agent <id> [--agent <id>] [--host <alias>] [--json] [--remove]   (claude, codex, gemini, opencode)"]);
+    const stray = io();
+    expect(await cli(["--state", statePath, "mcp", "install", "--nope"], stray)).toBe(3);
+    expect(stray.errors[0]).toContain("Unknown option '--nope'");
+    // The verb runs rather than printing its usage: nothing serves this state file, which is the line's own answer.
     const verbLine = io();
-    expect(await cli(["--state", statePath, "threads"], verbLine)).toBe(3);
-    expect(verbLine.errors[0]).toContain("usage: wsp threads");
+    expect(await cli(["--state", statePath, "threads"], verbLine)).toBe(1);
+    expect(verbLine.errors[0]).toContain(`no wsp host is serving ${statePath}`);
     const nonsense = io();
     expect(await cli(["--state", statePath, "nope"], nonsense)).toBe(3);
     expect(nonsense.errors[0]).toContain("unknown command: nope");

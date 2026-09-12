@@ -93,6 +93,12 @@ describe("wsp verbs over the host", () => {
     const { io, ended } = starting(...argv);
     return { code: await ended, io };
   }
+  /** A line exactly as it was typed, with nothing moved or added: where a shared flag sits is the question here, so
+   * the helpers that put --state at the end are no use. */
+  async function typed(...argv: string[]): Promise<{ code: number; io: Captured }> {
+    const io = captured();
+    return { code: await cli(argv, io, undefined, env), io };
+  }
   const json = (io: Captured): unknown[] => io.lines.map(l => JSON.parse(l) as unknown);
   /** The workspace column of the table wsp workspaces prints, which is the list a person reads names off. */
   const names = (listed: { io: Captured }): string[] => listed.io.lines[0]!.split("\n").slice(1).map(row => row.split(/\s+/)[0]!);
@@ -1950,6 +1956,75 @@ describe("wsp verbs over the host", () => {
     const missing = await run("thread", "read", "nope");
     expect(missing.code).toBe(1);
     expect(missing.io.errors).toEqual(["wsp thread read: no thread nope"]);
+  });
+
+  it("takes --state wherever it sits: before the verb's words, between them and after them", async () => {
+    await run("new", "alpha");
+    await run("thread", "new", "--in", "alpha", "build it");
+    const id = (await rt.sessions.list())[0]!.threadId!;
+
+    const before = await typed("--state", statePath, "thread", "read", id);
+    const between = await typed("thread", "--state", statePath, "read", id);
+    const after = await typed("thread", "read", id, "--state", statePath);
+    expect([before.code, between.code, after.code]).toEqual([0, 0, 0]);
+    expect([before.io.errors, between.io.errors, after.io.errors]).toEqual([[], [], []]);
+    expect(before.io.lines).toEqual(after.io.lines);
+    expect(between.io.lines).toEqual(after.io.lines);
+    expect(after.io.lines[0]).toContain("build it");
+  });
+
+  it("takes --json wherever it sits, so a line that asks for JSON before the verb's words prints JSON", async () => {
+    await run("new", "alpha");
+    await run("thread", "new", "--in", "alpha", "build it");
+    const id = (await rt.sessions.list())[0]!.threadId!;
+    const answer = [{ threadId: id, messages: [{ who: "agent", at: expect.any(Number), text: "re: build it" }] }];
+
+    const before = await typed("--json", "thread", "read", id, "--last", "--state", statePath);
+    const between = await typed("thread", "--json", "read", id, "--last", "--state", statePath);
+    const after = await typed("thread", "read", id, "--last", "--json", "--state", statePath);
+    expect([before.code, between.code, after.code]).toEqual([0, 0, 0]);
+    expect(json(before.io)).toEqual(answer);
+    expect(json(between.io)).toEqual(answer);
+    expect(json(after.io)).toEqual(answer);
+  });
+
+  it("hands the verb the rest of the line in the order it was typed, so its own flags are read beside a shared one", async () => {
+    await run("new", "alpha");
+    await run("thread", "new", "--in", "alpha", "build it");
+    const id = (await rt.sessions.list())[0]!.threadId!;
+
+    // The shared flag between the verb's words, the verb's own flag at the end.
+    const { code, io } = await typed("thread", "--state", statePath, "read", id, "--last");
+    expect(code).toBe(0);
+    expect(io.errors).toEqual([]);
+    expect(io.lines).toEqual([expect.stringContaining("re: build it")]);
+  });
+
+  it("refuses a shared flag left at the end of the line by its own name, never reading the verb's word as its value", async () => {
+    for (const name of ["--state", "--host"]) {
+      const { code, io } = await typed("thread", "read", "th_one", name);
+      const refusal = io.errors.join("\n");
+      expect(code, name).toBe(EXIT_CODES.usage);
+      expect(refusal, name).toContain(`Option '${name} <value>' argument missing`);
+      // The word the verb was given is its own, so nothing about it is read back as the flag's value.
+      expect(refusal, name).not.toContain("th_one");
+    }
+  });
+
+  it("refuses a misspelt shared flag by the word that was typed, in two halves, wherever it sits", async () => {
+    for (const argv of [
+      ["--stat", statePath, "threads"],
+      ["thread", "--stat", statePath, "read", "th_one"],
+      ["threads", "--stat", statePath],
+    ]) {
+      const { code, io } = await typed(...argv);
+      expect(code, argv.join(" ")).toBe(EXIT_CODES.usage);
+      const refusal = io.errors.join("\n");
+      expect(refusal, argv.join(" ")).toContain("--stat'");
+      // Two halves: what happened, then what to do about it.
+      expect(refusal.split("\n\n"), argv.join(" ")).toHaveLength(2);
+      expect(refusal.split("\n\n")[1], argv.join(" ")).toMatch(/^(?:usage:|wsp --help)/);
+    }
   });
 
   it("thread new, send and fork --send return with the reply on the turn's session.done; a session.end that never comes is not waited for", async () => {

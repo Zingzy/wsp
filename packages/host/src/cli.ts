@@ -84,7 +84,7 @@ import { addCommand, addFlags, joinCommand, leaveCommand, placeWiring, removeCom
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, registeredLine, removeEach, removeLines, runningWsp, type RunningWsp } from "./mcp-install.js";
-import { CLI_VERBS, COMMON, type DialOpts, dialHost, failed, findVerb, type HostClient, jsonAsked, runVerb, toolName, verbHelp, verbUsage, type LocalRuntime, type VerbDeps } from "./verbs.js";
+import { CLI_VERBS, COMMON, type DialOpts, dialHost, failed, findVerb, type HostClient, jsonAsked, runVerb, takeCommon, toolName, verbHelp, verbUsage, type LocalRuntime, type VerbDeps } from "./verbs.js";
 import { VERSION } from "./version.js";
 
 /** The computer every screen and every reader here is told it is on; the one reading, so a run, its hand-off and
@@ -1804,6 +1804,10 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
   return report.failures.length > 0 ? 1 : 0;
 }
 
+/** What to do about a word no line of the shared parse reads, said beside the parser's own sentence naming it: the
+ * help behind it runs to hundreds of rows, so a refusal points at it rather than printing it. */
+const FLAG_LIST_LINE = "wsp --help lists every line and the flags it reads.";
+
 /** The flags the shared parse reads for up, init and doctor. The ones that shape a serving host come from the table
  * the service's unit is written out of, so neither road can read a flag the other has never heard of. */
 export const SHARED_OPTIONS: Options = {
@@ -1869,7 +1873,10 @@ export async function cli(argv: string[], io: CliIO = terminalIO(), run: Running
   // One reading for every road out of this process, and the sentence about it said once: a verb, a command and the
   // tool server all pick their state here, so none of them can run against a state another of them named.
   const chooseState = (flag?: string): string => statePathFrom(flag, env, line => io.error(line));
-  const verb = findVerb(argv);
+  // The flags every line shares are taken off the whole line here, before the words that select the line are read,
+  // so one of them binds wherever it was typed and what is left reaches its own parse in the order it was given.
+  const { common, rest } = takeCommon(argv);
+  const verb = findVerb(rest);
   // The one verb that runs with no host serving, new --local, builds the runtime over the state file in this process.
   const verbRuntime = async (statePath: string): Promise<LocalRuntime> => {
     await adoptLoginPath(line => io.log(line));
@@ -1883,14 +1890,17 @@ export async function cli(argv: string[], io: CliIO = terminalIO(), run: Running
       close: () => rt.close(),
     };
   };
-  if (verb !== undefined) return runVerb(verb, argv, io, chooseState, { alsoHere, cwd: process.cwd(), env, runtime: verbRuntime });
-  if (argv[0] === MCP_COMMAND) return mcp(io, argv.slice(1), chooseState, run, env);
+  if (verb !== undefined) {
+    const words = verb.name.split(" ");
+    return runVerb(verb, [...words, ...common, ...rest.slice(words.length)], io, chooseState, { alsoHere, cwd: process.cwd(), env, runtime: verbRuntime });
+  }
+  if (rest[0] === MCP_COMMAND) return mcp(io, [...common, ...rest.slice(1)], chooseState, run, env);
   let values: SharedFlags;
   let positionals: string[];
   try {
-    ({ values, positionals } = parseArgs({ args: argv, options: SHARED_OPTIONS, allowPositionals: true }));
+    ({ values, positionals } = parseArgs({ args: [...common, ...rest], options: SHARED_OPTIONS, allowPositionals: true }));
   } catch (e) {
-    return failed(io, jsonAsked(argv), usageRefusal(e instanceof Error ? e.message : String(e)));
+    return failed(io, jsonAsked(argv), usageRefusal(`${e instanceof Error ? e.message : String(e)}\n\n${FLAG_LIST_LINE}`));
   }
   if (values.version) {
     io.log(`wsp ${VERSION}`);

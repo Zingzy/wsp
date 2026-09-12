@@ -254,6 +254,24 @@ describe("a verb against a connected host", () => {
     expect(ran).toBe(0);
   });
 
+  it("takes --host wherever it sits: before the verb's words, between them and after them", async () => {
+    const box = await boxAndHome();
+    await connectCommand(io(), { statePath: STATE, home: box.home }, { code: await box.code(), name: "box" }, [box.url]);
+    const env = { WSP_HOME: box.home };
+
+    const before: string[] = [];
+    expect(await cli(["--host", "box", "threads"], io(before), undefined, env)).toBe(0);
+    const after: string[] = [];
+    expect(await cli(["threads", "--host", "box"], io(after), undefined, env)).toBe(0);
+    expect(before).toEqual(after);
+
+    // Between the verb's own words the flag still aims the line: this thread is on no host, and the answer is the
+    // one that host gives rather than a usage dump from a line that never read the flag.
+    const err: string[] = [];
+    expect(await cli(["thread", "--host", "box", "read", "th_none"], io([], err), undefined, env)).toBe(1);
+    expect(err).toEqual(["wsp thread read: no thread th_none"]);
+  });
+
   it("takes the road through that host, not a runtime in this process, even though nothing serves the state file here", async () => {
     const box = await boxAndHome();
     await connectCommand(io(), { statePath: STATE, home: box.home }, { code: await box.code(), name: "box" }, [box.url]);
