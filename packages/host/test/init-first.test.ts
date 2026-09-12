@@ -188,7 +188,7 @@ describe("the two lines the import prints", () => {
   });
 
   it("says where the folder landed and what was left out of it", () => {
-    const landed = (over: Partial<ProjectImportResult> = {}): ProjectImportResult => ({ dest: "/Users/me/code/proj", files: 12, bytes: 3072, parts: 1, cut: [], rewritten: [], agents: [], ...over });
+    const landed = (over: Partial<ProjectImportResult> = {}): ProjectImportResult => ({ dest: "/Users/me/code/proj", files: 12, bytes: 3072, parts: 1, cut: [], rewritten: [], agents: [], project: { name: "proj", dest: "/Users/me/code/proj", importedAt: "2026-09-12T10:00:00.000Z", size: 3072 }, ...over });
     expect(importedLine(landed(), "first")).toBe("/Users/me/code/proj on first: 12 files, 3 KB.");
     expect(importedLine(landed({ cut: [".env"], rewritten: [".git/config"] }), "proj")).toBe("/Users/me/code/proj on proj: 12 files, 3 KB; 1 file rewritten without their credentials; 1 secret-shaped file cut.");
   });

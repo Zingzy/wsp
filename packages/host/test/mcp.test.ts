@@ -958,11 +958,11 @@ describe("the MCP server over the host", () => {
     const imported = await call("import", { workspace: "alpha", folder: proj, yes: true });
     expect(imported.isError).toBe(false);
     expect(imported.text).toBe(`1 file, 20 B, landed at ${real}.`);
-    expect(imported.structured).toEqual({ plan: expect.objectContaining({ source: real }), imported: { dest: real, files: 1, bytes: 20, parts: 1, cut: [".env"], rewritten: [], agents: [] } });
+    expect(imported.structured).toEqual({ plan: expect.objectContaining({ source: real }), imported: { dest: real, files: 1, bytes: 20, parts: 1, cut: [".env"], rewritten: [], agents: [], project: { name: "proj", dest: real, importedAt: expect.any(String), size: 20 } } });
     expect(landings()).toHaveLength(1);
     const kept = await call("import", { workspace: "alpha", folder: proj, keep: [".env"], replace: true });
     expect(kept.isError).toBe(false);
-    expect(kept.structured).toEqual({ plan: expect.objectContaining({ source: real }), imported: { dest: real, files: 2, bytes: 39, parts: 1, cut: [], rewritten: [], agents: [] } });
+    expect(kept.structured).toEqual({ plan: expect.objectContaining({ source: real }), imported: { dest: real, files: 2, bytes: 39, parts: 1, cut: [], rewritten: [], agents: [], project: { name: "proj", dest: real, importedAt: expect.any(String), size: 39 } } });
     const relative = await call("import", { workspace: "alpha", folder: "proj", yes: true });
     expect(relative.isError).toBe(true);
     expect(relative.text).toBe("the folder must be an absolute path, got proj");

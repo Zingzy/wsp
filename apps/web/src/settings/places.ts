@@ -154,8 +154,9 @@ export const WHERE_PICK_WORDS = {
   /** How long the first workspace there takes, which is the image being built before it. */
   firstBuild: "builds your image there first, about 4 min",
   imageThere: (version: number): string => `your image is there, v${version}`,
-  /** The dialog with nowhere to put a workspace: what is missing, and what to do about it. */
-  nowhereYet: "Nowhere to put a new workspace yet.",
+  /** The dialog with nowhere to put a workspace: why this computer is not on the list, since a person who has just
+   * read Settings knows it is a computer where agents run, and then what to do about it. */
+  nowhereYet: `${THIS_COMPUTER_WORD} is already a workspace, the only one it can be`,
   addOne: "Add a computer you own or connect a provider, and workspaces can be created there.",
   /** Why Create is held with no name typed. */
   nameFirst: "give the workspace a name",
@@ -165,9 +166,12 @@ export const WHERE_PICK_WORDS = {
  * there costs, how much room is left on it, and whether the image is there already or is built first. A fact the
  * row has not reported is left out rather than guessed, so a caption says only what this host knows.
  *
+ * The rate is the one the workspace being made will be charged at: the size the person picked where they picked
+ * one, since a caption quoting the row's default while another size is ticked prices a machine nobody asked for.
+ *
  * Every figure is the protocol's own formatter (fmtRate, plural), never a second spelling of one. */
-export function whereCaption(place: PlaceView, copy: SealedImageCopy | undefined): string {
-  const cost = place.rateUsdPerHour === undefined ? [WHERE_PICK_WORDS.free] : [`${fmtRate(place.rateUsdPerHour)} ${WHERE_PICK_WORDS.whileAwake}`, WHERE_PICK_WORDS.napsToZero];
+export function whereCaption(place: PlaceView, copy: SealedImageCopy | undefined, rateUsdPerHour = place.rateUsdPerHour): string {
+  const cost = rateUsdPerHour === undefined ? [WHERE_PICK_WORDS.free] : [`${fmtRate(rateUsdPerHour)} ${WHERE_PICK_WORDS.whileAwake}`, WHERE_PICK_WORDS.napsToZero];
   const forks = place.forks;
   // A row with no room left ends on what to do about it: where the image stands is no longer the question, since
   // nothing can be created there until a workspace goes.

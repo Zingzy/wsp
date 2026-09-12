@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, type AbsentComputer, cloudCreateRefusal, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, type AbsentComputer, cloudCreateRefusal, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, withProject, workspaceProjects, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, writeAddress } from "./address.js";
 import { sidebarWorkspaceOrder } from "../adapt/workspaces.js";
@@ -171,6 +171,10 @@ interface State {
   /** A workspace view the runtime handed back to a caller, over the one in the rail: no event carries the image a
    * workspace forks from, so a move to a newer golden version would read stale until the next full refresh. */
   applyWorkspace(workspace: WorkspaceView): void;
+  /** The project an import landed, onto the workspace it landed on: the host answers the record it has just kept, so
+   * the pane lists the folder as soon as the import returns, whether or not the machine's daemon is up to say
+   * anything about what is in it. */
+  landProject(workspaceId: string, project: WorkspaceProject): void;
   /** The row leaves on the host's forward.close; a refusal is a toast. */
   stopForward(workspaceId: string, port: number): Promise<void>;
   clearToast(): void;
@@ -651,6 +655,13 @@ export const useStore = create<State>((set, get) => {
       set(s => ({
         workspaces: s.workspaces.map(w => (w.id === workspace.id ? { ...w, ...workspace } : w)),
         statuses: s.statuses[workspace.id] ? { ...s.statuses, [workspace.id]: { ...s.statuses[workspace.id]!, ...workspace } } : s.statuses,
+      }));
+    },
+    landProject(workspaceId, project) {
+      const put = <T extends WorkspaceView>(w: T): T => (w.id === workspaceId ? { ...w, projects: withProject(workspaceProjects(w), project) } : w);
+      set(s => ({
+        workspaces: s.workspaces.map(put),
+        statuses: s.statuses[workspaceId] ? { ...s.statuses, [workspaceId]: put(s.statuses[workspaceId]!) } : s.statuses,
       }));
     },
     applyEvent(e) {

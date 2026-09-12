@@ -92,7 +92,7 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
     createWorkspace: ReturnType<typeof vi.fn<(golden: string, name?: string) => Promise<WorkspaceView>>>;
   } = {
     planProject: vi.fn(async () => ({ source: "/Users/dev/proj", repo: true, files: 1, bytes: 20, secrets: [], excluded: [], skipped: [], agents: [] })),
-    importProject: vi.fn(async () => ({ dest: "/root/proj", files: 1, bytes: 20, parts: 1, cut: [], rewritten: [], agents: [] })),
+    importProject: vi.fn(async () => ({ dest: "/root/proj", files: 1, bytes: 20, parts: 1, cut: [], rewritten: [], agents: [], project: { name: "proj", dest: "/root/proj", importedAt: "2026-09-12T10:00:00.000Z", size: 20 } })),
     listProjectGoldens: vi.fn<() => Promise<ProjectGolden[]>>(async () => projects),
     snapshotWorkspace: vi.fn<(id: string) => Promise<ProjectGolden>>(async id => {
       const taken = pg("snap_taken", "snap_golden-v12", { workspaceId: id, createdAt: "2026-09-07T08:00:00.000Z" });
