@@ -71,9 +71,13 @@ export function verifyPlaceBytes(publicKeyBase64: string, bytes: Uint8Array, sig
  * bound are not the caller's to know before the dial, so the link and the daemon fill those two in. */
 export type PlaceSelfReport = Omit<PlaceReport, "dialed" | "daemonPort">;
 
-/** The ops a socket the place opened answers that no inbound socket does. The handler belongs to the road that
- * owns the act: taking this computer out of a wsp is the link's, not the daemon's switch. */
-export type LinkOps = Readonly<Record<string, () => Promise<object>>>;
+/** One op answered on the socket the place opened, with the frame it arrived on: the handler belongs to the road
+ * that owns the act, not to the daemon's switch. */
+export type LinkOp = (msg: Record<string, unknown>) => Promise<object>;
+
+/** The ops a socket the place opened answers that no inbound socket does: taking this computer out of a wsp, and
+ * whatever else the road that dialled out registers. */
+export type LinkOps = Readonly<Record<string, LinkOp>>;
 
 export interface PlaceLinkOptions {
   /** The place file to read on every attempt, so a leave or a re-join is picked up without a restart. */
@@ -81,6 +85,9 @@ export interface PlaceLinkOptions {
   report(): Promise<PlaceSelfReport>;
   /** Sweeps wsp off this computer and answers what it took; run when the host asks over the link. */
   onLeave(): Promise<string[]>;
+  /** What else this computer answers on the socket it opened, by op name; the machine ops of a computer that serves
+   * a Docker daemon ride here. Absent leaves the link with the leave op alone. */
+  ops?: LinkOps;
   /** The port this daemon bound, filled in by the daemon that owns the link. */
   daemonPort?: number;
   backoffMs?: (attempt: number) => number;
@@ -334,7 +341,7 @@ export class PlaceLink {
       if ((this.opts.now ?? Date.now)() - this.linkedAt > SETTLED_MS) this.attempt = 0;
       this.schedule(this.wait((this.opts.backoffMs ?? placeBackoffMs)(this.attempt + 1)));
     });
-    this.serve(ws, { "place.leave": () => this.leave() });
+    this.serve(ws, { ...this.opts.ops, "place.leave": () => this.leave() });
   }
 
   /** The host asked this computer to leave. The sweep runs here, the reply names what it took, and the agent ends
