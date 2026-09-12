@@ -165,7 +165,7 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Outgo
                 let swept = fs::blocking(move || Ok(crate::place::sweep_place_home(&home))).await.unwrap_or_default();
                 return Outgoing::Leave(text(&Reply::new(id, PlaceLeaveReply { swept })));
             }
-            Some(name) if MACHINE_OPS.contains(&name) => return Outgoing::Text(text(&wsp_runtime::answer_machine_op(id, name))),
+            Some(name) if MACHINE_OPS.contains(&name) => return Outgoing::Text(machine_answer(ctx, id, name, &frame).await),
             _ => {}
         }
     }
@@ -215,6 +215,21 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
         Some(name) if DAEMON_OPS.contains(&name) => refuse(id, DaemonErrorCode::Unsupported, not_built(name)),
         _ => fail(id, words::unknown_op(&op_word(frame))),
     }
+}
+
+/// A machine op on the link: the workspace runtime answers where this daemon opened one, else the refusal that
+/// names the op.
+#[cfg(target_os = "linux")]
+async fn machine_answer(ctx: &Ctx, id: Option<RequestId>, name: &str, frame: &Value) -> String {
+    match &ctx.runtime {
+        Some(ops) => ops.answer(id, frame).await,
+        None => text(&wsp_runtime::answer_machine_op(id, name)),
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn machine_answer(_ctx: &Ctx, id: Option<RequestId>, name: &str, _frame: &Value) -> String {
+    text(&wsp_runtime::answer_machine_op(id, name))
 }
 
 /// An op the protocol names that this daemon does not serve yet.
@@ -603,6 +618,36 @@ mod tests {
         let swept = json!([at.place_file.to_string_lossy(), at.token_path.to_string_lossy()]);
         assert_eq!(serde_json::from_str::<Value>(text).unwrap(), json!({"id": 21, "ok": true, "swept": swept}));
         assert!(!at.place_file.exists() && !at.token_path.exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_place_daemon_answers_the_machine_ops_on_its_link_from_the_workspace_runtime() {
+        let mut token = tempfile::NamedTempFile::new().unwrap();
+        writeln!(token, "t").unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let runtime_root = tempfile::tempdir().unwrap();
+        let mut options = Options::new(token.path());
+        options.place_file = Some(home.path().join("place.json"));
+        options.runtime_root = Some(runtime_root.path().to_path_buf());
+        let ctx = Arc::new(Ctx::new(options, Box::new(|_| {})).unwrap());
+        let (link, _rx) = conn_on(None, Road::Link);
+        let listed: Value =
+            serde_json::from_str(handle(&link, &ctx, &json!({"id": 1, "op": "machine.list"}).to_string()).await.text()).unwrap();
+        assert_eq!(listed, json!({"id": 1, "ok": true, "machines": []}));
+        let lost: Value = serde_json::from_str(
+            handle(&link, &ctx, &json!({"id": 2, "op": "machine.get", "machineId": "wsp-x"}).to_string()).await.text(),
+        )
+        .unwrap();
+        assert_eq!(lost, json!({"id": 2, "ok": false, "error": "no such workspace: wsp-x", "kind": "missing", "status": 404}));
+        assert!(runtime_root.path().join("layers").is_dir(), "the store is opened under the runtime root");
+        // The same op inbound is still the road refusal.
+        let (inbound, _rx2) = conn(None);
+        assert_eq!(
+            serde_json::from_str::<Value>(handle(&inbound, &ctx, &json!({"id": 3, "op": "machine.list"}).to_string()).await.text())
+                .unwrap()["error"],
+            words::NOT_ON_THIS_ROAD
+        );
     }
 
     #[tokio::test]

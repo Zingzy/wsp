@@ -48,6 +48,12 @@ jobs:
           key: daemon-rust-${{ runner.os }}-${{ hashFiles('daemon/Cargo.lock', 'daemon/rust-toolchain.toml') }}
           restore-keys: |
             daemon-rust-${{ runner.os }}-
+      - name: The one C library the daemon links
+        # libcontainer applies the seccomp filter through libseccomp; the build links its archive statically,
+        # from a directory of its own so the musl link never sees glibc's libc.a beside it.
+        run: |
+          sudo apt-get install -y --no-install-recommends libseccomp-dev
+          ./scripts/libseccomp-archive.sh
       - name: Format
         run: cargo fmt --check
       - name: Lints
@@ -56,8 +62,11 @@ jobs:
         run: cargo test
       - name: Release build
         run: cargo build --release
-      - name: C compiler for the musl target
-        # ring carries C, and its build looks for x86_64-linux-musl-gcc, which musl-tools provides.
-        run: sudo apt-get install -y --no-install-recommends musl-tools
+      - name: C compiler for the musl target, and libseccomp built against musl
+        # ring carries C, and its build looks for x86_64-linux-musl-gcc, which musl-tools provides. The static
+        # binary links a libseccomp built against musl, since the distribution's archive is glibc's.
+        run: |
+          sudo apt-get install -y --no-install-recommends musl-tools gperf
+          ./scripts/libseccomp-archive.sh musl
       - name: Static musl build
-        run: cargo build --release --target x86_64-unknown-linux-musl
+        run: LIBSECCOMP_LIB_PATH=$PWD/target/libseccomp/musl cargo build --release --target x86_64-unknown-linux-musl
