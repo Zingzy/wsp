@@ -22,7 +22,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright";
-import { fixtureState } from "./fixture-state.mjs";
+import { fixtureCloud, fixtureState } from "./fixture-state.mjs";
 import { BROWSER_ARGS, freePort, REPO, startHost, stopHost, WEB_DIR, whatIsNotBuilt } from "./host.mjs";
 import { indexMarkdown, readSurfaces, shotPlan } from "./plan.mjs";
 import { APP_UP } from "./ready.mjs";
@@ -168,12 +168,14 @@ async function main() {
     const held = others.get(fixture);
     if (held !== undefined) return held;
     const own = mkdtempSync(join(tmpdir(), "wsp-shots-"));
-    const started = await startHost({ home: own, state: fixtureState(fixture), port: await freePort(), wsPort: await freePort() });
+    // The cloud the fixture's machines are meant to be at rides with it: without that word the stand-in stands in
+    // for nothing, and the provider a fixture is about is on no row of the places table.
+    const started = await startHost({ home: own, state: fixtureState(fixture), port: await freePort(), wsPort: await freePort(), cloud: fixtureCloud(fixture) });
     others.set(fixture, { ...started, home: own, token: await bootToken(started.base) });
     return others.get(fixture);
   };
   try {
-    host = await startHost({ home, state: fixtureState(), port: await freePort(), wsPort: await freePort() });
+    host = await startHost({ home, state: fixtureState(), port: await freePort(), wsPort: await freePort(), cloud: fixtureCloud() });
     host.token = await bootToken(host.base);
     browser = await chromium.launch({ args: BROWSER_ARGS });
     for (const shot of shotPlan(list)) {

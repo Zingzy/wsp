@@ -3,7 +3,7 @@
 // app's own computer first, every saved host with the current one marked, the
 // connect row, and the disconnect row for the host the window is on.
 import { describe, expect, it } from "vitest";
-import { HOST_WORDS, absentComputer, awayMsOf, hereWord, hostMenuAction, hostsMenuItems, placeWorkspacesCell, shellVersionNotice, type HostsView, type PlaceView } from "../src/index.js";
+import { HOST_WORDS, absentComputer, awayMsOf, hereWord, hostMenuAction, AGENTS_ONLY, hostsMenuItems, placeSpendLine, placeWorkspacesCell, placeWorkspacesParts, placesSpendFoot, shellVersionNotice, type HostsView, type PlaceView } from "../src/index.js";
 
 const VIEW: HostsView = {
   here: "This Mac",
@@ -108,6 +108,39 @@ describe("what the Where agents run table says about a computer", () => {
     expect(placeWorkspacesCell(view({ present: false }), 1)).toBe("1");
     expect(placeWorkspacesCell(view({ present: false, docker: false }), 1)).toBe("1 · agents only");
     expect(placeWorkspacesCell(view({ docker: false }), 0)).toBe("0 · agents only");
+  });
+
+  it("puts the month behind a row beside its count, where the host has metered anything on it", () => {
+    const provider = { id: "box", kind: "provider" as const, name: "box", default: false };
+    expect(placeWorkspacesCell(provider, 2, 0.41)).toBe("2 · $0.41 this month");
+    // A month that has cost fractions of a cent still reads as a figure rather than rounding to nothing.
+    expect(placeWorkspacesCell(provider, 1, 0.0042)).toBe("1 · $0.0042 this month");
+    // A computer of the person's own is charged by nobody, whether or not it runs copies of the image there.
+    expect(placeWorkspacesCell(view({ docker: false }), 1, 0.41)).toBe("1 · agents only");
+    expect(placeWorkspacesCell(view({ docker: true }), 1, 0.41)).toBe("1");
+    expect(placeWorkspacesCell(provider, 2)).toBe("2");
+  });
+
+  it("hands the cell to a table in two parts, the count and the note behind it, and reads as one line anywhere else", () => {
+    const provider = { id: "box", kind: "provider" as const, name: "box", default: false };
+    expect(placeWorkspacesParts(provider, 2, 0.41)).toEqual({ count: "2", note: "$0.41 this month" });
+    expect(placeWorkspacesParts(provider, 2)).toEqual({ count: "2" });
+    expect(placeWorkspacesParts(view({ docker: false }), 1)).toEqual({ count: "1", note: AGENTS_ONLY });
+    expect(placeWorkspacesParts(view({ docker: true }), 1)).toEqual({ count: "1" });
+    // The one line is the two parts joined, so a table and a row of words cannot say different things.
+    for (const [row, count, usd] of [[provider, 2, 0.41], [view({ docker: false }), 1, undefined]] as const) {
+      const parts = placeWorkspacesParts(row, count, usd);
+      expect(placeWorkspacesCell(row, count, usd)).toBe(parts.note === undefined ? parts.count : `${parts.count} · ${parts.note}`);
+    }
+  });
+
+  it("says what one place took this month and what it burns now, and what every provider took together", () => {
+    expect(placeSpendLine({ monthUsd: 4.12, rateUsdPerHour: 0.16 }, 2)).toBe("$4.12 this month · $0.16/hr now across 2 workspaces");
+    // Money is spelled the one way the protocol spells it (fmtCost), which keeps a figure under a cent rather than
+    // rounding a month that has barely begun down to nothing.
+    expect(placeSpendLine({ monthUsd: 0, rateUsdPerHour: 0 }, 1)).toBe("$0.0000 this month · $0.00/hr now across 1 workspace");
+    expect(placesSpendFoot(4.53, 2)).toBe("$4.53 this month across 2 providers");
+    expect(placesSpendFoot(0.41, 1)).toBe("$0.41 this month across 1 provider");
   });
 
   it("reads the count off the list it is handed, never off the workspace a join recorded on the row", () => {

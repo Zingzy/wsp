@@ -4,28 +4,36 @@
 // background, dashed grid, mono ticks on both axes, the newest point dotted.
 // Hovering reads one instant under the box.
 import { useId, useState, type MouseEvent as ReactMouseEvent } from "react";
-import type { WorkspaceCostEvent } from "@wsp/protocol";
+import { accruedAt, rateAt, type WorkspaceCostEvent } from "@wsp/protocol";
 import { cn } from "../../lib/utils.js";
 import { money } from "./format.js";
-import { accruedAt, plotPoints, rateAt, smoothPath, timeLabel, USAGE_RANGES, usageSpan, xTicks, yAxis, type UsageRange } from "./usage.js";
+import { plotPoints, rangeHeld, smoothPath, timeLabel, trackedLine, usageReadout, USAGE_RANGES, usageSpan, xTicks, yAxis, type UsageRange } from "./usage.js";
 
 /** The drawing box the line is laid out in; the svg stretches it to the panel, and the stroke keeps its width. */
 const BOX = 100;
 
-export function UsageRangeToggle({ range, onChange }: { range: UsageRange; onChange: (range: UsageRange) => void }) {
+/** The ranges, each held once it reaches back past the first tick this workspace has: a held one carries the
+ * sentence that says how long it has been tracked, which is the same sentence the readout under the chart says. */
+export function UsageRangeToggle({ series, range, onChange }: { series: WorkspaceCostEvent[]; range: UsageRange; onChange: (range: UsageRange) => void }) {
+  const reason = trackedLine(series);
   return (
     <div role="group" aria-label="range" className="flex gap-2.5" data-k="usage-range">
-      {USAGE_RANGES.map(r => (
-        <button
-          key={r}
-          type="button"
-          aria-pressed={r === range}
-          onClick={() => onChange(r)}
-          className={cn("transition-colors duration-150", r === range ? "text-foreground" : "text-muted-foreground hover:text-foreground")}
-        >
-          {r}
-        </button>
-      ))}
+      {USAGE_RANGES.map(r => {
+        const held = rangeHeld(series, r) && r !== range;
+        return (
+          <button
+            key={r}
+            type="button"
+            aria-pressed={r === range}
+            disabled={held}
+            {...(held && reason !== null ? { title: reason } : {})}
+            onClick={() => onChange(r)}
+            className={cn("transition-colors duration-150", r === range ? "text-foreground" : held ? "text-muted-foreground/50" : "text-muted-foreground hover:text-foreground")}
+          >
+            {r}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -57,9 +65,7 @@ export function UsageChart({ series, range }: { series: WorkspaceCostEvent[]; ra
   const area = end === undefined ? "" : `${line}L${end.x.toFixed(2)} ${BOX}L${xy[0]!.x.toFixed(2)} ${BOX}Z`;
   const overUsd = hover !== null ? accruedAt(series, hover) : null;
   const overRate = hover !== null ? rateAt(series, hover) : null;
-  const life = { start: Date.parse(first.at), end: span.end };
-  const readout =
-    hover !== null && overUsd !== null && overRate !== null ? `${money(overUsd)} · ${money(overRate, 3)}/hr · ${timeLabel(hover, span)}` : `tracked since ${timeLabel(life.start, life)}`;
+  const readout = hover !== null && overUsd !== null && overRate !== null ? `${money(overUsd)} · ${money(overRate, 3)}/hr · ${timeLabel(hover, span)}` : usageReadout(series, range);
   const ticks = xTicks(span);
 
   const track = (e: ReactMouseEvent<SVGSVGElement>): void => {

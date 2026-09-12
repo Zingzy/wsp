@@ -544,15 +544,19 @@ function Usage({ workspace, status, series }: { workspace: WorkspaceView; status
   const [range, setRange] = useState<UsageRange>("all");
   const billing = isBilling(workspaceStateOf(workspace, status));
   const rate = billing ? cost?.rateUsdPerHour ?? status?.rateUsdPerHour ?? 0 : 0;
+  // The total is the series' own newest point, which is the runtime's history until a tick lands and the tick
+  // after that: the live reading alone stood at zero under a chart drawing dollars until the first tick of the
+  // session, and a loaded zero reads as a measurement.
+  const accrued = series[series.length - 1]?.accruedUsd ?? cost?.accruedUsd ?? 0;
   return (
-    <Section label="Usage" aside={<UsageRangeToggle range={range} onChange={setRange} />}>
+    <Section label="Usage" aside={<UsageRangeToggle series={series} range={range} onChange={setRange} />}>
       <UsageChart series={series} range={range} />
       <div className="divide-y divide-border/40">
         <Row label="Rate now" k="rate">
           {`${money(rate, 3)}/hr`}
         </Row>
         <Row label="Accrued" k="accrued">
-          {money(cost?.accruedUsd ?? 0)}
+          {money(accrued)}
         </Row>
       </div>
       <SnapshotStorageLine />
