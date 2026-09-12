@@ -1,98 +1,112 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Where agents run: one table of every computer and provider this wsp holds,
-// this computer first. A row opens its own detail under it, where what the
-// host knows about that computer is listed and the three things a person can
-// do to it stand; the row menu holds the same three, for a hand that never
-// opened the row. Under the table the two roads to another one.
+// this computer first. A row opens its own detail under it, where what the host
+// knows about that computer is listed and the three things a person can do to
+// it stand; the row menu holds the same three, for a hand that never opened the
+// row. Under the table the two roads to another one.
 //
-// The detail opens on a button carrying aria-expanded rather than on the
+// The list, the door and the events behind it are the store's (places,
+// openAddComputer): the sheet that adds a computer is mounted once by the
+// settings page, so this section opens it rather than holding a second copy.
+//
+// The detail opens on a row carrying aria-expanded rather than on the
 // collapsible component: a collapsible panel animates its height and needs a
 // block box, which a table row is not, and TableRow already dims itself on
 // has-aria-expanded for exactly this.
 import { ChevronRightIcon, MoreHorizontalIcon } from "lucide-react";
 import { Fragment, useCallback, useEffect, useState } from "react";
-import type { PlaceView, WorkspaceView } from "@wsp/protocol";
+import { PLACES_WORDS, isLocalWorkspace, offlineFor, workspaceStateOf, workspaceWord, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { Button, WARN_BUTTON } from "../components/ui/button.js";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu.js";
 import { TableCell, TableRow } from "../components/ui/table.js";
 import { cn } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
-import { AddComputerSheet } from "./AddComputerSheet.js";
 import { ConnectProviderSheet } from "./ConnectProviderSheet.js";
 import { WHERE_WORDS } from "./format.js";
-import { NOTHING_HELD, quietFor, threadWord, type PlaceHolding } from "./places.js";
+import { NOTHING_HELD, isProviderPlace, threadWord, type PlaceHolding } from "./places.js";
 import { PlaceRow, PlaceTable } from "./PlaceTable.js";
 import { RemoveComputerDialog } from "./RemoveComputerDialog.js";
 
 /** The machine id every workspace standing on a joined computer carries (engine's `placeMachineId`). The one rule
- * that reads it: which workspaces a row counts, and which the remove sentence names. */
+ * that reads it: which workspaces the Remove sentence names. The table's own cell reads the protocol's
+ * `placeWorkspacesCell` off the row instead; the two answer different questions, since a sentence naming what
+ * leaves this Mac needs each workspace's name and its threads and a cell needs neither. */
 const placeMachineId = (placeId: string): string => `place:${placeId}`;
 
-/** What each row holds, folded from the workspaces the store already has: a joined computer's by its machine id,
- * this computer's and a provider's by the kind their workspaces carry. */
-export function holdingsFor(places: readonly PlaceView[], workspaces: readonly WorkspaceView[], threadsOf: (workspaceId: string) => number): Record<string, PlaceHolding> {
+/** What each row holds, folded from the workspaces the store already has, each workspace going to exactly one row:
+ * a joined computer takes the workspaces whose machine id names it, this computer, which the list puts first,
+ * takes the ones that run here, and the provider takes whatever is left, which is what it forked. The kind is
+ * never compared here: the registry's own reader answers whether a workspace runs on this computer. */
+export function holdingsFor(
+  places: readonly PlaceView[],
+  workspaces: readonly WorkspaceView[],
+  threadsOf: (workspaceId: string) => number,
+  statusOf: (workspaceId: string) => WorkspaceStatus | null = () => null,
+): Record<string, PlaceHolding> {
   const held: Record<string, PlaceHolding> = {};
-  for (const place of places) {
-    const mine = workspaces.filter(w => (place.kind === "provider" ? w.kind === "cloud" : place.joinedAt === undefined ? w.kind === "local" : w.machineId === placeMachineId(place.id)));
-    held[place.id] = { workspaces: mine.map(w => ({ name: w.name, threads: threadsOf(w.id) })) };
-  }
+  const joined = new Set(places.map(p => placeMachineId(p.id)));
+  places.forEach((place, at) => {
+    const mine = workspaces.filter(w => {
+      if (w.machineId === placeMachineId(place.id)) return true;
+      if (joined.has(w.machineId)) return false;
+      return isLocalWorkspace(w) ? at === 0 : isProviderPlace(place);
+    });
+    held[place.id] = { workspaces: mine.map(w => ({ name: w.name, state: workspaceWord(workspaceStateOf(w, statusOf(w.id))), threads: threadsOf(w.id) })) };
+  });
   return held;
 }
 
-export function WhereAgentsRun() {
-  const api = useStore(s => s.api);
+export function WhereAgentsRun({ now = Date.now() }: { now?: number }) {
+  const places = useStore(s => s.places);
   const workspaces = useStore(s => s.workspaces);
   const sessions = useStore(s => s.sessions);
-  const select = useStore(s => s.select);
-  const [places, setPlaces] = useState<PlaceView[]>([]);
+  const statuses = useStore(s => s.statuses);
+  const api = useStore(s => s.api);
+  const openAddComputer = useStore(s => s.openAddComputer);
+  /** Every built copy of this host's image by the computer it sits on, so Remove can say what comes off that one. */
+  const [copies, setCopies] = useState<readonly SealedImageCopy[]>([]);
   const [open, setOpen] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [removing, setRemoving] = useState<PlaceView | null>(null);
-  const now = Date.now();
 
-  const read = useCallback((): void => {
-    void api?.places?.().then(setPlaces, () => setPlaces([]));
+  const readCopies = useCallback((): void => {
+    void api?.image?.().then(view => setCopies(view.copies), () => setCopies([]));
   }, [api]);
-  useEffect(read, [read]);
+  useEffect(readCopies, [readCopies]);
 
   const threadsOf = (workspaceId: string): number => sessions[workspaceId]?.length ?? 0;
-  const holdings = holdingsFor(places, workspaces, threadsOf);
+  const holdings = holdingsFor(places, workspaces, threadsOf, id => statuses[id] ?? null);
+  /** What that computer's own copy of the image weighs, where the provider's listing gave a size for it. */
+  const imageBytesOn = (place: PlaceView): number | undefined => copies.find(c => c.place === place.id || c.place === place.name)?.sizeBytes;
   const holdingOf = (place: PlaceView): PlaceHolding => holdings[place.id] ?? NOTHING_HELD;
 
-  const openPlace = (place: PlaceView): void => {
-    if (place.workspaceId !== undefined) select(place.workspaceId);
-    setAdding(false);
-  };
-
   return (
-    <section aria-labelledby="settings-where" className="flex flex-col gap-2">
-      <h2 id="settings-where" className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
-        {WHERE_WORDS.title}
-      </h2>
+    <div className="flex flex-col gap-3">
       <PlaceTable>
-        {places.map(place => {
-          // This computer is the first row and the one row nothing can be done to: it is the computer the host
-          // runs on, so there is nothing to remove it from.
-          const own = place.joinedAt === undefined && place.kind === "computer";
-          const actions = own ? null : <PlaceActions place={place} onRemove={() => setRemoving(place)} />;
+        {places.map((place, at) => {
+          // The list puts this computer first, which the protocol's own order guarantees, and it is the one row
+          // nothing can be done to: it is the computer the host runs on, so there is nothing to take it off.
+          const own = at === 0;
           return (
             <Fragment key={place.id}>
               <PlaceRow
                 place={place}
-                holding={holdingOf(place)}
                 now={now}
-                {...(own ? {} : { open: open === place.id, onToggle: () => setOpen(held => (held === place.id ? null : place.id)) })}
+                here={own}
                 {...(own
                   ? {}
                   : {
+                      open: open === place.id,
+                      onToggle: () => setOpen(held => (held === place.id ? null : place.id)),
                       trail: <ChevronRightIcon aria-hidden className={cn("size-3 shrink-0 text-muted-foreground transition-transform duration-150", open === place.id && "rotate-90")} />,
                       menu: (
                         <Menu>
                           <MenuTrigger render={<Button variant="ghost-muted" size="icon-xs" aria-label={WHERE_WORDS.more} />}>
                             <MoreHorizontalIcon />
                           </MenuTrigger>
-                          <MenuPopup align="end">{actions}</MenuPopup>
+                          <MenuPopup align="end">
+                            <PlaceActions place={place} onRemove={() => setRemoving(place)} />
+                          </MenuPopup>
                         </Menu>
                       ),
                     })}
@@ -102,41 +116,27 @@ export function WhereAgentsRun() {
           );
         })}
       </PlaceTable>
-      <div className="flex gap-2 pt-1">
-        <Button data-k="add-computer" variant="outline" size="xs" onClick={() => setAdding(true)}>
-          {WHERE_WORDS.addComputer}
+      <div className="flex gap-2">
+        <Button size="xs" variant="outline" data-k="add-computer-button" onClick={openAddComputer}>
+          {PLACES_WORDS.addComputer}
         </Button>
-        <Button data-k="connect-provider" variant="outline" size="xs" onClick={() => setConnecting(true)}>
-          {WHERE_WORDS.connectProvider}
+        <Button size="xs" variant="outline" data-k="connect-provider" onClick={() => setConnecting(true)}>
+          {PLACES_WORDS.connectProvider}
         </Button>
       </div>
-      <AddComputerSheet
-        open={adding}
-        onOpenChange={next => {
-          setAdding(next);
-          if (!next) read();
-        }}
-        onOpenPlace={openPlace}
-      />
-      <ConnectProviderSheet
-        open={connecting}
-        onOpenChange={next => {
-          setConnecting(next);
-          if (!next) read();
-        }}
-      />
+      <ConnectProviderSheet open={connecting} onOpenChange={setConnecting} />
       {removing === null ? null : (
         <RemoveComputerDialog
           place={removing}
           holding={holdingOf(removing)}
+          {...(imageBytesOn(removing) === undefined ? {} : { imageBytes: imageBytesOn(removing)! })}
           open
           onOpenChange={next => {
             if (!next) setRemoving(null);
           }}
-          onRemoved={read}
         />
       )}
-    </section>
+    </div>
   );
 }
 
@@ -177,9 +177,10 @@ function PlaceActions({ place, onRemove, inMenu = true }: { place: PlaceView; on
 function PlaceDetail({ place, holding, now, onRemove }: { place: PlaceView; holding: PlaceHolding; now: number; onRemove: () => void }) {
   const rows: { k: string; label: string; value: string }[] = [
     ...(place.os === undefined ? [] : [{ k: "system", label: WHERE_WORDS.system, value: place.docker === true ? `${place.os} · docker` : place.os }]),
-    { k: "workspaces", label: WHERE_WORDS.workspaces, value: holding.workspaces.length === 0 ? WHERE_WORDS.none : holding.workspaces.map(w => `${w.name} · ${threadWord(w.threads)}`).join(", ") },
-    ...(place.joinedAt === undefined ? [] : [{ k: "joined", label: WHERE_WORDS.joined, value: `${quietFor(now - Date.parse(place.joinedAt))} ago` }]),
-    ...(place.lastSeenAt === undefined ? [] : [{ k: "answered", label: WHERE_WORDS.answered, value: `${quietFor(now - Date.parse(place.lastSeenAt))} ago` }]),
+    ...(place.agents === undefined || place.agents.length === 0 ? [] : [{ k: "agents", label: WHERE_WORDS.agents, value: place.agents.join(", ") }]),
+    { k: "workspaces", label: PLACES_WORDS.columns[3]!, value: holding.workspaces.length === 0 ? WHERE_WORDS.none : holding.workspaces.map(w => `${w.name} · ${w.state} · ${threadWord(w.threads)}`).join(", ") },
+    ...(place.joinedAt === undefined ? [] : [{ k: "joined", label: WHERE_WORDS.joined, value: WHERE_WORDS.ago(offlineFor(now - Date.parse(place.joinedAt))) }]),
+    ...(place.lastSeenAt === undefined ? [] : [{ k: "answered", label: WHERE_WORDS.answered, value: WHERE_WORDS.ago(offlineFor(now - Date.parse(place.lastSeenAt))) }]),
   ];
   return (
     <TableRow data-k="place-detail" data-place={place.id} className="hover:bg-transparent">

@@ -7,6 +7,7 @@
 // after the daemon's pty.list has been adopted and attached, so a consumer
 // that sees live can trust tabs() and spawn only when it is truly empty.
 import { PtyListReply, type DaemonEvent, type DaemonLinkStatus } from "@wsp/protocol";
+import { SHELL_ENDED_LINE } from "../adapt/terminal-pane.js";
 import type { PtyModeReport } from "./compose.js";
 import { composedPtyIo, type TerminalIo } from "./pty-io.js";
 
@@ -57,6 +58,7 @@ export class WorkspaceTerminals {
   #order: string[] = [];
   #activeId: string | null = null;
   #status: DaemonLinkStatus = "connecting";
+  #refusal: string | null = null;
   #wasLive = false;
   /** Bumped on every status change; an attach ritual that outlives its transition stops at the next await. */
   #liveGen = 0;
@@ -73,8 +75,9 @@ export class WorkspaceTerminals {
 
   // --- fed by the transport owner -------------------------------------------
 
-  feedStatus(s: DaemonLinkStatus): void {
+  feedStatus(s: DaemonLinkStatus, refusal?: string): void {
     this.#liveGen += 1;
+    this.#refusal = s === "refused" ? (refusal ?? "") : null;
     if (s !== "live") {
       this.#status = s;
       for (const fn of this.#statusFns) fn();
@@ -111,6 +114,11 @@ export class WorkspaceTerminals {
 
   status(): DaemonLinkStatus {
     return this.#status;
+  }
+
+  /** The door's own sentence while the status reads refused, else null. */
+  refusal(): string | null {
+    return this.#refusal;
   }
 
   onStatus(fn: () => void): () => void {
@@ -334,7 +342,7 @@ export class WorkspaceTerminals {
         if (!p.exited) {
           p.exited = true;
           p.lost = true;
-          const note = "\r\n[This shell ended when the machine was replaced]\r\n";
+          const note = `\r\n[${SHELL_ENDED_LINE}]\r\n`;
           this.#mirror(p, note);
           for (const s of p.sinks) s.data(note);
           this.#notifyTabs();

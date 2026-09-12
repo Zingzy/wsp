@@ -155,6 +155,8 @@ describe("local workspace", () => {
     expect(ws.home).toBe(root);
     const listed = await rt.workspaces.list();
     expect(listed.map(w => ({ name: w.name, kind: w.kind }))).toEqual([{ name: "my-mac", kind: "local" }]);
+    // This computer is forked by nobody, so no provider rides its view and a row reads the kind's own words for it.
+    expect(listed.map(w => w.provider)).toEqual([undefined]);
   });
 
   it("there is one local workspace per host", async () => {
@@ -286,7 +288,7 @@ describe("local workspace", () => {
   it("every verb its machine cannot take refuses with the capability's sentence", async () => {
     const rt = runtime();
     const ws = await rt.workspaces.createLocal("mac");
-    const cannot = /is this computer, not a machine wsp runs; it cannot/;
+    const cannot = /is this computer, which wsp does not run; it cannot/;
     await expect(rt.workspaces.nap(ws.id)).rejects.toThrow(cannot);
     // A computer is running while the host is: the wake every thread road sends first is a no-op, not a refusal.
     expect((await rt.workspaces.wake(ws.id)).phase).toBe("running");

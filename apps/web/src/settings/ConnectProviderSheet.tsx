@@ -3,12 +3,17 @@
 // took it. Three steps in one sheet, each read off what the last one answered:
 // the pick is a card of radio rows built from the provider table, the key step
 // is one field with the two-line slot the provider's answer lands in, and the
-// connected step is what the provider offers and what was saved where.
+// connected step is the sizes that provider offers and what was saved where.
+//
+// Opened again on a provider whose key this computer already holds, the key
+// step reads the key as dots with `saved` in its slot and Continue moves on
+// without asking; a quiet Change empties the field for a new one.
 //
 // Nothing here knows a provider by name: every word, price, ghost and key road
 // comes off the row in providers.ts, so a provider added tomorrow is a row
 // there and nothing else.
 import { ExternalLinkIcon } from "lucide-react";
+import { fmtMemGb, fmtRate, sizeWord, type Capabilities, type InitSetup } from "@wsp/protocol";
 import { useEffect, useState, type KeyboardEvent } from "react";
 import { Button } from "../components/ui/button.js";
 import { Input } from "../components/ui/input.js";
@@ -18,10 +23,11 @@ import { Sheet, SheetDescription, SheetFooter, SheetHeader, SheetPanel, SheetPop
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { cn, errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
+import { requestNewWorkspace } from "../shell/shellRequests.js";
 import { CARD, FIELD_LABEL, LONE_FIELD, NAME, ROW, ROW_LINE, STATE_WORD } from "../sidebar/cloud-setup/rows.js";
 import { CONNECT_PROVIDER_WORDS } from "./format.js";
-import { hourlyRate } from "./places.js";
-import { providerRows, type ProviderRow } from "./providers.js";
+import { keyWordsOf, providerRows, type ProviderRow } from "./providers.js";
+import { PlaceTable } from "./PlaceTable.js";
 import { RefusalSlot, RoadLines } from "./sheetParts.js";
 
 const WORDS = CONNECT_PROVIDER_WORDS;
@@ -50,6 +56,12 @@ export function ConnectProviderSheet({ open, onOpenChange, rows = providerRows()
   const [key, setKey] = useState("");
   const [said, setSaid] = useState<KeySaid | null>(null);
   const [busy, setBusy] = useState(false);
+  /** What the host says about its own setup: which key it holds, for the row that can read it. */
+  const [setup, setSetup] = useState<InitSetup | null>(null);
+  /** What the connected provider offers, read off the host once its key is saved and it is the wired provider. */
+  const [offers, setOffers] = useState<Capabilities["sizes"]>([]);
+  /** Whether the person pressed Change on a key this computer already holds. */
+  const [changing, setChanging] = useState(false);
   const picked = rows.find(r => r.id === pickedId) ?? rows[0];
 
   useEffect(() => {
@@ -58,20 +70,33 @@ export function ConnectProviderSheet({ open, onOpenChange, rows = providerRows()
     setKey("");
     setSaid(null);
     setBusy(false);
-  }, [open]);
+    setChanging(false);
+    setOffers([]);
+    void api?.initGet?.().then(setSetup, () => setSetup(null));
+  }, [api, open]);
 
   if (picked === undefined) return null;
 
+  // A key this computer already holds, which the sheet shows as dots until Change empties the field for a new one.
+  const kept = setup !== null && picked.held?.(setup) === true && !changing;
   const noRoad = picked.save === undefined;
-  const held = key.trim() === "" ? WORDS.pasteFirst : noRoad ? WORDS.noRoad(picked.name) : undefined;
+  const held = kept ? undefined : key.trim() === "" ? WORDS.pasteFirst : noRoad ? WORDS.noRoad(picked.name) : undefined;
+  const connected = (): void => {
+    setAt("connected");
+    void api?.capabilities().then(c => setOffers(c.sizes), () => setOffers([]));
+  };
   const save = (): void => {
+    if (kept) {
+      connected();
+      return;
+    }
     if (held !== undefined || busy || picked.save === undefined || api === null) return;
     setBusy(true);
     setSaid(null);
     picked.save(api, key.trim()).then(
       () => {
         setBusy(false);
-        setAt("connected");
+        connected();
       },
       (e: unknown) => {
         setBusy(false);
@@ -92,8 +117,8 @@ export function ConnectProviderSheet({ open, onOpenChange, rows = providerRows()
         </SheetHeader>
         <SheetPanel className="flex flex-col gap-5">
           {at === "pick" ? <Pick rows={rows} pickedId={pickedId} onPick={setPickedId} /> : null}
-          {at === "key" ? <KeyStep row={picked} value={key} said={said} onChange={setKey} onEnter={save} /> : null}
-          {at === "connected" ? <Connected row={picked} /> : null}
+          {at === "key" ? <KeyStep row={picked} value={key} said={said} kept={kept} onChange={setKey} onChange0={() => setChanging(true)} onEnter={save} /> : null}
+          {at === "connected" ? <Connected row={picked} offers={offers} /> : null}
         </SheetPanel>
         <SheetFooter className="items-center sm:justify-between">
           <span data-k="foot-note" className="font-mono text-[11px] text-muted-foreground">
@@ -123,15 +148,26 @@ export function ConnectProviderSheet({ open, onOpenChange, rows = providerRows()
                   {WORDS.back}
                 </Button>
                 <Tooltip>
-                  <TooltipTrigger render={<Button data-k="save" disabled={held !== undefined || busy} onClick={save} />}>{said?.retry === true ? WORDS.tryAgain : WORDS.save}</TooltipTrigger>
+                  <TooltipTrigger render={<Button data-k="save" disabled={held !== undefined || busy} onClick={save} />}>{kept ? WORDS.continueWord : said?.retry === true ? WORDS.tryAgain : WORDS.save}</TooltipTrigger>
                   {held === undefined ? null : <TooltipPopup side="top">{held}</TooltipPopup>}
                 </Tooltip>
               </>
             ) : null}
             {at === "connected" ? (
-              <Button variant="outline" onClick={() => onOpenChange(false)}>
-                {WORDS.close}
-              </Button>
+              <>
+                <Button variant="outline" onClick={() => onOpenChange(false)}>
+                  {WORDS.close}
+                </Button>
+                <Button
+                  data-k="new-workspace"
+                  onClick={() => {
+                    onOpenChange(false);
+                    requestNewWorkspace();
+                  }}
+                >
+                  {WORDS.newWorkspace(picked.name)}
+                </Button>
+              </>
             ) : null}
           </span>
         </SheetFooter>
@@ -150,7 +186,7 @@ function Pick({ rows, pickedId, onPick }: { rows: readonly ProviderRow[]; picked
           <label key={row.id} data-k="provider-row" data-provider={row.id} className={cn(ROW, ROW_LINE, "cursor-pointer")}>
             <Radio value={row.id} />
             <span className={NAME}>{row.name}</span>
-            <span className={cn(STATE_WORD, "ml-auto pl-3")}>{`${row.what} · from ${hourlyRate(row.fromUsdPerHour)}`}</span>
+            <span className={cn(STATE_WORD, "ml-auto pl-3")}>{`${row.what} · from ${fmtRate(row.fromUsdPerHour)}`}</span>
           </label>
         ))}
       </RadioGroup>
@@ -160,48 +196,92 @@ function Pick({ rows, pickedId, onPick }: { rows: readonly ProviderRow[]; picked
 }
 
 /** The key step: one field on its own, the two-line slot under it, and the link to where a key comes from, which
- * does not move when the slot fills. */
-function KeyStep({ row, value, said, onChange, onEnter }: { row: ProviderRow; value: string; said: KeySaid | null; onChange: (v: string) => void; onEnter: () => void }) {
+ * does not move when the slot fills. A key this computer already holds reads as dots with `saved` in the field's
+ * own slot, and the quiet Change under it empties the field for a new one. */
+function KeyStep({ row, value, said, kept, onChange, onChange0, onEnter }: { row: ProviderRow; value: string; said: KeySaid | null; kept: boolean; onChange: (v: string) => void; /** Change pressed on a key this computer holds. */ onChange0: () => void; onEnter: () => void }) {
   const id = "connect-provider-key";
+  const words = keyWordsOf(row);
   return (
     <>
       <div className="flex flex-col gap-2">
         <label htmlFor={id} className={FIELD_LABEL}>
-          {WORDS.key}
+          {words.keyName}
         </label>
-        <Input
-          id={id}
-          type="password"
-          size="compact"
-          autoComplete="off"
-          spellCheck={false}
-          autoFocus
-          value={value}
-          placeholder={row.placeholder}
-          aria-invalid={said !== null}
-          onChange={e => onChange(e.target.value)}
-          onKeyDown={(e: KeyboardEvent) => (e.key === "Enter" ? onEnter() : undefined)}
-          className={cn(LONE_FIELD, "min-w-0")}
-        />
+        <div className="relative w-full">
+          <Input
+            id={id}
+            data-k="key-field"
+            type="password"
+            size="compact"
+            autoComplete="off"
+            spellCheck={false}
+            autoFocus={!kept}
+            readOnly={kept}
+            value={kept ? WORDS.dots : value}
+            placeholder={row.placeholder}
+            // Only when it is true: ui/input.tsx matches the bare attribute for the shadow, so a field carrying
+            // aria-invalid="false" would lose its shadow before anything was refused.
+            {...(said === null ? {} : { "aria-invalid": true })}
+            onChange={e => onChange(e.target.value)}
+            onKeyDown={(e: KeyboardEvent) => (e.key === "Enter" ? onEnter() : undefined)}
+            className={cn(LONE_FIELD, "min-w-0", kept && "[&_input]:pr-[72px]")}
+          />
+          {kept ? (
+            <span data-k="key-state" className={cn(STATE_WORD, "absolute top-1/2 right-[14px] -translate-y-1/2")}>
+              {WORDS.savedWord}
+            </span>
+          ) : null}
+        </div>
         <RefusalSlot k="key-refusal" {...(said === null ? {} : { said: said.said, fix: said.fix })} />
       </div>
-      <a data-k="where" href={row.console} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 self-start text-[13px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
-        {WORDS.where(row.name)}
-        <ExternalLinkIcon aria-hidden className="size-3" />
-      </a>
+      {kept ? (
+        <Button data-k="change" variant="link" className="h-auto self-start p-0 text-[13px] text-muted-foreground hover:text-foreground sm:text-[13px]" onClick={onChange0}>
+          {WORDS.change}
+        </Button>
+      ) : words.keyConsole === undefined ? null : (
+        <a data-k="where" href={`https://${words.keyConsole}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 self-start text-[13px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+          {WORDS.where(row.name)}
+          <ExternalLinkIcon aria-hidden className="size-3" />
+        </a>
+      )}
     </>
   );
 }
 
-/** What the provider took: the key is accepted and it is saved here and nowhere else. What the provider offers is
- * drawn by the section's own table once a workspace can be created on it. */
-function Connected({ row }: { row: ProviderRow }) {
+/** What the provider took: the sizes it offers a workspace, then that the key is accepted and saved here and
+ * nowhere else. The sizes are the host's own capabilities, read once the key is saved and the provider is the one
+ * this host forks on, so nothing here quotes a price the provider did not. */
+function Connected({ row, offers }: { row: ProviderRow; offers: Capabilities["sizes"] }) {
   return (
-    <RoadLines
-      lines={[
-        { word: `${WORDS.accepted} · ${row.name}`, state: "done" },
-        { word: WORDS.savedHere, state: "done" },
-      ]}
-    />
+    <>
+      {offers.length === 0 ? null : (
+        <div className="overflow-hidden rounded-[10px] border border-border" data-k="sizes-table">
+          <table className="w-full caption-bottom text-xs">
+            <thead className="[&_tr]:border-b">
+              <tr>
+                <th className="h-10 px-2 text-left align-middle font-medium whitespace-nowrap text-foreground">{WORDS.sizes.size}</th>
+                <th className="h-10 px-2 text-right align-middle font-medium whitespace-nowrap text-foreground">{WORDS.sizes.memory}</th>
+                <th className="h-10 px-2 text-right align-middle font-medium whitespace-nowrap text-foreground">{WORDS.sizes.rate}</th>
+              </tr>
+            </thead>
+            <tbody className="[&_tr:last-child]:border-0">
+              {offers.map(size => (
+                <tr key={sizeWord(size)} data-k="size-row" className="border-b">
+                  <td className="p-2 align-middle font-mono text-xs tabular-nums text-foreground">{`${size.cpu} vCPU`}</td>
+                  <td className="p-2 text-right align-middle font-mono text-xs tabular-nums text-foreground">{fmtMemGb(size.memMb)}</td>
+                  <td className="p-2 text-right align-middle font-mono text-xs tabular-nums text-foreground">{fmtRate(size.rateUsdPerHour)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <RoadLines
+        lines={[
+          { word: `${WORDS.accepted} · ${row.name}`, state: "done" },
+          { word: WORDS.savedHere, state: "done" },
+        ]}
+      />
+    </>
   );
 }

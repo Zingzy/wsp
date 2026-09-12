@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The throwaway states a screenshot run and a persona lab serve, one per kind
 // of person: what their sidebar holds, whether an image is sealed, and what
-// their threads say. The default is a person with this computer alone, three
-// workspaces of the local kind, folders imported into two of them and two
-// threads with the transcript each replays, so no surface is photographed
-// empty; the rest vary the setup a tester meets. Nothing here is a real
-// machine, a real key or a real folder, and the forks are served by the
-// provider that answers out of memory, so no fixture dials anything.
+// their threads say. The default is a person with this computer alone, four
+// workspaces of the local kind, folders imported into three of them and the
+// threads with the transcript each replays, one of them opened by another
+// thread's agent, so no surface is photographed empty and the spawned row's
+// grammar is in a shot; the rest vary the setup a tester meets. Nothing here
+// is a real computer, a real key or a real folder, and the copies are served
+// by the provider that answers out of memory, so no fixture dials anything.
 
 /** Every stamp hangs off the hour this run started in rather than a date written here: the app words a
  * thread's time as a distance from now, and a fixed date would drift into the future and read "now" on
@@ -151,47 +152,6 @@ const device = (id, name, minutes) => ({
   lastSeenAt: new Date(ago(minutes)).toISOString(),
 });
 
-/** A computer somebody joined to this host, as the places collection keeps one: the key is the whole of its
- * identity, so a fixture carries a key of nothing, and the report is what it last said about itself. Nothing here
- * is linked: a link is a live socket, so every joined computer a fixture serves reads as not answering. */
-const place = (id, name, minutes, report) => ({
-  id,
-  name,
-  publicKey: `no-key-reads-as-this-${id}`,
-  joinedAt: new Date(ago(60 * 30)).toISOString(),
-  lastSeenAt: new Date(ago(minutes)).toISOString(),
-  report: {
-    name,
-    arch: "arm64",
-    daemonVersion: 1,
-    login: { HOME: "/home/dev", USER: "dev", PATH: "/usr/local/bin:/usr/bin:/bin" },
-    wsp: ["/usr/local/bin/wsp"],
-    dialed: "http://192.168.1.20:7788",
-    ...report,
-  },
-  workspaceId: `ws_${id}`,
-});
-
-/** A workspace standing on a joined computer: the machine id the engine gives one, so the settings table counts it
- * against that computer's row. */
-const onPlace = (id, name, placeId, size, extra = {}) => ({
-  id,
-  name,
-  machineId: `place:${placeId}`,
-  phase: "running",
-  kind: "place",
-  golden: "",
-  createdAt: new Date(ago(60 * 20)).toISOString(),
-  home: "/home/dev",
-  folder: "/home/dev",
-  // Every path a turn on a joined computer runs under is built from the login it reported, so a record without
-  // one is a record no join wrote and the runtime refuses it at startup.
-  login: { HOME: "/home/dev", USER: "dev", PATH: "/usr/local/bin:/usr/bin:/bin" },
-  size,
-  shape: size,
-  ...extra,
-});
-
 /** A thread an agent inside another thread opened: the same shape as a person's, with the tree it hangs in. */
 const spawned = (id, of, parent, root) => ({ ...of, id, parent, root, startedBy: "agent" });
 
@@ -205,6 +165,28 @@ const MIGRATE = {
   costUsd: 1.14,
 };
 
+/** A lead thread and the one its own agent opened under it, so a shot carries the spawned row's grammar: the
+ * workspace dropped where it is the row above's, then where that workspace runs, and no opener word. */
+const SEARCH = {
+  id: "search",
+  prompt: "ship the search rewrite",
+  title: "Ship the search rewrite",
+  thought: "The index is the slow half, so read how the query is built before touching the ranking.",
+  tool: { name: "Read", input: '{"file_path":"apps/api/src/search/query.ts"}', result: "export function buildQuery(term: string) {\n  return db.select().where(like(links.slug, `%${term}%`));\n}" },
+  reply: "The query is a LIKE over every row. I opened a thread to write the index migration while I take the ranking.",
+  costUsd: 0.63,
+};
+
+const MIGRATION = {
+  id: "migration",
+  prompt: "write the migration for the click index",
+  title: "Write the migration",
+  thought: "One index on clicks(link_id, at) covers both reads; write it as a migration rather than by hand.",
+  tool: { name: "Write", input: '{"file_path":"apps/api/migrations/0007_click_index.sql"}', result: "CREATE INDEX clicks_link_at ON clicks (link_id, at);" },
+  reply: "The migration is written and runs in 40 ms on the copy of the table I tried it against.",
+  costUsd: 0.21,
+};
+
 /** One store as the JSON file holds it: one object per collection, keyed the way the runtime keys it. Every
  * fixture below builds one. */
 const store = ({ workspaces, sessions = {}, transcripts = {}, goldens, devices, places }) => ({
@@ -216,10 +198,54 @@ const store = ({ workspaces, sessions = {}, transcripts = {}, goldens, devices, 
   ...(places === undefined
     ? {}
     : {
-        places: Object.fromEntries(places.map(p => [p.id, p])),
-        // The last computer added is the one a verb means when nobody says; the settings row wears the word.
-        "place-default": { default: { placeId: places[0].id } },
+        places,
+        // The last computer added is the one a verb means when nobody says; its row wears the mark.
+        "place-default": { default: { placeId: Object.keys(places)[0] } },
       }),
+});
+
+/** A computer somebody joined, as the host's record of it: what it last reported about itself, and when it was
+ * last seen, so the table has a row that is not this computer. */
+const place = (id, name, minutes, over = {}, workspaceId) => ({
+  id,
+  name,
+  ...(workspaceId === undefined ? {} : { workspaceId }),
+  publicKey: `no-key-verifies-against-this-${id}`,
+  joinedAt: new Date(ago(60 * 26)).toISOString(),
+  lastSeenAt: new Date(ago(minutes)).toISOString(),
+  report: {
+    name,
+    platform: "darwin",
+    arch: "arm64",
+    os: "Darwin 24.6.0",
+    shape: { cpu: 4, memMb: 8192 },
+    diskFreeBytes: 91 * 1024 ** 3,
+    login: { HOME: "/Users/maya", USER: "maya", PATH: "/usr/bin" },
+    docker: false,
+    daemonVersion: 17,
+    wsp: ["/Users/maya/.wsp/bin/wsp"],
+    agents: ["claude", "codex"],
+    dialed: "http://192.168.1.20:4420",
+    ...over,
+  },
+});
+
+/** A workspace standing on a joined computer: the machine id the engine gives one, so the settings table counts it
+ * against that computer's row. Every path a turn there runs under is built from the login it reported, so a record
+ * without one is a record no join wrote and the runtime refuses it at startup. */
+const onPlace = (id, name, placeId, size) => ({
+  id,
+  name,
+  machineId: `place:${placeId}`,
+  phase: "running",
+  kind: "place",
+  golden: "",
+  createdAt: new Date(ago(60 * 20)).toISOString(),
+  home: "/root",
+  folder: "/root",
+  login: { HOME: "/root", USER: "root", PATH: "/usr/local/bin:/usr/bin:/bin" },
+  size,
+  shape: size,
 });
 
 /** The threads one workspace holds, oldest first, with the transcript each replays. The order is the order the
@@ -240,13 +266,6 @@ const merge = (...parts) => ({
 
 const API_THREADS = () => threadsOn("ws_api", [[CHART, 300], [REDIRECT, 45]]);
 
-/** The two computers the settings table's own rows are read off: a Linux box of the person's running Docker, and
- * an old Mac that runs their agents and nothing else. */
-const JOINED = () => [
-  place("p_hetzner", "hetzner", 1, { platform: "linux", os: "Ubuntu 24.04", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, docker: true }),
-  place("p_laptop", "old-macbook", 120, { platform: "darwin", os: "macOS 15.6", shape: { cpu: 4, memMb: 8192 }, diskFreeBytes: 91 * 1024 ** 3, docker: false }),
-];
-
 /** This computer alone: three workspaces of the local kind, no image sealed, so the cloud setup button stands in
  * the sidebar's foot. */
 const macOnly = () =>
@@ -255,10 +274,14 @@ const macOnly = () =>
       workspace("ws_api", "api", { projects: [project("spoo", 48_200_000, 60 * 20), project("wsp", 133_000_000, 60 * 5)] }),
       workspace("ws_web", "web", { projects: [project("landing", 9_400_000, 60 * 9)] }),
       workspace("ws_notes", "notes"),
-      onPlace("ws_p_hetzner", "spoo-fix", "p_hetzner", { cpu: 2, memMb: 4096 }),
+      workspace("ws_fix", "spoo-fix", { projects: [project("spoo", 48_200_000, 60 * 20)] }),
+      onPlace("ws_hetzner", "box-build", "p_hetzner", { cpu: 2, memMb: 4096 }),
     ],
-    ...merge(API_THREADS(), threadsOn("ws_p_hetzner", [[CHART, 200], [REDIRECT, 30]])),
-    places: JOINED(),
+    ...merge(API_THREADS(), threadsOn("ws_fix", [[SEARCH, 12], [spawned("migration", MIGRATION, "search", "search"), 9]]), threadsOn("ws_hetzner", [[CHART, 200], [REDIRECT, 30]])),
+    places: {
+      p_hetzner: place("p_hetzner", "hetzner", 1, { platform: "linux", os: "Ubuntu 24.04", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, docker: true, login: { HOME: "/root", USER: "root", PATH: "/usr/bin" } }, "ws_hetzner"),
+      p_oldmacbook: place("p_oldmacbook", "old-macbook", 120),
+    },
   });
 
 /** This computer and an old laptop that redeemed a pairing code: a second workspace of the local kind, its own

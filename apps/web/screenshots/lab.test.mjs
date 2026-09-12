@@ -21,7 +21,7 @@ describe("the fixtures a lab serves", () => {
         // The key is the id: the store reads a collection as one document per id, so a row filed under another
         // key would load as a workspace nothing can name.
         expect([name, state.workspaces[w.id]]).toEqual([name, w]);
-        expect([name, w.kind]).toEqual([name, w.kind === "local" ? "local" : "cloud"]);
+        expect([name, ["local", "place", "cloud"].includes(w.kind)]).toEqual([name, true]);
         expect([name, typeof w.name, typeof w.machineId, typeof w.phase]).toEqual([name, "string", "string", "string"]);
         // A fork boots from the image the manifest's head names; a local machine forks from nothing.
         if (w.kind === "cloud") expect([name, w.golden]).toEqual([name, state.goldens.default.versions.at(-1).snapshotId]);

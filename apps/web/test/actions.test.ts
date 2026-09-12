@@ -88,9 +88,9 @@ describe("workspace actions", () => {
     expect(verbs.pickLook).toHaveBeenCalledWith("ws_a", "glyph");
     actionById(actions, "theme").run();
     expect(verbs.pickLook).toHaveBeenCalledWith("ws_a", "theme");
-    expect(actionById(actions, "fork").refusal).toBe("Forking a workspace is not in the runtime yet; take a project snapshot in the Machine tab and start a workspace from it");
+    expect(actionById(actions, "fork").refusal).toBe("Running a copy of a workspace is not in the runtime yet; take a project snapshot in the Workspace tab and start a workspace from it");
     expect(actionById(actions, "rebuild").refusal).toBe("Rebuild replaces a machine wsp cannot get back; this one answers");
-    expect(actionById(actions, "forget").refusal).toBe("Only a workspace whose machine is gone can be forgotten; this one is running");
+    expect(actionById(actions, "forget").refusal).toBe("Only a workspace whose computer is gone can be forgotten; this one is running");
   });
 
   it("pause and wake are one slot: the word follows the state, and the moving states refuse it with a word", () => {
@@ -127,9 +127,9 @@ describe("workspace actions", () => {
     expect(actionById(gone, "open-browser").refusal).toBe(goneRefusal("preview"));
     const zombie = resolveActions(workspaceActions, workspace("unreachable", { reach: "zombie" }), verbs);
     expect(actionById(zombie, "rebuild").refusal).toBeNull();
-    expect(actionById(zombie, "forget").refusal).toBe("Only a workspace whose machine is gone can be forgotten; this one is unreachable");
+    expect(actionById(zombie, "forget").refusal).toBe("Only a workspace whose computer is gone can be forgotten; this one is unreachable");
     const bare = resolveActions(workspaceActions, workspace("gone"), workspaceVerbs({ rebuild: undefined, forget: undefined }));
-    expect(actionById(bare, "rebuild").refusal).toBe("This client cannot rebuild machines");
+    expect(actionById(bare, "rebuild").refusal).toBe("This client cannot rebuild workspaces");
     expect(actionById(bare, "forget").refusal).toBe("This client cannot forget workspaces");
     // The project trips: the machine must answer, and the client must have the folder ops; a browser tab without them says so.
     expect(actionById(gone, "import-project").refusal).toBe("Projects wait for the rebuild");
@@ -176,16 +176,16 @@ describe("workspace actions", () => {
     expect([phaseOf("running").icon, phaseOf("paused").icon, phaseOf("waking").icon]).toEqual([PauseIcon, PlayIcon, SquareIcon]);
     expect(phaseOf("running").hint).toBe("Suspend the VM and keep the disk");
     expect(phaseOf("paused").hint).toBe("Boot the VM from its disk");
-    expect(phaseOf("waking").hint).toBe("Stop asking the provider to resume this machine");
+    expect(phaseOf("waking").hint).toBe("Stop asking the provider to wake this workspace");
     // A record that still says running while the provider holds the machine paused reads Wake, as its label does.
     const behind = phaseOf("running", { machineState: "paused" });
     expect([behind.buttonWord, behind.rowLabel, behind.title]).toEqual(["Wake", "Wake api", WORKSPACE_WORDS.wake]);
     const gone = resolveActions(workspaceActions, workspace("gone", { reason: "machine m_a is gone at the provider: Not found" }), verbs);
     expect(actionById(gone, "forget").buttonWord).toBe("Forget");
-    expect(actionById(gone, "forget").hint).toBe("The machine is gone; forget the workspace to drop it from this computer");
+    expect(actionById(gone, "forget").hint).toBe("Its computer is gone; forget the workspace to drop it from this computer");
     expect(actionById(gone, "rebuild").buttonWord).toBe("Rebuild");
     expect(actionById(gone, "rebuild").hint).toBe("machine m_a is gone at the provider: Not found");
-    expect(actionById(resolveActions(workspaceActions, workspace("unreachable", { reach: "zombie" }), verbs), "rebuild").hint).toBe("The machine answers nothing; rebuild it from the golden image");
+    expect(actionById(resolveActions(workspaceActions, workspace("unreachable", { reach: "zombie" }), verbs), "rebuild").hint).toBe("The workspace answers nothing; rebuild it from the golden image");
     expect(actionById(gone, "copy-id").buttonWord).toBeNull();
     expect(actionById(gone, "copy-id").hint).toBeNull();
   });

@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DisconnectedError, RequestError, type Api, type ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { caps } from "./caps.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 const view = (id: string): WorkspaceView => ({ id, name: id, machineId: `m_${id}`, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" });
 const CAPS = caps();
@@ -30,7 +31,7 @@ function fakeApi(record: Preferences, refuse?: () => Error) {
     capabilities: async () => CAPS,
     startSession: async o => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: 0 }),
-    daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
+    daemon: noDaemonApi,
     sessionHistory: async () => [],
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     snapshotStorage: async () => null,
@@ -212,11 +213,23 @@ describe("the preferences record in the store", () => {
     expect(useStore.getState().settingsOpen).toBe(false);
   });
 
-  it("with labs off the settings page never opens: the chord toggles nothing and the palette road is shut", () => {
+  it("opens with labs off too: the page is where a person finds the computers their agents run on, and the labs flag gates the picks inside it", () => {
     useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: false } });
+    useStore.getState().toggleSettings();
+    expect(useStore.getState().settingsOpen).toBe(true);
     useStore.getState().toggleSettings();
     expect(useStore.getState().settingsOpen).toBe(false);
     useStore.getState().openSettings();
-    expect(useStore.getState().settingsOpen).toBe(false);
+    expect(useStore.getState().settingsOpen).toBe(true);
+  });
+
+  it("shuts the Add a computer sheet with the page, whichever road shut it", () => {
+    useStore.getState().openAddComputer();
+    expect(useStore.getState()).toMatchObject({ settingsOpen: true, addComputerOpen: true });
+    useStore.getState().closeSettings();
+    expect(useStore.getState()).toMatchObject({ settingsOpen: false, addComputerOpen: false });
+    useStore.getState().openAddComputer();
+    useStore.getState().toggleSettings();
+    expect(useStore.getState()).toMatchObject({ settingsOpen: false, addComputerOpen: false });
   });
 });

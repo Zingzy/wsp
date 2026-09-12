@@ -55,16 +55,14 @@ export const providerFor = state => (Object.values(state.workspaces ?? {}).some(
  * A bare environment, not this shell's: a Solari key or a WSP_PROVIDER word in the terminal would put the run on a
  * real provider, and a stray WSP_HOME would take it to the person's own machines.
  */
-export async function startHost({ home, state, port, wsPort, logPath, detached = false, labs = false }) {
+export async function startHost({ home, state, port, wsPort, logPath, detached = false }) {
   const statePath = join(home, ".wsp", "state.json");
   mkdirSync(dirname(statePath), { recursive: true });
   writeFileSync(statePath, JSON.stringify(state, null, 2));
   const out = logPath === undefined ? "pipe" : openSync(logPath, "a");
   const child = spawn(process.execPath, [HOST_BIN, "up", "--state", statePath, "--port", String(port), "--ws-port", String(wsPort)], {
     cwd: home,
-    // Labs on where the run asks for it: the settings page is a labs surface, so a run photographing it would
-    // otherwise open a window that has no road to the page at all.
-    env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin", HOME: home, WSP_HOME: join(home, ".wsp"), WSP_PROVIDER: providerFor(state), ...(labs ? { WSP_LABS: "1" } : {}) },
+    env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin", HOME: home, WSP_HOME: join(home, ".wsp"), WSP_PROVIDER: providerFor(state) },
     stdio: ["ignore", out, out],
     detached,
   });

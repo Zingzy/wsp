@@ -43,6 +43,7 @@ import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../src/
 import { fakeWire, LEVELS, resetSurfaces, WS } from "./surface-harness.js";
 import { statusOf } from "./workspace-status.js";
 import { caps } from "./caps.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running"): WorkspaceView => ({
   id,
@@ -105,7 +106,7 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     capabilities: async () => CAPS,
     startSession: async o => ({ id: "s_x", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
-    daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
+    daemon: noDaemonApi,
     sessionHistory: async () => [],
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     snapshotStorage: async () => null,
@@ -236,7 +237,7 @@ describe("a workspace row's menu", () => {
     expect(item(WORKSPACE_WORDS.pause).getAttribute("aria-disabled")).toBeNull();
     expect(item(WORKSPACE_WORDS.rename).getAttribute("aria-disabled")).toBeNull();
     expect(refusalOf(WORKSPACE_WORDS.rename)).toBeNull();
-    expect(refusalOf(WORKSPACE_WORDS.forget)).toBe("Only a workspace whose machine is gone can be forgotten; this one is running");
+    expect(refusalOf(WORKSPACE_WORDS.forget)).toBe("Only a workspace whose computer is gone can be forgotten; this one is running");
     expect(refusalOf(WORKSPACE_WORDS.pause)).toBeNull();
     expect(item(WORKSPACE_WORDS.openTerminal).querySelector("kbd")?.textContent).toBe("⌘J");
     // The first row that can run holds focus; arrows walk every row, disabled ones too, so their refusal can be read.
@@ -286,7 +287,7 @@ describe("a workspace row's menu", () => {
     rightClick(rowOf("api"));
     await screen.findByRole("menu");
     fireEvent.click(item(WORKSPACE_WORDS.copyId));
-    await waitFor(() => expect(useStore.getState().toast).toBe("Copy machine id: The clipboard is not available here"));
+    await waitFor(() => expect(useStore.getState().toast).toBe("Copy computer id: The clipboard is not available here"));
     const writeText = clipboard();
     rightClick(rowOf("api"));
     await screen.findByRole("menu");

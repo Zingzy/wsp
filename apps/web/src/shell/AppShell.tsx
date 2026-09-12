@@ -25,6 +25,7 @@ import { useAppDark } from "../settings/theme.js";
 import { useSpaceTheme } from "../sidebar/sidebarMode.js";
 import { WorkspaceSidebar } from "../sidebar/WorkspaceSidebar.js";
 import { selectTerminalUiState, useTerminalDrawerStore } from "../terminal/drawerStore.js";
+import { hostAsleep } from "../boot.js";
 import { DisconnectedBanner } from "./DisconnectedBanner.js";
 import { KeybindingDispatcher } from "./KeybindingDispatcher.js";
 import { RightPanel } from "./RightPanel.js";
@@ -100,7 +101,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         <SidebarRail />
       </Sidebar>
       <SidebarInset className="h-dvh min-h-0 overflow-hidden">
-        {conn === "closed" || conn === "reconnecting" ? <DisconnectedBanner reconnecting={conn === "reconnecting"} /> : null}
+        {/* A window on another computer says the one running wsp is asleep in the sidebar's own line, as a fact
+            rather than an alert; the banner is for a wsp that stopped on the computer this window is at. */}
+        {!hostAsleep(conn) && (conn === "closed" || conn === "reconnecting") ? <DisconnectedBanner reconnecting={conn === "reconnecting"} /> : null}
         <SignInBanner />
         <div className="flex min-h-0 flex-1 flex-row">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-shell-center>

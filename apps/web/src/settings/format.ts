@@ -3,6 +3,11 @@
 // preference value where a value has words of its own.
 import { fmtPx, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
 
+/** The caps mono label over a section, and the muted mono a fact wears in a row's slot. Two class strings the page,
+ * the table and the sheet all draw with, so one type ladder holds across the three files. */
+export const ZONE_LABEL = "font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground";
+export const FACT = "font-mono text-[11px] tabular-nums text-muted-foreground";
+
 export const SETTINGS_WORDS = {
   title: "Settings",
   hint: "Theme, sidebar and terminal",
@@ -17,57 +22,34 @@ export const SETTINGS_WORDS = {
   version: "Version",
 } as const;
 
-/** The Where agents run section: its title, its four columns, the words a row's state slot and its detail carry,
- * and the two actions under the table. */
+/** What the Where agents run section says beyond the words the wire already carries in PLACES_WORDS: the row's
+ * detail, its menu and the Remove dialog, which are this build's and are drawn nowhere else. No word is in both. */
 export const WHERE_WORDS = {
-  title: "Where agents run",
-  computer: "Computer",
-  size: "Size",
-  diskFree: "Disk free",
-  workspaces: "Workspaces",
   more: "More",
-  addComputer: "Add a computer",
-  connectProvider: "Connect a provider",
   default: "default",
   setDefault: "Set as default",
   rename: "Rename",
   remove: "Remove",
+  removing: "Removing\u2026",
+  cancel: "Cancel",
   /** Why a row's action is held: the op that carries it is not on the wire yet. */
   notYet: "not on this wsp yet",
   system: "System",
+  agents: "Agents",
   joined: "Joined",
   answered: "Answered",
   none: "none",
-  agentsOnly: "agents only",
-  notAnswering: "not answering",
-  removing: "Removing\u2026",
-  cancel: "Cancel",
-  /** What a row's detail says where nothing on the wire carries that fact yet. */
-  unknown: "not known here",
+  ago: (span: string): string => `${span} ago`,
 } as const;
 
-/** Add a computer: the sheet's head, its two roads and every line each road says. */
+/** What Add a computer says beyond PLACES_WORDS.sheet: the two roads, every line the ssh road says, and the one
+ * description the sheet has that the wire's table does not, for a computer that can run copies of the image. */
 export const ADD_COMPUTER_WORDS = {
-  title: "Add a computer",
+  cancel: "Cancel",
   app: {
     road: "Runs the wsp app",
-    description: "A computer you own runs threads for your wsp. It connects to this Mac over your network. You open nothing on it.",
-    sentence: "On that computer, open wsp and press",
-    press: "This Mac joins another wsp",
-    then: ". Type these.",
-    address: "Address",
-    code: "Code",
-    good: "the code is good for 10 minutes",
-    expired: "the code expired; press New code",
-    newCode: "New code",
-    waiting: "waiting for it to connect",
-    connected: "connected \u00b7 keys exchanged",
-    noApp: "No app on that computer",
-    noAppSentence: "In its terminal, install wsp, then join:",
-    install: "npm i -g wsp",
-    footNote: "closes, the code stays good",
-    /** Where the join address comes from and why it can be the wrong one. */
-    loopback: "this address reaches your wsp only from this computer; open wsp at your Mac's network address for one to hand over",
+    /** The words beside the esc keycap; PLACES_WORDS.sheet.escStays carries the keycap in its own string. */
+    escCloses: "closes, the code stays good",
   },
   ssh: {
     road: "Linux box over ssh",
@@ -75,29 +57,22 @@ export const ADD_COMPUTER_WORDS = {
     login: "Login",
     loginPlaceholder: "user@host",
     port: "Port",
+    portWord: "port",
     portPlaceholder: "22",
     addon: "ssh",
     note: "Your ssh agent and config are used as they stand. Nothing is asked for a key unless ssh refuses.",
     add: "Add",
     adds: "adds",
     loginFirst: "type the login first",
-    /** Why Add is held on a host whose wsp cannot log in over ssh yet. */
+    /** Why Add is held on a wsp whose host cannot log in over ssh yet. */
     noRoad: "this wsp cannot log in over ssh yet",
-    refusedFix: "Check the user and the address, or",
-    pickKey: "pick a key file",
-    portWord: "port",
+    /** What to do about a login ssh would not take. There is no file picker on this road: the host reads the ssh
+     * agent and config as they stand, so the key a box wants is named where every other ssh client reads it. */
+    refusedFix: "Check the user and the address, or name a key for that host in your ssh config.",
     running: "closing keeps it going",
     named: "Named after its hostname. Rename it from its row.",
   },
-  close: "Close",
-  /** The joined screen: what the computer is now, by whether it can run copies of the image. */
-  joinedTitle: (name: string): string => `${name} joined`,
-  joined: "joined",
   joinedWithDocker: "It can run copies of your image. Your image is built there the first time a workspace is created on it.",
-  joinedWithoutDocker: "It runs your agents as one workspace. Without Docker it cannot run copies of your image.",
-  installDocker: "install Docker to run copies of your image",
-  optional: "optional",
-  open: (name: string): string => `Open ${name}`,
 } as const;
 
 /** Connect a provider: the pick, the key and what the provider said. */
@@ -122,6 +97,11 @@ export const CONNECT_PROVIDER_WORDS = {
   unreachedFix: "Check the network and try again.",
   /** Why Save is held on a provider whose key has no road on the wire yet. */
   noRoad: (name: string): string => `this wsp cannot save a ${name} key yet`,
+  /** The already connected state, opened again on a provider whose key this computer holds. */
+  savedWord: "saved",
+  change: "Change",
+  dots: "\u2022".repeat(12),
+  sizes: { size: "Size", memory: "Memory", rate: "Rate" },
   connectedTitle: (name: string): string => `${name} connected`,
   connectedDescription: (name: string): string => `Workspaces can be created on ${name}. Your image is built there the first time, about three minutes.`,
   savedHere: "saved on this Mac \u00b7 never sent anywhere else",

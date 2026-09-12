@@ -4,8 +4,8 @@
 // one row per workspace to switch to, recent threads at rest and every thread
 // whose title holds the typed query. Pure apart from the callbacks it is
 // handed, so the list is testable without the dialog.
-import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, ChevronUpIcon, MessageSquareIcon, PanelLeftIcon, PanelRightIcon, PlusIcon, SettingsIcon } from "lucide-react";
-import type { SidebarMode } from "@wsp/protocol";
+import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, ChevronUpIcon, MessageSquareIcon, MonitorIcon, PanelLeftIcon, PanelRightIcon, PlusIcon, SettingsIcon } from "lucide-react";
+import { PLACES_WORDS, type SidebarMode } from "@wsp/protocol";
 import { resolveActions, type ResolvedAction } from "../../actions/registry.js";
 import { sidebarActions } from "../../actions/sidebarActions.js";
 import { workspaceActions, workspaceTarget, type WorkspaceVerbs } from "../../actions/workspaceActions.js";
@@ -35,6 +35,7 @@ export interface PaletteHandlers {
   /** Makes this computer the host's local workspace, or selects the one it already is; the sidebar registry's row runs it. */
   readonly newLocalWorkspace: () => void;
   readonly openSettings: () => void;
+  readonly openAddComputer: () => void;
 }
 
 export interface PaletteItemsInput {
@@ -90,7 +91,7 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
       searchTerms: ["new workspace", "create workspace"],
       icon: <PlusIcon className={ITEM_ICON_CLASS} />,
       title: "New workspace",
-      description: input.canCreate ? "A fresh machine forked from your golden image" : "Not connected to the runtime",
+      description: input.canCreate ? "A copy of your image where you pick" : "Not connected to the runtime",
       disabled: !input.canCreate,
       run: sync(handlers.newWorkspace),
     },
@@ -161,6 +162,15 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
       title: "Toggle sidebar",
       shortcutCommand: "sidebar.toggle",
       run: sync(handlers.toggleSidebar),
+    },
+    {
+      kind: "action",
+      value: "action:add-computer",
+      searchTerms: ["add a computer", "join", "place", "another mac", "laptop", "where agents run"],
+      icon: <MonitorIcon className={ITEM_ICON_CLASS} />,
+      title: PLACES_WORDS.addComputer,
+      description: `${SETTINGS_WORDS.title} · ${PLACES_WORDS.section}`,
+      run: sync(handlers.openAddComputer),
     },
     ...(input.labs
       ? [

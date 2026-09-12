@@ -15,8 +15,11 @@ import { STATE_WORD } from "../sidebar/cloud-setup/rows.js";
 /** How long the copy glyph stands as a check before it is a copy glyph again. */
 const COPIED_MS = 1_400;
 
-/** A fact somebody has to type on another computer: its label, the fact in mono, and the glyph that copies it. The
- * code wears the big size, since it is read off one screen and typed on another. */
+/** How wide a copy row's label column stands, so the values under each other line up whatever their labels are. */
+const LABEL_WIDTH = "w-12";
+
+/** A fact somebody has to type on another computer: its label in a fixed column, the fact in mono, and the glyph
+ * that copies it. The code wears the big size, since it is read off one screen and typed on another. */
 export function CopyRow({ label, value, big = false, k, children }: { label?: string; value: string; big?: boolean; k: string; children?: ReactNode }) {
   const [copied, setCopied] = useState(false);
   const copy = (): void => {
@@ -29,15 +32,16 @@ export function CopyRow({ label, value, big = false, k, children }: { label?: st
     );
   };
   return (
-    <div data-k={k} className="flex h-11 w-full items-center gap-3 rounded-md border border-border bg-card px-3">
+    <div data-copy-row={k} className="flex h-10 w-full items-center gap-3 rounded-md border border-border bg-card px-3">
       {label === undefined ? null : (
-        <span className={cn(STATE_WORD, "uppercase tracking-[0.12em]")}>{label}</span>
+        <span className={cn(LABEL_WIDTH, "shrink-0 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground")}>{label}</span>
       )}
-      <span className={cn("min-w-0 flex-1 truncate font-mono tabular-nums text-foreground", big ? "text-xl tracking-[0.18em]" : "text-xs")} title={value}>
+      {/* The name is on the value, not the row: a reader after the fact alone must not also get the label. */}
+      <span data-k={k} className={cn("min-w-0 flex-1 truncate font-mono tabular-nums text-foreground", big ? "text-xl tracking-[0.18em]" : "text-xs")} title={value}>
         {value}
       </span>
       {children}
-      <Button variant="ghost-muted" size="icon-xs" aria-label={`Copy the ${label ?? "line"}`} onClick={copy}>
+      <Button variant="ghost-muted" size="icon-xs" aria-label={`Copy the ${(label ?? "line").toLowerCase()}`} onClick={copy}>
         {copied ? <CheckIcon /> : <CopyIcon />}
       </Button>
     </div>

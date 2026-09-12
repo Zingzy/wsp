@@ -60,7 +60,7 @@ describe.skipIf(renderSkipped !== undefined)("the machine tab of a wake the prov
     // One phase button, and its word is the stop; neither verb of a settled machine is offered beside it.
     const stop = page!.locator("footer button", { hasText: "Stop" });
     expect(await stop.count()).toBe(1);
-    expect(await stop.getAttribute("title")).toBe("Stop asking the provider to resume this machine");
+    expect(await stop.getAttribute("title")).toBe("Stop asking the provider to wake this workspace");
     expect(await stop.isDisabled()).toBe(false);
     for (const word of ["Wake", "Pause"]) expect(await page!.locator("footer button", { hasText: word }).count()).toBe(0);
     const shot = join(SHOTS, `machine-waking-${theme}.png`);

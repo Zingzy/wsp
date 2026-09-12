@@ -15,7 +15,10 @@ import {
   SessionRenameResult,
   SessionSteerOutcome,
   type Capabilities,
-  type DaemonReachView,
+  type DaemonChannelEvent,
+  type DaemonFrame,
+  type DaemonOpenReply,
+  type DaemonResponse,
   type EventUnion,
   goldenHead,
   type GoldenManifest,
@@ -24,11 +27,13 @@ import {
   InitJob,
   InitSetup,
   type InitRoad,
+  PlaceDoorView,
+  PlaceView,
+  SealedImageView,
   type InitScreenId,
   type ImageAttachment,
   TerminalConfig,
   type TerminalScheme,
-  PlaceView,
   type PortProbeView,
   type PortReachView,
   Preferences,
@@ -107,6 +112,14 @@ export class ProtocolClient {
   #seq = 0;
   #pending = new Map<number, Pending>();
   #listeners = new Set<(e: ProtocolEvent) => void>();
+  /** Per-channel listeners for the frames the host relays from a daemon. Kept off #listeners on purpose: a pty
+   * chunk is not history, and the store folds everything that reaches an event listener. */
+  #channels = new Map<string, Set<(e: DaemonChannelEvent) => void>>();
+  /** Frames that arrived for a channel nobody listens to yet. The host writes the open reply and the daemon's hello
+   * back to back, and two frames in one read are dispatched before the microtask that resolves the open can run, so
+   * a caller that subscribes the moment it learns its channel id would still miss the hello. Bounded by the socket:
+   * a channel dies with the socket that opened it, so a redial starts this empty. */
+  #unclaimed = new Map<string, DaemonChannelEvent[]>();
   #opts: ProtocolClientOptions;
   #Ctor: typeof WebSocket;
   #backoff: (attempt: number) => number;
@@ -144,6 +157,22 @@ export class ProtocolClient {
       this.#pending.set(id, { resolve: v => resolve(v as T), reject });
       this.#raw({ id, op, ...params });
     });
+  }
+
+  /** Frames the host pushes for one channel, in order; stops when the unsubscribe runs. */
+  onDaemonFrame(channel: string, fn: (e: DaemonChannelEvent) => void): () => void {
+    let fns = this.#channels.get(channel);
+    if (!fns) {
+      fns = new Set();
+      this.#channels.set(channel, fns);
+    }
+    fns.add(fn);
+    for (const e of this.#unclaimed.get(channel) ?? []) fn(e);
+    this.#unclaimed.delete(channel);
+    return () => {
+      fns.delete(fn);
+      if (fns.size === 0) this.#channels.delete(channel);
+    };
   }
 
   subscribe(fn: (e: ProtocolEvent) => void): () => void {
@@ -191,6 +220,7 @@ export class ProtocolClient {
     ws.onclose = ev => {
       if (this.#ws !== ws) return;
       this.#ws = null;
+      this.#unclaimed.clear();
       this.#failAll(new DisconnectedError("lost"));
       // 4401 is the runtime refusing the token; redialling cannot fix that.
       if (ev.code === 4401) this.#die("unauthorized");
@@ -226,6 +256,7 @@ export class ProtocolClient {
     const ws = this.#ws;
     this.#ws = null;
     ws?.close();
+    this.#unclaimed.clear();
     this.#failAll(new DisconnectedError(reason));
     this.#setStatus("closed");
     const first = this.#firstLive;
@@ -240,6 +271,18 @@ export class ProtocolClient {
     let msg: Record<string, unknown>;
     try { msg = JSON.parse(data); } catch { return; }
     if (typeof msg.type === "string" && !("ok" in msg)) { // server-push event
+      if (msg.type.startsWith("daemon.")) {
+        if (typeof msg.channel !== "string") return;
+        const fns = this.#channels.get(msg.channel);
+        if (fns === undefined) {
+          const held = this.#unclaimed.get(msg.channel) ?? [];
+          held.push(msg as unknown as DaemonChannelEvent);
+          this.#unclaimed.set(msg.channel, held);
+          return;
+        }
+        for (const fn of fns) fn(msg as unknown as DaemonChannelEvent);
+        return;
+      }
       if (typeof msg.seq === "number") this.#cursor = msg.seq;
       for (const fn of this.#listeners) fn(msg as unknown as ProtocolEvent);
       return;
@@ -267,12 +310,11 @@ export interface PlaceRemoved {
   note?: string;
 }
 
-/** The ssh road of Add a computer: the login as a person's terminal would take it, and a key file where ssh asked
- * for one. The only road on which the app ever opens a file picker. */
+/** The ssh road of Add a computer: the login as a person's terminal would take it. No key rides here; the host
+ * logs in through the ssh agent and config as they stand, which is what the note under the fields promises. */
 export interface SshLogin {
   address: string;
   port?: number;
-  keyFile?: string;
 }
 
 /** One line of the installer's progress as the sheet draws it: the words, whether it is running, and the figure at
@@ -323,22 +365,20 @@ export interface Api {
   /** The guest ports the host forwards to this computer's loopback; forward.open and forward.close keep the list current. Optional so fixtures without forwards need not fake it. */
   listForwards?(): Promise<PortForward[]>;
   stopForward?(workspaceId: string, port: number): Promise<void>;
-  /** Every computer and provider this host holds, this computer first. Optional so fixtures without the settings
-   * section need not fake it; without it the section shows this computer alone. */
-  places?(): Promise<PlaceView[]>;
   /** Takes a computer or a provider back out: the host sweeps wsp off it over its link where it is connected, drops
    * the workspaces standing on it and the record. */
   removePlace?(placeId: string): Promise<PlaceRemoved>;
-  /** A one time code another computer joins with, and when it runs out. The app road of Add a computer shows it. */
-  joinCode?(): Promise<{ code: string; expiresAt: number }>;
+  /** This host's image as it stands and every built copy of it, by the computer or provider each sits on. The
+   * Remove dialog reads a copy's size to say what comes off that computer. */
+  image?(): Promise<SealedImageView>;
   /** The ssh road of Add a computer: the host logs in as the person's terminal would, installs wsp on the box and
    * waits for the box to dial back, calling `onStage` with each stage as the installer reaches it. Resolves with the
-   * computer once it has joined. This is the one seam the sheet's ssh road calls; the installer is #621 B's, so a
-   * host without it holds the road's Add rather than pretending to run one. */
+   * computer once it has joined. This is the one seam the sheet's ssh road calls; no op on the wire carries the
+   * installer yet, so a host without it holds the road's Add rather than pretending to run one. */
   addComputerOverSsh?(login: SshLogin, onStage: (stage: InstallStage) => void): Promise<PlaceView>;
   capabilities(): Promise<Capabilities>;
-  /** How to dial the workspace's daemon right now; ask again per dial, the edge token expires hourly. */
-  daemonReach(id: string): Promise<DaemonReachView>;
+  /** The road to every workspace's daemon: the host holds the socket and relays the frames. */
+  daemon: DaemonApi;
   /** The public route to one guest port, for an iframe; the runtime remints near the hourly expiry, so ask again before expiresAt. */
   portReach(id: string, port: number): Promise<PortReachView>;
   /** What the host saw fetching that route once; the pane explains a refusal from it, since the frame cannot read its own
@@ -385,6 +425,14 @@ export interface Api {
   /** The person's Ghostty config on the computer running the host, as the terminal pane applies it, read now for the
    * scheme the app shows. Optional so fixtures without a terminal need not fake it; without it the pane keeps its defaults. */
   hostTerminalConfig?(scheme: TerminalScheme): Promise<TerminalConfig>;
+  /** Every computer this wsp runs on: this one, the ones joined to it, and the provider it forks on. Optional so a
+   * fixture with no Settings page need not fake it. */
+  placesList?(): Promise<PlaceView[]>;
+  /** Opens the door a computer you own dials and answers where it is. Refused in the host's own words when this
+   * host serves none. */
+  placesDoor?(): Promise<PlaceDoorView>;
+  /** A fresh code for a computer to join with, and when it stops being one. */
+  pairIssue?(): Promise<{ code: string; expiresAt: number }>;
   /** The person's view preferences as the host keeps them, one record every client on this host shares. Optional so
    * fixtures without a settings page need not fake it; without it the defaults stand and nothing is kept. */
   preferences?(): Promise<Preferences>;
@@ -441,6 +489,17 @@ export interface Api {
   snapshotWorkspace?(id: string): Promise<ProjectGolden>;
   /** Every project golden the runtime took; the Lineage section lists each under the version it stands on. */
   listProjectGoldens?(): Promise<ProjectGolden[]>;
+}
+
+/** The page's one transport to a daemon. The route the machine answers on and the token that opens it never leave
+ * the host: a page names a workspace and the host dials the road that workspace's kind answers with. */
+export interface DaemonApi {
+  open(workspaceId: string): Promise<DaemonOpenReply>;
+  /** Resolves with the daemon's own answer, ok or not; rejects only when the host could not carry the frame. */
+  send(channel: string, frame: DaemonFrame): Promise<DaemonResponse>;
+  close(channel: string): Promise<void>;
+  /** Frames the host pushes for one channel, in order; stops when the unsubscribe runs. */
+  onFrame(channel: string, fn: (e: DaemonChannelEvent) => void): () => void;
 }
 
 export interface WorkspaceSizeSpec {
@@ -535,7 +594,12 @@ export function makeApi(c: ProtocolClient): Api {
     listForwards: async () => PortForward.array().parse((await c.request<{ forwards?: unknown }>("forwards.list")).forwards),
     stopForward: async (workspaceId, port) => void (await c.request("forwards.stop", { workspaceId, port })),
     capabilities: async () => (await c.request<{ capabilities: Capabilities }>("capabilities.get")).capabilities,
-    daemonReach: async id => (await c.request<{ reach: DaemonReachView }>("workspaces.daemonReach", { workspaceId: id })).reach,
+    daemon: {
+      open: async workspaceId => ({ channel: (await c.request<{ channel: string }>("daemon.open", { workspaceId })).channel }),
+      send: async (channel, frame) => (await c.request<{ reply: DaemonResponse }>("daemon.send", { channel, frame })).reply,
+      close: async channel => void (await c.request("daemon.close", { channel })),
+      onFrame: (channel, fn) => c.onDaemonFrame(channel, fn),
+    },
     portReach: async (id, port) => (await c.request<{ reach: PortReachView }>("workspaces.portReach", { workspaceId: id, port })).reach,
     portProbe: async (id, port) => (await c.request<{ probe: PortProbeView }>("workspaces.portProbe", { workspaceId: id, port })).probe,
     startSession: async opts => (await c.request<{ session: SessionView }>("sessions.start", { ...opts })).session,
@@ -561,6 +625,9 @@ export function makeApi(c: ProtocolClient): Api {
       HostFolderListing.parse((await c.request<{ listing?: unknown }>("host.folders", { ...(dir !== undefined ? { dir } : {}), ...(hidden !== undefined ? { hidden } : {}) })).listing),
     // Parsed, not trusted: the pane paints only values the wire type vouches for.
     hostTerminalConfig: async scheme => TerminalConfig.parse((await c.request<{ config?: unknown }>("host.terminalConfig", { scheme })).config),
+    placesList: async () => PlaceView.array().parse((await c.request<{ places?: unknown }>("places.list")).places),
+    placesDoor: async () => PlaceDoorView.parse((await c.request<{ door?: unknown }>("places.door")).door),
+    pairIssue: async () => await c.request<{ code: string; expiresAt: number }>("pair.issue"),
     // Parsed, not trusted: the page paints its theme and sizes only from values the wire type vouches for.
     preferences: async () => Preferences.parse((await c.request<{ preferences?: unknown }>("preferences.get")).preferences),
     setPreferences: async patch => Preferences.parse((await c.request<{ preferences?: unknown }>("preferences.set", { patch })).preferences),
@@ -579,10 +646,9 @@ export function makeApi(c: ProtocolClient): Api {
     initBuild: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.build", { ...o })).job),
     initSignInCode: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.signInCode", { ...o })).job),
     initCancel: async () => InitJob.parse((await c.request<{ job?: unknown }>("init.cancel")).job),
-    // Parsed, not trusted: the table draws a computer's shape and disk only as the wire type vouches for them.
-    places: async () => PlaceView.array().parse((await c.request<{ places?: unknown }>("places.list")).places),
-    removePlace: async placeId => (await c.request<PlaceRemoved>("places.remove", { placeId })),
-    joinCode: async () => await c.request<{ code: string; expiresAt: number }>("pair.issue"),
+    removePlace: async placeId => await c.request<PlaceRemoved>("places.remove", { placeId }),
+    // Parsed, not trusted: a sentence about what leaves a computer is built from these bytes.
+    image: async () => SealedImageView.parse((await c.request<{ view?: unknown }>("image.get")).view),
     subscribe: fn => c.subscribe(fn),
     getGolden: async (name = "default") => (await c.request<{ manifest?: GoldenManifest }>("golden.get", { name })).manifest,
     listSnapshots: async name =>

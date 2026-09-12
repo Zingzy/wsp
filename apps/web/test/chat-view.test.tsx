@@ -16,6 +16,7 @@ import { requestNewThread } from "../src/shell/shellRequests.js";
 import { useWorkspacePreviews } from "../src/shell/workspacePreviews.js";
 import { getSyntaxHighlighterPromise } from "../src/lib/syntaxHighlighting.js";
 import { caps } from "./caps.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 let restoreLayout: () => void = () => {};
 // The fenced block's highlighter loads its wasm engine and grammar once per worker; cold, that load plus React's
@@ -34,6 +35,8 @@ const workspace: WorkspaceView = {
   id: WS,
   name: "api",
   machineId: "m1",
+  // A fork, so its record carries the provider it was made at; that is the word the waking line names.
+  provider: "solari",
   phase: "running",
   golden: "snap_g",
   createdAt: "2026-09-01T00:00:00Z",
@@ -51,7 +54,7 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
   const listeners = new Set<(e: ProtocolEvent) => void>();
   const api: Api = {
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
-    daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
+    daemon: noDaemonApi,
     sessionHistory: async id => history[id] ?? [],
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     snapshotStorage: async () => null,
@@ -205,22 +208,54 @@ describe("ChatView", () => {
     expect(screen.getByText(/Working/)).toBeDefined();
     const status = { ...workspace, machineState: "paused" as const, reach: { state: "napping" as const }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 };
     emit({ type: "workspace.status", status: { ...status, phase: "pausing" } });
-    await screen.findByText("Waiting for the machine to wake");
+    await screen.findByText("waiting for api to wake");
     expect(screen.queryByText(/Working for/)).toBeNull();
     expect(screen.queryByText("Thinking")).toBeNull();
     emit({ type: "workspace.napped", workspaceId: WS });
     fireEvent.click(screen.getByRole("button", { name: "Wake" }));
     await waitFor(() => expect(wakes).toEqual([WS]));
     expect(useStore.getState().workspaces[0]!.phase).toBe("waking");
-    await screen.findByText("Waking the machine");
+    await screen.findByText(/^waking api on solari/);
     expect(screen.queryByRole("button", { name: "Wake" })).toBeNull();
     emit({ type: "workspace.woken", workspaceId: WS, machineId: "m1", resurrected: false });
     emit({ type: "workspace.status", status: { ...status, phase: "running", machineState: "running", reach: { state: "unreachable" } } });
-    await screen.findByText("Waiting for the machine to answer");
+    await screen.findByText("waiting for api to answer");
     expect(screen.queryByRole("button", { name: "Wake" })).toBeNull();
     emit({ type: "workspace.status", status: { ...status, phase: "running", machineState: "running", reach: { state: "reachable" } } });
     await screen.findByText(/Working/);
-    expect(screen.queryByText(/Waiting for/)).toBeNull();
+    expect(screen.queryByText(/waiting for/)).toBeNull();
+  });
+
+  it("the send that wakes a paused workspace draws one mono rule line in the timeline, naming the workspace, where it runs and how long it has been waking", async () => {
+    const { api, emit } = fixtureApi([workspace]);
+    await setup(api);
+    emit({ type: "session.start", ...scope, prompt: "hi" });
+    const status = { ...workspace, machineState: "paused" as const, reach: { state: "napping" as const }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 };
+    emit({ type: "workspace.status", status: { ...status, phase: "waking" } });
+    const line = await screen.findByText(/^waking api on solari/);
+    const row = line.closest<HTMLElement>("[data-machine-wait]")!;
+    expect(row.className).toContain("font-mono");
+    expect(row.className).toContain("text-[11px]");
+    expect(row.textContent).toMatch(/^waking api on solari·\d+s$/);
+    expect(row.querySelector("[role=alert], [data-slot=alert]")).toBeNull();
+  });
+
+  it("a paused workspace with nothing running says so once under the last turn, in the same mono rule line, with the idle window the runtime napped it after", async () => {
+    const { api, emit } = fixtureApi([workspace], { [WS]: settledTurn(WS, "add a health route", "Added GET /health.") });
+    await setup(api);
+    await screen.findByText("Added GET /health.");
+    expect(screen.queryByText(/^paused/)).toBeNull();
+    const status = { ...workspace, machineState: "paused" as const, reach: { state: "napping" as const }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 };
+    emit({ type: "workspace.status", status: { ...status, phase: "napping", reason: "idle 30 min" } });
+    const line = (await screen.findByText("paused after 30 min idle")).closest<HTMLElement>("[data-workspace-paused]")!;
+    expect(line.className).toContain("font-mono");
+    expect(line.className).toContain("text-[11px]");
+    // A nap this window did not see the reason for still says the state; nothing is invented about why.
+    emit({ type: "workspace.status", status: { ...status, phase: "napping" } });
+    await screen.findByText("paused");
+    // It is the workspace's line, not a turn's: a running workspace draws none.
+    emit({ type: "workspace.status", status: { ...status, phase: "running", machineState: "running", reach: { state: "reachable" } } });
+    await waitFor(() => expect(screen.queryByText(/^paused/)).toBeNull());
   });
 
   it("clears to the empty headline on a new-thread request and shows the fresh turn that follows", async () => {

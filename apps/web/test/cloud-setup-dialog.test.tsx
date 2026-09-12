@@ -17,6 +17,7 @@ import { CloudSetupDialog } from "../src/sidebar/CloudSetupDialog.js";
 import { CloudSetupRow } from "../src/sidebar/CloudSetupRow.js";
 import { resetAskedToNotify } from "../src/shell/needsYou.js";
 import { caps } from "./caps.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 const MIB = 1024 * 1024;
 const GIB = 1024 * MIB;
@@ -117,7 +118,7 @@ function fakeApi(over: { setup?: InitSetup; refuse?: string; key?: KeyAnswer } =
       throw new Error("none");
     }),
     capabilities: vi.fn(async () => (caps())),
-    daemonReach: vi.fn(async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 })),
+    daemon: noDaemonApi,
     portReach: vi.fn(async (_id: string, port: number) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 })),
     startSession: vi.fn(async () => ({ id: "s1", workspaceId: "ws", harness: "claude", status: "running" as const })),
     listSessions: vi.fn(async () => []),
@@ -295,7 +296,7 @@ describe("the cloud setup sheet", () => {
     expect(where.getAttribute("href")).toBe("https://console.getsolari.com");
     expect(where.getAttribute("target")).toBe("_blank");
     expect(where.querySelector("svg")).not.toBeNull();
-    expect(k(dialog, "sentence").textContent).toBe("Solari runs the machines. A 2\u00a0vCPU\u00a0·\u00a04\u00a0GB machine costs about $0.11 an hour while it runs and naps when idle");
+    expect(k(dialog, "sentence").textContent).toBe("Solari runs the computers your workspaces sit on. A 2\u00a0vCPU\u00a0·\u00a04\u00a0GB workspace costs about $0.11 an hour while it runs and naps when idle");
     expect(dialog.querySelector("input")!.getAttribute("placeholder")).toBe(CLOUD_SETUP_WORDS.keys.placeholder);
     expect(dialog.querySelectorAll('[data-k="keys"] [data-k=content] [class*=rounded-\\[10px\\]]'), "no card around one field").toHaveLength(0);
     expect((k(dialog, "primary") as HTMLButtonElement).disabled).toBe(true);

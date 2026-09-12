@@ -1,32 +1,41 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The computers table, drawn once and read in three places: the Where agents
-// run section, and each Add a computer road's joined screen, where the computer
-// that just joined is the one row. Four columns and a menu cell; a cell whose
-// fact has not come in yet holds a skeleton bar, so the table keeps its shape
-// while the computer reports. Every word and every cell comes from places.ts.
+// The computers table, drawn once and read in two places: the Where agents run
+// section, and the Add a computer sheet's joined screen, where the computer
+// that just joined is the one row. Four columns and, where the caller has one,
+// a last cell for the row's menu. A cell whose fact the computer has not
+// reported yet holds a bar, so the table keeps its shape while it reports.
+//
+// Every column word and every cell rule is the protocol's: PLACES_WORDS.columns,
+// fmtSize, fmtBytes, placeStateWord and placeWorkspacesCell, so the app and the
+// command line read one table. The head is the shipped TableHead's own style,
+// which is a tier above the zone label over the section.
 import type { ReactNode } from "react";
-import type { PlaceView } from "@wsp/protocol";
+import { PLACES_WORDS, fmtBytes, fmtSize, placeStateWord, placeWorkspacesCell, type PlaceView } from "@wsp/protocol";
 import { Skeleton } from "../components/ui/skeleton.js";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table.js";
 import { cn } from "../lib/utils.js";
-import { WHERE_WORDS } from "./format.js";
-import { placeDiskFree, placeName, placeSize, placeStateWord, placeWorkspaces, type PlaceHolding } from "./places.js";
+import { FACT, WHERE_WORDS } from "./format.js";
+import { placeCpuWord, placeName } from "./places.js";
 
 const CELL = "font-mono text-xs tabular-nums text-foreground";
-const QUIET = "text-muted-foreground";
+/** The one column the mock right-aligns, since a disk figure is read against the one above it. */
+const RIGHT = 2;
 
-/** The table card: a hairline box around the shipped table, with the head row's four columns and, where rows carry
- * one, a last cell for the row's menu. */
-export function PlaceTable({ children, menu = true }: { children: ReactNode; menu?: boolean }) {
+/** A cell whose fact the computer has not reported yet: the bar stands where the words will, so nothing moves. */
+const Waiting = ({ right = false }: { right?: boolean }) => <Skeleton className={cn("h-3 w-16", right && "ml-auto")} />;
+
+/** The table card: a hairline box around the shipped table and the four column words. */
+export function PlaceTable({ children, menu = true, k = "places-table" }: { children: ReactNode; menu?: boolean; k?: string }) {
   return (
-    <div data-k="place-table" className="overflow-hidden rounded-[10px] border border-border bg-card">
-      <Table>
+    <div className="overflow-hidden rounded-[10px] border border-border">
+      <Table data-k={k}>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
-            <TableHead>{WHERE_WORDS.computer}</TableHead>
-            <TableHead>{WHERE_WORDS.size}</TableHead>
-            <TableHead className="text-right">{WHERE_WORDS.diskFree}</TableHead>
-            <TableHead>{WHERE_WORDS.workspaces}</TableHead>
+            {PLACES_WORDS.columns.map((column, at) => (
+              <TableHead key={column} className={cn(at === RIGHT && "text-right")}>
+                {column}
+              </TableHead>
+            ))}
             {menu ? <TableHead className="w-10" /> : null}
           </TableRow>
         </TableHeader>
@@ -36,31 +45,29 @@ export function PlaceTable({ children, menu = true }: { children: ReactNode; men
   );
 }
 
-/** One computer or provider. The name carries the state word in a mono slot beside it, so a word arriving or
- * leaving moves nothing; the three facts read as the protocol words them. */
-export function PlaceRow({ place, holding, now, trail, menu, open, onToggle }: { place: PlaceView; holding: PlaceHolding; now: number; /** The chevron after the state word, where the row opens. */ trail?: ReactNode; menu?: ReactNode; open?: boolean; onToggle?: () => void }) {
-  const state = placeStateWord(place, now);
-  const size = placeSize(place);
-  const disk = placeDiskFree(place);
-  const { figure, note } = placeWorkspaces(place, holding);
-  const name = (
-    <span className="flex min-w-0 items-center gap-1.5">
-      <span className="truncate text-xs text-foreground">{placeName(place)}</span>
-      <span data-k="state" className="font-mono text-[11px] tabular-nums text-muted-foreground">
-        {state}
-      </span>
-      {trail}
-    </span>
-  );
+/** One computer or provider. The default mark rides beside the name and the state slot is the state's, so a
+ * computer that is the default and is also away says both and no column moves when either word arrives.
+ * The chevron, where the row opens, comes after them. */
+export function PlaceRow({ place, now, here = false, trail, menu, open, onToggle }: { place: PlaceView; now: number; /** Whether this is the computer the host runs on, which the list puts first. */ here?: boolean; /** The chevron after the state word, where the row opens. */ trail?: ReactNode; menu?: ReactNode; open?: boolean; onToggle?: () => void }) {
   return (
-    <TableRow data-k="place-row" data-place={place.id} {...(open === undefined ? {} : { "aria-expanded": open })} className={cn(onToggle !== undefined && "cursor-pointer")} onClick={onToggle}>
-      <TableCell>{name}</TableCell>
-      <TableCell className={CELL}>{size === "" ? <Skeleton className="h-3 w-22" /> : size}</TableCell>
-      <TableCell className={cn(CELL, "text-right")}>{disk === "" ? <Skeleton className="ml-auto h-3 w-11" /> : disk}</TableCell>
-      <TableCell className={CELL}>
-        {figure}
-        {note === "" ? null : <span className={QUIET}>{` · ${note}`}</span>}
+    <TableRow data-place-row={place.id} {...(open === undefined ? {} : { "aria-expanded": open })} className={cn(onToggle !== undefined && "cursor-pointer")} onClick={onToggle}>
+      <TableCell>
+        <span className="flex min-w-0 items-baseline gap-2">
+          <span className="truncate text-[13px] text-foreground">{placeName(place, here)}</span>
+          {place.default ? (
+            <span className={FACT} data-k="place-default">
+              {WHERE_WORDS.default}
+            </span>
+          ) : null}
+          <span className={FACT} data-k="place-state">
+            {placeStateWord(place, now)}
+          </span>
+          {trail}
+        </span>
       </TableCell>
+      <TableCell className={CELL}>{place.shape === undefined ? <Waiting /> : fmtSize(place.shape, placeCpuWord(place))}</TableCell>
+      <TableCell className={cn(CELL, "text-right")}>{place.diskFreeBytes === undefined ? <Waiting right /> : fmtBytes(place.diskFreeBytes)}</TableCell>
+      <TableCell className={CELL}>{place.shape === undefined ? <Waiting /> : placeWorkspacesCell(place)}</TableCell>
       {menu === undefined ? null : <TableCell className="text-right">{menu}</TableCell>}
     </TableRow>
   );

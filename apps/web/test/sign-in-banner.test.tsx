@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { startDaemon, type DaemonHandle, type ListeningPort } from "@wsp/daemon";
+import type { ListeningPort } from "@wsp/daemon";
 import type { WorkspaceView } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Api } from "../src/protocol/client.js";
@@ -18,9 +18,9 @@ import { useStore } from "../src/protocol/store.js";
 import { SignInBanner } from "../src/shell/SignInBanner.js";
 import { useSignInStore } from "../src/shell/signInStore.js";
 import { wireTerminals } from "../src/terminal/wiring.js";
+import { startRelayHarness, type RelayHarness } from "./relay-harness.js";
 
 const execFileAsync = promisify(execFile);
-const TOKEN = "banner-token";
 const URL_A = "https://dash.example.com/oauth2/auth?redirect_uri=http%3A%2F%2Flocalhost%3A8976%2Fcb&state=S";
 const URL_B = "https://mcp-server.zomato.com/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A15384%2Fcallback&state=T";
 const DEVICE = "https://github.com/login/device";
@@ -149,15 +149,15 @@ describe("SignInBanner", () => {
   });
 });
 
-describe("wiring ties a bar to the daemon link that announced it", () => {
-  let daemon: DaemonHandle | undefined;
+describe("wiring ties a bar to the daemon channel that announced it", () => {
+  let relay: RelayHarness | undefined;
   let dir: string | undefined;
   let unwire: (() => void) | undefined;
   afterEach(async () => {
     unwire?.();
-    await daemon?.close();
+    await relay?.close();
     if (dir) rmSync(dir, { recursive: true, force: true });
-    unwire = daemon = dir = undefined;
+    unwire = relay = dir = undefined;
   });
 
   const listening = (port: number): ListeningPort => ({ port, pid: null, inode: port, uid: 0, loopback: true });
@@ -166,40 +166,42 @@ describe("wiring ties a bar to the daemon link that announced it", () => {
     dir = mkdtempSync(join(tmpdir(), "wsp-banner-"));
     const sockPath = join(dir, "open.sock");
     let ports: ListeningPort[] = [listening(8976), listening(3000)];
-    daemon = await startDaemon({ port: 0, token: TOKEN, openSocketPath: sockPath, portsSource: async () => ports, portsIntervalMs: 50 });
-    const workspaces = [view("ws1", "task-1")];
+    relay = await startRelayHarness({ ports: async () => ports, daemonOptions: { openSocketPath: sockPath } });
+    const id = relay.workspaceId;
+    const key = `${id}:8976`;
+    const workspaces = [view(id, "task-1")];
     const api = {
       listWorkspaces: async () => workspaces,
-      daemonReach: async () => ({ url: `ws://127.0.0.1:${daemon!.port}`, expiresAt: Date.now() + 3_600_000, daemonToken: TOKEN }),
+      daemon: relay.api.daemon,
       subscribe: () => () => {},
     } as unknown as Api;
-    useStore.setState({ api, workspaces });
+    useStore.setState({ api, workspaces, conn: "live" });
     unwire = wireTerminals(useStore, { heartbeatMs: 60_000 });
     const deadline = Date.now() + 5000;
-    while (pages()["ws1:8976"] === undefined) {
+    while (pages()[key] === undefined) {
       if (Date.now() > deadline) throw new Error("no bar within 5 s");
       await execFileAsync("curl", ["-s", "-o", "/dev/null", "--unix-socket", sockPath, "-X", "POST", "--data-binary", URL_A, "http://wsp/open"]);
       await new Promise(r => setTimeout(r, 100));
     }
-    expect(pages()).toEqual({ "ws1:8976": { workspaceId: "ws1", url: URL_A, port: 8976 } });
+    expect(pages()).toEqual({ [key]: { workspaceId: id, url: URL_A, port: 8976 } });
 
     // Another listener going away is not this sign-in ending.
     ports = [listening(8976)];
     await new Promise(r => setTimeout(r, 250));
-    expect(Object.keys(pages())).toEqual(["ws1:8976"]);
+    expect(Object.keys(pages())).toEqual([key]);
 
     // The callback fired and its listener closed: the daemon's port.close ends the bar with it.
     ports = [];
     const gone = Date.now() + 5000;
-    while (pages()["ws1:8976"] !== undefined) {
+    while (pages()[key] !== undefined) {
       if (Date.now() > gone) throw new Error("bar outlived its port");
       await new Promise(r => setTimeout(r, 25));
     }
     expect(pages()).toEqual({});
 
     // A workspace that is gone takes its bars with it instead of leaving one under an id.
-    useSignInStore.getState().announce("ws1", DEVICE);
+    useSignInStore.getState().announce(id, DEVICE);
     useStore.setState({ workspaces: [] });
     expect(pages()).toEqual({});
-  }, 15_000);
+  }, 20_000);
 });

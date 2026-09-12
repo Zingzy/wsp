@@ -17,18 +17,25 @@ import { hostname, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
   ALREADY_JOINED_LINE,
+  JOIN_ADDRESS_LINE,
   LOOPBACK,
+  PLACE_DOOR_UNSERVED,
   PLACE_FILE_MODE,
   PLACE_LINK_NONCE_BYTES,
   PlaceJoinReply,
   PlaceView,
+  type DeviceView,
+  type PlaceDoorView,
   type PlaceFile,
+  type PlaceReport,
   authority,
   fmtDuration,
   hostKeyRefusal,
   isLoopback,
+  joinAddressOf,
   placeLinkTranscript,
   relayUrlOf,
+  sentPairCode,
   usageRefusal,
   wsUrlOf,
 } from "@wsp/protocol";
@@ -40,7 +47,7 @@ import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
 import { aimName, aimedHost, wspHome, type HostAim, type HostPick } from "./hosts.js";
 import { placeFilePath, placeKeyPath, placeLogPath, placeReport, readPlaceFile, stopPlaceService, sweepPlace, writePlaceFile } from "./place-report.js";
-import { PROVIDER_ENV, addedProviders, providerBackendFor, providerModule, type ProviderEnv } from "./providers.js";
+import { PROVIDER_ENV, addedBy, addedProviders, providerBackendFor, providerModule, type ProviderEnv } from "./providers.js";
 import { publicHostname } from "./relay-link.js";
 import { pairOnLoopbackLine, reachAddresses } from "./pairing.js";
 import {
@@ -51,14 +58,19 @@ import {
   serviceManagerFor,
   systemRunner,
   type ServiceAddress,
+  type ServiceManager,
   type ServiceRunner,
 } from "./service.js";
 import { dialHost, type DialOpts, type HostClient } from "./verbs.js";
-import { writeEnvFile, type Keys } from "./env-keys.js";
+import { writeEnvFile } from "./env-keys.js";
 
 /** What this computer is called when the person named no name: its own name lowercased, which is what they would
  * type for it on a command line. The one reading, so the row for this computer and the name a join writes agree. */
 export const placeNameHere = (): string => hostname().toLowerCase();
+
+/** What this computer calls itself to a computer that joins it: its own name without the .local a Mac's mDNS name
+ * carries, which is the word a person reads on the joined computer from then on. */
+export const hostNameHere = (): string => hostname().replace(/\.local$/i, "");
 
 /** Where the host keeps its own ed25519 pair: beside the state file it serves, at the person's own mode, so a
  * second state file on one computer is a second wsp with a key of its own. */
@@ -91,16 +103,17 @@ export function hostPlaceKey(statePath: string): PlaceKeyPair {
 
 /** What a host wires for its places: its own pair, the provider it is set up for as a row of the same list, and
  * this computer's own row. */
-export function placeWiring(statePath: string, keys: Keys, env: ProviderEnv): PlaceWiring {
+export function placeWiring(statePath: string, env: ProviderEnv): PlaceWiring {
   return {
     hostKey: hostPlaceKey(statePath),
     provider: () => {
-      const module = providerModule({ keys, env });
-      // A row that names no way of being added is no place to show: a host set up to fork nowhere has none.
-      if (module.added === undefined) return undefined;
-      const { pricing } = providerBackendFor({ keys, env });
+      const module = providerModule(env);
+      // A row that answers for no way of being added is no place to show: a host set up to fork nowhere has none.
+      if (addedBy(module) === undefined) return undefined;
+      const { pricing } = providerBackendFor(env);
       return { id: module.id, rateUsdPerHour: pricing.rateUsdPerHour(pricing.defaultSize) };
     },
+    hostName: hostNameHere,
     // This computer under the name a person would type for it, and what it is off the same read a place sends about
     // itself, so the row for the computer the host runs on carries the facts every other row carries.
     here: () => {
@@ -116,11 +129,11 @@ const JOIN_MS = 20_000;
 
 /** The whole of what wsp add prints with no argument: the line to type on the computer being joined, at every
  * address this host answers on, and the other two roads in one line each. */
-export function addLines(code: string, expiresAt: number, now: number, addresses: readonly string[], port: number, publicAt: string | undefined): string[] {
+export function addLines(code: string, expiresAt: number, now: number, urls: readonly string[], publicAt: string | undefined): string[] {
   const join = (url: string, note?: string): string => `  wsp join ${url} --code ${code}${note === undefined ? "" : `      (${note})`}`;
   return [
     "wsp add: a computer you own joins by dialing this host. On that computer, with wsp installed:",
-    ...addresses.map(at => join(`http://${authority(at, port)}`)),
+    ...urls.map(url => join(url)),
     ...(publicAt === undefined ? [] : [join(relayUrlOf(publicAt), "when the host is linked to your relay")]),
     `The code is spent by the first join and stops working in ${fmtDuration(Math.max(0, expiresAt - now))}. The computer shows in wsp places within a minute of joining.`,
     "Over ssh instead: wsp add user@host --name <name> installs the agent there and joins it for you.",
@@ -152,13 +165,24 @@ export const sshAddNotYetLine = (address: string): string =>
 export const ADD_NAME_REFUSAL =
   "wsp add: --name belongs to the road that installs the agent on a computer over ssh, which is not wired yet. On the computer you are sitting at, wsp join <address> --code <code> --name <name> names it.";
 
-/** What a remove prints: what came off that computer, what the workspaces on it said as they went, and the note for
- * a place that was not connected to sweep. */
-export function removeLines(name: string, answer: { swept: readonly string[]; dropped: readonly string[]; note?: string }): string[] {
+/** What a remove says about the device a join bought for that computer's own window. One code bought the place and
+ * the device, and a remove takes the place alone: the token is still good until somebody hands it back, from the
+ * joined computer's own leave or from here. */
+export const deviceLeftLine = (name: string, deviceIds: readonly string[]): string => {
+  // One command per id: wsp devices revoke takes exactly one, so a line joining them would be a line that refuses.
+  const revoke = deviceIds.map(id => `wsp devices revoke ${id}`).join(", ");
+  const one = deviceIds.length === 1;
+  return `${name} still holds ${one ? "a token" : `${deviceIds.length} tokens`} for this wsp, which its own window signs in with; ${revoke} take${one ? "s it" : " them"} back.`;
+};
+
+/** What a remove prints: what came off that computer, what the workspaces on it said as they went, the note for a
+ * place that was not connected to sweep, and the device a join bought for it where one is still on record. */
+export function removeLines(name: string, answer: { swept: readonly string[]; dropped: readonly string[]; note?: string }, deviceIds: readonly string[] = []): string[] {
   return [
     ...(answer.swept.length === 0 ? [] : [`removed from ${name}:`, ...answer.swept.map(line => `  ${line}`)]),
     ...answer.dropped,
     ...(answer.note === undefined ? [] : [answer.note]),
+    ...(deviceIds.length === 0 ? [] : [deviceLeftLine(name, deviceIds)]),
     `${name} is no longer a place in this wsp.`,
   ];
 }
@@ -196,7 +220,8 @@ const systemDeps: PlaceDeps = { dial: dialHost, now: Date.now, run: systemRunner
  * aim a line, which is read to refuse anywhere but here. */
 export interface PlaceOpts extends HostPick {
   statePath: string;
-  keys?: Keys;
+  /** The environment the provider is picked out of, carrying every registered row's key off the three layers a key
+   * is read through: a provider added as a place is put the key this computer already holds under its own variable. */
   providerEnv?: ProviderEnv;
 }
 
@@ -235,9 +260,19 @@ export async function addCommand(io: CliIO, opts: PlaceOpts, args: readonly stri
   try {
     const { code, expiresAt } = await client.request<{ code: string; expiresAt: number }>("pair.issue");
     const publicAt = publicHostname(opts.statePath);
-    // A host on loopback alone with no relay could not be dialled by anything, so the code would open nothing.
-    if (isLoopback(address) && publicAt === undefined) io.error(pairOnLoopbackLine(address));
-    for (const line of addLines(code, expiresAt, deps.now(), reachAddresses(address), lock?.port ?? 0, publicAt)) io.log(line);
+    // The door a computer you own dials is the host's to open, and asking for it is what opens it: a host on
+    // loopback alone can be joined once it has one, so the loopback refusal is only for a host that serves none.
+    // A host that serves one and could not open it says why in its own words; pointing at --listen there would send
+    // the person to fix the wrong thing.
+    const asked = await client.request<{ door: PlaceDoorView }>("places.door").then(
+      answer => ({ door: answer.door }),
+      (e: unknown) => ({ refusal: e instanceof Error ? e.message : String(e) }),
+    );
+    const door = "door" in asked ? asked.door : undefined;
+    if ("refusal" in asked && asked.refusal !== PLACE_DOOR_UNSERVED) io.error(asked.refusal);
+    else if (door === undefined && isLoopback(address) && publicAt === undefined) io.error(pairOnLoopbackLine(address));
+    const urls = door?.addresses ?? reachAddresses(address).map(at => `http://${authority(at, lock?.port ?? 0)}`);
+    for (const line of addLines(code, expiresAt, deps.now(), urls, publicAt)) io.log(line);
     return 0;
   } finally {
     client.close();
@@ -246,15 +281,13 @@ export async function addCommand(io: CliIO, opts: PlaceOpts, args: readonly stri
 
 /** A provider as a place: the words name it, this computer is set up for it, and a provider that is opened by a key
  * of the person's is put the one this computer already holds before anything is written. The key itself is read
- * where they keep it and is never written here: which variable a given provider's key lives under is the key seam's
- * to declare, and until it does the row's own rule stands, which is that a missing key is the provider's own
- * refusal rather than a guess made on this side. */
+ * under the variable that provider's row declares, off the same three layers every other road reads a key through,
+ * and is never written here. */
 async function addProvider(io: CliIO, opts: PlaceOpts, id: string, deps: PlaceDeps): Promise<number> {
   const module = addedProviders().find(m => m.id === id)!;
-  const keys = opts.keys ?? {};
   const env: ProviderEnv = { ...(opts.providerEnv ?? process.env), [PROVIDER_ENV]: id };
-  const backend = providerBackendFor({ keys, env });
-  if (module.added === "key") {
+  const backend = providerBackendFor(env);
+  if (addedBy(module) === "key") {
     const check = await deps.checkKey(backend);
     const said = keyCheckLine(check, true);
     if (check.state === "refused" && said !== undefined) {
@@ -294,7 +327,13 @@ export async function removeCommand(io: CliIO, opts: PlaceOpts, args: readonly s
       io.error(noPlaceLine(ref, joined.map(p => p.name)));
       return 1;
     }
-    for (const line of removeLines(place.name, answer)) io.log(line);
+    // The place's own name is what a join names the device it buys, so a device still wearing it is that computer's
+    // window token. Read after the remove: a host that answers no device list simply names none.
+    const held = await client.request<{ devices: DeviceView[] }>("devices.list").then(
+      answered => answered.devices.filter(d => d.name === place.name).map(d => d.id),
+      () => [],
+    );
+    for (const line of removeLines(place.name, answer, held)) io.log(line);
     return 0;
   } finally {
     client.close();
@@ -306,6 +345,8 @@ export interface JoinFlags {
   codeFile?: string;
   name?: string;
   serve?: boolean;
+  /** Hold this computer out of idle sleep while it is joined, from the moment it joins. */
+  awake?: boolean;
 }
 
 export interface JoinDeps {
@@ -336,10 +377,10 @@ const joinDeps = (): JoinDeps => ({
  * left on a computer's disk is a code somebody else could spend. */
 function joinCode(flags: JoinFlags): string {
   if (flags.code !== undefined && flags.codeFile !== undefined) throw usageRefusal("wsp join takes --code or --code-file, not both");
-  if (flags.code !== undefined) return flags.code.trim();
+  if (flags.code !== undefined) return sentPairCode(flags.code.trim());
   if (flags.codeFile === undefined) throw usageRefusal("usage: wsp join <address> --code <code> [--name <name>]\n       wsp join --serve");
   const path = resolve(flags.codeFile);
-  const code = readFileSync(path, "utf8").trim();
+  const code = sentPairCode(readFileSync(path, "utf8").trim());
   rmSync(path, { force: true });
   if (code === "") throw usageRefusal(`${path} held no join code`);
   return code;
@@ -347,12 +388,21 @@ function joinCode(flags: JoinFlags): string {
 
 /** One dial that joins this computer to a wsp: the key is made here, the host's own key is trusted on this first use
  * because the code proved the person meant it, and nothing is written until the host has proved that key back. */
-async function handshake(io: CliIO, url: string, code: string, name: string, deps: JoinDeps): Promise<{ placeId: string; hostPublicKey: string; privateKeyPem: string }> {
+async function handshake(
+  io: CliIO,
+  url: string,
+  code: string,
+  name: string,
+  home: string,
+  /** Whether this join also buys the device token this computer's own window holds; it wears `name`. */
+  client: boolean,
+  dial: (url: string) => WebSocket,
+): Promise<{ placeId: string; hostPublicKey: string; hostName: string; privateKeyPem: string; report: PlaceReport; device?: { deviceId: string; deviceToken: string } }> {
   const pair = newPlaceKeyPair();
   const nonce = randomBytes(PLACE_LINK_NONCE_BYTES).toString("base64");
-  const report = { ...placeReport({ name, home: deps.home }), dialed: url };
-  const ws = deps.dial(url);
-  let answered: { placeId: string; hostPublicKey: string } | undefined;
+  const report = { ...placeReport({ name, home }), dialed: url };
+  const ws = dial(url);
+  let answered: { placeId: string; hostPublicKey: string; hostName: string; device?: { deviceId: string; deviceToken: string } } | undefined;
   try {
     return await new Promise((done, fail) => {
       const deadline = setTimeout(() => fail(new Error(`the host at ${url} did not answer in ${Math.round(JOIN_MS / 1000)}s`)), JOIN_MS);
@@ -362,7 +412,7 @@ async function handshake(io: CliIO, url: string, code: string, name: string, dep
       };
       ws.on("error", (e: Error) => end(new Error(`${url} could not be reached: ${e.message}`)));
       ws.once("close", () => end(new Error(`${url} closed the socket before this computer had joined`)));
-      ws.once("open", () => ws.send(JSON.stringify({ id: 1, op: "place.join", code, publicKey: pair.publicKey, nonce, report })));
+      ws.once("open", () => ws.send(JSON.stringify({ id: 1, op: "place.join", code, publicKey: pair.publicKey, nonce, report, ...(client ? { client: { name } } : {}) })));
       ws.on("message", raw => {
         let frame: Record<string, unknown>;
         try {
@@ -381,13 +431,13 @@ async function handshake(io: CliIO, url: string, code: string, name: string, dep
             end(new Error(`${url} answered the join with something this computer cannot read: ${reply.error.message}`));
             return;
           }
-          const { placeId, hostPublicKey, nonce: hostNonce, signature } = reply.data;
+          const { placeId, hostPublicKey, nonce: hostNonce, signature, hostName, device } = reply.data;
           // Nothing of this computer's is written or sent past here until the host has proved the key it sent.
           if (!verifyPlaceBytes(hostPublicKey, placeLinkTranscript("host", placeId, nonce, hostNonce), signature)) {
             end(new Error(hostKeyRefusal(url)));
             return;
           }
-          answered = { placeId, hostPublicKey };
+          answered = { placeId, hostPublicKey, hostName, ...(device === undefined ? {} : { device }) };
           if (frame["notice"] !== undefined) io.error(String(frame["notice"]));
           ws.send(
             JSON.stringify({
@@ -401,7 +451,7 @@ async function handshake(io: CliIO, url: string, code: string, name: string, dep
         }
         if (frame["id"] === 2 && answered !== undefined) {
           clearTimeout(deadline);
-          done({ ...answered, privateKeyPem: pair.privateKeyPem });
+          done({ ...answered, privateKeyPem: pair.privateKeyPem, report });
         }
       });
     });
@@ -410,6 +460,127 @@ async function handshake(io: CliIO, url: string, code: string, name: string, dep
     // otherwise sit as a place the host thinks is present with nothing serving it.
     ws.close(1000, "the join is done; the agent dials the link");
   }
+}
+
+/** What one join needs, whoever asked for it: the app's shell hands the shim it writes, the command line hands the
+ * node binary and its own entry. The road below is the whole of a join, so both callers take the same one. */
+export interface JoinPlaceOptions {
+  /** The home holding place.json and the key beside it. */
+  home: string;
+  /** The address as joinAddressOf gave it. */
+  address: string;
+  code: string;
+  /** What the host will call this computer; its own name lowercased when nobody says. */
+  name?: string;
+  /** Also buy a device token for this computer's own window with the same code. The device is named after the
+   * place, off the one `name` below: `wsp remove` finds the token a computer still holds by that name, so the two
+   * cannot be two words. An ask rather than a name, so no caller can pass a second one. */
+  client?: boolean;
+  awake?: boolean;
+  /** The line the unit runs, word for word. */
+  serviceArgv: readonly string[];
+  /** Which computer this is, for the manager that holds the unit and the line said where there is none; this
+   * process's own unless a caller names another. */
+  platform?: string;
+  /** Which manager holds the unit: the one that platform has unless the caller names another, and a caller that
+   * means none names the key with nothing in it, as the sweep's own option already reads. */
+  manager?: ServiceManager | undefined;
+  run?: ServiceRunner;
+  /** How the socket to the host is opened, and the clock the joined stamp is read off; the real ones by default. */
+  dial?: (url: string) => WebSocket;
+  now?: () => number;
+}
+
+/** What a join answers its caller: enough for the app to open its window on the other wsp with no second read. */
+export interface JoinedPlace {
+  placeId: string;
+  hostName: string;
+  hostUrls: string[];
+  report: PlaceReport;
+  device?: { deviceId: string; deviceToken: string };
+}
+
+/** The whole of a join, as a function: the key, the handshake, the two files at the person's own mode, and the unit
+ * that dials again at every login. It refuses a computer that already belongs to a wsp, since a place file is the
+ * one wsp this computer is in. Throws the host's own sentence on a refusal; the caller decides what a person reads. */
+export async function joinPlace(io: CliIO, opts: JoinPlaceOptions): Promise<JoinedPlace> {
+  const { home, address, code } = opts;
+  if (home === "") throw new Error("a join needs this login's home folder, and this process has none");
+  const file = placeFilePath(home);
+  if (readPlaceFile(file) !== undefined) throw new Error(ALREADY_JOINED_LINE);
+  const name = opts.name?.trim() !== undefined && opts.name.trim() !== "" ? opts.name.trim() : placeNameHere();
+  const now = opts.now ?? Date.now;
+  const joined = await handshake(io, address, code, name, home, opts.client === true, opts.dial ?? (url => new WebSocket(wsUrlOf(url))));
+  const key = placeKeyPath(home);
+  mkdirSync(dirname(key), { recursive: true, mode: 0o700 });
+  writeFileSync(key, joined.privateKeyPem, { mode: PLACE_FILE_MODE });
+  chmodSync(key, PLACE_FILE_MODE);
+  const placeFile: PlaceFile = {
+    placeId: joined.placeId,
+    name,
+    hostName: joined.hostName,
+    hostUrls: [address],
+    hostPublicKey: joined.hostPublicKey,
+    keyPath: key,
+    joinedAt: new Date(now()).toISOString(),
+    awake: opts.awake === true,
+  };
+  writePlaceFile(file, placeFile);
+  io.log(joinedLine(name, address));
+  const answer: JoinedPlace = {
+    placeId: joined.placeId,
+    hostName: joined.hostName,
+    hostUrls: placeFile.hostUrls,
+    report: joined.report,
+    ...(joined.device === undefined ? {} : { device: joined.device }),
+  };
+  const on = opts.platform ?? platform();
+  const manager = "manager" in opts ? opts.manager : serviceManagerFor(on);
+  if (manager === undefined) {
+    io.error(noManagerLine(on));
+    io.log("Run wsp join --serve in a terminal that stays open instead.");
+    return answer;
+  }
+  const at: ServiceAddress = { role: "place", statePath: file, home, uid: process.getuid?.() ?? 0 };
+  const logPath = placeLogPath(home);
+  // HOME is stated rather than inherited: the agent keeps every file it has under the home its place file sits in,
+  // and a manager that hands it the login's own default would put them somewhere else entirely.
+  const env = { ...serviceEnv(process.env), HOME: home };
+  const { unit, installed, failure } = await installService(manager, { ...at, argv: [...opts.serviceArgv], cwd: home, env, logPath }, opts.run ?? systemRunner);
+  if (failure !== undefined) {
+    if (installed) io.error(`the ${manager.words} ${unit.name} is still there at ${unit.path}; wsp leave takes it away.`);
+    throw new Error(runFailureLine(failure));
+  }
+  io.log(`${manager.words} ${unit.name} is loaded; it dials again at every login`);
+  io.log(`log         ${logPath}`);
+  const after = manager.afterLoad?.(at);
+  if (after !== undefined) io.log(after);
+  io.log("wsp leave takes this computer back out.");
+  return answer;
+}
+
+/** The place file as it stands on this computer, or nothing when it belongs to no wsp. */
+export function placeStanding(home: string): PlaceFile | undefined {
+  return readPlaceFile(placeFilePath(home));
+}
+
+/** Flips whether this computer is held out of idle sleep while it is joined, keeping every other field. The agent
+ * watches the file, so this write is the whole of the toggle and nothing is restarted. */
+export function writePlaceAwake(home: string, awake: boolean): PlaceFile {
+  const held = placeStanding(home);
+  if (held === undefined) throw new Error(NOTHING_TO_LEAVE_LINE);
+  const moved: PlaceFile = { ...held, awake };
+  writePlaceFile(placeFilePath(home), moved);
+  return moved;
+}
+
+/** The sweep a computer runs on itself, and the lines naming what it took. The host's own remove asks the agent for
+ * this over the link; this is the road for a wsp that cannot be reached. */
+export async function leavePlace(home: string, run?: ServiceRunner, forPlatform: string = platform()): Promise<string[]> {
+  const manager = serviceManagerFor(forPlatform);
+  const swept = await sweepPlace({ home, ...(manager !== undefined ? { manager } : {}), ...(run !== undefined ? { run } : {}) });
+  await stopPlaceService({ home, ...(manager !== undefined ? { manager } : {}), ...(run !== undefined ? { run } : {}) });
+  return swept.removed;
 }
 
 export async function joinCommand(io: CliIO, args: readonly string[], flags: JoinFlags, deps: JoinDeps = joinDeps()): Promise<number> {
@@ -430,51 +601,27 @@ export async function joinCommand(io: CliIO, args: readonly string[], flags: Joi
     await new Promise<void>(() => {});
     return 0;
   }
-  const [address] = args;
-  if (address === undefined || args.length !== 1) throw usageRefusal("usage: wsp join <address> --code <code> [--name <name>]\n       wsp join --serve");
+  const [typed] = args;
+  if (typed === undefined || args.length !== 1) throw usageRefusal("usage: wsp join <address> --code <code> [--name <name>] [--awake]\n       wsp join --serve");
+  const address = joinAddressOf(typed);
+  if (address === undefined) throw usageRefusal(`${JOIN_ADDRESS_LINE.what} ${JOIN_ADDRESS_LINE.fix}`);
   if (readPlaceFile(file) !== undefined) {
     io.error(ALREADY_JOINED_LINE);
     return 1;
   }
   const code = joinCode(flags);
-  const name = flags.name?.trim() !== undefined && flags.name.trim() !== "" ? flags.name.trim() : placeNameHere();
-  const joined = await handshake(io, address, code, name, deps);
-  const key = placeKeyPath(home);
-  mkdirSync(dirname(key), { recursive: true, mode: 0o700 });
-  writeFileSync(key, joined.privateKeyPem, { mode: PLACE_FILE_MODE });
-  chmodSync(key, PLACE_FILE_MODE);
-  const placeFile: PlaceFile = {
-    placeId: joined.placeId,
-    name,
-    hostUrls: [address],
-    hostPublicKey: joined.hostPublicKey,
-    keyPath: key,
-    joinedAt: new Date(deps.now()).toISOString(),
-  };
-  writePlaceFile(file, placeFile);
-  io.log(joinedLine(name, address));
-  const manager = serviceManagerFor(deps.platform);
-  if (manager === undefined) {
-    io.error(noManagerLine(deps.platform));
-    io.log("Run wsp join --serve in a terminal that stays open instead.");
-    return 0;
-  }
-  const at: ServiceAddress = { role: "place", statePath: file, home, uid: process.getuid?.() ?? 0 };
-  const logPath = placeLogPath(home);
-  // HOME is stated rather than inherited: the agent keeps every file it has under the home its place file sits in,
-  // and a manager that hands it the login's own default would put them somewhere else entirely.
-  const env = { ...serviceEnv(process.env), HOME: home };
-  const { unit, installed, failure } = await installService(manager, { ...at, argv: deps.argv(), cwd: home, env, logPath }, deps.run);
-  if (failure !== undefined) {
-    io.error(`wsp join: ${runFailureLine(failure)}`);
-    if (installed) io.error(`the ${manager.words} ${unit.name} is still there at ${unit.path}; wsp leave takes it away.`);
-    return 1;
-  }
-  io.log(`${manager.words} ${unit.name} is loaded; it dials again at every login`);
-  io.log(`log         ${logPath}`);
-  const after = manager.afterLoad?.(at);
-  if (after !== undefined) io.log(after);
-  io.log("wsp leave takes this computer back out.");
+  await joinPlace(io, {
+    home,
+    address,
+    code,
+    ...(flags.name !== undefined ? { name: flags.name } : {}),
+    ...(flags.awake === true ? { awake: true } : {}),
+    serviceArgv: deps.argv(),
+    platform: deps.platform,
+    run: deps.run,
+    dial: deps.dial,
+    now: deps.now,
+  });
   return 0;
 }
 
