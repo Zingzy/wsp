@@ -4,8 +4,9 @@
 // but for the one hook beside the where word, which reads that word off the
 // store for the surfaces that hold a workspace's id and no snapshot.
 import { agentName } from "@wsp/catalog";
-import { FREE_WORD, fmtSize, isBilling, isLocalWorkspace, kindWords, machineLacksShort, outOfMemoryRowLine, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspaceStateOf, type MemoryReading, type ReachState, type SessionOrigin, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
+import { FREE_WORD, fmtSize, isBilling, isLocalWorkspace, kindWords, machineLacksShort, outOfMemoryRowLine, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspaceStateOf, type MemoryReading, type ReachState, type SessionOrigin, type PlaceView, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
+import { PLACE_KIND_WORDS, THIS_COMPUTER_WORD, placeName, placeOf } from "../settings/places.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
 import { formatRelativeTimeLabel } from "../lib/timestampFormat.js";
@@ -169,11 +170,27 @@ const PLAIN = { colorClass: "text-sidebar-whisper/70", dotClass: "bg-sidebar-whi
 /** The computer or the provider a workspace runs on, as a row names it: the provider the record itself carries,
  * else the kind's own word where it has one, else the name wsp holds for the machine, the live one once a status
  * has arrived. The provider leads because this host is wired to one of several and only the record knows which;
- * reading it off the kind would tell a person on Docker or Box that their workspace is at Solari. The one place a
- * surface asks where a workspace runs, so the day a computer carries the name its owner gave it is one edit here. */
+ * reading it off the kind would tell a person on Docker or Box that their workspace is at Solari. A fork whose
+ * record names no provider falls to the kind's word rather than to that machine's id, which names nothing to the
+ * person reading the row. The one place a surface asks where a workspace runs, so the day a computer carries the
+ * name its owner gave it is one edit here. */
 export function whereWord(project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string {
   const record = project.status ?? project.workspace;
   return record.provider ?? kindWords(workspaceKind(project.workspace)).where ?? record.machineId;
+}
+
+/** The fuller reading of the same question, for the pane that has a whole row for it: the computer or provider the
+ * workspace stands on by the name its own row carries, and what that row is. The computer the host runs on says so
+ * in the words a sentence says it in, and nothing more, being the one row a person needs no word for. A workspace this host holds no row for falls back
+ * to the row's own short word, which is what a browser tab on a host without places has.
+ *
+ * Built on placeOf and placeName, the readings the places list already holds, so the pane and the table name a
+ * computer alike. */
+export function whereRuns(places: readonly PlaceView[], project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string {
+  const at = placeOf(places, project.workspace);
+  if (at === undefined) return whereWord(project);
+  if (at === places[0]) return THIS_COMPUTER_WORD;
+  return `${placeName(at)} · ${PLACE_KIND_WORDS[at.kind]}`;
 }
 
 /** The same word for a surface that holds the workspace's id and no snapshot: the record and its status off the

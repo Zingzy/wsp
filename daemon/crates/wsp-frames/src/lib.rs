@@ -11,6 +11,7 @@ mod id;
 mod machine;
 pub mod numbers;
 mod place;
+mod place_paths;
 mod reply;
 mod request;
 mod validate;
@@ -22,9 +23,10 @@ pub use event::{DaemonEvent, ProcEntry, Usage};
 pub use id::RequestId;
 pub use machine::{MachineErrorKind, MachineKind, MachineLife, MachineLinkRequest, MachineOp, MachineSpec, OnIdle, MACHINE_OPS};
 pub use place::{
-    Base64Bytes, PlaceAuthReply, PlaceAuthRequest, PlaceNonce, PlaceProveRequest, PlacePublicKey, PlaceReport, PlaceSignature, Platform,
-    WorkspaceSize,
+    place_link_transcript, Base64Bytes, LinkRole, PlaceAuthReply, PlaceAuthRequest, PlaceFile, PlaceNonce, PlaceProveRequest,
+    PlacePublicKey, PlaceReport, PlaceSignature, Platform, WorkspaceSize,
 };
+pub use place_paths::{place_daemon_paths, place_owned_paths, PlaceDaemonPaths};
 pub use reply::{
     DaemonErrorResponse, DaemonExecReply, Empty, False, FsEntry, FsListReply, FsReadReply, GitBranch, GitDiffFile, GitDiffReply,
     GitStatusEntry, GitStatusReply, InboxRescanReply, ListeningPort, ManifestEntry, ManifestGetReply, ManifestRecordReply,

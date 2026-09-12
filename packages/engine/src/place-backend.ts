@@ -8,7 +8,7 @@
 // module, the transport, which is one `exec` frame on the link.
 
 import { randomBytes } from "node:crypto";
-import type { Capabilities, MachineFacts } from "@wsp/protocol";
+import { parsePlaceMachineId, placeMachineId, type Capabilities, type MachineFacts } from "@wsp/protocol";
 import { execDetached } from "./exec-detached.js";
 import { OS_READ, UPTIME_READ, HOME_READ, osNameOf, readValues, uptimeMsOf } from "./machine-facts.js";
 import { SSH_BYTES_OK, putBytesScript } from "./ssh-backend.js";
@@ -16,15 +16,9 @@ import type { BackendPricing, ExecResult, Machine, MachineBackend, MachineShape,
 
 const NO_SNAPSHOT_STORAGE: SnapshotStoragePricing = { freeGb: 0, usdPerGbMonth: 0, billedFrom: "" };
 
-/** The one written form of a place's machine: its id on the record, which names the place the link belongs to and
- * nothing else. Everything a later host process needs is the place record, so this is the whole id. */
-export const placeMachineId = (placeId: string): string => `place:${placeId}`;
-
-/** The place an id names, or nothing when the id is not one of ours: a record from another backend. */
-export function parsePlaceMachineId(id: string): string | undefined {
-  const placeId = id.startsWith("place:") ? id.slice("place:".length) : "";
-  return placeId === "" ? undefined : placeId;
-}
+/** The written form of a place's machine id and its reading; both live in the protocol, since the app reads the
+ * same id back off a workspace record to say which computer it stands on. */
+export { placeMachineId, parsePlaceMachineId };
 
 /** How a command reaches a place: one `exec` frame on the link that place is holding. The runtime hands this in,
  * since it is the runtime that holds the links; a place that is not connected is a rejection with the sentence

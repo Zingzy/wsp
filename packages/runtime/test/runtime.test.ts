@@ -3783,7 +3783,7 @@ describe("runtime verified wake", () => {
       expect(await store.getBlob("vaults", ws.id)).toEqual(Buffer.from("tarbytes"));
       expect(vaultWarnings()).toEqual([`nap vault for ${ws.id} not stored, previous kept: the export was 6 KB, over the 5 KB cap`]);
       expect((await rt.workspaces.get(ws.id)).phase).toBe("napping");
-      expect(napReason()).toBe("nap kept the previous vault; the export was 6 KB, over the 5 KB cap");
+      expect(napReason()).toBe("the nap kept what was saved before it; the export was 6 KB, over the 5 KB cap");
       // The status says it once; the record says it until a nap stores one, which is what the row and the tab read.
       const refused = await rt.workspaces.get(ws.id);
       expect(refused.vaultRefused).toBe("the export was 6 KB, over the 5 KB cap");
@@ -4095,7 +4095,7 @@ describe("nap vault against the stub backend", () => {
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn.mock.calls[0]![0]).toBe(`nap vault for ${ws.id} not stored, previous kept: fetch failed`);
       expect(await store.getBlob("vaults", ws.id)).toEqual(first);
-      expect((events.filter(e => e.type === "workspace.status").at(-1) as { status: { phase: string; reason?: string } }).status).toMatchObject({ phase: "napping", reason: "nap kept the previous vault; fetch failed" });
+      expect((events.filter(e => e.type === "workspace.status").at(-1) as { status: { phase: string; reason?: string } }).status).toMatchObject({ phase: "napping", reason: "the nap kept what was saved before it; fetch failed" });
     } finally {
       warn.mockRestore();
     }
@@ -6984,7 +6984,7 @@ describe("a workspace behind the golden's head", () => {
   it("one forked from a snapshot no golden of this host knows is refused by name", async () => {
     const { rt } = await seeded();
     const ws = await rt.workspaces.create({ golden: "snap_elsewhere", name: "api" });
-    await expect(rt.workspaces.updateImage(ws.id)).rejects.toThrow("api's image is not a version of any golden this host knows");
+    await expect(rt.workspaces.updateImage(ws.id)).rejects.toThrow("api's image is not one of the versions this host knows");
   });
 });
 

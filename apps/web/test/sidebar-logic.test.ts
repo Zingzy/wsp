@@ -544,8 +544,9 @@ describe("a thread row's words", () => {
     expect(whereWord(runs({ machineId: "sb_9f2c1d8a", provider: "solari" }))).toBe("solari");
     expect(whereWord(runs({ machineId: "bx_4c11e0", provider: "box" }))).toBe("box");
     expect(whereWord(runs({ machineId: "wsp-api", provider: "docker" }))).toBe("docker");
-    // A record from before the provider rode the wire has only the machine's own name to go by.
-    expect(whereWord(runs({ machineId: "sb_9f2c1d8a" }))).toBe("sb_9f2c1d8a");
+    // A record from before the provider rode the wire says what the machine is; the id the provider minted for it
+    // names nothing to the person reading the row, and no row anywhere shows one.
+    expect(whereWord(runs({ machineId: "sb_9f2c1d8a" }))).toBe("a provider");
     expect(whereWord(runs({ machineId: "dev@box" }, { kind: "ssh" }))).toBe("dev@box");
     expect(whereWord({ status: null, workspace: { ...status({}), kind: "ssh", machineId: "m_recorded" } })).toBe("m_recorded");
   });

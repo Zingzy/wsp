@@ -276,6 +276,69 @@
       ],
       "wait": "k=where",
       "settleMs": 700
+    },
+    {
+      "name": "new-workspace",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=new-workspace"
+      ],
+      "wait": "k=where-caption",
+      "settleMs": 700,
+      "widths": [
+        1440,
+        390
+      ],
+      "fixture": "mac-and-boxes"
+    },
+    {
+      "name": "new-workspace-nowhere",
+      "at": "/",
+      "fixture": "mac-only",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=new-workspace"
+      ],
+      "wait": "k=nowhere-here",
+      "settleMs": 700,
+      "widths": [
+        1440,
+        390
+      ]
+    },
+    {
+      "name": "creating-workspace",
+      "at": "/",
+      "fixture": "mac-and-boxes",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=new-workspace",
+        "k=create"
+      ],
+      "wait": "testid=creation-log",
+      "settleMs": 700,
+      "widths": [
+        1440,
+        390
+      ]
+    },
+    {
+      "name": "workspace-projects",
+      "at": "/",
+      "steps": [
+        "1440:row-id=ws:ws_api",
+        "surface-launch=machine"
+      ],
+      "wait": "k=projects-note",
+      "settleMs": 700,
+      "widths": [
+        1440,
+        390
+      ]
     }
   ]
 }

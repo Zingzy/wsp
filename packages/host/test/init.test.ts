@@ -3545,7 +3545,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     // Off a terminal the stream prints a step's end line only, so the attempts are read from the run log; the v1 seal was ask 1 on this machine.
     expect(readFileSync(join(dirname(f.opts.statePath), "init.log"), "utf8")).toContain("stage snapshotting: attempt 1 of 3 answered 502 Failed to snapshot sandbox (request req_2); the builder reads running, next attempt in 1ms");
     expect(f.text()).toContain("the snapshot failed 3 times: the provider answered 502 Failed to snapshot sandbox (request req_4) while the builder read running");
-    expect(f.text()).toContain("Golden v1 is unchanged. Builder m1 is as it was, up at about $0.11/hr; run wsp init again to retry, and the sweep stops it once it is six hours old.");
+    expect(f.text()).toContain("Image v1 is unchanged. Builder m1 is as it was, up at about $0.11/hr; run wsp init again to retry, and the sweep stops it once it is six hours old.");
     expect(shared.machines.map(m => m.killed)).toEqual([false, true]);
     // The retry: the next wsp init finds the builder with the new recipe on it, attaches, and seals v2 off it.
     shared.beforeSnapshot = undefined;
@@ -3560,7 +3560,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     unread.shared.beforeSnapshot = m => { m.state = async () => { throw Object.assign(new Error("upstream sad"), { kind: "transient", status: 503 }); }; throw Object.assign(new Error("Failed to snapshot sandbox"), { kind: "snapshotUnavailable", status: 502 }); };
     const u = unread.next({ tty: false });
     expect((await runInit(u.opts, u.io)).code).toBe(1);
-    expect(u.text()).toContain("Golden v1 is unchanged. The provider could not be read about builder m1, so nothing on it was touched; run wsp init again to retry, and the sweep stops it once it is six hours old.");
+    expect(u.text()).toContain("Image v1 is unchanged. The provider could not be read about builder m1, so nothing on it was touched; run wsp init again to retry, and the sweep stops it once it is six hours old.");
     expect(unread.shared.machines.map(m => m.killed)).toEqual([false, true]);
 
     const dropped = await sealed();
@@ -3569,7 +3569,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     const g = dropped.next({ tty: false });
     expect((await runInit(g.opts, g.io)).code).toBe(1);
     expect(g.text()).toMatch(/the snapshot failed 1 time: the provider answered 502 Failed to snapshot sandbox \(no request id from the provider, at \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z\) and no longer has the builder \(404\)/);
-    expect(g.text()).toContain("Golden v1 is unchanged and the builder is gone: the provider dropped it after refusing the snapshot. Run wsp init again to retry.");
+    expect(g.text()).toContain("Image v1 is unchanged and the builder is gone: the provider dropped it after refusing the snapshot. Run wsp init again to retry.");
     expect(await g.runtimes.at(-1)!.golden.builders()).toEqual([]);
   });
 
