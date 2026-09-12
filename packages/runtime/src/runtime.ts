@@ -199,7 +199,7 @@ import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./
 import { PlaceAbsentError, PlaceBackend, isPlaceAbsent, parsePlaceMachineId, placeMachineId } from "@wsp/engine";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
-import { assertTokenShape, rotateDaemonToken } from "./daemon-token.js";
+import { assertTokenShape, daemonTokenPathOf, rotateDaemonToken } from "./daemon-token.js";
 import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy } from "./idle.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import { POLL_INTERVAL_MS, createStatusTracker, machineStateOf, phaseLeavingGone, providerSaid, type StatusApi, type StatusListOptions, type StatusWatchOptions } from "./status.js";
@@ -2401,7 +2401,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const daemonTokenOf = async (machine: Machine, path?: string): Promise<string | undefined> => {
     const cached = daemonTokens.get(machine.id);
     if (cached && (cached.hasDaemon || Date.now() - cached.at < DAEMON_TOKEN_MISS_TTL_MS)) return cached.hasDaemon ? daemonToken : undefined;
-    const hasDaemon = await rotateDaemonToken(machine, daemonToken, path);
+    const hasDaemon = await rotateDaemonToken(machine, daemonToken, daemonTokenPathOf(machine, path));
     daemonTokens.set(machine.id, { hasDaemon, at: Date.now() });
     return hasDaemon ? daemonToken : undefined;
   };

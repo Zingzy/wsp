@@ -5,7 +5,7 @@
 // packages/wspx/scripts/daemon-binary.mjs, so a failure here is a failure of
 // the road the host takes.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir, totalmem } from "node:os";
 import { join } from "node:path";
@@ -96,6 +96,23 @@ describe("local daemon", () => {
     // The browser's link dials the same url as ws, with the token in the first frame.
     const link = connectDaemon({ previewUrl: road.url, token: road.daemonToken!, onEvent: () => {} });
     await link.ready;
+    link.close();
+  });
+
+  it("reads its token off a file the caller named, so a rotation under it opens the next link", async () => {
+    const tokenPath = join(root, "handed", "token");
+    daemon = await LocalDaemon.start({ root, workFolder: root, tokenPath });
+    const minted = readFileSync(tokenPath, "utf8").trim();
+    expect(minted).toMatch(/^[0-9a-f]{48}$/);
+    // A stand-in machine's daemon is reached by a token the runtime writes through that machine's own shell, and
+    // that shell cannot write the path a Linux guest keeps one at; one holding only the token it minted would
+    // refuse every link after the first rotation.
+    const rotated = "b".repeat(48);
+    writeFileSync(tokenPath, `${rotated}\n`);
+    expect(daemon.road.daemonToken).toBe(rotated);
+    const link = connectDaemon({ previewUrl: daemon.road.url, token: rotated, onEvent: () => {} });
+    await link.ready;
+    await link.request("ping");
     link.close();
   });
 

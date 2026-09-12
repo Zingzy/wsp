@@ -10,6 +10,8 @@ import { allRows, type RecipeAnswer } from "../src/recipe-answer.js";
 import { HERE } from "./recipe-fixture.js";
 import { BUILDER_IDLE_MS, type GoldenImport } from "@wsp/engine";
 import { copyKey, createRuntime, memoryStore, type HarnessAdapterFactory, type ReapResult, type Runtime, type Store } from "@wsp/runtime";
+import { execFileSync } from "node:child_process";
+import { DAEMON_PORT } from "@wsp/engine";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cli, serve, type CliIO } from "../src/cli.js";
 import { claudeEnvs } from "../src/doctor.js";
@@ -17,6 +19,7 @@ import { REAP_INTERVAL_MS, startHost, type HostHandle } from "../src/server.js";
 import { VERSION } from "../src/version.js";
 import { SEALED_GOLDEN as GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
+import { closeStandInGuests, fakeGuestAt } from "../src/fake-guest.js";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
   version: string;
@@ -910,6 +913,34 @@ describe("host sweeps orphaned machines", () => {
     await vi.advanceTimersByTimeAsync(REAP_INTERVAL_MS);
     expect(reap).toHaveBeenCalledTimes(2);
   });
+});
+
+describe("a host that stops takes what it spawned with it", () => {
+  let handle: HostHandle | undefined;
+  const dirs: string[] = [];
+  afterEach(async () => {
+    await handle?.close();
+    handle = undefined;
+    await closeStandInGuests();
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  it("ends the daemons a stand-in provider's machines were given, which are children and outlive the process that spawned them", async () => {
+    const web = fakeWebDir();
+    const root = mkdtempSync(join(tmpdir(), "wsp-stand-in-host-"));
+    dirs.push(web, root);
+    const { rt } = testRuntime();
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: web });
+    const guest = fakeGuestAt(root);
+    await guest.reach("fk_c0ffee", DAEMON_PORT);
+    const running = (): boolean => execFileSync("ps", ["-ax", "-o", "args="], { encoding: "utf8" }).includes(guest.tokenPath("fk_c0ffee"));
+    expect(running()).toBe(true);
+    // A lab stopped by its own verb kills the host it recorded the pid of; the daemon it spawned for each machine
+    // a tester had opened stayed behind on the person's computer.
+    await handle.close();
+    handle = undefined;
+    expect(running()).toBe(false);
+  }, 20_000);
 });
 
 describe("host names snapshot storage at start", () => {
