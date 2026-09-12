@@ -46,7 +46,7 @@ import type { Api } from "../protocol/client";
 import { useStore } from "../protocol/store";
 import { type GhosttyColor, type GhosttyTheme } from "../terminal/ghostty/core";
 import type { TerminalIo } from "../terminal/pty-io";
-import { terminalEmptyLine, terminalInputRefusal, terminalPaneTitle, type TerminalPaneState } from "../adapt/index";
+import { SHELL_ENDED_LINE, terminalEmptyLine, terminalInputRefusal, terminalPaneTitle, type TerminalPaneState } from "../adapt/index";
 import { isTerminalLinkActivation, isTerminalUrl } from "../terminal-links";
 import {
   DEFAULT_THREAD_TERMINAL_HEIGHT,
@@ -605,7 +605,7 @@ function ShellGoneOverlay({ onNewTerminal, label }: { onNewTerminal: () => void;
       data-terminal-overlay="shell-gone"
       className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-background/70 px-4 text-center text-sm text-foreground"
     >
-      <p>This shell ended when the machine was replaced</p>
+      <p>{SHELL_ENDED_LINE}</p>
       <Button size="xs" variant="outline" onClick={onNewTerminal}>
         {label}
       </Button>

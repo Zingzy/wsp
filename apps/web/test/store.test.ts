@@ -297,7 +297,7 @@ describe("store creations", () => {
     await flush();
     expect(await useStore.getState().createWorkspace("beta")).toBeNull();
     const failed = useStore.getState().creations[0]!;
-    expect(failed.failed?.title).toBe("The provider refused: machine cap reached");
+    expect(failed.failed?.title).toBe("The provider refused: no more workspaces can run there now");
     expect(failed.lines.map(l => l.stage)).toEqual(["fork-requested", "failed"]);
     expect(useStore.getState().selectedId).toBe(failed.key);
 
@@ -517,7 +517,7 @@ describe("store sessions", () => {
     listCalls.length = 0;
 
     expect(await useStore.getState().renameThread({ sessionId: "s1", workspaceId: "ws_a", harness: "claude", title: "the name" })).toBe(false);
-    expect(useStore.getState().toast).toBe("Claude Code on the machine has no session for this thread yet");
+    expect(useStore.getState().toast).toBe("Claude Code on the workspace has no session for this thread yet");
     expect(listCalls).toEqual([]);
   });
 

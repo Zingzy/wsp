@@ -4,7 +4,7 @@
 // shape as chat.test.tsx; no live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { screenCommandLine, sendRefusal, stillWorkingLine, type EventUnion, type HarnessCatalog, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { HOST_ASLEEP_SEND, screenCommandLine, sendRefusal, stillWorkingLine, type EventUnion, type HarnessCatalog, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
@@ -257,7 +257,7 @@ describe("composer slash menu", () => {
     await press(editor, "Enter");
     await waitFor(() => expect(screen.queryByRole("status")).not.toBeNull());
     expectPlainLine(screenCommandLine(SCREEN_COMMANDS[0]!, CLAUDE_CATALOG, workspace));
-    expect(screen.getByRole("status").textContent).toContain("Machine tab");
+    expect(screen.getByRole("status").textContent).toContain("Workspace panel");
     expect(started).toHaveLength(0);
     expect(draft()).toBe("/login");
     expect(isEditable(editor)).toBe(true);
@@ -291,7 +291,7 @@ describe("composer slash menu", () => {
     expect(started).toHaveLength(0);
   });
 
-  it("the line for a sign-in command on this computer names the person's own terminal, not the Machine tab", async () => {
+  it("the line for a sign-in command on this computer names the person's own terminal, not the Workspace panel", async () => {
     const local: WorkspaceView = { ...workspace, kind: "local" };
     const { api, started } = fixtureApi([local]);
     await setup(api);
@@ -407,6 +407,26 @@ describe("composer while the workspace is not live", () => {
     release();
     await waitFor(() => expect(calls).toEqual([`wake ${WS}`, "start"]));
     expect(started[0]!.prompt).toBe("hello");
+  });
+
+  it("on a window the host did not serve on this computer, a socket that drops reads as that computer asleep, not as wsp gone", async () => {
+    (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 7788, wsPath: "/ws", paired: true, version: "0.0.0" };
+    try {
+      const { api } = fixtureApi([workspace]);
+      await setup(api);
+      act(() => useStore.getState().setConn("reconnecting"));
+      await waitFor(() => expect(screen.getByRole("status").textContent).toBe(HOST_ASLEEP_SEND));
+      expect(screen.getByRole("status").textContent).not.toBe(sendRefusal("reconnecting"));
+      const send = screen.getByRole("button", { name: HOST_ASLEEP_SEND }) as HTMLButtonElement;
+      expect(send.disabled).toBe(true);
+      expect(isEditable(composerEditor())).toBe(false);
+      // A page the host served on this computer says what it has always said: wsp itself is not running here.
+      (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 7788, wsPath: "/ws", paired: true, version: "0.0.0", token: "t_local" };
+      act(() => useStore.getState().setConn("closed"));
+      await waitFor(() => expect(screen.getByRole("status").textContent).toBe(sendRefusal("closed")));
+    } finally {
+      delete (window as unknown as { __WSP__?: unknown }).__WSP__;
+    }
   });
 
   it("a gone machine reads the same way: the gone sentence, one line, no panel", async () => {

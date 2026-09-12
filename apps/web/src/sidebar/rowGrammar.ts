@@ -6,6 +6,8 @@
 // two-line thread row's, the leading slot the workspace kind's glyph sits in,
 // and the one id each row wears, which the keyboard traversal walks and the
 // name box is opened by.
+import { cutLine } from "@wsp/protocol";
+
 export const TOP_ROW_CLASS = "px-2 transition-[background-color,color] duration-150";
 const ROW_META_GRAMMAR = "font-mono text-[11px] tabular-nums";
 export const ROW_META_CLASS = `${ROW_META_GRAMMAR} text-[var(--top-row-meta)]`;
@@ -21,6 +23,13 @@ export const ROW_LEAD_CLASS = "mt-0.5 flex size-3.5 shrink-0 items-center justif
  * other row wears. The host switcher and the Settings row are both one of these, so the foot reads as one column. */
 export const FOOT_ROW_CLASS =
   "flex h-7 w-full items-center gap-1.5 rounded-md px-2 font-mono text-[11px] text-sidebar-muted-foreground transition-colors duration-150 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none";
+
+/** The most characters the third line of a workspace row holds: the row leaves 201 px for text at the sidebar's
+ * default 256 px and 11 px mono fits 30 of them there, so a longer line would be cut by the width with no say in
+ * where. Every line written for this slot is under it; the cut is what keeps a line nobody measured from taking
+ * the half that says what to do, and the whole sentence rides the row's hover text. */
+export const ROW_LINE_MAX = 30;
+export const rowLineCut = (line: string): string => cutLine(line, ROW_LINE_MAX);
 
 export const workspaceRowId = (workspaceId: string): string => `ws:${workspaceId}`;
 export const threadRowId = (threadId: string): string => `thread:${threadId}`;

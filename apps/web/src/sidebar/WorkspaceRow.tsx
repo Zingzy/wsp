@@ -7,8 +7,9 @@
 // app's success green while the machine runs, muted otherwise and dimmed while
 // paused, by the rule in workspaceRows.ts, in a box that never moves. Line
 // two: what the machine is, its size in the kind's words. Line three: what it cost
-// today, free for a machine wsp does not pay for; the one sentence a person may
-// be waiting on takes that line while it lasts. The row's actions, the collapse
+// today, free for a computer wsp does not pay for; the one sentence a person may
+// be waiting on takes that line while it lasts, cut at the row's own cap with
+// the whole of it on the row's hover text. The row's actions, the collapse
 // chevron and new thread on a live row, forget and rebuild on a dead one, show
 // on hover in the state slot, where the word yields to them so nothing moves,
 // and in the row's menu; the resting row carries none. Renaming turns the name
@@ -30,7 +31,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.
 import { cn } from "../lib/utils.js";
 import { workspaceKindGlyph } from "../workspaceKindGlyph.js";
 import { RowNameInput } from "./RowNameInput.js";
-import { ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, THREE_LINE_ROW_CLASS, workspaceRowId } from "./rowGrammar.js";
+import { ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, THREE_LINE_ROW_CLASS, rowLineCut, workspaceRowId } from "./rowGrammar.js";
 import { NEW_THREAD_TITLE, glyphStateClass, machineLine, metaSentences, stateSlotWord, workspaceMetaLine } from "./workspaceRows.js";
 
 /** The glyphs sit on line one inside the state slot, the inner one and the one at the row's inset; the kit's own place is the row's middle and edge. */
@@ -86,6 +87,7 @@ export function WorkspaceRow({
   project,
   cost,
   outOfMemory,
+  quiet,
   nowMs,
   actions,
   active,
@@ -102,6 +104,8 @@ export function WorkspaceRow({
   project: SidebarProjectSnapshot;
   cost: { readonly rateUsdPerHour: number; readonly accruedUsd: number } | null;
   outOfMemory: MemoryReading | undefined;
+  /** This workspace's own computer has gone quiet, so nothing here is known right now: the glyph takes no green. */
+  quiet: boolean;
   nowMs: number;
   actions: ReadonlyArray<ResolvedAction>;
   active: boolean;
@@ -141,7 +145,7 @@ export function WorkspaceRow({
         {...(renaming ? {} : { onClick: onSelect })}
       >
         <span aria-hidden className={ROW_LEAD_CLASS} data-workspace-lead>
-          <KindGlyph className={cn("size-3.5", LEAD_GLYPH_CLASS, glyphStateClass(project))} />
+          <KindGlyph className={cn("size-3.5", LEAD_GLYPH_CLASS, glyphStateClass(project, quiet))} />
         </span>
         <span className="flex min-w-0 flex-1 flex-col gap-px leading-tight">
           <span className="flex items-center gap-2">
@@ -167,7 +171,7 @@ export function WorkspaceRow({
             {machine}
           </span>
           <span data-workspace-meta className={cn(metaIsProse ? ROW_PROSE_CLASS : ROW_META_CLASS, "truncate")} title={meta}>
-            {meta}
+            {rowLineCut(meta)}
           </span>
         </span>
       </SidebarMenuButton>

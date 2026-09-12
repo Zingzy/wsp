@@ -14,8 +14,9 @@
 // sidebar-glass: nothing here paints a background.
 import { ChevronDownIcon, MessageSquarePlusIcon, PlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type WheelEvent } from "react";
-import { DROP_A_FOLDER_LINE, PROVIDER_UNREACHED_LINE, cloudCreateRefusal, computerOffline, dropTileLine, goldenHead, isLocalWorkspace, kindWords, registerRequest, registeredLine, workspaceKind, workspaceState, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
+import { DROP_A_FOLDER_LINE, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, cloudCreateRefusal, computerOffline, dropTileLine, goldenHead, isLocalWorkspace, kindWords, registerRequest, registeredLine, workspaceKind, workspaceState, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
+import { CREATION_ASKED } from "../actions/format.js";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry.js";
 import { sidebarActions } from "../actions/sidebarActions.js";
 import { threadActions, threadTarget, type ThreadVerbs } from "../actions/threadActions.js";
@@ -35,6 +36,7 @@ import { useNowMinute } from "../hooks/useNowMinute.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { cn, errorText } from "../lib/utils.js";
 import { catalogIn, useCapabilities, useLabs, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useStore, useWorkspace, type Creation } from "../protocol/store.js";
+import { hostAsleep } from "../boot.js";
 import { goToAdjacentWorkspace } from "../shell/shellCommands.js";
 import { onForgetWorkspaceRequest, onNewWorkspaceRequest, onProjectTripRequest, onRenameWorkspaceRequest, onWorkspaceLookRequest, type ProjectTripRequest, type WorkspaceLookRequest } from "../shell/shellRequests.js";
 import { ExportProjectDialog } from "./ExportProjectDialog.js";
@@ -57,7 +59,7 @@ import { SPACE_LEAVING_SELECTOR, SpaceSlide } from "./SpaceSlide.js";
 import { NO_SWIPE, readSwipe } from "./spaceSwipe.js";
 import { ThreadRow } from "./ThreadRow.js";
 import { WorkspaceDropTile, WorkspaceRow, type DropTile } from "./WorkspaceRow.js";
-import { NEW_THREAD_SHORTCUT, NEW_THREAD_TITLE, compactTimeLabel, defaultWorkspaceName } from "./workspaceRows.js";
+import { NEW_THREAD_SHORTCUT, NEW_THREAD_TITLE, compactTimeLabel, defaultWorkspaceName, onQuietComputer, whereWord } from "./workspaceRows.js";
 
 /** Which workspaces have their idle shelf shut, so a shelf is open until this workspace's own chevron shuts it. */
 const SETTLED_COLLAPSED_KEY = "wsp:sidebar-settled-collapsed";
@@ -116,6 +118,7 @@ interface ProjectTripState extends ProjectTripRequest {
 
 export function WorkspaceSidebar() {
   const api = useStore(s => s.api);
+  const conn = useStore(s => s.conn);
   const workspaces = useStore(s => s.workspaces);
   const statuses = useStore(s => s.statuses);
   const sessions = useStore(s => s.sessions);
@@ -174,6 +177,10 @@ export function WorkspaceSidebar() {
   );
   const defaultVerbs = useWorkspaceVerbs();
 
+  // This window is on another computer and the one running wsp has gone quiet: the rows stand as they were last
+  // known, the line under the search row says why nothing moves, and the rows on that computer take no green, since
+  // nothing here knows what they are doing while it sleeps.
+  const asleep = hostAsleep(conn);
   const projects = useMemo(() => deriveSidebarProjects({ workspaces, statuses, sessions }), [workspaces, statuses, sessions]);
   const visible = useMemo(() => visibleProjects(projects, nowMs), [projects, nowMs]);
   const outOfMemory = useOutOfMemoryReadings(projects);
@@ -301,16 +308,21 @@ export function WorkspaceSidebar() {
     setRenaming(open => (open?.rowId !== rowId ? open : named ? null : { rowId, saving: false }));
   };
 
-  /** One thread's row, wherever it is listed: the active list and the idle shelf read the same props. */
-  const threadRow = (thread: SidebarThreadSnapshot, time: string, machine: RowMachine) => {
+  /** One thread's row, wherever it is listed: the active list and the idle shelf read the same props. The row is
+   * told the workspace the thread itself runs in, which is the one it is drawn under except where an agent opened
+   * a thread on another workspace, and the workspace whose rows it sits among, which is what it names against. */
+  const threadRow = (thread: SidebarThreadSnapshot, time: string, machine: RowMachine, under: SidebarProjectSnapshot) => {
     const target = threadTarget(thread, { catalog: catalogIn({ harnesses, harnessesByWorkspace }, thread.workspaceId, thread.harness), ...machine });
     const actionsOf = resolveActions(threadActions, target, threadVerbs);
     const rowId = threadRowId(thread.id);
+    const owner = projects.find(candidate => candidate.id === thread.workspaceId) ?? under;
     return (
       <ThreadRow
         key={thread.id}
         thread={thread}
         time={time}
+        runs={{ workspace: owner.displayName, where: whereWord(owner) }}
+        under={under.displayName}
         active={selectedId === thread.workspaceId && selectedThreadId === thread.id}
         renaming={renaming?.rowId === rowId}
         saving={renaming?.rowId === rowId && renaming.saving}
@@ -361,15 +373,15 @@ export function WorkspaceSidebar() {
         ) : null}
         {!shut && active.length + shelved > 0 ? (
           <SidebarMenuSub>
-            {active.map(thread => threadRow(thread, compactTimeLabel(thread.startedAt), machine))}
+            {active.map(thread => threadRow(thread, compactTimeLabel(thread.startedAt), machine, project))}
             {shelved > 0 ? (
               <ThreadGroupRow rowId={groupRowId("settled", project.id)} label="Idle" count={shelved} open={settledOpen} onToggle={() => toggleSettled(project.id)} />
             ) : null}
-            {settledOpen ? settled.map(thread => threadRow(thread, compactTimeLabel(resolveSettledTimestamp(thread)), machine)) : null}
+            {settledOpen ? settled.map(thread => threadRow(thread, compactTimeLabel(resolveSettledTimestamp(thread)), machine, project)) : null}
             {settledOpen && archived.length > 0 ? (
               <ThreadGroupRow rowId={groupRowId("archived", project.id)} label="Archived" count={archived.length} open={archivedOpen} onToggle={() => toggleArchived(project.id)} />
             ) : null}
-            {settledOpen && archivedOpen ? archived.map(thread => threadRow(thread, compactTimeLabel(resolveSettledTimestamp(thread)), machine)) : null}
+            {settledOpen && archivedOpen ? archived.map(thread => threadRow(thread, compactTimeLabel(resolveSettledTimestamp(thread)), machine, project)) : null}
           </SidebarMenuSub>
         ) : null}
       </>
@@ -397,6 +409,7 @@ export function WorkspaceSidebar() {
           project={project}
           cost={costs[project.id] ?? null}
           outOfMemory={outOfMemory[project.id]}
+          quiet={onQuietComputer(project, asleep)}
           nowMs={nowMs}
           actions={actions}
           active={selectedId === project.id && selectedThreadId === null}
@@ -516,7 +529,11 @@ export function WorkspaceSidebar() {
           }
         />
       </div>
-      {offline ? (
+      {asleep ? (
+        <p data-sidebar-asleep className={cn(ROW_PROSE_CLASS, "px-2 pt-1 leading-4")}>
+          {HOST_ASLEEP_LINE}
+        </p>
+      ) : offline ? (
         <p data-sidebar-offline className={cn(ROW_PROSE_CLASS, "px-2 pt-1 leading-4")}>
           {PROVIDER_UNREACHED_LINE}
         </p>
@@ -573,7 +590,7 @@ export function WorkspaceSidebar() {
                   <Empty className="py-8">
                     <EmptyHeader>
                       <EmptyTitle>No workspaces yet</EmptyTitle>
-                      <EmptyDescription>Create one to fork a machine from your golden image.</EmptyDescription>
+                      <EmptyDescription>Add a computer or connect a provider, then create one.</EmptyDescription>
                     </EmptyHeader>
                   </Empty>
                 ) : null}
@@ -683,7 +700,7 @@ function ThreadGroupRow({ rowId, label, count, open, onToggle }: { rowId: string
 /** A workspace still being created: the spinner and the runtime's latest stage, wrapped rather than cut at the sidebar's width. */
 function CreationRow({ creation, active, onSelect }: { creation: Creation; active: boolean; onSelect: () => void }) {
   const failed = creation.failed !== null;
-  const line = failed ? creation.failed.title : creation.lines.at(-1)?.message ?? "Asking the runtime for a fork.";
+  const line = failed ? creation.failed.title : creation.lines.at(-1)?.message ?? CREATION_ASKED;
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
