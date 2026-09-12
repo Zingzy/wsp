@@ -70,22 +70,29 @@ const buttonVariants = cva(
 interface ButtonProps extends useRender.ComponentProps<"button"> {
   variant?: VariantProps<typeof buttonVariants>["variant"];
   size?: VariantProps<typeof buttonVariants>["size"];
+  /** A control that cannot be pressed yet, waiting on a field beside it: it is drawn as the outline variant and
+   * disabled, at the size and in the slot the live one has, and takes its own variant back the moment it can be
+   * pressed. The reason it waits belongs in the slot under that field, never on a hover. Being busy is not this:
+   * a pressed control keeps its variant and changes its word. */
+  held?: boolean;
 }
 
-function Button({ className, variant, size, render, ...props }: ButtonProps) {
+function Button({ className, variant, size, held = false, render, ...props }: ButtonProps) {
   const typeValue: React.ButtonHTMLAttributes<HTMLButtonElement>["type"] = render
     ? undefined
     : "button";
 
   const defaultProps = {
-    className: cn(buttonVariants({ className, size, variant })),
+    className: cn(buttonVariants({ className, size, variant: held ? "outline" : variant })),
     "data-slot": "button",
     type: typeValue,
   };
+  const heldProps = { "data-held": "", disabled: true };
 
   return useRender({
     defaultTagName: "button",
-    props: mergeProps<"button">(defaultProps, props),
+    // Last, so a caller that disables for its own reason cannot hand a held control back to the hand.
+    props: mergeProps<"button">(defaultProps, props, held ? heldProps : {}),
     render,
   });
 }

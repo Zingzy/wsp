@@ -52,8 +52,9 @@
 // tile leaves it; ?panel=machine opens the right panel on the Machine tab of
 // the workspace ?ws names, so its PROJECTS section can be measured with two
 // projects (ws_a under ?projects=1) and with none;
-// ?init=building puts the init job mid-build so the cloud row's progress line
-// can be measured; ?version=behind holds a shell older than the host that
+// ?places=1 fills the Where agents run table with four computers, one of them
+// away with the longest name the spec draws; ?init=building puts the init job
+// mid-build so the cloud row's progress line can be measured; ?version=behind holds a shell older than the host that
 // served the page, so the one line the app says about it can be measured.
 import { createRoot } from "react-dom/client";
 import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DESKTOP_MAC_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, keptAccess, THEME_PRESETS, THIS_COMPUTER, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
@@ -511,6 +512,18 @@ const sidebarWidth = params.get("sidebar");
 useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme, labs: params.get("labs") !== "0", ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(params.get("spaces") === "1" ? { sidebarMode: "spaces" as const } : {}), ...(params.get("size") === "file" ? { terminalSize: "file" as const } : {}), ...(projects ? { project: { ws_a: "spoo", ws_m: "spoo" } } : {}) } });
 const settings = params.get("settings") === "1";
 if (settings) useStore.setState({ settingsOpen: true });
+// ?places=1 fills the Where agents run table with the worst row the spec draws, a computer away with a long name
+// beside this Mac and a provider, so the table's four columns and its menu cell can be measured at every window.
+if (params.get("places") === "1") {
+  useStore.setState({
+    places: [
+      { id: "p_here", kind: "computer", name: "zingzy-mbp", default: true, present: true, shape: { cpu: 10, memMb: 16384 }, diskFreeBytes: 210_000_000_000, workspaceId: "ws_a" },
+      { id: "p_hetzner", kind: "computer", name: "hetzner", default: false, present: true, docker: true, shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38_000_000_000, workspaceId: "ws_b", forks: { running: 0, room: 3 } },
+      { id: "p_laptop", kind: "computer", name: "old-macbook", default: false, present: false, lastSeenAt: new Date(Date.now() - 2 * 3_600_000).toISOString(), shape: { cpu: 10, memMb: 16384 }, diskFreeBytes: 353_100_000_000, workspaceId: "ws_c" },
+      { id: "p_ascii", kind: "provider", name: "ascii", default: false, present: true, shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 40_000_000_000, workspaceId: "ws_d", rateUsdPerHour: 0.018 },
+    ],
+  });
+}
 function ThemeRule() {
   useThemeEffect();
   return null;

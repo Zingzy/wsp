@@ -16,10 +16,7 @@ use std::time::{Duration, SystemTime};
 
 use libcontainer::container::builder::ContainerBuilder;
 use libcontainer::container::{Container, ContainerStatus, State};
-use libcontainer::network::link::LinkClient;
-use libcontainer::network::wrapper::create_network_client;
 use libcontainer::syscall::syscall::SyscallType;
-use nix::sched::{setns, CloneFlags};
 use nix::sys::signal::{kill, killpg, Signal};
 use nix::sys::wait::{waitpid, WaitStatus};
 use nix::unistd::Pid;
@@ -346,8 +343,8 @@ async fn read_into<R: AsyncRead + Unpin>(pipe: Option<R>, out: &Mutex<Vec<u8>>) 
     }
 }
 
-/// In the helper process: youki's create for the bundle, detached, on the plain cgroup manager; then the
-/// workspace's loopback is brought up, which a fresh network namespace leaves down.
+/// In the helper process: youki's create for the bundle, detached, on the plain cgroup manager. The network
+/// namespace it made is empty but for a downed loopback; the daemon fills it once the init's pid is known.
 pub fn helper_create(root: &Path, id: &str) -> Result<(), Error> {
     let layout = Layout::new(root);
     let state = layout.state();
@@ -371,17 +368,8 @@ pub fn helper_create(root: &Path, id: &str) -> Result<(), Error> {
         .with_detach(true)
         .build()
         .map_err(container)?;
-    let pid = c.pid().ok_or_else(|| Error::Container("youki created the container without a pid".into()))?;
-    loopback_up(Pid::from_raw(pid.as_raw()))
-}
-
-fn loopback_up(pid: Pid) -> Result<(), Error> {
-    let ns_path = PathBuf::from(format!("/proc/{pid}/ns/net"));
-    let ns = fs::File::open(&ns_path).map_err(io_at(&ns_path))?;
-    setns(ns, CloneFlags::CLONE_NEWNET).map_err(|e| Error::Io { path: ns_path.clone(), source: io::Error::from(e) })?;
-    let mut links = LinkClient::new(create_network_client()).map_err(container)?;
-    let lo = links.get_by_name("lo").map_err(container)?;
-    links.set_up(lo.header.index).map_err(container)
+    c.pid().ok_or_else(|| Error::Container("youki created the container without a pid".into()))?;
+    Ok(())
 }
 
 /// In the helper process: the command as a tenant of the workspace, its stdio inherited from this process, waited
