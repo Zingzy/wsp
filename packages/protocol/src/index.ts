@@ -2835,6 +2835,7 @@ const DAEMON_CONTENTS = [
   "01030623497a43f044916ca27731dbfa4c92c6b82765a9e9dbd6426d69b1ee4e",
   "a6ae68d8af502a8a5ecf9795ca11ca0b9b12cda2792e45eee3376c7e4d57917b",
   "055dcf11b2a17e8959ab3a6246c2d17f89eb3837c59b31d3a8138c6dc7b6c322",
+  "3659b0465a52ba004e34097845522204c1d90b02c9b4d0a77928bf8c65499999",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -2878,13 +2879,13 @@ const DAEMON_CONTENTS = [
  * and the words and numbers it answers with are the protocol's, held in one fixture set. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
-/** sha256 of what a deploy installs on a guest and this record can hold: the daemon's sources, the dependency
- * pins its bundle carries, the scripts the host writes beside them, and DAEMON_ROOTS_PATH. The host's
- * daemon-content test recomputes it and fails when that content moved and this record did not, so changed content
- * cannot reach nobody: a start script gained a PATH line under an unchanged version once and every machine
- * already running kept the old one. Left out, and on the guest anyway because the daemon's dist bundles them: the
- * rest of this file, the DaemonAuthRequest schema the daemon reads, and zod. Hashing the protocol whole would
- * turn every edit to it into a redeploy of every machine. */
+/** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
+ * is built from, the lock that pins its dependencies, the contract fixtures its words and numbers are held to, the
+ * scripts the host writes beside it, DAEMON_ROOTS_PATH and the work-score line. The host's daemon-content test
+ * recomputes it and fails when that content moved and this record did not, so changed content cannot reach nobody:
+ * a start script gained a PATH line under an unchanged version once and every machine already running kept the
+ * old one. Left out: the rest of this file, which the binary reads only through the fixtures; hashing the protocol
+ * whole would turn every edit to it into a redeploy of every machine. */
 export const DAEMON_CONTENT_SHA = DAEMON_CONTENTS[DAEMON_CONTENTS.length - 1]!;
 
 /** The file on the guest naming the imported project folders, one absolute path per line: the runtime writes it

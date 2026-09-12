@@ -2,7 +2,8 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { hostTarget, MAC_TARGETS, ptyBuild } from "../scripts/pty.mjs";
+import { daemonBinaryIn, DAEMON_TARGETS, stagedAsset } from "@wsp/host";
+import { hostTarget, MAC_TARGETS } from "../scripts/targets.mjs";
 
 const dist = fileURLToPath(new URL("../dist/", import.meta.url));
 
@@ -40,7 +41,11 @@ export function resourcesIn(tree: PackagedTree): string {
   return join(dist, tree.dir, tree.resources);
 }
 
-/** Where a tree carries node-pty's native build for one of the targets it runs. */
-export function ptyBuildIn(tree: PackagedTree, target: string): string {
-  return ptyBuild(resourcesIn(tree), target);
+/** Where a tree carries the daemon binary for one of the targets it runs: among the staged assets, under the
+ * triple the host's table gives that platform and chip. */
+export function daemonIn(tree: PackagedTree, target: string): string {
+  const [platform, arch] = target.split("-");
+  const row = DAEMON_TARGETS.find(t => t.platform === platform && t.arch === arch);
+  if (row === undefined) throw new Error(`wsp builds no daemon for ${target}`);
+  return daemonBinaryIn(stagedAsset(join(resourcesIn(tree), "app"), "daemon"), row.triple);
 }

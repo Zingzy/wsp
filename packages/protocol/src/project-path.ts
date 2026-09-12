@@ -60,7 +60,6 @@ export function placeDaemonPaths(home: string): {
   openSocket: string;
   manifestPath: string;
   profileFile: string;
-  nodeDir: string;
   unitDir: string;
   binDir: string;
   rootsPath: string;
@@ -85,7 +84,6 @@ export function placeDaemonPaths(home: string): {
     openSocket: `${wsp}/open.sock`,
     manifestPath: `${wsp}/manifest.json`,
     profileFile: `${wsp}/profile.sh`,
-    nodeDir: `${wsp}/node`,
     unitDir: `${at}/.config/systemd/user`,
     binDir: `${at}/.local/bin`,
     rootsPath: rootsPathIn(at),
@@ -101,7 +99,7 @@ export function placeDaemonPaths(home: string): {
  * daemon sweeps by this list when its host asks over the link and wsp leave sweeps by it at the terminal. */
 export function placeOwnedPaths(home: string): string[] {
   const at = placeDaemonPaths(home);
-  return [at.placeFile, at.placeKey, at.placeLog, at.dir, at.bundle, at.inbox, at.tokenPath, at.rootsPath, at.nodeDir, at.profileFile, at.openSocket, at.runDir, `${at.wsp}/wsp-npm.log`, at.portFile, `${at.binDir}/wsp-open`, `${at.binDir}/xdg-open`];
+  return [at.placeFile, at.placeKey, at.placeLog, at.dir, at.bundle, at.inbox, at.tokenPath, at.rootsPath, at.profileFile, at.openSocket, at.runDir, at.portFile, `${at.binDir}/wsp-open`, `${at.binDir}/xdg-open`];
 }
 
 /** The same paths under the name the ssh road has always called them. One function, two names, so nothing keeps a

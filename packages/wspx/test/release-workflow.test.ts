@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { DAEMON_TARGETS, daemonArtifactName } from "@wsp/host";
 import { bundleEnv, bundleNames, STABLE_NAMES } from "../scripts/bundles.mjs";
 
 const repo = fileURLToPath(new URL("../../..", import.meta.url));
@@ -11,6 +12,8 @@ const desktopScripts = JSON.parse(readFileSync(join(repo, "apps", "desktop", "pa
 const builderConfig = readFileSync(join(repo, "apps", "desktop", "electron-builder.yml"), "utf8");
 const macJob = workflow.slice(workflow.indexOf("\n  mac:\n"), workflow.indexOf("\n  linux:\n"));
 const linuxJob = workflow.slice(workflow.indexOf("\n  linux:\n"), workflow.indexOf("\n  npm:\n"));
+const npmJob = workflow.slice(workflow.indexOf("\n  npm:\n"), workflow.indexOf("\n  publish:\n"));
+const daemonJob = workflow.slice(workflow.indexOf("\n  daemon:\n"), workflow.indexOf("\n  draft:\n"));
 /** The names bundle-env.mjs writes into a job's environment, which is where every job reads them from. */
 const envNames = bundleEnv("0.1.5")
   .trim()
@@ -20,11 +23,36 @@ const envNames = bundleEnv("0.1.5")
 const SIGNING_SECRETS = ["CSC_LINK", "CSC_KEY_PASSWORD", "APPLE_ID", "APPLE_APP_SPECIFIC_PASSWORD", "APPLE_TEAM_ID"];
 
 describe("the release workflow", () => {
-  it("runs on a pushed release tag and on nothing else", () => {
+  it("runs on a pushed release tag, and by hand as a dry run that publishes nothing", () => {
     expect(workflow).toContain('on:\n  push:\n    tags:\n      - "v*"\n');
     expect(workflow).not.toContain("branches:");
     expect(workflow).not.toContain("pull_request:");
     expect(workflow).not.toContain("schedule:");
+    // A dispatch is a dry run unless it says otherwise, and a draft is only ever opened for a tag.
+    expect(workflow).toContain("workflow_dispatch:\n    inputs:\n      dry_run:\n");
+    expect(workflow).toContain("type: boolean\n        default: true");
+    expect(workflow).toContain("if: ${{ !inputs.dry_run && github.ref_type == 'tag' }}");
+    for (const step of ["Attach the binaries to the draft", "Publish"]) expect(npmJob).toContain(`name: ${step}\n        if: \${{ !inputs.dry_run }}`);
+    expect(npmJob).toContain("needs.daemon.result == 'success' && (inputs.dry_run || needs.draft.result == 'success')");
+  });
+
+  it("builds one static daemon per target the host names, uploads each under the artifact name the host spells, and places all of them before every build", () => {
+    for (const target of DAEMON_TARGETS) {
+      const row = daemonJob.slice(daemonJob.indexOf(`- target: ${target.triple}\n`));
+      expect(row.length).toBeGreaterThan(0);
+      expect(/os: (\S+)/.exec(row)![1]).toBe(target.platform === "linux" ? "ubuntu-latest" : "macos-14");
+    }
+    expect(daemonJob).toContain(`name: ${daemonArtifactName("${{ matrix.target }}")}`);
+    expect(daemonJob).toContain('cargo zigbuild --release --target "$TARGET" -p wsp-daemon-bin');
+    expect(daemonJob).toContain('cargo build --release --target "$TARGET" -p wsp-daemon-bin');
+    // Every job that builds the command or the app reads the binaries back first, through the one script.
+    for (const job of [macJob, linuxJob, npmJob]) {
+      expect(job).toContain("pattern: wsp-daemon-*");
+      expect(job).toContain("node packages/wspx/scripts/daemon-binary.mjs --from-artifacts daemon-bins");
+      expect(job).toContain("needs: [draft, daemon]");
+    }
+    expect(npmJob).toContain("node packages/wspx/scripts/daemon-binary.mjs --check");
+    expect(existsSync(join(repo, "packages/wspx/scripts/daemon-binary.mjs"))).toBe(true);
   });
 
   it("publishes the command line package from the runner through trusted publishing, and holds no npm token", () => {
@@ -51,12 +79,11 @@ describe("the release workflow", () => {
     // The screen smoke measures a real Mac's window and fails on a hosted runner's display; the packaged trees are
     // checked there instead, and the smoke stays in the merge gate on a Mac.
     expect(workflow).not.toContain("pnpm --filter @wsp/desktop smoke");
-    for (const file of ["test/signing.test.ts", "test/pty-native.test.ts"]) expect(workflow).toContain(file);
+    expect(workflow).toContain("test/signing.test.ts");
+    expect(workflow).not.toContain("pty-native");
     expect(desktopScripts["build:mac"]).toContain("--mac");
     expect(desktopScripts["build:linux"]).toContain("--linux");
-    // node-pty's native module only exists for the machine that installed it, so the plain build packages the machine
-    // it runs on and the workflow's two jobs are what make both platforms. A build that named the other platform
-    // would fail at the packaging step, which is the only alternative to shipping a package whose panes die.
+    // The plain build packages the machine it runs on and the workflow's two jobs are what make both platforms.
     expect(desktopScripts["build"]).toBe("pnpm run build:deps && pnpm run build:app && electron-builder --config electron-builder.yml --publish never");
   });
 

@@ -105,6 +105,16 @@ describe("daemon WS server", () => {
     expect(c.frames).toEqual([]);
   });
 
+  it("answers a plain HTTP request 426 Upgrade Required, the one status the host's probe reads as a daemon", async () => {
+    const res = await fetch(`http://127.0.0.1:${daemon.port}/`);
+    expect(res.status).toBe(426);
+    await res.text();
+    // The door still serves: the same daemon takes an upgrade and its auth frame after.
+    const c = await Client.connect(daemon.port, TOKEN);
+    expect((await c.request("ping")).ok).toBe(true);
+    c.close();
+  });
+
   it("the query token no longer authenticates: a socket dialled with ?token= still needs the frame", async () => {
     const ws = new WebSocket(`ws://127.0.0.1:${daemon.port}/?token=${TOKEN}`);
     ws.on("open", () => ws.send(JSON.stringify({ id: 1, op: "ping" })));

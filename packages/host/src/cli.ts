@@ -30,7 +30,7 @@ import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT
 import { agentHome, agentHomes, checkProviderKey, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, parseSshAddress, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshIdentity, sshMachineName, sshReachOf, type SshReach } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerModule, providerPlaces, wiredProviderId, type ProviderEnv } from "./providers.js";
 import { webDirFor } from "./assets.js";
-import { claudeEnvs, deployDaemon, doctor, localDoctor, removeDaemon, sshDaemonPlace } from "./doctor.js";
+import { DAEMON_DEPLOYED_LINE, claudeEnvs, deployDaemon, doctor, localDoctor, removeDaemon, sshDaemonPlace } from "./doctor.js";
 import { agentsHere } from "./agents-here.js";
 import { InitJobs } from "./init-job.js";
 import { ANTHROPIC_KEY, agentKeyEnvs, keyIn, parseEnvFile, savedEnv, writeEnvFile, type Keys } from "./env-keys.js";
@@ -54,7 +54,6 @@ import { buildBesideHost } from "./init-beside.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 import { addressLines, dialAddress, hostLogPath, hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
 import type { LocalDaemon, LocalDaemonOptions } from "./local-daemon.js";
-import { localSysSamples } from "./local-readings.js";
 import { startOnce } from "./start-once.js";
 import {
   hostThereLines,
@@ -114,9 +113,9 @@ usage:
                      workspaces standing on it go, and the computer is left
                      as wsp found it
   wsp join URL       on the computer you are sitting at: joins it to the wsp at
-                     that address with --code, then holds the link open under
-                     this computer's own service manager. wsp join --serve is
-                     what that service runs
+                     that address with --code, then installs the daemon under
+                     this computer's own service manager, which dials again at
+                     every login
   wsp leave          on that computer: takes wsp off it, for a computer whose
                      host is gone and cannot run wsp remove
   wsp pair           a one time code another computer redeems for a token of
@@ -218,8 +217,6 @@ options:
                      before dialing, so a code never sits on a disk
   --awake            join: hold this computer out of idle sleep while it is
                      joined, for as long as the agent runs
-  --serve            join: hold the link open in this terminal, which is what
-                     the service installed by a join runs
   --name ALIAS       connect: the name to call that host here (default what its
                      address calls it); relay link: the name the approval page
                      shows for this computer (default what it calls itself);
@@ -534,7 +531,7 @@ export function goldenRecipe(
     setup: GOLDEN_SETUP,
     smoke: GOLDEN_SMOKE,
     envs: claudeEnvs(keys.anthropic),
-    deployDaemon: hooks.deployDaemon ?? (async machine => `daemon on node ${(await deployDaemon(machine)).node}`),
+    deployDaemon: hooks.deployDaemon ?? (async machine => deployDaemon(machine).then(() => DAEMON_DEPLOYED_LINE)),
   };
 }
 
@@ -612,9 +609,8 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
   const person = homeNamed(env[PERSON_HOME_ENV]) ?? home;
   let shutting = false;
   const backend = new LocalBackend({ root, env });
-  // Started on the first dial and kept: a host nobody opens a pane on binds no port on this computer and writes
-  // none of the daemon's own files under the person's home. The native module a pty takes is loaded at the first
-  // pty and not by this import, so the deferred edge is the port and those files, nothing else.
+  // Started on the first dial and kept: a host nobody opens a pane on starts no process, binds no port on this
+  // computer and writes none of the daemon's own files under the person's home.
   const daemon = startOnce(
     () => startDaemon({ root: home, workFolder: backend.workFolder() }),
     why => `the daemon for this computer's workspace did not start, so its terminal, files and processes have nothing to dial: ${why}`,
@@ -625,7 +621,7 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
     home: id => agentHome(person, id, env),
     homeDir: home,
     env: () => ({ ...Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined)), HOME: person }),
-    sysSamples: localSysSamples({ root: home, workFolder: () => backend.workFolder() }),
+    sysSamples: async fn => (await daemon.get()).sysSamples(fn),
     daemonRoad: async () => {
       // The panes stay on the person's home: the files and terminal tabs are theirs to look around in, where a
       // turn's own folder is the workspace's.
@@ -679,7 +675,7 @@ export function sshWiring(forwards = new SshForwards()): SshWiring {
         ...(hostKey !== undefined ? { identity: sshIdentity(hostKey, login.USER), hostKey } : {}),
       };
     },
-    deployDaemon: async (machine, login) => `daemon on node ${(await deployDaemon(machine, { place: sshDaemonPlace(login) })).node}`,
+    deployDaemon: async (machine, login) => deployDaemon(machine, { place: sshDaemonPlace(login) }).then(() => DAEMON_DEPLOYED_LINE),
     forward: (machine, remotePort) => forwards.forward(machine.id, reachOf(machine), remotePort),
     removeDaemon: (machine, login) => removeDaemon(machine, sshDaemonPlace(login)),
     dropForward: machine => forwards.drop(machine.id),
@@ -861,7 +857,7 @@ function hostCopyRecipe(statePath: string): (image: SealedImage) => Promise<Gold
       platform: hostPlatform(),
       statePath,
       agentKeys: agentKeyEnvs(keysFound()),
-      deployDaemon: async machine => `daemon on node ${(await deployDaemon(machine)).node}`,
+      deployDaemon: async machine => deployDaemon(machine).then(() => DAEMON_DEPLOYED_LINE),
     });
 }
 
@@ -912,7 +908,7 @@ function hostInitDoor(rt: Runtime, statePath: string, run: RunningWsp, openUrl: 
           builder,
         }),
       roads: () => workspaceRoads(rt, agentHomes(home), workspaceEnvsFor(keysFound())),
-      recipe: recipe => ({ ...recipe, deployDaemon: async machine => `daemon on node ${(await deployDaemon(machine)).node}` }),
+      recipe: recipe => ({ ...recipe, deployDaemon: async machine => deployDaemon(machine).then(() => DAEMON_DEPLOYED_LINE) }),
     },
   });
 }
@@ -1183,7 +1179,7 @@ async function init(
         platform: hostPlatform(),
         brew: () => readBrewTable(nodeHost()),
         scan: recipe => scanTools(nodeHost(), recipe),
-        runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `daemon on node ${(await deployDaemon(machine)).node}` }, providerEnv, agentsReachOf(opts)),
+        runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => deployDaemon(machine).then(() => DAEMON_DEPLOYED_LINE) }, providerEnv, agentsReachOf(opts)),
         ports: { port: opts.port, wsPort: opts.wsPort, named: opts.named, states: statesHere(opts.statePath) },
         address: opts.address,
         upCommand: flags.upCommand,
@@ -1710,7 +1706,6 @@ const COMMANDS: Readonly<Record<string, Command>> = {
         ...(values.code !== undefined ? { code: values.code } : {}),
         ...(values["code-file"] !== undefined ? { codeFile: values["code-file"] } : {}),
         ...(values.name !== undefined ? { name: values.name } : {}),
-        ...(values.serve === true ? { serve: true } : {}),
         ...(values.awake === true ? { awake: true } : {}),
       }),
   },
@@ -1868,7 +1863,6 @@ export const SHARED_OPTIONS: Options = {
   "code-file": { type: "string" },
   "ssh-port": { type: "string" },
   "ssh-key": { type: "string" },
-  serve: { type: "boolean" },
   awake: { type: "boolean" },
   name: { type: "string" },
   relay: { type: "string" },
