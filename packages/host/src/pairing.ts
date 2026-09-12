@@ -9,7 +9,7 @@ import { authority, fmtDuration, isLoopback, isWildcard, LOOPBACK, relayUrlOf, u
 import type { HostReach } from "@wsp/runtime";
 import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
-import { aimName, aimedHost, hostSideOnlyLine, type HostAim, type HostPick } from "./hosts.js";
+import { aimName, aimedHost, hostSideOnlyFix, hostSideOnlyLine, type HostAim, type HostPick } from "./hosts.js";
 import { publicHostname } from "./relay-link.js";
 import { dialHost, table, type DialOpts, type HostClient } from "./verbs.js";
 
@@ -117,12 +117,12 @@ export interface PairOpts extends HostPick {
 
 function aimHere(word: string, opts: PairOpts): HostAim {
   const aim = aimedHost(opts.statePath, opts);
-  if (aim.kind !== "here") throw usageRefusal(hostSideOnlyLine(word, aimName(aim)));
+  if (aim.kind !== "here") throw usageRefusal(hostSideOnlyLine(word, aimName(aim)), hostSideOnlyFix());
   return aim;
 }
 
 export async function pairCommand(io: CliIO, opts: PairOpts, args: readonly string[], deps: PairDeps = systemDeps): Promise<number> {
-  if (args.length !== 0) throw usageRefusal("wsp pair takes no positional arguments");
+  if (args.length !== 0) throw usageRefusal("wsp pair takes no positional arguments.", "Run wsp pair on its own; it prints the code and the line to type on the other computer.");
   const aim = aimHere("pair", opts);
   const lock = servingHost(opts.statePath);
   const address = lock?.address ?? LOOPBACK;
@@ -142,7 +142,7 @@ export async function pairCommand(io: CliIO, opts: PairOpts, args: readonly stri
 export async function devicesCommand(io: CliIO, opts: PairOpts, args: readonly string[], deps: PairDeps = systemDeps): Promise<number> {
   const [word, id] = args;
   if (word !== undefined && (word !== "revoke" || id === undefined || args.length !== 2)) {
-    throw usageRefusal("usage: wsp devices\n       wsp devices revoke <id>");
+    throw usageRefusal("wsp devices takes nothing, or revoke and one device id.", "usage: wsp devices\n       wsp devices revoke <id>");
   }
   const aim = aimHere("devices", opts);
   const client = await deps.dial(opts.statePath, { aim });

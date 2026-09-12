@@ -896,6 +896,31 @@ export function sendNowFailedLine(error: string): string {
 /** The one line every client shows on a start whose thread's previous turn was cut, before the new turn's output. */
 export const AFTER_CUT_LINE = "previous turn was cut; resuming";
 
+/** Every refusal a terminal reads is two halves, what happened and then what to do about it, in one or two lines:
+ * the law the app's first-run slot draws in its two inks, in the one sentence stderr gets. A refusal that only
+ * names the fault leaves the person to guess the fix, which is the whole complaint. The first half is closed here
+ * when it closes itself with nothing, since many of these sentences are written for the app as well, where they
+ * stand alone and nothing follows them. */
+export function refusalLine(happened: string, fix: string): string {
+  const said = happened.trimEnd();
+  return `${said}${/[.!?:]$/.test(said) ? "" : "."} ${fix}`;
+}
+
+/** The command's name, said once. A line refused inside a verb is printed behind the verb's name, so a sentence
+ * that opens with that same name would say it twice; the prefix is the one home for it, and the sentence may open
+ * with it or not without either of them knowing about the other. */
+export function sayOnce(prefix: string, message: string): string {
+  const name = prefix.replace(/:\s*$/, "");
+  return name !== "" && (message === name || message.startsWith(`${name} `)) ? message : `${prefix}${message}`;
+}
+
+/** A word no command answers to, named: the first half of that refusal, wherever the word was typed. */
+export const unknownWordLine = (word: string): string => `unknown command: ${word}.`;
+
+/** Where the list of words is: the second half of an unknown word's refusal. The help runs to hundreds of lines,
+ * so a typo is pointed at it and never handed it. */
+export const runForTheList = (list: string): string => `Run ${list} for the list.`;
+
 /** The refusal of a flag another verb reads: the verbs it belongs to, then the one that does not read it, so the
  * caller is told where the flag lives rather than left with the parser's bare unknown-option line. */
 export function foreignFlagLine(flag: string, readers: readonly string[], here: string): string {
@@ -2134,8 +2159,14 @@ export function leftOutLine(note: string): string {
 /** Why `wsp recipe --add` refuses a package a manager on this computer already has: that package is a row of its own,
  * which the build installs by the road the plan resolves for it (a tap formula from its GitHub release, pinned),
  * and a second row would install it twice by a line the image can refuse. The word that ticks the row instead. */
-export function addAlreadyHereLine(platform: "darwin" | "linux", id: string, scanId: string): string {
-  return `--add ${id}: a package manager on ${thisComputer(platform)} already has ${id}, so it is a row of its own; tick it with --set ${scanId}=on, which installs it by its own road, rather than adding a second row that installs it again`;
+export function addAlreadyHereLine(platform: "darwin" | "linux", id: string): string {
+  return `--add ${id}: a package manager on ${thisComputer(platform)} already has ${id}, so it is a row of its own.`;
+}
+
+/** What to do about it: the word that ticks that row, which installs the package by its own road rather than by a
+ * second row that installs it again. */
+export function addAlreadyHereFix(scanId: string): string {
+  return `Tick it with --set ${scanId}=on.`;
 }
 
 /** A recipe file's tick on a tool outside the catalog that this computer has no row for: nothing here says how to install

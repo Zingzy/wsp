@@ -8,6 +8,9 @@
 // pinned once the thread has a turn. Base UI's menu and popover never settle
 // under jsdom (see composer-checkout.test), so both are stood in by a plain
 // open/closed context.
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -236,6 +239,22 @@ const openModelMenu = async () => {
   await waitFor(() => expect(modelMenu()).not.toBeNull());
   return modelMenu()!;
 };
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const APPS = join(HERE, "..", "..");
+/** The dev shell's fixture catalog, the one file allowed to repeat the table's sentences: the test below pins it to
+ * the table's current words, so a screenshot of the shell is never a menu the table stopped saying. */
+const SHELL_FIXTURE = join(HERE, "shell", "main.tsx");
+/** Every source file of the web and desktop apps, where a second copy of a person's words could hide. */
+function appSources(dir: string, out: Array<readonly [string, string]> = []): Array<readonly [string, string]> {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, e.name);
+    if (e.name === "node_modules" || e.name === "dist" || e.name.startsWith(".") || path === SHELL_FIXTURE) continue;
+    if (e.isDirectory()) appSources(path, out);
+    else if (/\.tsx?$/.test(e.name)) out.push([path, readFileSync(path, "utf8")] as const);
+  }
+  return out;
+}
 
 describe("composer pickers", () => {
   it("sit inside the composer box with the machine's catalog, read the defaults, and picks ride the next start", async () => {
@@ -688,6 +707,25 @@ describe("composer pickers", () => {
     await waitFor(() => expect(started).toHaveLength(1));
     expect(started[0]).toMatchObject({ cwd: "/root/app" });
     expect(started[0]?.project).toBeUndefined();
+  });
+
+  it("reads each access mode's sentence off the runtime's table, so the app spells none of them itself", async () => {
+    const { api } = fixtureApi({ table: [CLAUDE_TABLE] });
+    await setup(api);
+    await waitFor(() => expect(picker("permissionMode")).not.toBeNull());
+    fireEvent.click(picker("permissionMode")!);
+    const modes = CLAUDE_TABLE.permissionModes;
+    expect(modes).toHaveLength(7);
+    for (const mode of modes) expect(option(mode.value)?.textContent, mode.value).toContain(mode.description!);
+    // The sentences have one home. A copy in the app would go on saying what the table no longer says, which is how
+    // this menu came to explain itself in the binary's own words; the dev shell's fixture is pinned to them instead.
+    const app = appSources(APPS);
+    expect(app.length).toBeGreaterThan(100);
+    for (const mode of modes) {
+      expect(app.filter(([, body]) => body.includes(mode.description!)).map(([f]) => f), mode.value).toEqual([]);
+    }
+    const shell = readFileSync(SHELL_FIXTURE, "utf8");
+    for (const mode of modes.filter(o => shell.includes(`value: "${o.value}"`))) expect(shell, mode.value).toContain(mode.description!);
   });
 
   it("shows nothing at all when the runtime serves no catalog for the harness", async () => {

@@ -119,6 +119,31 @@ describe("the default effort of a pick", () => {
   });
 });
 
+describe("what an access mode says it does", () => {
+  // This menu is where a person decides what an agent may do on their computer, so every sentence is about that and
+  // not about the binary behind it: no word from an agent's own documentation, no name of an agent, one sentence each.
+  const INTERNALS = [/classifier/i, /\bCLIs?\b/, /print mode/i, /\bmachines?\b/i];
+  const AGENT_NAMES = HARNESS_CATALOGS.flatMap(c => [new RegExp(`\\b${c.harness}\\b`, "i"), new RegExp(`\\b${c.label}\\b`, "i")]);
+
+  it("says what the agent may do, naming no agent and nothing inside one", () => {
+    const modes = HARNESS_CATALOGS.flatMap(c => c.permissionModes.map(o => [`${c.harness} ${o.value}`, o.description] as const));
+    expect(modes.length).toBeGreaterThan(15);
+    for (const [where, description] of modes) {
+      expect(description, where).toBeDefined();
+      for (const word of [...INTERNALS, ...AGENT_NAMES]) expect(description!, `${where} against ${word.source}`).not.toMatch(word);
+      // One sentence: the semicolon joins two halves of the same one, a full stop would start another.
+      expect(description!, where).not.toContain(".");
+    }
+  });
+
+  it("the two a person could not read now read as a person would say them", () => {
+    const claude = harnessCatalog("claude")!;
+    const mode = (value: string) => claude.permissionModes.find(o => o.value === value)?.description;
+    expect(mode("auto")).toBe("The agent decides which actions to ask about; where the account has no such mode it asks as Default does");
+    expect(mode("manual")).toBe("Asks before every action");
+  });
+});
+
 describe("the access a kept machine's threads start at", () => {
   it("every harness with an access mode names the one a kept machine runs, and it is not the throwaway default", () => {
     for (const catalog of HARNESS_CATALOGS) {
@@ -273,7 +298,7 @@ describe("catalogFromProbe", () => {
     expect(catalogFromProbe(harnessCatalog("claude")!, { ...probe, efforts: ["low", "turbo"] }).efforts.some(o => o.isDefault)).toBe(false);
     expect(catalog.contextWindows).toEqual(harnessCatalog("claude")!.contextWindows);
     expect(catalog.permissionModes.map(o => o.value)).toEqual(["default", "plan", "yolo"]);
-    expect(catalog.permissionModes[1]?.description).toBe("Read and plan only; no changes");
+    expect(catalog.permissionModes[1]?.description).toBe("Reads and plans only; changes nothing");
     // A mode the table has no words for still shows, named as the CLI spells it.
     expect(catalog.permissionModes[2]).toEqual({ value: "yolo", label: "yolo" });
     // The table's bypass default is not among the binary's modes here, so nothing is default.

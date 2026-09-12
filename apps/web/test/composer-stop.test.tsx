@@ -9,6 +9,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { EventUnion, SessionView, WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
+import { TABLE_CATALOG } from "./agents.js";
 import { composerEditor, isEditable } from "./composer-harness.js";
 import { ScriptedSocket, type Frame } from "./scripted-socket.js";
 import { makeApi, ProtocolClient } from "../src/protocol/client.js";
@@ -76,6 +77,7 @@ async function setup() {
   useStore.setState({ conn: "connecting", workspaces: [], statuses: {}, sessions: {} });
   useStore.getState().bind(makeApi(client));
   useStore.getState().setConn("live");
+  useStore.setState({ harnesses: [TABLE_CATALOG] });
   await waitFor(() => expect(useStore.getState().workspaces.length).toBeGreaterThan(0));
   render(<ChatView workspaceId={WS}>{thread => <ChatComposer workspaceId={WS} thread={thread} />}</ChatView>);
   await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());

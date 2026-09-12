@@ -78,7 +78,7 @@ const aliasOk = (alias: string): boolean => ALIAS.test(alias) && !alias.includes
 /** The alias itself, or the refusal for a word that could never be one. Every road that writes a name reads it
  * here, and `wsp connect` reads it before the dial that spends a code, so a name it would refuse costs nothing. */
 export function checkedAlias(alias: string): string {
-  if (!aliasOk(alias)) throw usageRefusal(`${JSON.stringify(alias)} is not a host alias; a name is letters, digits, dots, dashes and underscores, opens with a letter or a digit, and is at most ${ALIAS_MAX} characters`);
+  if (!aliasOk(alias)) throw usageRefusal(`${JSON.stringify(alias)} is not a host alias.`, `A name is letters, digits, dots, dashes and underscores, opens with a letter or a digit, and is at most ${ALIAS_MAX} characters.`);
   return alias;
 }
 
@@ -253,8 +253,13 @@ export const HOST_SIDE_ACCESS = "Handing out access is the one thing a paired co
 /** What the person reads when a line that runs at the host's own terminal is aimed at one on another computer: the
  * thing it does happens over there and nowhere else, so there is no road from here to there. Every way a line is
  * aimed reads the same, whether a --host flag, WSP_HOST or the default alias wsp hosts marks did the aiming. */
-export function hostSideOnlyLine(word: string, where: string, why: string = HOST_SIDE_ACCESS): string {
-  return `wsp ${word} runs on the computer the host runs on, and this line is aimed at ${where}; run it in a terminal over there. ${why}`;
+export function hostSideOnlyLine(word: string, where: string): string {
+  return `wsp ${word} runs on the computer the host runs on, and this line is aimed at ${where}.`;
+}
+
+/** What to do about it: the same line, typed over there. `why` says what a paired computer may not do from here. */
+export function hostSideOnlyFix(why: string = HOST_SIDE_ACCESS): string {
+  return `Run it in a terminal over there. ${why}`;
 }
 
 /** The note a line naming both --state and a host somewhere else gets: the state file is this computer's, and a
@@ -298,7 +303,7 @@ function aimAt(named: string, home: string, env: Readonly<Record<string, string 
     return { kind: "url", url: named, ...(carried?.url === named ? { token: carried.token } : {}) };
   }
   const record = readHost(home, named);
-  if (record === undefined) throw usageRefusal(noSuchHostLine(named, home));
+  if (record === undefined) throw usageRefusal(noSuchHostLine(named, home), "Run wsp hosts to read the names this computer knows.");
   return { kind: "alias", alias: named, record };
 }
 

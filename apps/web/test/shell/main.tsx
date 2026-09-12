@@ -155,10 +155,10 @@ const sessions: SessionView[] = [
 // for a workspace on this computer: the mode the harness asks in marked, and bypass named after the machine it would
 // touch. One list serves every workspace here, which is what a fixture can do; the runtime decides per machine.
 const ACCESS_MODES = [
-  { value: "default", label: "Default", description: "Every tool that needs permission is asked about in the chat" },
-  { value: "acceptEdits", label: "Accept edits", description: "Edits land without asking; commands that need permission are asked about" },
-  { value: "plan", label: "Plan", description: "Read and plan only; no changes" },
-  { value: "bypassPermissions", label: "Bypass", description: "Run every tool without asking", isDefault: true },
+  { value: "default", label: "Default", description: "Asks in the chat about each action that needs permission" },
+  { value: "acceptEdits", label: "Accept edits", description: "Edits files without asking; asks about commands that need permission" },
+  { value: "plan", label: "Plan", description: "Reads and plans only; changes nothing" },
+  { value: "bypassPermissions", label: "Bypass", description: "Runs every action without asking", isDefault: true },
 ];
 // ?efforts=1 gives the claude row the effort levels and context windows the runtime's table lists for it, so the
 // composer's row carries the effort picker beside the others and is as wide as it gets.
