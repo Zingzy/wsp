@@ -160,11 +160,15 @@ export function offeredSize(sizes: readonly WorkspaceSize[], size: WorkspaceSize
 
 /** An awake rate in dollars an hour, at the fewest places that do not round the price: cents where cents are the
  * whole of it, three places where they are not, since a workspace at $0.018 an hour reads as $0.02 to the cent and
- * that is a fifth of the price. A third place that says nothing is not added: $0.09 is $0.09, not $0.090. The one
- * rate rule, read by the size refusal, the places table and the provider rows alike. */
+ * that is a fifth of the price. A third place that says nothing is not added: $0.09 is $0.09, not $0.090.
+ *
+ * Which it is, is read off the rounded thousandth and never off the number itself: a provider computes its rate
+ * (Solari charges per vCPU-hour plus per GB-hour), so a real one arrives as 0.09000000000000001, and any test of
+ * the float against its own cent form calls that noise a third place. The one rate rule, read by the size refusal,
+ * the places table, the size pickers and the provider rows alike. */
 export function fmtRate(usdPerHour: number): string {
-  const cents = usdPerHour.toFixed(2);
-  return `$${Number(cents) === usdPerHour ? cents : usdPerHour.toFixed(3)}/hr`;
+  const mils = usdPerHour.toFixed(3);
+  return `$${mils.endsWith("0") ? usdPerHour.toFixed(2) : mils}/hr`;
 }
 
 /** The one refusal every road gives a size the provider does not offer, malformed or merely absent: the word as it

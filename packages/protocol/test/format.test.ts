@@ -821,6 +821,20 @@ describe("machine size words", () => {
     expect(["big", "2", "x4", "2x", "0x4", "2x0", "2 x 4", "2x4x8", "-2x4"].map(sizeFromWord)).toEqual(Array(9).fill(undefined));
   });
 
+  it("fmtRate reads a rate a provider computed, not only one written down: the price to the places it needs and no more", () => {
+    // Solari prices per vCPU-hour plus per GB-hour (solari-backend.ts), so every rate it offers carries float noise:
+    // 2x2 lands on 0.09000000000000001. A rule that compares the cent form back to the number reads noise as a
+    // third place and prints $0.090/hr on every live size.
+    const solari = (cpu: number, memGb: number): number => cpu * 0.035 + memGb * 0.01;
+    expect(fmtRate(solari(2, 2))).toBe("$0.09/hr");
+    expect(fmtRate(solari(2, 4))).toBe("$0.11/hr");
+    expect(fmtRate(solari(4, 8))).toBe("$0.22/hr");
+    expect(fmtRate(solari(8, 32))).toBe("$0.60/hr");
+    // Box quotes its classes outright (box-backend.ts), and those need the third place to say the price at all.
+    expect([0.018, 0.036, 0.072].map(fmtRate)).toEqual(["$0.018/hr", "$0.036/hr", "$0.072/hr"]);
+    expect([0.1, 1.234, 2.5].map(fmtRate)).toEqual(["$0.10/hr", "$1.234/hr", "$2.50/hr"]);
+  });
+
   it("offeredSize is the one membership rule, and the refusal names the word as given and every offer with its rate", () => {
     expect(offeredSize(offers, { cpu: 2, memMb: 8192 })).toBe(true);
     expect(offeredSize(offers, { cpu: 4, memMb: 8192 })).toBe(false);
