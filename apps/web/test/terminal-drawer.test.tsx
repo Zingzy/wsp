@@ -15,6 +15,7 @@ import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
 import { RightPanel } from "../src/shell/RightPanel.js";
+import { terminalRefusedLine } from "../src/actions/format.js";
 import { openDrawerTerminal, openPanelTerminal, splitActivePanelTerminal, splitDrawerTerminal } from "../src/shell/shellCommands.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../src/terminal/link.js";
@@ -426,23 +427,27 @@ describe("drawer resilience", () => {
     await waitFor(() => expect(count("pty.create")).toBe(1));
   });
 
-  it("a refused pty.create reaches the toast from the first open, New Terminal and the panel", async () => {
+  it("a pty a live link refused is said in the app's own sentence, never in the link's words behind a name and a colon", async () => {
     const { count } = fakeLink({ refuseCreate: true });
+    act(() => useStore.setState({ workspaces: [PANE_WS], statuses: {}, toast: null }));
     useTerminalDrawerStore.getState().setOpen(WS, true);
     render(<WorkspaceTerminalDrawer workspaceId={WS} />);
-    await waitFor(() => expect(useStore.getState().toast).toBe("terminal: daemon unreachable"));
     await screen.findByText(/No terminals for this workspace yet/);
-    await new Promise(r => setTimeout(r, 50));
+    await waitFor(() => expect(useStore.getState().toast).toBe(terminalRefusedLine("api")));
     expect(count("pty.create")).toBe(1);
+    // The link is up and this one shell was refused: no pane stands in for that, so the sentence is the app's own
+    // and says what did not happen. What used to stand here was the link's words behind a name and a colon.
+    expect(document.body.textContent).not.toContain("terminal: daemon unreachable");
 
     useStore.setState({ toast: null });
     fireEvent.click(screen.getByRole("button", { name: /^New Terminal/ }));
-    await waitFor(() => expect(useStore.getState().toast).toBe("terminal: daemon unreachable"));
+    await waitFor(() => expect(useStore.getState().toast).toBe(terminalRefusedLine("api")));
 
     useStore.setState({ toast: null });
     await act(() => openPanelTerminal(WS));
-    expect(useStore.getState().toast).toBe("terminal: daemon unreachable");
+    await waitFor(() => expect(useStore.getState().toast).toBe(terminalRefusedLine("api")));
     expect(selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS).surfaces).toEqual([]);
+    act(() => useStore.setState({ workspaces: [], toast: null }));
   });
 });
 
@@ -497,6 +502,45 @@ describe("panes on a workspace that is not running", () => {
     expect(wt.tabs().map(t => t.ptyId)).toEqual(["p1"]);
     fireEvent.keyDown(inputs("drawer")[0]!, { key: "a", code: "KeyA" });
     await waitFor(() => expect(writes()).toEqual(["a"]));
+  }, 20_000);
+
+  it("a pty refused on a computer that is not answering says nothing in the corner: its pane already says why", async () => {
+    fakeLink({ refuseCreate: true });
+    const here = { ...PANE_WS, kind: "local" as const, machineId: "local" };
+    act(() =>
+      useStore.setState({
+        workspaces: [here],
+        statuses: { [WS]: { ...paneStatus({ reach: { state: "unreachable" } }), kind: "local" as const, machineId: "local" } },
+      }),
+    );
+    useTerminalDrawerStore.getState().setOpen(WS, true);
+    render(<WorkspaceTerminalDrawer workspaceId={WS} />);
+    await screen.findByText("this Mac's daemon is not running");
+    await act(() => openPanelTerminal(WS));
+    expect(useStore.getState().toast).toBeNull();
+  });
+
+  it("this computer's own daemon down: the pane says the one sentence and its button asks the host for another", async () => {
+    const asked: string[] = [];
+    const api = { subscribe: () => () => {}, restartDaemon: async (id: string) => void asked.push(id) } as unknown as Api;
+    const here = { ...PANE_WS, kind: "local" as const, machineId: "local" };
+    fakeLink();
+    act(() =>
+      useStore.setState({
+        api,
+        workspaces: [here],
+        statuses: { [WS]: { ...paneStatus({ reach: { state: "unreachable" } }), kind: "local" as const, machineId: "local" } },
+      }),
+    );
+    useTerminalDrawerStore.getState().setOpen(WS, true);
+    render(<WorkspaceTerminalDrawer workspaceId={WS} />);
+    await screen.findByText("this Mac's daemon is not running");
+    // One line and one button: no second sentence saying in words what the button already says.
+    expect(document.body.textContent).not.toContain("Unreachable");
+    expect(document.body.textContent).not.toContain("wake it");
+    const start = await screen.findByRole("button", { name: "Start it" });
+    await act(async () => void fireEvent.click(start));
+    expect(asked).toEqual([WS]);
   }, 20_000);
 
   it("the overlay takes focus only from the pane itself, and Enter on its Wake button is left to the button", async () => {
@@ -660,7 +704,7 @@ describe("panes on a workspace that is not running", () => {
     act(() => wt.feedStatus("connecting"));
     act(() => wt.feedStatus("live"));
     await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("shell-gone"));
-    expect(overlay()!.textContent).toContain("This shell ended when the workspace moved to another computer");
+    expect(overlay()!.textContent).toContain("This shell ended when the daemon holding it stopped");
     fireEvent.click(within(overlay()!).getByRole("button", { name: /^New Terminal/ }));
     await waitFor(() => expect(wt.tabs().map(t => t.ptyId)).toEqual(["p1", "p2"]));
     await waitFor(() => expect(overlay()).toBeNull());

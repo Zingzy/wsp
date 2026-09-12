@@ -88,7 +88,10 @@ export function RightPanel({
       filesAvailable={workspace?.phase === "running"}
       machineAvailable={workspace !== null}
       machinePanelWords={kindWords(workspaceKind(workspace ?? LOCAL_UNTIL_KNOWN)).panel}
-      processesAvailable={workspace?.phase === "running" && absent === null}
+      // A pane the host can put the daemon back for opens and says so with the button in it; a panel terminal
+      // cannot open at all without a pty, so its tab keeps the sentence as the reason it is held and the drawer
+      // under the chat is where that sentence carries the button.
+      processesAvailable={workspace?.phase === "running" && (absent === null || absent.start !== undefined)}
       {...(absent === null ? {} : { unavailableReasons: { terminal: absent.sentence, processes: absent.sentence } })}
       screenAvailable={status?.screen !== undefined}
     >

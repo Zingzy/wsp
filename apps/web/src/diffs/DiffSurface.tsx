@@ -171,7 +171,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
     setRevealNote(revealFile(relativeTo(cwd, revealRequest)) ? null : noDiffLine(baseName(revealRequest), SCOPE_LABELS[scope]));
   }, [cwd, model, revealFile, revealRequest, scope, takeReveal, workspaceId]);
 
-  if (!wire || root === null) return <NotRunning />;
+  if (!wire || root === null) return <NotRunning workspaceId={workspaceId} />;
 
   const isPending = load.kind === "pending";
   const scopeLabel = SCOPE_LABELS[scope];

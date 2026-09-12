@@ -40,6 +40,7 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
   const workspaces = useStore(s => s.workspaces);
   const statuses = useStore(s => s.statuses);
   const sessions = useStore(s => s.sessions);
+  const places = useStore(s => s.places);
   const select = useStore(s => s.select);
   const openSettings = useStore(s => s.openSettings);
   const openAddComputer = useStore(s => s.openAddComputer);
@@ -89,8 +90,8 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
     [createLocalWorkspace, openAddComputer, openConnectProvider, openSettings, select, setSidebarMode, toggleRightPanel, toggleSidebar],
   );
   const items = useMemo(
-    () => buildPaletteItems({ projects, selectedId, query, canCreate: api !== null, hasLocal, labs, sidebarMode, handlers, verbs }),
-    [api, handlers, hasLocal, labs, projects, query, selectedId, sidebarMode, verbs],
+    () => buildPaletteItems({ projects, selectedId, query, canCreate: api !== null, hasLocal, labs, sidebarMode, handlers, verbs, places }),
+    [api, handlers, hasLocal, labs, places, projects, query, selectedId, sidebarMode, verbs],
   );
 
   const groups = useMemo<CommandPaletteGroup[]>(() => {

@@ -47,6 +47,7 @@ import { useStore } from "../protocol/store";
 import { type GhosttyColor, type GhosttyTheme } from "../terminal/ghostty/core";
 import type { TerminalIo } from "../terminal/pty-io";
 import { SHELL_ENDED_LINE, terminalEmptyLine, terminalInputRefusal, terminalPaneTitle, type TerminalPaneState } from "../adapt/index";
+import { StartDaemonButton } from "./DaemonDown";
 import { isTerminalLinkActivation, isTerminalUrl } from "../terminal-links";
 import {
   DEFAULT_THREAD_TERMINAL_HEIGHT,
@@ -549,7 +550,7 @@ function Elapsed() {
  * lifts; a key pressed on it shows the refusal instead of vanishing into a socket that is down. Keys on its own
  * button are the button's.
  */
-function TerminalPaneOverlay({ pane, hints, refused, onWake, onLift }: { pane: TerminalPaneState; hints: readonly string[]; refused: string | null; onWake?: () => void; onLift: () => void }) {
+function TerminalPaneOverlay({ pane, hints, refused, workspaceId, onWake, onLift }: { pane: TerminalPaneState; hints: readonly string[]; refused: string | null; workspaceId: string; onWake?: () => void; onLift: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [keyRefused, setKeyRefused] = useState<string | null>(null);
   useEffect(() => {
@@ -589,6 +590,7 @@ function TerminalPaneOverlay({ pane, hints, refused, onWake, onLift }: { pane: T
           Wake
         </Button>
       ) : null}
+      {pane.kind === "absent" ? <StartDaemonButton absent={pane.absent} workspaceId={workspaceId} /> : null}
       {line !== null ? (
         <p className="text-xs text-muted-foreground" data-terminal-refused>
           {line}
@@ -974,6 +976,7 @@ export default function ThreadTerminalDrawer({
                   Wake
                 </Button>
               ) : null}
+              {pane.kind === "absent" ? <StartDaemonButton absent={pane.absent} workspaceId={workspaceId} /> : null}
             </>
           )}
         </div>
@@ -1068,7 +1071,7 @@ export default function ThreadTerminalDrawer({
 
       <div className="relative min-h-0 w-full flex-1">
         {pane.kind !== "live" ? (
-          <TerminalPaneOverlay pane={pane} hints={paneHints} refused={refused} onLift={onOverlayLift} {...(onWake !== undefined ? { onWake } : {})} />
+          <TerminalPaneOverlay pane={pane} hints={paneHints} refused={refused} workspaceId={workspaceId} onLift={onOverlayLift} {...(onWake !== undefined ? { onWake } : {})} />
         ) : activeLost ? (
           <ShellGoneOverlay onNewTerminal={onNewTerminalAction} label={newTerminalActionLabel} />
         ) : null}

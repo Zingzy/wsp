@@ -5,8 +5,8 @@
 import { act, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, PLACES_WORDS, type SessionView, type WorkspaceView } from "@wsp/protocol";
-import { SIDEBAR_MODE_WORDS } from "../src/actions/format.js";
+import { DEFAULT_PREFERENCES, PLACES_WORDS, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { NO_DAEMON_TO_START, SIDEBAR_MODE_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
 import { RECENT_THREAD_LIMIT } from "../src/components/palette/CommandPalette.logic.js";
 import { SidebarProvider, useSidebar } from "../src/components/ui/sidebar.js";
 import { compileResolvedKeybindingsConfig } from "../src/keybindingDefaults.js";
@@ -197,6 +197,69 @@ describe("command palette", () => {
     expect(metaOn("api")).toBe("Running · solari · Current workspace");
     expect(metaOn("worker")).toBe("Paused · a provider");
     for (const title of ["api", "worker"]) expect(metaOn(title)).not.toMatch(/m_ws_/);
+  });
+
+  it("reads this computer's own daemon in the row and in the rebuild's reason, and never says Unreachable about it", async () => {
+    const here: WorkspaceView = { ...view("ws_a", "mac"), kind: "local", machineId: "local" };
+    const api = fakeApi([here], []);
+    api.watchStatuses = async () => [{ ...here, machineState: "running", reach: { state: "unreachable" }, size: { cpu: 8, memMb: 16384 }, kind: "local" } as unknown as WorkspaceStatus];
+    useStore.getState().bind(api);
+    render(
+      <AppShell>
+        <div>center content</div>
+      </AppShell>,
+    );
+    await waitFor(() => expect(Object.keys(useStore.getState().statuses)).toHaveLength(1));
+    await waitFor(() => expect(useStore.getState().selectedId).toBe(here.id));
+    mod("k");
+    await waitFor(() => expect(palette()).not.toBeNull());
+    await waitFor(() => expect(metaOn("mac")).toContain("No daemon"));
+    expect(metaOn("mac")).not.toContain("Unreachable");
+    // The rebuild forks a machine again from the image, and there is no machine of wsp's here to fork; the row
+    // used to answer that this one answers, on a computer whose every pane said it did not.
+    fireEvent.change(screen.getByPlaceholderText(/Search commands/), { target: { value: "rebuild" } });
+    await waitFor(() => expect(palette()!.textContent).toContain("Rebuild"));
+    expect(palette()!.textContent).toContain("which wsp does not run; it cannot be rebuilt");
+    expect(palette()!.textContent).not.toContain("This one answers");
+    // No row of the list says unreachable about the computer the app is drawn on, whichever verb it refuses.
+    for (const query of ["browser", "forget", ""]) {
+      fireEvent.change(screen.getByPlaceholderText(/Search commands/), { target: { value: query } });
+      await waitFor(() => expect(palette()!.textContent).not.toContain("unreachable"));
+      expect(palette()!.textContent).not.toContain("Unreachable");
+    }
+  });
+
+  it("offers the start the row's own line names, under start and under daemon, and refuses it while the daemon answers", async () => {
+    const here: WorkspaceView = { ...view("ws_a", "mac"), kind: "local", machineId: "local" };
+    const asked: string[] = [];
+    const api = fakeApi([here], []);
+    api.restartDaemon = async (id: string) => void asked.push(id);
+    api.watchStatuses = async () => [{ ...here, machineState: "running", reach: { state: "unreachable" }, size: { cpu: 8, memMb: 16384 }, kind: "local" } as unknown as WorkspaceStatus];
+    useStore.getState().bind(api);
+    render(
+      <AppShell>
+        <div>center content</div>
+      </AppShell>,
+    );
+    await waitFor(() => expect(Object.keys(useStore.getState().statuses)).toHaveLength(1));
+    await waitFor(() => expect(useStore.getState().selectedId).toBe(here.id));
+    mod("k");
+    await waitFor(() => expect(palette()).not.toBeNull());
+    // The row's third line reads start it, and the word a person types to find it is either half of that.
+    for (const query of ["start", "daemon"]) {
+      fireEvent.change(screen.getByPlaceholderText(/Search commands/), { target: { value: query } });
+      await waitFor(() => expect(palette()!.textContent).toContain(WORKSPACE_WORDS.startDaemon));
+    }
+    await act(async () => void fireEvent.click(within(palette()!).getByText(WORKSPACE_WORDS.startDaemon)));
+    expect(asked).toEqual([here.id]);
+  });
+
+  it("refuses the start on a workspace whose daemon this host does not hold, in one sentence and never by the kind", async () => {
+    await mountShell();
+    mod("k");
+    await waitFor(() => expect(palette()).not.toBeNull());
+    fireEvent.change(screen.getByPlaceholderText(/Search commands/), { target: { value: "start the daemon" } });
+    await waitFor(() => expect(palette()!.textContent).toContain(NO_DAEMON_TO_START));
   });
 
   it("carries Add a computer, which opens Settings with the sheet over it", async () => {
@@ -720,7 +783,9 @@ describe("default shortcuts", () => {
     await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_1"));
   });
 
-  it("reports a missing terminal link instead of failing silently", async () => {
+  it("leaves a pty it could not open to the pane the click was in, and puts nothing in the sidebar's corner", async () => {
+    // The link's own words used to land in the foot of the sidebar behind a workspace name and a colon, in the
+    // opposite corner from the click, where nothing cleared them; the pane a person clicked says it instead.
     await mountShell();
     const term = document.createElement("div");
     term.dataset["terminalOwner"] = "drawer";
@@ -729,7 +794,8 @@ describe("default shortcuts", () => {
     document.body.appendChild(term);
     ta.focus();
     mod("n", {}, ta);
-    await waitFor(() => expect(useStore.getState().toast).toContain("no terminal link"));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(useStore.getState().toast).toBeNull();
     term.remove();
   });
 });

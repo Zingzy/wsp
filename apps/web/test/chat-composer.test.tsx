@@ -562,6 +562,23 @@ describe("composer while the workspace is not live", () => {
     }
   });
 
+  it("a window on a sleeping Mac says which computer is asleep, ahead of anything that computer's daemon would say", async () => {
+    (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 7788, wsPath: "/ws", paired: true, version: "0.0.0" };
+    try {
+      const here: WorkspaceView = { ...workspace, kind: "local", machineId: "local" };
+      const { api } = fixtureApi([here]);
+      await setup(api);
+      // This window cannot reach the host at all: a daemon on the far side of it is not the block, and the reading
+      // of it used to take the slot and read as though the daemon were the reason nothing could be sent.
+      act(() => useStore.setState({ statuses: { [WS]: { ...here, machineState: "running", reach: { state: "unreachable" }, size: { cpu: 8, memMb: 16384 }, rateUsdPerHour: 0 } as never } }));
+      act(() => useStore.getState().setConn("reconnecting"));
+      await waitFor(() => expect(screen.getByRole("status").textContent).toBe(HOST_ASLEEP_SEND));
+      expect(screen.getByRole("status").textContent).not.toContain("daemon is not running");
+    } finally {
+      delete (window as unknown as { __WSP__?: unknown }).__WSP__;
+    }
+  });
+
   it("a gone machine reads the same way: the gone sentence, one line, no panel", async () => {
     const { api } = fixtureApi([{ ...workspace, phase: "gone" }]);
     await setup(api);
@@ -830,5 +847,17 @@ describe("composerSendBlock", () => {
     expect(composerSendBlock({ ...live, state: "unreachable" })).toBe("unreachable");
     expect(composerSendBlock({ ...live, hydrated: false })).toBe("loading");
     expect(composerSendBlock({ ...live, agents: false })).toBe("no-agents");
+  });
+
+  it("holds nothing for a daemon this host started: the turn runs on this computer and never went through it", () => {
+    // The state word folds a silent daemon into unreachable, which held the box on the computer the app is drawn
+    // on while the very same build answered a turn from the command line in two seconds.
+    expect(composerSendBlock({ ...live, state: "unreachable", absent: true, daemonOnly: true })).toBeNull();
+    // Everything that is about the turn itself still holds it.
+    expect(composerSendBlock({ ...live, state: "unreachable", absent: true, daemonOnly: true, hydrated: false })).toBe("loading");
+    expect(composerSendBlock({ ...live, state: "unreachable", absent: true, daemonOnly: true, agents: false })).toBe("no-agents");
+    expect(composerSendBlock({ ...live, conn: "closed", state: "unreachable", absent: true, daemonOnly: true })).toBe("closed");
+    // A computer this host only waits for runs no turn, so its silence holds the box as it did.
+    expect(composerSendBlock({ ...live, state: "unreachable", absent: true })).toBe("unreachable");
   });
 });

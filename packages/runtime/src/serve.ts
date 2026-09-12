@@ -630,6 +630,10 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "workspaces.stopWake":
               send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.stopWake(msg.workspaceId, origin)) });
               return;
+            case "workspaces.restartDaemon":
+              await rt.workspaces.restartDaemon(msg.workspaceId, origin);
+              send({ id: msg.id, ok: true });
+              return;
             case "workspaces.upgrade": {
               const spec = {
                 ...(msg.cpu !== undefined ? { cpu: msg.cpu } : {}),

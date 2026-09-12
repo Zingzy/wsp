@@ -876,8 +876,9 @@ export function useWorkspaceState(id: string | null): WorkspaceState | null {
  * and is handed a reading with no figure, rather than a clock read on the render path that never ticks again. */
 export function useAbsentComputer(id: string | null, nowMs: number | null = null): AbsentComputer | null {
   const workspace = useWorkspace(id);
+  const status = useStatus(id);
   const places = usePlaces();
-  return useMemo(() => absenceOf(places, workspace, nowMs), [places, workspace, nowMs]);
+  return useMemo(() => absenceOf(places, workspace, status, nowMs), [places, workspace, status, nowMs]);
 }
 
 export function useCost(id: string | null): CostTick | null {

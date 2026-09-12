@@ -1357,6 +1357,34 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 30_000);
 
+  it("the state slot is one width whatever word is in it, so a name keeps its room when a word arrives, in both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      // One row not answering beside a paused one and a gone one: the longest of the state words against the two
+      // the fixture already draws.
+      await page!.goto(`${base}?theme=${theme}&oom=1`);
+      await page!.waitForSelector("[data-sidebar-row]");
+      const slots = await page!.evaluate(() =>
+        Array.from(document.querySelectorAll<HTMLElement>("[data-row-id^='ws:']")).map(row => {
+          const slot = row.querySelector<HTMLElement>("[data-workspace-state]")!;
+          const name = row.querySelector<HTMLElement>("[data-workspace-name]")!;
+          // The word's own width, which is what the slot has to hold: the slot's box is its min-width once it is
+          // wider than the text, so the box says nothing about whether the word fits in it.
+          const range = document.createRange();
+          range.selectNodeContents(slot);
+          return { state: slot.textContent ?? "", slotWidth: slot.getBoundingClientRect().width, wordWidth: range.getBoundingClientRect().width, nameWidth: name.getBoundingClientRect().width };
+        }),
+      );
+      console.info(`state slots at ${theme}: ${JSON.stringify(slots)}`);
+      expect(slots.map(s => s.state)).toEqual(["Unreachable", "Paused", "Gone"]);
+      // The slot is one width on every row, so the name beside it is too: the name used to give back 16 px the
+      // moment a long word arrived, which moved it under a person reading it.
+      expect(new Set(slots.map(s => Math.round(s.slotWidth))).size).toBe(1);
+      expect(new Set(slots.map(s => Math.round(s.nameWidth))).size).toBe(1);
+      // And the longest word there is is drawn whole in it rather than cut by it.
+      for (const slot of slots) expect(slot.wordWidth).toBeLessThanOrEqual(slot.slotWidth);
+    }
+  }, 30_000);
+
   it("the line the runtime puts on a machine's row is the whole second line, drawn whole and at the row's own height, in both themes", async () => {
     const metaOf = (): Promise<{ text: string; clipped: boolean; height: number }[]> =>
       page!.locator("[data-row-id^='ws:']").evaluateAll(rows =>
@@ -1859,9 +1887,10 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       expect(skin.background).not.toBe("rgba(0, 0, 0, 0)");
       expect(skin.z).toBe("130");
       expect(skin.arrows).toBe(0);
-      expect(await page!.locator("[data-context-menu] [role=menuitem]").count()).toBe(14);
-      // Rebuild, the two project trips (this fake host has no folder ops), fork and forget.
-      expect(await page!.locator("[data-context-menu] [role=menuitem][aria-disabled=true]").count()).toBe(5);
+      expect(await page!.locator("[data-context-menu] [role=menuitem]").count()).toBe(15);
+      // Rebuild, the start of a daemon this host does not hold, the two project trips (this fake host has no folder
+      // ops), fork and forget.
+      expect(await page!.locator("[data-context-menu] [role=menuitem][aria-disabled=true]").count()).toBe(6);
       // The first row that can run holds focus, so the keyboard is already in the menu.
       expect(await page!.locator("[data-context-menu] [role=menuitem]").first().evaluate(el => document.activeElement === el)).toBe(true);
       const path = join(SHOTS_DIR, `sidebar-context-menu-${theme}.png`);

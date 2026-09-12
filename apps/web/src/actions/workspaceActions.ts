@@ -2,7 +2,7 @@
 // The workspace's actions, one registry: what a workspace row, the palette,
 // the Machine tab and the row's context menu offer for one machine.
 import { CopyIcon, FolderInputIcon, FolderOutputIcon, GlobeIcon, GitForkIcon, MessageSquarePlusIcon, PaletteIcon, PauseIcon, PencilIcon, PlayIcon, RefreshCwIcon, ServerIcon, ShapesIcon, SquareIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
-import { NO_REBUILD_NEEDED, isBilling, kindWords, machineWord, needsRebuild, undrivenRefusal, workspaceKind, workspaceState, type LookPart, type MachineState, type ReachState, type WorkspaceKind, type WorkspacePhase, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { NO_REBUILD_NEEDED, isBilling, kindWords, machineWord, needsRebuild, undrivenRefusal, workspaceKind, workspaceState, type AbsentComputer, type LookPart, type MachineState, type PlaceView, type ReachState, type WorkspaceKind, type WorkspacePhase, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import {
   CLIENT_CANNOT_EXPORT,
   CLIENT_CANNOT_FORGET,
@@ -10,8 +10,10 @@ import {
   CLIENT_CANNOT_LOOK,
   CLIENT_CANNOT_REBUILD,
   CLIENT_CANNOT_RENAME_WORKSPACE,
+  CLIENT_CANNOT_START_DAEMON,
   FORGET_HINT,
   NEW_THREAD_WAITS,
+  NO_DAEMON_TO_START,
   NO_WORKSPACE_FORK,
   PROJECTS_WAIT,
   REBUILD_HINT,
@@ -27,6 +29,7 @@ import {
   rowNewThread,
   rowVerb,
 } from "./format.js";
+import { absenceOf } from "../settings/places.js";
 import type { ActionEntry } from "./registry.js";
 
 /** What the enabled rules read: the workspace's phase, and the machine state, reach and reason of its status when one has arrived. */
@@ -44,10 +47,15 @@ export interface WorkspaceTarget {
   /** The record's own words when the last wake ran its asking out with the machine still paused at the provider;
    * null on every other machine. Carried apart from `reason`, which the next status push replaces. */
   readonly wakeRefused: string | null;
+  /** The one reading of the computer this workspace stands on while it is not answering, for the verbs whose
+   * refusal would otherwise word that silence a second time; null while it answers. */
+  readonly absent: AbsentComputer | null;
 }
 
-/** The one target every surface builds from the record and its status: the status leads where it has arrived. */
-export function workspaceTarget(workspace: WorkspaceView, status: WorkspaceStatus | null): WorkspaceTarget {
+/** The one target every surface builds from the record, its status and the computers this host holds: the status
+ * leads where it has arrived, and the places list is what the reading of a computer that is not answering is taken
+ * from, for every kind of computer alike. */
+export function workspaceTarget(workspace: WorkspaceView, status: WorkspaceStatus | null, places: readonly PlaceView[]): WorkspaceTarget {
   return {
     id: workspace.id,
     displayName: workspace.name,
@@ -58,6 +66,10 @@ export function workspaceTarget(workspace: WorkspaceView, status: WorkspaceStatu
     reach: status?.reach.state ?? null,
     reason: status?.reason ?? workspace.gone ?? null,
     wakeRefused: status?.wakeRefused ?? workspace.wakeRefused ?? null,
+    // A verb refused while the computer under the workspace is not answering says what that computer says about
+    // itself, which on the computer the host runs on names the part that is down rather than calling the computer
+    // the app is drawn on unreachable. No figure on it: a refusal is read the moment it is shown.
+    absent: absenceOf(places, workspace, status, null),
   };
 }
 
@@ -66,6 +78,9 @@ export interface WorkspaceVerbs {
   /** Pauses a running workspace, wakes a paused one. */
   readonly togglePhase: (workspaceId: string) => Promise<void>;
   readonly openTerminal: (workspaceId: string) => Promise<void>;
+  /** Starts another daemon in place of one this host started and that is not running; absent on a client whose
+   * host wires no such road. */
+  readonly restartDaemon?: ((workspaceId: string) => Promise<void>) | undefined;
   readonly openBrowser: (workspaceId: string) => void;
   readonly openMachine: (workspaceId: string) => void;
   readonly newThread: (workspaceId: string) => void;
@@ -109,8 +124,32 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     rowLabel: target => rowVerb("Rebuild", target.displayName),
     buttonWord: () => "Rebuild",
     hint: target => target.wakeRefused ?? target.reason ?? REBUILD_HINT,
-    refusal: (target, verbs) => (!dead(target) ? NO_REBUILD_NEEDED : verbs.rebuild === undefined ? CLIENT_CANNOT_REBUILD : null),
+    // A rebuild forks the machine again from the image, which wsp can only do to a machine it forked. On the
+    // computer the host runs on there is nothing to fork, so the row said this one answers while every pane on it
+    // said it did not; it now says the one thing that is true of it, in the sentence every undriven verb uses.
+    refusal: (target, verbs) =>
+      !kindWords(target.kind).driven
+        ? undrivenRefusal(target.displayName, machineWord(target.kind), "be rebuilt")
+        : !dead(target)
+          ? NO_REBUILD_NEEDED
+          : verbs.rebuild === undefined
+            ? CLIENT_CANNOT_REBUILD
+            : null,
     run: (target, verbs) => verbs.rebuild?.(target.id),
+  },
+  {
+    id: "start-daemon",
+    group: "state",
+    icon: () => PlayIcon,
+    searchTerms: ["start daemon", "daemon", "start it", "restart daemon"],
+    title: () => WORKSPACE_WORDS.startDaemon,
+    rowLabel: target => rowVerb("Start the daemon of", target.displayName),
+    buttonWord: target => target.absent?.start ?? WORKSPACE_WORDS.startDaemon,
+    hint: target => target.absent?.said ?? WORKSPACE_WORDS.startDaemon,
+    // Offered off the one reading, never off the kind: a reading carries the word for this button exactly where
+    // this host holds the process that is missing.
+    refusal: (target, verbs) => (target.absent?.start === undefined ? NO_DAEMON_TO_START : verbs.restartDaemon === undefined ? CLIENT_CANNOT_START_DAEMON : null),
+    run: (target, verbs) => verbs.restartDaemon?.(target.id),
   },
   {
     id: "new-thread",
@@ -140,7 +179,7 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     shortcutCommand: "preview.toggle",
     searchTerms: ["open browser", "preview", "ports"],
     title: () => WORKSPACE_WORDS.openBrowser,
-    refusal: target => openBrowserRefusal(stateOf(target)),
+    refusal: target => target.absent?.sentence ?? openBrowserRefusal(stateOf(target)),
     run: (target, verbs) => verbs.openBrowser(target.id),
   },
   {
@@ -230,7 +269,7 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     rowLabel: target => rowVerb("Forget", target.displayName),
     buttonWord: () => "Forget",
     hint: () => FORGET_HINT,
-    refusal: (target, verbs) => forgetRefusal(stateOf(target)) ?? (verbs.forget === undefined ? CLIENT_CANNOT_FORGET : null),
+    refusal: (target, verbs) => forgetRefusal(stateOf(target), target.absent?.said) ?? (verbs.forget === undefined ? CLIENT_CANNOT_FORGET : null),
     run: (target, verbs) => verbs.forget?.(target.id),
   },
 ];

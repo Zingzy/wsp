@@ -94,7 +94,7 @@ describe("WorkspaceTerminals", () => {
     expect(wt.tabs().find(t => t.ptyId === "p2")).toMatchObject({ exited: false, lost: false });
     const seen: string[] = [];
     wt.bind("p1", { data: d => seen.push(d), reset: () => {} })();
-    expect(seen.join("")).toContain("[This shell ended when the workspace moved to another computer]");
+    expect(seen.join("")).toContain("[This shell ended when the daemon holding it stopped]");
   });
 
   it("a connection dying mid-reattach does not mark ptys lost", async () => {

@@ -21,6 +21,7 @@ import {
   splitSidebarThreads,
   topSidebarThread,
 } from "../src/sidebar/Sidebar.logic.js";
+import { absenceOf } from "../src/settings/places.js";
 import { spaceWorkspaceId } from "../src/sidebar/sidebarMode.js";
 import { ROW_LINE_MAX, rowLineCut } from "../src/sidebar/rowGrammar.js";
 import {
@@ -306,6 +307,23 @@ describe("workspace row labels", () => {
     expect(spaceHeaderLines({ project: local("no-daemon"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toEqual(["no daemon answering", "2 cores · 4 GB", FREE_WORD]);
     expect(daemonGoneLine("slow", kindWords("local"))).toBeUndefined();
     expect(daemonGoneLine(null, kindWords("local"))).toBeUndefined();
+  });
+
+  it("this computer's own daemon is read off its workspace's reach, and says so in every slot the row has", () => {
+    const here = { id: "ws_m", name: "mac", machineId: "local", phase: "running", golden: "", createdAt: "2026-09-08T09:00:00Z", kind: "local" } as const;
+    const silent = { ...status({ reach: { state: "unreachable" } }), kind: "local" as const };
+    // The places list holds no link for the computer the host runs on, so the reading comes off the workspace.
+    const reading = absenceOf([], here, silent, null)!;
+    expect(reading.said).toBe("this Mac's daemon is not running");
+    expect(reading.word).toBe("No daemon");
+    // A probe that found the port dead rather than silence is the same daemon, not running.
+    expect(absenceOf([], here, { ...silent, reach: { state: "no-daemon" } }, null)!.said).toBe(reading.said);
+    expect(absenceOf([], here, { ...silent, reach: { state: "reachable" } }, null)).toBeNull();
+    expect(absenceOf([], here, null, null)).toBeNull();
+    // The row's slot and its third line then read that one reading, where they read nothing and free before.
+    const row = project({ reach: { state: "unreachable" } }, { kind: "local" });
+    expect(stateSlotWord({ ...row, indicator: { label: "Unreachable", tone: "neutral", pulse: false } }, reading)).toBe("No daemon");
+    expect(workspaceMetaLine({ project: row, absent: reading, cost: null, outOfMemory: undefined, nowMs: now })).toBe("daemon not running · start it");
   });
 
   it("a fork whose daemon died says so too: Unreachable alone reads as a lost machine, and this one is fine", () => {

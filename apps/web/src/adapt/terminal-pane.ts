@@ -129,10 +129,11 @@ const WORKSPACE_PANEL = "Workspace panel";
 
 const REBUILD_HINT = `Rebuild it from the ${WORKSPACE_PANEL}`;
 
-/** What a shell says when the computer under it went: the pane's overlay and the bytes written into the terminal
- * itself read one sentence, so a person who saw it in the scrollback and a person who saw the overlay read the
- * same thing. */
-export const SHELL_ENDED_LINE = "This shell ended when the workspace moved to another computer";
+/** What a shell says when the daemon that was holding it is gone: the pane's overlay and the bytes written into
+ * the terminal itself read one sentence, so a person who saw it in the scrollback and a person who saw the overlay
+ * read the same thing. It names the daemon and not a move, because the same refusal comes back when the workspace
+ * moved to another computer and when this computer's own daemon was started again under a shell. */
+export const SHELL_ENDED_LINE = "This shell ended when the daemon holding it stopped";
 
 /** What to do once nothing has answered. The fact is in the title; this half is the one thing a person can act on,
  * and it names the thing to look at rather than leaving an "it" open. Both halves read the same name for where,
@@ -172,7 +173,8 @@ export function terminalPaneHints(pane: TerminalPaneState, size: WorkspaceSize |
     case "not-answering":
       return pane.outOfMemory ? [...bigger, REBUILD_HINT] : [REBUILD_HINT];
     case "absent":
-      return [pane.absent.will];
+      // A reading whose daemon this host owns carries a button instead of a second sentence; the pane draws it.
+      return pane.absent.will === undefined ? [] : [pane.absent.will];
     case "no-daemon":
     case "refused":
       return [];
@@ -206,7 +208,9 @@ export function terminalEmptyLine(pane: TerminalPaneState): string | null {
     case "not-answering":
       return "The workspace is not answering; terminals open when it does";
     case "absent":
-      return `${pane.absent.sentence}, and a terminal opens then`;
+      // The one sentence the pane already shows for an absent computer, which a refused terminal lands in too: a
+      // reading with a button promises nothing after it, since the button is what opens the terminal.
+      return pane.absent.start !== undefined ? pane.absent.said : `${pane.absent.sentence}, and a terminal opens then`;
     case "no-daemon":
       return NO_DAEMON_LINE;
     case "refused":

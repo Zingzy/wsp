@@ -461,6 +461,15 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
       }
       return started.road;
     },
+    // The daemon is a child of this process, so nothing but this host can put one back. The one it is holding is
+    // let go of and closed first, whether it died or is merely wedged, so the next dial cannot be answered with
+    // the port of a daemon that is gone.
+    restartDaemon: async () => {
+      const held = daemon.held();
+      daemon.forget();
+      await held?.then(d => d.close(), () => {});
+      await daemon.get();
+    },
     close: async () => {
       shutting = true;
       const started = daemon.held();

@@ -19,7 +19,8 @@ import { isDesktopShell } from "../../lib/desktopShell.js";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, staleWord, useOutOfMemoryReading, useWorkspaceLive, type StaleWord } from "../../machine/live.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type Upgrade } from "../../protocol/machine.js";
-import { useAbsentComputer, useCapabilities, useCost, useProtocolEvents, useStatus, useStore, useWorkspace } from "../../protocol/store.js";
+import { useAbsentComputer, useCapabilities, useCost, usePlaces, useProtocolEvents, useStatus, useStore, useWorkspace } from "../../protocol/store.js";
+import { DaemonDown } from "../DaemonDown.js";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -88,7 +89,8 @@ const PANE_INSET = "pl-3 pr-5";
 function Header({ workspace, status }: { workspace: WorkspaceView; status: WorkspaceStatus | null }) {
   const machineId = status?.machineId ?? workspace.machineId;
   const verbs = useWorkspaceVerbs();
-  const copy = actionById(resolveActions(workspaceActions, workspaceTarget(workspace, status), verbs, false), "copy-id");
+  const places = usePlaces();
+  const copy = actionById(resolveActions(workspaceActions, workspaceTarget(workspace, status, places), verbs, false), "copy-id");
   // On a joined computer the machine is the link, so the id is this host's own row key rather than anything a
   // provider would look up: the corner holds nothing there, and the Where row names the computer instead.
   const shown = workspacePlace({ machineId }) === undefined ? machineId : null;
@@ -152,7 +154,7 @@ interface FactsProps {
  * (nothing), the system it runs, how long it has been up and the folder its commands start in. */
 function Facts({ workspace, status, pendingSize, kind }: FactsProps) {
   const capabilities = useCapabilities();
-  const places = useStore(s => s.places);
+  const places = usePlaces();
   const now = useClock(status?.idleAt !== undefined);
   const zombie = status?.reach.state === "zombie";
   const absent = useAbsentComputer(workspace.id, now);
@@ -176,7 +178,7 @@ function Facts({ workspace, status, pendingSize, kind }: FactsProps) {
     <Section label="Workspace">
       <div className="mt-1 divide-y divide-border/40">
         <Row label="State" k="state" title={absent?.sentence ?? stateWord}>
-          <span className={cn(zombie && "text-destructive-foreground")}>{stateWord}</span>
+          <span className={cn(zombie && "text-destructive-foreground")}>{absent?.word ?? stateWord}</span>
         </Row>
         <Row label="Where" k="where" title={where}>
           {where}
@@ -204,15 +206,23 @@ function Facts({ workspace, status, pendingSize, kind }: FactsProps) {
             <Row label="Cost" k="cost">
               {FREE_WORD}
             </Row>
-            <Row label="OS" k="os">
-              {facts?.os ?? "pending"}
-            </Row>
-            <Row label="Uptime" k="uptime">
-              {facts === undefined ? "pending" : fmtUptime(facts.uptimeMs)}
-            </Row>
-            <Row label="Folder" k="folder">
-              {facts?.folder ?? "pending"}
-            </Row>
+            {/* The system, the uptime and the folder are read over the daemon, so while the one this host started
+                is not running there is nothing coming and three rows reading pending are three rows waiting on
+                nothing. A computer this host only waits for keeps them: what it last reported is what is known
+                about it, and dropping the rows would take that away on top of the silence. */}
+            {absent?.start === undefined ? (
+              <>
+                <Row label="OS" k="os">
+                  {facts?.os ?? "pending"}
+                </Row>
+                <Row label="Uptime" k="uptime">
+                  {facts === undefined ? "pending" : fmtUptime(facts.uptimeMs)}
+                </Row>
+                <Row label="Folder" k="folder">
+                  {facts?.folder ?? "pending"}
+                </Row>
+              </>
+            ) : null}
           </>
         )}
         {vaultStale !== null && (
@@ -290,8 +300,9 @@ function useProjectGoldens(wanted: boolean): { list: ProjectGolden[]; add: (take
 function Projects({ workspace, status, kind, onTaken }: { workspace: WorkspaceView; status: WorkspaceStatus | null; kind: WorkspaceKindWords; onTaken: (taken: ProjectGolden) => void }) {
   const api = useStore(s => s.api);
   const verbs = useWorkspaceVerbs();
+  const places = usePlaces();
   const projects = workspaceProjects(workspace);
-  const importAction = actionById(resolveActions(workspaceActions, workspaceTarget(workspace, status), verbs, false), "import-project");
+  const importAction = actionById(resolveActions(workspaceActions, workspaceTarget(workspace, status, places), verbs, false), "import-project");
   const images = kind.driven && api?.snapshotWorkspace !== undefined;
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -373,12 +384,13 @@ function useClock(ticking: boolean): number {
 function Rebuild({ workspace, status }: { workspace: WorkspaceView; status: WorkspaceStatus | null }) {
   const api = useStore(s => s.api);
   const verbs = useWorkspaceVerbs();
+  const places = usePlaces();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   // The tab asks before it rebuilds, so its registry entry opens the dialog; the dialog's own button calls the api and
   // names a client without the verb.
-  const action = actionById(resolveActions(workspaceActions, workspaceTarget(workspace, status), { ...verbs, rebuild: async () => setOpen(true) }, false), "rebuild");
+  const action = actionById(resolveActions(workspaceActions, workspaceTarget(workspace, status, places), { ...verbs, rebuild: async () => setOpen(true) }, false), "rebuild");
 
   const rebuild = async (): Promise<void> => {
     setOpen(false);
@@ -439,8 +451,18 @@ function Rebuild({ workspace, status }: { workspace: WorkspaceView; status: Work
  * never come. */
 function Live({ workspace }: { workspace: WorkspaceView }) {
   const live = useWorkspaceLive(workspace.id);
+  const absent = useAbsentComputer(workspace.id);
   const last = live.samples[live.samples.length - 1];
   const stale = staleWord(workspace.phase, live.reach === "live");
+  // Nothing is sampling these rows while the daemon that reads them is not running, so the section says which part
+  // is down and offers the start rather than printing unreachable three times about a computer on the desk.
+  if (absent !== null && absent.start !== undefined) {
+    return (
+      <Section label="Live">
+        <DaemonDown absent={absent} workspaceId={workspace.id} className="mt-1 flex flex-col items-start gap-2" />
+      </Section>
+    );
+  }
   const kindWord = servesReading(workspaceKind(workspace), "metrics") ? null : NOT_ON_THIS_KIND;
   const share = (m: { used: number; total: number }): number => (m.total > 0 ? (m.used / m.total) * 100 : 0);
   const row = { kindWord, stale, unavailable: live.unavailable, samples: live.samples };
@@ -881,13 +903,14 @@ function LineageNote({ k, label, text }: { k: string; label: string; text: strin
 function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; status: WorkspaceStatus | null; upgrade: Upgrade }) {
   const verbs = useWorkspaceVerbs();
   const capabilities = useCapabilities();
+  const places = usePlaces();
   const sessions = useStore(s => s.sessions[workspace.id]);
   const [open, setOpen] = useState(false);
   const [picked, setPicked] = useState<MachineSizeOffer | null>(null);
   const [forgetting, setForgetting] = useState(false);
   const gone = workspace.phase === "gone";
   // The tab's forget opens its own dialog, in place of the request the sidebar answers; the dialog names a client without the verb.
-  const actions = resolveActions(workspaceActions, workspaceTarget(workspace, status), { ...verbs, forget: () => setForgetting(true) }, false);
+  const actions = resolveActions(workspaceActions, workspaceTarget(workspace, status, places), { ...verbs, forget: () => setForgetting(true) }, false);
   const phase = actionById(actions, "phase");
   const forget = actionById(actions, "forget");
   // Backend fact, not a probe: a provider with no road to a new size gets no picker and no button. The whole road

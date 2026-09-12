@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { selectPanelTerminalIds, useRightPanelStore } from "../rightPanelStore.js";
-import { openDrawerTerminal, reportTerminalFailure, splitDrawerTerminal, type SplitDirection } from "../shell/shellCommands.js";
+import { openDrawerTerminal, reportTerminalRefused, splitDrawerTerminal, type SplitDirection } from "../shell/shellCommands.js";
 import { selectTerminalUiState, useTerminalDrawerStore } from "../terminal/drawerStore.js";
 import { useTerminalViewportConfig } from "../terminal/fontSetting.js";
 import { reconcileTerminalIds, type TerminalUiState } from "../terminal/groups.js";
@@ -69,7 +69,7 @@ function LinkedDrawer({ terms, workspaceId, ui }: { terms: WorkspaceTerminals; w
 
   useEffect(() => {
     if (status !== "live" || ids.length > 0) return;
-    spawnFirstDrawerTerminal(terms)?.then(t => store.getState().add(workspaceId, t.ptyId), reportTerminalFailure);
+    spawnFirstDrawerTerminal(terms)?.then(t => store.getState().add(workspaceId, t.ptyId), () => reportTerminalRefused(workspaceId));
   }, [terms, store, workspaceId, status, ids.length]);
 
   const split = useCallback((direction: SplitDirection) => void splitDrawerTerminal(workspaceId, direction), [workspaceId]);

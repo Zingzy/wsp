@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { alreadyRecorded, inFolder, machineWord, undrivenRefusal, NO_SUCH_TURN, NOTIFY_ME, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, rootsPathIn, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type EventUnion, type PortForward, type ProjectImportEvent, type TurnResult } from "@wsp/protocol";
+import { alreadyRecorded, inFolder, machineWord, undrivenRefusal, NO_SUCH_TURN, NOTIFY_ME, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, rootsPathIn, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type EventUnion, type PortForward, type ProjectImportEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import type { MachineExecOptions } from "../src/machine-exec.js";
 import { createRuntime, type HarnessAdapterContext, type HarnessAdapterFactory, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
@@ -617,6 +617,30 @@ describe("local workspace", () => {
     const rt = runtime();
     const ws = await rt.workspaces.createLocal("mac");
     expect(await rt.workspaces.daemonReach(ws.id)).toEqual(road);
+  });
+
+  it("the button under the panes asks the host for another daemon, which only this computer's workspace has", async () => {
+    let started = 0;
+    localWiring = { ...localWiring, restartDaemon: async () => void started++, daemonRoad: async () => ({ url: "http://127.0.0.1:1", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "t" }) };
+    const rt = runtime();
+    const here = await rt.workspaces.createLocal("mac");
+    const statuses: WorkspaceStatus[] = [];
+    rt.events.on("workspace.status", e => statuses.push((e as { status: WorkspaceStatus }).status));
+    await rt.workspaces.restartDaemon(here.id);
+    expect(started).toBe(1);
+    // The row says what this host has just watched start, rather than the poll's reading of the daemon that is
+    // gone: a person who pressed the button read no daemon under it for another ten seconds.
+    const said = statuses.filter(s => s.id === here.id).at(-1);
+    expect(said?.reach.state).toBe("reachable");
+    // Every other kind's daemon runs on a machine this host reaches and does not hold the process of.
+    const cloud = await rt.workspaces.create({ golden: "snap_g", name: "fork" });
+    await expect(rt.workspaces.restartDaemon(cloud.id)).rejects.toThrow(/does not hold the process of/);
+  });
+
+  it("says a host that wires no such road cannot start one, rather than answering the button with nothing", async () => {
+    const rt = runtime();
+    const here = await rt.workspaces.createLocal("mac");
+    await expect(rt.workspaces.restartDaemon(here.id)).rejects.toThrow(/does not hold the process of/);
   });
 
   it("a host that wired no daemon for this computer says so rather than minting a preview route", async () => {

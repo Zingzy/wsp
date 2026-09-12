@@ -15,13 +15,14 @@ import { copyText } from "../actions/clipboard.js";
 import { openContextMenu } from "../actions/contextMenu.js";
 import { fileActions, type FileVerbs } from "../actions/fileActions.js";
 import { resolveActions } from "../actions/registry.js";
+import { DaemonDown } from "../components/DaemonDown.js";
 import FileBrowserPanel from "../components/files/FileBrowserPanel.js";
 import { Button } from "../components/ui/button.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { useDiffRevealStore } from "../diffs/reveal.js";
 import { daemonBehindLine } from "../machine/daemon.js";
-import { useStore, useWorkspace } from "../protocol/store.js";
+import { useAbsentComputer, useStore, useWorkspace } from "../protocol/store.js";
 import { useRightPanelStore } from "../rightPanelStore.js";
 import { focusPaneOnShow, FolderBreadcrumbs, useUpAFolder } from "./FolderBreadcrumbs.js";
 import { useWorkspaceListing } from "./listing.js";
@@ -30,6 +31,7 @@ import { useDaemonRoot, useDaemonVersion, useDaemonWire } from "./wire.js";
 
 export function FilesSurface({ workspaceId, theme }: { workspaceId: string; theme: "light" | "dark" }) {
   const workspace = useWorkspace(workspaceId);
+  const absent = useAbsentComputer(workspaceId);
   const wire = useDaemonWire(workspaceId);
   const version = useDaemonVersion(workspaceId);
   const home = useDaemonRoot(workspaceId);
@@ -64,7 +66,9 @@ export function FilesSurface({ workspaceId, theme }: { workspaceId: string; them
     if (root !== null) ensure(root);
   }, [ensure, root]);
 
-  if (!wire || root === null) return <NotRunning />;
+  // A listing already drawn is not a listing that is still true: the daemon that reads it can go while the tree
+  // sits there, and a stale tree with no sentence is the pane saying the daemon is fine.
+  if (!wire || root === null || absent?.start !== undefined) return <NotRunning workspaceId={workspaceId} />;
   const newThreadHere = () => {
     follow(workspaceId, root);
     newThread(workspaceId);
@@ -113,12 +117,23 @@ export function FilesSurface({ workspaceId, theme }: { workspaceId: string; them
   );
 }
 
-export function NotRunning() {
+/** What the files, the diff and a file preview say instead of a listing. A daemon this host started and is not
+ * running is said in the one reading's sentence, with the button that starts another, so the pane a person clicked
+ * holds both the reason and the road; every other reason keeps the shipped line. */
+export function NotRunning({ workspaceId }: { workspaceId: string }) {
+  const absent = useAbsentComputer(workspaceId);
+  if (absent !== null && absent.start !== undefined) {
+    return (
+      <Empty className="flex-1">
+        <DaemonDown absent={absent} workspaceId={workspaceId} />
+      </Empty>
+    );
+  }
   return (
     <Empty className="flex-1">
       <EmptyHeader>
         <EmptyTitle>The workspace is not running.</EmptyTitle>
-        <EmptyDescription>Files and diffs are read over the workspace's daemon; wake it to browse them.</EmptyDescription>
+        <EmptyDescription>{absent?.sentence ?? "Files and diffs are read over the workspace's daemon; wake it to browse them."}</EmptyDescription>
       </EmptyHeader>
     </Empty>
   );

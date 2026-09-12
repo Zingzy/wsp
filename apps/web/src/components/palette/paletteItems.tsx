@@ -5,7 +5,7 @@
 // whose title holds the typed query. Pure apart from the callbacks it is
 // handed, so the list is testable without the dialog.
 import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, ChevronUpIcon, CloudIcon, MessageSquareIcon, MonitorIcon, PanelLeftIcon, PanelRightIcon, PlusIcon, SettingsIcon } from "lucide-react";
-import { PLACES_WORDS, type SidebarMode } from "@wsp/protocol";
+import { PLACES_WORDS, type PlaceView, type SidebarMode } from "@wsp/protocol";
 import { resolveActions, type ResolvedAction } from "../../actions/registry.js";
 import { sidebarActions } from "../../actions/sidebarActions.js";
 import { workspaceActions, workspaceTarget, type WorkspaceVerbs } from "../../actions/workspaceActions.js";
@@ -13,6 +13,7 @@ import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../../adapt/
 import { WORKSPACE_SELECT_SLOTS, workspaceSelectCommand } from "../../keybindingTypes.js";
 import { cn } from "../../lib/utils.js";
 import { SETTINGS_WORDS } from "../../settings/format.js";
+import { absenceOf } from "../../settings/places.js";
 import { threadWalk } from "../../shell/shellCommands.js";
 import { searchSidebarThreadsByTitle } from "../../sidebar/Sidebar.logic.js";
 import { threadTree, workspaceOf } from "../../sidebar/threadTree.js";
@@ -53,6 +54,9 @@ export interface PaletteItemsInput {
   readonly sidebarMode: SidebarMode;
   readonly handlers: PaletteHandlers;
   readonly verbs: WorkspaceVerbs;
+  /** The computers and providers this host holds, for the one reading of a workspace whose computer is not
+   * answering: a row that named its own state read Unreachable for the computer the app is drawn on. */
+  readonly places: readonly PlaceView[];
 }
 
 export interface PaletteItems {
@@ -99,7 +103,7 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
     },
   ];
   if (selected !== null) {
-    items.push(...resolveActions(workspaceActions, workspaceTarget(selected.workspace, selected.status), input.verbs, input.labs).map(action => actionItem(action, selected.displayName)));
+    items.push(...resolveActions(workspaceActions, workspaceTarget(selected.workspace, selected.status, input.places), input.verbs, input.labs).map(action => actionItem(action, selected.displayName)));
   }
 
   items.push(
@@ -218,8 +222,10 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
 function workspaceItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
   return input.projects.map((project, index) => {
     // Where it runs, in the one word the sidebar row reads for it: a person picks a workspace by its state and the
-    // computer it is on, never by the id wsp holds the machine under.
-    const parts = [project.indicator.label, whereWord(project)];
+    // computer it is on, never by the id wsp holds the machine under. The state word is the row's own, which on a
+    // computer that is not answering is that computer's word and not the wire's.
+    const absent = absenceOf(input.places, project.workspace, project.status, null);
+    const parts = [absent?.word ?? project.indicator.label, whereWord(project)];
     if (project.id === input.selectedId) parts.push("Current workspace");
     // The projects arrive in sidebar order, so a row's index is the slot its chord jumps to.
     const slot = WORKSPACE_SELECT_SLOTS[index];

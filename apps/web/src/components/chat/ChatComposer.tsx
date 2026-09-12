@@ -95,11 +95,16 @@ export function composerSendBlock(input: {
   /** This workspace's computer is not answering, which is its state whatever a status that predates the silence
    * still says: the send is held on it in the same slot every other state is held in. */
   absent?: boolean;
+  /** What is not answering is a daemon this host started, not the computer under it: the turn runs in this host's
+   * own process, on this computer, and never went through that daemon, so neither the silence nor the state word
+   * it folds into holds the box. The panes that do need the daemon say so where they are. */
+  daemonOnly?: boolean;
 }): SendRefusalKind | null {
   if (!input.hasApi || input.conn === "connecting") return "connecting";
   if (input.conn === "reconnecting") return "reconnecting";
   if (input.conn === "closed") return "closed";
   if (input.state === null) return "not-found";
+  if (input.daemonOnly === true) return !input.hydrated ? "loading" : input.agents ? null : "no-agents";
   if (input.absent === true) return "unreachable";
   if (input.state !== "running") return input.state;
   if (!input.hydrated) return "loading";
@@ -178,16 +183,19 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const linkDown = useLinkDownLine(workspaceId);
   const { harness } = thread.view;
   const catalog = useMemo(() => catalogFromHarness({ id: harnessId, harness, screen: screenCommandsOf(harnessCatalog) }), [harness, harnessCatalog, harnessId]);
-  const blocked = composerSendBlock({ conn, hasApi: api !== null, state, hydrated: thread.hydrated, agents: harnessCatalogs.length > 0, absent: absent !== null });
+  // A daemon this host started is not the road a turn takes, so its absence leaves the box open on this computer.
+  const daemonOnly = absent?.start !== undefined;
+  const blocked = composerSendBlock({ conn, hasApi: api !== null, state, hydrated: thread.hydrated, agents: harnessCatalogs.length > 0, absent: absent !== null, daemonOnly });
   // A send wakes a paused machine by itself, so paused is not a refusal here: the box takes the words and the send
   // button says it wakes first.
   const wakesFirst = blocked === "paused";
   // A window on another computer whose wsp has gone quiet says which computer is asleep, not that wsp is not
-  // running: nothing here is broken, and the turn starts when that computer wakes.
-  // A computer that is not answering says so in its own sentence rather than in the state table's: the person's
-  // next move is to switch that computer on, and no wire word says that. The send is held either way, so nothing
-  // leaves the box and no refusal comes back as a line in the sidebar's corner.
-  const unavailable = blocked === null || wakesFirst ? null : absent !== null ? absent.sentence : hostAsleep(conn) ? HOST_ASLEEP_SEND : sendRefusal(blocked);
+  // running: nothing here is broken, and the turn starts when that computer wakes. It is read first, because it is
+  // the block: a computer this window cannot reach at all says nothing about a daemon on the far side of it.
+  // A computer that is not answering then says so in its own sentence rather than in the state table's: the
+  // person's next move is to switch that computer on, and no wire word says that. The send is held either way, so
+  // nothing leaves the box and no refusal comes back as a line in the sidebar's corner.
+  const unavailable = blocked === null || wakesFirst ? null : hostAsleep(conn) ? HOST_ASLEEP_SEND : absent !== null ? absent.sentence : sendRefusal(blocked);
   // Everything that holds this send, in one reading: what blocks every send in this workspace, then what this draft
   // alone cannot be sent as. The slot, the send button and the Enter path all take it from here, so a person is told
   // once and told the same thing wherever they look.
