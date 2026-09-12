@@ -233,7 +233,9 @@ const withProgress = (job: InitJob): InitJob => ({ ...job, progress: initStageCo
 
 const setup: InitSetup = {
   // The saved-key state is the key step reached with a key in the home, one Continue past the choice like the others.
-  keys: { solari: at !== "keys" && at !== "keys-refused" },
+  // The step reads what is held by the word the host says its own key belongs to, as a real host answers.
+  keys: { box: false, solari: at !== "keys" && at !== "keys-refused" },
+  keyProvider: "solari",
   home: "/Users/zingzy",
   agents: [
     { id: "claude", name: "Claude Code", configured: true, takesTools: true },

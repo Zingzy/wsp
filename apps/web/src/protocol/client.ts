@@ -483,9 +483,11 @@ export interface Api {
    * what a machine costs, and the init job when one runs or ran. Optional so fixtures without the modal need not fake
    * it; without it the sidebar's cloud row opens nothing that can start a build. */
   initGet?(): Promise<InitSetup>;
-  /** Saves keys into the wsp home's .env on the host's computer: the provider key, which wires the provider, and an
-   * agent's API key by the sign-in row that took it; the reply says a key is held and never carries it back. */
-  initKeys?(keys: { solari?: string; rows?: Record<string, string> }): Promise<InitSetup>;
+  /** Saves keys into the wsp home's .env on the host's computer: the provider key, checked with the provider named
+   * before it is written and saved under the variable that provider's module reads, and an agent's API key by the
+   * sign-in row that took it. The provider is the word WSP_PROVIDER holds; absent, the key is the wired provider's.
+   * The reply says a key is held and never carries it back. */
+  initKeys?(keys: { provider?: string; key?: string; rows?: Record<string, string> }): Promise<InitSetup>;
   /** Starts the init job on a road; every change after rides init.job events. */
   initStart?(o: { road: InitRoad; harness?: string }): Promise<InitJob>;
   /** Answers one of the screens; the reply carries the screens recomputed and the step moved on. */
