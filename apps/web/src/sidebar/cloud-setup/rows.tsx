@@ -154,7 +154,7 @@ export function RowPicker({ k, label, value, choices, disabled, onPick, row }: {
       <MenuPopup align="end" side="bottom" className="w-56">
         <MenuRadioGroup value={current?.value} onValueChange={next => (typeof next === "string" ? onPick(next) : undefined)}>
           {choices.map(c => (
-            <MenuRadioItem key={c.value} value={c.value} data-k="option" data-value={c.value} disabled={c.disabled === true} closeOnClick>
+            <MenuRadioItem key={c.value} value={c.value} data-k="option" data-value={c.value} disabled={c.disabled === true}>
               {c.label}
               {c.state !== undefined ? <span className={cn(STATE_WORD, "ml-auto pl-3")}>{c.state}</span> : null}
             </MenuRadioItem>

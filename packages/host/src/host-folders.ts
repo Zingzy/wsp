@@ -9,7 +9,7 @@
 import { readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
-import { workspaceProjects, type HostFolder, type HostFolderListing, type WorkspaceView } from "@wsp/protocol";
+import { hiddenFolder, workspaceProjects, type HostFolder, type HostFolderListing, type WorkspaceView } from "@wsp/protocol";
 import type { HostFolders } from "@wsp/runtime";
 import { under } from "./init-import.js";
 import { isRepoFolder } from "./project-bundle.js";
@@ -19,6 +19,8 @@ export interface HostFolderPaths {
   home?: string;
   /** Each imported project's own folder, so a project the home folder does not hold is browsable too. */
   projects?: readonly string[];
+  /** What this computer runs, for the one folder a Mac keeps in every home; absent reads the process's own. */
+  platform?: string;
 }
 
 /** The project folders the records name, each once: an import lands a folder on the machine at the path it has here,
@@ -68,9 +70,11 @@ function folderToList(dir: string | undefined, roots: readonly string[], realRoo
   return asked;
 }
 
-/** One level: the folders directly inside `dir`, sorted by name, each marked when git tracks it, with the dot-named
- * ones counted rather than listed unless `hidden`. A folder that exists and cannot be read raises, as does a path
- * outside the roots. A symlink is a row when it points at a folder the roots hold, so no row leads out of them. */
+/** One level: the folders directly inside `dir`, sorted by name, each marked when git tracks it, with the hidden ones
+ * counted rather than listed unless `hidden`. The one rule both folder browsers read, told the home it is walking
+ * and what this computer is, since the Library a Mac hides is the home's own and not every folder of that name. A
+ * folder that exists and cannot be read raises, as does a path outside the roots. A symlink is a row when it points
+ * at a folder the roots hold, so no row leads out of them. */
 export function listHostFolders(req: { dir?: string; hidden?: boolean } = {}, paths: HostFolderPaths = {}): HostFolderListing {
   const roots = hostFolderRoots(paths);
   const realRoots = roots.map(realOf).filter((root): root is string => root !== null);
@@ -85,7 +89,8 @@ export function listHostFolders(req: { dir?: string; hidden?: boolean } = {}, pa
     })
     .map(e => e.name)
     .sort();
-  const named = names.filter(name => !name.startsWith("."));
+  const machine = { home: roots[0]!, mac: (paths.platform ?? process.platform) === "darwin" };
+  const named = names.filter(name => !hiddenFolder(join(dir, name), machine));
   const shown = req.hidden === true ? names : named;
   const folders: HostFolder[] = shown.map(name => join(dir, name)).map(path => ({ path, repo: isRepoFolder(path) }));
   return { dir, roots, folders, hidden: names.length - named.length };

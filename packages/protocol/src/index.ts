@@ -439,6 +439,14 @@ export type WorkspaceView = z.infer<typeof WorkspaceView>;
 export const MachineFacts = z.object({ os: z.string(), uptimeMs: z.number(), folder: z.string() });
 export type MachineFacts = z.infer<typeof MachineFacts>;
 
+/** Whether the machine that reported this system name is a Mac: the name its maker gives it, and the kernel's own
+ * word where the machine answered nothing better, which is what a machine on this computer falls back to. The
+ * folder browsers read it beside the home to know whether that home keeps a Library. Absent is not a Mac: what
+ * reads this hides a folder, and a machine that said nothing has said nothing to hide. */
+export function isMacMachine(osName: string | null | undefined): boolean {
+  return /^(?:macOS|Darwin)\b/.test(osName ?? "");
+}
+
 /** WorkspaceView enriched with what the rail and meta panel render live. */
 export const WorkspaceStatus = WorkspaceView.extend({
   machineState: MachineState,
@@ -725,6 +733,10 @@ export const HarnessCatalog = z.object({
    * mcpServers this is the adapter's own declaration and no binary's, so a table row is the answer and a client reads
    * it before any machine exists; absent is none. The composer lists none of them and sends nothing for one. */
   screenCommands: z.array(ScreenCommand).optional(),
+  /** Whether an access picked while a turn of this harness runs reaches that turn. The adapter in this host declares
+   * it, as with mcpServers, so the picker says what a pick does to the turn in front of the person before the pick
+   * rather than under the box after it. Read it through movesRunningAccess: absent is a no. */
+  movesAccess: z.boolean().optional(),
   /** Set on the harness a start without one runs, so a client can pick its list without the catalog package. */
   isDefault: z.boolean().optional(),
   /** Why the binary described nothing, in its own adapter's words, when it ran and refused for a reason it can name
@@ -808,6 +820,13 @@ export function readsImages(catalog: HarnessCatalog | null | undefined): boolean
  * machine exists. Absent is a no, which is a catalog from before the field was declared. */
 export function takesMcpServers(catalog: Pick<HarnessCatalog, "mcpServers"> | null | undefined): boolean {
   return catalog?.mcpServers === true;
+}
+
+/** Whether an access picked while a turn runs reaches that turn on this harness. The adapter's own declaration, like
+ * takesMcpServers; absent is a no, which is a catalog from before the field was declared, and a pick then waits for
+ * the person's next message. */
+export function movesRunningAccess(catalog: Pick<HarnessCatalog, "movesAccess"> | null | undefined): boolean {
+  return catalog?.movesAccess === true;
 }
 
 /** Whatever carries a harness's screen-only commands: the catalog itself, or a caller that holds the list alone. */
@@ -2850,7 +2869,7 @@ const DAEMON_CONTENTS = [
   "a6ae68d8af502a8a5ecf9795ca11ca0b9b12cda2792e45eee3376c7e4d57917b",
   "055dcf11b2a17e8959ab3a6246c2d17f89eb3837c59b31d3a8138c6dc7b6c322",
   "09e441a435678290871e210158d5f8fef3b43b307c5ec917086a201583c037a5",
-  "d174f06a61a283e4163c28e884b2152fa4551596dceeebb9de05b01b45d1ac22",
+  "386b54104e2a8abf8f45f9a35fe767971b72d5d00da68c4d8ae0aa9630b7cc6d",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3601,7 +3620,7 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("workspaces.exec"), workspaceId: z.string(), argv: z.array(z.string()).min(1), cwd: z.string().optional() }),
   /** Replies with { listing: HostFolderListing }: one level of this computer's own folders, for the picker a browser
    * tab has instead of the desktop shell's dialog. `dir` absent lists the first root and a folder inside the roots
-   * that is gone does the same; a path outside them is refused. `hidden` lists the dot-named folders too, which are
+   * that is gone does the same; a path outside them is refused. `hidden` lists the hidden folders too, which are
    * otherwise only counted. */
   z.object({ id: reqId, op: z.literal("host.folders"), dir: z.string().optional(), hidden: z.boolean().optional() }),
   /** Replies with { config: TerminalConfig }: the person's Ghostty config on the computer running the host, read
@@ -3811,11 +3830,12 @@ export type SessionSteerResult = z.infer<typeof SessionSteerResult>;
 
 // --- session access (what a pick made while a turn runs gets back) ---------------------
 
-/** set: the harness took the mode and this turn's next tool call runs at it. unsupported: the harness takes no
- * access change on a turn already under way (Claude Code's bypass, which is a launch flag on that CLI), so the pick
- * waits for the person's next message. not-running: the turn ended, or its process is gone, before the pick reached
- * it. not-found: this runtime holds no such session. None is an error reply, as a mode the harness's own list does
- * not carry is. */
+/** set: the turn is at the mode, from its next tool call and on the prompt it was stopped on where that mode
+ * answers one; a harness whose CLI takes the change only at launch is set too, where its adapter stands in for it
+ * by answering that turn's prompts itself. unsupported: the harness takes no access change on a turn already under
+ * way and nothing could stand in for it, so the pick is kept and the person's next message carries it.
+ * not-running: the turn ended, or its process is gone, before the pick reached it. not-found: this runtime holds no
+ * such session. None is an error reply, as a mode the harness's own list does not carry is. */
 export const SessionAccessOutcome = z.enum(["set", "not-running", "unsupported", "not-found"]);
 export type SessionAccessOutcome = z.infer<typeof SessionAccessOutcome>;
 export const SessionAccessResult = z.object({ outcome: SessionAccessOutcome });
@@ -3984,7 +4004,7 @@ export {
   type Rgb,
   type ThemePreset,
 } from "./workspace-look.js";
-export { folderName, parentFolderName, placeDaemonPaths, placeOwnedPaths, rootsPathIn, sshDaemonPaths, underProject, workFolderIn } from "./project-path.js";
+export { folderName, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, rootsPathIn, sshDaemonPaths, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importDest, importRequest, registerRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
