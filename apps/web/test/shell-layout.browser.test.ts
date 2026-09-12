@@ -1723,9 +1723,10 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         });
       // The composer remembers the last agent picked for the workspace, so the tab to read from is chosen, not assumed.
       await page!.locator("[data-composer-harness='claude']").click();
-      await page!.waitForFunction(() => document.querySelector("[data-composer-catalog-source]")?.textContent?.endsWith("on this machine") === true);
+      // ws_a names no provider, so where it runs is the name wsp holds for its machine, as the sidebar row says it.
+      await page!.waitForFunction(() => document.querySelector("[data-composer-catalog-source]")?.textContent?.endsWith("on m_ws_a") === true);
       const claude = await read();
-      expect(claude.text).toBe("Claude Code 2.1.257 on this machine");
+      expect(claude.text).toBe("Claude Code 2.1.257 on m_ws_a");
       await page!.locator("[data-composer-harness='codex']").click();
       await page!.waitForFunction(() => document.querySelector("[data-composer-catalog-source]")?.textContent?.includes(" table · ") === true);
       const codex = await read();

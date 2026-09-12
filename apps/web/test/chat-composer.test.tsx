@@ -83,11 +83,15 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
   return { api, started, interrupted, emit };
 }
 
-async function setup(api: Api, conn: ConnStatus = "live") {
-  useStore.setState({ conn: "connecting", workspaces: [], statuses: {} });
+/** The store as a fresh window opens it, then the api bound and the socket put where the case wants it. The
+ * catalogs are waited for unless the case is about a composer that has none: a send reads its model and its access
+ * out of them, so a composer without them is held and a test that did not wait would be testing that hold. */
+async function setup(api: Api, conn: ConnStatus = "live", agents = true) {
+  useStore.setState({ conn: "connecting", workspaces: [], statuses: {}, harnesses: [], harnessesByWorkspace: {} });
   useStore.getState().bind(api);
   useStore.getState().setConn(conn);
   await waitFor(() => expect(useStore.getState().workspaces.length).toBeGreaterThan(0));
+  if (agents) await waitFor(() => expect(useStore.getState().harnesses.length).toBeGreaterThan(0));
   const view = render(<WorkspaceThread workspaceId={WS} />);
   await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
   return view;
@@ -592,8 +596,97 @@ describe("a new thread while another thread of the workspace works", () => {
   });
 });
 
+/** The send control itself, queried where it sits rather than by the name it happens to be wearing: a held one
+ * wears the reason it is held, which is not a name any list of send words can be written from. */
+const sendControl = () => document.querySelector<HTMLButtonElement>('[data-chat-composer-actions="right"] button[type="submit"]')!;
+
+/** The block reads the same in all three places a person meets it: the slot above the box, the name a screen
+ * reader hears on the send, and the tooltip the held send carries. */
+function expectHeld(words: string): void {
+  expectPlainLine(words);
+  expect(sendControl().getAttribute("aria-label")).toBe(words);
+  expect(sendControl().getAttribute("title")).toBe(words);
+  expect(sendControl().disabled).toBe(true);
+  // Held is the primary at the app's held weight, not a fainter blue: the same disabled:opacity-64 ui/button.tsx gives.
+  expect(sendControl().className).toContain("disabled:opacity-64");
+  expect(sendControl().className).not.toContain("disabled:opacity-30");
+}
+
+describe("a composer that cannot send yet", () => {
+  it("an Enter while the link is down keeps the draft and leaves the reason standing in the slot", async () => {
+    const { api, started } = fixtureApi([workspace]);
+    await setup(api);
+    const editor = composerEditor();
+    await typeInto(editor, "check the redirect chain");
+    act(() => useStore.getState().setConn("reconnecting"));
+    await waitFor(() => expect(isEditable(editor)).toBe(false));
+    expectHeld(SEND_BLOCK_WORDS.reconnecting);
+    await press(editor, "Enter");
+    expect(draft()).toBe("check the redirect chain");
+    expectHeld(SEND_BLOCK_WORDS.reconnecting);
+    expect(started).toHaveLength(0);
+  });
+
+  it("the line goes when the link is up, the Enter that was dropped is not replayed, and the next one carries the draft once", async () => {
+    const { api, started } = fixtureApi([workspace]);
+    await setup(api);
+    const editor = composerEditor();
+    await typeInto(editor, "check the redirect chain");
+    act(() => useStore.getState().setConn("closed"));
+    await waitFor(() => expect(isEditable(editor)).toBe(false));
+    await press(editor, "Enter");
+    act(() => useStore.getState().setConn("live"));
+    await waitFor(() => expect(isEditable(editor)).toBe(true));
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(slot()!.textContent).toBe("");
+    expect(sendControl().getAttribute("title")).toBeNull();
+    // The link coming back is not a send: the draft is still the person's to change or to throw away.
+    expect(started).toHaveLength(0);
+    expect(draft()).toBe("check the redirect chain");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]?.prompt).toBe("check the redirect chain");
+    expect(draft()).toBe("");
+  });
+
+  it("a composer whose agents have not answered is held in the catalog's own words, and opens when they land", async () => {
+    const { api, started } = fixtureApi([workspace]);
+    let answered: HarnessCatalog[] = [];
+    api.listHarnesses = async () => answered;
+    await setup(api, "live", false);
+    expectHeld(SEND_BLOCK_WORDS["no-agents"]);
+    expect(isEditable(composerEditor())).toBe(false);
+    // The harness that drives the built app waits on this word too, so a driven step cannot land on this window.
+    expect(NOT_READY_NAMES).toContain(SEND_BLOCK_WORDS["no-agents"]);
+    answered = [CLAUDE_CATALOG];
+    await act(async () => { await useStore.getState().loadHarnesses(WS); });
+    await waitFor(() => expect(isEditable(composerEditor())).toBe(true));
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(started).toHaveLength(0);
+    await typeInto(composerEditor(), "check the redirect chain");
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]?.prompt).toBe("check the redirect chain");
+  });
+
+  it("the block outranks an image refusal already in the slot, so a held composer says one thing and it is the block", async () => {
+    const { api } = fixtureApi([workspace]);
+    await setup(api);
+    const editor = composerEditor();
+    await typeInto(editor, "look at this");
+    act(() => {
+      fireEvent.paste(editor, { clipboardData: { files: [new File(["x"], "shot.png", { type: "image/png" })], getData: () => "" } });
+    });
+    await waitFor(() => expect(screen.queryByRole("status")).not.toBeNull());
+    expect(screen.getByRole("status").textContent).not.toBe(SEND_BLOCK_WORDS.closed);
+    act(() => useStore.getState().setConn("closed"));
+    await waitFor(() => expect(isEditable(editor)).toBe(false));
+    expectHeld(SEND_BLOCK_WORDS.closed);
+  });
+});
+
 describe("composerSendBlock", () => {
-  const live = { conn: "live" as const, hasApi: true, state: "running" as const, hydrated: true };
+  const live = { conn: "live" as const, hasApi: true, state: "running" as const, hydrated: true, agents: true };
   it("names the first thing in the way, socket first, as the kind the refusal table gives words for", () => {
     expect(composerSendBlock(live)).toBeNull();
     expect(composerSendBlock({ ...live, hasApi: false })).toBe("connecting");
@@ -608,5 +701,6 @@ describe("composerSendBlock", () => {
     expect(composerSendBlock({ ...live, state: "waking" })).toBe("waking");
     expect(composerSendBlock({ ...live, state: "unreachable" })).toBe("unreachable");
     expect(composerSendBlock({ ...live, hydrated: false })).toBe("loading");
+    expect(composerSendBlock({ ...live, agents: false })).toBe("no-agents");
   });
 });

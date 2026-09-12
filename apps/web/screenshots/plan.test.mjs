@@ -122,12 +122,33 @@ describe("a surface that names its own fixture", () => {
 describe("the surfaces list this repo ships", () => {
   it("reads, and asks for one file per surface, width and theme", () => {
     const read = readSurfaces(JSON.parse(readFileSync(join(HERE, "surfaces.json"), "utf8")));
-    expect(read.surfaces.map(s => s.name)).toEqual(["sidebar", "workspace", "composer-thread", "machine", "cloud-setup", "spawned-thread", "host-asleep", "settings-where", "add-computer", "settings-image-fresh", "settings-image-built", "settings-image-sheet"]);
+    expect(read.surfaces.map(s => s.name)).toEqual([
+      "sidebar",
+      "workspace",
+      "composer-thread",
+      "machine",
+      "cloud-setup",
+      "spawned-thread",
+      "threads-across-workspaces",
+      "opener-transcript",
+      "host-asleep",
+      "settings-where",
+      "add-computer",
+      "settings-image-fresh",
+      "settings-image-built",
+      "settings-image-sheet",
+      "settings-computer-open",
+      "remove-computer",
+      "add-computer-no-app",
+      "add-computer-ssh",
+      "connect-provider-pick",
+      "connect-provider-key",
+    ]);
     // The one surface shot as a window on another computer, which is the only state the asleep line is drawn in.
     expect(read.surfaces.filter(s => s.remote).map(s => s.name)).toEqual(["host-asleep"]);
-    // The two served from a state of their own, since an image that is built cannot stand in the same state file
-    // as one that never was.
-    expect(read.surfaces.filter(s => s.fixture !== undefined).map(s => s.fixture)).toEqual(["image-built", "image-built"]);
+    // The four served from a state of their own: an image that is built cannot stand in the same state file as one
+    // that never was, and a thread whose agent opened threads elsewhere needs the workspaces those threads run on.
+    expect(read.surfaces.filter(s => s.fixture !== undefined).map(s => s.fixture)).toEqual(["orchestrator", "orchestrator", "image-built", "image-built"]);
     expect(shotPlan(read)).toHaveLength(read.surfaces.length * read.widths.length * 2);
     // The app's own default window is one of them, so a row that only breaks at 1280 is photographed.
     expect(read.widths).toContain(1280);

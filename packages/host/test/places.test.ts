@@ -244,7 +244,7 @@ describe("the table wsp places prints", () => {
     expect(printed[1]).toContain("zingzys-mac");
     expect(printed[2]).toContain("box");
     expect(printed[2]).toContain("default");
-    expect(printed[3]).toContain("$0.018/h");
+    expect(printed[3]).toContain("$0.018/hr");
     expect(printed.filter(l => l.includes("default"))).toHaveLength(1);
   });
 

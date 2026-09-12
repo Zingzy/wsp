@@ -63,8 +63,10 @@ export interface ThreadVerbs {
   readonly copyText: (text: string) => Promise<void>;
 }
 
-/** The page's own address for one thread, the link a person pastes elsewhere. */
-export const threadLink = (target: ThreadTarget, threadId: string): string => `${window.location.origin}${window.location.pathname}${threadHash(target.workspaceId, threadId)}`;
+/** The page's own address for one thread: the link a person pastes elsewhere, and the href a row that points at
+ * another thread carries. One shape for both, so an address written in the app never differs from one copied out. */
+export const threadLink = (target: Pick<ThreadTarget, "workspaceId">, threadId: string): string =>
+  `${window.location.origin}${window.location.pathname}${threadHash(target.workspaceId, threadId)}`;
 
 export const threadActions: ReadonlyArray<ActionEntry<ThreadTarget, ThreadVerbs>> = [
   {

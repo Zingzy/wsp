@@ -440,7 +440,7 @@ describe("stageDaemonBundle", () => {
     // A stand-in daemon that reports the environment it was started with and what start.mjs asked of it.
     writeFileSync(
       join(daemonDir, "dist", "index.js"),
-      'export const OPEN_SOCKET_PATH = "/root/.wsp/open.sock";\nexport async function startDaemon(o) { console.log(JSON.stringify({ path: process.env.PATH, ...o })); return { port: 7070 }; }\n',
+      'export const OPEN_SOCKET_PATH = "/root/.wsp/open.sock";\n' + "export const daemonListeningLine = (host, port) => `wsp-daemon listening on ${host}:${port}`;\n" + 'export async function startDaemon(o) { console.log(JSON.stringify({ path: process.env.PATH, ...o })); return { port: 7070 }; }\n',
     );
     const stage = join(dir, "stage");
     await stageDaemonBundle(stage, CLOUD_PLACE, daemonDir, fakeCliDir(dir));

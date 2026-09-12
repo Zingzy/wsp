@@ -27,7 +27,7 @@ import {
   type SshWiring,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portsAsked, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, usageRefusal, WS_PORT_OFFSET, type WorkspaceCreatingEvent } from "@wsp/protocol";
+import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portsAsked, runForTheList, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, unknownWordLine, usageRefusal, WS_PORT_OFFSET, type WorkspaceCreatingEvent } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, parseSshAddress, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshIdentity, sshMachineName, sshReachOf, type SshReach } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerModule, type ProviderEnv } from "./providers.js";
 import { assetDir } from "./assets.js";
@@ -53,7 +53,9 @@ import { askFirst } from "./init-first.js";
 import { buildBesideHost } from "./init-beside.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 import { addressLines, dialAddress, hostLogPath, hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
-import type { LocalDaemon } from "./local-daemon.js";
+import type { LocalDaemon, LocalDaemonOptions } from "./local-daemon.js";
+import { localSysSamples } from "./local-readings.js";
+import { startOnce } from "./start-once.js";
 import {
   hostThereLines,
   httpProbe,
@@ -84,7 +86,7 @@ import { addCommand, addFlags, joinCommand, leaveCommand, placeWiring, removeCom
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, registeredLine, removeEach, removeLines, runningWsp, type RunningWsp } from "./mcp-install.js";
-import { CLI_VERBS, COMMON, type DialOpts, dialHost, failed, findVerb, type HostClient, jsonAsked, runVerb, toolName, verbHelp, verbUsage, type LocalRuntime, type VerbDeps } from "./verbs.js";
+import { CLI_VERBS, COMMON, type DialOpts, dialHost, failed, findVerb, type HostClient, jsonAsked, runVerb, takeCommon, toolName, verbHelp, verbUsage, type LocalRuntime, type VerbDeps } from "./verbs.js";
 import { VERSION } from "./version.js";
 
 /** The computer every screen and every reader here is told it is on; the one reading, so a run, its hand-off and
@@ -325,6 +327,10 @@ export interface CliIO {
   ask(question: string): Promise<string>;
   /** A person is at the keyboard (stdin and stdout are terminals); absent means an agent or a pipe, and nothing is asked. */
   isTTY?: boolean;
+  /** What the stream writes and what log prints land in front of the same eyes (stdout and stderr are both
+   * terminals), so text the stream has already shown is not printed a second time under it. Absent, the two part:
+   * stdout carries the answer whole and the stream is somebody else's view of the work. */
+  sameScreen?: boolean;
   /** A key, typed without echo. Lines after the first are shown under the question. `variable` is what a caller
    * with no terminal is told to set instead, so a refusal in a service log names the key to put in a file rather
    * than saying it. */
@@ -372,6 +378,7 @@ export function terminalIO(input: Stream<Readable> = process.stdin, output: Stre
     stream: text => process.stderr.write(text),
     muted: text => muted(text, colourDepth(isTTY(process.stderr))),
     isTTY: screen,
+    sameScreen: isTTY(output) && isTTY(process.stderr),
     ask: q => (screen ? answered(confirmPrompt(split(q))).then(yes => (yes ? "yes" : "no")) : nobody(q)),
     askSecret: (q, variable) => (screen ? answered(passwordPrompt(split(q))) : noKey(q, variable)),
   };
@@ -588,33 +595,41 @@ function statePathFrom(flag?: string, env: Readonly<Record<string, string | unde
  * folders stay reachable, as they are to any shell they open, but nothing starts a turn in one. */
 export const localWorkFolder = (home: string): string => join(home, "wsp-work");
 
+/** How this host starts the daemon for its local workspace. Behind a parameter so a test can hand one that refuses
+ * to start; the default loads the daemon module on the first dial, so a host nobody opens a pane on loads none of it. */
+export type LocalDaemonStart = (opts: LocalDaemonOptions) => Promise<LocalDaemon>;
+
 /** This computer as a workspace: the local backend, a real child process per turn under the turn's limits, each
  * harness's own store (the one their store variable names, else the default under the person's home), and the
  * person's own login environment for every turn, the same one wsp exec runs under, so the keys and tools a terminal
  * gives an agent reach it here too. The adapters strip their own agent-session variables from it, as they do on a
  * fork. The person's home and the folder work starts in are two facts: the stores are theirs, so a sign-in they
  * made is the one a turn uses, and the work folder is the workspace's own. */
-export function localWiring(home = homedir(), env: Readonly<Record<string, string | undefined>> = process.env): LocalWiring {
+export function localWiring(home = homedir(), env: Readonly<Record<string, string | undefined>> = process.env, startDaemon: LocalDaemonStart = opts => import("./local-daemon.js").then(m => m.LocalDaemon.start(opts))): LocalWiring {
   const root = localWorkFolder(home);
   // The person whose sign-ins a turn here reads. Their login home, except under a harness serving a fixture out of
   // a home of its own: that home holds this host's files, and a turn started under it finds no sign-in at all.
   const person = homeNamed(env[PERSON_HOME_ENV]) ?? home;
-  // Started on the first dial and kept: a host nobody opens a pane on never binds a port on this computer, and
-  // never dlopens the native module @wsp/daemon's import of node-pty loads. The desktop package ships that module
-  // beside its bundle, so the deferred edge is about the port and the load, not about a missing file.
-  let daemon: Promise<LocalDaemon> | undefined;
   let shutting = false;
   const backend = new LocalBackend({ root, env });
+  // Started on the first dial and kept: a host nobody opens a pane on binds no port on this computer and writes
+  // none of the daemon's own files under the person's home. The native module a pty takes is loaded at the first
+  // pty and not by this import, so the deferred edge is the port and those files, nothing else.
+  const daemon = startOnce(
+    () => startDaemon({ root: home, workFolder: backend.workFolder() }),
+    why => `the daemon for this computer's workspace did not start, so its terminal, files and processes have nothing to dial: ${why}`,
+  );
   return {
     backend,
     execStream: o => localExecStream({ root: backend.workFolder(), ...o }),
     home: id => agentHome(person, id, env),
     homeDir: home,
     env: () => ({ ...Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined)), HOME: person }),
+    sysSamples: localSysSamples({ root: home, workFolder: () => backend.workFolder() }),
     daemonRoad: async () => {
       // The panes stay on the person's home: the files and terminal tabs are theirs to look around in, where a
       // turn's own folder is the workspace's.
-      const started = await (daemon ??= import("./local-daemon.js").then(m => m.LocalDaemon.start({ root: home, workFolder: backend.workFolder() })));
+      const started = await daemon.get();
       // A dial that lands while the host is closing must leave no socket behind: a listening one keeps this process up.
       if (shutting) {
         await started.close().catch(() => {});
@@ -624,8 +639,8 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
     },
     close: async () => {
       shutting = true;
-      const started = daemon;
-      daemon = undefined;
+      const started = daemon.held();
+      daemon.forget();
       // A turn here leads a process group of its own, so it no longer goes with the terminal's Ctrl-C: this host is
       // the only thing that knows where its turns are, and nothing can re-open one once it is gone.
       await endLocalRuns();
@@ -1067,11 +1082,11 @@ async function init(
   opts: SharedOpts,
   flags: { yes: boolean; nonInteractive: boolean; json: boolean; noLocal: boolean; recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string; upCommand: string; forkCommand: string },
 ): Promise<number> {
-  if (flags.json && flags.yes) throw usageRefusal("wsp init: --json prints the sign-ins as they are handed to you, and --yes skips the sign-ins, so there would be nothing to print. Drop one of them.");
+  if (flags.json && flags.yes) throw usageRefusal("wsp init: --json prints the sign-ins as they are handed to you, and --yes skips the sign-ins, so there would be nothing to print.", "Drop one of them.");
   await adoptLoginPath(line => io.log(line));
   const held = servingHost(opts.statePath);
   const flag = projectFlag("init", flags.project);
-  if (!flag.ok) throw usageRefusal(flag.message);
+  if (!flag.ok) throw usageRefusal(flag.message, "Give --project a folder that is already here, or drop the flag and let the run ask.");
   const project = flag.path;
   // Under --json every line this run says, the host's own included, goes to stderr so stdout is the objects' alone.
   const say = flags.json ? jsonCliIO() : io;
@@ -1079,7 +1094,7 @@ async function init(
   // The objects --json prints are the build's own, and a build handed over is that host's run: its objects land on
   // its job, where wsp setup reads them, not on this stdout. Refused rather than printing an empty stream.
   if (held !== undefined && flags.json) {
-    throw usageRefusal(`wsp init --json prints the build's own objects, and the host serving ${opts.statePath} (pid ${held.pid}) is what runs this build: its sign-ins and stages ride its own setup, which wsp setup --json reads. Drop --json, or take that host down (wsp down) and run this again.`);
+    throw usageRefusal(`wsp init --json prints the build's own objects, and the host serving ${opts.statePath} (pid ${held.pid}) is what runs this build: its sign-ins and stages ride its own setup, which wsp setup --json reads.`, "Drop --json, or take that host down (wsp down) and run this again.");
   }
   // A host already serving this state file is the process that writes it and holds the provider, so this run asks
   // its screens and hands the build to that host. Read before the opening: a refusal here is the whole run, and it
@@ -1091,12 +1106,12 @@ async function init(
   // A provider with no size to boot a builder on has no image to build, so the run makes this computer the workspace
   // and serves the app on it. Every flag about the golden is about a road this run does not take.
   if (beside === undefined && forksNoMachines(providerBackendFor(providerEnv).capabilities)) {
-    if (flags.noLocal) throw usageRefusal(`wsp init: with no provider key ${THIS_COMPUTER} is all this run makes, so --no-local would leave it with nothing. Drop it${orSetTheKey(providerEnv)}.`);
+    if (flags.noLocal) throw usageRefusal(`wsp init: with no provider key ${THIS_COMPUTER} is all this run makes, so --no-local would leave it with nothing.`, `Drop it${orSetTheKey(providerEnv)}.`);
     // Every other flag is about a golden: what goes on the image, what forks from it and what lands on that fork.
     // This road builds no image, and the workspace it makes is this computer, whose files are already here.
     const aboutGolden = GOLDEN_FLAGS.filter(([, given]) => given(flags)).map(([name]) => name);
     if (aboutGolden.length > 0) {
-      throw usageRefusal(`wsp init: with no provider key there is no image to build and nothing to fork, and ${THIS_COMPUTER} already has your files, so ${aboutGolden.join(", ")} would do nothing here. Drop them${orSetTheKey(providerEnv)}.`);
+      throw usageRefusal(`wsp init: with no provider key there is no image to build and nothing to fork, and ${THIS_COMPUTER} already has your files, so ${aboutGolden.join(", ")} would do nothing here.`, `Drop them${orSetTheKey(providerEnv)}.`);
     }
     const local = await runLocalInit(
       {
@@ -1760,7 +1775,7 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
   try {
     ({ values, positionals: words } = parseArgs({ args: argv, options: MCP_OPTIONS, allowPositionals: true }));
   } catch (e) {
-    return failed(io, jsonAsked(argv), usageRefusal(`${e instanceof Error ? e.message : String(e)}\n\n${usage}`));
+    return failed(io, jsonAsked(argv), usageRefusal(e instanceof Error ? e.message : String(e), usage));
   }
   if (values.help === true) {
     io.log(usage);
@@ -1773,13 +1788,16 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
     return 0;
   }
   const json = values.json === true;
-  if (words[0] !== "install" || words.length !== 1) return failed(io, json, usageRefusal(`unknown command: ${MCP_COMMAND} ${words.join(" ")}\n\n${usage}`));
+  if (words[0] !== "install" || words.length !== 1) return failed(io, json, usageRefusal(unknownWordLine(`${MCP_COMMAND} ${words.join(" ")}`), runForTheList(`wsp ${MCP_COMMAND} --help`)));
   // Nobody named an agent: at a terminal that is a line half typed, but an agent running this has no terminal to be
   // asked at, so every agent whose own command is on this computer's PATH takes it.
   const agents = values.agent ?? (io.isTTY === true ? [] : agentsOnPath(run.PATH));
   if (agents.length === 0) {
-    const none = io.isTTY !== true ? "wsp mcp install: no agent of the catalog's is on this computer's PATH; name one with --agent.\n" : "";
-    return failed(io, json, usageRefusal(`${none}usage: ${mcpInstallUsage()}`));
+    const none =
+      io.isTTY !== true
+        ? "wsp mcp install: no agent of the catalog's is on this computer's PATH."
+        : "wsp mcp install writes the config of the agents it is given, and was given none.";
+    return failed(io, json, usageRefusal(none, `Name one with --agent.\n\nusage: ${mcpInstallUsage()}`));
   }
   const project = process.cwd();
   if (values.remove === true) {
@@ -1869,7 +1887,10 @@ export async function cli(argv: string[], io: CliIO = terminalIO(), run: Running
   // One reading for every road out of this process, and the sentence about it said once: a verb, a command and the
   // tool server all pick their state here, so none of them can run against a state another of them named.
   const chooseState = (flag?: string): string => statePathFrom(flag, env, line => io.error(line));
-  const verb = findVerb(argv);
+  // The flags every line shares are taken off the whole line here, before the words that select the line are read,
+  // so one of them binds wherever it was typed and what is left reaches its own parse in the order it was given.
+  const { common, rest } = takeCommon(argv);
+  const verb = findVerb(rest);
   // The one verb that runs with no host serving, new --local, builds the runtime over the state file in this process.
   const verbRuntime = async (statePath: string): Promise<LocalRuntime> => {
     await adoptLoginPath(line => io.log(line));
@@ -1883,31 +1904,44 @@ export async function cli(argv: string[], io: CliIO = terminalIO(), run: Running
       close: () => rt.close(),
     };
   };
-  if (verb !== undefined) return runVerb(verb, argv, io, chooseState, { alsoHere, cwd: process.cwd(), env, runtime: verbRuntime });
-  if (argv[0] === MCP_COMMAND) return mcp(io, argv.slice(1), chooseState, run, env);
+  if (verb !== undefined) {
+    const words = verb.name.split(" ");
+    return runVerb(verb, [...words, ...common, ...rest.slice(words.length)], io, chooseState, { alsoHere, cwd: process.cwd(), env, runtime: verbRuntime });
+  }
+  if (rest[0] === MCP_COMMAND) return mcp(io, [...common, ...rest.slice(1)], chooseState, run, env);
   let values: SharedFlags;
   let positionals: string[];
   try {
-    ({ values, positionals } = parseArgs({ args: argv, options: SHARED_OPTIONS, allowPositionals: true }));
+    ({ values, positionals } = parseArgs({ args: [...common, ...rest], options: SHARED_OPTIONS, allowPositionals: true }));
   } catch (e) {
-    return failed(io, jsonAsked(argv), usageRefusal(e instanceof Error ? e.message : String(e)));
+    return failed(io, jsonAsked(argv), usageRefusal(e instanceof Error ? e.message : String(e), runForTheList("wsp --help")));
   }
   if (values.version) {
     io.log(`wsp ${VERSION}`);
     return 0;
   }
-  if (values.help) {
+  const word = positionals[0] ?? "up";
+  // `help` is the word for the flag: a person reaching for it types one as readily as the other, and answering the
+  // word with a typo's refusal is the tool arguing about punctuation.
+  if (values.help === true || word === "help") {
     io.log(HELP);
     return 0;
   }
   const opts = optsFor(values, env, line => io.error(line));
-  const word = positionals[0] ?? "up";
   const command = COMMANDS[word];
   const json = values.json === true;
-  if (command === undefined) return failed(io, json, usageRefusal(commandUsage(word) ?? `unknown command: ${word}\n\n${HELP}`));
-  if (json && !command.json) return failed(io, json, usageRefusal(`Unknown option '--json' for wsp ${word}: only ${JSON_COMMANDS.map(w => `wsp ${w}`).join(", ")} prints JSON.`));
+  if (command === undefined) {
+    // A word that opens a line but is no line of its own gets the lines it opens; one no command answers to gets
+    // the pointer, since the help behind it runs to hundreds of rows.
+    const usage = commandUsage(word);
+    const refusal = usage === undefined ? usageRefusal(unknownWordLine(word), runForTheList("wsp --help")) : usageRefusal(`wsp ${word} opens a line rather than being one.`, usage);
+    return failed(io, json, refusal);
+  }
+  if (json && !command.json) {
+    return failed(io, json, usageRefusal(`Unknown option '--json' for wsp ${word}: it answers in prose.`, `That flag belongs to ${JSON_COMMANDS.map(w => `wsp ${w}`).join(", ")}, and to every verb.`));
+  }
   if (values.host !== undefined && command.host === "refused") {
-    return failed(io, json, usageRefusal(`Unknown option '--host' for wsp ${word}: it runs on this computer. ${HOST_COMMANDS.map(w => `wsp ${w}`).join(", ")} reads it, and so does every verb.`));
+    return failed(io, json, usageRefusal(`Unknown option '--host' for wsp ${word}: it runs on this computer.`, `That flag belongs to ${HOST_COMMANDS.map(w => `wsp ${w}`).join(", ")}, and to every verb.`));
   }
   try {
     return await command.run(io, opts, values, positionals.slice(1));

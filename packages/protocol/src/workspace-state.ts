@@ -45,11 +45,12 @@ export interface WorkspaceKindWords {
    * so a row says what the machine is instead of that its daemon is not there. True on a kind whose machines take
    * one, even before one has landed on a given machine: what a machine without one yet says is its own reach word. */
   daemon: boolean;
-  /** Whether a machine of this kind reads its own load, memory and disk for the Machine tab's Live rows. False says
-   * those rows read that the reading is not on this kind, rather than waiting on a sample that never comes. */
-  metrics: boolean;
-  /** Whether a machine of this kind lists its processes for the Processes tab, which the same rule holds for. */
-  processes: boolean;
+  /** Where the Machine tab's Live rows are read for a machine of this kind: off the daemon on that machine, or in
+   * the host process for the computer the host runs on. False says those rows read that the reading is not on this
+   * kind, rather than waiting on a sample that never comes. */
+  metrics: ReadingRoad;
+  /** Where the Processes tab's list is read, which the same rule holds for. */
+  processes: ReadingRoad;
   /** What `import` does to a folder on this computer for a machine of this kind: copies it there and asks about the
    * secret-shaped files first, or registers its path with nothing copied and nothing to ask, the folder being on
    * this computer already. Null where no road lands a folder yet, so no tile and no verb offers one. */
@@ -106,13 +107,19 @@ const A_PROVIDER = "a provider";
  * that machine's own /proc through the daemon on it, and this computer reads its own host. */
 export type KindReading = "metrics" | "processes";
 
+/** Who reads one of those two for a machine of this kind. `daemon` is the machine answering for itself over the
+ * link a pane holds. `host` is the host process reading the computer it runs on, which is the whole machine there:
+ * the reading then stands whether or not that computer's daemon is up, since nothing about cpu, memory or disk
+ * needs a port, a token or a pty. False is a kind that reads it on no road. */
+export type ReadingRoad = "daemon" | "host" | false;
+
 /** The words per kind, the one table every client reads instead of comparing a kind itself. Adding a kind (an ssh
  * machine) is a row here. */
 export const WORKSPACE_KIND_WORDS: Record<WorkspaceKind, WorkspaceKindWords> = {
-  cloud: { machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: A_PROVIDER, driven: true, daemon: true, metrics: true, processes: true, imports: "copies", importsAt: "same path", agents: true, onDelete: { asked: "machine is deleted at the provider", done: machineId => `machine ${machineId} is gone at the provider` }, panel: "Where it runs, its projects and what it costs." },
-  local: { machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: true, processes: true, imports: "registers", importsAt: "same path", agents: false, onDelete: { asked: MACHINE_LEFT, done: () => `its ${MACHINE_LEFT}` }, panel: "What this Mac is running, its projects and how it is doing." },
-  ssh: { machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: true, processes: true, imports: "copies", importsAt: "under home", agents: false, onDelete: { asked: SSH_SWEPT, done: () => `its ${SSH_SWEPT}` }, panel: OWN_COMPUTER_PANEL },
-  place: { machine: JOINED_COMPUTER, rowReadsMachine: true, cpu: "cores", where: JOINED_COMPUTER, driven: false, daemon: true, metrics: true, processes: true, imports: "copies", importsAt: "under home", agents: false, onDelete: { asked: PLACE_KEPT, done: () => `its ${PLACE_KEPT}` }, panel: OWN_COMPUTER_PANEL },
+  cloud: { machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: A_PROVIDER, driven: true, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "same path", agents: true, onDelete: { asked: "machine is deleted at the provider", done: machineId => `machine ${machineId} is gone at the provider` }, panel: "Where it runs, its projects and what it costs." },
+  local: { machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", imports: "registers", importsAt: "same path", agents: false, onDelete: { asked: MACHINE_LEFT, done: () => `its ${MACHINE_LEFT}` }, panel: "What this Mac is running, its projects and how it is doing." },
+  ssh: { machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "under home", agents: false, onDelete: { asked: SSH_SWEPT, done: () => `its ${SSH_SWEPT}` }, panel: OWN_COMPUTER_PANEL },
+  place: { machine: JOINED_COMPUTER, rowReadsMachine: true, cpu: "cores", where: JOINED_COMPUTER, driven: false, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "under home", agents: false, onDelete: { asked: PLACE_KEPT, done: () => `its ${PLACE_KEPT}` }, panel: OWN_COMPUTER_PANEL },
 };
 
 export function kindWords(kind: WorkspaceKind): WorkspaceKindWords {
@@ -123,6 +130,12 @@ export function kindWords(kind: WorkspaceKind): WorkspaceKindWords {
  * that serves it shows pending until the first value lands, and a kind that serves it on no road says so at once,
  * so no slot sits at pending for a stream that will never come. */
 export function servesReading(kind: WorkspaceKind, reading: KindReading): boolean {
+  return readingRoad(kind, reading) !== false;
+}
+
+/** Who answers this reading for a machine of this kind: the one table both the pane that asks for it and the host
+ * that serves it read, so neither can decide for itself where a kind's figures come from. */
+export function readingRoad(kind: WorkspaceKind, reading: KindReading): ReadingRoad {
   return WORKSPACE_KIND_WORDS[kind][reading];
 }
 
@@ -229,8 +242,8 @@ export function actionRefusal(state: WorkspaceState, action: string, goneWords?:
 }
 
 /** What refuses a send before the workspace's state is asked: the socket to wsp, the workspace lookup, the
- * transcript still loading. */
-export type SendBlock = "connecting" | "reconnecting" | "closed" | "not-found" | "loading";
+ * transcript still loading, the agent catalog this workspace picks its model and access out of still unanswered. */
+export type SendBlock = "connecting" | "reconnecting" | "closed" | "not-found" | "loading" | "no-agents";
 
 /** Every kind of send refusal: a block, or a state other than running. */
 export type SendRefusalKind = WorkspaceState | SendBlock;
@@ -243,6 +256,7 @@ export const SEND_BLOCK_WORDS: Record<SendBlock, string> = {
   closed: "wsp is not running",
   "not-found": "Workspace not found",
   loading: "Loading transcript",
+  "no-agents": "the agents here have not answered yet",
 };
 
 /** Why a turn cannot be sent, one sentence per kind; null while running. The composer draws every row; the runtime

@@ -158,17 +158,30 @@ export function offeredSize(sizes: readonly WorkspaceSize[], size: WorkspaceSize
   return sizes.some(s => s.cpu === size.cpu && s.memMb === size.memMb);
 }
 
-/** An awake rate in dollars an hour, to the cent. */
+/** An awake rate in dollars an hour, at the fewest places that do not round the price: cents where cents are the
+ * whole of it, three places where they are not, since a workspace at $0.018 an hour reads as $0.02 to the cent and
+ * that is a fifth of the price. A third place that says nothing is not added: $0.09 is $0.09, not $0.090.
+ *
+ * Which it is, is read off the rounded thousandth and never off the number itself: a provider computes its rate
+ * (Solari charges per vCPU-hour plus per GB-hour), so a real one arrives as 0.09000000000000001, and any test of
+ * the float against its own cent form calls that noise a third place. The one rate rule, read by the size refusal,
+ * the places table, the size pickers and the provider rows alike. */
 export function fmtRate(usdPerHour: number): string {
-  return `$${usdPerHour.toFixed(2)}/hr`;
+  const mils = usdPerHour.toFixed(3);
+  return `$${mils.endsWith("0") ? usdPerHour.toFixed(2) : mils}/hr`;
 }
 
 /** The one refusal every road gives a size the provider does not offer, malformed or merely absent: the word as it
- * was given, then every size that is offered with its rate. */
+ * was given, then every size that is offered with its rate. What happened, alone: each road joins its own fix to it
+ * through refusalLine, since what to do about it is the road's (a flag at a terminal, a pick in the app). */
 export function sizeRefusal(word: string, sizes: readonly MachineSizeOffer[]): string {
   const offered = sizes.map(s => `${sizeWord(s)} (${fmtRate(s.rateUsdPerHour)})`).join(", ");
   return `${word} is not a size this provider offers; the sizes are ${offered}`;
 }
+
+/** What to do about such a size on a road with no flag to name: the app's picker and the wire both ask for one of
+ * the sizes the half above just listed. The command line names its own flag instead. */
+export const SIZE_PICK_FIX = "Ask for one of those instead.";
 
 /** The one refusal a create or a fork gives when the provider is at its machine cap and no builder was left to stop
  * for room: the machines this host knows hold the slots, and the two moves that free one. The provider's own
@@ -275,12 +288,27 @@ export function waitTimedOutLine(threadIds: readonly string[], ms: number): stri
   return `${who} still running after ${fmtDuration(ms)}`;
 }
 
-/** What a settled turn says beside its outcome word, in the order every client shows it: how long it worked, then
- * what it cost. The app's chat footer and the command line's last line read from this one list. */
-export function turnSettledParts(turn: { durationMs?: number | null; costUsd?: number | null }): string[] {
+/** What the threads a thread opened have spent, said as its own fact: this is their whole life, and the turn's own
+ * figure counts none of their work. */
+export function openedSpendPart(costUsd: number): string {
+  return `${fmtCost(costUsd)} in threads it opened`;
+}
+
+/** The turn's own cost where a second figure stands beside it. The two count different things, one turn against
+ * whole threads, so where both are shown each says which spend it is and neither can be read as the other. */
+export function turnSpendPart(costUsd: number): string {
+  return `${fmtCost(costUsd)} this turn`;
+}
+
+/** What a settled turn says beside its outcome word, in the order every client shows it: how long it worked, what
+ * it cost, and what the threads it opened cost where it opened any. The app's chat footer and the command line's
+ * last line read from this one list. */
+export function turnSettledParts(turn: { durationMs?: number | null; costUsd?: number | null }, openedCostUsd?: number | null): string[] {
+  const opened = typeof openedCostUsd === "number" && openedCostUsd > 0;
   const parts: string[] = [];
   if (typeof turn.durationMs === "number") parts.push(`Worked for ${fmtDuration(turn.durationMs)}`);
-  if (typeof turn.costUsd === "number") parts.push(fmtCost(turn.costUsd));
+  if (typeof turn.costUsd === "number") parts.push(opened ? turnSpendPart(turn.costUsd) : fmtCost(turn.costUsd));
+  if (opened) parts.push(openedSpendPart(openedCostUsd));
   return parts;
 }
 
@@ -898,6 +926,31 @@ export function sendNowFailedLine(error: string): string {
 /** The one line every client shows on a start whose thread's previous turn was cut, before the new turn's output. */
 export const AFTER_CUT_LINE = "previous turn was cut; resuming";
 
+/** Every refusal a terminal reads is two halves, what happened and then what to do about it, in one or two lines:
+ * the law the app's first-run slot draws in its two inks, in the one sentence stderr gets. A refusal that only
+ * names the fault leaves the person to guess the fix, which is the whole complaint. The first half is closed here
+ * when it closes itself with nothing, since many of these sentences are written for the app as well, where they
+ * stand alone and nothing follows them. */
+export function refusalLine(happened: string, fix: string): string {
+  const said = happened.trimEnd();
+  return `${said}${/[.!?:]$/.test(said) ? "" : "."} ${fix}`;
+}
+
+/** The command's name, said once. A line refused inside a verb is printed behind the verb's name, so a sentence
+ * that opens with that same name would say it twice; the prefix is the one home for it, and the sentence may open
+ * with it or not without either of them knowing about the other. */
+export function sayOnce(prefix: string, message: string): string {
+  const name = prefix.replace(/:\s*$/, "");
+  return name !== "" && (message === name || message.startsWith(`${name} `)) ? message : `${prefix}${message}`;
+}
+
+/** A word no command answers to, named: the first half of that refusal, wherever the word was typed. */
+export const unknownWordLine = (word: string): string => `unknown command: ${word}.`;
+
+/** Where the list of words is: the second half of an unknown word's refusal. The help runs to hundreds of lines,
+ * so a typo is pointed at it and never handed it. */
+export const runForTheList = (list: string): string => `Run ${list} for the list.`;
+
 /** The refusal of a flag another verb reads: the verbs it belongs to, then the one that does not read it, so the
  * caller is told where the flag lives rather than left with the parser's bare unknown-option line. */
 export function foreignFlagLine(flag: string, readers: readonly string[], here: string): string {
@@ -922,9 +975,11 @@ export const EMPTY_TASK_LINE = "the task is empty; say what the thread is to do"
 export const EMPTY_TITLE_LINE = "the name is empty; say what the thread is called";
 
 /** The one line a codex turn fails with when its provider wants an OpenAI login the machine has not got: the CLI
- * itself only retries the 401 and dies. `login` is the catalog's command for signing in on a machine. */
+ * itself only retries the 401 and dies. `login` is the catalog's command for signing in on a machine. It is also
+ * what the composer's model menu shows in place of its footer's source line, which is why it names the workspace
+ * rather than the machine it runs on. */
 export function codexNotSignedInLine(login: string): string {
-  return `Codex is not signed in on this machine; run ${login} there`;
+  return `Codex is not signed in where this workspace runs; run ${login} there`;
 }
 
 /** The line when codex's provider reads its key from an environment variable the machine does not set. */
@@ -934,13 +989,26 @@ export function codexMissingEnvLine(name: string): string {
 
 /** The one line under the composer's model lists: the binary that filled them, else whose table stood in and what it
  * was pinned from, or the adapter's own words for why the binary gave nothing. Every word comes from the catalog being
- * shown, so a tab never borrows another agent's binary, reason or pin. The slot is one line at the popup's width, 290px
- * of the 10px mono it draws in, so the agent is named once and the pin's own words carry the rest. */
-export function catalogSourceLine(catalog: HarnessCatalog): string {
+ * shown, so a tab never borrows another agent's binary, reason or pin. `where` is the word for where the turn runs,
+ * which the caller reads off the workspace: the binary the line names is the one on that computer and on no other.
+ * The slot is one line at the popup's width, 290px of the 10px mono it draws in, so the agent is named once and the
+ * pin's own words carry the rest. */
+export function catalogSourceLine(catalog: HarnessCatalog, where: string): string {
   const version = catalog.version;
-  if (catalog.source === "harness") return `${catalog.label}${version === null ? "" : ` ${version}`} on this machine`;
+  if (catalog.source === "harness") return `${catalog.label}${version === null ? "" : ` ${version}`} on ${where}`;
   const why = catalog.refusal ?? `${catalog.harness} table`;
   return version === null ? why : `${why} · ${version}`;
+}
+
+/** What the foot of the composer's model menu says after that line, and the only place it is said. The rows above it
+ * carry the agent's own dollar prices per million tokens, which a person with no account anywhere read as a bill from
+ * wsp: so the foot names whose sign-in the turn runs on and where that sign-in is, and says the prices are the agent's
+ * own. Both sentences hold on every workspace and only the word for where the turn runs changes, so a person who moves
+ * a thread to another computer reads the same two sentences with one word swapped. The prices sentence is dropped
+ * where the menu lists no model, since there is then no price on the screen for it to be about. */
+export function whoPaysLines(catalog: HarnessCatalog, where: string): string[] {
+  const runs = `Threads run on ${catalog.label}'s own sign-in on ${where}, which costs this wsp nothing.`;
+  return catalog.models.length === 0 ? [runs] : [runs, "The prices are its list prices, not a bill."];
 }
 
 /** The one line in place of the model rows: what the binary reported, or what the table holds, and never a count the
@@ -1129,6 +1197,15 @@ export const NO_PROVIDER_LINE = "no machine provider is set up on this computer,
 
 /** Where a Solari key comes from, spelled once for the terminal's ask, the modal's guide and its link. */
 export const SOLARI_CONSOLE = "console.getsolari.com";
+
+/** What a person calls a provider's key and where they get one, keyed by the word WSP_PROVIDER holds. The host's
+ * provider registry reads its keyName and keyConsole from here and the app's provider rows read the same, so the
+ * screen that asks for a key and the terminal that asks for it say one thing. A provider that takes no key has no
+ * row. */
+export const PROVIDER_KEY_WORDS: Record<string, { keyName: string; keyConsole?: string }> = {
+  box: { keyName: "Box API key", keyConsole: "ascii.dev" },
+  solari: { keyName: "Solari API key", keyConsole: SOLARI_CONSOLE },
+};
 
 /** The quiet row at the sidebar's bottom while no golden is sealed, and every word of the modal it opens: the init
  * job drawn in the app. Micro-labels are the caps mono words over a screen, headlines the one sentence under them,
@@ -2121,8 +2198,14 @@ export function leftOutLine(note: string): string {
 /** Why `wsp recipe --add` refuses a package a manager on this computer already has: that package is a row of its own,
  * which the build installs by the road the plan resolves for it (a tap formula from its GitHub release, pinned),
  * and a second row would install it twice by a line the image can refuse. The word that ticks the row instead. */
-export function addAlreadyHereLine(platform: "darwin" | "linux", id: string, scanId: string): string {
-  return `--add ${id}: a package manager on ${thisComputer(platform)} already has ${id}, so it is a row of its own; tick it with --set ${scanId}=on, which installs it by its own road, rather than adding a second row that installs it again`;
+export function addAlreadyHereLine(platform: "darwin" | "linux", id: string): string {
+  return `--add ${id}: a package manager on ${thisComputer(platform)} already has ${id}, so it is a row of its own.`;
+}
+
+/** What to do about it: the word that ticks that row, which installs the package by its own road rather than by a
+ * second row that installs it again. */
+export function addAlreadyHereFix(scanId: string): string {
+  return `Tick it with --set ${scanId}=on.`;
 }
 
 /** A recipe file's tick on a tool outside the catalog that this computer has no row for: nothing here says how to install
@@ -2522,7 +2605,7 @@ export const HOST_WORDS = {
 } as const;
 
 /** How long a computer has been away, coarse on purpose: the figure is read once in a table, not watched. */
-function offlineFor(ms: number): string {
+export function offlineFor(ms: number): string {
   const minutes = Math.max(0, Math.floor(ms / 60_000));
   if (minutes < 60) return `${minutes} min`;
   const hours = Math.floor(minutes / 60);
@@ -2605,7 +2688,7 @@ export function hostsMenuItems(view: HostsView): ContextMenuItem[] {
     ...(view.place === undefined
       ? []
       : [
-          { id: `${HOST_MENU_AWAKE}${view.place.awake ? "off" : "on"}`, label: HOST_WORDS.place.awakeRow, group: "place", enabled: true, checked: view.place.awake },
+          { id: `${HOST_MENU_AWAKE}${view.place.awake ? "off" : "on"}`, label: HOST_WORDS.place.awakeRow, group: "place", enabled: true, checked: view.place.awake, hint: HOST_WORDS.place.awakeWhy },
           { id: HOST_MENU_LEAVE, label: HOST_WORDS.place.leaveRow(view.place.hostName), group: "place", enabled: true, destructive: true },
         ]),
   ];

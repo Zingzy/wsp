@@ -157,7 +157,7 @@ describe("parseCatalogProbe", () => {
 
   it("names the sign-in when the app-server answered and offered no model for want of one, and stays silent otherwise", () => {
     expect(parseCatalogProbe(withoutModels('{"id":4,"result":{"account":null,"requiresOpenaiAuth":true}}'), LOGIN)).toEqual({
-      refused: `Codex is not signed in on this machine; run ${LOGIN} there`,
+      refused: `Codex is not signed in where this workspace runs; run ${LOGIN} there`,
     });
     // Signed in, or routed to a provider that wants no OpenAI login: an empty catalog is not a sign-in to ask for.
     expect(parseCatalogProbe(withoutModels('{"id":4,"result":{"account":null,"requiresOpenaiAuth":false}}'), LOGIN)).toBeNull();

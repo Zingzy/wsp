@@ -5,6 +5,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { installFakeLayout } from "./fake-layout.js";
+import { TABLE_CATALOG, whenAgentsAnswered } from "./agents.js";
 import { composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
 import { stillWorkingLine, type EventUnion, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { useSelectedThreadId, useStore } from "../src/protocol/store.js";
@@ -56,6 +57,7 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
     upgrade: async id => workspaces.find(w => w.id === id)!,
     capabilities: async () => (caps()),
     listSessions: async id => (id === undefined ? rows : rows.filter(r => r.workspaceId === id)),
+    listHarnesses: async () => [TABLE_CATALOG],
     watchStatuses: async () => [],
     createFromGoldenHead: async () => workspaces[0]!,
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
@@ -80,6 +82,7 @@ async function setup(api: Api, threadId: string | null = null) {
   useStore.getState().setConn("live");
   useStore.getState().select(WS, threadId);
   await waitFor(() => expect(useStore.getState().workspaces.length).toBeGreaterThan(0));
+  await whenAgentsAnswered();
   const view = render(<Selected />);
   await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
   return view;

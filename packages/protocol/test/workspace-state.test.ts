@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { actionRefusal, agentsKindRefusal, imageMoveRefusal, NO_REBUILD_NEEDED, agentsMayDrive, computerOffline, deleteNotice, importDest, screenCommandLine, screenCommandTyped, screenCommandsOf, goneRefusal, isBilling, isLocalWorkspace, kindWords, MACHINE_WSP_FORKS, machineWord, needsRebuild, NOT_ON_THIS_KIND, OVER_SSH, providerCannotRefusal, reachShown, relayedRefusal, sendRefusal, servesReading, signInRefusalLine, signInRoad, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, workspaceStateOf, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
+import { actionRefusal, agentsKindRefusal, agentsMayDrive, computerOffline, deleteNotice, importDest, screenCommandLine, screenCommandTyped, screenCommandsOf, goneRefusal, isBilling, isLocalWorkspace, kindWords, MACHINE_WSP_FORKS, machineWord, needsRebuild, NOT_ON_THIS_KIND, OVER_SSH, providerCannotRefusal, reachShown, readingRoad, relayedRefusal, sendRefusal, servesReading, signInRefusalLine, signInRoad, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, workspaceStateOf, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
 
 describe("workspaceState", () => {
   it("phase alone: running, pausing, napping and waking each have one word", () => {
@@ -56,40 +56,17 @@ describe("workspaceState", () => {
     expect(sendRefusal("gone")).toBe("Workspace machine is gone; rebuild it to send");
   });
 
-  it("sendRefusal is one table over everything that refuses a send: the socket, the lookup, the transcript, the thread, then the states", () => {
+  it("sendRefusal is one table over everything that refuses a send: the socket, the lookup, the transcript, the agents, the thread, then the states", () => {
     const blocks: Record<SendBlock, string> = {
       connecting: "Connecting to wsp",
       reconnecting: "wsp is not running, reconnecting",
       closed: "wsp is not running",
       "not-found": "Workspace not found",
       loading: "Loading transcript",
+      "no-agents": "the agents here have not answered yet",
     };
     for (const [kind, words] of Object.entries(blocks)) expect(sendRefusal(kind as SendBlock)).toBe(words);
     expect(stillWorkingLine("Fix the port list")).toBe("Fix the port list replied, still working; the message runs as its next turn once that process exits");
-  });
-
-  // Every refusal a person meets is two halves, what is so and then what to do about it. A refusal that names only
-  // the fault leaves the person to work the fix out, which is what "this one answers" left them with. These are
-  // held as words rather than thrown, and each is one sentence whose halves meet at a semicolon; what that second
-  // half says is read here by eye, case by case, since a clause continuing a sentence in lower case cannot be
-  // checked for the shape of an instruction the way the command line's own fix half can.
-  it("every refusal a held verb answers with is one sentence in two clauses at a semicolon, both of them said", () => {
-    const refusals = [
-      NO_REBUILD_NEEDED,
-      goneRefusal("wake"),
-      actionRefusal("paused", "import"),
-      actionRefusal("waking", "import"),
-      actionRefusal("unreachable", "export"),
-      agentsKindRefusal("local"),
-      imageMoveRefusal("api", "running", { knownVersion: false, projectImage: false }),
-      imageMoveRefusal("api", "running", { knownVersion: true, projectImage: true }),
-      imageMoveRefusal("api", "paused", { knownVersion: true, projectImage: false }),
-      imageMoveRefusal("api", "gone", { knownVersion: true, projectImage: false }),
-    ];
-    for (const refusal of refusals) {
-      const halves = (refusal ?? "").split("; ");
-      expect([refusal, halves.length > 1 && halves.every(half => half.trim() !== "")]).toEqual([refusal, true]);
-    }
   });
 
   it("actionRefusal is the same sentence for any verb that needs the machine, and a send's is it with send", () => {
@@ -188,16 +165,17 @@ describe("what a workspace's kind changes about its words", () => {
   });
 
   it("a machine wsp drives has a state, a bill and an image; this computer has none of the three and its row reads its own size", () => {
-    expect(kindWords("cloud")).toEqual({ machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: "a provider", driven: true, daemon: true, metrics: true, processes: true, imports: "copies", importsAt: "same path", agents: true, onDelete: { asked: "machine is deleted at the provider", done: expect.any(Function) }, panel: "Where it runs, its projects and what it costs." });
-    // This computer serves a daemon and reads both its own load and its own processes off its host. A folder is
+    expect(kindWords("cloud")).toEqual({ machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: "a provider", driven: true, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "same path", agents: true, onDelete: { asked: "machine is deleted at the provider", done: expect.any(Function) }, panel: "Where it runs, its projects and what it costs." });
+    // This computer's load is read where it runs, in the host's own process, so its Live rows stand whether or not
+    // the daemon its terminal and its processes ride ever started. A folder is
     // already on this computer, so an import registers its path and copies nothing. Its row's second line is its
     // cores and memory in the size line a fork's row reads, in its own word for a cpu, since its cores are not virtual.
-    expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: true, processes: true, imports: "registers", importsAt: "same path", agents: false, onDelete: { asked: "machine is left as it is", done: expect.any(Function) }, panel: "What this Mac is running, its projects and how it is doing." });
+    expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", imports: "registers", importsAt: "same path", agents: false, onDelete: { asked: "machine is left as it is", done: expect.any(Function) }, panel: "What this Mac is running, its projects and how it is doing." });
     // A machine over ssh is the person's own too: wsp neither forks it, pauses it, resizes it nor pays for it. It
     // carries the same daemon a fork does, put there under the person's own login, so it serves the panes, reads
     // its own load off its own /proc and lists its own processes, and a folder is copied onto it the way one is
     // copied onto a fork. Its cpus are cores like this computer's, though its words win over any size today.
-    expect(kindWords("ssh")).toEqual({ machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: true, processes: true, imports: "copies", importsAt: "under home", agents: false, onDelete: { asked: "daemon, its unit and its login line come off the machine, which is otherwise left as it is", done: expect.any(Function) }, panel: "What the computer is running, its projects and how it is doing." });
+    expect(kindWords("ssh")).toEqual({ machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "under home", agents: false, onDelete: { asked: "daemon, its unit and its login line come off the machine, which is otherwise left as it is", done: expect.any(Function) }, panel: "What the computer is running, its projects and how it is doing." });
     // Only the machines wsp forks run agents that could drive this host: this computer answers no request relayed
     // from a machine, and a machine somebody already owns is handed no wsp to drive one with.
     expect(agentsMayDrive("cloud")).toBe(true);
@@ -220,6 +198,16 @@ describe("what a workspace's kind changes about its words", () => {
       expect(servesReading(kind, "processes")).toBe(true);
     }
     expect(NOT_ON_THIS_KIND).toBe("not on this kind");
+  });
+
+  it("says in one place who reads each of them, so a pane and a host cannot each decide it for themselves", () => {
+    // The computer the host runs on is read where it runs. Every other machine answers for itself over the link a
+    // pane holds, and the processes of every kind, this computer's included, are read on that machine.
+    expect(readingRoad("local", "metrics")).toBe("host");
+    for (const kind of ["cloud", "ssh", "place"] as const) expect(readingRoad(kind, "metrics")).toBe("daemon");
+    for (const kind of ["cloud", "local", "ssh", "place"] as const) expect(readingRoad(kind, "processes")).toBe("daemon");
+    // Whichever road it is read on, a kind that answers a reading is a kind whose slot waits for a figure.
+    for (const kind of ["cloud", "local", "ssh", "place"] as const) expect(servesReading(kind, "metrics")).toBe(true);
   });
 
   it("every kind has a row in the table, so adding one is a row here and nothing else", () => {

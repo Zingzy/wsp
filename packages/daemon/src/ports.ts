@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { open, readdir, readFile, readlink } from "node:fs/promises";
 import { promisify } from "node:util";
-import type { DaemonEvent } from "@wsp/protocol";
+import { PORT_COMMAND_BYTES, type DaemonEvent } from "@wsp/protocol";
 
 const run = promisify(execFile);
 
@@ -14,7 +14,7 @@ export interface ListeningPort {
   uid: number;
   /** /proc/<pid>/comm of the owner; unset when there is no pid or the read fails. */
   process?: string;
-  /** /proc/<pid>/cmdline of the owner joined by spaces, at most CMDLINE_CAP_BYTES of it; unset like process. */
+  /** /proc/<pid>/cmdline of the owner joined by spaces, at most PORT_COMMAND_BYTES of it; unset like process. */
   command?: string;
   /** Bound to 127.0.0.1 or ::1 (or ::ffff:127.0.0.1) only: a sign-in callback listener; unreachable through the preview edge. */
   loopback: boolean;
@@ -197,12 +197,9 @@ async function readComm(procRoot: string, pid: number): Promise<string | undefin
   return comm.length > 0 ? comm : undefined;
 }
 
-/** cmdline can run to ARG_MAX (2 MiB) and goes on the wire in every close; the read stops here and a cut argv ends with an ellipsis. */
-export const CMDLINE_CAP_BYTES = 512;
-
 // cmdline separates argv with NUL bytes and ends with one.
 async function readCmdline(procRoot: string, pid: number): Promise<string | undefined> {
-  const buf = Buffer.alloc(CMDLINE_CAP_BYTES + 1);
+  const buf = Buffer.alloc(PORT_COMMAND_BYTES + 1);
   let bytesRead = 0;
   try {
     const fh = await open(`${procRoot}/${pid}/cmdline`);
@@ -214,10 +211,10 @@ async function readCmdline(procRoot: string, pid: number): Promise<string | unde
   } catch {
     return undefined;
   }
-  const kept = buf.subarray(0, Math.min(bytesRead, CMDLINE_CAP_BYTES)).toString("utf8");
+  const kept = buf.subarray(0, Math.min(bytesRead, PORT_COMMAND_BYTES)).toString("utf8");
   const command = kept.split("\0").filter(a => a.length > 0).join(" ");
   if (command.length === 0) return undefined;
-  return bytesRead > CMDLINE_CAP_BYTES ? `${command}…` : command;
+  return bytesRead > PORT_COMMAND_BYTES ? `${command}…` : command;
 }
 
 /** Signal 0 delivers nothing and reports whether the pid exists; EPERM means it does, under another user. */

@@ -6,6 +6,7 @@
 // helpers here for a refusal), never off its words, so every door classes
 // the same failure the same way.
 import { z } from "zod";
+import { refusalLine } from "./format.js";
 
 export const ExitClass = z.enum(["ok", "provider", "auth", "usage"]);
 export type ExitClass = z.infer<typeof ExitClass>;
@@ -38,8 +39,10 @@ export function verbFailure(e: unknown): VerbFailure {
   return { error: e instanceof Error ? e.message : String(e), class: cls, exit: EXIT_CODES[cls] };
 }
 
-/** A line refused before anything ran: a missing argument, a flag or a value nothing takes. */
-export const usageRefusal = (message: string): Error => Object.assign(new Error(message), { kind: "usage" });
+/** A line refused before anything ran: a missing argument, a flag or a value nothing takes. Both halves are asked
+ * for, what happened and then what to do about it, because a refusal that only names the fault leaves the person
+ * to work the fix out for themselves; `refusalLine` is the one place they are joined. */
+export const usageRefusal = (happened: string, fix: string): Error => Object.assign(new Error(refusalLine(happened, fix)), { kind: "usage" });
 
 /** No key, no sign-in, or a token the host refused. */
 export const authRefusal = (message: string): Error => Object.assign(new Error(message), { kind: "auth" });

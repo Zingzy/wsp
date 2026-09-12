@@ -2,14 +2,14 @@
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { adoptLoginPath, agentsHere, assetDir, currentHome, installEach, mcpServerSpec, runningWsp, shimPath, wspHome, type CliIO } from "@wsp/host";
-import { DEFAULT_PORT, DEFAULT_WS_PORT, HOST_WORDS, InitNeedsYou, ThemePreference, hereWord, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
+import { DEFAULT_PORT, DEFAULT_WS_PORT, HOST_WORDS, InitNeedsYou, ThemePreference, hereWord, hostMenuAction, hostsMenuItems, type HostOutcome } from "@wsp/protocol";
 import type { Runtime } from "@wsp/runtime";
 import { BrowserWindow, Menu, Notification, app, dialog, ipcMain, nativeTheme, shell, type IpcMainInvokeEvent } from "electron";
 import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./context-menu.js";
 import { fontDirs, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { locateHost, openHost, statePathIn, type HostSession, type Launch, type Located } from "./host-lifecycle.js";
 import { hostSwitcher, parseConnectAsk, type HostSwitcher } from "./host-switch.js";
-import { joinWsp } from "./join.js";
+import { joinRoad, parseJoinAsk, type JoinRoad } from "./join.js";
 import { offerMove, type MoveGate } from "./move.js";
 import { sayNeedsYou, type Notifier } from "./needs-you.js";
 import { fromAppPage, fromOnboardingPage } from "./origin.js";
@@ -48,6 +48,13 @@ let session: HostSession | undefined;
 let local: HostSession | undefined;
 let switcher: HostSwitcher | undefined;
 let win: BrowserWindow | undefined;
+/** What this computer is to another wsp: the join behind the first launch's link, and what the window does about it
+ * afterwards. Built on the located home, since the place file and the hosts folder are both under a person's own. */
+let road: JoinRoad | undefined;
+
+function joinRoadFor(located: Located): JoinRoad {
+  return joinRoad({ home: homedir(), wspHome: wspHome(), statePath: statePathIn(located.home, launch()), shim: shimPath(wspHome()), log: io.log });
+}
 
 // Read once per run: a font installed while the app is open is seen after a restart.
 let fontIndex: Promise<FontFile[]> | undefined;
@@ -161,6 +168,26 @@ ipcMain.handle("hosts:disconnect", async (event, alias: unknown) => {
   return answer;
 });
 
+// What this computer is to the wsp it joined, and the two things its sidebar can do about it. The place file and the
+// service are this login's, so the page asks and the shell acts; a refusal comes back as the host's own sentence
+// rather than thrown, since the foot puts it in a toast as it is.
+ipcMain.handle("place:standing", event => {
+  if (!fromCurrentPage(event)) throw new Error("place:standing: not the app's page");
+  return road?.standing();
+});
+ipcMain.handle("place:leave", event => {
+  if (!fromCurrentPage(event) || road === undefined) throw new Error("place:leave: not the app's page");
+  return leaveJoined();
+});
+ipcMain.handle("place:awake", async (event, on: unknown) => {
+  if (!fromCurrentPage(event) || road === undefined) throw new Error("place:awake: not the app's page");
+  // The menu is a copy of the row list, and the row's tick is read off the file this write moves, so it is rebuilt
+  // after the write lands rather than beside it.
+  const standing = await road.setAwake(on === true);
+  refreshMenu();
+  return standing;
+});
+
 /** The shell's own menu bar: the platform's rows by their roles, and Hosts, drawn from the same list the sidebar's
  * foot draws its menu from, so a host saved by either shows in both. Rebuilt whenever the list or the current host
  * moves, since a native menu is a copy. */
@@ -174,8 +201,18 @@ function refreshMenu(): void {
       win?.webContents.send("hosts:connect-open");
       return;
     }
-    // The two rows a computer that joined another wsp adds are the joining shell's; this menu drives the switch and
-    // the disconnect, and a window on a Mac that joined nothing is never shown them.
+    // The two rows a computer that joined another wsp adds are drawn from the same list as the sidebar's menu, so
+    // they are answered here too; a window on a Mac that joined nothing is never shown them.
+    if (action.kind === "awake") {
+      if (road !== undefined) void road.setAwake(action.on).then(refreshMenu, (e: unknown) => io.error(e instanceof Error ? e.message : String(e)));
+      return;
+    }
+    if (action.kind === "leave") {
+      void leaveJoined().then(answer => {
+        if (!answer.ok) io.error(answer.error);
+      }, (e: unknown) => io.error(e instanceof Error ? e.message : String(e)));
+      return;
+    }
     if (action.kind !== "switch" && action.kind !== "disconnect") return;
     const moved = action.kind === "switch" ? hostsHeld.to(action.alias) : hostsHeld.disconnect(action.alias);
     void moved.then(answer => {
@@ -203,6 +240,7 @@ function locate(): Promise<Located> {
  * recorded this computer on, or, with none, over the located home once the gate says it holds something to show. */
 async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
   const statePath = statePathIn(located.home, launch());
+  road ??= joinRoadFor(located);
   if (located.session === undefined) {
     let runtime = recorded;
     if (runtime === undefined) {
@@ -241,6 +279,10 @@ async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
       await page.loadURL(next.url);
     },
     log: io.log,
+    place: () => {
+      const standing = road?.standing();
+      return standing === undefined ? undefined : { hostName: standing.hostName, awake: standing.awake };
+    },
     ssh: sshRoad(systemSshDeps()),
   });
   refreshMenu();
@@ -309,6 +351,7 @@ async function showOnboarding(located: Located): Promise<void> {
       await showApp(located, runtime);
       for (const channel of ONBOARDING_CHANNELS) ipcMain.removeHandler(channel);
       page.close();
+      await openJoined();
     })());
   ipcMain.handle("onboarding:finish", event => {
     gate(event, "onboarding:finish");
@@ -318,13 +361,34 @@ async function showOnboarding(located: Located): Promise<void> {
   // the page is handed only what it draws.
   ipcMain.handle("onboarding:join", (event, raw: unknown) => {
     gate(event, "onboarding:join");
-    const ask = raw as { address?: unknown; code?: unknown } | null;
-    const word = (value: unknown): string => (typeof value === "string" ? value : "");
-    return joinWsp({ address: word(ask?.address), code: word(ask?.code) }, { home: homedir(), argv: [shim, "join", "--serve"] });
+    const ask = parseJoinAsk(raw);
+    if (ask === undefined) throw new Error("onboarding:join: not the join screen's ask");
+    return (road ??= joinRoadFor(located)).join(ask);
   });
   // The page follows the Mac's appearance: no preference record exists yet for it to read.
   nativeTheme.themeSource = "system";
   await page.loadFile(ONBOARDING_PAGE);
+}
+
+/** Leaving the wsp this computer joined, from the sidebar's foot or from the menu bar: what the road answers, then
+ * the window back on this computer, since that wsp is off this computer whether or not it could be told. One road
+ * for both, so the two never part company over what a leave leaves the window looking at. */
+async function leaveJoined(): Promise<HostOutcome> {
+  const answer = (await road?.leave()) ?? { ok: true as const };
+  await switcher?.to(null);
+  refreshMenu();
+  return answer;
+}
+
+/** A computer that joined another wsp opens on it: the window loads the door's page, which carries no token, and the
+ * boot gate asks the shell for the device token the join bought. Its own host keeps running and This Mac in the menu
+ * still opens it, so nothing that worked before the join stopped working. */
+async function openJoined(): Promise<void> {
+  const alias = road?.alias();
+  if (alias === undefined || switcher === undefined) return;
+  const answer = await switcher.to(alias);
+  if (!answer.ok) io.error(answer.error);
+  refreshMenu();
 }
 
 let stopping: Promise<void> | undefined;
@@ -385,6 +449,7 @@ app
     const located = await locate();
     if (located.stalePointer !== undefined) io.error(`~/.wsp/current-home names ${located.stalePointer}, but no host is serving it; opening ${located.home}`);
     if (!(await showApp(located))) await showOnboarding(located);
+    else await openJoined();
   })
   .catch((e: unknown) => {
     dialog.showErrorBox("wsp could not start", e instanceof Error ? e.message : String(e));

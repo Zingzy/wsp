@@ -349,6 +349,26 @@ describe("command palette", () => {
     expect(useStore.getState().selectedThreadId).toBe("t_old");
   });
 
+  it("lists a thread an agent opened on another workspace once, naming the workspace it runs on and where that runs", async () => {
+    const lead = { ...session("s_lead", "ws_a", "run the migration across the fleet"), threadId: "t_lead", startedAt: Date.now() - 60_000 };
+    // Opened by the lead's agent, filed under the other workspace: the palette reads the same tree the sidebar draws.
+    const child = { ...session("s_child", "ws_b", "migration on worker"), threadId: "t_child", parentThreadId: "t_lead", startedBy: "agent" as const, startedAt: Date.now() - 30_000 };
+    await mountShell([lead, child]);
+    mod("k");
+    await waitFor(() => expect(palette()).not.toBeNull());
+    const input = screen.getByPlaceholderText(/Search commands/);
+    fireEvent.change(input, { target: { value: "migration" } });
+    await waitFor(() => expect(inPalette().getByText("migration on worker")).toBeTruthy());
+    // Once, not twice: the tree moves the row into its opener's group and never leaves a copy where it runs.
+    const titles = [...palette()!.querySelectorAll<HTMLElement>("[data-slot=command-item] span.truncate")].map(node => node.textContent);
+    expect(titles.filter(title => title === "migration on worker")).toHaveLength(1);
+    expect(titles).toContain("run the migration across the fleet");
+    // The workspace it runs on and where that runs, which is what tells it from a thread of the opener's own. This
+    // fixture's records name no provider, so where it runs is what the machine is.
+    const row = inPalette().getByText("migration on worker").closest<HTMLElement>("[data-slot=command-item]")!;
+    expect(within(row).getByText("worker · a provider")).toBeTruthy();
+  });
+
   it("a thread the sidebar has folded into its archive is still found by title and still opens", async () => {
     const fresh = { ...session("s_fresh", "ws_a", "tail the dev server"), threadId: "t_fresh", startedAt: Date.now() - 60_000 };
     // Quiet for a week, so the sidebar draws it inside a shut Archived group; the palette reads every thread the

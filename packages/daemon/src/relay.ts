@@ -8,15 +8,7 @@ import { EventEmitter } from "node:events";
 import { mkdirSync, unlinkSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { dirname } from "node:path";
-import { RelayPort, callbackPortOf } from "@wsp/protocol";
-
-/** BROWSER value and xdg-open target on the guest. A bare path: tools append
- * the URL as the one argument, and Claude Code treats the literal "true" as
- * its never-open sentinel. */
-export const OPEN_SHIM_PATH = "/usr/local/bin/wsp-open";
-export const XDG_OPEN_PATH = "/usr/local/bin/xdg-open";
-/** Where the shim posts in the guest; root-only through the daemon's umask, unreachable from the edge. */
-export const OPEN_SOCKET_PATH = "/root/.wsp/open.sock";
+import { OPEN_SOCKET_PATH, RelayPort, callbackPortOf } from "@wsp/protocol";
 
 /** POSIX sh with curl only: the base image has neither xdg-utils nor python
  * on PATH for every template. gh, gcloud and aws block until the shim exits,

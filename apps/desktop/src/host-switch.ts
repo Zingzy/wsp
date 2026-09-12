@@ -25,6 +25,8 @@ export interface SwitcherDeps {
   /** Puts the window on a session. */
   load(session: HostSession): Promise<void>;
   log(line: string): void;
+  /** What this computer is to another wsp, when it joined one: the menu grows the leave and the awake rows for it. */
+  place?(): { hostName: string; awake: boolean } | undefined;
   connect?: typeof connectCommand;
   disconnect?: typeof disconnectCommand;
   ssh?: SshRoad;
@@ -155,11 +157,15 @@ export function hostSwitcher(deps: SwitcherDeps): HostSwitcher {
 
   return {
     current: () => current,
-    view: () => ({
-      here: deps.here,
-      current: current.alias ?? null,
-      hosts: listHosts(deps.home).map(h => ({ alias: h.alias, label: h.label ?? h.alias, url: h.url, road: h.road ?? "direct" })),
-    }),
+    view: () => {
+      const place = deps.place?.();
+      return {
+        here: deps.here,
+        current: current.alias ?? null,
+        hosts: listHosts(deps.home).map(h => ({ alias: h.alias, label: h.label ?? h.alias, url: h.url, road: h.road ?? "direct" })),
+        ...(place === undefined ? {} : { place }),
+      };
+    },
     token: () => (current.remote ? current.deviceToken : hostTokenFor(deps.statePath)),
     async to(alias) {
       try {

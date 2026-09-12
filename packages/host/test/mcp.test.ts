@@ -221,7 +221,7 @@ describe("the MCP server over the host", () => {
     await server?.close();
     await connect();
     const bare = await call("thread_new", { task: "nowhere" });
-    expect(bare).toEqual(failedWith(noThreadTargetLine("workspace"), "usage"));
+    expect(bare).toEqual(failedWith(`${noThreadTargetLine("workspace")}. Run wsp workspaces to read the names.`, "usage"));
   });
 
   it("import onto this computer registers the folder with no plan; replace true, keep, cut or agents are refused as meaningless there, while replace false is nothing asked", async () => {
@@ -230,7 +230,7 @@ describe("the MCP server over the host", () => {
     mkdirSync(join(proj, "src"), { recursive: true });
     writeFileSync(join(proj, "src", "index.ts"), "export const a = 1;\n");
     const refused = await call("import", { workspace: "mac", folder: proj, replace: true, keep: [".env"] });
-    expect(refused).toEqual(failedWith(registerTakesNoConsentLine(["keep", "replace"]), "usage"));
+    expect(refused).toEqual(failedWith(`${registerTakesNoConsentLine(["keep", "replace"])}. Drop them, or import the folder instead of registering it.`, "usage"));
     const landed = await call("import", { workspace: "mac", folder: proj, replace: false });
     expect(landed.isError).toBe(false);
     expect(landed.text).toBe(registeredLine(proj));
@@ -248,7 +248,7 @@ describe("the MCP server over the host", () => {
     expect(backend.machines.at(-1)!.spec).toMatchObject({ cpu: 4, memMb: 8192 });
     const odd = await call("new", { name: "odd", size: "8x16" });
     expect(odd.isError).toBe(true);
-    expect(odd.text).toBe("8x16 is not a size this provider offers; the sizes are 2x4 ($0.11/hr), 2x8 ($0.15/hr), 4x8 ($0.22/hr)");
+    expect(odd.text).toBe("8x16 is not a size this provider offers; the sizes are 2x4 ($0.11/hr), 2x8 ($0.15/hr), 4x8 ($0.22/hr). Name one of those with --size.");
     expect(backend.machines).toHaveLength(2);
   });
 
@@ -386,11 +386,11 @@ describe("the MCP server over the host", () => {
   it("fork and thread_new under an agent the host has no adapter for are refused naming the agents it has; no machine is minted or woken", async () => {
     await call("new", { name: "alpha" });
     const refused = await call("fork", { workspace: "alpha", name: "worker", task: "hi", agent: "gpt9" });
-    expect(refused).toEqual(failedWith('no adapter registered for harness "gpt9"; agents on this host: claude, codex', "usage"));
+    expect(refused).toEqual(failedWith('no adapter registered for harness "gpt9"; agents on this host: claude, codex. Name one of those with --agent.', "usage"));
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha"]);
     await call("pause", { workspace: "alpha" });
     const opened = await call("thread_new", { workspace: "alpha", task: "hi", agent: "gpt9" });
-    expect(opened).toEqual(failedWith('no adapter registered for harness "gpt9"; agents on this host: claude, codex', "usage"));
+    expect(opened).toEqual(failedWith('no adapter registered for harness "gpt9"; agents on this host: claude, codex. Name one of those with --agent.', "usage"));
     expect((await rt.workspaces.list()).map(w => [w.name, w.phase])).toEqual([["alpha", "napping"]]);
     expect(await rt.sessions.list()).toEqual([]);
   });
@@ -401,9 +401,9 @@ describe("the MCP server over the host", () => {
     const threadId = (first.structured as { threadId: string }).threadId;
     await call("pause", { workspace: "alpha" });
     for (const task of ["", " \n\t "]) {
-      expect(await call("thread_new", { workspace: "alpha", task })).toEqual(failedWith(EMPTY_TASK_LINE, "usage"));
-      expect(await call("fork", { workspace: "alpha", name: "worker", task })).toEqual(failedWith(EMPTY_TASK_LINE, "usage"));
-      expect(await call("send", { thread: threadId, message: task })).toEqual(failedWith(EMPTY_TASK_LINE, "usage"));
+      expect(await call("thread_new", { workspace: "alpha", task })).toEqual(failedWith(`${EMPTY_TASK_LINE}. Put it in quotes after the flags.`, "usage"));
+      expect(await call("fork", { workspace: "alpha", name: "worker", task })).toEqual(failedWith(`${EMPTY_TASK_LINE}. Put it in quotes after the flags.`, "usage"));
+      expect(await call("send", { thread: threadId, message: task })).toEqual(failedWith(`${EMPTY_TASK_LINE}. Put it in quotes after the flags.`, "usage"));
     }
     expect((await rt.workspaces.list()).map(w => [w.name, w.phase])).toEqual([["alpha", "napping"]]);
     expect(claude.starts).toHaveLength(1);
@@ -423,7 +423,7 @@ describe("the MCP server over the host", () => {
     const notes = join(dir, "notes.pdf");
     writeFileSync(notes, "%PDF-1.7 nope");
     expect(await call("send", { thread: threadId, message: "look", images: [notes] })).toEqual(
-      failedWith(`${notes} is not PNG, JPEG, GIF or WebP; a message carries those four`, "usage"),
+      failedWith(`${notes} is not PNG, JPEG, GIF or WebP; a message carries those four. Name one of those instead.`, "usage"),
     );
   });
 
@@ -597,7 +597,7 @@ describe("the MCP server over the host", () => {
     expect(named.isError).toBe(false);
     expect(claude.starts.map(s => s.cwd)).toEqual(["/root/wsp"]);
     const projects = (await rt.workspaces.get(alpha!.id)).projects!;
-    expect(await call("thread_new", { workspace: "alpha", task: "build it", project: "nope" })).toEqual(failedWith(noProjectLine("nope", projects), "usage"));
+    expect(await call("thread_new", { workspace: "alpha", task: "build it", project: "nope" })).toEqual(failedWith(`${noProjectLine("nope", projects)}. Run wsp projects <workspace> to read the names it holds.`, "usage"));
     expect(claude.starts).toHaveLength(1);
     const { workspaces } = (await call("workspaces")).structured as { workspaces: WorkspaceView[] };
     expect(workspaces.find(w => w.name === "alpha")!.projects).toHaveLength(2);
@@ -627,14 +627,14 @@ describe("the MCP server over the host", () => {
     const before = claude.starts.length;
     const refused = await call("thread_new", { workspace: "alpha", task: "review it", model: "claude-haiku-4-5" });
     expect(refused.isError).toBe(true);
-    expect(refused.text).toBe('model "claude-haiku-4-5" is not one claude takes; one of: Fable 5.1 (claude-fable-5-1), Opus 5 (claude-opus-5), Sonnet 5 (claude-sonnet-5)');
+    expect(refused.text).toBe('model "claude-haiku-4-5" is not one claude takes; one of: Fable 5.1 (claude-fable-5-1), Opus 5 (claude-opus-5), Sonnet 5 (claude-sonnet-5). Drop the flag, or give it a value the agent offers.');
     const mode = await call("send", { thread: threadId, message: "go", access: "yolo" });
     expect(mode.isError).toBe(true);
     expect(mode.text).toMatch(/^access mode "yolo" is not one claude takes; one of: Default \(default\), /);
     const minted = (await rt.workspaces.list()).map(w => w.name);
     const fork = await call("fork", { workspace: "alpha", name: "cheap", task: "review", model: "claude-haiku-4-5" });
     expect(fork.isError).toBe(true);
-    expect(fork.text).toBe('model "claude-haiku-4-5" is not one claude takes; one of: Fable 5.1 (claude-fable-5-1), Opus 5 (claude-opus-5), Sonnet 5 (claude-sonnet-5)');
+    expect(fork.text).toBe('model "claude-haiku-4-5" is not one claude takes; one of: Fable 5.1 (claude-fable-5-1), Opus 5 (claude-opus-5), Sonnet 5 (claude-sonnet-5). Drop the flag, or give it a value the agent offers.');
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(minted);
     expect(claude.starts).toHaveLength(before);
   });
@@ -643,10 +643,10 @@ describe("the MCP server over the host", () => {
     await call("new", { name: "alpha" });
     const relative = await call("thread_new", { workspace: "alpha", task: "look here", cwd: "packages/host" });
     expect(relative.isError).toBe(true);
-    expect(relative.text).toContain('cwd is a path on the machine, absolute: got "packages/host"');
+    expect(relative.text).toContain('cwd is a path on the machine, absolute, and got "packages/host"');
     const forked = await call("fork", { workspace: "alpha", name: "worker", task: "build it", cwd: "packages/host" });
     expect(forked.isError).toBe(true);
-    expect(forked.text).toContain('cwd is a path on the machine, absolute: got "packages/host"');
+    expect(forked.text).toContain('cwd is a path on the machine, absolute, and got "packages/host"');
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha"]);
     expect(await rt.sessions.list()).toEqual([]);
     expect(claude.starts).toEqual([]);
@@ -999,7 +999,7 @@ describe("the MCP server over the host", () => {
     await call("pause", { workspace: "alpha" });
     const launches = launchedScripts(backend).length;
     const relative = await call("exec", { workspace: "alpha", argv: ["git", "status"], cwd: "packages/host" });
-    expect(relative).toEqual(failedWith('--cwd is a path on the machine, absolute: got "packages/host"', "usage"));
+    expect(relative).toEqual(failedWith('--cwd is a path on the machine, absolute, and got "packages/host". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.', "usage"));
     expect(launchedScripts(backend)).toHaveLength(launches);
     expect((await rt.workspaces.list())[0]!.phase).toBe("napping");
   });
@@ -1067,7 +1067,7 @@ describe("the MCP server over the host", () => {
     expect(allRows(flipped).find(r => r.id === "java")).toMatchObject({ on: true, size: 613280230 });
     expect(flipped.heavy.map(r => r.id)).toContain("java");
     // A word no row of any kind answers is a tool error in one line, not a rewritten file.
-    expect(await call("recipe", { out, set: ["jaava=on"] })).toMatchObject({ isError: true, text: `--set jaava=on: "jaava" is no catalog row and no row of ${out} outside the catalog, and no package a manager on ${HERE} has that id` });
+    expect(await call("recipe", { out, set: ["jaava=on"] })).toMatchObject({ isError: true, text: `--set jaava=on: "jaava" is no catalog row and no row of ${out} outside the catalog, and no package a manager on ${HERE} has that id. Run wsp recipe scan to read the rows this computer offers.` });
     expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).rows.find(r => r.id === "java")?.on).toBe(true);
 
     // The id the scan gives a package this computer has ticks that package's own row, the road the Also screen takes.
@@ -1075,14 +1075,14 @@ describe("the MCP server over the host", () => {
     expect(allRows(ticked).some(r => r.id === diskbloom.id)).toBe(false);
     expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).rows.find(r => r.id === "tools/brew/zingzy/tap/diskbloom")).toMatchObject({ on: true, kind: "tool" });
     // An add for the same package is refused in one line naming the set word, since it is a row already.
-    expect(await call("recipe", { out, add: [`${diskbloom.id}=${diskbloom.install}`] })).toMatchObject({ isError: true, text: `--add ${diskbloom.id}: a package manager on ${HERE} already has ${diskbloom.id}, so it is a row of its own; tick it with --set ${diskbloom.id}=on, which installs it by its own road, rather than adding a second row that installs it again` });
+    expect(await call("recipe", { out, add: [`${diskbloom.id}=${diskbloom.install}`] })).toMatchObject({ isError: true, text: `--add ${diskbloom.id}: a package manager on ${HERE} already has ${diskbloom.id}, so it is a row of its own. Tick it with --set ${diskbloom.id}=on.` });
     expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).custom ?? []).toEqual([]);
   });
 
   it("recipe refuses a relative out or project by name: this server's own folder is wherever the agent launched it", async () => {
-    expect(await call("recipe", { out: "recipe.json" })).toMatchObject({ isError: true, text: 'out is a path on this computer, absolute: got "recipe.json"' });
-    expect(await call("recipe", { out: join(dir, "r.json"), project: ["../elsewhere"] })).toMatchObject({ isError: true, text: 'project is a folder on this computer, absolute: got "../elsewhere"' });
-    expect(await call("recipe_scan", { project: ["packages/host"] })).toMatchObject({ isError: true, text: 'project is a folder on this computer, absolute: got "packages/host"' });
+    expect(await call("recipe", { out: "recipe.json" })).toMatchObject({ isError: true, text: 'out is a path on this computer, absolute, and got "recipe.json". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.' });
+    expect(await call("recipe", { out: join(dir, "r.json"), project: ["../elsewhere"] })).toMatchObject({ isError: true, text: 'project is a folder on this computer, absolute, and got "../elsewhere". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.' });
+    expect(await call("recipe_scan", { project: ["packages/host"] })).toMatchObject({ isError: true, text: 'project is a folder on this computer, absolute, and got "packages/host". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.' });
   });
 
   it("recipe_scan answers with every option and a recommendation per row, and writes nothing", async () => {

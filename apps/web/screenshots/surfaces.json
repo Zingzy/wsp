@@ -71,6 +71,28 @@
       "wait": "testid=composer-editor"
     },
     {
+      "name": "threads-across-workspaces",
+      "at": "/",
+      "fixture": "orchestrator",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger"
+      ],
+      "wait": "row-id=thread:th_api-move"
+    },
+    {
+      "name": "opener-transcript",
+      "at": "/",
+      "fixture": "orchestrator",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:th_migrate",
+        "390:key:Escape"
+      ],
+      "wait": "opened-thread"
+    },
+    {
       "name": "host-asleep",
       "at": "/",
       "remote": true,
@@ -139,6 +161,88 @@
         "k=edit-image"
       ],
       "wait": "k=choice",
+      "settleMs": 700
+    },
+    {
+      "name": "settings-computer-open",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "390:key:Escape",
+        "place-row=p_hetzner"
+      ],
+      "wait": "k=place-detail",
+      "settleMs": 700
+    },
+    {
+      "name": "remove-computer",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "390:key:Escape",
+        "place-row=p_hetzner",
+        "k=remove"
+      ],
+      "wait": "k=remove-sentence",
+      "settleMs": 700
+    },
+    {
+      "name": "add-computer-no-app",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "390:key:Escape",
+        "k=add-computer-button",
+        "k=no-app"
+      ],
+      "wait": "k=join-line",
+      "settleMs": 700
+    },
+    {
+      "name": "add-computer-ssh",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "390:key:Escape",
+        "k=add-computer-button",
+        "segment=ssh"
+      ],
+      "wait": "k=login-field",
+      "settleMs": 700
+    },
+    {
+      "name": "connect-provider-pick",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "390:key:Escape",
+        "k=connect-provider"
+      ],
+      "wait": "provider=box",
+      "settleMs": 700
+    },
+    {
+      "name": "connect-provider-key",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "390:key:Escape",
+        "k=connect-provider",
+        "k=continue"
+      ],
+      "wait": "k=where",
       "settleMs": 700
     }
   ]

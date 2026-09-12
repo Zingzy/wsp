@@ -59,6 +59,9 @@ const turn = (thread, minutes, workspaceId = "ws_api") => ({
   cwd: thread.cwd ?? join(HOME, "spoo"),
   model: "opus",
   permissionMode: "default",
+  // What the turn on this row cost, as the runtime stamps it: a thread's opener reads its own figure beside what
+  // the threads it opened spent, and a row without one would leave that second figure unsaid.
+  costUsd: thread.costUsd,
   ...(thread.parent === undefined ? {} : { parentThreadId: `th_${thread.parent}`, rootThreadId: `th_${thread.root}` }),
 });
 
@@ -209,14 +212,39 @@ const store = ({ workspaces, sessions = {}, transcripts = {}, goldens, devices, 
   ...(goldens !== undefined ? { goldens } : {}),
   ...(devices !== undefined ? { devices } : {}),
   ...(images !== undefined ? { images } : {}),
-  ...(places !== undefined ? { places } : {}),
+  ...(places === undefined
+    ? {}
+    : {
+        places,
+        // The last computer added is the one a verb means when nobody says; its row wears the mark.
+        "place-default": { default: { placeId: Object.keys(places)[0] } },
+      }),
+});
+
+/** A workspace standing on a joined computer: the machine id the engine gives one, so the settings table counts it
+ * against that computer's row. Every path a turn there runs under is built from the login it reported, so a record
+ * without one is a record no join wrote and the runtime refuses it at startup. */
+const onPlace = (id, name, placeId, size) => ({
+  id,
+  name,
+  machineId: `place:${placeId}`,
+  phase: "running",
+  kind: "place",
+  golden: "",
+  createdAt: new Date(ago(60 * 20)).toISOString(),
+  home: "/root",
+  folder: "/root",
+  login: { HOME: "/root", USER: "root", PATH: "/usr/local/bin:/usr/bin:/bin" },
+  size,
+  shape: size,
 });
 
 /** A computer somebody joined, as the host's record of it: what it last reported about itself, and when it was
  * last seen, so the table has a row that is not this computer. */
-const place = (id, name, minutes, over = {}) => ({
+const place = (id, name, minutes, over = {}, workspaceId) => ({
   id,
   name,
+  ...(workspaceId === undefined ? {} : { workspaceId }),
   publicKey: `no-key-verifies-against-this-${id}`,
   joinedAt: new Date(ago(60 * 26)).toISOString(),
   lastSeenAt: new Date(ago(minutes)).toISOString(),
@@ -265,9 +293,13 @@ const macInUse = () =>
       workspace("ws_web", "web", { projects: [project("landing", 9_400_000, 60 * 9)] }),
       workspace("ws_notes", "notes"),
       workspace("ws_fix", "spoo-fix", { projects: [project("spoo", 48_200_000, 60 * 20)] }),
+      onPlace("ws_hetzner", "box-build", "p_hetzner", { cpu: 2, memMb: 4096 }),
     ],
-    ...merge(API_THREADS(), threadsOn("ws_fix", [[SEARCH, 12], [spawned("migration", MIGRATION, "search", "search"), 9]])),
-    places: { p_oldmacbook: place("p_oldmacbook", "old-macbook", 120) },
+    ...merge(API_THREADS(), threadsOn("ws_fix", [[SEARCH, 12], [spawned("migration", MIGRATION, "search", "search"), 9]]), threadsOn("ws_hetzner", [[CHART, 200], [REDIRECT, 30]])),
+    places: {
+      p_hetzner: place("p_hetzner", "hetzner", 1, { platform: "linux", os: "Ubuntu 24.04", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, docker: true, login: { HOME: "/root", USER: "root", PATH: "/usr/bin" } }, "ws_hetzner"),
+      p_oldmacbook: place("p_oldmacbook", "old-macbook", 120),
+    },
   });
 
 /** This computer and nothing else, as the person sitting at it first meets it: one workspace, named after this
