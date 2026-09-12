@@ -6,7 +6,7 @@
 // whole of what this file reads; what the shell does with each ask is its own
 // road, proved where recordThisComputer and the join are.
 import { readFileSync } from "node:fs";
-import { PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH } from "@wsp/protocol";
+import { DEFAULT_PLACE_PORT, JOIN_ADDRESS_LINE, JOIN_ALREADY, PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH } from "@wsp/protocol";
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
 import { shownCode } from "../../web/src/hosts/pairingCode.js";
@@ -174,7 +174,9 @@ describe("the first launch's screen", () => {
     expect(screen.text("#joining h1")).toBe("Join another wsp");
     expect(screen.text("#joining .sentence")).toBe("On the Mac that runs your wsp, open Settings, then Where agents run, then Add a computer. The address and code are on that screen.");
     expect(screen.text("#joining .field-label")).toBe("Address");
-    expect((screen.at("#address") as HTMLInputElement).placeholder).toBe("192.168.1.20:7788");
+    // The ghost shows the port a wsp opens for a computer you own, so a person copying the shape of it types one
+    // something is listening on. The page imports nothing, so the number is read back against the protocol's here.
+    expect((screen.at("#address") as HTMLInputElement).placeholder).toBe(`192.168.1.20:${DEFAULT_PLACE_PORT}`);
     expect((screen.at("#code") as HTMLInputElement).placeholder).toBe("XXXX-XXXX");
     expect(screen.asks.join).toEqual([]);
     expect(screen.asks.finish).toBe(0);
@@ -182,6 +184,23 @@ describe("the first launch's screen", () => {
     // Back is the way out of it, to the screen it came from.
     await screen.press("#back");
     expect(screen.shown()).toBe("welcome");
+  });
+
+  it("says what the protocol says about a word that is no address and about a Mac already in a wsp, so the two cannot drift", async () => {
+    const refused = await open(AGENTS, { join: { ok: false, why: "address" } });
+    await refused.press("#join");
+    await refused.type("#address", "box");
+    await refused.type("#code", "QW4K7PZX");
+    await refused.press("#go");
+    expect(refused.text("#address-said")).toBe(`${JOIN_ADDRESS_LINE.what} ${JOIN_ADDRESS_LINE.fix}`);
+    const already = await open(AGENTS, { join: { ok: false, why: "already" } });
+    await already.press("#join");
+    await already.type("#address", "192.168.1.20:4420");
+    await already.type("#code", "QW4K7PZX");
+    await already.press("#go");
+    // What to do is the protocol's own sentence: the sidebar of a Mac that joined one carries the way out, so the
+    // screen never sends a person to a terminal for it. What happened says Mac, since this screen is a Mac's own.
+    expect(already.text("#join-said")).toBe(`This Mac already runs threads for another wsp. ${JOIN_ALREADY.fix}`);
   });
 
   it("holds the Join keycap until both fields are filled, and says why while it is held", async () => {
