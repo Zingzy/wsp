@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
+import { FAKE_AS_ENV } from "@wsp/protocol";
 import { BoxBackend, DockerBackend, FakeBackend, LocalBackend, NoProviderBackend, SolariBackend, SshBackend, landsBytes, type MachineBackend } from "@wsp/engine";
 import { goldenRecipe, makeRuntime, optsFor, providerSlotOf, swapProvider } from "../src/cli.js";
 import { keysOf } from "../src/env-keys.js";
-import { BOX_KEY_ENV, PROVIDER_MODULES, SOLARI_KEY_ENV, providerBackendFor, providerEnvNames, providerEnvWith, providerEnvWithKey, providerKeyEnvs, providerKeyRow, providerModule, type ProviderModule } from "../src/providers.js";
+import { BOX_KEY_ENV, PROVIDER_MODULES, SOLARI_KEY_ENV, providerBackendFor, providerEnvNames, providerEnvWith, providerEnvWithKey, providerKeyEnvs, providerKeyRow, providerModule, wiredProviderId, type ProviderModule } from "../src/providers.js";
 
 /** A computer's environment as the rows read it: the provider key rides in it under the row's own variable, which
  * is where every layer a key is read through puts it. */
@@ -121,12 +122,12 @@ describe("provider modules", () => {
   });
 
   it("the variables a service carries are the rows' own, so a provider added brings its variable with it", () => {
-    expect(providerEnvNames()).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST"]);
+    expect(providerEnvNames()).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST", FAKE_AS_ENV]);
     // The row a provider is added as: the list follows it, and nothing else has to be remembered for the unit its
     // host is installed as to be given the variable that selects it. Keys are not among them: a unit file carries
     // no key, and the host reads its own off the same files at every start.
     const fly: ProviderModule = { id: "fly", envNames: ["WSP_PROVIDER", "FLY_REGION"], keyEnv: "FLY_API_TOKEN", selects: env => env["FLY_API_TOKEN"] !== undefined, build: () => new NoProviderBackend() };
-    expect(providerEnvNames([...PROVIDER_MODULES, fly])).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST", "FLY_REGION"]);
+    expect(providerEnvNames([...PROVIDER_MODULES, fly])).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST", FAKE_AS_ENV, "FLY_REGION"]);
     expect(providerEnvNames()).not.toContain(BOX_KEY_ENV);
     // What a row selects on is what it names: a row reading a variable it never listed would be carried by neither.
     for (const m of PROVIDER_MODULES) for (const name of m.envNames) expect(providerEnvNames()).toContain(name);
@@ -166,5 +167,21 @@ describe("provider modules", () => {
     // Wired to a provider that reads no key: nothing to ask for.
     expect(providerKeyRow({ WSP_PROVIDER: "docker" })).toBeUndefined();
     expect(providerKeyRow({ WSP_DOCKER: "1" })).toBeUndefined();
+  });
+
+  it("stamps a stand-in's machines with the provider it stands in for, so no row reads the stand-in's own word", () => {
+    // A harness serving a fixture of one cloud's machines says which cloud, and every row about those machines
+    // reads it: a tester met "fake" where a person reads which provider they are paying.
+    expect(wiredProviderId({ WSP_PROVIDER: "fake", [FAKE_AS_ENV]: "solari" })).toBe("solari");
+    expect(wiredProviderId({ WSP_PROVIDER: "fake", [FAKE_AS_ENV]: "box" })).toBe("box");
+    // The row is still the stand-in: nothing dials that cloud, and the word alone would have.
+    expect(providerModule({ WSP_PROVIDER: "fake", [FAKE_AS_ENV]: "solari" }).id).toBe("fake");
+    expect(providerBackendFor({ WSP_PROVIDER: "fake", [FAKE_AS_ENV]: "solari" })).toBeInstanceOf(FakeBackend);
+    // Every other row is the word it says it is, and a stand-in that stands in for nobody is its own word too.
+    expect(wiredProviderId({ WSP_PROVIDER: "fake" })).toBe("fake");
+    expect(wiredProviderId({ WSP_PROVIDER: "box" })).toBe("box");
+    expect(wiredProviderId({})).toBe("none");
+    // It travels with the row, so a host a service starts carries it the way it carries the provider's own word.
+    expect(providerEnvNames()).toContain(FAKE_AS_ENV);
   });
 });

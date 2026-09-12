@@ -11,7 +11,11 @@ describe("the provider that answers out of memory", () => {
     await expect(machine.run("echo hi", { deadlineMs: 1_000 })).rejects.toThrow(FAKE_NO_GUEST);
     // Exit 0 with nothing was read by the launch check as a failure it could not word: "exit 0: " with no reason
     // after it, which a tester met as the app losing their thread.
-    expect(FAKE_NO_GUEST).toContain("no guest");
+    // The sentence is for a person who has never read this code: it says what the provider is and what it will
+    // not do, in words nobody has to be taught.
+    expect(FAKE_NO_GUEST).toContain("stand-in provider for testing");
+    expect(FAKE_NO_GUEST).toContain("nothing runs on them");
+    for (const jargon of ["out of memory", "no guest", "capability", "landsBytes"]) expect(FAKE_NO_GUEST).not.toContain(jargon);
   });
 
   it("still answers for a machine a fixture names, in the state its id says, since the record has to load", async () => {

@@ -19,6 +19,7 @@ import { TimelineRuleLine } from "./TimelineRuleLine";
 import { MessagesTimeline, type MachineWait } from "./MessagesTimeline";
 import { useNewThreadRequests } from "./newThreadRequests";
 import { useChatThread, type ChatThreadHandle } from "./useChatThread";
+import { TRANSCRIPT_LOADING } from "../../transcript-words";
 
 const noopImageExpand = () => {};
 
@@ -88,7 +89,7 @@ export function ChatView({
     <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
       <div className="relative min-h-0 flex-1">
         {!thread.hydrated ? (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">loading transcript</div>
+          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">{TRANSCRIPT_LOADING}</div>
         ) : empty ? (
           <EmptyThread workspaceName={workspace?.name ?? workspaceId} />
         ) : (

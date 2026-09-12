@@ -6,6 +6,7 @@
 // is copied there. npm drops node_modules from a published tarball, so the
 // packed road is the only one the published command has; adding an asset is one
 // entry here and nothing else.
+import { WEB_DIR_ENV } from "@wsp/protocol";
 import { cpSync, existsSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -118,4 +119,12 @@ function here(): string {
 /** An asset for whoever is running: staged beside a packed bundle, else built in this checkout. */
 export function assetDir(kind: AssetKind, fromDir: string = here()): string {
   return packedAsset(fromDir, kind) ?? workspaceAsset(kind);
+}
+
+/** The folder a host serves the app out of: the one a harness named in the environment, else the asset built or
+ * staged beside this command. A harness serves a copy of the app so a build landing while a tester drives it cannot
+ * change the page under them. */
+export function webDirFor(env: Readonly<Record<string, string | undefined>> = process.env, fromDir?: string): string {
+  const said = env[WEB_DIR_ENV];
+  return said !== undefined && said !== "" ? said : assetDir("web", fromDir);
 }

@@ -29,8 +29,8 @@ import {
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
 import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portsAsked, runForTheList, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, unknownWordLine, usageRefusal, WS_PORT_OFFSET, type WorkspaceCreatingEvent } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, parseSshAddress, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshIdentity, sshMachineName, sshReachOf, type SshReach } from "@wsp/engine";
-import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerModule, type ProviderEnv } from "./providers.js";
-import { assetDir } from "./assets.js";
+import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerModule, wiredProviderId, type ProviderEnv } from "./providers.js";
+import { webDirFor } from "./assets.js";
 import { claudeEnvs, deployDaemon, doctor, localDoctor, removeDaemon, sshDaemonPlace } from "./doctor.js";
 import { agentsHere } from "./agents-here.js";
 import { InitJobs } from "./init-job.js";
@@ -794,7 +794,7 @@ export function swapProvider(rt: Runtime, keys: Readonly<Record<string, string |
   const env = { ...(PROVIDER_ENVS.get(rt) ?? process.env), ...keys };
   slot.swap(providerBackendFor(env));
   const wired = PROVIDER_IDS.get(rt);
-  if (wired !== undefined) wired.id = providerModule(env).id;
+  if (wired !== undefined) wired.id = wiredProviderId(env);
 }
 
 /** What a host serving this line tells a turn about where it answers: the address and port it binds, and the
@@ -814,7 +814,7 @@ export function makeRuntime(
   const slot = providerSlot(providerBackendFor(env));
   // The place this host's copies are filed under is the provider module it forks on, read at each call: a host that
   // starts with no key swaps its module in when one is saved, and its copies belong to the module that made them.
-  const wired = { id: providerModule(env).id };
+  const wired = { id: wiredProviderId(env) };
   const rt = createRuntime({
     places: wiredPlace(() => wired.id, slot.backend),
     backend: slot.backend,
@@ -1291,7 +1291,7 @@ async function hostFor(
       beyondThisComputer: linked,
       door: joined ? "open" : "closed",
       doorLine: line => io.log(line),
-      webDir: opts.webDir ?? assetDir("web"),
+      webDir: opts.webDir ?? webDirFor(),
       // Read at each fork, not once at start: the init job saves a key while this host serves.
       workspaceEnvs: golden => workspaceEnvsFor(keysFound()).workspaceEnvs?.(golden) ?? {},
       ...(opts.openUrl !== undefined ? { openUrl: opts.openUrl } : {}),
