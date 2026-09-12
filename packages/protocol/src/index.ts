@@ -1614,7 +1614,7 @@ export interface HostsView {
   place?: { hostName: string; awake: boolean };
 }
 
-/** What the connect sheet asks the shell for: an address with the code wsp pair printed there, or an ssh login the
+/** What the connect sheet asks the shell for: an address with the code wsp host pair printed there, or an ssh login the
  * shell starts or finds a host behind and forwards. */
 export type HostConnectAsk = { road: "direct"; url: string; code: string } | { road: "ssh"; address: string; port?: number };
 
@@ -2965,7 +2965,7 @@ export type TicketPurpose = z.infer<typeof TicketPurpose>;
  * has to say what it is here before any socket may redeem it. */
 export const TICKET_ORIGIN: Record<TicketPurpose, WorkspaceOrigin> = { connect: "here", relay: "relayed" };
 
-/** A computer that redeemed a pairing code and holds a token of its own, as devices.list answers and wsp devices
+/** A computer that redeemed a pairing code and holds a token of its own, as devices.list answers and wsp host devices
  * prints it. The token is never here: the host keeps only its hash, so a listing can leak nothing that opens a
  * socket. */
 export const DeviceView = z.object({
@@ -3010,24 +3010,24 @@ export const PAIR_CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 /** The refusal a socket that is not the host's own gets for asking to mint a pairing code: a code lets a stranger
  * in, so only the process holding the host token, on this computer, may hand one out. */
-export const PAIR_ISSUE_REFUSAL = "only a socket holding this host's own token may mint a pairing code; run wsp pair on the computer the host runs on";
+export const PAIR_ISSUE_REFUSAL = "only a socket holding this host's own token may mint a pairing code; run wsp host pair on the computer the host runs on";
 
 /** The refusal a redeemed code that this host is not holding gets: spent, expired, or never minted read the same,
  * so guessing tells a caller nothing about which. */
-export const PAIR_CODE_REFUSAL = "that pairing code is not one this host is waiting for; run wsp pair on the host for a fresh one";
+export const PAIR_CODE_REFUSAL = "that pairing code is not one this host is waiting for; run wsp host pair on the host for a fresh one";
 
 /** The refusal a socket that was let in on a single-use ticket gets for reaching the device ops, whether the ticket
  * was the road a machine's requests arrive by or another client's. Who may drive this host is handed out, read and
  * taken away at the terminal of the computer it runs on, and nowhere else. */
-export const DEVICES_TICKET_REFUSAL = "a socket let in on a ticket cannot see or change the devices paired with this host; run wsp devices on the computer the host runs on";
+export const DEVICES_TICKET_REFUSAL = "a socket let in on a ticket cannot see or change the devices paired with this host; run wsp host devices on the computer the host runs on";
 
 /** The refusal a device gets for revoking another device: a paired computer can hand its own token back, and only
  * the host takes anyone else's away. */
-export const DEVICE_REVOKE_REFUSAL = "a paired device may only revoke itself; run wsp devices revoke on the host to take another one away";
+export const DEVICE_REVOKE_REFUSAL = "a paired device may only revoke itself; run wsp host devices revoke on the host to take another one away";
 
 /** The refusal the JSON routes answer with when the host listens beyond this computer and the request carries no
  * device token. */
-export const API_UNAUTHORIZED = "this host listens beyond the computer it runs on, so this route needs a paired device token in an Authorization header; run wsp pair on the host";
+export const API_UNAUTHORIZED = "this host listens beyond the computer it runs on, so this route needs a paired device token in an Authorization header; run wsp host pair on the host";
 
 /** A frame the page sends a daemon through the host: the daemon's own op and params, no id. The host numbers
  * frames on its socket to the daemon and hands the daemon's answer back under the request that carried the frame,
@@ -3149,7 +3149,7 @@ export function placeLinkTranscript(role: "host" | "place", placeId: string, cha
 
 /** The refusal a join whose code this host is not holding gets. Spent, expired and never minted read the same, so
  * guessing tells a caller nothing about which; the words differ from a pairing code's only in naming the verb that
- * mints this one, since a person joining a computer never typed wsp pair. */
+ * mints this one, since a person joining a computer never typed wsp host pair. */
 export const PLACE_CODE_REFUSAL = "that join code is not one this host is waiting for; run wsp add on the host for a fresh one";
 
 /** The refusal a place gets for proving itself with a key the host does not hold for it. A key that moved is a

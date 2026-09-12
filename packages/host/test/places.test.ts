@@ -692,9 +692,9 @@ describe("what a remove says about the device the join bought", () => {
     expect(await removeCommand(io, opts, ["old-macbook"], removeDeps(removeClient([{ id: "d_1", name: "old-macbook" }])))).toBe(0);
     const said = io.lines.join("\n");
     expect(said).toContain(deviceLeftLine("old-macbook", ["d_1"]));
-    expect(said).toContain("wsp devices revoke d_1 takes it back.");
-    // One command per id, since wsp devices revoke takes exactly one.
-    expect(deviceLeftLine("old-macbook", ["d_1", "d_2"])).toContain("wsp devices revoke d_1, wsp devices revoke d_2 take them back.");
+    expect(said).toContain("wsp host devices revoke d_1 takes it back.");
+    // One command per id, since wsp host devices revoke takes exactly one.
+    expect(deviceLeftLine("old-macbook", ["d_1", "d_2"])).toContain("wsp host devices revoke d_1, wsp host devices revoke d_2 take them back.");
     // The line sits before the last one, so what is gone is still the sentence the remove ends on.
     expect(io.lines.at(-1)).toBe("old-macbook is no longer a place in this wsp.");
   });
@@ -704,7 +704,7 @@ describe("what a remove says about the device the join bought", () => {
     const io = captured();
     const opts = { statePath: join(home, "state.json"), home, env: { HOME: home, WSP_HOME: home } };
     expect(await removeCommand(io, opts, ["old-macbook"], removeDeps(removeClient([{ id: "d_2", name: "a browser tab" }])))).toBe(0);
-    expect(io.lines.join("\n")).not.toContain("wsp devices revoke");
+    expect(io.lines.join("\n")).not.toContain("wsp host devices revoke");
   });
 });
 

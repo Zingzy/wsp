@@ -105,7 +105,7 @@ async function overHostToken(wsPort: number, token: string, op: string): Promise
   }
 }
 
-/** A host of this process, the folder wsp connect writes into, and a fresh code from that host. */
+/** A host of this process, the folder wsp host connect writes into, and a fresh code from that host. */
 async function boxAndHome(): Promise<{ url: string; home: string; code: () => Promise<string>; devices: () => Promise<string[]> }> {
   handle = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
   const up = handle;
@@ -119,7 +119,7 @@ async function boxAndHome(): Promise<{ url: string; home: string; code: () => Pr
 
 const STATE = "/nowhere/state.json";
 
-describe("wsp connect", () => {
+describe("wsp host connect", () => {
   it("redeems the code, keeps the token in a file only this user can read and makes that host the default", async () => {
     const box = await boxAndHome();
     const log: string[] = [];
@@ -185,7 +185,7 @@ describe("wsp connect", () => {
     // computer after it reached the URL parser and threw a TypeError nobody could act on.
     for (const word of ["http://", "https://", "ws://x", "wss://x:4410", "http:/box", "box", "box:4400"]) {
       await expect(connectCommand(io(), { statePath: STATE, home }, { code: "ABCD1234" }, [word], never)).rejects.toThrow(
-        `wsp connect takes the address the host is served at, and got ${JSON.stringify(word)}. An address starts http:// or https:// and names the computer it runs on.`,
+        `wsp host connect takes the address the host is served at, and got ${JSON.stringify(word)}. An address starts http:// or https:// and names the computer it runs on.`,
       );
     }
     expect(readHost(home, "x")).toBeUndefined();
@@ -309,7 +309,7 @@ describe("a verb against a connected host", () => {
     const err: string[] = [];
     const threads = CLI_VERBS.find(v => v.name === "threads")!;
     const ran = await runVerb(threads, ["threads", "--host", box.url], io([], err), () => STATE, { env: { WSP_HOME: box.home } });
-    expect(err.join("\n")).toContain(`wsp connect ${box.url} --code <code>`);
+    expect(err.join("\n")).toContain(`wsp host connect ${box.url} --code <code>`);
     expect(err.join("\n").split("\n")).toHaveLength(1);
     expect(ran).toBe(3);
     await expect(dialHost(STATE, { host: box.url, home: box.home, env: {} })).rejects.toThrow(/--host takes the name/);
@@ -337,7 +337,7 @@ describe("a verb against a connected host", () => {
     const line = (refused as Error).message;
     expect(line.split("\n")).toHaveLength(1);
     expect(line).toContain("box");
-    expect(line).toContain("wsp connect");
+    expect(line).toContain("wsp host connect");
     expect((refused as { kind?: string }).kind).toBe("auth");
   });
 
@@ -376,7 +376,7 @@ describe("a verb against a connected host", () => {
   });
 });
 
-describe("wsp hosts", () => {
+describe("wsp host list", () => {
   it("lists every connected host with its address and marks the default, and never prints a token", async () => {
     const box = await boxAndHome();
     await connectCommand(io(), { statePath: STATE, home: box.home }, { code: await box.code(), name: "box" }, [box.url]);
@@ -392,7 +392,7 @@ describe("wsp hosts", () => {
   it("says so when this computer is connected to none", async () => {
     const log: string[] = [];
     expect(await hostsCommand(io(log), { statePath: STATE, home: tempDir("connect-home") }, [])).toBe(0);
-    expect(log[0]).toContain("wsp connect");
+    expect(log[0]).toContain("wsp host connect");
   });
 
   it("moves the default to the alias named, and refuses an alias nothing is stored for", async () => {
@@ -407,7 +407,7 @@ describe("wsp hosts", () => {
   });
 });
 
-describe("wsp disconnect", () => {
+describe("wsp host forget", () => {
   it("hands the token back to the host and takes the record off this computer", async () => {
     const box = await boxAndHome();
     await connectCommand(io(), { statePath: STATE, home: box.home }, { code: await box.code(), name: "box" }, [box.url]);
@@ -430,7 +430,7 @@ describe("wsp disconnect", () => {
     const err: string[] = [];
     expect(await disconnectCommand(io(log, err), { statePath: STATE, home: box.home }, ["box"])).toBe(0);
     expect(readHost(box.home, "box")).toBeUndefined();
-    expect(err.join("\n")).toContain(`wsp devices revoke ${kept.deviceId}`);
+    expect(err.join("\n")).toContain(`wsp host devices revoke ${kept.deviceId}`);
     // A host that is off refuses the connection at once, so the second try costs nothing and the person is told
     // there was one rather than reading one refusal for two.
     expect(err.join("\n")).toContain(`still asking the host at ${box.url}`);
@@ -504,7 +504,7 @@ describe("wsp disconnect", () => {
     expect(await disconnectCommand(io(log, err), { statePath: STATE, home: box.home }, ["box"], quiet)).toBe(0);
     expect(readHost(box.home, "box")).toBeUndefined();
     expect(err.join("\n")).toContain(`the host at ${at} did not answer: nothing came back within 300 ms`);
-    expect(err.join("\n")).toContain(`wsp devices revoke ${kept.deviceId}`);
+    expect(err.join("\n")).toContain(`wsp host devices revoke ${kept.deviceId}`);
     // Honest about what is left over there: the revoke never reached the host, so the device is still standing.
     expect(await box.devices()).toEqual([kept.deviceId]);
     // And the road is not held past the window: a graceful close waits on an answer a dead road never carries, and
@@ -523,7 +523,7 @@ describe("wsp disconnect", () => {
     const err: string[] = [];
     expect(await disconnectCommand(io(log, err), { statePath: STATE, home: box.home }, ["box"])).toBe(0);
     expect(readHost(box.home, "box")).toBeUndefined();
-    expect(err.join("\n")).toContain(`wsp devices revoke ${kept.deviceId}`);
+    expect(err.join("\n")).toContain(`wsp host devices revoke ${kept.deviceId}`);
     // The words are the ones this file already holds every address to, never the URL parser's, which names nothing
     // the person can act on.
     expect(err.join("\n")).toContain(`"not-an-address" is not an address this computer can dial`);
@@ -564,7 +564,7 @@ describe("the command line's own environment", () => {
     await connectCommand(io(), { statePath: STATE, home: box.home }, { code: await box.code(), name: "box" }, [box.url]);
     const lines: string[] = [];
     const out: CliIO = { log: l => lines.push(l), error: l => lines.push(l), ask: noPrompt, askSecret: noPrompt };
-    expect(await cli(["hosts"], out, runningWsp(), { WSP_HOME: box.home })).toBe(0);
+    expect(await cli(["host", "list"], out, runningWsp(), { WSP_HOME: box.home })).toBe(0);
     expect(lines.join("\n")).toContain("box");
     expect(lines.join("\n")).toContain(box.url);
   });

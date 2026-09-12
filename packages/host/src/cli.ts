@@ -121,25 +121,21 @@ usage:
                      what that service runs
   wsp leave          on that computer: takes wsp off it, for a computer whose
                      host is gone and cannot run wsp remove
-  wsp pair           a one time code another computer redeems for a token of
-                     its own, when the host listens beyond this computer
-  wsp devices        the computers paired with this host; wsp devices revoke
-                     <id> takes one back out
-  wsp connect URL    redeem a code from a host on another computer for a token
-                     of this one's own: --code is that code, --name the name
-                     every later line calls the host by
-  wsp hosts          the hosts on other computers this computer holds, the
-                     default marked; wsp hosts default <alias> moves it
-  wsp disconnect ALIAS
-                     hand that host its token back and forget it here
-  wsp relay link URL put this computer on your relay account, so it can be
-                     reached from anywhere without a port open to the world:
-                     it prints a code and a page to approve it on. wsp relay
-                     unlink takes it back off, wsp relay hosts lists the
-                     computers on your account from whichever one you are at,
-                     and wsp relay clients says which computers hold a token
-                     for that account, with wsp relay clients revoke <id> to
-                     sign one out
+  wsp host           the roads to a host on a computer that is not the one you
+                     are sitting at, all under one word. wsp host pair prints a
+                     one time code another computer redeems for a token of its
+                     own and wsp host devices lists and revokes the computers
+                     that took one, both at the host's own terminal; wsp host
+                     connect <url> --code <code> --name <alias> spends such a
+                     code here, wsp host list names the hosts this computer
+                     holds with the default marked, wsp host default <alias>
+                     moves that mark and wsp host forget <alias> hands a token
+                     back; wsp host link <url> puts this computer on your relay
+                     account so it is reachable with no port open to the world,
+                     wsp host unlink takes it off, wsp host linked lists the
+                     boxes on the account and wsp host clients, with wsp host
+                     clients revoke <id>, says which computers hold a token for
+                     it. Run wsp host for the lines
   wsp status         whether a host is serving this state file, on which ports,
                      and what keeps it there, with a non-zero exit code when
                      none does
@@ -192,29 +188,29 @@ options:
   --listen ADDR      up: the address to bind (default ${LOOPBACK}, this
                      computer alone). On any other address the page is served
                      without the host token and every client pairs for a device
-                     token of its own: wsp pair prints a code, wsp devices
+                     token of its own: wsp host pair prints a code, wsp host devices
                      lists and revokes them
   --state PATH       state file: this word first, else WSP_HOME's state.json,
                      else ./.wsp/state.json when the current directory has a
                      .env, else state.json in the home the running host serves,
                      which is ~/.wsp unless current-home names another
   --host ALIAS       on any verb, and on wsp status: run the line against a
-                     host on another computer, by the name wsp connect gave it.
+                     host on another computer, by the name wsp host connect gave it.
                      WSP_HOST names one for a whole shell. That host serves its
                      own state, so --state is not read beside it and a line that
                      gives both says so. With neither, a line goes to the host
                      serving the state file here, and only when none does to the
-                     default alias wsp hosts marks. wsp status beside it, or
+                     default alias wsp host list marks. wsp status beside it, or
                      WSP_HOST, reads that host rather than this computer: where
                      it answers and whether it did, the service holding it up
                      being that computer's own to read. Naming one is the only
                      thing that moves that line: with neither word it answers
-                     for this computer whatever alias wsp hosts marks, since it
+                     for this computer whatever alias wsp host list marks, since it
                      is the question whether the host here is serving. The
                      lines that read this computer's own files refuse it, and
-                     wsp add, wsp remove, wsp pair and wsp devices take it only
+                     wsp add, wsp remove, wsp host pair and wsp host devices take it only
                      to answer that they run at that host's own terminal
-  --code CODE        connect: the code wsp pair printed on the other computer;
+  --code CODE        connect: the code wsp host pair printed on the other computer;
                      join: the code wsp add printed on the host
   --code-file PATH   join: read the code off this file and delete the file
                      before dialing, so a code never sits on a disk
@@ -233,7 +229,7 @@ options:
                      whatever your own ssh config and agent already use)
   --relay HOST       connect: reach that host through your relay by the name it
                      has there, instead of giving an address. The code is still
-                     the one wsp pair printed on it: the relay never carries one
+                     the one wsp host pair printed on it: the relay never carries one
   --no-relay         up: serve without the tunnel, on a computer that is linked
                      to a relay
   --yes              init: take every default and ask nothing (required off a
@@ -743,7 +739,7 @@ export interface SharedOpts extends ServeAsked {
 }
 
 /** The environment the caller runs in decides the home, the same reading the verbs take, so a run with its own
- * environment cannot send wsp connect to one folder and --host to another. It is also what the provider words
+ * environment cannot send wsp host connect to one folder and --host to another. It is also what the provider words
  * stand in front of, so one run picks its folder and its provider out of the same environment. */
 export function optsFor(
   values: Pick<SharedFlags, "port" | "ws-port" | "listen" | "advertise" | "state" | "provider" | "docker-host" | "no-relay">,
@@ -1626,7 +1622,9 @@ function aimPick(opts: SharedOpts, values: SharedFlags): { statePath: string } &
   return { statePath: opts.statePath, home: opts.home, env: opts.env, ...(values.host !== undefined ? { host: values.host } : {}) };
 }
 
-/** The commands the shared parse serves, by word; a line with no word is `up`. */
+/** The commands the shared parse serves, keyed by the words that select one. A line is matched against the longest
+ * key whose words open it, as a verb's words select a verb, so the plumbing folded under `host` needs no second
+ * dispatch of its own. */
 const COMMANDS: Readonly<Record<string, Command>> = {
   up: {
     json: false,
@@ -1651,41 +1649,65 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     run: (io, opts, values) =>
       statusCommand(io, { ...aimPick(opts, values), ...(values.state !== undefined ? { state: values.state } : {}) }, systemService()),
   },
-  pair: {
+  "host pair": {
     json: false,
     host: "hostSide",
     cliOnly: "hands out a code that lets another computer drive this host; only a person at the host's own terminal gives that away",
     run: (io, opts, values, args) => pairCommand(io, aimPick(opts, values), args),
   },
-  devices: {
+  "host devices": {
     json: false,
     host: "hostSide",
     cliOnly: "lists and takes away the computers that may drive this host, which belongs with the terminal that handed them the code",
     run: (io, opts, values, args) => devicesCommand(io, aimPick(opts, values), args),
   },
-  connect: {
+  "host connect": {
     json: false,
     host: "refused",
     cliOnly: "spends a pairing code and keeps the token it buys in this person's own files; where their wsp points is theirs to say",
     run: (io, opts, values, args) => connectCommand(io, opts, values, args),
   },
-  relay: {
+  "host list": {
     json: false,
     host: "refused",
-    cliOnly: "puts this computer on a person's relay account and runs the tunnel it sits behind, which is theirs to give away and theirs to take back",
-    run: (io, opts, values, args) => relayCommand(io, opts, args, values),
-  },
-  hosts: {
-    json: false,
-    host: "refused",
-    cliOnly: "reads and moves which host every line on this computer runs against, which no thread decides for the person",
+    cliOnly: "reads which host every line on this computer runs against, which no thread decides for the person",
     run: (io, opts, _values, args) => hostsCommand(io, opts, args),
   },
-  disconnect: {
+  "host default": {
+    json: false,
+    host: "refused",
+    cliOnly: "moves which host every line on this computer runs against, which no thread decides for the person",
+    run: (io, opts, _values, args) => hostsCommand(io, opts, ["default", ...args]),
+  },
+  "host forget": {
     json: false,
     host: "refused",
     cliOnly: "hands a host back the token this computer drives it by, which belongs with the terminal that took it",
     run: (io, opts, _values, args) => disconnectCommand(io, opts, args),
+  },
+  "host link": {
+    json: false,
+    host: "refused",
+    cliOnly: "puts this computer on a person's relay account, which is theirs to give away",
+    run: (io, opts, values, args) => relayCommand(io, opts, ["link", ...args], values),
+  },
+  "host unlink": {
+    json: false,
+    host: "refused",
+    cliOnly: "takes this computer off a person's relay account and stops the tunnel, which belongs with the terminal that put it there",
+    run: (io, opts, values, args) => relayCommand(io, opts, ["unlink", ...args], values),
+  },
+  "host linked": {
+    json: false,
+    host: "refused",
+    cliOnly: "signs this person in to their relay and lists the boxes on their account, which no thread does for them",
+    run: (io, opts, values, args) => relayCommand(io, opts, ["linked", ...args], values),
+  },
+  "host clients": {
+    json: false,
+    host: "refused",
+    cliOnly: "reads and takes away the computers holding a token for this person's relay account, which belongs with the person whose account it is",
+    run: (io, opts, values, args) => relayCommand(io, opts, ["clients", ...args], values),
   },
   init: {
     json: true,
@@ -1766,13 +1788,26 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
 };
 
-/** What each word of the shared parse does with --host, the one fact the parse, its refusal and the usage table read. */
-export const HOST_FLAG: Readonly<Record<string, HostFlag>> = Object.fromEntries(Object.entries(COMMANDS).map(([word, command]) => [word, command.host]));
+/** What each line of the shared parse does with --host, the one fact the parse, its refusal and the usage table read. */
+export const HOST_FLAG: Readonly<Record<string, HostFlag>> = Object.fromEntries(Object.entries(COMMANDS).map(([words, command]) => [words, command.host]));
 
-/** The words of the shared parse that run against a host somewhere else, the one fact its refusal reads. The two
+/** The lines of the shared parse that run against a host somewhere else, the one fact its refusal reads. The two
  * that take the flag only to say they run at that host's own terminal are not among them: a person told to read
  * this list wants the words that answer for a host over there. */
 export const HOST_COMMANDS: readonly string[] = Object.keys(HOST_FLAG).filter(w => HOST_FLAG[w] === "aimed");
+
+/** The word the plumbing folds under, and the lines it opens: one reading for the dispatch, the help and the
+ * refusal that meets somebody who typed the word on its own. */
+export const HOST_WORD = "host";
+export const HOST_LINES: readonly string[] = Object.keys(COMMANDS).filter(w => w.startsWith(`${HOST_WORD} `));
+
+/** The command a line of positionals selects: the longest key whose words open it, the same rule findVerb reads. */
+function findCommand(words: readonly string[]): { words: string; command: Command } | undefined {
+  const key = Object.keys(COMMANDS)
+    .filter(k => k.split(" ").every((w, i) => words[i] === w))
+    .sort((a, b) => b.length - a.length)[0];
+  return key === undefined ? undefined : { words: key, command: COMMANDS[key]! };
+}
 
 /** The words that take --json on the shared parse and those that refuse it, the one fact the refusal and its test read. */
 export const JSON_COMMANDS: readonly string[] = Object.keys(COMMANDS).filter(w => COMMANDS[w]!.json);
@@ -1801,10 +1836,12 @@ export const MCP_OPTIONS: Options = {
 const mcpInstallUsage = (): string => `wsp ${MCP_COMMAND} install --agent <id> [--agent <id>] [--host <alias>] [--json] [--remove]   (${MCP_AGENT_IDS})`;
 const mcpUsage = (): string => `usage: wsp ${MCP_COMMAND} [--host <alias>]\n       ${mcpInstallUsage()}`;
 
-/** The usage of the command a line stopped short of, whether it is a verb or `mcp`; none when no command owns the
- * word. `mcp` needs its own answer here because it is not in the verb table and its flags follow the word. */
+/** The usage of the command a line stopped short of, whether it is a verb, `mcp` or the word the plumbing folds
+ * under; none when no command owns the word. `mcp` needs its own answer here because it is not in the verb table
+ * and its flags follow the word. */
 function commandUsage(word: string): string | undefined {
   if (word === MCP_COMMAND) return mcpUsage();
+  if (word === HOST_WORD) return HOST_LINES.map(words => `usage: wsp ${words}`).join("\n");
   return verbUsage(word);
 }
 
@@ -1899,9 +1936,9 @@ const without = (options: Options, names: readonly string[]): Options => Object.
  * selected by its first word, so it advertises exactly what that word's `json` and `host` say and never a list
  * written out beside it, which is how a flag added to the shared parse reached seven lines that refuse it. */
 function optionsFor(words: string): Options {
-  const word = words.split(" ")[0]!;
-  const command = COMMANDS[word];
-  if (command === undefined) throw new Error(`wsp ${words} is in the command lines and no command answers wsp ${word}`);
+  const found = findCommand(words.split(" "));
+  if (found === undefined) throw new Error(`wsp ${words} is in the command lines and no command answers it`);
+  const { command } = found;
   return without(SHARED_OPTIONS, [...(command.json ? [] : ["json"]), ...(command.host === "refused" ? ["host"] : [])]);
 }
 
@@ -1914,13 +1951,8 @@ export const COMMAND_LINES: readonly CommandLine[] = [
   ...CLI_VERBS.map(v => ({ words: v.name, options: { ...COMMON, ...v.options }, ...("cliOnly" in v ? { cliOnly: v.cliOnly } : { tool: toolName(v.name) }) })),
   { words: MCP_COMMAND, options: MCP_OPTIONS, cliOnly: "is the tool server itself" },
   { words: `${MCP_COMMAND} install`, options: MCP_OPTIONS, cliOnly: "writes an agent's own config and skills folder, which is done once from a shell" },
-  { words: "devices revoke", options: optionsFor("devices revoke"), cliOnly: "takes away a computer's token, which belongs with the terminal that handed it the code" },
-  { words: "hosts default", options: optionsFor("hosts default"), cliOnly: "moves which host every line on this computer runs against, which no thread decides for the person" },
-  { words: "relay link", options: optionsFor("relay link"), cliOnly: "shows a code a person approves in their own browser, which only somebody at this computer's terminal starts" },
-  { words: "relay unlink", options: optionsFor("relay unlink"), cliOnly: "takes this computer off a person's relay account and stops the tunnel, which belongs with the terminal that put it there" },
-  { words: "relay hosts", options: optionsFor("relay hosts"), cliOnly: "signs this person in to their relay and lists the boxes on their account, which no thread does for them" },
-  { words: "relay clients", options: optionsFor("relay clients"), cliOnly: "reads and takes away the computers holding a token for this person's relay account, which belongs with the person whose account it is" },
-  { words: "relay clients revoke", options: optionsFor("relay clients revoke"), cliOnly: "signs another of this person's computers out of their relay, which no thread decides for them" },
+  { words: "host devices revoke", options: optionsFor("host devices revoke"), cliOnly: "takes away a computer's token, which belongs with the terminal that handed it the code" },
+  { words: "host clients revoke", options: optionsFor("host clients revoke"), cliOnly: "signs another of this person's computers out of their relay, which no thread decides for them" },
   ...Object.entries(COMMANDS).map(([words, command]) => ({ words, options: optionsFor(words), cliOnly: command.cliOnly })),
 ];
 
@@ -1982,23 +2014,24 @@ export async function cli(
     return 0;
   }
   const opts = optsFor(values, env, line => io.error(line));
-  const command = COMMANDS[word];
+  const found = findCommand(positionals);
   const json = values.json === true;
-  if (command === undefined) {
+  if (found === undefined) {
     // A word that opens a line but is no line of its own gets the lines it opens; one no command answers to gets
     // the pointer, since the help behind it runs to hundreds of rows.
     const usage = commandUsage(word);
     const refusal = usage === undefined ? usageRefusal(unknownWordLine(word), runForTheList("wsp --help")) : usageRefusal(`wsp ${word} opens a line rather than being one.`, usage);
     return failed(io, json, refusal);
   }
+  const { words, command } = found;
   if (json && !command.json) {
-    return failed(io, json, usageRefusal(`Unknown option '--json' for wsp ${word}: it answers in prose.`, `That flag belongs to ${JSON_COMMANDS.map(w => `wsp ${w}`).join(", ")}, and to every verb.`));
+    return failed(io, json, usageRefusal(`Unknown option '--json' for wsp ${words}: it answers in prose.`, `That flag belongs to ${JSON_COMMANDS.map(w => `wsp ${w}`).join(", ")}, and to every verb.`));
   }
   if (values.host !== undefined && command.host === "refused") {
-    return failed(io, json, usageRefusal(`Unknown option '--host' for wsp ${word}: it runs on this computer.`, `That flag belongs to ${HOST_COMMANDS.map(w => `wsp ${w}`).join(", ")}, and to every verb.`));
+    return failed(io, json, usageRefusal(`Unknown option '--host' for wsp ${words}: it runs on this computer.`, `That flag belongs to ${HOST_COMMANDS.map(w => `wsp ${w}`).join(", ")}, and to every verb.`));
   }
   try {
-    return await command.run(io, opts, values, positionals.slice(1));
+    return await command.run(io, opts, values, positionals.slice(words.split(" ").length));
   } catch (e) {
     return failed(io, json, e);
   }

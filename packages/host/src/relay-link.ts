@@ -179,7 +179,7 @@ async function relayClient(io: CliIO, home: string, deps: RelayDeps, url?: strin
     throw usageRefusal(`this computer is signed in to the relay at ${held.relayUrl}, and one at a time is the rule.`, `Sign out of that one before ${trimUrl(url ?? "")}.`);
   }
   const relayUrl = trimUrl(url ?? "");
-  if (relayUrl === "") throw usageRefusal("this computer has signed in to no relay.", "Give the relay's address: wsp relay hosts <url>.");
+  if (relayUrl === "") throw usageRefusal("this computer has signed in to no relay.", "Give the relay's address: wsp host linked <url>.");
   const name = deps.deviceName();
   const approved = await linkThrough(io, deps, relayUrl, "client", name);
   const record: RelayClientRecord = { relayUrl, token: approved.token, name, linkedAt: new Date(deps.now()).toISOString() };
@@ -201,10 +201,10 @@ async function relayHosts(record: RelayClientRecord, deps: RelayDeps): Promise<R
 }
 
 /** Where a host on the relay answers, for the connect that pairs with it. The relay carries no pairing code: the
- * code still comes from wsp pair on the box itself. */
+ * code still comes from wsp host pair on the box itself. */
 export async function relayHostUrl(home: string, name: string, deps: RelayDeps = systemRelayDeps): Promise<string> {
   const record = readRelayClient(home);
-  if (record === undefined) throw usageRefusal("this computer has signed in to no relay.", "Run wsp relay hosts <url> first, which signs in and lists the boxes on your account.");
+  if (record === undefined) throw usageRefusal("this computer has signed in to no relay.", "Run wsp host linked <url> first, which signs in and lists the boxes on your account.");
   const hosts = await relayHosts(record, deps);
   const named = hosts.filter(h => h.name === name);
   // Two boxes under one name is not a guess to make: the ids are what tells them apart, so the line names them.
@@ -212,7 +212,7 @@ export async function relayHostUrl(home: string, name: string, deps: RelayDeps =
   const found = named[0] ?? hosts.find(h => h.id === name);
   if (found === undefined) {
     const known = hosts.map(h => h.name).join(", ");
-    throw usageRefusal(`the relay holds no host called ${name}.`, `It holds ${known === "" ? "none at all" : known}; run wsp relay hosts to read them.`);
+    throw usageRefusal(`the relay holds no host called ${name}.`, `It holds ${known === "" ? "none at all" : known}; run wsp host linked to read them.`);
   }
   if (found.hostname === null || found.hostname === "") {
     throw usageRefusal(`the relay has no address for ${name} yet.`, "Start it there with wsp up, which asks the relay for a tunnel and says where it landed.");
@@ -220,9 +220,9 @@ export async function relayHostUrl(home: string, name: string, deps: RelayDeps =
   return relayUrlOf(found.hostname);
 }
 
-/** The rows wsp relay hosts prints; never the token, which a listing has no use for. */
+/** The rows wsp host linked prints; never the token, which a listing has no use for. */
 export function relayHostLines(hosts: readonly RelayHostView[]): string[] {
-  if (hosts.length === 0) return ["Your relay account holds no box yet. Run wsp relay link <url> on the computer you want to reach."];
+  if (hosts.length === 0) return ["Your relay account holds no box yet. Run wsp host link <url> on the computer you want to reach."];
   return table([
     ["HOST", "ADDRESS", "CONNECTOR", "LAST SEEN"],
     ...hosts.map(h => [h.name, h.hostname === null || h.hostname === "" ? "not up yet" : relayUrlOf(h.hostname), h.connectorVersion ?? "", h.lastSeen ?? ""]),
@@ -230,11 +230,11 @@ export function relayHostLines(hosts: readonly RelayHostView[]): string[] {
 }
 
 const RELAY_USAGE = [
-  "usage: wsp relay link <url> [--name <name>]",
-  "       wsp relay unlink",
-  "       wsp relay hosts [<url>]",
-  "       wsp relay clients",
-  "       wsp relay clients revoke <id>",
+  "usage: wsp host link <url> [--name <name>]",
+  "       wsp host unlink",
+  "       wsp host linked [<url>]",
+  "       wsp host clients",
+  "       wsp host clients revoke <id>",
 ].join("\n");
 
 interface RelayClientView {
@@ -245,9 +245,9 @@ interface RelayClientView {
   thisOne?: boolean;
 }
 
-/** The rows wsp relay clients prints: which computers hold a token for this account, and which one is this. */
+/** The rows wsp host clients prints: which computers hold a token for this account, and which one is this. */
 export function relayClientLines(clients: readonly RelayClientView[]): string[] {
-  if (clients.length === 0) return ["No computer is signed in to that relay. Run wsp relay hosts <url> to sign this one in."];
+  if (clients.length === 0) return ["No computer is signed in to that relay. Run wsp host linked <url> to sign this one in."];
   return table([
     ["COMPUTER", "ID", "SIGNED IN", "LAST SEEN", ""],
     ...clients.map(c => [c.name, c.id, c.signedInAt ?? "", c.lastSeen ?? "", c.thisOne === true ? "this one" : ""]),
@@ -261,29 +261,29 @@ export interface RelayCommandOpts {
 
 export async function relayCommand(io: CliIO, opts: RelayCommandOpts, args: readonly string[], values: { name?: string }, deps: RelayDeps = systemRelayDeps): Promise<number> {
   const [word, second, third, ...rest] = args;
-  if (word === undefined || rest.length > 0) throw usageRefusal("wsp relay takes one of its five lines.", RELAY_USAGE);
+  if (word === undefined || rest.length > 0) throw usageRefusal("wsp host takes one of its relay lines.", RELAY_USAGE);
   const noMore = (): void => {
-    if (third !== undefined) throw usageRefusal(`wsp relay ${word} takes no word beside ${third}.`, RELAY_USAGE);
+    if (third !== undefined) throw usageRefusal(`wsp host ${word} takes no word beside ${third}.`, RELAY_USAGE);
   };
   if (word === "link") {
     noMore();
     return relayLink(io, opts, second, values, deps);
   }
   if (word === "unlink") {
-    if (second !== undefined) throw usageRefusal("wsp relay unlink takes the relay this computer is already on, so it needs no address.", RELAY_USAGE);
+    if (second !== undefined) throw usageRefusal("wsp host unlink takes the relay this computer is already on, so it needs no address.", RELAY_USAGE);
     return relayUnlink(io, opts, deps);
   }
-  if (word === "hosts") {
+  if (word === "linked") {
     noMore();
     return relayHostsCommand(io, opts, second, deps);
   }
   if (word === "clients") {
-    if (second !== undefined && (second !== "revoke" || third === undefined)) throw usageRefusal("wsp relay clients takes nothing, or revoke and one id.", RELAY_USAGE);
+    if (second !== undefined && (second !== "revoke" || third === undefined)) throw usageRefusal("wsp host clients takes nothing, or revoke and one id.", RELAY_USAGE);
     return relayClientsCommand(io, opts, second === "revoke" ? third : undefined, deps);
   }
-  // The relay lines are all in the top-level help, and `wsp relay --help` is read by the shared parse before this
-  // function ever sees it, so the pointer names the one that lists them.
-  throw usageRefusal(unknownWordLine(`relay ${word}`), runForTheList("wsp --help"));
+  // The words reaching here come from the command table, so this is the line a road added there without a branch
+  // below would take; the pointer names the page that lists them.
+  throw usageRefusal(unknownWordLine(`host ${word}`), runForTheList("wsp host --help"));
 }
 
 /** The computers signed in to this person's relay, and the one line that takes one away. A token that walked off
@@ -302,8 +302,8 @@ async function relayClientsCommand(io: CliIO, opts: RelayCommandOpts, revoke: st
 
 async function relayLink(io: CliIO, opts: RelayCommandOpts, address: string | undefined, values: { name?: string }, deps: RelayDeps): Promise<number> {
   const held = readRelayRecord(opts.statePath);
-  if (held !== undefined) throw usageRefusal(`this computer is already linked to the relay at ${held.relayUrl} as ${held.name}.`, "Run wsp relay unlink to take it off first.");
-  if (address === undefined || !/^https?:\/\//i.test(address)) throw usageRefusal("wsp relay link takes the address of the relay, starting http:// or https://.", RELAY_USAGE);
+  if (held !== undefined) throw usageRefusal(`this computer is already linked to the relay at ${held.relayUrl} as ${held.name}.`, "Run wsp host unlink to take it off first.");
+  if (address === undefined || !/^https?:\/\//i.test(address)) throw usageRefusal("wsp host link takes the address of the relay, starting http:// or https://.", RELAY_USAGE);
   const relayUrl = trimUrl(address);
   const name = values.name ?? deps.deviceName();
   const approved = await linkThrough(io, deps, relayUrl, "host", name);
@@ -312,13 +312,13 @@ async function relayLink(io: CliIO, opts: RelayCommandOpts, address: string | un
   writeRelayRecord(opts.statePath, record);
   io.log(`relay       ${relayUrl}`);
   io.log(`host        ${name}`);
-  io.log("This computer asks that relay for a tunnel every time wsp up runs, and says where it answers. wsp relay unlink takes it back off.");
+  io.log("This computer asks that relay for a tunnel every time wsp up runs, and says where it answers. wsp host unlink takes it back off.");
   return 0;
 }
 
 async function relayUnlink(io: CliIO, opts: RelayCommandOpts, deps: RelayDeps): Promise<number> {
   const record = readRelayRecord(opts.statePath);
-  if (record === undefined) throw usageRefusal("this computer is on no relay.", "Run wsp relay link <url> to put it on one.");
+  if (record === undefined) throw usageRefusal("this computer is on no relay.", "Run wsp host link <url> to put it on one.");
   // The record goes first of all, so the host that is serving starts no connector in place of the one stopped next,
   // and the connector goes before the relay is told: a tunnel with connections still registered cannot be deleted.
   removeRelayRecord(opts.statePath);
@@ -329,7 +329,7 @@ async function relayUnlink(io: CliIO, opts: RelayCommandOpts, deps: RelayDeps): 
     await relayCall(deps, `${record.relayUrl}/hosts/${record.hostId}`, { method: "DELETE", token: record.token });
   } catch (e) {
     io.error(e instanceof Error ? e.message : String(e));
-    io.error(`the relay may still hold this computer as ${record.name}; take it off there with wsp relay hosts on your own computer.`);
+    io.error(`the relay may still hold this computer as ${record.name}; take it off there with wsp host linked on your own computer.`);
   }
   io.log(`unlinked from ${record.relayUrl}; the tunnel is stopped and this computer holds no token for it`);
   return 0;
@@ -392,7 +392,7 @@ export async function startRelay(opts: RelayStartOpts, deps: RelayDeps = systemR
    * the host down, so a relay that refuses the name is one line and a host that goes on serving. */
   const learn = async (hostname: string): Promise<void> => {
     try {
-      // wsp relay unlink takes the record away while this host serves; without this, a name learned after that
+      // wsp host unlink takes the record away while this host serves; without this, a name learned after that
       // would put a relay.json back holding a hostname and nothing else, where the unlink had left none.
       const held = readRelayRecord(opts.statePath);
       if (held === undefined) return;
@@ -412,7 +412,7 @@ export async function startRelay(opts: RelayStartOpts, deps: RelayDeps = systemR
       port: opts.port,
       ...(asked.tunnelToken !== null ? { token: asked.tunnelToken } : {}),
       log: opts.log,
-      // wsp relay unlink stops the child and takes the record away; this host is what would otherwise start another.
+      // wsp host unlink stops the child and takes the record away; this host is what would otherwise start another.
       keepRunning: () => readRelayRecord(opts.statePath) !== undefined,
       // Only a quick tunnel is handed a new name when its child is restarted; a managed name is the relay's own and
       // is not this box's to report, so nothing on that road listens for one.
@@ -450,7 +450,7 @@ export async function startRelay(opts: RelayStartOpts, deps: RelayDeps = systemR
 /** What a box behind a relay says at start: it binds this computer alone and is still reachable from anywhere, so
  * the page it serves carries no token and a client pairs for one, exactly as a host that bound an address does. */
 export function relayOnLoopbackLine(): string {
-  return "this host is on a relay, so it can be reached from anywhere it can dial out: the page carries no token and pairing is the gate. Run wsp pair for a code, and wsp devices to see who took one.";
+  return "this host is on a relay, so it can be reached from anywhere it can dial out: the page carries no token and pairing is the gate. Run wsp host pair for a code, and wsp host devices to see who took one.";
 }
 
 /** Where this host answers from anywhere: the name the record holds, and only while a connector this computer

@@ -268,9 +268,9 @@ export async function dialHost(statePath: string, opts: DialOpts = {}): Promise<
   if (aim.kind === "here" && opts.start !== undefined && servingHost(statePath) === undefined) {
     await opts.start(statePath, opts.say ?? (line => void process.stderr.write(`${line}\n`)));
   }
-  // An address is the road wsp connect takes and no other: every other line needs the token a redeem bought, and
+  // An address is the road wsp host connect takes and no other: every other line needs the token a redeem bought, and
   // this computer holds one only under a name.
-  if (aim.kind === "url" && aim.token === undefined && opts.redeem === undefined) throw usageRefusal(addressNotPairedLine(aim.url), "Run wsp hosts to read the names this computer knows.");
+  if (aim.kind === "url" && aim.token === undefined && opts.redeem === undefined) throw usageRefusal(addressNotPairedLine(aim.url), "Run wsp host list to read the names this computer knows.");
   const { url, token } = hostAddress(statePath, { aim });
   const deadlineMs = opts.deadlineMs ?? dialWindowMs(aim);
   const ws = new WebSocket(url);
@@ -3140,7 +3140,7 @@ export async function runVerb(verb: CliVerb | CliOnlyVerb, argv: ReadonlyArray<s
   const hostSide = "hostSide" in verb ? verb.hostSide : undefined;
   if (flags["help"] === true) {
     // A line that runs at its own host's terminal takes the flag only to say so, which is what its own line says.
-    const host = hostSide === undefined ? "a host on another computer, by the name wsp connect gave it" : "read to say this line runs at its own host's terminal; it dials no other";
+    const host = hostSide === undefined ? "a host on another computer, by the name wsp host connect gave it" : "read to say this line runs at its own host's terminal; it dials no other";
     io.log(`usage: ${verb.usage}\n${aboutLines(verb, "  ").join("\n")}\n\n  --json         print the raw protocol values, one JSON line each\n  --state PATH   the state file the host serves\n  --host NAME    ${host}`);
     return 0;
   }
@@ -3153,8 +3153,8 @@ export async function runVerb(verb: CliVerb | CliOnlyVerb, argv: ReadonlyArray<s
   } catch (e) {
     return failed(io, flags["json"] === true, e, `wsp ${verb.name}: `);
   }
-  // A line whose work happens at the host's own terminal is answered here however it was aimed, as wsp pair and
-  // wsp devices are: it never dials, so nothing of this computer's crosses to the other one.
+  // A line whose work happens at the host's own terminal is answered here however it was aimed, as wsp host pair and
+  // wsp host devices are: it never dials, so nothing of this computer's crosses to the other one.
   if (hostSide !== undefined && aim.kind !== "here") {
     return failed(io, flags["json"] === true, usageRefusal(hostSideOnlyLine(verb.name, aimName(aim)), hostSideOnlyFix(hostSide)));
   }

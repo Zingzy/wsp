@@ -44,13 +44,16 @@ describe("what wsp says when it will not run a line", () => {
     }
   });
 
-  it("answers an unknown word under mcp and under relay the same way, one line and a pointer, with no usage dump", async () => {
+  it("answers an unknown word under mcp and under host the same way, one line and a pointer, with no usage dump", async () => {
     const mcp = await run("mcp", "nope");
     expect(mcp.code).toBe(EXIT_CODES.usage);
     expect(mcp.io.errors).toEqual(["unknown command: mcp nope. Run wsp mcp --help for the list."]);
-    const relay = await run("relay", "nope");
-    expect(relay.code).toBe(EXIT_CODES.usage);
-    expect(relay.io.errors).toEqual(["unknown command: relay nope. Run wsp --help for the list."]);
+    // The word the plumbing folds under opens lines rather than being one, so it answers with the lines it opens.
+    const host = await run("host", "nope");
+    expect(host.code).toBe(EXIT_CODES.usage);
+    expect(host.io.errors).toHaveLength(1);
+    expect(host.io.errors[0]).toContain("wsp host opens a line rather than being one.");
+    expect(host.io.errors[0]).toContain("usage: wsp host pair");
   });
 
   it("takes help as the word for the flag, printing what wsp --help prints and exiting 0", async () => {

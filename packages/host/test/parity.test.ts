@@ -293,27 +293,26 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     }
     expect(COMMAND_LINES.filter(c => "cliOnly" in c).map(c => c.words).sort()).toEqual([
       "add",
-      "connect",
-      "devices",
-      "devices revoke",
-      "disconnect",
       "doctor",
       "down",
-      "hosts",
-      "hosts default",
+      "host clients",
+      "host clients revoke",
+      "host connect",
+      "host default",
+      "host devices",
+      "host devices revoke",
+      "host forget",
+      "host link",
+      "host linked",
+      "host list",
+      "host pair",
+      "host unlink",
       "image export",
       "init",
       "join",
       "leave",
       "mcp",
       "mcp install",
-      "pair",
-      "relay",
-      "relay clients",
-      "relay clients revoke",
-      "relay hosts",
-      "relay link",
-      "relay unlink",
       "remove",
       "status",
       "up",
@@ -353,21 +352,23 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     // --host is one key in the shared parse, and the command line refuses it on a word that runs here. A line whose
     // flags were written out beside it advertised the flag anyway, and this table is what every skill example is
     // held to, so the example would pass the gate and fail at a terminal.
-    const refused = usageError(["wsp", "hosts", "default", "box", "--host", "box"], COMMAND_LINES) ?? "the usage table takes --host on wsp hosts default";
+    const refused = usageError(["wsp", "host", "default", "box", "--host", "box"], COMMAND_LINES) ?? "the usage table takes --host on wsp host default";
     expect(refused).toContain("Unknown option '--host'");
     const errors: string[] = [];
     const io: CliIO = { log: () => {}, error: line => errors.push(line), ask: () => Promise.reject(new Error("no prompt")), askSecret: () => Promise.reject(new Error("no prompt")) };
-    expect(await cli(["hosts", "default", "box", "--host", "box"], io)).toBe(EXIT_CODES.usage);
-    expect(errors[0]).toContain("Unknown option '--host' for wsp hosts");
+    expect(await cli(["host", "default", "box", "--host", "box"], io)).toBe(EXIT_CODES.usage);
+    expect(errors[0]).toContain("Unknown option '--host' for wsp host default");
     // Every line the shared parse serves, one word or several, advertises exactly what its command answers. The
     // words that take the flag are the ones aimed at a host over there and the two that run at its own terminal:
     // only the ones that refuse it outright leave it out.
     for (const line of COMMAND_LINES) {
       const word = line.words.split(" ")[0]!;
-      // A verb serves itself, flags and all; only the lines the shared parse serves are held to their word's table.
+      // A verb serves itself, flags and all; only the lines the shared parse serves are held to their command's table.
       if (!("cliOnly" in line) || word === "mcp" || CLI_VERBS.some(v => v.name === line.words)) continue;
-      expect(Object.hasOwn(line.options, "host"), `wsp ${line.words} advertises --host`).toBe((HOST_FLAG[word] ?? "refused") !== "refused");
-      expect(Object.hasOwn(line.options, "json"), `wsp ${line.words} advertises --json`).toBe(JSON_COMMANDS.includes(word));
+      // The command a line selects is the longest key that opens it, which is what the parse itself reads.
+      const key = Object.keys(HOST_FLAG).filter(k => k.split(" ").every((w, i) => line.words.split(" ")[i] === w)).sort((a, b) => b.length - a.length)[0]!;
+      expect(Object.hasOwn(line.options, "host"), `wsp ${line.words} advertises --host`).toBe(HOST_FLAG[key] !== "refused");
+      expect(Object.hasOwn(line.options, "json"), `wsp ${line.words} advertises --json`).toBe(JSON_COMMANDS.includes(key));
     }
   });
 

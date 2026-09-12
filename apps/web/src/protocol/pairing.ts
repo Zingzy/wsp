@@ -77,7 +77,7 @@ export function redeemPairingCode(url: string, code: string, name: string, Ctor:
   });
 }
 
-/** What this browser calls itself to the host, which is what wsp devices shows beside the id. */
+/** What this browser calls itself to the host, which is what wsp host devices shows beside the id. */
 export function deviceName(at: PageLocation, agent: string): string {
   const platform = /Mac/.test(agent) ? "a Mac" : /Windows/.test(agent) ? "a Windows computer" : /Linux/.test(agent) ? "a Linux computer" : "a computer";
   return `${platform} in a browser at ${at.host}`;

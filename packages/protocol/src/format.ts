@@ -2728,7 +2728,7 @@ export const HOST_WORDS = {
     portPlaceholder: "22",
     keycap: "Connect",
     cancel: "Cancel",
-    directNote: "The app pairs with the host at this address, with the code wsp pair printed on that computer, and opens it.",
+    directNote: "The app pairs with the host at this address, with the code wsp host pair printed on that computer, and opens it.",
     sshNote: "The app logs in over ssh, starts wsp there when nothing serves, forwards its port to this computer and pairs.",
     /** Why Connect is held, as its tooltip. */
     fillFirst: "type the address and the code first",

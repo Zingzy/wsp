@@ -527,7 +527,7 @@ describe("wsp verbs over the host", () => {
     writeHost(join(dir, "home"), "box", { url: "http://box.local:4400", deviceId: "d_box", deviceToken: "tok-box", pairedAt: "2026-09-11T10:00:00.000Z" });
     const dest = join(dir, "elsewhere.wsp");
     const line = `${hostSideOnlyLine("image export", "box")} ${hostSideOnlyFix(HOST_SIDE_VAULT)}`;
-    // Every way a line is aimed reads the same: the flag, the variable, and the alias wsp hosts marks.
+    // Every way a line is aimed reads the same: the flag, the variable, and the alias wsp host list marks.
     const flagged = await run("image", "export", dest, "--host", "box");
     expect(flagged.code).toBe(EXIT_CODES.usage);
     expect(flagged.io.errors.at(-1)).toBe(line);

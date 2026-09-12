@@ -10,7 +10,7 @@
 // One join buys two things with one code: the place the other wsp keeps for
 // this computer, and the device token this computer's own window holds. The
 // second is written here as a host record, so the window opens on the wsp it
-// joined the way it would have after wsp connect, and leaving hands that token
+// joined the way it would have after wsp host connect, and leaving hands that token
 // back before the place goes.
 import {
   JoinRefused,

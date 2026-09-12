@@ -219,18 +219,37 @@ describe("installing the MCP server for a local agent", () => {
   it("--agent belongs to mcp install alone, a command with no JSON to print refuses --json, and mcp --help says its own usage", async () => {
     // Which shared-parse commands print JSON is the command table's fact: init prints each sign-in hand-off as one
     // object per line and takes the flag; recipe parses its own flags and prints its table as one object.
-    expect(PROSE_COMMANDS).toEqual(["up", "down", "status", "pair", "devices", "connect", "relay", "hosts", "disconnect", "add", "remove", "join", "leave", "doctor"]);
+    expect(PROSE_COMMANDS).toEqual([
+      "up",
+      "down",
+      "status",
+      "host pair",
+      "host devices",
+      "host connect",
+      "host list",
+      "host default",
+      "host forget",
+      "host link",
+      "host unlink",
+      "host linked",
+      "host clients",
+      "add",
+      "remove",
+      "join",
+      "leave",
+      "doctor",
+    ]);
     expect(JSON_COMMANDS).toEqual(["init"]);
     for (const cmd of PROSE_COMMANDS) {
       const out = io();
-      expect(await cli([cmd, "--json", "--state", statePath], out), cmd).toBe(3);
+      expect(await cli([...cmd.split(" "), "--json", "--state", statePath], out), cmd).toBe(3);
       expect(out.errors[0], cmd).toContain("Unknown option '--json'");
       expect(out.lines, cmd).toEqual([]);
     }
     for (const cmd of JSON_COMMANDS) {
       // --yes beside --json is init's own refusal, so the flag reached the command instead of the parse turning it away.
       const out = io();
-      expect(await cli([cmd, "--json", "--yes", "--state", statePath], out), cmd).toBe(3);
+      expect(await cli([...cmd.split(" "), "--json", "--yes", "--state", statePath], out), cmd).toBe(3);
       expect(out.errors[0], cmd).not.toContain("Unknown option");
       // The refusal of a --json line is the failure object, the same line an agent parses on every verb.
       expect(JSON.parse(out.errors[0]!), cmd).toMatchObject({ error: expect.stringContaining("--json"), class: "usage", exit: 3 });

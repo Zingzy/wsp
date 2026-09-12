@@ -128,7 +128,7 @@ describe("hostSwitcher", () => {
     expect(d.loaded).toEqual([]);
   });
 
-  it("connecting by address runs the same road wsp connect does, labels the record, and opens the window on it", async () => {
+  it("connecting by address runs the same road wsp host connect does, labels the record, and opens the window on it", async () => {
     const d = deps();
     const connect = vi.fn(async (_io, opts: { home: string }, values: { name?: string }, args: readonly string[]) => {
       writeHost(opts.home, values.name ?? "host", record(args[0]!));
