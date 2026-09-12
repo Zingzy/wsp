@@ -7,7 +7,7 @@ import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe } from "@wsp/adapter-claude";
-import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, type AdapterEvent, type EventUnion, type RecipeDigest, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
+import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, PERMISSION_ALLOW, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, threadWordOf, type AdapterEvent, type EventUnion, type RecipeDigest, type SessionView, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, GuestUnusableError, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_PATH, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
@@ -1766,6 +1766,23 @@ describe("a turn the host comes back to", () => {
     // its own asked-set is empty and the row is still on its seed, and the start row is what stands in for both.
     expect(h.asked()).toEqual(["build it"]);
     expect((await rt2.sessions.list(workspaceId))[0]!.harnessTitle).toBeUndefined();
+    await rt2.close();
+  });
+
+  it("a turn cut on the way back takes its open prompt with it, so no settled thread is left reading as waiting on a person", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const h = machineRuns();
+    const { workspaceId, run } = await hostWentDown(h, store, backend);
+    h.emit(run, { type: "permission.ask", sessionId: "sess-1", ask: { askId: "ask_1", toolName: "Write", detail: "out.txt", input: '{"file_path":"/root/out.txt"}', options: [{ id: PERMISSION_ALLOW, label: "Allow", effect: "allow" }] } });
+    await until(async () => ((await store.get("sessions", workspaceId)) as { sessions: SessionView[] }).sessions[0]!.asking !== undefined);
+
+    // The host comes back with no adapter for the harness, so the run cannot be re-opened and the turn is cut.
+    const rt2 = createRuntime({ backend, store, adapters: {} });
+    await until(async () => (await rt2.sessions.list(workspaceId))[0]!.status === "failed");
+    const [row] = await rt2.sessions.list(workspaceId);
+    expect(row!.asking).toBeUndefined();
+    expect(threadWordOf(foldThreads([row!])[0]!)).toBe("Ended");
     await rt2.close();
   });
 

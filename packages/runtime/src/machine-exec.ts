@@ -50,6 +50,10 @@ export interface MachineExecOptions {
   execTimeoutMs?: number;
   /** Directory inside the guest for script/log/pid/exit files. */
   runDir?: string;
+  /** Whether the turn is stopped on a question only a person can answer. A harness blocked on a permission prompt
+   * prints nothing and burns nothing, so the idle limit would cut the very turn the question is waiting for; the
+   * idle clock does not run while this answers true. */
+  waiting?: () => boolean;
   /** The clock both limits read. */
   now?: () => number;
   /** What every wait runs on, the poll's and the launch retry's; tests hand in one that moves the clock. */
@@ -140,6 +144,7 @@ const GRACE_CHECKS = Array.from({ length: Math.round(RUN_STOP_MS / GRACE_POLL_MS
 export function machineExecStream(machine: Machine, opts: MachineExecOptions = {}): ExecStreamFactory {
   const pollMs = opts.pollMs ?? 1500;
   const idleMs = opts.idleMs ?? TURN_IDLE_MS;
+  const waiting = opts.waiting ?? (() => false);
   const deadlineMs = opts.deadlineMs ?? TURN_WALL_MS;
   const execTimeoutMs = opts.execTimeoutMs ?? INLINE_EXEC_MS;
   const runDir = opts.runDir ?? RUN_DIR;
@@ -238,6 +243,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
           return;
         }
         const at = now();
+        if (waiting()) activity.touch(at);
         const quietMs = activity.quietMs(at);
         const cut = turnCut({ idleMs, deadlineMs }, at - startedAt, quietMs);
         if (cut !== undefined) {

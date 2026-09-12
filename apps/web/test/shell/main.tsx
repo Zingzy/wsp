@@ -232,7 +232,6 @@ const prompting: SessionEvent[] = [
     input: JSON.stringify({ file_path: "/Users/zingzy/api/src/health.ts", content: "export const health = () => ({ ok: true });\n" }),
     detail: "health.ts",
     options: permOptions,
-    waitMs: 300_000,
   },
   { type: "session.permission.closed", ...perm, askId: "ask_done", outcome: "allowed", optionId: "allow" },
   {
@@ -244,7 +243,6 @@ const prompting: SessionEvent[] = [
     input: JSON.stringify({ command: "pnpm exec vitest run packages/api/test/health.test.ts", description: "Run the health route's test" }),
     detail: "pnpm exec vitest run",
     options: permOptions,
-    waitMs: 300_000,
   },
 ];
 

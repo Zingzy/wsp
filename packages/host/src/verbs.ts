@@ -90,6 +90,7 @@ import {
   plural,
   fmtThreads,
   foldThreads,
+  threadWordOf,
   forksNoMachines,
   foreignFlagLine,
   forgetNotice,
@@ -860,7 +861,7 @@ export function shortenedEnd(text: string, width: number): string {
 }
 
 function threadLine(t: ThreadRow, indent = ""): string[] {
-  return [`${indent}${t.id}`, t.workspaceName, t.harness, t.status, t.startedBy, t.cwd !== undefined ? shortenedFront(t.cwd, FOLDER_WIDTH) : "", shortenedEnd(t.title, TITLE_WIDTH)];
+  return [`${indent}${t.id}`, t.workspaceName, t.harness, threadWordOf(t), t.startedBy, t.cwd !== undefined ? shortenedFront(t.cwd, FOLDER_WIDTH) : "", shortenedEnd(t.title, TITLE_WIDTH)];
 }
 
 /** The rows a --tree listing prints: every thread a person or the command line opened, each followed by the ones

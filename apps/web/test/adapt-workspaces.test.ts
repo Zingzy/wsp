@@ -37,7 +37,13 @@ describe("threadIndicator", () => {
   it.each<[SessionView["status"], string, boolean]>([
     ["running", "Working", true], ["completed", "Idle", false], ["interrupted", "Idle", false], ["failed", "Ended", false],
   ])("%s -> %s", (st, label, pulse) => {
-    expect(threadIndicator({ status: st })).toEqual({ label, tone: "neutral", pulse });
+    expect(threadIndicator({ status: st, asking: undefined })).toEqual({ label, tone: "neutral", pulse });
+  });
+
+  it("a turn stopped on a permission prompt reads as needing the person and does not pulse, and goes back to working when it is answered", () => {
+    const asking = "Permission for Write: out.txt";
+    expect(threadIndicator({ status: "running", asking })).toEqual({ label: "Needs you", tone: "neutral", pulse: false });
+    expect(threadIndicator({ status: "running", asking: undefined })).toEqual({ label: "Working", tone: "neutral", pulse: true });
   });
 });
 
@@ -87,8 +93,8 @@ describe("deriveSidebarProjects", () => {
     ]);
     expect(projects[1]).toMatchObject({ projectKey: LIVE_WS, environmentPresence: "remote-only", groupedProjectCount: 1, allRemoteMembersAreDesktopLocal: false, machineState: "running", reach: "reachable", state: "running" });
     expect(projects[1]?.threads).toEqual([
-      { id: "s1", threadId: null, sessionId: "s1", workspaceId: LIVE_WS, title: "hello", status: "completed", ran: true, startedAt: "2026-09-02T17:19:35.668Z", endedAt: "2026-09-02T17:19:37.768Z", indicator: { label: "Idle", tone: "neutral", pulse: false }, harness: "claude", startedBy: "person", project: null, parentThreadId: null },
-      { id: "s0", threadId: null, sessionId: "s0", workspaceId: LIVE_WS, title: "59094224", status: "running", ran: true, startedAt: null, endedAt: null, indicator: { label: "Working", tone: "neutral", pulse: true }, harness: "claude", startedBy: "person", project: null, parentThreadId: null },
+      { id: "s1", threadId: null, sessionId: "s1", workspaceId: LIVE_WS, title: "hello", status: "completed", ran: true, startedAt: "2026-09-02T17:19:35.668Z", endedAt: "2026-09-02T17:19:37.768Z", indicator: { label: "Idle", tone: "neutral", pulse: false }, harness: "claude", startedBy: "person", project: null, parentThreadId: null, asking: null },
+      { id: "s0", threadId: null, sessionId: "s0", workspaceId: LIVE_WS, title: "59094224", status: "running", ran: true, startedAt: null, endedAt: null, indicator: { label: "Working", tone: "neutral", pulse: true }, harness: "claude", startedBy: "person", project: null, parentThreadId: null, asking: null },
     ]);
   });
 

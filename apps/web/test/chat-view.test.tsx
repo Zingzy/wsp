@@ -404,7 +404,6 @@ describe("ChatView", () => {
         { id: "deny", label: "Deny", effect: "deny" as const },
         { id: "mode:acceptEdits", label: "Allow, then Accept edits", effect: "mode" as const, mode: "acceptEdits" },
       ],
-      waitMs: 300_000,
     };
     const history: SessionEvent[] = [{ type: "session.start", ...sc, at: T0, model: "claude-sonnet-5", prompt: "write it" }, ask];
     const { api, emit } = fixtureApi([workspace], { [WS]: history });
@@ -452,7 +451,6 @@ describe("ChatView", () => {
         { id: "allow", label: "Allow", effect: "allow" as const },
         { id: "deny", label: "Deny", effect: "deny" as const },
       ],
-      waitMs: 300_000,
     });
     const history: SessionEvent[] = [
       { type: "session.start", ...sc, at: T0, model: "claude-sonnet-5", prompt: "clean it" },

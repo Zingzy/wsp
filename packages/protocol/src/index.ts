@@ -40,10 +40,6 @@ export const TURN_IDLE_MS = 10 * 60_000;
  * percent of one core clears it, which a vitest batch or a packager does many times over; a harness process waking
  * on its own timers stays under it, so a turn nothing is working on is still cut at TURN_IDLE_MS. */
 export const TURN_WORK_TICKS_PER_S = 5;
-/** How long a permission prompt relayed into the chat waits for an answer before the runtime denies it in the
- * person's place. Well inside TURN_IDLE_MS: a waiting prompt writes no byte, so a wait past the idle cut would take
- * the turn with it and the thread would read as hung rather than as unanswered. */
-export const PERMISSION_WAIT_MS = 5 * 60_000;
 /** How long a thread sits idle before the sidebar folds it out of that workspace's shelf into its Archived group.
  * The fold reads the thread's own last activity, so a thread that takes a new turn leaves the archive by itself and
  * there is no archived flag anywhere to set or clear. */
@@ -549,6 +545,10 @@ export const SessionView = z.object({
   effort: z.string().optional(),
   permissionMode: z.string().optional(),
   contextWindow: z.string().optional(),
+  /** The lead of the permission prompt this turn has open and nobody has answered, as askingLine writes it;
+   * absent on a turn waiting on nobody. The harness is stopped on the question while it stands, so this is the one
+   * fact that says a thread is waiting on the person rather than working. */
+  asking: z.string().optional(),
 });
 export type SessionView = z.infer<typeof SessionView>;
 
@@ -578,6 +578,8 @@ export const ThreadView = z.object({
   /** The opening turn's parent and root, so a listing draws the tree a root thread spawned without reading rows. */
   parentThreadId: z.string().optional(),
   rootThreadId: z.string().optional(),
+  /** The latest turn's open permission prompt, as SessionView.asking carries it; what threadState reads. */
+  asking: z.string().optional(),
 });
 export type ThreadView = z.infer<typeof ThreadView>;
 
@@ -622,6 +624,7 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.startedAt !== undefined ? { startedAt: latest.startedAt } : {}),
       ...(latest.endedAt !== undefined ? { endedAt: latest.endedAt } : {}),
       ...(latest.cwd !== undefined ? { cwd: latest.cwd } : {}),
+      ...(latest.asking !== undefined ? { asking: latest.asking } : {}),
       turns: turns.length,
       ran: threadRan(turns),
       ...(first.parentThreadId !== undefined ? { parentThreadId: first.parentThreadId } : {}),
@@ -1069,15 +1072,15 @@ export const PermissionOption = z.object({
 });
 export type PermissionOption = z.infer<typeof PermissionOption>;
 
-/** How a permission prompt ended. allowed and denied are a person's pick. unanswered is the runtime's own deny after
- * PERMISSION_WAIT_MS, the policy for a thread nobody is watching. cancelled is the prompt going with its turn: a
- * stop, or a harness that withdrew the question. */
+/** How a permission prompt ended. allowed and denied are a person's pick. cancelled is the prompt going with its
+ * turn: a stop, or a harness that withdrew the question. unanswered is only ever read back off a transcript written
+ * while wsp still denied a prompt on a clock of its own; nothing closes one that way now. */
 export const PermissionOutcome = z.enum(["allowed", "denied", "unanswered", "cancelled"]);
 export type PermissionOutcome = z.infer<typeof PermissionOutcome>;
 
 /** One permission prompt the harness raised, relayed into the chat as its own row: the tool it wants to run, what it
  * wants to run it on, and the options the person may pick. The prompt blocks the turn until sessions.answer names an
- * option or the runtime's wait runs out, so the row is what the thread is waiting on. */
+ * option or the turn itself ends, so the row is what the thread is waiting on for as long as the turn lives. */
 export const SessionPermissionEvent = z.object({
   type: z.literal("session.permission"),
   ...sessionScope,
@@ -1092,9 +1095,6 @@ export const SessionPermissionEvent = z.object({
   /** The harness's own one phrase for the call (a file name, a command); absent where it named none. */
   detail: z.string().optional(),
   options: z.array(PermissionOption),
-  /** How long this prompt waits before the runtime denies it, from `at`; absent on a prompt the runtime does not
-   * time out. */
-  waitMs: z.number().optional(),
 });
 export type SessionPermissionEvent = z.infer<typeof SessionPermissionEvent>;
 
@@ -3854,6 +3854,7 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
+export { threadState, threadStateWord, threadWordOf, type ThreadState } from "./thread-state.js";
 export { actionRefusal, agentsKindRefusal, agentsMayDrive, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, type MachineOnDelete, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";

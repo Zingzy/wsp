@@ -6,7 +6,7 @@
 // roads run here against a stubbed Notification and a stubbed bridge; nothing
 // real is shown and nothing makes a sound.
 import { act, render } from "@testing-library/react";
-import { NEEDS_YOU, workspaceAwakeLine, type InitNeedsYou } from "@wsp/protocol";
+import { NEEDS_YOU, permissionAskLine, workspaceAwakeLine, type InitNeedsYou } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -170,6 +170,41 @@ describe("a browser tab's road out of the app", () => {
   });
 });
 
+
+describe("a thread stopped on a permission prompt while the person looked away", () => {
+  const ASKED = {
+    type: "session.permission" as const,
+    workspaceId: "ws_1",
+    sessionId: "s1",
+    turnId: "turn_1",
+    threadId: "thr_1",
+    askId: "ask_1",
+    toolName: "Bash",
+    detail: "Check wsp version",
+    input: '{"command":"wsp --version"}',
+    options: [{ id: "allow", label: "Allow", effect: "allow" as const }],
+  };
+
+  it("says what the thread is waiting on, on the same road as a build's need, and a click opens that thread", () => {
+    const emit = bindEvents();
+    render(<Harness />);
+    const focus = vi.spyOn(window, "focus").mockImplementation(() => {});
+    act(() => emit(ASKED));
+    expect(FakeNotification.built).toEqual([{ title: NEEDS_YOU, body: permissionAskLine("Bash", "Check wsp version"), silent: true }]);
+    FakeNotification.last!.onclick!();
+    expect(focus).toHaveBeenCalled();
+    expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_1", "thr_1"]);
+    focus.mockRestore();
+  });
+
+  it("says nothing while the app is the thing in front of the person", () => {
+    const emit = bindEvents();
+    render(<Harness />);
+    hidden = false;
+    act(() => emit(ASKED));
+    expect(FakeNotification.built).toEqual([]);
+  });
+});
 
 describe("a machine that came up while the person looked away", () => {
   const WOKEN = { id: "ws_1", name: "b1", machineId: "m1", phase: "running" as const, golden: "snap_g", createdAt: "2026-09-10T00:00:00Z", projects: [] };

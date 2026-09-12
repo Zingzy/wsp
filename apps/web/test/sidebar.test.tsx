@@ -201,6 +201,19 @@ describe("rows from the fixture wire", () => {
     expect(screen.queryByText(/Settled/)).toBeNull();
   });
 
+  it("a thread stopped on a permission prompt says so on its row and on its workspace's third line, and goes back to working when it is answered", async () => {
+    const asking = "Permission for Bash: Check wsp version";
+    await mount(fakeApi([API], [status(API)], [session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000), asking })]), "api");
+    await waitFor(() => expect(screen.getByText("fix the port list")).toBeDefined());
+    expect(within(rowOf("fix the port list")).getByLabelText("Needs you")).toBeDefined();
+    expect(within(rowOf("fix the port list")).queryByLabelText("Working")).toBeNull();
+    // The workspace's own row carries the sentence a person is waiting on, cut at the row's cap.
+    expect(rowOf("api").textContent).toContain("Permission for Bash: Check");
+    act(() => useStore.setState({ sessions: { ws_a: [session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) })] } }));
+    await waitFor(() => expect(within(rowOf("fix the port list")).getByLabelText("Working")).toBeDefined());
+    expect(rowOf("api").textContent).not.toContain("Permission for Bash");
+  });
+
   it("three workspaces in mixed states: the running one leads, then the paused, then the gone, whatever order they were created in; a creating row sits above them all", async () => {
     const gone = { ...view("ws_gone", "scratch"), createdAt: new Date(NOW - 3 * 24 * 60 * 60_000).toISOString() };
     const paused = { ...view("ws_nap", "spike", "napping"), createdAt: new Date(NOW - 2 * 60 * 60_000).toISOString() };

@@ -4,6 +4,7 @@
 // new-workspace helpers.
 import { describe, expect, it } from "vitest";
 import { FREE_WORD, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, OVER_SSH, THIS_COMPUTER, THREAD_ARCHIVE_MS, kindWords, machineLacksShort, wakeAskingAgainLine, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../src/adapt/index.js";
 import { RequestError } from "../src/protocol/client.js";
 import { explainCreateRefusal } from "../src/protocol/store.js";
 import {
@@ -156,9 +157,15 @@ describe("workspace row labels", () => {
   });
 
   /** A project as the adapter folds it from a status, with the record's phase behind it. */
-  const project = (over: Partial<WorkspaceStatus>, view: Partial<WorkspaceView> = {}) => {
+  const project = (over: Partial<WorkspaceStatus>, view: Partial<WorkspaceView> = {}, threads: { asking: string | null }[] = []) => {
     const st = status(over);
-    return { state: workspaceState({ phase: st.phase, machineState: st.machineState, reach: st.reach.state }), status: st, reach: st.reach.state, workspace: { ...st, ...view } };
+    return {
+      state: workspaceState({ phase: st.phase, machineState: st.machineState, reach: st.reach.state }),
+      status: st,
+      reach: st.reach.state,
+      workspace: { ...st, ...view },
+      threads: threads as unknown as SidebarProjectSnapshot["threads"],
+    };
   };
   const tick = (accruedUsd: number, rateUsdPerHour = 0.11) => ({ rateUsdPerHour, accruedUsd });
 
@@ -185,6 +192,23 @@ describe("workspace row labels", () => {
     // No ask in flight is no word: a paused row that gave up says its sentence on the tab and offers the rebuild.
     expect(meta({ phase: "napping", machineState: "paused", reach: { state: "napping" } })).toBe("$0.29 today");
     expect(wakeAskNote(null)).toBeNull();
+  });
+
+  it("a thread stopped on a permission prompt puts what it is asking on the row's third line, ahead of the spend and of the helper's own note", () => {
+    const asked = [{ asking: "Permission for Write: out.txt" }, { asking: null }];
+    const line = (threads: { asking: string | null }[], over: Partial<WorkspaceStatus> = {}) =>
+      workspaceMetaLine({ project: project(over, {}, threads), cost: tick(0.5), outOfMemory: undefined, nowMs: now });
+    expect(line(asked)).toBe("Permission for Write: out.txt");
+    // Even while the helper has something to say: the prompt is the one thing on the row a person can answer now.
+    expect(line(asked, { daemonNote: "updating the helper" })).toBe("Permission for Write: out.txt");
+    // The oldest waiting thread's, so a second prompt never takes the line from the one that has waited longest.
+    expect(line([{ asking: "Permission for Bash: ls" }, ...asked])).toBe("Permission for Bash: ls");
+    expect(line([{ asking: null }])).toBe("$0.50 today · active");
+    // The row cuts it at its own cap, as it does every line three; the whole sentence rides the row's title.
+    const long = "Permission for Bash: Check wsp version, host, and connected hosts";
+    const cut = rowLineCut(line([{ asking: long }]));
+    expect(cut).toBe("Permission for Bash: Check…");
+    expect(cut.length).toBeLessThanOrEqual(ROW_LINE_MAX);
   });
 
   it("what the runtime is doing to the machine's helper, or a drop with memory near full, takes the whole line", () => {
@@ -332,13 +356,20 @@ describe("workspace row labels", () => {
     expect(daemonGoneLine("unsupported", kindWords("ssh"))).toBe("no daemon on it");
   });
 
-  it("thread pills key on the session status, wear the adapter's word, and use tokens: only the running dot is the success colour", () => {
-    expect(threadPill({ status: "running", indicator: { label: "Working", tone: "neutral", pulse: true } })).toMatchObject({ label: "Working", pulse: true, dotClass: expect.stringContaining("sidebar-whisper") });
-    expect(threadPill({ status: "failed", indicator: { label: "Ended", tone: "neutral", pulse: false } })).toMatchObject({ label: "Ended", dotClass: expect.stringContaining("sidebar-whisper") });
-    expect(threadPill({ status: "failed", indicator: { label: "Stopped short", tone: "neutral", pulse: false } })).toMatchObject({ label: "Stopped short" });
-    expect(threadPill({ status: "completed", indicator: { label: "Idle", tone: "neutral", pulse: false } })).toBeNull();
-    expect(threadPill({ status: "interrupted", indicator: { label: "Idle", tone: "neutral", pulse: false } })).toBeNull();
-    expect(threadPill({ status: "running", indicator: null })).toBeNull();
+  it("thread pills key on the session state, wear the adapter's word, and use tokens: only the running dot is the success colour", () => {
+    const pill = (over: { status: SidebarThreadSnapshot["status"]; indicator: SidebarThreadSnapshot["indicator"]; asking?: string }) =>
+      threadPill({ ...over, asking: over.asking ?? null });
+    expect(pill({ status: "running", indicator: { label: "Working", tone: "neutral", pulse: true } })).toMatchObject({ label: "Working", pulse: true, dotClass: expect.stringContaining("sidebar-whisper") });
+    expect(pill({ status: "failed", indicator: { label: "Ended", tone: "neutral", pulse: false } })).toMatchObject({ label: "Ended", dotClass: expect.stringContaining("sidebar-whisper") });
+    expect(pill({ status: "failed", indicator: { label: "Stopped short", tone: "neutral", pulse: false } })).toMatchObject({ label: "Stopped short" });
+    expect(pill({ status: "completed", indicator: { label: "Idle", tone: "neutral", pulse: false } })).toBeNull();
+    expect(pill({ status: "interrupted", indicator: { label: "Idle", tone: "neutral", pulse: false } })).toBeNull();
+    expect(pill({ status: "running", indicator: null })).toBeNull();
+    // A thread stopped on a question carries its word whatever the turn's own status says, and it does not pulse:
+    // nothing is moving until the person answers.
+    const waiting = { label: "Needs you", tone: "neutral" as const, pulse: false };
+    expect(pill({ status: "running", indicator: waiting, asking: "Permission for Write: out.txt" })).toMatchObject({ label: "Needs you", pulse: false });
+    expect(pill({ status: "completed", indicator: waiting, asking: "Permission for Write: out.txt" })).toMatchObject({ label: "Needs you" });
     // One emerald in the sidebar: the running dot wears the token the row's kind glyph wears while running.
     expect(dotClassForTone("running")).toBe("bg-success-foreground");
     for (const cls of [dotClassForTone("paused"), dotClassForTone("neutral")]) expect(cls).toContain("muted-foreground");
@@ -469,7 +500,7 @@ describe("the row's third line is cut at the sidebar's own room", () => {
   });
 
   it("the cost line leaves the hourly rate to the pane, so a row that bills and naps stays inside the cap", () => {
-    const project = { state: "running" as const, status: status({ idleAt: now + 12.5 * 60_000 }), reach: "reachable" as const, workspace: status({}) };
+    const project = { state: "running" as const, status: status({ idleAt: now + 12.5 * 60_000 }), reach: "reachable" as const, workspace: status({}), threads: [] as unknown as SidebarProjectSnapshot["threads"] };
     const line = workspaceMetaLine({ project, cost: { rateUsdPerHour: 0.018, accruedUsd: 0.09 }, outOfMemory: undefined, nowMs: now });
     expect(line).toBe("$0.09 today · naps in 12m");
     expect(line.length).toBeLessThanOrEqual(ROW_LINE_MAX);

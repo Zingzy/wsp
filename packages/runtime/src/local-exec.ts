@@ -31,7 +31,7 @@ import { psCpuSeconds, RUN_STOP_MS, TURN_IDLE_MS, TURN_WALL_MS } from "@wsp/prot
 import type { ExecStream, ExecStreamFactory } from "@wsp/protocol";
 import { readsWork, turnActivity, turnCut, type MachineExecOptions } from "./machine-exec.js";
 
-export interface LocalExecOptions extends Pick<MachineExecOptions, "idleMs" | "deadlineMs" | "now" | "pollMs"> {
+export interface LocalExecOptions extends Pick<MachineExecOptions, "idleMs" | "deadlineMs" | "now" | "pollMs" | "waiting"> {
   /** The folder the child starts in; the command may cd elsewhere, as a harness turn's does. */
   root: string;
 }
@@ -166,6 +166,7 @@ class Lines {
 
 export function localExecStream(opts: LocalExecOptions): ExecStreamFactory {
   const limits = { idleMs: opts.idleMs ?? TURN_IDLE_MS, deadlineMs: opts.deadlineMs ?? TURN_WALL_MS };
+  const waiting = opts.waiting ?? (() => false);
   const now = opts.now ?? Date.now;
   const checkMs = opts.pollMs ?? CHECK_MS;
   const factory: ExecStreamFactory = (command, { env, input }) => {
@@ -216,6 +217,7 @@ export function localExecStream(opts: LocalExecOptions): ExecStreamFactory {
     let reading = false;
     const check = setInterval(() => {
       const at = now();
+      if (waiting()) activity.touch(at);
       const quietMs = activity.quietMs(at);
       if (pgid !== undefined && !reading && readsWork(limits.idleMs, quietMs)) {
         reading = true;

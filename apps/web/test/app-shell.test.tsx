@@ -373,6 +373,23 @@ describe("the header row", () => {
     expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("No workspace selected");
   });
 
+  it("the pane header carries the one thread state a person has to act on, and nothing for a thread that is working or settled", async () => {
+    await mountShell();
+    const rows = (asking?: string) => ({
+      ws_a: [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "running" as const, prompt: "add a health route", threadId: "thr_1", ...(asking !== undefined ? { asking } : {}) }],
+    });
+    act(() => useStore.setState({ sessions: rows() }));
+    await collapse();
+    const crumb = () => banner().querySelector("[data-thread-breadcrumb]")!;
+    expect(crumb().textContent).toBe("api/add a health route");
+    act(() => useStore.setState({ sessions: rows("Permission for Bash: Check wsp version") }));
+    expect(crumb().textContent).toBe("api/add a health routeNeeds you");
+    // The whole sentence is the hover text; the header shows the word alone.
+    expect(crumb().querySelector("[title]")!.getAttribute("title")).toBe("Permission for Bash: Check wsp version");
+    act(() => useStore.setState({ sessions: rows() }));
+    expect(crumb().textContent).toBe("api/add a health route");
+  });
+
   it("the compose glyph sits in the search row, raises the request for the selected workspace, and leaves with it", async () => {
     await mountShell();
     const seen: string[] = [];

@@ -4,7 +4,7 @@
 // sidebarProjectGrouping.ts SidebarProjectSnapshot and Sidebar.logic.ts
 // resolveThreadStatusPill (commit 57a66608). Phase is the product word and
 // leads; machine state and reach only add when they diverge from it.
-import { foldThreads, IDLE_REASON, projectAt, workspaceProjects, workspaceStateOf, workspaceWord, type SessionView, type ThreadView, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { foldThreads, IDLE_REASON, projectAt, threadState, threadWordOf, workspaceProjects, workspaceStateOf, workspaceWord, type SessionView, type ThreadView, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicator } from "./view-model.js";
 
 export interface SidebarInput {
@@ -131,22 +131,12 @@ function deriveThread(thread: ThreadView, workspace: Pick<WorkspaceView, "projec
     startedBy: thread.startedBy,
     project: projectAt(workspaceProjects(workspace), thread.cwd)?.name ?? null,
     parentThreadId: thread.parentThreadId ?? null,
+    asking: thread.asking ?? null,
   };
 }
 
-/** The thread words: Working while a turn runs, Idle once it settled or was stopped, Ended when it did not get to settle. */
-export function threadIndicator(session: Pick<SessionView, "status">): StatusIndicator {
-  switch (session.status) {
-    case "running":
-      return { label: "Working", tone: "neutral", pulse: true };
-    case "completed":
-    case "interrupted":
-      return { label: "Idle", tone: "neutral", pulse: false };
-    case "failed":
-      return { label: "Ended", tone: "neutral", pulse: false };
-    default: {
-      const _exhaustive: never = session.status;
-      return { label: "Idle", tone: "neutral", pulse: false };
-    }
-  }
+/** The thread's word, from the protocol's one table, and whether it pulses: a running turn does, and a turn stopped
+ * on a question does not, since nothing is moving until the person answers. */
+export function threadIndicator(session: Pick<ThreadView, "status" | "asking">): StatusIndicator {
+  return { label: threadWordOf(session), tone: "neutral", pulse: threadState(session) === "running" };
 }

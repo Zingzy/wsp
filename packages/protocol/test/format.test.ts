@@ -9,10 +9,10 @@ import {
   catalogSourceLine,
   PERMISSION_DENIED_LINE,
   accessFromNextMessage,
+  askingLine,
   permissionAskLine,
   permissionModeOptionLabel,
   permissionOutcomeLine,
-  permissionUnansweredLine,
   noModelsLine,
   type HarnessCatalog,
   MEMORY_NEAR_FULL,
@@ -1478,12 +1478,15 @@ describe("the words a relayed permission prompt shows", () => {
     expect(permissionOutcomeLine("cancelled", mode)).toBe("Cancelled with the turn");
   });
 
-  it("tells the agent nobody answered rather than that a person refused, since the two are different facts", () => {
-    const waited = permissionUnansweredLine(5 * 60_000);
-    expect(waited).toContain("5m");
-    expect(waited).toContain("wsp denied it");
-    expect(waited).not.toContain("the person");
+  it("has one deny line, the person's own, and it points the agent at no other access mode", () => {
     expect(PERMISSION_DENIED_LINE).toBe("the person denied this in the chat");
+    for (const word of ["access", "bypass", "mode", "start the thread"]) expect(PERMISSION_DENIED_LINE).not.toContain(word);
+  });
+
+  it("what a thread says it is waiting on is the prompt row's own lead, worded in one place off the whole prompt", () => {
+    const ask = { toolName: "Write", input: '{"file_path":"/root/out.txt","content":"hi"}', detail: "out.txt" };
+    expect(askingLine(ask)).toBe(permissionAskLine("Write", "out.txt"));
+    expect(askingLine({ ...ask, detail: undefined })).toBe(permissionAskLine("Write"));
   });
 
   it("a mode option reads as an allow that also stops the asking, in the picker's own words for the mode", () => {

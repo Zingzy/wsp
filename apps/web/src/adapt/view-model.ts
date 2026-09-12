@@ -269,6 +269,9 @@ export interface SidebarThreadSnapshot {
   /** The thread whose own agent opened this one; null on every thread a person or the command line opened. The row
    * is drawn one step in under it. */
   readonly parentThreadId: string | null;
+  /** The lead of the permission prompt the thread is stopped on, as the protocol's fold reads it; null while it is
+   * waiting on nobody. */
+  readonly asking: string | null;
 }
 
 /** One wsp workspace (a machine) as a sidebar project; its sessions are the threads. */
