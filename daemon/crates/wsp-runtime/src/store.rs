@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! The layer store under `<root>/layers`. Blobs land as fetched and are unpacked once; an image is a name over a
-//! chain of layers and a config; a build is a recipe's hash over the chain it produced. A layer is referenced
-//! while any image or build names it, and the sweep removes what nothing names. The shape on disk is `Layout`,
-//! and nothing outside this file reads it.
+//! The layer store under `<root>/layers`. Blobs land as fetched or committed and are unpacked once; an image is a
+//! name over a chain of layers and a config; a build is a recipe's hash over the chain it produced; a snapshot is
+//! a workspace's saved layer over the chain it booted from; a template is a name over a snapshot's chain. A layer
+//! is referenced while any of those names it, or a workspace the sweep is told about holds it, and the sweep
+//! removes what nothing names. The shape on disk is `Layout`, and nothing outside this file reads it.
 
 use std::collections::HashSet;
 use std::fmt;
 use std::fs::{self, File};
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 
 use crate::fetch::{self, Client, Descriptor, Digest, LayerEncoding, Manifest, Platform, Reference};
 
@@ -65,8 +67,24 @@ impl Layout {
     fn build(&self, recipe: &str) -> PathBuf {
         self.builds().join(recipe)
     }
-    fn dirs(&self) -> [PathBuf; 4] {
-        [self.blobs(), self.unpacked_all(), self.images(), self.builds()]
+    fn snapshots(&self) -> PathBuf {
+        self.root.join("snapshots")
+    }
+    fn snapshot(&self, id: &Digest) -> PathBuf {
+        self.snapshots().join(format!("{}.json", id.hex()))
+    }
+    fn templates(&self) -> PathBuf {
+        self.root.join("templates")
+    }
+    fn template(&self, id: &str) -> PathBuf {
+        self.templates().join(format!("{}.json", file_word(id)))
+    }
+    /// A layer being committed, before its digest is known.
+    fn committing(&self, token: &str) -> PathBuf {
+        self.blobs().join(format!("commit-{token}")).with_extension(Layout::PARTIAL)
+    }
+    fn dirs(&self) -> [PathBuf; 6] {
+        [self.blobs(), self.unpacked_all(), self.images(), self.builds(), self.snapshots(), self.templates()]
     }
 }
 
@@ -115,6 +133,41 @@ pub struct Build {
     #[serde(flatten)]
     pub chain: Chain,
     pub built_at: u64,
+}
+
+/// `snapshots/<id>.json`: a workspace's upper directory saved as one layer over the chain it booted from. The id is
+/// the snapshot's own, fresh at every commit, since two commits of an unchanged workspace make one layer and must
+/// stay two snapshots; `layer` is that saved layer, the last of the chain, and `layer_bytes` its blob.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Snapshot {
+    pub id: Digest,
+    pub name: String,
+    /// The workspace it was taken from, and what that workspace booted from: an image, a template or a snapshot.
+    pub workspace: String,
+    pub from: String,
+    #[serde(flatten)]
+    pub chain: Chain,
+    pub layer: Digest,
+    pub layer_bytes: u64,
+    pub created_at: String,
+}
+
+/// `templates/<id>.json`: a name over a snapshot's chain, which a fork boots from as it boots from an image.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Template {
+    pub id: String,
+    pub name: String,
+    pub snapshot: Digest,
+    #[serde(flatten)]
+    pub chain: Chain,
+    pub created_at: String,
+}
+
+/// A layer the store took from a commit: its digest and its blob's bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Committed {
+    pub digest: Digest,
+    pub bytes: u64,
 }
 
 /// What a pull did: the image, and whether any byte moved.
@@ -244,12 +297,136 @@ impl Store {
         remove_if_there(&self.layout.build(recipe))
     }
 
-    /// How many images and builds name the layer or config.
+    /// How many images, builds, snapshots and templates name the layer or config.
     pub fn references(&self, digest: &Digest) -> Result<usize, Error> {
-        let images = self.images()?.into_iter().filter(|i| i.chain.digests().any(|d| d == digest)).count();
-        let builds =
-            self.read_records::<Build>(&self.layout.builds())?.into_iter().filter(|b| b.chain.digests().any(|d| d == digest)).count();
-        Ok(images + builds)
+        Ok(self.chains()?.iter().filter(|chain| chain.digests().any(|d| d == digest)).count())
+    }
+
+    /// Every chain a record names.
+    fn chains(&self) -> Result<Vec<Chain>, Error> {
+        let mut chains: Vec<Chain> = self.images()?.into_iter().map(|i| i.chain).collect();
+        chains.extend(self.read_records::<Build>(&self.layout.builds())?.into_iter().map(|b| b.chain));
+        chains.extend(self.snapshots()?.into_iter().map(|s| s.chain));
+        chains.extend(self.templates()?.into_iter().map(|t| t.chain));
+        Ok(chains)
+    }
+
+    /// A snapshot of a workspace: the layer `write` produces as a tar, committed, and the record naming it over the
+    /// chain the workspace booted from. `from` is what that workspace was made from.
+    pub fn record_snapshot(
+        &self,
+        name: &str,
+        workspace: &str,
+        from: &str,
+        base: &Chain,
+        write: impl FnOnce(&mut dyn Write) -> io::Result<()>,
+    ) -> Result<Snapshot, Error> {
+        let committed = self.commit_layer(write)?;
+        let created_at = now_iso();
+        let mut layers = base.layers.clone();
+        layers.push(committed.digest.clone());
+        let id = Digest::of(format!("{}\n{name}\n{workspace}\n{created_at}\n{}", committed.digest, random_word()).as_bytes());
+        let snapshot = Snapshot {
+            id,
+            name: name.to_owned(),
+            workspace: workspace.to_owned(),
+            from: from.to_owned(),
+            chain: Chain { config: base.config.clone(), layers },
+            layer: committed.digest,
+            layer_bytes: committed.bytes,
+            created_at,
+        };
+        self.write_record(&self.layout.snapshot(&snapshot.id), &snapshot)?;
+        Ok(snapshot)
+    }
+
+    pub fn snapshot(&self, id: &Digest) -> Result<Option<Snapshot>, Error> {
+        self.read_record(&self.layout.snapshot(id))
+    }
+
+    /// Every snapshot, oldest first.
+    pub fn snapshots(&self) -> Result<Vec<Snapshot>, Error> {
+        let mut rows: Vec<Snapshot> = self.read_records(&self.layout.snapshots())?;
+        rows.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)));
+        Ok(rows)
+    }
+
+    /// Drops the snapshot; its layer stays until the sweep finds nothing else names it.
+    pub fn remove_snapshot(&self, id: &Digest) -> Result<bool, Error> {
+        remove_if_there(&self.layout.snapshot(id))
+    }
+
+    /// A template: the snapshot's chain under a name of its own.
+    pub fn record_template(&self, id: &str, name: &str, snapshot: &Snapshot) -> Result<Template, Error> {
+        let template = Template {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            snapshot: snapshot.id.clone(),
+            chain: snapshot.chain.clone(),
+            created_at: now_iso(),
+        };
+        self.write_record(&self.layout.template(id), &template)?;
+        Ok(template)
+    }
+
+    pub fn template(&self, id: &str) -> Result<Option<Template>, Error> {
+        self.read_record(&self.layout.template(id))
+    }
+
+    pub fn templates(&self) -> Result<Vec<Template>, Error> {
+        let mut rows: Vec<Template> = self.read_records(&self.layout.templates())?;
+        rows.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)));
+        Ok(rows)
+    }
+
+    pub fn remove_template(&self, id: &str) -> Result<bool, Error> {
+        remove_if_there(&self.layout.template(id))
+    }
+
+    /// The chain a name resolves to here: an image by its name, a template by its id, or a snapshot by its id.
+    pub fn chain_of(&self, name: &str) -> Result<Option<Chain>, Error> {
+        if let Some(image) = self.image(name)? {
+            return Ok(Some(image.chain));
+        }
+        if let Some(template) = self.template(name)? {
+            return Ok(Some(template.chain));
+        }
+        if let Ok(id) = Digest::parse(name) {
+            if let Some(snapshot) = self.snapshot(&id)? {
+                return Ok(Some(snapshot.chain));
+            }
+        }
+        Ok(None)
+    }
+
+    /// The tar `write` produces, gzipped and hashed into a blob and unpacked beside it: one layer, as a fetched one
+    /// lands. A layer already in the store under that digest is left as it is.
+    pub fn commit_layer(&self, write: impl FnOnce(&mut dyn Write) -> io::Result<()>) -> Result<Committed, Error> {
+        let partial = self.layout.committing(&random_word());
+        let file = File::create(&partial).map_err(io_at(&partial))?;
+        let mut hashing = Hashing { inner: file, hasher: Sha256::new(), bytes: 0 };
+        let committed = (|| -> io::Result<Committed> {
+            let mut gz = flate2::write::GzEncoder::new(&mut hashing, flate2::Compression::default());
+            write(&mut gz)?;
+            gz.finish()?;
+            hashing.inner.sync_all()?;
+            Ok(Committed { digest: Digest::from_hash(hashing.hasher.finalize_reset().as_slice()), bytes: hashing.bytes })
+        })();
+        let committed = match committed {
+            Ok(committed) => committed,
+            Err(e) => {
+                let _ = fs::remove_file(&partial);
+                return Err(Error::Io { path: partial, source: e });
+            }
+        };
+        let done = self.layout.blob(&committed.digest);
+        if done.is_file() {
+            fs::remove_file(&partial).map_err(io_at(&partial))?;
+        } else {
+            fs::rename(&partial, &done).map_err(io_at(&done))?;
+        }
+        self.unpack(&Descriptor { digest: committed.digest.clone(), size: committed.bytes, media_type: fetch::LAYER_GZIP.to_owned() })?;
+        Ok(committed)
     }
 
     /// Where a layer's files lie, once unpacked: the directory an overlay takes as a lower.
@@ -263,33 +440,31 @@ impl Store {
         self.layout.blob(digest).is_file()
     }
 
-    /// Removes every blob and unpacked layer no image or build names, every partial blob, and every unpack
-    /// that never finished. Not for while a pull is in flight: a pull's partial and its unpack in progress
-    /// are what it would take.
-    pub fn sweep(&self) -> Result<Swept, Error> {
+    /// Removes every blob and unpacked layer no record names and no chain in `held` carries, every partial blob,
+    /// and every unpack that never finished. `held` is what the workspaces on the box booted from, whose layers
+    /// stay mounted under them whatever the records say. Not for while a pull or a commit is in flight: their
+    /// partial and their unpack in progress are what it would take.
+    pub fn sweep(&self, held: &[Chain]) -> Result<Swept, Error> {
         let mut live: HashSet<Digest> = HashSet::new();
-        for image in self.images()? {
-            live.extend(image.chain.digests().cloned());
-        }
-        for build in self.read_records::<Build>(&self.layout.builds())? {
-            live.extend(build.chain.digests().cloned());
+        for chain in self.chains()?.iter().chain(held) {
+            live.extend(chain.digests().cloned());
         }
         let mut swept = Swept::default();
         let blobs = self.layout.blobs();
         for entry in fs::read_dir(&blobs).map_err(io_at(&blobs))? {
             let entry = entry.map_err(io_at(&blobs))?;
             let path = entry.path();
-            let Some(digest) = digest_of(&path) else { continue };
             let partial = self.layout.is_partial(&path);
-            if !partial && live.contains(&digest) {
+            let digest = digest_of(&path);
+            if !partial && digest.as_ref().is_none_or(|d| live.contains(d)) {
                 continue;
             }
             swept.bytes += entry.metadata().map_err(io_at(&path))?.len();
             fs::remove_file(&path).map_err(io_at(&path))?;
-            if partial {
-                swept.partials.push(digest);
-            } else {
-                swept.blobs.push(digest);
+            match (partial, digest) {
+                (true, Some(digest)) => swept.partials.push(digest),
+                (false, Some(digest)) => swept.blobs.push(digest),
+                (_, None) => {}
             }
         }
         let unpacked = self.layout.unpacked_all();
@@ -482,6 +657,43 @@ fn remove_if_there(path: &Path) -> Result<bool, Error> {
 
 fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
+}
+
+/// The moment as the wire carries it, ISO 8601 in UTC to the millisecond.
+pub(crate) fn now_iso() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+/// Sixteen hex digits nothing else on the box is writing under: a workspace id, a commit's in-flight name, a
+/// snapshot's salt.
+pub(crate) fn random_word() -> String {
+    let mut bytes = [0u8; 8];
+    let read = File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut bytes));
+    if read.is_err() {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+        bytes.copy_from_slice(&(nanos as u64 ^ u64::from(std::process::id())).to_le_bytes());
+    }
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// A writer that hashes and counts what passes through it on the way to the file.
+struct Hashing {
+    inner: File,
+    hasher: Sha256,
+    bytes: u64,
+}
+
+impl Write for Hashing {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        self.hasher.update(&buf[..n]);
+        self.bytes += n as u64;
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
 }
 
 #[cfg(test)]

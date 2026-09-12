@@ -118,7 +118,7 @@ fn refuses_a_corrupted_blob_by_name_and_keeps_nothing_of_it() {
     assert!(!store.has_blob(&w.os_release));
     assert_eq!(store.unpacked(&w.os_release), None);
     assert_eq!(store.image(IMAGE).unwrap(), None);
-    let swept = store.sweep().unwrap();
+    let swept = store.sweep(&[]).unwrap();
     assert!(swept.partials.is_empty(), "no partial of the corrupt blob stays: {swept:?}");
     let mut expected = vec![w.base.clone(), w.layout.config_digest("ubuntu", "24.04")];
     expected.sort();
@@ -160,13 +160,13 @@ fn reference_counts_follow_images_and_builds_and_the_sweep_takes_what_nothing_na
     assert_eq!(store.references(&w.os_release).unwrap(), 3, "ubuntu, tools and the build");
     assert_eq!(store.references(&w.tools).unwrap(), 1);
     assert_eq!(store.references(&tools.chain.config).unwrap(), 1);
-    assert_eq!(store.sweep().unwrap(), store::Swept::default(), "everything is named");
+    assert_eq!(store.sweep(&[]).unwrap(), store::Swept::default(), "everything is named");
 
     assert!(store.remove_image("tools:1").unwrap());
     assert!(!store.remove_image("tools:1").unwrap());
     assert_eq!(store.references(&w.tools).unwrap(), 0);
     assert_eq!(store.references(&w.os_release).unwrap(), 2);
-    let swept = store.sweep().unwrap();
+    let swept = store.sweep(&[]).unwrap();
     let mut gone = vec![w.tools.clone(), tools.chain.config.clone()];
     gone.sort();
     assert_eq!(swept.blobs, gone);
@@ -179,11 +179,11 @@ fn reference_counts_follow_images_and_builds_and_the_sweep_takes_what_nothing_na
 
     assert!(store.remove_image(IMAGE).unwrap());
     assert_eq!(store.references(&w.base).unwrap(), 1, "the build still names it");
-    assert_eq!(store.sweep().unwrap(), store::Swept::default());
+    assert_eq!(store.sweep(&[]).unwrap(), store::Swept::default());
     assert!(store.has_blob(&w.base));
 
     assert!(store.remove_build(&recipe).unwrap());
-    let swept = store.sweep().unwrap();
+    let swept = store.sweep(&[]).unwrap();
     let mut gone = vec![w.base.clone(), w.os_release.clone(), ubuntu.chain.config.clone()];
     gone.sort();
     assert_eq!(swept.blobs, gone);

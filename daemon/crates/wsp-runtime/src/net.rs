@@ -690,12 +690,15 @@ impl Net {
     }
 
     /// The listeners of every running workspace, bound again on the ports their records name; a port somebody else
-    /// took meanwhile moves and the record says where.
+    /// took meanwhile moves and the record says where. A forward already held is left as it is.
     pub async fn restore(&self, running: &[String]) -> Result<(), Error> {
         for id in running {
             let Some(mut network) = self.record(id)? else { continue };
             let mut moved = false;
             for (port, box_port) in network.forwards.clone() {
+                if self.listeners.lock().await.get(id).is_some_and(|m| m.contains_key(&port)) {
+                    continue;
+                }
                 let bound = match bind(box_port).await {
                     Ok(listener) => listener,
                     Err(e) if e.kind() == io::ErrorKind::AddrInUse => bind(0).await.map_err(at("binding a forward"))?,
@@ -715,18 +718,25 @@ impl Net {
         Ok(())
     }
 
-    /// The pair, the addresses, the route inside, the rules: the workspace whose init is `pid` gets its network.
+    /// The pair, the addresses, the route inside, the rules: the workspace whose init is `pid` gets its network. A
+    /// workspace that had one before, and was stopped, gets the same block and keeps its forwards where that block
+    /// is still free; the forwards themselves come back with `restore`.
     pub async fn up(&self, id: &str, pid: i32) -> Result<Network, Error> {
         let _turn = self.turn.lock().await;
         let layout = Layout::new(self.layout.root());
         let alias = self.alias_of(id);
+        let before = self.record(id)?;
         let id = id.to_owned();
         tokio::task::spawn_blocking(move || {
             let ns_path = format!("/proc/{pid}/ns/net");
             let ns = fs::File::open(&ns_path).map_err(at(ns_path))?;
             let mut route = Route::open()?;
-            let index = free_index(route.links()?.iter().filter_map(|l| index_of_link(&l.name)))
+            let taken: Vec<u16> = route.links()?.iter().filter_map(|l| index_of_link(&l.name)).collect();
+            let wanted = before.as_ref().and_then(|n| index_of_link(&n.link)).filter(|k| !taken.contains(k));
+            let index = wanted
+                .or_else(|| free_index(taken.into_iter()))
                 .ok_or_else(|| Error { what: format!("{RANGE}/{RANGE_PREFIX}"), source: io::Error::other("every block is taken") })?;
+            let forwards = before.map(|n| n.forwards).unwrap_or_default();
             let (gateway, address) = block(index);
             let name = link_name(index);
             route.add_veth(&name, INSIDE_LINK, Some(ns.as_raw_fd()))?;
@@ -751,7 +761,7 @@ impl Net {
                 let _ = route.delete_named(&name);
                 return Err(e);
             }
-            let network = Network { link: name, address, gateway, prefix: BLOCK_PREFIX, forwards: BTreeMap::new() };
+            let network = Network { link: name, address, gateway, prefix: BLOCK_PREFIX, forwards };
             bundle::write_json(&layout.net(&id), &network)?;
             Ok(network)
         })
@@ -762,6 +772,16 @@ impl Net {
     /// The listeners, the link and the record go; with the last workspace link on the box the rules go too. A
     /// workspace whose namespace already died took its pair with it, which is what was asked for.
     pub async fn down(&self, id: &str) -> Result<(), Error> {
+        self.take_down(id, false).await
+    }
+
+    /// A stopped workspace's network: the listeners and the link go as on a delete, the record stays with its
+    /// block and its forwards, so the wake brings the same address and the same ports back.
+    pub async fn stop(&self, id: &str) -> Result<(), Error> {
+        self.take_down(id, true).await
+    }
+
+    async fn take_down(&self, id: &str, keep_record: bool) -> Result<(), Error> {
         let _turn = self.turn.lock().await;
         self.listeners.lock().await.remove(id);
         // The listeners' tasks end at the next turn of the runtime; taking it here means none is bound when this
@@ -778,10 +798,12 @@ impl Net {
                     route.delete(link.index)?;
                 }
             }
-            match fs::remove_file(&path) {
-                Ok(()) => {}
-                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-                Err(e) => return Err(at(path.display().to_string())(e)),
+            if !keep_record {
+                match fs::remove_file(&path) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(at(path.display().to_string())(e)),
+                }
             }
             if !route.links()?.iter().any(|l| l.name.starts_with(LINK_PREFIX)) && rules_present()? {
                 rules_down()?;

@@ -2287,6 +2287,7 @@ dependencies = [
  "wsp-daemon",
  "wsp-frames",
  "wsp-runtime",
+ "xattr",
 ]
 
 [[package]]
