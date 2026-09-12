@@ -11,6 +11,7 @@ import { reachAddresses } from "./pairing.js";
 import { accountHere, publicHostname } from "./relay-link.js";
 import { wspHome } from "./hosts.js";
 import { nodeHost, readGhosttyConfig } from "@wsp/collect";
+import { closeStandInGuests } from "./fake-guest.js";
 import { hostFolders } from "./host-folders.js";
 import { projectBundler } from "./project-bundle.js";
 import { imageExporter } from "./image.js";
@@ -527,6 +528,9 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       // Last: with the servers gone nothing can record another event, so the
       // flush this waits on is the final word in the store.
       await rt.close();
+      // A stand-in provider's machines are daemons this process spawned, and a child outlives the parent that
+      // spawned it: a lab whose host was stopped left one per machine running on the person's computer.
+      await closeStandInGuests();
     },
   };
 }

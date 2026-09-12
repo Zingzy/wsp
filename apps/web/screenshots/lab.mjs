@@ -4,7 +4,7 @@
 // fixture state in it and the built wsp command serving the built app on two
 // free ports, and then stays up instead of photographing anything and going.
 //
-//   node lab.mjs start <name> --fixture <fixture>
+//   node lab.mjs start <name> --fixture <fixture> [--for <folder>]
 //   node lab.mjs stop <name> [--log <file>]
 //   node lab.mjs url <name>
 //
@@ -24,10 +24,12 @@
 //
 // What a run served is written down: the commit the checkout stood on, a hash
 // of the app as it was copied into the lab's home, which is the copy the host
-// serves, and a hash of the wsp command serving it, which is the checkout's own
-// since its bundle resolves its imports there. A build landing on main while a
-// tester drives used to change the page under them, and no log could say which
-// app they had met.
+// serves, when that app was built, and a hash of the wsp command serving it,
+// which is the checkout's own since its bundle resolves its imports there. A
+// build landing on main while a tester drives used to change the page under
+// them, and no log could say which app they had met. The folder the tester
+// keeps their own log in is written down at the start too, since the stop is
+// run from wherever they happen to be standing.
 //
 // A tester who lives in a terminal rather than the app runs no fixture of their
 // own: this lab's wsp is on the path of the shell the start prints. It runs the
@@ -43,11 +45,11 @@ import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readF
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fixtureCloud, fixtureFolders, FIXTURE_NAMES, fixtureState } from "./fixture-state.mjs";
+import { fixtureCloud, fixtureFolders, FIXTURE_NAMES, fixtureSnapshots, fixtureState } from "./fixture-state.mjs";
 import { freePort, HOST_BIN, providerFor, sleep, startHost, whatIsNotBuilt } from "./host.mjs";
-import { AGENT_KEYS, binDir, copyApp, keyLayers, keysFound, labHome, treeSha, writeAgentHome, writeKeys, writeShim, writeWorkFolder } from "./lab-home.mjs";
+import { AGENT_KEYS, binDir, copyApp, keyLayers, keysFound, labHome, standInRoot, treeSha, writeAgentHome, writeKeys, writeShim, writeStandIn, writeWorkFolder } from "./lab-home.mjs";
 
-const USAGE = `usage: node lab.mjs start <name> [--fixture <fixture>]
+const USAGE = `usage: node lab.mjs start <name> [--fixture <fixture>] [--for <folder>]
        node lab.mjs stop <name> [--log <file>]
        node lab.mjs url <name>
 
@@ -81,28 +83,42 @@ const pidsPath = home => join(home, "lab.pids");
 const factsPath = home => join(home, "lab.json");
 const logPath = home => join(home, "lab.log");
 
-/** The flag each verb takes, and nothing else: a word this table does not hold is a typo rather than something to
- * carry through. */
-const FLAGS = { start: "--fixture", stop: "--log" };
+/** The flags each verb takes and nothing else: a word this table does not hold is a typo rather than something to
+ * carry through. Each one says what it does with the word after it, so a verb that grows a flag grows a row here. */
+const FLAGS = {
+  start: {
+    "--fixture": (args, value) => {
+      if (value === undefined || !FIXTURE_NAMES.includes(value)) die(`--fixture takes one of ${FIXTURE_NAMES.join(", ")}`);
+      args.fixture = value;
+    },
+    "--for": (args, value) => {
+      if (value === undefined || value.startsWith("--")) die("--for takes the folder the tester keeps their log in");
+      args.for = resolve(value);
+    },
+  },
+  stop: {
+    "--log": (args, value) => {
+      if (value === undefined || value.startsWith("--")) die("--log takes the file the lab's log is copied to");
+      args.log = resolve(value);
+    },
+  },
+  url: {},
+};
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const [verb, name, ...rest] = argv;
   if (verb === undefined) die("say start, stop or url");
   if (!["start", "stop", "url"].includes(verb)) die(`there is no ${verb} verb`);
   if (name === undefined) die(`${verb} needs the lab's name`);
   if (!NAME.test(name)) die(`a lab's name is lowercase words and dashes, not ${JSON.stringify(name)}`);
+  const taken = FLAGS[verb];
+  const words = Object.keys(taken);
   const args = { verb, name, fixture: "mac-only" };
   for (let i = 0; i < rest.length; i += 1) {
     if (rest[i] === "--") continue;
-    if (rest[i] !== FLAGS[verb]) die(`${verb} takes the lab's name${FLAGS[verb] === undefined ? " and nothing else" : ` and ${FLAGS[verb]}`}, not ${rest[i]}`);
-    const value = rest[i + 1];
-    if (verb === "start") {
-      if (value === undefined || !FIXTURE_NAMES.includes(value)) die(`--fixture takes one of ${FIXTURE_NAMES.join(", ")}`);
-      args.fixture = value;
-    } else {
-      if (value === undefined || value.startsWith("--")) die("--log takes the file the lab's log is copied to");
-      args.log = resolve(value);
-    }
+    const take = taken[rest[i]];
+    if (take === undefined) die(`${verb} takes the lab's name${words.length === 0 ? " and nothing else" : ` and ${words.join(" or ")}`}, not ${rest[i]}`);
+    take(args, rest[i + 1]);
     i += 1;
   }
   return args;
@@ -141,12 +157,13 @@ function readFacts(home) {
 }
 
 /** Why a folder standing where this lab's home goes is not this lab's to remove, or nothing when it is: a lab's
- * own home holds its record, and an empty folder is nobody's. A root named wrongly in a shell would otherwise
- * take a real folder with it, and the start removes what it finds before it writes. */
+ * own home holds its record, and an empty folder is nobody's. A root named wrongly in a shell would otherwise take
+ * a real folder with it, and both verbs remove what stands there: the start before it writes, the stop after it
+ * has kept the log. */
 export function whyNotOursToRemove(home, holds = () => (existsSync(home) ? readdirSync(home) : undefined)) {
   const held = holds();
   if (held === undefined || held.length === 0 || held.includes("lab.json")) return undefined;
-  return `${home} is not a lab of this harness (no lab.json in it) and it is not empty, so this start would delete a folder that is somebody's; pick another name, or another root.`;
+  return `${home} is not a lab of this harness (no lab.json in it) and it is not empty, so removing it would take a folder that is somebody's; pick another name, or another root.`;
 }
 
 /** What a lab says when it comes up and when it is asked where it is, in one place so both say the same thing and a
@@ -154,8 +171,9 @@ export function whyNotOursToRemove(home, holds = () => (existsSync(home) ? readd
  * signed in with, and the shell whose wsp is this lab's. */
 export const labLines = facts => [
   `lab ${facts.name} serving ${facts.url} pid ${facts.pid} home ${facts.home}`,
-  `built from ${facts.build.sha}, app ${facts.build.app}, command ${facts.build.command}, served out of ${facts.build.appDir}`,
-  facts.signedIn ? "turns run in this lab's own home, signed in with the agents' key, with no MCP server and no skill of this computer's" : `turns run in this lab's own home and none of ${AGENT_KEYS.join(", ")} was found, so an agent there answers that it is not logged in`,
+  `built from ${facts.build.sha}, app ${facts.build.app} built ${facts.build.builtAt}, command ${facts.build.command}, served out of ${facts.build.appDir}`,
+  facts.signedIn ? "turns run in this lab's own home, signed in with the agents' key, with this lab's own wsp tools and no skill of this computer's" : `turns run in this lab's own home and none of ${AGENT_KEYS.join(", ")} was found, so an agent there answers that it is not logged in`,
+  `this lab's log is kept at ${keptLog(facts.name, undefined, facts)} when it is stopped`,
   "a shell whose wsp is this lab's, carrying nothing of the tester's own:",
   `  ${labShell(facts)}`,
 ];
@@ -164,7 +182,7 @@ export const labLines = facts => [
  * path, so `wsp doctor` is this lab's doctor with no wrapper to write and nothing to paste. */
 const labShell = facts => `env -i HOME=${shellQuote(facts.home)} PATH=${shellQuote(facts.env.PATH)} TERM=xterm-256color /bin/sh`;
 
-async function start({ name, fixture }) {
+async function start({ name, fixture, for: keepLogIn }) {
   const unbuilt = whatIsNotBuilt();
   if (unbuilt !== undefined) {
     console.error(unbuilt);
@@ -188,6 +206,10 @@ async function start({ name, fixture }) {
   const app = copyApp(home);
   writeAgentHome(home);
   writeWorkFolder(home, fixtureFolders(state));
+  // The stand-in's own folder, holding the snapshots this fixture's image says are already at the provider: a
+  // second host on this state file reads the same machines out of it, and each machine gets a folder there with a
+  // daemon in it, which is what gives a fork a terminal, a process list and live readings.
+  writeStandIn(home, fixtureSnapshots(state));
   const keys = keysFound(keyLayers());
   const key = Object.keys(keys).length > 0;
   if (key) writeKeys(home, keys);
@@ -205,6 +227,7 @@ async function start({ name, fixture }) {
     personHome: home,
     appDir: app.dir,
     binDir: binDir(home),
+    standIn: standInRoot(home),
     ...(cloud === undefined ? {} : { cloud }),
     ...(key ? { secrets: keys } : {}),
   });
@@ -214,6 +237,8 @@ async function start({ name, fixture }) {
   const facts = {
     name,
     fixture,
+    // Where the stop leaves this lab's log, decided here rather than wherever the stop is run from.
+    for: keepLogIn ?? process.cwd(),
     provider: providerFor(state),
     ...(cloud === undefined ? {} : { cloud }),
     url: host.base,
@@ -222,7 +247,7 @@ async function start({ name, fixture }) {
     node: process.execPath,
     bin: HOST_BIN,
     env: host.env,
-    build: { sha: treeSha(), app: app.hash, command: app.command, appDir: app.dir },
+    build: { sha: treeSha(), app: app.hash, command: app.command, appDir: app.dir, builtAt: app.builtAt },
     signedIn: key,
     startedAt: new Date().toISOString(),
   };
@@ -238,17 +263,20 @@ async function start({ name, fixture }) {
   console.log(lines.join("\n"));
 }
 
-/** Where a stopped lab's log is kept: the file the tester named, else one beside them in the folder they ran the
- * stop from. The home goes with the lab, and the host's side of a send that died is only in that log. */
-export const keptLog = (name, said) => said ?? resolve(process.cwd(), `${name}-lab.log`);
+/** Where a stopped lab's log is kept: the file the tester named, else one in the folder the start was told the
+ * tester keeps their own log in. The stop is run from wherever the tester happens to be standing, so a folder read
+ * there put seven of nine logs of one round in two folders nobody was reading; the folder is decided once, at the
+ * start, and travels in the lab's record. The home goes with the lab, and the host's side of a send that died is
+ * only in that log. */
+export const keptLog = (name, said, facts) => said ?? resolve(facts?.for ?? process.cwd(), `${name}-lab.log`);
 
-async function stop({ name, log }) {
+export async function stopLab({ name, log }) {
   const home = homeOf(name);
+  const facts = readFacts(home);
   const pids = recordedPids(home);
-  if (pids.length === 0) {
-    console.log(`no lab called ${name} wrote a pid down; nothing to stop`);
-    return;
-  }
+  // A lab whose host is already gone still has a log to keep and a home to take away: an early return here left
+  // both behind, and the log is the only place the host's side of a send that died is written.
+  if (pids.length === 0) console.log(`no lab called ${name} wrote a pid down; there is nothing to stop`);
   const left = [];
   for (const { what, pid } of pids) {
     if (!alive(pid)) {
@@ -277,11 +305,23 @@ async function stop({ name, log }) {
     }
   }
   rmSync(pointerPath(name), { force: true });
-  const kept = keptLog(name, log);
+  const kept = keptLog(name, log, facts);
   if (existsSync(logPath(home))) {
     mkdirSync(dirname(kept), { recursive: true });
     copyFileSync(logPath(home), kept);
     console.log(`the lab's log is at ${kept}`);
+  }
+  // The same guard the start keeps, and for the same reason: a stop that ran past a pid file it did not find used
+  // to stop before it removed anything, so a name typed wrongly cost nothing.
+  const notALab = whyNotOursToRemove(home);
+  if (notALab !== undefined) {
+    console.error(notALab);
+    return;
+  }
+  // A home that was never there is a name nobody started, which is not a lab going down.
+  if (!existsSync(home)) {
+    console.log(`there is no lab called ${name} at ${home}`);
+    return;
   }
   rmSync(home, { recursive: true, force: true });
   console.log(`the lab ${name} is down and ${home} is gone`);
@@ -299,7 +339,7 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
   const args = parseArgs(process.argv.slice(2));
   if (args.verb === "url") url(args);
   else {
-    await (args.verb === "start" ? start(args) : stop(args)).catch(e => {
+    await (args.verb === "start" ? start(args) : stopLab(args)).catch(e => {
       console.error(`lab ${args.verb}: ${e instanceof Error ? e.message : String(e)}`);
       process.exit(1);
     });

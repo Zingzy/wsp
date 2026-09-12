@@ -35,6 +35,13 @@ export function rotateDaemonTokenScript(token: string, path: string = DAEMON_TOK
   return [`test -f ${path} || { echo ${DAEMON_TOKEN_NONE}; exit 0; }`, writeDaemonTokenScript(token, path), `echo ${DAEMON_TOKEN_SET}`].join("\n");
 }
 
+/** Where one machine's daemon token is written and read: the machine's own file where it names one, and the path
+ * the road asked for otherwise. A machine names one where the road's path is not a path it has: a stand-in
+ * machine's guest is a folder on the computer asking, and a shell there cannot write under the root of a Linux
+ * machine that does not exist. Read in one place, since a road that asked for the guest's path on such a machine
+ * found no token and left every other road reading that miss. */
+export const daemonTokenPathOf = (machine: Machine, road?: string): string | undefined => machine.daemonTokenPath ?? road;
+
 /** Whether the machine had a token file to replace, having replaced it. A machine wsp made is root's alone and
  * takes the whole rotation as one command; a machine somebody already owns may carry other accounts, and a
  * command sits in a world readable /proc/<pid>/cmdline while it runs, so there the token travels the machine's

@@ -308,9 +308,24 @@ describe("processes surface", () => {
     expect(document.querySelector("[role='table']")!.getAttribute("data-stale")).toBe("unreachable");
     expect(pids()).toHaveLength(6);
     expect(document.querySelector<HTMLButtonElement>("[data-proc-kill] button")!.disabled).toBe(true);
-    // A napping workspace says so instead.
+    // A paused workspace says so instead, in the word the Workspace panel and the sidebar row use for it.
     act(() => useStore.setState({ workspaces: [{ ...view, phase: "napping" }] }));
-    expect(document.querySelector("[data-procs-count]")!.textContent).toBe("napping");
+    expect(document.querySelector("[data-procs-count]")!.textContent).toBe("paused");
+  });
+
+  it("says the computer is not answering in the pane itself, in two halves, when that computer is the one holding the workspace", async () => {
+    act(() =>
+      useStore.setState({
+        workspaces: [{ ...view, kind: "place", machineId: "place:p_oldlaptop" }],
+        places: [{ id: "p_oldlaptop", kind: "computer", name: "old-laptop", default: true, present: false, lastSeenAt: new Date(Date.now() - 38 * 60_000).toISOString(), workspaceId: WS }],
+      }),
+    );
+    render(<ProcessesSurface workspaceId={WS} />);
+    await flush();
+    const said = document.querySelector("[data-procs-unavailable]")!;
+    expect(said.textContent).toBe("old-laptop is not answeringit connects on its own when it is on");
+    expect(said.textContent).not.toContain("daemon");
+    expect(said.textContent).not.toContain("place:");
   });
 
   it("a machine over ssh lists its own, since the daemon on it reads that machine's own /proc", async () => {
