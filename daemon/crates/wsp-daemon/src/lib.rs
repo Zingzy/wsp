@@ -81,6 +81,8 @@ pub struct Options {
     pub link_quiet_ms: Option<u64>,
     pub link_refused_retry_ms: Option<u64>,
     pub link_backoff_ms: Option<u64>,
+    /// Where a place's daemon keeps the layers and the workspaces it runs.
+    pub runtime_root: Option<PathBuf>,
 }
 
 impl Options {
@@ -116,6 +118,7 @@ impl Options {
             link_quiet_ms: None,
             link_refused_retry_ms: None,
             link_backoff_ms: None,
+            runtime_root: None,
         }
     }
 }
@@ -193,6 +196,10 @@ pub(crate) struct Ctx {
     procs: Mutex<Option<Arc<proc::ProcSampler>>>,
     /// Told once a leave has been answered, which is what ends the daemon.
     pub(crate) stop: tokio::sync::Notify,
+    /// The workspaces a place's daemon runs and answers the machine ops on its link with; none where no place file
+    /// turned the link on or the runtime root could not be opened.
+    #[cfg(target_os = "linux")]
+    pub(crate) runtime: Option<Arc<wsp_runtime::ops::Ops>>,
     authed: Mutex<HashMap<u64, Outbound>>,
     keys: AtomicU64,
 }
@@ -210,6 +217,8 @@ impl Ctx {
         let manifest = manifest::ProcessManifest::load(Some(manifest_path), options.run_dir.as_deref(), options.log_dir.as_deref())?;
         let interval = options.ports_interval_ms.map_or(ports::DEFAULT_INTERVAL, Duration::from_millis);
         let ports = ports::PortWatch::new(ports::source_for(options.proc_root.as_deref()), interval);
+        #[cfg(target_os = "linux")]
+        let runtime = open_runtime(&options, &log);
         Ok(Ctx {
             options,
             root,
@@ -224,6 +233,8 @@ impl Ctx {
             sys: Mutex::new(None),
             procs: Mutex::new(None),
             stop: tokio::sync::Notify::new(),
+            #[cfg(target_os = "linux")]
+            runtime,
             authed: Mutex::new(HashMap::new()),
             keys: AtomicU64::new(1),
         })
@@ -330,7 +341,14 @@ impl Daemon {
             Some(path) => Some(relay::listen_open_socket(path)?),
             None => None,
         };
-        Ok(Daemon { listener, open_socket, ctx: Arc::new(Ctx::new(options, log)?) })
+        let ctx = Arc::new(Ctx::new(options, log)?);
+        #[cfg(target_os = "linux")]
+        if let Some(runtime) = &ctx.runtime {
+            if let Err(e) = runtime.restore().await {
+                ctx.log(&format!("workspace forwards not restored: {e}"));
+            }
+        }
+        Ok(Daemon { listener, open_socket, ctx })
     }
 
     pub fn local_addr(&self) -> SocketAddr {
@@ -358,6 +376,50 @@ impl Daemon {
             let _ = stream.set_nodelay(true);
             let ctx = Arc::clone(&self.ctx);
             tokio::spawn(door::serve(stream, ctx));
+        }
+    }
+}
+
+/// The workspace runtime a place's daemon serves on its link, under the runtime root. A daemon that is not a place
+/// serves none; a root this process cannot open leaves the link answering that no backend is here, and says why once.
+#[cfg(target_os = "linux")]
+fn open_runtime(options: &Options, log: &Log) -> Option<Arc<wsp_runtime::ops::Ops>> {
+    options.place_file.as_ref()?;
+    let root = options.runtime_root.clone().unwrap_or_else(|| PathBuf::from(wsp_runtime::DEFAULT_ROOT));
+    let exe = match std::env::current_exe() {
+        Ok(exe) => exe,
+        Err(e) => {
+            log(&format!("workspace runtime not served: this binary's own path is unknown: {e}"));
+            return None;
+        }
+    };
+    match wsp_runtime::ops::Ops::open(&root, exe) {
+        Ok(ops) => {
+            let swept = ops.swept_at_open();
+            if swept.bytes > 0 {
+                log(&format!(
+                    "layer store swept: {} blobs, {} unpacked layers, {} bytes",
+                    swept.blobs.len(),
+                    swept.unpacked.len(),
+                    swept.bytes
+                ));
+            }
+            for id in ops.stopped_at_open() {
+                log(&format!("workspace {id} found stopped at start: its init is gone"));
+            }
+            let net_swept = ops.net_swept_at_open();
+            if !net_swept.links.is_empty() || net_swept.rules {
+                log(&format!(
+                    "workspace network swept: {} links{}",
+                    net_swept.links.len(),
+                    if net_swept.rules { ", the rules" } else { "" }
+                ));
+            }
+            Some(Arc::new(ops))
+        }
+        Err(e) => {
+            log(&format!("workspace runtime not served: {}: {e}", root.display()));
+            None
         }
     }
 }

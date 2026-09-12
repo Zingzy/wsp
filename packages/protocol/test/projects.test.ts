@@ -2,7 +2,7 @@
 // The projects a workspace holds and the one rule for which of them a thread
 // starts in: the composer, the command line and the runtime all read it here.
 import { describe, expect, it } from "vitest";
-import { DEFAULT_PREFERENCES, dropTileLine, folderName, goldenForkName, homeShortened, lastTargetLine, noProjectLine, noWorkspaceForFolderLine, projectAt, projectCountCell, projectFor, ProjectGolden, projectsInPlace, REGISTERING_LINE, registeredLine, registerRequest, registerTakesNoConsentLine, THIS_COMPUTER, threadOpenedLine, workspaceForFolder, workspaceProjects, type WorkspaceProject, WorkspaceView } from "../src/index.js";
+import { DEFAULT_PREFERENCES, dropTileLine, folderName, hiddenFolder, isMacMachine, goldenForkName, homeShortened, lastTargetLine, noProjectLine, noWorkspaceForFolderLine, projectAt, projectCountCell, projectFor, ProjectGolden, projectsInPlace, REGISTERING_LINE, registeredLine, registerRequest, registerTakesNoConsentLine, THIS_COMPUTER, threadOpenedLine, workspaceForFolder, workspaceProjects, type WorkspaceProject, WorkspaceView } from "../src/index.js";
 
 const spoo: WorkspaceProject = { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z", size: 1024 };
 const wsp: WorkspaceProject = { name: "wsp", dest: "/root/wsp", importedAt: "2026-09-02T00:00:00Z" };
@@ -85,6 +85,36 @@ describe("getting a project onto a workspace", () => {
     expect(registerTakesNoConsentLine(["keep", "agents"])).toBe("keep, agents have no meaning on this computer: the folder is registered at its path and nothing is carried, cut or replaced");
     expect(folderName("/Users/dev/wsp/")).toBe("wsp");
     expect(folderName("wsp")).toBe("wsp");
+  });
+
+  it("a folder browser hides the machine's own folders: the dot-named ones anywhere, and a Mac home's own Library", () => {
+    const mac = { home: "/Users/dev", mac: true };
+    // A dot-named folder is the machine's own wherever it sits, and with nothing known about the machine at all.
+    expect(hiddenFolder("/Users/dev/.config", mac)).toBe(true);
+    expect(hiddenFolder("/root/.wsp-inbox")).toBe(true);
+    expect(hiddenFolder("/Users/dev/code", mac)).toBe(false);
+    // The Library the Mac keeps in the home itself, which its Finder hides too.
+    expect(hiddenFolder("/Users/dev/Library", mac)).toBe(true);
+    expect(hiddenFolder("/Users/dev/Library/", mac)).toBe(true);
+    // A home is wherever the login puts it, and a lab account's is not /Users/<name>: the home decides, not the
+    // path's shape, or every persona home on a Mac gets the junk drawer back.
+    expect(hiddenFolder("/Users/Shared/lab/priya/Library", { home: "/Users/Shared/lab/priya", mac: true })).toBe(true);
+    expect(hiddenFolder("/var/folders/t/session/Library", { home: "/var/folders/t/session", mac: true })).toBe(true);
+    // A Library somebody made inside their own work is theirs, and so is one on a machine that is not a Mac.
+    expect(hiddenFolder("/Users/dev/code/app/Library", mac)).toBe(false);
+    expect(hiddenFolder("/root/Library", { home: "/root", mac: false })).toBe(false);
+    expect(hiddenFolder("/Users/dev/Library", { home: "/Users/dev" })).toBe(false);
+    expect(hiddenFolder("/Users/dev/Library")).toBe(false);
+  });
+
+  it("a machine says it is a Mac by the name its maker gives it, or by the kernel where it had nothing better", () => {
+    expect(isMacMachine("macOS 15.5")).toBe(true);
+    expect(isMacMachine("Darwin 25.4.0")).toBe(true);
+    expect(isMacMachine("Ubuntu 24.04.1 LTS")).toBe(false);
+    expect(isMacMachine("Debian GNU/Linux 12 (bookworm)")).toBe(false);
+    // A machine that has answered nothing yet has said nothing to hide.
+    expect(isMacMachine(undefined)).toBe(false);
+    expect(isMacMachine("")).toBe(false);
   });
 
   it("with no --to the import goes to the workspace the last thread started on, and the line says so", () => {

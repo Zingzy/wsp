@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, DAEMON_VERSION, FREE_WORD, LINEAGE_MARKS, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, NO_LINGER_LINE, NOT_ON_THIS_KIND, fmtBytes, fmtSize, imageKeptLine, kindWords, machineLacksShort, placeMachineId, servesReading, workspaceKind } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, DAEMON_VERSION, FREE_WORD, LINEAGE_MARKS, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, NO_LINGER_LINE, NOT_ON_THIS_KIND, absentComputer, fmtBytes, fmtSize, imageKeptLine, kindWords, machineLacksShort, placeMachineId, servesReading, workspaceKind } from "@wsp/protocol";
 import type {
   Capabilities,
   EventUnion,
@@ -947,6 +947,29 @@ describe("where a workspace runs", () => {
     await waitFor(() => expect(fact("where")).toBe("this Mac"));
   });
 
+  it("a workspace on a computer that is not answering reads Unreachable, with the whole sentence on the State row and no id in it", async () => {
+    const away: PlaceView = { ...HETZNER, name: "old-laptop", present: false, lastSeenAt: new Date(Date.now() - 38 * 60_000).toISOString(), workspaceId: "ws_p" };
+    useStore.setState({ places: [HERE_PLACE, away, ASCII] });
+    const on: WorkspaceView = { ...view("ws_p", "old-laptop"), kind: "place", machineId: placeMachineId("p_1"), golden: "" };
+    const api = fakeApi([on]);
+    // The status the host pushes for a machine on a computer it cannot ask anything of: running at the provider,
+    // answering nothing, with the one sentence as its reason.
+    api.watchStatuses = vi.fn(async () => [
+      { ...status(on), kind: "place" as const, size: { cpu: 4, memMb: 8192 }, rateUsdPerHour: 0, reach: { state: "unreachable" as const }, reason: absentComputer("old-laptop", null).sentence },
+    ]);
+    useStore.getState().bind(api);
+    render(<MachineSurface workspaceId="ws_p" />);
+    const sentence = "old-laptop is not answering; it connects on its own when it is on";
+    await waitFor(() => expect(fact("state")).toBe("Unreachable"));
+    // Never Running over readings of unreachable: the two used to sit seven inches apart in one box.
+    expect(fact("state")).not.toBe("Running");
+    expect(fact("cpu")).toBe("unreachable");
+    expect(document.querySelector('[data-k="state"]')!.getAttribute("title")).toBe(sentence);
+    expect(fact("reason")).toBe(sentence);
+    expect(document.body.textContent).not.toContain(placeMachineId("p_1"));
+    expect(document.body.textContent).not.toContain("no daemon on it");
+  });
+
   it("falls back to the row's own short word on a host that lists no computers", async () => {
     useStore.setState({ places: [] });
     await mount([{ ...view("ws_a", "api"), provider: "box" }]);
@@ -1257,16 +1280,21 @@ describe("live", () => {
     expect(d).toMatch(/L100\.00 [\d.]+$/);
   });
 
-  it("a napping workspace keeps its last values dim under the word napping, and nothing changes height", async () => {
+  it("a paused workspace keeps its last values dim under the one word the whole pane uses for it, and nothing changes height", async () => {
     await mount([view("ws_a", "api", "napping")]);
     feed("ws_a", [0, 1, 2].map(i => sysSample(i)), "connecting");
-    await waitFor(() => expect(fact("cpu")).toBe("napping"));
-    expect(fact("mem")).toBe("napping");
-    expect(fact("disk")).toBe("napping");
+    // One word for one state: the State row reads Paused, the nap row says what the nap will do, and the three
+    // Live rows read the same word rather than the phase the protocol writes it under.
+    await waitFor(() => expect(fact("cpu")).toBe("paused"));
+    expect(fact("state")).toBe("Paused");
+    expect(fact("idle")).toBe("not until it wakes");
+    expect(fact("mem")).toBe("paused");
+    expect(fact("disk")).toBe("paused");
+    expect(document.body.textContent).not.toContain("napping");
     expect(screen.queryByText("load 0.42")).toBeNull();
     for (const k of ["cpu", "mem", "disk"]) {
       const row = liveRow(k);
-      expect(row.getAttribute("data-stale")).toBe("napping");
+      expect(row.getAttribute("data-stale")).toBe("paused");
       expect(row.className).toMatch(/\bh-7\b/);
       expect(row.querySelector("[data-live-line]")!.getAttribute("d")).toMatch(/^M[^ML]+(L[^ML]+){2}$/);
       expect(row.querySelector("[data-live-line]")!.getAttribute("class")).toMatch(/muted-foreground/);

@@ -1,8 +1,27 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! The workspace manager behind the machine ops on a place link. The layer store and the registry fetch live
-//! here; until a backend exists, every machine op the link carries is answered with one refusal that names it.
+//! The workspace manager behind the machine ops on a place link. The layer store and the registry fetch hold the
+//! image; on Linux the bundle, the runtime, the freezer and the ops run workspaces from it through youki's library
+//! and answer every `machine.*` frame, and the net module gives each workspace its network and its published
+//! ports. What this slice does not serve yet, and every op on another platform, is answered with one refusal that
+//! names it.
 
+#[cfg(target_os = "linux")]
+pub mod bundle;
 pub mod fetch;
+#[cfg(target_os = "linux")]
+pub mod freeze;
+#[cfg(target_os = "linux")]
+pub mod init;
+#[cfg(target_os = "linux")]
+pub mod net;
+#[cfg(target_os = "linux")]
+pub mod nft;
+#[cfg(target_os = "linux")]
+pub mod ops;
+#[cfg(target_os = "linux")]
+pub mod profile;
+#[cfg(target_os = "linux")]
+pub mod runtime;
 pub mod store;
 
 use wsp_frames::{DaemonErrorResponse, RequestId};
@@ -10,12 +29,12 @@ use wsp_frames::{DaemonErrorResponse, RequestId};
 /// Where the runtime keeps everything it owns on a computer somebody joined, layers under it.
 pub const DEFAULT_ROOT: &str = "/var/lib/wsp";
 
-/// What a machine op gets on a computer whose daemon holds no backend yet.
+/// What a machine op gets on a computer whose daemon holds no backend for it.
 pub fn no_backend_refusal(op: &str) -> String {
     format!("this computer's backend has no {op}")
 }
 
-/// The reply to any machine op on the link: the refusal above under the request's id.
+/// The reply to a machine op nothing here serves: the refusal above under the request's id.
 pub fn answer_machine_op(id: Option<RequestId>, op: &str) -> DaemonErrorResponse {
     DaemonErrorResponse::new(id, no_backend_refusal(op))
 }

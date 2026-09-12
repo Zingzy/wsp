@@ -103,6 +103,9 @@ export interface ExecStream {
   /** What a later host process attaches to this run by, on a factory whose runs outlive the process that launched
    * them; absent where they do not, and a turn on such a factory dies with its host. */
   readonly run?: string;
+  /** The process this run leads on the computer the host runs on, where the factory starts one here; absent on a
+   * factory whose run is on another machine, whose pids say nothing about this one. */
+  readonly pid?: number;
   /** Graceful stop: SIGTERM to the process and to everything it started. A harness leaves its own children behind
    * when it goes (MCP servers under npx were seen holding 90 MB each for the machine's life), so a signal that
    * reaches the leader alone is not a stop. */

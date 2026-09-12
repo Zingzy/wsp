@@ -10,7 +10,7 @@ import { SolariBackend, isReserved, type GoldenStage } from "@wsp/engine";
 import { createRuntime, memoryStore, type ImportResult } from "@wsp/runtime";
 import { afterAll, describe, expect, it } from "vitest";
 import { LIVE, liveEnv } from "../../engine/test/live.js";
-import { deployDaemon } from "../src/doctor.js";
+import { DAEMON_DEPLOYED_LINE, deployDaemon } from "../src/doctor.js";
 import { importFor } from "../src/init-import.js";
 import { goldenRecipeFor } from "../src/init-recipe.js";
 import type { ManifestEntry } from "@wsp/collect";
@@ -48,7 +48,7 @@ describe.runIf(LIVE)("golden import (live: apply a trimmed recipe, seal, fork, p
       adapters: {},
       goldenRecipe: goldenRecipeFor(BRING, { ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY }, {
         import: imp,
-        deployDaemon: async m => `node ${(await deployDaemon(m)).node}`,
+        deployDaemon: async m => deployDaemon(m).then(() => DAEMON_DEPLOYED_LINE),
       }),
     });
     rt.events.on("golden.stage", e => {

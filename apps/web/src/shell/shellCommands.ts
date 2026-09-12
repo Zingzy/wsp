@@ -17,6 +17,7 @@ import { isWorkspaceSelectCommand, workspaceSelectSlot, type KeybindingCommand, 
 import { getTerminalFocusOwner } from "../lib/terminalFocus.js";
 import { useStore } from "../protocol/store.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
+import { absenceOf } from "../settings/places.js";
 import { sidebarThreadOrder } from "../sidebar/Sidebar.logic.js";
 import { spaceWorkspaceId } from "../sidebar/sidebarMode.js";
 import { threadTree } from "../sidebar/threadTree.js";
@@ -38,8 +39,13 @@ export function reportTerminalFailure(error: unknown): void {
   useStore.setState({ toast: `terminal: ${error instanceof Error ? error.message : String(error)}` });
 }
 
-/** Runs fn against the workspace's link; no link or a refused create ends in a toast, never in silence. */
+/** Runs fn against the workspace's link; no link or a refused create ends in a toast, never in silence. Nothing is
+ * asked of a workspace whose computer is not answering: its pane already says so in that computer's own words and
+ * stands there, where a rejection from the link would land as a line in the sidebar's foot that nothing clears.
+ * The tab that opens a pane is held on the same reading, so every road to a pty reads one state. */
 function withTerminals(workspaceId: string, fn: (terminals: WorkspaceTerminals) => Promise<unknown>): Promise<void> {
+  const { workspaces, places } = useStore.getState();
+  if (absenceOf(places, workspaces.find(w => w.id === workspaceId) ?? null, null) !== null) return Promise.resolve();
   const terminals = getTerminals(workspaceId);
   if (!terminals) {
     reportTerminalFailure(new Error("no terminal link for this workspace"));

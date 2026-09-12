@@ -17,11 +17,11 @@ import {
   NO_PLACE_INSTALLER,
   PAIR_CODE_TTL_MS,
   PLACE_KEY_REFUSAL,
+  PLACE_LEAVE_LINE,
   PLACE_LINK_NONCE_BYTES,
   forkRoom,
   placeLinkTranscript,
-  fmtSize,
-  placeAbsentLine,
+  absentComputer,
   noSuchPlaceRefusal,
   placeHoldsForksRefusal,
   placeForksNowhereLine,
@@ -439,7 +439,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   const linkTo = (placeId: string): MachineLink => ({
     request: async (op, params, o) => {
       const reach = live.get(placeId)?.reach;
-      if (reach === undefined) throw new PlaceAbsentError(placeAbsentLine(kept.get(placeId)?.name ?? placeId));
+      if (reach === undefined) throw new PlaceAbsentError(absentComputer(kept.get(placeId)?.name ?? placeId, null).sentence);
       return bounded(reach.request(op, params), o?.timeoutMs ?? LINK_FRAME_MS, `${op} on ${kept.get(placeId)?.name ?? placeId}`);
     },
     forward: placePort => door.forward(placeId, placePort),
@@ -783,7 +783,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         });
         const held = await recordOf(placeId);
         if (held === undefined) throw new Error(placeNoLinkLine(installed.name));
-        stage("join", "done", `${fmtSize(held.report.shape, "cores")} · docker ${held.report.docker ? "yes" : "no"}`);
+        // The size the box reported is not here: every road that draws this line draws the box's row beside it, and
+        // a fact already in the row costs the line the room it needs to read whole.
+        stage("join", "done", `docker ${held.report.docker ? "yes" : "no"}`);
         return { addId, place: viewOf(held, await defaultId()), ...(installed.hostKey !== undefined ? { hostKey: installed.hostKey } : {}) };
       } catch (e) {
         // The step the install was on when it stopped is the one that failed, so a person reads the sentence
@@ -798,7 +800,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     async road(placeId) {
       const held = live.get(placeId);
       const name = (await recordOf(placeId))?.name ?? placeId;
-      if (held === undefined) throw new Error(placeAbsentLine(name));
+      if (held === undefined) throw new Error(absentComputer(name, null).sentence);
       const port = (await recordOf(placeId))?.report.daemonPort;
       if (port === undefined) throw new Error(placeNoDaemonPortLine(name));
       // One port per link, opened at the first pane that asks and closed with the link it rides.
@@ -813,7 +815,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
 
     async exec(placeId, cmd, execOpts) {
       const reach = live.get(placeId)?.reach;
-      if (reach === undefined) throw new Error(placeAbsentLine((await recordOf(placeId))?.name ?? placeId));
+      if (reach === undefined) throw new Error(absentComputer((await recordOf(placeId))?.name ?? placeId, null).sentence);
       const answer = await reach.request("exec", {
         cmd,
         ...(execOpts.timeoutMs !== undefined ? { timeoutMs: execOpts.timeoutMs } : {}),
@@ -874,7 +876,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           const answer = await reach.request("place.leave");
           swept = Array.isArray(answer["swept"]) ? (answer["swept"] as unknown[]).map(String) : [];
         } catch (e) {
-          note = `${held.name} was connected but did not finish the sweep: ${e instanceof Error ? e.message : String(e)}; run wsp leave on that computer`;
+          note = `${held.name} was connected but did not finish the sweep: ${e instanceof Error ? e.message : String(e)}; run ${PLACE_LEAVE_LINE} on that computer`;
         }
         cut(placeId, "removed from this host");
       }

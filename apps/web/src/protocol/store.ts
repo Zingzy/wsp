@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, cloudCreateRefusal, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, type AbsentComputer, cloudCreateRefusal, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, writeAddress } from "./address.js";
 import { sidebarWorkspaceOrder } from "../adapt/workspaces.js";
@@ -11,7 +11,7 @@ import { DisconnectedError, RequestError, type Api, type ConnStatus, type Protoc
 import { lastWorkspaceId, rememberWorkspace } from "./lastWorkspace.js";
 import { clearLegacyPreferences, legacyPreferences } from "./legacyPreferences.js";
 import { bootPreferences, rememberFirstPaint } from "./firstPaint.js";
-import { placeName, placeNamed } from "../settings/places.js";
+import { absenceOf, placeName, placeNamed } from "../settings/places.js";
 import { imageBuildFrame } from "../shell/creationLog.js";
 import { requestNewThread } from "../shell/shellRequests.js";
 import { useSignInStore } from "../shell/signInStore.js";
@@ -856,6 +856,17 @@ export function useWorkspaceState(id: string | null): WorkspaceState | null {
   const view = status ?? workspace;
   return view === null ? null : workspaceStateOf(view, status);
 }
+/** The one state of this workspace's computer while it is not answering, null while it is. Every surface that says
+ * anything about an absent computer reads it here: the sidebar row, the Workspace panel, the composer's held send
+ * and the terminal and processes panes. The clock is the caller's: a surface that ticks passes its own, so it
+ * cannot date the silence differently from the row beside it, and one that shows the sentence alone passes none
+ * and is handed a reading with no figure, rather than a clock read on the render path that never ticks again. */
+export function useAbsentComputer(id: string | null, nowMs: number | null = null): AbsentComputer | null {
+  const workspace = useWorkspace(id);
+  const places = usePlaces();
+  return useMemo(() => absenceOf(places, workspace, nowMs), [places, workspace, nowMs]);
+}
+
 export function useCost(id: string | null): CostTick | null {
   return useStore(s => (id ? s.costs[id] ?? null : null));
 }

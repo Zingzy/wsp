@@ -21,6 +21,7 @@ import { glyphStateClass, leadDimClass } from "../src/sidebar/workspaceRows.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
+import { WorkspaceTerminals, provideTerminals } from "../src/terminal/link.js";
 
 // The triggers keep their elements, and no popup mounts: this file focuses and
 // clicks the search row, and Base UI's positioning against jsdom's zero-size
@@ -1301,6 +1302,28 @@ describe("Solari out of reach from this computer", () => {
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API) }));
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(WEB) }));
     await waitFor(() => expect(screen.queryByText(PROVIDER_UNREACHED_LINE)).toBeNull());
+  });
+
+  it("keeps the slot under the search row for the host's own two lines, never a workspace's link", async () => {
+    await mount(fakeApi([API, WEB], [status(API), status(WEB)]), "api");
+    await waitFor(() => expect(rowOf("api")).toBeDefined());
+    // The workspace on screen has a link that nothing has answered on. Its sentence belongs to the pane that
+    // asked and to the composer under the box, both of which sit beside the workspace they name; drawn here, in
+    // the opposite corner, it read as a line about nothing and named no workspace.
+    const wt = new WorkspaceTerminals({ request: async () => ({ ok: true }) });
+    act(() => {
+      wt.feedStatus("unanswered");
+      provideTerminals(API.id, wt);
+    });
+    await waitFor(() => expect(rowOf("api")).toBeDefined());
+    const slot = document.querySelector("[data-sidebar-search]")!;
+    expect(slot.querySelector("[data-sidebar-link-down]")).toBeNull();
+    expect(slot.textContent).not.toContain("Nothing has answered");
+    provideTerminals(API.id, null);
+    // The two the slot does carry stay: this computer asleep, and a poll that never left it.
+    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { reach: { state: "reachable", offline: true } }) }));
+    expect((await screen.findByText(PROVIDER_UNREACHED_LINE)).closest("[data-sidebar-search]")).not.toBeNull();
+    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API) }));
   });
 
   it("a row that was Unreachable stays Unreachable through the computer's offline spell", async () => {

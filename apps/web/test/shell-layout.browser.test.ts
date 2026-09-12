@@ -41,7 +41,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, ConsoleMessage, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { accessFromNextMessage, contrastRatio, DEFAULT_THEME, dotColour, effectiveOpacity, FREE_WORD, INK_FLOOR, NO_REBUILD_NEEDED, PROVIDER_UNREACHED_LINE, sendRefusal, SIDE_INK, stillWorkingLine, THEME_PRESETS, themeInk, themeScheme, THIS_COMPUTER, type Rgb } from "@wsp/protocol";
+import { ACCESS_REFUSED_LINE, accessReachLine, contrastRatio, DEFAULT_THEME, dotColour, effectiveOpacity, FREE_WORD, INK_FLOOR, NO_REBUILD_NEEDED, PROVIDER_UNREACHED_LINE, sendRefusal, SIDE_INK, stillWorkingLine, THEME_PRESETS, themeInk, themeScheme, type Rgb } from "@wsp/protocol";
 import { WAKE_AND_SEND_LABEL } from "../src/components/chat/ComposerPrimaryActions";
 import { LOCKUP_OPTICAL_CENTRE } from "../src/brand/optical";
 import { SPACE_SLIDE_MS } from "../src/sidebar/SpaceSlide";
@@ -1472,10 +1472,49 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 60_000);
 
-  it("an access picked while a turn runs reads back on the picker, and the line saying when it lands is one uncut muted mono line, in both themes", async () => {
+  it("a pick closes the option menu, so the click after it lands on the prompt the menu was covering", async () => {
+    // A turn running on this computer with a prompt open under the composer, which is the page the menu covered.
+    await page!.goto(`${base}?theme=dark&local=1&ws=ws_m&perm=1`);
+    await page!.waitForSelector("[data-composer-picker='permissionMode']");
+    await page!.waitForSelector("text=loading transcript", { state: "detached" });
+    await page!.waitForSelector("[data-permission-prompt='ask_open'][data-permission-open='true']");
+    await page!.locator("[data-composer-picker='permissionMode']").click();
+    await page!.waitForSelector("[data-composer-option='plan']");
+    // What the pick will do to the turn running now, read over the list before anything is picked.
+    expect(await page!.locator("[data-composer-access-reach]").textContent()).toBe(accessReachLine(true));
+
+    await page!.locator("[data-composer-option='plan']").click();
+    await page!.waitForSelector(`[data-composer-picker='permissionMode'][data-value='plan']`);
+    // The menu is gone on the pick: nothing of it is left over the page, visible or not.
+    await page!.waitForSelector("[role=menu]", { state: "detached" });
+
+    // Plan says nothing about the write in front of the person, so the prompt stands and their click on it lands
+    // rather than being eaten by a menu that stayed up.
+    const allow = page!.locator("[data-permission-prompt='ask_open'] [data-permission-option='allow']");
+    await allow.click({ timeout: 5_000 });
+    await page!.waitForSelector("[data-permission-prompt='ask_open'][data-permission-open='false']");
+  }, 60_000);
+
+  it("an access that answers the open prompt closes it without a click, and says nothing about a next message", async () => {
+    await page!.goto(`${base}?theme=dark&local=1&ws=ws_m&perm=1`);
+    await page!.waitForSelector("[data-composer-picker='permissionMode']");
+    await page!.waitForSelector("text=loading transcript", { state: "detached" });
+    await page!.waitForSelector("[data-permission-prompt='ask_open'][data-permission-open='true']");
+    await page!.locator("[data-composer-picker='permissionMode']").click();
+    await page!.waitForSelector("[data-composer-option='bypassPermissions']");
+    await page!.locator("[data-composer-option='bypassPermissions']").click();
+
+    // The prompt the turn was stopped on is answered by the pick itself: the person clicks nothing.
+    await page!.waitForSelector("[data-permission-prompt='ask_open'][data-permission-open='false']");
+    await page!.waitForSelector(`[data-composer-picker='permissionMode'][data-value='bypassPermissions']`);
+    expect(await page!.locator("[data-composer-refusal]").textContent()).toBe("");
+  }, 60_000);
+
+  it("an access picked while a turn runs reads back on the picker, and a refusal the harness answered with is one uncut muted mono line, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
-      // A turn running on this computer, which is where a pick made mid-turn has somewhere to go.
-      await page!.goto(`${base}?theme=${theme}&local=1&ws=ws_m&perm=1`);
+      // A turn running on this computer whose harness takes the change back after its row said it takes it, which is
+      // the one thing the composer says in that slot.
+      await page!.goto(`${base}?theme=${theme}&local=1&ws=ws_m&perm=1&access=refused`);
       await page!.waitForSelector("[data-composer-picker='permissionMode']");
       await page!.waitForSelector("text=loading transcript", { state: "detached" });
       const trigger = "[data-composer-picker='permissionMode']";
@@ -1484,6 +1523,8 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       const before = await box("[data-slot=composer-shell]");
       await page!.locator(trigger).click();
       await page!.waitForSelector("[data-composer-option='bypassPermissions']");
+      // The menu says what the pick does before it is made; the refusal below is the harness taking that back.
+      expect(await page!.locator("[data-composer-access-reach]").textContent()).toBe(accessReachLine(true));
       const menu = join(SHOTS_DIR, `composer-access-menu-${theme}.png`);
       await page!.locator("[role=menu]").first().screenshot({ path: menu });
       console.info(`composer access menu screenshot: ${menu}`);
@@ -1491,9 +1532,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
 
       // The pick reads back on the trigger whatever the running turn did with it, and the line says when it lands.
       await page!.waitForSelector(`${trigger}[data-value='bypassPermissions']`);
-      // A radio pick leaves the menu up, as it does for the model and the effort; it is dismissed so the line is
-      // photographed with nothing over it.
-      await page!.keyboard.press("Escape");
+      // The pick closes the menu, so the line is photographed with nothing over it.
       await page!.waitForSelector("[role=menu]", { state: "detached" });
       await page!.waitForSelector("[data-composer-refusal] [role=status]");
       const read = await page!.locator("[data-chat-composer]").evaluate(el => {
@@ -1515,7 +1554,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       await page!.locator("[data-chat-composer]").screenshot({ path: shot });
       console.info(`composer access line screenshot: ${shot} (${read.width} px of line in ${read.slot} px of slot)`);
 
-      expect(read.text).toBe(accessFromNextMessage(`Bypass on ${THIS_COMPUTER}`));
+      expect(read.text).toBe(ACCESS_REFUSED_LINE);
       // The button wears the mode's short form; the machine is named in the menu and in the line.
       expect(read.trigger).toBe("Bypass");
       // Whole at the width this app is smallest in: the clause that says when the pick lands is the point of it.

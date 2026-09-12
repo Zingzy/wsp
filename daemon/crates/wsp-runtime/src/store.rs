@@ -423,7 +423,37 @@ fn unpack_tar(read: impl Read, dst: &Path, owners: bool) -> io::Result<()> {
     archive.set_preserve_ownerships(owners);
     archive.set_preserve_mtime(true);
     archive.set_unpack_xattrs(true);
-    archive.unpack(dst)
+    archive.unpack(dst)?;
+    #[cfg(target_os = "linux")]
+    if nix::unistd::geteuid().is_root() {
+        convert_whiteouts(dst)?;
+    }
+    Ok(())
+}
+
+/// OCI whiteouts as overlayfs reads them: `.wh.<name>` becomes a character device 0:0 named `<name>`, and
+/// `.wh..wh..opq` marks its directory opaque. Both take root, so a process without it keeps the files as the tar
+/// carried them, which shows deleted files until a root unpack.
+#[cfg(target_os = "linux")]
+fn convert_whiteouts(dir: &Path) -> io::Result<()> {
+    use nix::sys::stat::{makedev, mknod, Mode, SFlag};
+
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str() else { continue };
+        if entry.file_type()?.is_dir() {
+            convert_whiteouts(&path)?;
+        } else if name == ".wh..wh..opq" {
+            fs::remove_file(&path)?;
+            xattr::set(dir, "trusted.overlay.opaque", b"y")?;
+        } else if let Some(hidden) = name.strip_prefix(".wh.") {
+            fs::remove_file(&path)?;
+            mknod(&dir.join(hidden), SFlag::S_IFCHR, Mode::empty(), makedev(0, 0))?;
+        }
+    }
+    Ok(())
 }
 
 /// The digest a store file or directory is named after, with or without an in-flight extension.

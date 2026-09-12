@@ -14,12 +14,12 @@ import { CLIENT_CANNOT_REBUILD } from "../../actions/format.js";
 import { actionById, resolveActions, rowLabelOf } from "../../actions/registry.js";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { workspaceActions, workspaceTarget } from "../../actions/workspaceActions.js";
-import { FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, LINEAGE_MARKS, NOT_ON_THIS_KIND, agentsLine, behindGoldenLine, biggerSizeLine, diskTone, fmtBytes, fmtBytesOfTotal, fmtCost, fmtRate, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageKeptLine, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, resizesMachines, servesReading, sizeWord, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspaceProjects, workspaceState, workspaceStateOf, workspaceWord, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SizeTone, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, LINEAGE_MARKS, NOT_ON_THIS_KIND, agentsLine, behindGoldenLine, biggerSizeLine, diskTone, fmtBytes, fmtBytesOfTotal, fmtCost, fmtRate, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageKeptLine, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, resizesMachines, servesReading, sizeWord, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspacePlace, workspaceProjects, workspaceState, workspaceStateOf, workspaceWord, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SizeTone, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { isDesktopShell } from "../../lib/desktopShell.js";
 import { cn, errorText } from "../../lib/utils.js";
-import { LIVE_WINDOW, useOutOfMemoryReading, useWorkspaceLive } from "../../machine/live.js";
+import { LIVE_WINDOW, staleWord, useOutOfMemoryReading, useWorkspaceLive, type StaleWord } from "../../machine/live.js";
 import { upgradeOptions, useCostSeries, useUpgrade, type Upgrade } from "../../protocol/machine.js";
-import { useCapabilities, useCost, useProtocolEvents, useStatus, useStore, useWorkspace } from "../../protocol/store.js";
+import { useAbsentComputer, useCapabilities, useCost, useProtocolEvents, useStatus, useStore, useWorkspace } from "../../protocol/store.js";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -81,22 +81,31 @@ function Surface({ workspace, series }: { workspace: WorkspaceView; series: Work
   );
 }
 
+/** Every row of the pane, header and foot included: 12 px at the left and 20 px at the right, so the 6 px scroll
+ * bar rides in the outer 8 px and never covers a value. The hairlines run edge to edge, being the row's own. */
+const PANE_INSET = "pl-3 pr-5";
+
 function Header({ workspace, status }: { workspace: WorkspaceView; status: WorkspaceStatus | null }) {
   const machineId = status?.machineId ?? workspace.machineId;
   const verbs = useWorkspaceVerbs();
   const copy = actionById(resolveActions(workspaceActions, workspaceTarget(workspace, status), verbs, false), "copy-id");
+  // On a joined computer the machine is the link, so the id is this host's own row key rather than anything a
+  // provider would look up: the corner holds nothing there, and the Where row names the computer instead.
+  const shown = workspacePlace({ machineId }) === undefined ? machineId : null;
   return (
-    <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
+    <div className={cn("flex items-center gap-2 border-b border-border/60 py-2", PANE_INSET)}>
       <MachineLead workspace={workspace} />
       <span className="min-w-0 truncate text-sm font-medium">{workspace.name}</span>
-      <span className="ml-auto flex min-w-0 items-center gap-0.5 font-mono text-[.7rem] text-muted-foreground">
-        <span className="max-w-28 truncate" title={machineId} data-k="machine-id">
-          {machineId}
+      {shown !== null && (
+        <span className="ml-auto flex min-w-0 items-center gap-0.5 font-mono text-[.7rem] text-muted-foreground">
+          <span className="max-w-28 truncate" title={shown} data-k="machine-id">
+            {shown}
+          </span>
+          <Button size="icon-micro" variant="ghost-muted" aria-label={copy.title} onClick={() => void runAction(copy)}>
+            <CopyIcon />
+          </Button>
         </span>
-        <Button size="icon-micro" variant="ghost-muted" aria-label={copy.title} onClick={() => void runAction(copy)}>
-          <CopyIcon />
-        </Button>
-      </span>
+      )}
     </div>
   );
 }
@@ -109,7 +118,7 @@ function MachineLead({ workspace }: { workspace: WorkspaceView }) {
 
 function Section({ label, aside, children }: { label: string; aside?: ReactNode; children: ReactNode }) {
   return (
-    <section className="border-b border-border/50 px-3 py-2.5 last:border-b-0">
+    <section className={cn("border-b border-border/50 py-2.5 last:border-b-0", PANE_INSET)}>
       <div className="flex items-baseline gap-2 text-[.65rem] font-medium uppercase tracking-wider text-muted-foreground">
         <span>{label}</span>
         {aside !== undefined && <span className="ml-auto font-mono normal-case tracking-normal text-muted-foreground/80">{aside}</span>}
@@ -146,13 +155,15 @@ function Facts({ workspace, status, pendingSize, kind }: FactsProps) {
   const places = useStore(s => s.places);
   const now = useClock(status?.idleAt !== undefined);
   const zombie = status?.reach.state === "zombie";
+  const absent = useAbsentComputer(workspace.id, now);
   // Reach is not a row of its own: the protocol folds a machine that stopped answering into the state word, which
   // is the word every other surface shows for it.
-  const stateWord = workspaceWord(workspaceStateOf(workspace, status));
+  const state = workspaceStateOf(workspace, status);
+  const stateWord = workspaceWord(state);
   const rebuild = needsRebuild({ phase: workspace.phase, machineState: status?.machineState, reach: status?.reach.state, wakeRefused: workspace.wakeRefused });
   // The full reading of the ask the host is on; the sidebar row reads the same two numbers in the words its slot holds.
   const wakeAskLine = status?.wakeAsk === undefined ? null : wakeAskingAgainLine(status.wakeAsk.ask, status.wakeAsk.of);
-  const billing = isBilling(workspaceStateOf(workspace, status));
+  const billing = isBilling(state);
   const outOfMemory = useOutOfMemoryReading(workspace.id, workspace.phase);
   const facts = status?.facts;
   const vault = status ?? workspace;
@@ -164,7 +175,7 @@ function Facts({ workspace, status, pendingSize, kind }: FactsProps) {
   return (
     <Section label="Workspace">
       <div className="mt-1 divide-y divide-border/40">
-        <Row label="State" k="state" title={stateWord}>
+        <Row label="State" k="state" title={absent?.sentence ?? stateWord}>
           <span className={cn(zombie && "text-destructive-foreground")}>{stateWord}</span>
         </Row>
         <Row label="Where" k="where" title={where}>
@@ -185,7 +196,7 @@ function Facts({ workspace, status, pendingSize, kind }: FactsProps) {
         {kind.driven ? (
           <>
             <Row label="Auto-nap" k="idle">
-              {idleLabel(billing ? status?.idleAt : undefined, now)}
+              {idleLabel(billing ? status?.idleAt : undefined, now, state)}
             </Row>
           </>
         ) : (
@@ -418,7 +429,7 @@ function Rebuild({ workspace, status }: { workspace: WorkspaceView; status: Work
   );
 }
 
-type Stale = "napping" | "unreachable" | null;
+
 
 /** cpu, memory and disk from the machine, one sparkline each. A napping workspace, or a running one whose link is
  * down, keeps the last values dim under the word for it; the daemon says nothing about a machine it is not on. A
@@ -429,7 +440,7 @@ type Stale = "napping" | "unreachable" | null;
 function Live({ workspace }: { workspace: WorkspaceView }) {
   const live = useWorkspaceLive(workspace.id);
   const last = live.samples[live.samples.length - 1];
-  const stale: Stale = workspace.phase === "napping" || workspace.phase === "pausing" ? "napping" : live.reach === "live" ? null : "unreachable";
+  const stale = staleWord(workspace.phase, live.reach === "live");
   const kindWord = servesReading(workspaceKind(workspace), "metrics") ? null : NOT_ON_THIS_KIND;
   const share = (m: { used: number; total: number }): number => (m.total > 0 ? (m.used / m.total) * 100 : 0);
   const row = { kindWord, stale, unavailable: live.unavailable, samples: live.samples };
@@ -466,7 +477,7 @@ interface LiveRowProps {
   text: (s: SysSample) => string;
   /** The tone the sample's share earns, from the protocol's one percent table. */
   tone: (s: SysSample) => SizeTone;
-  stale: Stale;
+  stale: StaleWord;
   /** The daemon's refusal of the stream; the slot reads unavailable and carries it as the title. */
   unavailable: string | null;
   /** The kind table's word for a kind that reads none of this, put in the slot as it is; null on a kind that reads
@@ -926,7 +937,7 @@ function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; sta
   ].filter(button => button !== null);
   if (buttons.length === 0 && note === null && upgrade.phase.kind !== "failed") return null;
   return (
-    <footer className="flex flex-col gap-2 border-t border-border/60 p-3">
+    <footer className={cn("flex flex-col gap-2 border-t border-border/60 py-3", PANE_INSET)}>
       {buttons.length > 0 && <div className="flex gap-2">{buttons}</div>}
       {open && status && choice && (
         <div className="flex flex-col gap-2 rounded-md border border-border/60 p-2.5">

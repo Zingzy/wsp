@@ -688,6 +688,12 @@ export function openingTitle(text: string): string {
   return cutLine(/^.*?[.!?](?=\s|$)/.exec(line)?.[0] ?? line, OPENING_TITLE_MAX);
 }
 
+/** The most characters the third line of a workspace row holds: the row leaves 201 px for text at the sidebar's
+ * default 256 px and 11 px mono fits 30 of them there, so a longer line is cut by the width with no say in where.
+ * Here rather than in the app because the lines written for that slot are written here too, and the cut is what
+ * takes the half that says what to do off a line nobody measured. */
+export const ROW_LINE_MAX = 30;
+
 /** Text cut to at most room characters, at a word boundary where one fits, with the ellipsis counted inside the
  * room and drawn only where something was taken off. One rule for every line a surface cuts itself: a thread's
  * title from its opening turn, a sidebar row's third line. */
@@ -849,7 +855,7 @@ export function nextInsideAgentLine(open: string, first: string): string {
 }
 
 /** One level of this computer's own folders in words, the same on the command line and in the app's folder browser:
- * how many folders the level holds, where it sits, and how many of it are dot-named, whether or not those are listed. */
+ * how many folders the level holds, where it sits, and how many of it are hidden, whether or not those are listed. */
 export function folderLevelLine(listing: { dir: string; folders: readonly unknown[]; hidden: number }): string {
   const held = listing.hidden === 0 ? "" : `, ${listing.hidden} hidden`;
   return listing.folders.length === 0 ? `No folders in ${listing.dir}${held}.` : `${plural(listing.folders.length, "folder")} in ${listing.dir}${held}.`;
@@ -1955,12 +1961,12 @@ export function noImportRoadLine(name: string, machine: string): string {
   return `${name} is ${machine}, which lands no folder yet; import to a fork, or register the folder on this computer`;
 }
 
-/** What a machine that cannot build the daemon is refused with. node-pty ships prebuilt binaries for macOS and
- * Windows only, so the terminal's native part is compiled where the daemon runs; a machine wsp builds carries the
- * floor's toolchain, and a machine somebody already owns may carry none. Said before the install rather than
- * after, since a daemon that installed half of itself restarts forever under its unit. */
-export const NO_BUILD_TOOLS_LINE =
-  "this machine has no C compiler, so the daemon's terminal cannot be built on it; install a build toolchain (on Debian or Ubuntu: sudo apt-get install build-essential) and deploy the daemon again";
+/** What a machine without a node the wsp command runs on is refused with. The daemon itself is one static binary
+ * and asks nothing of the machine; the wsp command that rides beside it, which every turn's agent drives the host
+ * through, still runs on node. A machine wsp builds carries the floor's; a machine somebody already owns may carry
+ * none, or one too old. Said before the install rather than after, so nothing lands on a machine that refuses. */
+export const NO_NODE_LINE =
+  "this machine has no Node 22, which the wsp command beside the daemon runs on; install Node 22 or newer on it and deploy the daemon again";
 
 /** What a machine whose login does not linger is refused with. Its own systemd stops when its last session ends
  * and takes the daemon with it, so a daemon deployed there is gone the moment the host's connection closes; the
@@ -1971,7 +1977,7 @@ export const NO_LINGER_LINE =
 /** Every sentence a machine's own checks refuse with, in one place beside them. Read by the rule that keeps each
  * one's first clause short enough for a row, so a refusal added later takes that rule without anyone remembering
  * where it is checked. Nothing decides anything by searching this: which ending a throw is comes off its mark. */
-export const MACHINE_LACKS_LINES: readonly string[] = [NO_BUILD_TOOLS_LINE, NO_LINGER_LINE];
+export const MACHINE_LACKS_LINES: readonly string[] = [NO_NODE_LINE, NO_LINGER_LINE];
 
 /** The marks the checks a machine takes before a daemon is put on it end with, put on where the throw happens
  * rather than matched against text: a check added to a place's preflight is then one shell line and one sentence,
@@ -2194,14 +2200,23 @@ export function permissionModeOptionLabel(modeLabel: string): string {
   return `Allow, then ${modeLabel}`;
 }
 
-/** What the composer says under the box when a person picked an access while a turn was running and that harness
- * takes no such change mid-turn: the pick is kept and it reaches the agent with the next thing they send. Short
- * because that slot is one line the width of the box and it truncates from the right: a longer sentence lost the
- * half that carries the answer at the window this app is smallest in (measured 2026-09-08, 364 px of slot at a
- * 1200 px viewport), and a line that says when the pick lands is no use cut before the "when". */
-export function accessFromNextMessage(modeLabel: string): string {
-  return `${modeLabel} from your next message`;
+/** What the access picker says over its list while a turn is running: what a pick does to that turn, read before the
+ * pick rather than under the box after it. A harness that takes a mode change mid-turn puts the pick to the turn in
+ * front of the person, the prompt it is stopped on included; one that does not keeps the pick for the next message. */
+export function accessReachLine(movesRunningTurn: boolean): string {
+  return movesRunningTurn ? "Applies to the turn running now" : "Applies from your next message";
 }
+
+/** What the composer says under the box when an access pick the harness's own row said would reach the running turn
+ * came back refused: the two halves every refusal in this app has, what happened and then what to do about it. It
+ * stands only for a refusal the harness actually answered with, never for one the menu said before the pick, so
+ * nobody reads the same sentence twice. Short because that slot is one line the width of the box and it truncates
+ * from the right: 54 characters is what fits at the window this app is smallest in (measured 2026-09-08, 364 px of
+ * slot at a 1200 px viewport), and a refusal cut before its second half is no use. */
+export const ACCESS_REFUSED_WORDS = { said: "The turn refused it.", fix: "Your next message carries it." } as const;
+
+/** Those two halves as the one line that slot holds. */
+export const ACCESS_REFUSED_LINE = `${ACCESS_REFUSED_WORDS.said} ${ACCESS_REFUSED_WORDS.fix}`;
 
 /** The one sentence a second workspace on a machine that already carries one is refused with. wsp forks a machine
  * for every workspace it makes and records one for every machine it does not, so one record stands on one machine
@@ -2754,23 +2769,17 @@ export function offlineFor(ms: number): string {
   return hours < 24 ? `${hours} h` : `${Math.floor(hours / 24)} d`;
 }
 
-/** The mono word after a computer's name in the Where agents run table: nothing while it holds its link, and how
- * long it has been away when it does not. The slot stands either way, so the word arriving moves no column. */
-export function placeStateWord(view: PlaceView, now: number): string {
-  if (view.present !== false) return "";
-  const since = view.lastSeenAt === undefined ? NaN : Date.parse(view.lastSeenAt);
-  return Number.isNaN(since) ? "offline" : `offline · ${offlineFor(now - since)}`;
-}
-
 /** The Workspaces cell of that table: how many stand on the computer, and the one thing about it that changes what
- * a person may put there. A computer that is not answering says so ahead of what it cannot run, since the second
- * fact is about a computer this wsp is not talking to. */
+ * a person may put there. Whether the computer is answering is not one of them: the state slot beside its name
+ * carries that, and a row that said it twice was a row that said it in two wordings. */
 export function placeWorkspacesCell(view: PlaceView): string {
   const count = view.workspaceId === undefined ? 0 : 1;
   if (count === 0) return "0";
-  if (view.present === false) return `${count} · not answering`;
   return view.docker === true ? `${count}` : `${count} · agents only`;
 }
+
+/** The one line that takes wsp off a computer it is typed on. */
+export const PLACE_LEAVE_LINE = "wsp leave";
 
 /** The words of the Settings section for where a person's agents run, and of the sheet that adds a computer. */
 export const PLACES_WORDS = {
@@ -2803,6 +2812,15 @@ export const PLACES_WORDS = {
     close: "Close",
     /** Said once, the first time the door binds: a Mac with its firewall on asks whether wsp may accept connections. */
     firewall: "macOS may ask once whether wsp can accept connections; allow it",
+  },
+  remove: {
+    /** The line run on the computer itself, which is the one road that also takes the agent's service: the sweep
+     * the host asks for over the link leaves the unit standing, since its name is the host's rule and not the
+     * agent's. */
+    leaveLine: PLACE_LEAVE_LINE,
+    /** What that line takes and what it leaves, off the one list a sweep reads (placeOwnedPaths), which names the
+     * files under wsp's folder and never the folder itself, and the unit the manager holds the agent up with. */
+    leaveTakes: "It takes off the agent's service, wsp's own files under that login's home, and the browser shim beside it. Your work folder stays, and so do any copies of your image in Docker there.",
   },
 } as const;
 
