@@ -156,7 +156,7 @@ const THREAD = { id: "th_1", workspaceId: "ws_local", session: "turn_1", harness
 const JOBS: Record<string, InitJob> = {
   reading: { ...base, phase: "reading", screens: [], rows: FACTS },
   agent: { ...base, road: "agent", phase: "agent", screens: [], line: "read /Users/zingzy/.claude/projects", thread: THREAD },
-  "agent-stopped": { ...base, road: "agent", phase: "failed", screens: [], line: "Permission for Bash: wsp recipe scan --json", error: initAgentNoRecipeLine("/Users/zingzy/.wsp/recipe.json"), thread: THREAD },
+  "agent-stopped": { ...base, road: "agent", phase: "failed", screens: [], line: "Run: wsp recipe scan --json", error: initAgentNoRecipeLine("/Users/zingzy/.wsp/recipe.json"), thread: THREAD },
   ask: { ...base, step: SCREENS.length },
   // A Mac with no formula to offer: the host shows no Also screen, so the agents step is the first of four.
   "no-extras": { ...base, screens: SCREENS.filter(s => s.id !== "also") },
