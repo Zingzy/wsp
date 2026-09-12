@@ -909,7 +909,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, setup: await init().get() });
               return;
             case "init.keys":
-              send({ id: msg.id, ok: true, setup: await init().keys({ ...(msg.solari !== undefined ? { solari: msg.solari } : {}), ...(msg.rows !== undefined ? { rows: msg.rows } : {}) }) });
+              send({ id: msg.id, ok: true, setup: await init().keys({ ...(msg.provider !== undefined ? { provider: msg.provider } : {}), ...(msg.key !== undefined ? { key: msg.key } : {}), ...(msg.rows !== undefined ? { rows: msg.rows } : {}) }) });
               return;
             case "init.start":
               send({ id: msg.id, ok: true, job: await init().start({ road: msg.road, ...(msg.harness !== undefined ? { harness: msg.harness } : {}) }) });

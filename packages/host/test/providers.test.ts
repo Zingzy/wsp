@@ -4,7 +4,7 @@ import { FAKE_AS_ENV, FAKE_ROOT_ENV } from "@wsp/protocol";
 import { BoxBackend, DockerBackend, FakeBackend, LocalBackend, NoProviderBackend, SolariBackend, SshBackend, landsBytes, type MachineBackend } from "@wsp/engine";
 import { goldenRecipe, makeRuntime, optsFor, providerSlotOf, swapProvider } from "../src/cli.js";
 import { keysOf } from "../src/env-keys.js";
-import { BOX_KEY_ENV, PROVIDER_MODULES, SOLARI_KEY_ENV, isPlace, placeIdOf, placeProviders, providerBackendFor, providerEnvNames, providerEnvWith, providerEnvWithKey, providerKeyEnvs, providerKeyRow, providerModule, providerPlaces, wiredProviderId, type ProviderModule } from "../src/providers.js";
+import { BOX_KEY_ENV, PROVIDER_MODULES, SOLARI_KEY_ENV, isPlace, placeIdOf, placeProviders, providerBackendFor, providerEnvNames, providerEnvWith, providerEnvWithKey, providerKeyEnvs, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredProviderId, type ProviderModule } from "../src/providers.js";
 
 /** A computer's environment as the rows read it: the provider key rides in it under the row's own variable, which
  * is where every layer a key is read through puts it. */
@@ -119,6 +119,29 @@ describe("provider modules", () => {
     expect(providerModule(providerEnvWithKey({}, "slr_live_fake")).id).toBe("solari");
     // A run wired to another provider puts the key it is typed to that provider, not to the row a key alone wires.
     expect(providerModule(providerEnvWithKey({ WSP_PROVIDER: "box" }, "box_fake")).id).toBe("box");
+  });
+
+  it("a key saved for a provider by name goes under that row's variable and leaves the wired provider alone", () => {
+    // The app's Connect a provider names which provider the key is for, so a person connecting one provider on a
+    // computer set up for another is not silently saving their key under the other one's variable.
+    expect(providerKeySet({}, "ascii_live_fake", "box")).toEqual({ [BOX_KEY_ENV]: "ascii_live_fake" });
+    expect(providerKeySet({ [SOLARI_KEY_ENV]: "slr_live_held" }, "ascii_live_fake", "box")).toEqual({ [BOX_KEY_ENV]: "ascii_live_fake" });
+    // The key opens that provider as a place and moves nothing: what this computer forks on is where it was, so a
+    // second key does not carry every workspace made after it to another provider.
+    const after = { [SOLARI_KEY_ENV]: "slr_live_held", ...providerKeySet({ [SOLARI_KEY_ENV]: "slr_live_held" }, "ascii_live_fake", "box")! };
+    expect(providerModule(after).id).toBe("solari");
+    expect(placeProviders(after).map(m => m.id)).toEqual(["docker", "box", "solari"]);
+    expect(providerModule(providerEnvWithKey({}, "ascii_live_fake", "box")).id).toBe("box");
+    expect(providerBackendFor(providerEnvWithKey({}, "ascii_live_fake", "box"))).toBeInstanceOf(BoxBackend);
+    // With no provider named the key is the wired row's, and the word for it is left as it stands.
+    expect(providerKeySet({}, "slr_live_fake")).toEqual({ [SOLARI_KEY_ENV]: "slr_live_fake" });
+    // A row that takes no key, and a word no row answers to, take nothing.
+    expect(providerKeySet({}, "x", "docker")).toBeUndefined();
+    expect(providerKeySet({}, "x", "nowhere")).toBeUndefined();
+  });
+
+  it("every provider a key can be saved for is read off the table, each under the variable its own row names", () => {
+    expect(providerKeyRows()).toEqual({ box: BOX_KEY_ENV, solari: SOLARI_KEY_ENV });
   });
 
   it("the variables a service carries are the rows' own, so a provider added brings its variable with it", () => {

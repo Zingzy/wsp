@@ -101,7 +101,7 @@ export function ImageSection() {
           </Table>
         </div>
       )}
-      {editing ? <CloudSetupDialog title={IMAGE_WORDS.sheet} onClose={() => setEditing(false)} /> : null}
+      {editing ? <CloudSetupDialog onClose={() => setEditing(false)} /> : null}
     </Section>
   );
 }

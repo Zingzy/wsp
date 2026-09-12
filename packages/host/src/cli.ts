@@ -28,7 +28,7 @@ import {
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
 import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portsAsked, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, unknownWordLine, usageRefusal, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, parseSshAddress, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshIdentity, sshMachineName, sshReachOf, type SshReach } from "@wsp/engine";
-import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerModule, providerPlaces, wiredProviderId, type ProviderEnv } from "./providers.js";
+import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredProviderId, type ProviderEnv } from "./providers.js";
 import { webDirFor } from "./assets.js";
 import { DAEMON_DEPLOYED_LINE, claudeEnvs, deployDaemon, doctor, localDoctor, removeDaemon, sshDaemonPlace } from "./doctor.js";
 import { agentsHere } from "./agents-here.js";
@@ -704,8 +704,10 @@ function hostInitDoor(rt: Runtime, statePath: string, run: RunningWsp, openUrl: 
     saved: () => savedEnv(wspHome()),
     saveKeys: set => writeEnvFile(join(wspHome(), ".env"), set),
     provider: saved => swapProvider(rt, saved),
-    keyEnv: () => providerKeyRow(providerEnv)?.keyEnv,
-    checkKey: key => checkProviderKey(providerBackendFor(providerEnvWithKey(providerEnv, key))),
+    keysHeld: saved => Object.fromEntries(Object.entries(providerKeyRows()).map(([id, name]) => [id, keyIn(saved, name) !== undefined])),
+    keySet: (key, provider) => providerKeySet(providerEnv, key, provider),
+    keyProvider: () => providerKeyRow(providerEnv)?.id,
+    checkKey: (key, provider) => checkProviderKey(providerBackendFor(providerEnvWithKey(providerEnv, key, provider))),
     // What this host's own provider charges and gives, not one provider's table: a host that forks containers has
     // no bill and no disk cap, and the screens read both off here.
     pricing: () => providerBackendFor(providerEnvNow(providerEnv)).pricing,

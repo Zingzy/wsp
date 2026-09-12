@@ -144,6 +144,11 @@ export type WorkspaceSize = z.infer<typeof WorkspaceSize>;
  * or over. */
 export const InitSetup = z.object({
   keys: InitKeys,
+  /** The provider whose key the setup's own key step asks for, by the word WSP_PROVIDER holds: the one this host
+   * forks on where it reads a key, else the one a key alone would wire. Absent where no key would wire anything,
+   * which is a host set up for a provider that reads none. The step reads its held state out of `keys` by this
+   * word rather than by a provider's name. */
+  keyProvider: z.string().optional(),
   /** This computer's home directory, so a field can show a real path of the person's as its example. */
   home: z.string(),
   agents: z.array(InitAgent),
@@ -3688,10 +3693,13 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("host.terminalConfig"), scheme: TerminalScheme.optional() }),
   /** Replies with { setup: InitSetup }: the cloud setup as the modal opens on it, the init job included when one runs. */
   z.object({ id: reqId, op: z.literal("init.get") }),
-  /** Saves keys into the wsp home's .env on the computer running the host: the provider key, which wires the
-   * provider it names, and an agent's API key by the sign-in row it answers, saved under the variable that agent's
-   * sign-in declares. Replies with { setup: InitSetup }, which says a key is held and never says what it is. */
-  z.object({ id: reqId, op: z.literal("init.keys"), solari: z.string().optional(), rows: z.record(z.string()).optional() }),
+  /** Saves keys into the wsp home's .env on the computer running the host: the provider key, put to that provider
+   * before anything is written and saved under the variable its own module reads, and an agent's API key by the
+   * sign-in row it answers, saved under the variable that agent's sign-in declares. `provider` is the word
+   * WSP_PROVIDER holds for the provider the key belongs to, and naming one picks it; absent, the key goes to the
+   * provider this host already forks on. Replies with { setup: InitSetup }, which says a key is held and never says
+   * what it is. */
+  z.object({ id: reqId, op: z.literal("init.keys"), provider: z.string().max(64).optional(), key: z.string().optional(), rows: z.record(z.string()).optional() }),
   /** Starts the init job on the road named, an agent's harness on the agent road; replies with { job: InitJob } and
    * every change after rides init.job events. One job runs at a time; a second start while one runs is refused. The
    * terminal road takes its answers from the recipe beside the state, which wsp init wrote from its own screens, and
