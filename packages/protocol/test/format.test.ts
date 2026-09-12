@@ -129,6 +129,8 @@ import {
   TURN_WALL_MS,
   turnCutLine,
   turnEndLine,
+  openedSpendPart,
+  turnSpendPart,
   turnSettledLine,
   turnSettledParts,
   refusedTurn,
@@ -489,6 +491,18 @@ describe("a turn's activity in one line each", () => {
     expect(turnSettledLine({ status: "interrupted", durationMs: 1_500 })).toBe("interrupted · Worked for 1.5s");
     expect(turnSettledParts({ durationMs: null, costUsd: null })).toEqual([]);
     expect(turnSettledParts({ durationMs: 72_000, costUsd: 0.22 })).toEqual(["Worked for 1m 12s", "$0.22"]);
+  });
+
+  it("says what the threads a thread opened spent beside its own figure, and says what each figure counts, so neither reads as the other", () => {
+    expect(openedSpendPart(2.3)).toBe("$2.30 in threads it opened");
+    expect(turnSpendPart(1.14)).toBe("$1.14 this turn");
+    // One turn against whole threads: with both on the line each says its own scope.
+    expect(turnSettledParts({ durationMs: 72_000, costUsd: 1.14 }, 2.3)).toEqual(["Worked for 1m 12s", "$1.14 this turn", "$2.30 in threads it opened"]);
+    // Nothing opened anything, so there is no second figure to weigh the first against and the cost stands bare.
+    expect(turnSettledParts({ durationMs: 72_000, costUsd: 1.14 })).toEqual(["Worked for 1m 12s", "$1.14"]);
+    expect(turnSettledParts({ durationMs: 72_000, costUsd: 1.14 }, 0)).toEqual(["Worked for 1m 12s", "$1.14"]);
+    // The line a stream with no footer prints never carries a second figure, so it is untouched.
+    expect(turnSettledLine({ status: "completed", durationMs: 72_000, costUsd: 1.14 })).toBe("completed · Worked for 1m 12s · $1.14");
   });
 });
 

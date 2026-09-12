@@ -5079,6 +5079,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           // The cause rides the row too, since a refused turn did none of the work: what a thread is read as having
           // run is decided off the rows, and the result itself lives only in the transcript.
           if (event.result.refusal !== undefined) view.refusal = event.result.refusal;
+          // So does what the turn cost, added to what the row's earlier turns cost: a resumed turn takes over the
+          // row it resumes, and a listing has to answer what a thread spent without reading anyone's transcript.
+          if (event.result.costUsd !== undefined) view.costUsd = (view.costUsd ?? 0) + event.result.costUsd;
           void persistSessions(workspaceId);
           if (notify !== undefined) notifyEnd({ view, turnId }, notify, event.result);
           record({ type: "session.done", workspaceId, sessionId, turnId, threadId, result: event.result });
@@ -5140,6 +5143,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (resumed !== undefined) {
       view.startedBy = resumed.startedBy ?? view.startedBy;
       if (resumed.prompt !== undefined) view.prompt = resumed.prompt;
+      // What the row cost is every turn that ran on it, so the earlier turns' figure carries into the row this one
+      // takes over; a listing reads the row, not the transcript.
+      if (resumed.costUsd !== undefined) view.costUsd = resumed.costUsd;
     }
 
     /** A pick made while this turn runs, taken by the harness: the row carries the mode the turn is now at, so the

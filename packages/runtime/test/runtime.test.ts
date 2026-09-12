@@ -6188,6 +6188,36 @@ describe("a start on a thread whose turn is running", () => {
   });
 });
 
+describe("what a turn cost, on the row it ran on", () => {
+  it("is kept on the row the listing answers with, and adds up over the turns that ran there, so a reader of the list needs no transcript to say what a thread spent", async () => {
+    const h = held(false);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const one = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
+    h.end(0, "done", { durationMs: 1_000, costUsd: 0.75 });
+    await one.finished;
+    expect(one.view().costUsd).toBeCloseTo(0.75, 10);
+    // A second turn on the same row: what the row says is what the turns on it have cost together.
+    const two = await rt.sessions.start(ws.id, { prompt: "and again", thread: one.view().threadId });
+    h.end(1, "done again", { durationMs: 1_000, costUsd: 0.39 });
+    await two.finished;
+    const rows = await rt.sessions.list(ws.id);
+    expect(rows.map(r => r.costUsd).filter(c => c !== undefined).reduce((a, b) => a + b, 0)).toBeCloseTo(1.14, 10);
+    await rt.close();
+  });
+
+  it("is absent on a row whose harness reported no figure, so nothing reads a missing number as nothing spent", async () => {
+    const h = held(false);
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const turn = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
+    h.end(0, "done", { durationMs: 1_000 });
+    await turn.finished;
+    expect((await rt.sessions.list(ws.id))[0]!.costUsd).toBeUndefined();
+    await rt.close();
+  });
+});
+
 describe("a thread whose start named who to tell", () => {
   it("a running parent that steers is told by one steer: the line, with the outcome, duration, cost and the reply whole, and the child's transcript holds a session.notify naming the parent", async () => {
     const h = held(true);
