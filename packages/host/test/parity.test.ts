@@ -219,8 +219,8 @@ const LISTS_ON_THE_COMMAND_LINE: Record<string, string> = {
   "recipe add_check": "--add-check",
   "recipe project": "--project",
   "fork notify": "--notify",
-  "thread new notify": "--notify",
-  "thread new images": "--image",
+  "run notify": "--notify",
+  "run images": "--image",
   "send images": "--image",
   "import keep": "--keep",
   "import cut": "--cut",
@@ -232,7 +232,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     const served = VERBS.filter(hasTool);
     expect(tools.map(t => t.name).sort()).toEqual(served.map(v => toolName(v.name)).sort());
     for (const verb of served) expect(tools.find(t => t.name === toolName(verb.name))!.inputs, verb.name).toEqual(Object.keys(verb.tool.input).sort());
-    expect(toolName("thread new")).toBe("thread_new");
+    expect(toolName("run")).toBe("run");
   });
 
   it("every served tool carries an output schema with the entry's fields, so a verb cannot ship without saying what it answers with", async () => {
@@ -397,22 +397,22 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
   it("every flag a command reads is in its row of the skill's verbs table and the row shows no other; every verb's usage names only flags it reads", () => {
     expect(flagDrift(WSP_SKILL, COMMAND_LINES)).toEqual([]);
     for (const verb of CLI_VERBS) for (const name of flagsOf(verb.usage)) expect(Object.hasOwn(verb.options, name), `wsp ${verb.name}'s usage names --${name}`).toBe(true);
-    // The rows the skill carried while thread new and send already read the three picks: each missing pick is named.
+    // The rows the skill carried while run and send already read the three picks: each missing pick is named.
     const stale = WSP_SKILL.split("\n")
       .map(line => {
-        if (line.startsWith("| `wsp thread new ")) return '| `wsp thread new --in <workspace> [--agent <id>] [--cwd <path>] [--notify <thread\\|me>] "<task>"` | `thread_new` (workspace, task, agent, cwd, notify) | opens |';
+        if (line.startsWith("| `wsp run ")) return '| `wsp run <workspace> [--agent <id>] [--cwd <path>] [--notify <thread\\|me>] "<task>"` | `run` (workspace, task, agent, cwd, notify) | opens |';
         if (line.startsWith("| `wsp send ")) return '| `wsp send <thread> "<message>"` | `send` (thread, message) | a message |';
         return line;
       })
       .join("\n");
     expect(flagDrift(stale, COMMAND_LINES)).toEqual([
-      "wsp thread new reads --access, which its row does not show",
-      "wsp thread new reads --detach, which its row does not show",
-      "wsp thread new reads --effort, which its row does not show",
-      "wsp thread new reads --image, which its row does not show",
-      "wsp thread new reads --model, which its row does not show",
-      "wsp thread new reads --project, which its row does not show",
-      "wsp thread new reads --title, which its row does not show",
+      "wsp run reads --access, which its row does not show",
+      "wsp run reads --detach, which its row does not show",
+      "wsp run reads --effort, which its row does not show",
+      "wsp run reads --image, which its row does not show",
+      "wsp run reads --model, which its row does not show",
+      "wsp run reads --project, which its row does not show",
+      "wsp run reads --title, which its row does not show",
       "wsp send reads --access, which its row does not show",
       "wsp send reads --detach, which its row does not show",
       "wsp send reads --effort, which its row does not show",
@@ -446,8 +446,8 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     // reader over it: a lone value passed through as a string is refused before the thread opens.
     const workspace = { id: "ws_notify" } as WorkspaceView;
     const cases: ReadonlyArray<[string, string[], string[]]> = [
-      ["thread new", ["--notify", "me", "build it"], ["me"]],
-      ["thread new", ["--notify", "me", "--notify", "1a2b3c4d", "build it"], ["me", "1a2b3c4d"]],
+      ["run", ["--notify", "me", "build it"], ["me"]],
+      ["run", ["--notify", "me", "--notify", "1a2b3c4d", "build it"], ["me", "1a2b3c4d"]],
       ["fork", ["alpha", "--send", "build it", "--notify", "me"], ["me"]],
       ["fork", ["alpha", "--send", "build it", "--notify", "me", "--notify", "1a2b3c4d"], ["me", "1a2b3c4d"]],
     ];
@@ -464,12 +464,12 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     }
   });
 
-  it("the --effort words the thread_new tool and the skill name are the picker's options for the default agent, and the default they say runs is the one the picker marks", () => {
+  it("the --effort words the run tool and the skill name are the picker's options for the default agent, and the default they say runs is the one the picker marks", () => {
     const claude = harnessCatalog(DEFAULT_AGENT.id)!;
     const options = effortsFor(claude, markedDefault(claude.models) ?? null);
     const words = options.map(o => o.value);
     const fallback = markedDefault(options)!.value;
-    const effort = VERBS.filter(hasTool).find(v => v.name === "thread new")!.tool.input.effort!.description!;
+    const effort = VERBS.filter(hasTool).find(v => v.name === "run")!.tool.input.effort!.description!;
     expect(/\(([^)]*)\)/.exec(effort)![1]!.split(", ")).toEqual(words);
     expect(effort).toContain(`absent means the agent's default, ${fallback} for ${claude.harness}`);
     expect(WSP_SKILL).toContain(words.map(w => `\`${w}\``).join(", "));
@@ -514,9 +514,9 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     expect(tools.find(t => t.name === "threads_wait")!.description).toContain("it is for a shell script and not for your own conversation");
   });
 
-  it("when a turn ends and when the notify line goes are the runtime's words in every door: the skill, the thread_new tool and the help; the wait tool says the wait is the notify line's", async () => {
+  it("when a turn ends and when the notify line goes are the runtime's words in every door: the skill, the run tool and the help; the wait tool says the wait is the notify line's", async () => {
     const tools = await listTools();
-    const tool = tools.find(t => t.name === "thread_new")!.description!;
+    const tool = tools.find(t => t.name === "run")!.description!;
     expect(tools.find(t => t.name === "threads_wait")!.description).toContain("the one line a notify sends");
     for (const text of [tool, WSP_SKILL]) {
       expect(text).toContain(TURN_END_WORDS);
@@ -535,13 +535,13 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "wsp threads --json   # illustrative",
       "wsp exec dev -- sh -c 'ls | wc -l' > /tmp/out 2>&1 &",
       "```",
-      "Then `wsp thread new --in dev --cwd`, `wsp forkk dev`, `wsp <version>` and `wsp new: no golden yet; run wsp init`.",
+      "Then `wsp run dev --cwd`, `wsp forkk dev`, `wsp <version>` and `wsp new: no golden yet; run wsp init`.",
     ].join("\n");
     const commands = wspCommands(planted);
     expect(commands).toEqual([
       ["wsp", "recipe", "--tick", "used", "--pick", "node=on"],
       ["wsp", "exec", "dev", "--", "sh", "-c", "'ls | wc -l'"],
-      ["wsp", "thread", "new", "--in", "dev", "--cwd"],
+      ["wsp", "run", "dev", "--cwd"],
       ["wsp", "forkk", "dev"],
     ]);
     const errors = commands.map(argv => usageError(argv, COMMAND_LINES));
@@ -552,8 +552,8 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
   });
 
   it("reads a usage row as its words and each tool with its inputs", () => {
-    const [row] = skillRows("| `wsp thread new --in <workspace> [--agent <id>] \"<task>\"` | `thread_new` (workspace, task, agent), `threads` | opens |");
-    expect(row).toEqual({ words: "thread new", flags: ["agent", "in"], tools: [{ name: "thread_new", inputs: ["agent", "task", "workspace"], outputs: [] }, { name: "threads", inputs: [], outputs: [] }] });
+    const [row] = skillRows("| `wsp run <workspace> [--agent <id>] \"<task>\"` | `run` (workspace, task, agent), `threads` | opens |");
+    expect(row).toEqual({ words: "run", flags: ["agent"], tools: [{ name: "run", inputs: ["agent", "task", "workspace"], outputs: [] }, { name: "threads", inputs: [], outputs: [] }] });
     expect(shellWords('wsp recipe --add just="brew install just" [--set <id>=on|off] --notify <thread|me> "<the task>" # a note')).toEqual({
       words: ["wsp", "recipe", "--add", 'just="brew install just"', "--set", "<id>=on|off", "--notify", "<thread|me>", '"<the task>"'],
       comment: "a note",

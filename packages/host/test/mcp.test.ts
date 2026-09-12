@@ -3,7 +3,7 @@
 // over the fake runtime, through the same socket client and verb logic the
 // command line uses; a thread it opens is the local agent's.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -16,12 +16,17 @@ import { EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, NO_SUCH_TURN, noProjec
 import { copyKey, createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hostPlatform, localWiring, serve } from "../src/cli.js";
+import { placeWiring } from "../src/places.js";
 import { dialer, mcpServer, serveMcp } from "../src/mcp.js";
 import { RecipeAnswer, RecipeScan, allRows, recipePrintout, scanPrintout } from "../src/recipe-answer.js";
 import { WSP_SKILL, instructionsOf } from "../src/skill.js";
 import type { HostHandle } from "../src/server.js";
 import type { HostClient } from "../src/verbs.js";
 import { HERE } from "./recipe-fixture.js";
+
+/** This computer, as the places list names it: the word a caller passes as `on` for the place their own agents run
+ * on, which is where a workspace that forks nothing lives. */
+const HERE_PLACE = hostname().toLowerCase();
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScripts, projectBundler, heldAgent, scriptedAgent, stuckAgent, doneOnlyAgent } from "./verbs-fixture.js";
@@ -89,7 +94,7 @@ describe("the MCP server over the host", () => {
     await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
     claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`));
     codex = scriptedAgent(prompt => `codex: ${prompt}`);
-    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: codex.adapter }, local: localWiring(join(dir, "user")) });
+    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: codex.adapter }, local: localWiring(join(dir, "user")), placeLinks: placeWiring(statePath, {}) });
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
     // The host has its keys; the server never reads any.
     vi.stubEnv("SOLARI_API_KEY", "");
@@ -131,7 +136,7 @@ describe("the MCP server over the host", () => {
   async function restartHost(adapters: Parameters<typeof createRuntime>[0]["adapters"]): Promise<void> {
     await handle?.close();
     handle = undefined;
-    rt = createRuntime({ backend, store, adapters, local: localWiring(join(dir, "user")) });
+    rt = createRuntime({ backend, store, adapters, local: localWiring(join(dir, "user")), placeLinks: placeWiring(statePath, {}) });
     vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_mcp_key");
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
     vi.stubEnv("SOLARI_API_KEY", "");
@@ -140,14 +145,14 @@ describe("the MCP server over the host", () => {
   it("offers the verbs as tools, each described", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "folders", "forget", "fork", "image", "image_build", "image_move", "import", "new", "pause", "places", "projects", "rebuild", "recipe", "recipe_scan", "rename", "send", "setup", "snapshot", "stop", "terminal_config", "thread_forget", "thread_new", "thread_read", "thread_rename", "threads", "threads_wait", "wake", "workspaces", "workspaces_agents"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "folders", "forget", "fork", "image", "image_build", "image_move", "import", "new", "pause", "places", "projects", "rebuild", "recipe", "recipe_scan", "rename", "run", "send", "setup", "snapshot", "stop", "terminal_config", "thread_forget", "thread_read", "thread_rename", "threads", "threads_wait", "wake", "workspaces", "workspaces_agents"]);
     expect(Object.keys((tools.find(t => t.name === "folders")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["folder", "hidden"]);
     expect(Object.keys((tools.find(t => t.name === "terminal_config")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["scheme"]);
     expect(Object.keys((tools.find(t => t.name === "import")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agents", "cut", "folder", "keep", "replace", "workspace", "yes"]);
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
-    expect(Object.keys((tools.find(t => t.name === "new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["from", "local", "max_depth", "max_machines", "name", "on", "size", "spawn", "ssh", "ssh_key", "ssh_port"]);
+    expect(Object.keys((tools.find(t => t.name === "new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["from", "max_depth", "max_machines", "name", "on", "size", "spawn"]);
     expect(Object.keys((tools.find(t => t.name === "rename")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["name", "workspace"]);
-    expect(Object.keys((tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "detach", "effort", "images", "model", "notify", "project", "task", "title", "workspace"]);
+    expect(Object.keys((tools.find(t => t.name === "run")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "detach", "effort", "images", "model", "notify", "project", "task", "title", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "fork")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "max_depth", "max_machines", "model", "name", "notify", "size", "spawn", "task", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "send")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "detach", "effort", "images", "message", "model", "thread"]);
     expect(Object.keys((tools.find(t => t.name === "threads_wait")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["threads", "timeout"]);
@@ -156,7 +161,7 @@ describe("the MCP server over the host", () => {
     expect(Object.keys((tools.find(t => t.name === "recipe")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["add", "add_check", "out", "project", "set", "signin", "tick", "why"]);
     expect(c.getServerVersion()?.name).toBe("wsp");
     expect(c.getInstructions()).toBe(instructionsOf(WSP_SKILL, THREAD_AGENTS));
-    expect(c.getInstructions()).toContain("thread_new");
+    expect(c.getInstructions()).toContain("run");
     // The setup sequence an agent follows the first time, so it never has to guess at the order.
     expect(c.getInstructions()).toContain("then `recipe_scan`, which writes nothing");
     expect(c.getInstructions()).toContain("then `recipe` with their answers");
@@ -165,7 +170,7 @@ describe("the MCP server over the host", () => {
     // The instructions and the agent input promise only agents the host has adapters for, from the one list.
     expect(c.getInstructions()).toContain(`take as agent: ${THREAD_AGENTS.join(", ")}.`);
     for (const a of CATALOG.filter(e => e.kind === "agent")) expect(new RegExp(`\\b${a.id}\\b`).test(c.getInstructions()!), a.id).toBe(THREAD_AGENTS.some(id => id === a.id));
-    const agentInput = (tools.find(t => t.name === "thread_new")!.inputSchema as { properties: Record<string, { description?: string }> }).properties.agent!;
+    const agentInput = (tools.find(t => t.name === "run")!.inputSchema as { properties: Record<string, { description?: string }> }).properties.agent!;
     expect(agentInput.description).toBe(`the agent to run in the thread, one of ${THREAD_AGENTS.join(", ")}; absent means the host's default`);
     for (const t of tools) expect(WSP_SKILL, t.name).toContain(`\`${t.name}\``);
   });
@@ -200,7 +205,7 @@ describe("the MCP server over the host", () => {
     expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "task-a", "task-b"]);
   });
 
-  it("thread_new with no workspace starts on the workspace holding the project the client's folder is a repo of, and the first line of the reply says so; a server with no client folder is a tool error in one line", async () => {
+  it("run with no workspace starts on the workspace holding the project the client's folder is a repo of, and the first line of the reply says so; a server with no client folder is a tool error in one line", async () => {
     await call("new", { name: "alpha" });
     const [alpha] = await rt.workspaces.list();
     await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/spoo", dest: "/root/spoo", bundler: projectBundler() });
@@ -210,7 +215,7 @@ describe("the MCP server over the host", () => {
     await client?.close();
     await server?.close();
     await connect({ cwd: join(repo, "packages", "api") });
-    const opened = await call("thread_new", { task: "hello from the repo" });
+    const opened = await call("run", { task: "hello from the repo" });
     expect(opened.isError).toBe(false);
     const thread = (await rt.sessions.list()).find(t => t.prompt === "hello from the repo")!;
     expect(thread.workspaceId).toBe(alpha!.id);
@@ -221,12 +226,12 @@ describe("the MCP server over the host", () => {
     await client?.close();
     await server?.close();
     await connect();
-    const bare = await call("thread_new", { task: "nowhere" });
+    const bare = await call("run", { task: "nowhere" });
     expect(bare).toEqual(failedWith(`${noThreadTargetLine("workspace")}. Run wsp workspaces to read the names.`, "usage"));
   });
 
   it("import onto this computer registers the folder with no plan; replace true, keep, cut or agents are refused as meaningless there, while replace false is nothing asked", async () => {
-    await call("new", { local: true, name: "mac" });
+    await call("new", { on: HERE_PLACE, name: "mac" });
     const proj = join(dir, "proj");
     mkdirSync(join(proj, "src"), { recursive: true });
     writeFileSync(join(proj, "src", "index.ts"), "export const a = 1;\n");
@@ -334,9 +339,9 @@ describe("the MCP server over the host", () => {
     expect([listed.machineState, listed.reach["state"]]).toEqual(["running", "unreachable"]);
   });
 
-  it("new with local makes this computer, workspaces lists it beside a fork with kind local and no image, and thread_new takes it by name like any workspace", async () => {
+  it("new on the place this computer is makes this computer, workspaces lists it beside a fork with kind local and no image, and run takes it by name like any workspace", async () => {
     await call("new", { name: "alpha" });
-    const made = await call("new", { local: true, name: "mac" });
+    const made = await call("new", { on: HERE_PLACE, name: "mac" });
     expect(made.isError).toBe(false);
     const listed = await call("workspaces");
     const { workspaces } = listed.structured as { workspaces: WorkspaceView[] };
@@ -348,7 +353,7 @@ describe("the MCP server over the host", () => {
     const served = (await client!.listTools()).tools.find(t => t.name === "workspaces")!.description!;
     expect(served).toContain("or this computer itself, which forks from no golden and runs while the host does");
 
-    const opened = await call("thread_new", { workspace: "mac", task: "say pong" });
+    const opened = await call("run", { workspace: "mac", task: "say pong" });
     expect(opened.isError).toBe(false);
     expect(opened.text).toBe("re: say pong");
     const local = workspaces.find(w => w.name === "mac")!;
@@ -384,25 +389,25 @@ describe("the MCP server over the host", () => {
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha", "worker"]);
   });
 
-  it("fork and thread_new under an agent the host has no adapter for are refused naming the agents it has; no machine is minted or woken", async () => {
+  it("fork and run under an agent the host has no adapter for are refused naming the agents it has; no machine is minted or woken", async () => {
     await call("new", { name: "alpha" });
     const refused = await call("fork", { workspace: "alpha", name: "worker", task: "hi", agent: "gpt9" });
     expect(refused).toEqual(failedWith('no adapter registered for harness "gpt9"; agents on this host: claude, codex. Name one of those with --agent.', "usage"));
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha"]);
     await call("pause", { workspace: "alpha" });
-    const opened = await call("thread_new", { workspace: "alpha", task: "hi", agent: "gpt9" });
+    const opened = await call("run", { workspace: "alpha", task: "hi", agent: "gpt9" });
     expect(opened).toEqual(failedWith('no adapter registered for harness "gpt9"; agents on this host: claude, codex. Name one of those with --agent.', "usage"));
     expect((await rt.workspaces.list()).map(w => [w.name, w.phase])).toEqual([["alpha", "napping"]]);
     expect(await rt.sessions.list()).toEqual([]);
   });
 
-  it("an empty or whitespace task or message is refused in words by thread_new, fork and send; no machine is minted or woken and nothing starts", async () => {
+  it("an empty or whitespace task or message is refused in words by run, fork and send; no machine is minted or woken and nothing starts", async () => {
     await call("new", { name: "alpha" });
-    const first = await call("thread_new", { workspace: "alpha", task: "first" });
+    const first = await call("run", { workspace: "alpha", task: "first" });
     const threadId = (first.structured as { threadId: string }).threadId;
     await call("pause", { workspace: "alpha" });
     for (const task of ["", " \n\t "]) {
-      expect(await call("thread_new", { workspace: "alpha", task })).toEqual(failedWith(`${EMPTY_TASK_LINE}. Put it in quotes after the flags.`, "usage"));
+      expect(await call("run", { workspace: "alpha", task })).toEqual(failedWith(`${EMPTY_TASK_LINE}. Put it in quotes after the flags.`, "usage"));
       expect(await call("fork", { workspace: "alpha", name: "worker", task })).toEqual(failedWith(`${EMPTY_TASK_LINE}. Put it in quotes after the flags.`, "usage"));
       expect(await call("send", { thread: threadId, message: task })).toEqual(failedWith(`${EMPTY_TASK_LINE}. Put it in quotes after the flags.`, "usage"));
     }
@@ -411,11 +416,11 @@ describe("the MCP server over the host", () => {
     expect(await rt.sessions.list()).toHaveLength(1);
   });
 
-  it("an images list on thread_new and send reads each file here and carries its bytes; a file that is not an image is a tool error", async () => {
+  it("an images list on run and send reads each file here and carries its bytes; a file that is not an image is a tool error", async () => {
     const path = join(dir, "shot.png");
     writeFileSync(path, Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(1016, 3)]));
     await call("new", { name: "alpha" });
-    const opened = await call("thread_new", { workspace: "alpha", task: "what is this?", images: [path] });
+    const opened = await call("run", { workspace: "alpha", task: "what is this?", images: [path] });
     expect(opened.isError).toBe(false);
     expect(claude.starts.at(-1)!.images).toEqual([{ mediaType: "image/png", bytes: readFileSync(path).toString("base64") }]);
     const threadId = (opened.structured as { threadId: string }).threadId;
@@ -452,7 +457,7 @@ describe("the MCP server over the host", () => {
     expect(missing).toEqual(failedWith("no workspace nope"));
   });
 
-  it("exec, thread_new and send on a paused workspace wake it first and then run", async () => {
+  it("exec, run and send on a paused workspace wake it first and then run", async () => {
     await call("new", { name: "alpha" });
     await call("pause", { workspace: "alpha" });
     execGuest(backend, "awake-ok\n", 0);
@@ -460,7 +465,7 @@ describe("the MCP server over the host", () => {
     expect(ran).toEqual({ text: "awake-ok", structured: { exitCode: 0, output: ["awake-ok"] }, isError: false });
     expect((await rt.workspaces.list())[0]!.phase).toBe("running");
     await call("pause", { workspace: "alpha" });
-    const opened = await call("thread_new", { workspace: "alpha", task: "hello" });
+    const opened = await call("run", { workspace: "alpha", task: "hello" });
     expect(opened.isError).toBe(false);
     expect(opened.text).toBe("re: hello");
     const threadId = (opened.structured as { threadId: string }).threadId;
@@ -513,7 +518,7 @@ describe("the MCP server over the host", () => {
   it("delete without confirm deletes nothing and answers with what would go; with confirm it kills the machine and drops the record and threads", async () => {
     await call("new", { name: "alpha" });
     const [alpha] = await rt.workspaces.list();
-    await call("thread_new", { workspace: "alpha", task: "build it" });
+    await call("run", { workspace: "alpha", task: "build it" });
 
     const asked = await call("delete", { workspace: "alpha" });
     expect(asked.isError).toBe(true);
@@ -537,10 +542,10 @@ describe("the MCP server over the host", () => {
     expect(missing).toEqual(failedWith("no workspace nope"));
   });
 
-  it("thread_new opens a thread under the named agent, started by the local agent, and returns the reply as the result", async () => {
+  it("run opens a thread under the named agent, started by the local agent, and returns the reply as the result", async () => {
     await call("new", { name: "alpha" });
     const [alpha] = await rt.workspaces.list();
-    const made = await call("thread_new", { workspace: "alpha", agent: "codex", task: "write tests" });
+    const made = await call("run", { workspace: "alpha", agent: "codex", task: "write tests" });
     expect(made.isError).toBe(false);
     const [row] = await rt.sessions.list(alpha!.id);
     expect(row).toMatchObject({ harness: "codex", startedBy: "agent", prompt: "write tests", status: "completed" });
@@ -550,29 +555,29 @@ describe("the MCP server over the host", () => {
     expect(made.structured).toEqual({ threadId: row!.threadId, workspaceId: alpha!.id, harness: "codex", text: "codex: write tests", outcome: "started" });
   });
 
-  it("thread_new takes a title, which names the thread as a person's from the first second", async () => {
+  it("run takes a title, which names the thread as a person's from the first second", async () => {
     await call("new", { name: "alpha" });
     const [alpha] = await rt.workspaces.list();
-    const made = await call("thread_new", { workspace: "alpha", task: "build it", title: "Ticket 411 review" });
+    const made = await call("run", { workspace: "alpha", task: "build it", title: "Ticket 411 review" });
     expect(made.isError).toBe(false);
     expect(claude.starts.at(-1)?.title).toBe("Ticket 411 review");
     const [row] = await rt.sessions.list(alpha!.id);
     expect(row).toMatchObject({ harnessTitle: "Ticket 411 review", titleSource: "person" });
   });
 
-  it("thread_new and fork take cwd, the folder the turn starts in; without it the workspace's project folder, else none", async () => {
+  it("run and fork take cwd, the folder the turn starts in; without it the workspace's project folder, else none", async () => {
     await call("new", { name: "alpha" });
     const [alpha] = await rt.workspaces.list();
-    const picked = await call("thread_new", { workspace: "alpha", agent: "codex", task: "write tests", cwd: "/root/work/elsewhere" });
+    const picked = await call("run", { workspace: "alpha", agent: "codex", task: "write tests", cwd: "/root/work/elsewhere" });
     expect(picked.isError).toBe(false);
     expect(codex.starts.map(s => s.cwd)).toEqual(["/root/work/elsewhere"]);
 
-    const bare = await call("thread_new", { workspace: "alpha", task: "hello" });
+    const bare = await call("run", { workspace: "alpha", task: "hello" });
     expect(bare.isError).toBe(false);
     expect(claude.starts.map(s => s.cwd)).toEqual([undefined]);
 
     await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/proj", dest: "/root/work/proj", bundler: projectBundler() });
-    const inProject = await call("thread_new", { workspace: "alpha", task: "hello again" });
+    const inProject = await call("run", { workspace: "alpha", task: "hello again" });
     expect(inProject.isError).toBe(false);
     expect(claude.starts.map(s => s.cwd)).toEqual([undefined, "/root/work/proj"]);
 
@@ -583,7 +588,7 @@ describe("the MCP server over the host", () => {
     expect(threads.map(t => t.cwd)).toEqual(["/root/work/site"]);
   });
 
-  it("thread_new takes project, one of the workspace's projects by name, refused in one line when it has none of that name; projects lists them as wsp projects does", async () => {
+  it("run takes project, one of the workspace's projects by name, refused in one line when it has none of that name; projects lists them as wsp projects does", async () => {
     await call("new", { name: "alpha" });
     const [alpha] = await rt.workspaces.list();
     expect(await call("projects", { workspace: "alpha" })).toMatchObject({ isError: false, structured: { projects: [] } });
@@ -594,22 +599,22 @@ describe("the MCP server over the host", () => {
     expect(listed.structured).toEqual({ projects: [expect.objectContaining({ name: "spoo", dest: "/root/spoo", size: 20 }), expect.objectContaining({ name: "wsp", dest: "/root/wsp", size: 20 })] });
     expect(JSON.parse(listed.text)).toEqual(listed.structured);
 
-    const named = await call("thread_new", { workspace: "alpha", task: "build it", project: "wsp" });
+    const named = await call("run", { workspace: "alpha", task: "build it", project: "wsp" });
     expect(named.isError).toBe(false);
     expect(claude.starts.map(s => s.cwd)).toEqual(["/root/wsp"]);
     const projects = (await rt.workspaces.get(alpha!.id)).projects!;
-    expect(await call("thread_new", { workspace: "alpha", task: "build it", project: "nope" })).toEqual(failedWith(`${noProjectLine("nope", projects)}. Run wsp projects <workspace> to read the names it holds.`, "usage"));
+    expect(await call("run", { workspace: "alpha", task: "build it", project: "nope" })).toEqual(failedWith(`${noProjectLine("nope", projects)}. Run wsp projects <workspace> to read the names it holds.`, "usage"));
     expect(claude.starts).toHaveLength(1);
     const { workspaces } = (await call("workspaces")).structured as { workspaces: WorkspaceView[] };
     expect(workspaces.find(w => w.name === "alpha")!.projects).toHaveLength(2);
   });
 
-  it("thread_new, send and fork take model, effort and access, the composer's three picks; a new thread without a model runs the catalog's default and an unlisted value is refused with the list", async () => {
+  it("run, send and fork take model, effort and access, the composer's three picks; a new thread without a model runs the catalog's default and an unlisted value is refused with the list", async () => {
     await call("new", { name: "alpha" });
-    const picked = await call("thread_new", { workspace: "alpha", task: "review it", model: "claude-sonnet-5", effort: "low", access: "plan" });
+    const picked = await call("run", { workspace: "alpha", task: "review it", model: "claude-sonnet-5", effort: "low", access: "plan" });
     expect(picked.isError).toBe(false);
     expect(claude.starts.map(s => [s.model, s.effort, s.permissionMode])).toEqual([["claude-sonnet-5", "low", "plan"]]);
-    const bare = await call("thread_new", { workspace: "alpha", task: "hello" });
+    const bare = await call("run", { workspace: "alpha", task: "hello" });
     expect(bare.isError).toBe(false);
     // The model and the effort the composer shows for it, since a tool that names neither runs what the app would.
     expect(claude.starts.at(-1)).toMatchObject({ model: "claude-opus-5", effort: "high" });
@@ -626,7 +631,7 @@ describe("the MCP server over the host", () => {
     expect(claude.starts.at(-1)).toMatchObject({ model: "claude-sonnet-5", permissionMode: "bypassPermissions" });
 
     const before = claude.starts.length;
-    const refused = await call("thread_new", { workspace: "alpha", task: "review it", model: "claude-haiku-4-5" });
+    const refused = await call("run", { workspace: "alpha", task: "review it", model: "claude-haiku-4-5" });
     expect(refused.isError).toBe(true);
     expect(refused.text).toBe('model "claude-haiku-4-5" is not one claude takes; one of: Fable 5.1 (claude-fable-5-1), Opus 5 (claude-opus-5), Sonnet 5 (claude-sonnet-5). Drop the flag, or give it a value the agent offers.');
     const mode = await call("send", { thread: threadId, message: "go", access: "yolo" });
@@ -640,9 +645,9 @@ describe("the MCP server over the host", () => {
     expect(claude.starts).toHaveLength(before);
   });
 
-  it("a cwd that is not absolute is refused by thread_new and fork before anything is created or started", async () => {
+  it("a cwd that is not absolute is refused by run and fork before anything is created or started", async () => {
     await call("new", { name: "alpha" });
-    const relative = await call("thread_new", { workspace: "alpha", task: "look here", cwd: "packages/host" });
+    const relative = await call("run", { workspace: "alpha", task: "look here", cwd: "packages/host" });
     expect(relative.isError).toBe(true);
     expect(relative.text).toContain('cwd is a path on the machine, absolute, and got "packages/host"');
     const forked = await call("fork", { workspace: "alpha", name: "worker", task: "build it", cwd: "packages/host" });
@@ -657,7 +662,7 @@ describe("the MCP server over the host", () => {
     await call("new", { name: "alpha" });
     await call("new", { name: "beta" });
     const [alpha, beta] = await rt.workspaces.list();
-    await call("thread_new", { workspace: "alpha", task: "first task" });
+    await call("run", { workspace: "alpha", task: "first task" });
     await (await rt.sessions.start(beta!.id, { prompt: "from the app", harness: "codex" })).finished;
     const all = await call("threads");
     const { threads } = all.structured as { threads: (ThreadView & { workspaceName: string })[] };
@@ -676,7 +681,7 @@ describe("the MCP server over the host", () => {
   it("send resumes the thread's latest session under its own agent and returns the reply; the thread keeps who opened it", async () => {
     await call("new", { name: "alpha" });
     const [alpha] = await rt.workspaces.list();
-    await call("thread_new", { workspace: "alpha", agent: "codex", task: "first" });
+    await call("run", { workspace: "alpha", agent: "codex", task: "first" });
     await (await rt.sessions.start(alpha!.id, { prompt: "from the app" })).finished;
     const [byAgent, byPerson] = await rt.sessions.list();
     const reply = await call("send", { thread: byAgent!.threadId!, message: "second" });
@@ -702,7 +707,7 @@ describe("the MCP server over the host", () => {
   it("send into a thread whose last turn was cut puts the cut line first in the result text and flags it; the send after that is plain", async () => {
     await call("new", { name: "alpha" });
     const [alpha] = await rt.workspaces.list();
-    const cut = await call("thread_new", { workspace: "alpha", task: "cut" });
+    const cut = await call("run", { workspace: "alpha", task: "cut" });
     expect(cut).toMatchObject({ isError: true, text: CUT_LINE });
     const [row] = await rt.sessions.list();
     const resumed = await call("send", { thread: row!.threadId!, message: "again" });
@@ -718,7 +723,7 @@ describe("the MCP server over the host", () => {
     const held = heldAgent(true);
     await restartHost({ claude: held.adapter });
     await call("new", { name: "alpha" });
-    const first = call("thread_new", { workspace: "alpha", task: "loop, then say done" });
+    const first = call("run", { workspace: "alpha", task: "loop, then say done" });
     await vi.waitFor(() => expect(held.starts).toHaveLength(1));
     const [row] = await rt.sessions.list();
     const sent = call("send", { thread: row!.threadId!, message: "end with STEERED" });
@@ -732,11 +737,11 @@ describe("the MCP server over the host", () => {
     expect((await rt.sessions.history(row!.workspaceId)).map(e => e.type)).toEqual(["session.start", "session.steer", "session.delta", "session.done", "session.end"]);
   });
 
-  it("stop ends the thread's running turn and returns the outcome; the waiting thread_new is a tool error saying interrupted; a second stop says not-running and is no error", async () => {
+  it("stop ends the thread's running turn and returns the outcome; the waiting run is a tool error saying interrupted; a second stop says not-running and is no error", async () => {
     const held = heldAgent(false);
     await restartHost({ claude: held.adapter });
     await call("new", { name: "alpha" });
-    const first = call("thread_new", { workspace: "alpha", task: "loop forever" });
+    const first = call("run", { workspace: "alpha", task: "loop forever" });
     await vi.waitFor(() => expect(held.starts).toHaveLength(1));
     const [row] = await rt.sessions.list();
     const stopped = await call("stop", { thread: row!.threadId!.slice(0, 8) });
@@ -755,7 +760,7 @@ describe("the MCP server over the host", () => {
     const named = scriptedAgent(prompt => `re: ${prompt}`, () => ({ kind: "written" }));
     await restartHost({ claude: named.adapter, codex: scriptedAgent(prompt => `codex: ${prompt}`).adapter });
     await call("new", { name: "alpha" });
-    await call("thread_new", { workspace: "alpha", task: "build it" });
+    await call("run", { workspace: "alpha", task: "build it" });
     const [row] = await rt.sessions.list();
     const renamed = await call("thread_rename", { thread: row!.threadId!.slice(0, 8), title: "the name he typed" });
     expect(renamed).toEqual({
@@ -766,7 +771,7 @@ describe("the MCP server over the host", () => {
     expect(named.renames).toEqual([{ sessionId: row!.claudeSessionId, title: "the name he typed" }]);
     expect(((await call("threads")).structured as { threads: ThreadView[] }).threads.map(t => t.title)).toEqual(["the name he typed"]);
 
-    await call("thread_new", { workspace: "alpha", task: "build it there", agent: "codex" });
+    await call("run", { workspace: "alpha", task: "build it there", agent: "codex" });
     const codexRow = (await rt.sessions.list()).find(v => v.harness === "codex")!;
     const unsupported = await call("thread_rename", { thread: codexRow.threadId!, title: "the name" });
     expect(unsupported).toEqual({
@@ -779,7 +784,7 @@ describe("the MCP server over the host", () => {
 
   it("thread_read answers with the thread's messages as the app lists them, its tool call one row, and with last the whole final message alone", async () => {
     await call("new", { name: "alpha" });
-    const opened = await call("thread_new", { workspace: "alpha", task: "build it" });
+    const opened = await call("run", { workspace: "alpha", task: "build it" });
     const [row] = await rt.sessions.list();
     const read = await call("thread_read", { thread: row!.threadId!.slice(0, 8) });
     expect(read.isError).toBe(false);
@@ -803,14 +808,14 @@ describe("the MCP server over the host", () => {
     expect(await call("thread_read", { thread: "nope" })).toEqual(failedWith("no thread nope"));
   });
 
-  it("thread_new with notify tells that thread when the new one ends, through the same start the CLI makes: the running parent is steered the line and the child's transcript names the parent", async () => {
+  it("run with notify tells that thread when the new one ends, through the same start the CLI makes: the running parent is steered the line and the child's transcript names the parent", async () => {
     const held = heldAgent(true);
     await restartHost({ claude: held.adapter });
     await call("new", { name: "alpha" });
-    const parent = call("thread_new", { workspace: "alpha", task: "orchestrate" });
+    const parent = call("run", { workspace: "alpha", task: "orchestrate" });
     await vi.waitFor(() => expect(held.starts).toHaveLength(1));
     const [parentRow] = await rt.sessions.list();
-    const kid = call("thread_new", { workspace: "alpha", task: "build it", notify: [parentRow!.threadId!.slice(0, 8)] });
+    const kid = call("run", { workspace: "alpha", task: "build it", notify: [parentRow!.threadId!.slice(0, 8)] });
     await vi.waitFor(() => expect(held.starts).toHaveLength(2));
     const kidRow = (await rt.sessions.list()).find(r => r.threadId !== parentRow!.threadId)!;
     held.release(1, "all green");
@@ -824,20 +829,20 @@ describe("the MCP server over the host", () => {
     expect(history.find(e => e.type === "session.steer")).toMatchObject({ threadId: parentRow!.threadId, prompt: line });
     expect(held.starts).toHaveLength(2);
 
-    const missing = await call("thread_new", { workspace: "alpha", task: "x", notify: ["nope"] });
+    const missing = await call("run", { workspace: "alpha", task: "x", notify: ["nope"] });
     expect(missing).toEqual(failedWith("no thread nope"));
   });
 
-  it("thread_new with notify me, called by an agent inside a turn, names that turn's thread: the server reads the token off the environment it runs with", async () => {
+  it("run with notify me, called by an agent inside a turn, names that turn's thread: the server reads the token off the environment it runs with", async () => {
     const held = heldAgent(true);
     await restartHost({ claude: held.adapter });
     await call("new", { name: "alpha" });
-    const parent = call("thread_new", { workspace: "alpha", task: "orchestrate" });
+    const parent = call("run", { workspace: "alpha", task: "orchestrate" });
     await vi.waitFor(() => expect(held.starts).toHaveLength(1));
     const [parentRow] = await rt.sessions.list();
     // The MCP server this agent runs is a child of that turn's process, so it holds the turn's own variable.
     env[TURN_TOKEN_ENV] = held.envs[0]![TURN_TOKEN_ENV]!;
-    const kid = call("thread_new", { workspace: "alpha", task: "build it", notify: ["me"] });
+    const kid = call("run", { workspace: "alpha", task: "build it", notify: ["me"] });
     await vi.waitFor(() => expect(held.starts).toHaveLength(2));
     const kidRow = (await rt.sessions.list()).find(r => r.threadId !== parentRow!.threadId)!;
     held.release(1, "Ran the gate.\nAll 12 tests green.");
@@ -849,7 +854,7 @@ describe("the MCP server over the host", () => {
     await parent;
     // A token no turn carries is refused on this door in the contract's own shape.
     env[TURN_TOKEN_ENV] = "f".repeat(32);
-    expect(await call("thread_new", { workspace: "alpha", task: "x", notify: ["me"] })).toEqual(failedWith(NO_SUCH_TURN));
+    expect(await call("run", { workspace: "alpha", task: "x", notify: ["me"] })).toEqual(failedWith(NO_SUCH_TURN));
   });
 
   it("fork with a task and notify me records the first turn's end in the new thread for the person", async () => {
@@ -861,11 +866,11 @@ describe("the MCP server over the host", () => {
     expect((await rt.sessions.history(worker.id)).find(e => e.type === "session.notify")).toMatchObject({ threadId: row!.threadId, notify: "me", text: `thread ${row!.threadId!.slice(0, 8)} finished (completed): re: build it` });
   });
 
-  it("thread_new and send return the reply on the turn's session.done; a session.end that never comes is not waited for", async () => {
+  it("run and send return the reply on the turn's session.done; a session.end that never comes is not waited for", async () => {
     const agent = doneOnlyAgent(prompt => `re: ${prompt}`);
     await restartHost({ claude: agent.adapter });
     await call("new", { name: "alpha" });
-    const made = await call("thread_new", { workspace: "alpha", task: "first" });
+    const made = await call("run", { workspace: "alpha", task: "first" });
     expect(made.isError).toBe(false);
     expect(made.text).toBe("re: first");
     const [row] = await rt.sessions.list();
@@ -876,16 +881,16 @@ describe("the MCP server over the host", () => {
     expect((await rt.sessions.history(row!.workspaceId)).map(e => e.type)).not.toContain("session.end");
   });
 
-  it("thread_new and send with detach answer with the thread id the moment the turn is started, without the reply; threads_wait then answers with the first named thread to finish, in the notify line's words, and with timedOut when the seconds pass first", async () => {
+  it("run and send with detach answer with the thread id the moment the turn is started, without the reply; threads_wait then answers with the first named thread to finish, in the notify line's words, and with timedOut when the seconds pass first", async () => {
     const held = heldAgent(false);
     await restartHost({ claude: held.adapter });
     await call("new", { name: "alpha" });
-    const opened = await call("thread_new", { workspace: "alpha", task: "build a", detach: true });
+    const opened = await call("run", { workspace: "alpha", task: "build a", detach: true });
     expect(held.starts).toHaveLength(1);
     const [a] = await rt.sessions.list();
     expect(a).toMatchObject({ status: "running", startedBy: "agent" });
     expect(opened).toEqual({ text: `thread ${a!.threadId}`, structured: { threadId: a!.threadId, workspaceId: a!.workspaceId, harness: "claude", outcome: "started" }, isError: false });
-    const forked = await call("thread_new", { workspace: "alpha", task: "build b", detach: true });
+    const forked = await call("run", { workspace: "alpha", task: "build b", detach: true });
     const b = (await rt.sessions.list()).find(r => r.threadId !== a!.threadId)!;
     expect(forked.structured).toMatchObject({ threadId: b.threadId });
 
@@ -915,7 +920,7 @@ describe("the MCP server over the host", () => {
 
   it("a failed turn is a tool error carrying the harness's reason", async () => {
     await call("new", { name: "alpha" });
-    const failed = await call("thread_new", { workspace: "alpha", task: "die" });
+    const failed = await call("run", { workspace: "alpha", task: "die" });
     expect(failed).toEqual(failedWith("the harness died"));
     expect((await rt.sessions.list())[0]).toMatchObject({ startedBy: "agent", status: "failed" });
   });
@@ -1024,7 +1029,7 @@ describe("the MCP server over the host", () => {
     expect(gone).toEqual(failedWith(`no wsp host is serving ${statePath}`));
 
     await restartHost({ claude: stuckAgent() });
-    const turn = call("thread_new", { workspace: "alpha", task: "hang" });
+    const turn = call("run", { workspace: "alpha", task: "hang" });
     await new Promise(r => setTimeout(r, 300));
     await handle!.close();
     handle = undefined;

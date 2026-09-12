@@ -217,7 +217,7 @@ export async function runLocal(roads: Pick<WorkspaceRoads, "createLocalWorkspace
     log.step(thisComputerLine(workspace.name, workspace.id), { output });
     return workspace;
   } catch (e) {
-    log.warn(`${THIS_COMPUTER} was not made a workspace: ${errorText(e)}. wsp new --local makes it from a terminal.`, { output });
+    log.warn(`${THIS_COMPUTER} was not made a workspace: ${errorText(e)}. wsp new <name> --on it makes it a workspace from a terminal.`, { output });
     return undefined;
   }
 }

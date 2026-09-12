@@ -527,6 +527,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     lastSeenAt: record.lastSeenAt,
     daemonVersion: record.report.daemonVersion,
     agents: record.report.agents,
+    // A joined computer forks only where it has a Docker of its own; without one it runs the person's agents as
+    // its own one workspace and that is the whole of it.
+    takesForks: record.report.docker === true,
     ...(record.workspaceId !== undefined ? { workspaceId: record.workspaceId } : {}),
   });
 
@@ -845,6 +848,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           ...(here.diskFreeBytes !== undefined ? { diskFreeBytes: here.diskFreeBytes } : {}),
           ...(here.docker !== undefined ? { docker: here.docker } : {}),
           present: true,
+          // This computer is where the person's own agents run, never something the host forks into: a copy of the
+          // image on a Docker here is the provider row's, which is the one that says it forks.
+          takesForks: false,
         },
         ...held.map(r => {
           const forks = room.get(r.id);
@@ -852,7 +858,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         }),
         ...(provider === undefined
           ? []
-          : [{ id: provider.id, kind: "provider" as const, name: provider.id, default: marked === provider.id, rateUsdPerHour: provider.rateUsdPerHour }]),
+          : [{ id: provider.id, kind: "provider" as const, name: provider.id, default: marked === provider.id, rateUsdPerHour: provider.rateUsdPerHour, takesForks: true }]),
       ];
     },
 

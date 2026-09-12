@@ -2174,6 +2174,10 @@ export const PlaceView = z.object({
   rateUsdPerHour: z.number().optional(),
   /** How many forks the place holds and how many more it takes, by forkRoom; absent on a place that forks nowhere. */
   forks: z.object({ running: z.number().int(), room: z.number().int() }).optional(),
+  /** Whether a workspace can be forked here at all: a provider, or a computer with Docker on it. Absent or false is
+   * a computer used directly, which runs the person's agents as its own one workspace. The one fact wsp new reads
+   * to decide which road a place takes, so no line outside this list switches on a place's kind. */
+  takesForks: z.boolean().optional(),
 });
 export type PlaceView = z.infer<typeof PlaceView>;
 
@@ -2740,6 +2744,10 @@ export const placeHoldsForksRefusal = (place: string, names: readonly string[]):
  * has nothing to fork with. */
 export const placeForksNowhereLine = (place: string): string =>
   `${place} runs your agents but has no Docker, so it takes no forks; install Docker on it to fork there`;
+
+/** The second half of that refusal where the caller knows which workspace the place already runs: the person asked
+ * for a workspace there and there is one, so the line names it rather than leaving them to look it up. */
+export const placeForksNowhereFix = (workspace: string): string => `Use ${workspace}, or install Docker on it.`;
 
 /** What a word that names no place this host holds is refused with, naming the ones it does. */
 export const noSuchPlaceRefusal = (word: string, held: readonly string[]): string => `no place named ${word}; you have ${held.join(", ")}`;

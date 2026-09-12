@@ -232,9 +232,9 @@ describe("a provider as a place", () => {
 
 describe("the table wsp places prints", () => {
   const rows: PlaceView[] = [
-    { id: "here", kind: "computer", name: "zingzys-mac", default: false, shape: { cpu: 8, memMb: 16384 }, docker: true, present: true },
-    { id: "p_1", kind: "computer", name: "box", default: true, shape: { cpu: 4, memMb: 4096 }, diskFreeBytes: 831 * 1024 ** 3, docker: true, present: true, lastSeenAt: "2026-09-12T00:00:00.000Z" },
-    { id: "solari", kind: "provider", name: "solari", default: false, rateUsdPerHour: 0.018 },
+    { id: "here", kind: "computer", name: "zingzys-mac", default: false, shape: { cpu: 8, memMb: 16384 }, docker: true, present: true, takesForks: false },
+    { id: "p_1", kind: "computer", name: "box", default: true, shape: { cpu: 4, memMb: 4096 }, diskFreeBytes: 831 * 1024 ** 3, docker: true, present: true, lastSeenAt: "2026-09-12T00:00:00.000Z", takesForks: true },
+    { id: "solari", kind: "provider", name: "solari", default: false, rateUsdPerHour: 0.018, takesForks: true },
   ];
 
   it("carries the cores, the memory, the free disk, the docker and the presence, with the default marked once", () => {
@@ -516,7 +516,7 @@ describe("wsp add on a computer reached over ssh", () => {
   it("asks the host to do it, prints each step as it lands and says what joined", async () => {
     const io = captured();
     const frames: ((frame: Record<string, unknown>) => void)[] = [];
-    const place: PlaceView = { id: "p_1", kind: "computer", name: "box", default: true, shape: { cpu: 4, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, docker: true, present: true };
+    const place: PlaceView = { id: "p_1", kind: "computer", name: "box", default: true, shape: { cpu: 4, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, docker: true, present: true, takesForks: true };
     const client = {
       request: async (op: string, params?: Record<string, unknown>) => {
         expect(op).toBe("places.add");

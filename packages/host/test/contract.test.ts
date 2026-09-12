@@ -138,10 +138,10 @@ describe("the agent contract on the command line and the tool door", () => {
     await last("terminal config", "terminal", "config");
     // The streaming verbs: the frames carry a field of the tool's object and the result leaves it out. A plan nobody
     // consented to is the plan frame alone, since nothing is left of the result once the plan is dropped.
-    const planned = await run("import", proj, "--to", "alpha", "--json");
+    const planned = await run("import", "alpha", proj, "--json");
     expect(planned.code).toBe(0);
     expect(objects(planned.io)).toEqual([{ plan: expect.objectContaining({ files: 1 }) }]);
-    const imported = await run("import", proj, "--to", "alpha", "--yes", "--json");
+    const imported = await run("import", "alpha", proj, "--yes", "--json");
     expect(imported.code).toBe(0);
     expect(objects(imported.io)).toEqual([{ plan: expect.objectContaining({ files: 1 }) }, { imported: expect.objectContaining({ files: 1 }) }]);
     covered.set("import", objects(imported.io).at(-1));
@@ -162,7 +162,7 @@ describe("the agent contract on the command line and the tool door", () => {
     await store.put("images", "default", RECORD);
     await store.put("goldens", copyKey("elsewhere", "default"), { ...SEALED_GOLDEN, versions: [{ ...SEALED_GOLDEN.versions[0]!, snapshotId: "snap_elsewhere", imageHash: RECORD.hash }] });
     expect(await last("image build", "image", "build", "elsewhere")).toEqual({ copy: expect.objectContaining({ place: "elsewhere", version: 1, hash: RECORD.hash }), built: false });
-    const opened = (await last("thread new", "thread", "new", "--in", "alpha", "hello")) as { threadId: string; text: string };
+    const opened = (await last("run", "run", "alpha", "hello")) as { threadId: string; text: string };
     expect(opened).toMatchObject({ threadId: expect.any(String), text: "re: hello", outcome: "started" });
     await last("send", "send", opened.threadId, "again");
     // The turn is over, so the wait answers off the transcript at once.
@@ -173,7 +173,7 @@ describe("the agent contract on the command line and the tool door", () => {
     await last("stop", "stop", opened.threadId);
     await last("thread rename", "thread", "rename", opened.threadId, "the name he typed");
     // A launch that never started its agent leaves a row with no turn on it, which is the one a forget takes.
-    const dead = await run("thread", "new", "--in", "alpha", "--agent", "codex", "never gets going", "--json");
+    const dead = await run("run", "alpha", "--agent", "codex", "never gets going", "--json");
     expect(dead.code).toBe(1);
     const junk = (await rt.sessions.list()).find(v => v.harness === "codex")!.threadId!;
     expect(await last("thread forget", "thread", "forget", junk)).toEqual({ threadId: junk, workspaceId: alpha });
@@ -304,9 +304,9 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(failure(missing.io)).toEqual({ error: "no workspace nope", class: "provider", exit: 1 });
 
     await run("new", "alpha");
-    const died = await run("thread", "new", "--in", "alpha", "die");
+    const died = await run("run", "alpha", "die");
     expect(died.code).toBe(1);
-    expect(died.io.errors).toEqual(["wsp thread new: the harness died"]);
+    expect(died.io.errors).toEqual(["wsp run: the harness died"]);
 
     await handle!.close();
     handle = undefined;

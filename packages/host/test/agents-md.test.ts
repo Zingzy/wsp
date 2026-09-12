@@ -22,7 +22,7 @@ describe("the wsp section a project's instructions carry", () => {
     expect(text).toContain(`under \`${SKILL_NAME}\` in your agent's own`);
     expect(text).toContain("skills folder; read it before opening a thread, sending into one, or setting anyone up on wsp.");
     const named = text.split("\n").filter(l => l.startsWith("- `wsp "));
-    expect(named).toEqual(["threads", "thread new", "send"].map(name => {
+    expect(named).toEqual(["threads", "run", "send"].map(name => {
       const verb = CLI_VERBS.find(v => v.name === name)!;
       return `- \`wsp ${verb.name}\` ${verb.about}`;
     }));

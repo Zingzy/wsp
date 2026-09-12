@@ -65,19 +65,60 @@ describe("what wsp says when it will not run a line", () => {
     expect(word.io.lines).toEqual([HELP]);
   });
 
-  it("names the stray word and the flag its workspace belongs behind when a thread is opened on two words", async () => {
-    const { code, io } = await run("thread", "new", "api", "say hi");
+  it("names the third word when a thread is opened on more than a workspace and a task", async () => {
+    const { code, io } = await run("run", "api", "say hi", "and this");
     expect(code).toBe(EXIT_CODES.usage);
-    expect(io.errors).toEqual(["wsp thread new takes one task; api reads as a second one. Name the workspace with --in api, and quote the task."]);
+    expect(io.errors[0]).toContain("wsp run takes a workspace and a task; and this reads as a third word.");
     // The name is the line's own prefix, so the sentence behind it never says it a second time.
-    expect(io.errors[0]!.match(/wsp thread new/g)).toHaveLength(1);
-    expect(io.errors[0]).not.toContain("wsp thread new: wsp thread new");
+    expect(io.errors[0]!.startsWith("wsp run: wsp run")).toBe(false);
+  });
+
+  it("answers every word wsp used to have with the word it is now, in two halves, and dials nothing", async () => {
+    const rows: [string[], string][] = [
+      [["thread", "new", "x", "t"], "wsp thread new is now wsp run, with the workspace first."],
+      [["pair"], "wsp pair is now wsp host pair."],
+      [["devices"], "wsp devices is now wsp host devices."],
+      [["connect", "http://box:4400"], "wsp connect is now wsp host connect."],
+      [["hosts"], "wsp hosts is now wsp host list."],
+      [["hosts", "default", "box"], "wsp hosts default is now wsp host default."],
+      [["disconnect", "box"], "wsp disconnect is now wsp host forget."],
+      [["relay", "link", "http://relay"], "wsp relay link is now wsp host link."],
+      [["relay", "unlink"], "wsp relay unlink is now wsp host unlink."],
+      [["relay", "hosts"], "wsp relay hosts is now wsp host linked."],
+      [["relay", "clients"], "wsp relay clients is now wsp host clients."],
+    ];
+    for (const [argv, said] of rows) {
+      const { code, io } = await run(...argv);
+      const line = argv.join(" ");
+      expect(code, line).toBe(EXIT_CODES.usage);
+      expect(io.lines, line).toEqual([]);
+      expect(io.errors, line).toHaveLength(1);
+      expect(io.errors[0], line).toContain(said);
+      // Both halves: what happened, then what to type instead.
+      expect(io.errors[0], line).toMatch(/\. (Run|Put) /);
+    }
+    // A flag wsp used to read is answered the same way, by the parse of the verb that no longer reads it.
+    const flags: [string[], string][] = [
+      [["import", "/tmp/x", "--to", "alpha"], "so there is no --to"],
+      [["threads", "--in", "alpha"], "so there is no --in"],
+      [["new", "x", "--local"], "so wsp new --local is now --on"],
+      [["new", "x", "--ssh", "maya@box"], "wsp new --ssh is gone"],
+    ];
+    for (const [argv, said] of flags) {
+      const { code, io } = await run(...argv);
+      const line = argv.join(" ");
+      expect(code, line).toBe(EXIT_CODES.usage);
+      expect(io.errors[0], line).toContain(said);
+    }
+    // A word that was never a verb still gets the unknown line and the pointer.
+    const never = await run("ls");
+    expect(never.io.errors).toEqual(["unknown command: ls. Run wsp --help for the list."]);
   });
 
   it("says a thread opened on no words at all what to put in quotes", async () => {
-    const { code, io } = await run("thread", "new");
+    const { code, io } = await run("run");
     expect(code).toBe(EXIT_CODES.usage);
-    expect(io.errors).toEqual(['wsp thread new takes one task and got none. Put the task in quotes: wsp thread new --in <workspace> "say hi".']);
+    expect(io.errors).toEqual(['wsp run takes a task and got none. Put the task in quotes: wsp run <workspace> "say hi".']);
   });
 
   it("answers every verb in one line that never says the verb's name twice over, and refuses one with both halves", async () => {

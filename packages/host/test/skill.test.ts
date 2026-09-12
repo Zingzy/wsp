@@ -50,7 +50,7 @@ describe("the wsp skill", () => {
     const shell = WSP_SKILL.slice(WSP_SKILL.indexOf(SHELL_HEADING), WSP_SKILL.indexOf(RULES_HEADING));
     expect(shell).toContain("| `wsp threads wait <thread>... [--timeout <s>]` | `threads_wait` (threads, timeout) |");
     const section = WSP_SKILL.slice(WSP_SKILL.indexOf("### threads wait"), WSP_SKILL.indexOf("### stop"));
-    expect(section).toContain("wsp thread new --in dev --detach --notify me");
+    expect(section).toContain("wsp run dev --detach --notify me");
     expect(section).toContain("wsp threads wait 1a2b3c4d 5e6f7a8b --timeout 600");
     expect(section).toContain("One thread per call");
     expect(section).toContain("`thread 1a2b3c4d still running after 10m`");
@@ -62,7 +62,7 @@ describe("the wsp skill", () => {
     expect(loop).toContain("--notify me");
     expect(loop).toContain("end your turn");
     expect(loop).not.toContain("threads wait");
-    expect(loop).not.toContain("nohup wsp thread new");
+    expect(loop).not.toContain("nohup wsp run");
     // The MCP instructions carry both roads, since an agent holding only the tools reads nothing else.
     for (const words of [NOTIFY_CALLER, COORDINATOR_HANDOFF]) expect(INSTRUCTIONS, words.slice(0, 40)).toContain(words);
   });
@@ -83,7 +83,7 @@ describe("the wsp skill", () => {
     for (const words of ["the send is refused", "a `send` before then is refused"]) expect(WSP_SKILL, words).not.toContain(words);
     // Three sections may name the wait: the one whose table holds its row, its own section under the contract, and
     // the rules learned the hard way, which is a log every line of which restates a rule from the body. No other
-    // paragraph may send a reader to it, which is how the thread new paragraph kept teaching it.
+    // paragraph may send a reader to it, which is how the run paragraph kept teaching it.
     const owns =
       WSP_SKILL.slice(WSP_SKILL.indexOf(SHELL_HEADING), WSP_SKILL.indexOf(RULES_HEADING)) +
       WSP_SKILL.slice(WSP_SKILL.indexOf("### threads wait"), WSP_SKILL.indexOf("### stop")) +
@@ -123,8 +123,8 @@ describe("the wsp skill", () => {
   });
 
   it("says where a thread on this computer starts, and its example asks nothing of a folder it may not be in", () => {
-    const section = WSP_SKILL.slice(WSP_SKILL.indexOf("### thread new"), WSP_SKILL.indexOf("### send"));
-    expect(section).toContain("wsp thread new --in mac --agent codex \"Say in one line which folder you are in");
+    const section = WSP_SKILL.slice(WSP_SKILL.indexOf("### run"), WSP_SKILL.indexOf("### send"));
+    expect(section).toContain("wsp run mac --agent codex \"Say in one line which folder you are in");
     expect(section).toContain("Its folder is the workspace's own rather than the person's home");
     // One statement of the order a folder is picked in, so the paragraph cannot say two things about the same start.
     expect(section).toContain("with neither, the thread starts in the project the last thread on that workspace used, else in the workspace's only project, else in the workspace's own folder, which on a fork is the machine's home folder");
@@ -151,7 +151,7 @@ describe("the wsp skill", () => {
     expect(setup).toContain("Hand that line to the person as it comes");
     expect(setup).toContain("SOLARI_API_KEY=");
     expect(setup).toContain("Do not ask them to paste a key into this conversation");
-    for (const step of ["wsp recipe scan", "wsp recipe --tick used", "--set <id>=on|off", "--add <id>=", "--signin <id>=copy|machine|key|skip", "--project <folder>", "wsp new dev", "wsp snapshot first", "wsp thread new --in first"]) expect(setup, step).toContain(step);
+    for (const step of ["wsp recipe scan", "wsp recipe --tick used", "--set <id>=on|off", "--add <id>=", "--signin <id>=copy|machine|key|skip", "--project <folder>", "wsp new dev", "wsp snapshot first", "wsp run first"]) expect(setup, step).toContain(step);
     // Eight steps, since nothing in the walkthrough starts or restarts a host by hand any more.
     expect(setup.split("\n").filter(l => /^\d+\. /.test(l))).toHaveLength(8);
   });
@@ -202,7 +202,7 @@ describe("the wsp skill", () => {
 
   it("the MCP instructions are the skill's opening paragraph, the walkthrough's, the line pointing back at the skill and the command line, and the rules", () => {
     const skill = `---\nname: x\ndescription: y\n---\n\n# x\n\nOne.\nTwo.\n\n${SETUP_HEADING}\n\nThree.\n\n1. Not this.\n\n${RULES_HEADING}\n\nFour.\n\n- A rule.\n\n## Later\n\nNor this.\n`;
-    expect(instructionsOf(skill, ["claude"]).startsWith("One. Two. Three. The agents this host runs threads on, the only values thread_new and fork take as agent: claude. The steps, with the exact line to run")).toBe(true);
+    expect(instructionsOf(skill, ["claude"]).startsWith("One. Two. Three. The agents this host runs threads on, the only values run and fork take as agent: claude. The steps, with the exact line to run")).toBe(true);
     expect(instructionsOf(skill, ["claude"]).endsWith("Four.\n- A rule.")).toBe(true);
     expect(instructionsOf(skill, ["claude"])).not.toContain("Not this.");
     expect(() => instructionsOf("---\nname: x\n", ["claude"])).toThrow("never closes");
@@ -224,7 +224,7 @@ describe("the wsp skill", () => {
     expect(INSTRUCTIONS).not.toContain("their own terminal");
     expect(INSTRUCTIONS).toContain("prefer the `wsp` command line");
     // An agent holding only the tools reads here that a workspace need not be a machine, and which listing shows both.
-    expect(INSTRUCTIONS).toContain("This computer is a workspace too, the one `wsp new --local` makes");
+    expect(INSTRUCTIONS).toContain("This computer is a workspace too, the one `wsp new <name> --on it` makes");
     expect(INSTRUCTIONS).toContain("Start with `wsp workspaces` to see every workspace");
     // Everything but the rules is one line, so a client that shows the instructions as a paragraph shows them whole.
     expect(INSTRUCTIONS.split("\n").filter(line => !line.startsWith("- "))).toHaveLength(1);
@@ -249,7 +249,7 @@ describe("the wsp skill", () => {
     }
     // The ten, each by the fact it turns on: the two roads to a child's end, which kind of workspace the work goes
     // on, the golden, the count, the worktree, the send, the restart, the pause, the person reading along.
-    expect(section).toContain("the one `wsp new --local` makes");
+    expect(section).toContain("the one `wsp new <name> --on it` makes");
     expect(section).toContain("a quick subtask or a second harness");
     expect(section).toContain("Fork a cloud workspace for builds that run beside each other");
     expect(section).toContain("anything that should not touch this computer");
@@ -270,6 +270,6 @@ describe("the wsp skill", () => {
     for (const id of THREAD_AGENTS) expect(named(id), id).toBe(true);
     for (const a of CATALOG_AGENTS) if (!THREAD_AGENTS.some(id => id === a.id)) expect(named(a.id), a.id).toBe(false);
     expect(INSTRUCTIONS).toContain(`take as agent: ${THREAD_AGENTS.join(", ")}.`);
-    expect(agentsLine(["claude", "codex"])).toBe("The agents this host runs threads on, the only values thread_new and fork take as agent: claude, codex.");
+    expect(agentsLine(["claude", "codex"])).toBe("The agents this host runs threads on, the only values run and fork take as agent: claude, codex.");
   });
 });

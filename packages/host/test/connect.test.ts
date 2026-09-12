@@ -272,23 +272,23 @@ describe("a verb against a connected host", () => {
     expect(err).toEqual(["wsp thread read: no thread th_none"]);
   });
 
-  it("takes the road through that host, not a runtime in this process, even though nothing serves the state file here", async () => {
+  it("takes the road through that host, and starts no host here, even though nothing serves the state file here", async () => {
     const box = await boxAndHome();
     await connectCommand(io(), { statePath: STATE, home: box.home }, { code: await box.code(), name: "box" }, [box.url]);
     const err: string[] = [];
-    let builtHere = false;
+    let startedHere = false;
     const newWorkspace = CLI_VERBS.find(v => v.name === "new")!;
-    await runVerb(newWorkspace, ["new", "--local", "here", "--host", "box"], io([], err), () => STATE, {
+    await runVerb(newWorkspace, ["new", "here", "--on", "nowhere", "--host", "box"], io([], err), () => STATE, {
       env: { WSP_HOME: box.home },
-      runtime: () => {
-        builtHere = true;
-        throw new Error("a runtime in this process is not the road to a host somewhere else");
+      start: () => {
+        startedHere = true;
+        throw new Error("a host on this computer is not the road to a host somewhere else");
       },
     });
-    // The state file here has no host, which is the one case the verb builds a runtime in this process for; the
-    // line names a host somewhere else, so it goes there and the answer is that host's own.
-    expect(builtHere).toBe(false);
-    expect(err.join("\n")).toContain("this host");
+    // Nothing serves the state file here, which is the one case a line starts a host for itself; the line names a
+    // host somewhere else, so it goes there and the answer is that host's own.
+    expect(startedHere).toBe(false);
+    expect(err.join("\n")).toContain("wsp new: ");
   });
 
   it("keeps the note for the dial, so a line that never reaches a host does not claim its state file went unread", async () => {
@@ -298,9 +298,9 @@ describe("a verb against a connected host", () => {
     // Refused on its own words before anything dials, which is where a verb that reads the state file and never
     // dials would be: nothing has been left unread, so nothing says it was.
     const newWorkspace = CLI_VERBS.find(v => v.name === "new")!;
-    const ran = await runVerb(newWorkspace, ["new", "--local", "--ssh", "maya@box", "--host", "box", "--state", STATE], io([], err), () => STATE, { env: { WSP_HOME: box.home } });
+    const ran = await runVerb(newWorkspace, ["new", "one", "two", "--host", "box", "--state", STATE], io([], err), () => STATE, { env: { WSP_HOME: box.home } });
     expect(ran).toBe(3);
-    expect(err.join("\n")).toContain("not both");
+    expect(err.join("\n")).toContain("wsp new takes one name");
     expect(err.join("\n")).not.toContain("--state names");
   });
 

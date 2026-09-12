@@ -95,7 +95,7 @@ export async function runLocalInit(opts: LocalInitOptions, io: InitIO): Promise<
   }
   if (handle === undefined) {
     io.json?.({ event: "done", nextCommand: opts.upCommand, ...(workspace !== undefined ? { workspace: { id: workspace.id, name: workspace.name } } : {}) });
-    outro(`Done. ${workspace === undefined ? `Nothing was made; wsp new --local makes ${THIS_COMPUTER} a workspace.` : `${opts.upCommand} starts the app on ${workspace.name}.`}`, out);
+    outro(`Done. ${workspace === undefined ? `Nothing was made; wsp new <name> --on ${THIS_COMPUTER} makes it a workspace.` : `${opts.upCommand} starts the app on ${workspace.name}.`}`, out);
     await closeRuntime();
     return { code: 0 };
   }

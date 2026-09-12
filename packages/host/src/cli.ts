@@ -26,7 +26,7 @@ import {
   type SshWiring,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portsAsked, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, unknownWordLine, usageRefusal, WS_PORT_OFFSET, type WorkspaceCreatingEvent } from "@wsp/protocol";
+import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portsAsked, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, unknownWordLine, usageRefusal, WS_PORT_OFFSET } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, parseSshAddress, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshIdentity, sshMachineName, sshReachOf, type SshReach } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerModule, providerPlaces, type ProviderEnv } from "./providers.js";
 import { assetDir } from "./assets.js";
@@ -88,7 +88,7 @@ import { addCommand, addFlags, joinCommand, leaveCommand, placeWiring, removeCom
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, registeredLine, removeEach, removeLines, runningWsp, type RunningWsp } from "./mcp-install.js";
-import { CLI_VERBS, COMMON, type DialOpts, dialHost, failed, findVerb, type HostClient, jsonAsked, runVerb, takeCommon, toolName, verbHelp, verbUsage, type LocalRuntime, type VerbDeps } from "./verbs.js";
+import { CLI_VERBS, COMMON, type DialOpts, dialHost, failed, findVerb, type HostClient, jsonAsked, renamedWords, runVerb, takeCommon, toolName, verbHelp, verbUsage, type VerbDeps } from "./verbs.js";
 import { VERSION } from "./version.js";
 
 /** The computer every screen and every reader here is told it is on; the one reading, so a run, its hand-off and
@@ -171,8 +171,8 @@ ${verbHelp()}
   wsp send streams the reply to stderr as it arrives and prints the last message
   on stdout when the reply is complete.
 ${wrap(`  ${TURN_END_WORDS}.`, 80).join("\n")}
-  wsp exec streams the command's output and exits with its code. thread new,
-  send and exec wake a paused workspace first, with one line on stderr saying so.
+  wsp exec streams the command's output and exits with its code. run, send and
+  exec wake a paused workspace first, with one line on stderr saying so.
 
 exit codes; every failure is one line on stderr, the failure object with --json:
 ${exitCodeHelp()}
@@ -223,9 +223,9 @@ options:
                      shows for this computer (default what it calls itself);
                      add, join: the name the wsp calls the computer being
                      joined (default its own name lowercased)
-  --ssh-port PORT    add, new --ssh: the port ssh dials that computer on
+  --ssh-port PORT    add: the port ssh dials that computer on
                      (default 22)
-  --ssh-key PATH     add, new --ssh: the key file ssh logs in with (default
+  --ssh-key PATH     add: the key file ssh logs in with (default
                      whatever your own ssh config and agent already use)
   --relay HOST       connect: reach that host through your relay by the name it
                      has there, instead of giving an address. The code is still
@@ -419,7 +419,7 @@ const KEY_TRIES = 3;
 /** What no provider key means for the command that asked. `refuse` is the road every command that needs a machine
  * takes: nothing it does has any meaning without one. `offer` is wsp init's: at a terminal the key is asked for with
  * the way to skip it, and an empty answer takes the local road, since this computer is a workspace of its own. `local`
- * is the road of up, up --service, new --local and doctor --local: init already answered, so nothing is asked and
+ * is the road of up, up --service and doctor --local: init already answered, so nothing is asked and
  * the run goes on with no provider. */
 export type NoProviderKey = "refuse" | "offer" | "local";
 
@@ -1079,7 +1079,7 @@ const GOLDEN_FLAGS: readonly [string, (flags: { recipe?: string; project?: strin
 
 /** The build handed to the host serving this state: the workspace question is asked here, where the person is, and
  * everything from the first billed machine on happens in that host's job. Its own init job forks no workspace for
- * this computer, so the tick beside the question is not offered; wsp new --local is that road. */
+ * this computer, so the tick beside the question is not offered; wsp new <name> --on this computer is that road. */
 async function handOffTo(beside: BesideHost, screen: InitIO, interactive: boolean, flags: { yes: boolean; firstWorkspace?: string; importFolder?: string }): Promise<number> {
   const step = await askFirst({
     interactive,
@@ -1976,22 +1976,9 @@ export async function cli(
   // so one of them binds wherever it was typed and what is left reaches its own parse in the order it was given.
   const { common, rest } = takeCommon(argv);
   const verb = findVerb(rest);
-  // The one verb that runs with no host serving, new --local, builds the runtime over the state file in this process.
-  const verbRuntime = async (statePath: string): Promise<LocalRuntime> => {
-    await adoptLoginPath(line => io.log(line));
-    const { keys, env: providerEnv } = await loadKeys(io, keySources(env), { anthropic: false, noSolari: "local" });
-    const rt = makeRuntime(keys, statePath, goldenRecipe(keys), providerEnv);
-    // Handed on as the two calls the verb makes and the stages it prints, so the verbs read nothing of the
-    // runtime's own shape: they speak to a host over the wire, and this is the one road that has none.
-    return {
-      workspaces: rt.workspaces,
-      creating: on => rt.events.on("workspace.creating", e => on(e as WorkspaceCreatingEvent)),
-      close: () => rt.close(),
-    };
-  };
   if (verb !== undefined) {
     const words = verb.name.split(" ");
-    return runVerb(verb, [...words, ...common, ...rest.slice(words.length)], io, chooseState, { alsoHere, cwd: process.cwd(), env, runtime: verbRuntime, ...starts });
+    return runVerb(verb, [...words, ...common, ...rest.slice(words.length)], io, chooseState, { alsoHere, cwd: process.cwd(), env, ...starts });
   }
   if (rest[0] === MCP_COMMAND) return mcp(io, [...common, ...rest.slice(1)], chooseState, run, env, starts);
   let values: SharedFlags;
@@ -2017,6 +2004,10 @@ export async function cli(
   const found = findCommand(positionals);
   const json = values.json === true;
   if (found === undefined) {
+    // A word wsp used to answer to is met with the word it is now, so nobody who knew the old page is left on a
+    // blank one; only then does an unknown word get the pointer.
+    const renamed = renamedWords(positionals);
+    if (renamed !== undefined) return failed(io, json, usageRefusal(renamed.said, renamed.fix));
     // A word that opens a line but is no line of its own gets the lines it opens; one no command answers to gets
     // the pointer, since the help behind it runs to hundreds of rows.
     const usage = commandUsage(word);

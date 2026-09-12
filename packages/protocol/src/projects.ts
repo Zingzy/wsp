@@ -110,9 +110,9 @@ export function threadOpenedLine(threadId: string, workspaceName: string, folder
 }
 
 /** Why a run from inside a folder no workspace holds a project for opens nothing, with both roads out; `named` is the
- * caller's word for naming a workspace (`--in <workspace>` on the command line, `workspace` on the tool). */
+ * caller's word for naming a workspace (`<workspace>` on the command line, `workspace` on the tool). */
 export function noWorkspaceForFolderLine(folder: string, named: string): string {
-  return `no workspace holds a project for ${folder}; name one with ${named}, or wsp import ${shellQuote(folder)} --to <workspace> lands it there`;
+  return `no workspace holds a project for ${folder}; name one with ${named}, or wsp import <workspace> ${shellQuote(folder)} lands it there`;
 }
 
 /** The workspace a folder on this computer belongs to, and the project it is there as, for a thread opened with no
@@ -136,7 +136,7 @@ export function workspaceForFolder<W extends Pick<WorkspaceView, "id" | "kind" |
 }
 
 /** Why a thread opened with no workspace named, from a folder that is not inside a repo, opens nothing; `named` is
- * the caller's word for naming one (`--in <workspace>` on the command line, `workspace` on the tool). */
+ * the caller's word for naming one (`<workspace>` on the command line, `workspace` on the tool). */
 export function noThreadTargetLine(named: string): string {
   return `${named} is needed outside a repo: run from inside a repo one of the workspaces holds, or name the workspace`;
 }
