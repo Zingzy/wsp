@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { passphraseCipher } from "@wsp/engine";
-import { agentsKindRefusal, effortsFor, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { agentsKindRefusal, effortsFor, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { copyKey, createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -903,6 +903,37 @@ describe("wsp verbs over the host", () => {
     expect(io.lines).toHaveLength(1);
     expect(io.lines[0]).toMatch(/^thread /);
     expect(io.errors).toEqual(["wsp thread new: the harness died"]);
+  });
+
+  it("a turn the agent refused for want of a sign-in reads failed, exits with the auth code and says the refusal once, on the command line and in the read alike", async () => {
+    const refusal = `Not logged in · Please run /login; ${signInRefusalLine({ kind: "local" })}`;
+    await restartHost({ claude: toolingAgent([], { status: "failed", durationMs: 88, costUsd: 0, error: refusal, refusal: "sign-in" }) });
+    await run("new", "alpha");
+
+    const { code, io } = await run("thread", "new", "--in", "alpha", "say hi");
+    expect(code).toBe(EXIT_CODES.auth);
+    expect(io.lines).toEqual([expect.stringMatching(/^thread /)]);
+    expect(io.streamed.split("\n").filter(l => l !== "")).toEqual(["failed · Worked for 88ms · $0.0000"]);
+    expect(io.errors).toEqual([`wsp thread new: ${refusal}`]);
+
+    const [row] = await rt.sessions.list();
+    const read = await run("thread", "read", row!.threadId!);
+    expect(read.code).toBe(0);
+    expect(read.io.lines.join("\n")).toContain(`failed · Worked for 88ms · $0.0000: ${refusal}`);
+    expect(read.io.lines.join("\n").split("Not logged in")).toHaveLength(2);
+  });
+
+  it("a refusal the agent named no cause for exits the provider code, so the auth code says a sign-in and nothing else", async () => {
+    await restartHost({ claude: toolingAgent([], { status: "failed", durationMs: 40, error: "API Error: 529 overloaded" }) });
+    await run("new", "alpha");
+
+    const { code, io } = await run("thread", "new", "--in", "alpha", "say hi");
+    expect(code).toBe(EXIT_CODES.provider);
+    expect(io.errors).toEqual(["wsp thread new: API Error: 529 overloaded"]);
+
+    const asJson = await run("thread", "new", "--in", "alpha", "again", "--json");
+    expect(asJson.code).toBe(EXIT_CODES.provider);
+    expect(JSON.parse(asJson.io.errors.at(-1)!)).toMatchObject({ class: "provider", exit: EXIT_CODES.provider });
   });
 
   it("a send into a thread whose last turn was cut says so on stderr before the reply; the send after that says nothing", async () => {

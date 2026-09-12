@@ -3,8 +3,8 @@
 // t3code ClaudeAdapter.ts (MIT, see NOTICE); event shapes are the ones
 // recorded in solari-poc/RESULTS.md.
 
-import { PERMISSION_DENY, RUN_EXIT_MS, backgroundTasksLine, endAfterResult, endRun, fmtDuration, harnessExitLine, titlePrompt } from "@wsp/protocol";
-import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnResult, TurnStatus } from "@wsp/protocol";
+import { PERMISSION_DENY, RUN_EXIT_MS, backgroundTasksLine, endAfterResult, endRun, fmtDuration, harnessExitLine, refusedTurn, titlePrompt } from "@wsp/protocol";
+import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus } from "@wsp/protocol";
 import { controlAnswerLine, controlErrorLine, controlLine, setModeLine } from "./permissions.js";
 import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
@@ -74,6 +74,10 @@ export interface AdapterDeps {
   /** How long the CLI gets to exit on the EOF its result closed the channel with, before its process and its tree
    * are ended for it. */
   resultExitMs?: number;
+  /** wsp's half of a turn this workspace's agent refuses for want of a sign-in, from the one rule every door reads
+   * for how it is signed in; it differs between the person's own computer and a machine, which only the caller
+   * knows. Absent leaves such a turn carrying the CLI's own sentence alone. */
+  signInRefusal?: string;
 }
 
 export interface ClaudeAdapter {
@@ -165,11 +169,15 @@ function flattenContent(value: unknown): string {
 }
 
 function resultStatus(event: Record<string, unknown>, errorsText: string): TurnStatus {
-  if (str(event.subtype) === "success") return "completed";
   // The CLI stamps user aborts explicitly: "aborted_tools" mid-tool-call,
-  // "aborted_streaming" mid-stream (t3code isInterruptedResult).
+  // "aborted_streaming" mid-stream (t3code isInterruptedResult). Read before
+  // anything else: the person ended this turn, whatever word the CLI settled
+  // on for it and whether or not it flagged its own result as an error.
   const terminal = str(event.terminal_reason);
   if (terminal === "aborted_tools" || terminal === "aborted_streaming") return "interrupted";
+  // is_error is the CLI's own flag on its own result, and it outranks the subtype: a turn it refused before the
+  // agent ran comes back as a success carrying the refusal (measured on 2.1.257 with a home that has no login).
+  if (str(event.subtype) === "success") return event.is_error === true ? "failed" : "completed";
   if (errorsText.includes("interrupt") || errorsText.includes("cancel")) return "interrupted";
   if (
     str(event.subtype) === "error_during_execution" &&
@@ -181,9 +189,9 @@ function resultStatus(event: Record<string, unknown>, errorsText: string): TurnS
   return "failed";
 }
 
-function normalizeResult(event: Record<string, unknown>): TurnResult {
+function normalizeResult(event: Record<string, unknown>, refusal: { road?: string; cause?: TurnRefusal } | undefined): TurnResult {
   const errors = strArr(event.errors) ?? [];
-  return {
+  const result: TurnResult = {
     status: resultStatus(event, errors.join(" ").toLowerCase()),
     durationMs: num(event.duration_ms),
     costUsd: num(event.total_cost_usd),
@@ -193,6 +201,19 @@ function normalizeResult(event: Record<string, unknown>): TurnResult {
     // the CLI's own UI too (t3code resultUserFacingError).
     error: errors.find((entry) => !entry.startsWith("[ede_diagnostic]")),
   };
+  return event.is_error === true && result.status === "failed" ? refusedTurn(result, refusal) : result;
+}
+
+/** What wsp classes a refusal as, by the CLI's own name for what refused the turn; a name no cause claims is a
+ * refusal wsp has no road out of and leaves the CLI's sentence to stand alone. Adding a cause is a row here. */
+const REFUSAL_CAUSES: Readonly<Record<string, TurnRefusal>> = { authentication_failed: "sign-in" };
+
+/** The CLI writes a line of its own into the stream as an assistant message when a request failed, marked as its own
+ * and with no model behind it; it is the turn's error and the result carries it again, so it is no reply of the
+ * agent's and never a delta. Answers the cause it named, null where wsp claims none. */
+function apiErrorCause(event: Record<string, unknown>): TurnRefusal | null | undefined {
+  if (str(event.type) !== "assistant" || event.is_api_error_message !== true) return undefined;
+  return REFUSAL_CAUSES[str(event.error) ?? ""] ?? null;
 }
 
 /** A success with no text and no token in its usage: the CLI refused the turn (a resume of a transcript a kill left
@@ -224,7 +245,7 @@ function endedEarly(result: TurnResult, backgroundTasks: number): TurnResult {
   return { ...result, status: "failed", error: backgroundTasksLine(backgroundTasks) };
 }
 
-function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: string): AdapterEvent[] {
+function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: string, refusal: { road?: string; cause?: TurnRefusal } | undefined): AdapterEvent[] {
   const sessionId = str(event.session_id) ?? fallbackSessionId;
   switch (str(event.type)) {
     case "system": {
@@ -295,7 +316,7 @@ function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: strin
       return deltas;
     }
     case "result":
-      return [{ type: "turn.done", sessionId, result: normalizeResult(event) }];
+      return [{ type: "turn.done", sessionId, result: normalizeResult(event, refusal) }];
     default:
       return [];
   }
@@ -305,6 +326,14 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
   if (!deps.configDir.trim().startsWith("/")) throw new Error(`configDir must be an absolute path, got "${deps.configDir}"`);
   const sessions = new Map<string, ClaudeSession>();
   const env = buildEnv({ base: deps.baseEnv, apiKey: deps.apiKey });
+
+  /** wsp's half for a refusal the CLI named a cause for: the road the caller handed this adapter, which is the one
+   * rule every door reads for how this workspace is signed in, and the cause the failure is classed by. */
+  const refusalOf = (cause: TurnRefusal | null | undefined): { road?: string; cause?: TurnRefusal } | undefined => {
+    if (cause === undefined) return undefined;
+    const road = cause === "sign-in" ? deps.signInRefusal : undefined;
+    return { ...(road !== undefined ? { road } : {}), ...(cause !== null ? { cause } : {}) };
+  };
 
   /** Everything a turn is once its stream exists. The launch and the attach differ only in where the stream came
    * from and in what is already known: an attached turn's CLI announced itself to an earlier host process, so it
@@ -323,6 +352,9 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     let harnessCwd: string | undefined;
     let shellCwd: string | undefined;
     let backgroundTasks = 0;
+    /** What the last error the CLI wrote into the stream itself was for, null where wsp claims no cause for it;
+     * undefined until it writes one. */
+    let refusalCause: TurnRefusal | null | undefined;
     /** The prompts this turn raised and nobody has answered yet, by the CLI's own request id. The CLI runs nothing
      * while one is open, so an entry here is what the turn is waiting on. */
     const pending = new Map<string, PermissionAsk>();
@@ -385,7 +417,12 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
             backgroundTasks = tasks;
             continue;
           }
-          for (const normalized of normalizeEvent(event, claudeSessionId)) {
+          const cause = apiErrorCause(event);
+          if (cause !== undefined) {
+            refusalCause = cause;
+            continue;
+          }
+          for (const normalized of normalizeEvent(event, claudeSessionId, refusalOf(refusalCause))) {
             if (normalized.type === "session.start") {
               claudeSessionId = normalized.sessionId;
               sawInit = true;
