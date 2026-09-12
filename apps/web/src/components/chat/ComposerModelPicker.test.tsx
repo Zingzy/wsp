@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { HarnessCatalog } from "@wsp/protocol";
+import { THIS_COMPUTER, type HarnessCatalog } from "@wsp/protocol";
 import { ComposerModelPicker, UNLISTED_MODEL_LINE, listModels } from "./ComposerModelPicker";
 
 const CLAUDE: HarnessCatalog = {
@@ -37,7 +37,7 @@ describe("ComposerModelPicker", () => {
 
   it("names that model on the button and gives it a muted row that picks like any other", async () => {
     const picked: string[] = [];
-    render(<ComposerModelPicker catalogs={[CLAUDE]} catalog={CLAUDE} model={FABLE} pinned onPickHarness={() => {}} onPickModel={(_h, m) => picked.push(m)} />);
+    render(<ComposerModelPicker catalogs={[CLAUDE]} catalog={CLAUDE} model={FABLE} pinned where={THIS_COMPUTER} onPickHarness={() => {}} onPickModel={(_h, m) => picked.push(m)} />);
     expect(screen.getByRole("button", { name: "Model: claude-fable-5-1" }).textContent).toContain("claude-fable-5-1");
     await open();
     const row = screen.getByRole("option", { name: /claude-fable-5-1/ });
