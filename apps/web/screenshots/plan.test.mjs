@@ -39,6 +39,11 @@ describe("a click or wait word", () => {
     expect(stepFor("390:key:Escape", [1440, 390])).toEqual({ width: 390, key: "Escape" });
   });
 
+  it("reads a type: word as typing into whatever the step before it focused", () => {
+    expect(stepFor("type:/does/not/exist", [1440, 390])).toEqual({ type: "/does/not/exist" });
+    expect(stepFor("390:type:/tmp", [1440, 390])).toEqual({ width: 390, type: "/tmp" });
+  });
+
   it("refuses a width the list never shoots, which would silently never run", () => {
     expect(() => stepFor("768:sidebar=trigger", [1440, 390])).toThrow(/does not shoot/);
   });
@@ -132,6 +137,8 @@ describe("the surfaces list this repo ships", () => {
       "threads-across-workspaces",
       "opener-transcript",
       "host-asleep",
+      "composer-folder",
+      "composer-folder-refused",
       "settings-where",
       "add-computer",
       "settings-image-fresh",
