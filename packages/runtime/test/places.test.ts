@@ -28,7 +28,8 @@ import {
   type PlaceReport,
   type PlaceView,
 } from "@wsp/protocol";
-import { createRuntime, wiredPlace, type Runtime } from "../src/runtime.js";
+import { createRuntime, wiredPlace, type PlaceBackends, type Runtime } from "../src/runtime.js";
+import type { MachineBackend } from "@wsp/engine";
 import { newPlaceKeyPair, type PlaceInstallRequest, type PlaceKeyPair, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -958,6 +959,68 @@ function forks(
   return seen;
 }
 
+describe("a fork at a provider this host is not wired to", () => {
+  /** Two providers over two backends, as the host's own table hands them down: the wired one and one more whose key
+   * this computer holds. */
+  const twoProviders = (wired: string, at: Record<string, MachineBackend>): PlaceBackends => ({
+    get wired() {
+      return wired;
+    },
+    backend: place => at[place],
+    list: () => Object.keys(at),
+  });
+
+  it("lists every provider whose key this host holds and forks at the one the line names, through that provider's own backend", async () => {
+    const solari = stubBackend();
+    const box = stubBackend();
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({
+      backend: solari,
+      store: memoryStore(),
+      adapters: {},
+      places: twoProviders("solari", { solari, box }),
+      placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }),
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    const rows = await placesOf();
+    expect(rows.filter(p => p.kind === "provider").map(p => p.id)).toEqual(["solari", "box"]);
+    for (const row of rows.filter(p => p.kind === "provider")) expect(row.takesForks, row.id).toBe(true);
+
+    // Named on the line: the machine is minted by that provider and the record says where it stands.
+    const there = await runtime.workspaces.create({ golden: "snap_g", name: "x", on: "box" });
+    expect(box.machines).toHaveLength(1);
+    expect(solari.machines).toHaveLength(0);
+    expect(there.place).toBe("box");
+    expect(await runtime.workspaces.get(there.id)).toMatchObject({ place: "box" });
+    // The place the last fork landed on is where the next one lands when nobody says.
+    expect((await placesOf()).find(p => p.default)!.id).toBe("box");
+    const again = await runtime.workspaces.create({ golden: "snap_g", name: "y" });
+    expect(box.machines).toHaveLength(2);
+    expect(again.place).toBe("box");
+
+    // The wired provider named on the line is the road a record with no place word already takes.
+    await runtime.places!.markUsed(undefined);
+    const here = await runtime.workspaces.create({ golden: "snap_g", name: "z", on: "solari" });
+    expect(solari.machines).toHaveLength(1);
+    expect(here.place).toBeUndefined();
+  });
+
+  it("names every provider it holds when a word names none of them", async () => {
+    const solari = stubBackend();
+    const box = stubBackend();
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({
+      backend: solari,
+      store: memoryStore(),
+      adapters: {},
+      places: twoProviders("solari", { solari, box }),
+      placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }),
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    await expect(runtime.workspaces.create({ golden: "snap_g", name: "x", on: "nowhere" })).rejects.toThrow(/no place named nowhere; you have .*solari.*box/);
+  });
+});
+
 describe("a fork on a computer you joined", () => {
   it("lands on that computer's backend and not on this host's, and the record and the view say where", async () => {
     const backend = stubBackend();
@@ -1015,6 +1078,31 @@ describe("a fork on a computer you joined", () => {
     expect(backend.machines).toHaveLength(1);
     expect(second.place).toBeUndefined();
     expect(place.created).toHaveLength(1);
+  });
+
+  it("says on the row whether a place takes forks at all, off the list the verbs read, and forks where it says yes", async () => {
+    const backend = stubBackend();
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    let place!: ForkingPlace;
+    const withDocker = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
+    sockets.push(withDocker.client.ws);
+    const without = await join(hostKey, { code: await code(), name: "laptop", report: report("laptop", { docker: false }) });
+    sockets.push(without.client.ws);
+    const rows = await placesOf();
+    // The computer the host runs on is where the person's own agents run, never something the host forks into.
+    expect(rows.find(p => p.id === "here")!.takesForks).toBe(false);
+    expect(rows.find(p => p.id === withDocker.placeId)!.takesForks).toBe(true);
+    expect(rows.find(p => p.id === without.placeId)!.takesForks).toBe(false);
+    expect(rows.find(p => p.id === "solari")!.takesForks).toBe(true);
+    // What the row promises is what the create does: the fork lands on that computer's own backend.
+    const made = await runtime.workspaces.create({ golden: "snap_g", name: "x", on: "srv" });
+    expect(place.created).toHaveLength(1);
+    expect(backend.machines).toHaveLength(0);
+    expect(made.place).toBe(withDocker.placeId);
+    // And a row that says no forks nowhere: the refusal is that computer's, not a fork nobody asked for.
+    await expect(runtime.workspaces.create({ golden: "snap_g", name: "y", on: "laptop" })).rejects.toThrow(/laptop runs your agents but has no Docker/);
   });
 
   it("refuses a word that names no place, and names what this host holds", async () => {

@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The providers Connect a provider offers, one row each: what a person reads,
-// what the provider is in one mono line, what its cheapest workspace costs,
-// the ghost in its key field, and the roads that check whether a key is held
-// and put a new one to the provider. Adding a provider is a row here and
-// nothing else; no code below this file compares a provider by name.
+// what the provider is in one mono line, what its cheapest workspace costs and
+// the ghost in its key field. Adding a provider is a row here and nothing else;
+// no code below this file compares a provider by name.
 //
-// The ids are the words WSP_PROVIDER holds, so this table and the host's own
-// registry are keyed alike, and the two facts a person reads about a key, its
-// name and where one comes from, are read off PROVIDER_KEY_WORDS, which the
-// host's registry reads too. The rates are what each backend quotes for its
-// smallest size today (box-backend.ts BOX_CLASSES, solari-backend.ts
-// rateUsdPerHour), copied because the engine is a server package the browser
-// cannot import; they go when a size listing rides the wire.
+// The ids are the words WSP_PROVIDER holds, so this table, the keys the host
+// says it holds and the key a person saves are all keyed alike, and the sheet
+// puts a key to the host under the row's own id rather than carrying a road per
+// row. The two facts a person reads about a key, its name and where one comes
+// from, are read off PROVIDER_KEY_WORDS, which the host's registry reads too.
+// The rates are what each backend quotes for its smallest size today
+// (box-backend.ts BOX_CLASSES, solari-backend.ts rateUsdPerHour), copied because
+// the engine is a server package the browser cannot import; they go when a size
+// listing rides the wire.
 import { PROVIDER_KEY_WORDS, type InitSetup } from "@wsp/protocol";
-import type { Api } from "../protocol/client.js";
 
 export interface ProviderRow {
   /** The word WSP_PROVIDER holds for this provider. */
@@ -28,13 +28,11 @@ export interface ProviderRow {
   placeholder: string;
   /** Whether this provider's trial is live, which is what puts it first in the list. */
   trial?: boolean;
-  /** Whether this computer already holds a key for this provider, off what the host says about its setup. A row
-   * with no reader cannot know, and the sheet asks for a key rather than claiming one is saved. */
-  held?(setup: InitSetup): boolean;
-  /** Puts the typed key to the provider and saves it on this computer, or nothing where no op on the wire carries
-   * this row's key yet. A row without one holds Save rather than pretending the key was saved. */
-  save?(api: Api, key: string): Promise<void>;
 }
+
+/** Whether this computer already holds a key for this provider, off what the host says about its setup: the host
+ * keys what it holds by the same word this row's id is. */
+export const keyHeld = (row: ProviderRow, setup: InitSetup): boolean => setup.keys[row.id] === true;
 
 /** Where a person gets this provider's key, off the one table the host's registry reads. The key's own name
  * there titles the screen the terminal draws; this sheet is titled by the provider already, so its field carries
@@ -56,10 +54,6 @@ export const PROVIDER_ROWS: readonly ProviderRow[] = [
     what: "in memory, wakes fast",
     fromUsdPerHour: 0.11,
     placeholder: "slr_live_...",
-    held: setup => setup.keys.solari,
-    save: async (api, key) => {
-      await api.initKeys?.({ solari: key });
-    },
   },
 ];
 

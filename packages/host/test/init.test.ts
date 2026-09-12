@@ -1638,7 +1638,7 @@ describe("wsp init, flags and no terminal", () => {
     // Nobody is here to use the app or to pay for a machine nobody asked for: no host and no fork. This computer is
     // not a fork and bills nothing, so the tick stands and the run still ends in a workspace.
     expect(out).not.toContain("forked from golden v1");
-    expect(out).toContain("Done. Golden v1 is sealed; wsp up starts the app.");
+    expect(out).toContain("Done. Golden v1 is sealed; wsp up opens the app.");
     expect(out).not.toMatch(URL_RE);
     expect((await f.runtimes.at(-1)!.workspaces.list()).map(w => ({ name: w.name, kind: w.kind }))).toEqual([{ name: LOCAL_NAME, kind: "local" }]);
     expect(f.trail).toEqual(["local"]);
@@ -1699,7 +1699,7 @@ describe("wsp init, flags and no terminal", () => {
     expect(out).not.toContain("is in use on this computer");
     expect(out).toContain("Taken as yes (--non-interactive)");
     expect(out).toContain("Sealing golden v1. Taken as yes (--non-interactive).");
-    expect(out).toContain("Done. Golden v1 is sealed; wsp up --state /tmp/wsp-test/state.json starts the app.");
+    expect(out).toContain("Done. Golden v1 is sealed; wsp up --state /tmp/wsp-test/state.json opens the app.");
     const rt = f.runtimes.at(-1)!;
     expect(goldenHead(await rt.golden.get())?.snapshotId).toBe("snap_wsp-h1-default-v1");
     // An agent pays for no machine it did not ask for: nothing is forked. This computer costs nothing, so the tick
@@ -1736,7 +1736,7 @@ describe("wsp init, flags and no terminal", () => {
     const workspace = (await f.runtimes.at(-1)!.workspaces.list())[0]!;
     expect(workspace.name).toBe("proj");
     expect(f.records.at(-1)).toEqual({ event: "done", golden: "default", version: 1, snapshotId: "snap_wsp-h1-default-v1", recipe: join(dirname(f.opts.statePath), "recipe.json"), nextCommand: "wsp up", workspace: { id: workspace.id, name: "proj" } });
-    expect(f.text()).toContain("Done. Golden v1 is sealed; wsp up starts the app.");
+    expect(f.text()).toContain("Done. Golden v1 is sealed; wsp up opens the app.");
     expect(f.hosts).toBe(0);
   });
 
@@ -3492,7 +3492,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(shared.machines[0]!.killed).toBe(true);
     // The builder gave up its slot to the smoke fork; nothing else boots, and the fork is the person's to ask for.
     expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_wsp-h1-default-v1", true]]);
-    expect(f.text()).toContain("wsp new first forks a workspace from it.");
+    expect(f.text()).toContain("wsp new first forks a workspace from it, and wsp up opens the app.");
   });
 
   it("a reusable builder already carrying the new recipe is attached to; the update road does not run beside it", async () => {
@@ -3599,7 +3599,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(out).toMatch(/Delete golden v1, [\d.]+ GB, .*\? v3 and v2 stay\..* Taken as yes \(--yes\)\./);
     expect(out).toContain("Deleted golden v1.");
     expect(out.indexOf("Golden v3 sealed.")).toBeLessThan(out.indexOf("Delete golden v1"));
-    expect(out.indexOf("Deleted golden v1.")).toBeLessThan(out.indexOf("Done. Golden v3 is sealed; wsp up starts the app"));
+    expect(out.indexOf("Deleted golden v1.")).toBeLessThan(out.indexOf("Done. Golden v3 is sealed;"));
     expect(shared.snapshots.map(r => r.id)).toEqual(["snap_wsp-h1-default-v2", "snap_wsp-h1-default-v3"]);
   });
 
@@ -4068,7 +4068,7 @@ describe("wsp init, the first workspace and its project", () => {
     expect(out).toContain("12 files, 3 KB; the repository whole; 46 sessions from Claude Code; 2 secret-shaped files read for what may travel.");
     expect(out).toContain(`${folder} on proj: 12 files, 3 KB; 1 file rewritten without their credentials; 1 secret-shaped file cut.`);
     // Off a terminal no app is served: the run ends naming what serves it.
-    expect(out).toContain("Done. Golden v1 is sealed; wsp up starts the app.");
+    expect(out).toContain("Done. Golden v1 is sealed; wsp up opens the app.");
     expect(out).not.toMatch(URL_RE);
     expect(f.hosts).toBe(0);
   });
@@ -4144,7 +4144,7 @@ describe("wsp init, the first workspace and its project", () => {
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     expect(await f.runtimes.at(-1)!.workspaces.list()).toEqual([]);
     expect(f.trail).toEqual([]);
-    expect(f.text()).toContain("Done. Golden v1 is sealed; wsp up starts the app, and wsp new first forks a workspace from it.");
+    expect(f.text()).toContain("Done. Golden v1 is sealed; wsp new first forks a workspace from it, and wsp up opens the app.");
   });
 
   it("a host that refuses the tick is one line, and the fork beside it still opens the app", async () => {
@@ -4208,7 +4208,7 @@ describe("wsp init, the first workspace and its project", () => {
     expect(workspaces.map(w => w.name)).toEqual(["first", LOCAL_NAME]);
     expect(f.text()).toContain(`${folder} was not imported: the machine refused the upload. The workspace is up; import it from the app.`);
     // The workspace survived the failed import, so the run still ends done, with the workspace on the account.
-    expect(f.text()).toContain("Done. Golden v1 is sealed; wsp up starts the app.");
+    expect(f.text()).toContain("Done. Golden v1 is sealed; wsp up opens the app.");
   });
 });
 

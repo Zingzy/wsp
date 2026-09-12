@@ -179,6 +179,16 @@
       "wait": "k=places-table"
     },
     {
+      "name": "settings-account",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row"
+      ],
+      "wait": "k=account-state"
+    },
+    {
       "name": "add-computer",
       "at": "/",
       "steps": [

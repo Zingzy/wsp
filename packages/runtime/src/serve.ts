@@ -11,6 +11,8 @@ import type { IncomingMessage, Server as HttpServer } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
 import {
+  ACCOUNT_TICKET_REFUSAL,
+  ACCOUNT_UNSERVED,
   DEVICES_TICKET_REFUSAL,
   DEVICE_REVOKE_REFUSAL,
   HOST_STOPPING_CLOSE,
@@ -31,6 +33,7 @@ import {
   WorkspaceListing,
   WorkspaceOut,
   threadOpRefusal,
+  type AccountView,
   type DeviceView,
   type ExecEvent,
   type SealedImage,
@@ -76,6 +79,9 @@ export interface ServeOptions {
   /** Where paired computers and their unspent codes are kept; without it the pairing ops are refused and the host
    * token is the only way in. */
   devices?: DeviceDoor;
+  /** How the host reads the account it is signed in to; without it account.get is refused, since the runtime keeps
+   * no records of its own. */
+  account?: AccountDoor;
   ticketTtlMs?: number;
   pairTtlMs?: number;
   /** Injectable clock for ticket-expiry tests. */
@@ -99,6 +105,12 @@ export interface ServeOptions {
    * without it image.build is refused, since the runtime writes no recipe of its own. It reads this computer, so it
    * answers when the read is done. */
   copyRecipe?: (image: SealedImage) => Promise<GoldenRecipe>;
+}
+
+/** How the runtime asks the host who this wsp is signed in to. The host owns the records; the runtime owns who may
+ * read them. */
+export interface AccountDoor {
+  read(): Promise<AccountView>;
 }
 
 /** How the runtime asks the host for the door computers a person owns dial. The host owns the listener; the runtime
@@ -504,6 +516,18 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, ...added });
               return;
             }
+            case "account.get": {
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: ACCOUNT_TICKET_REFUSAL });
+                return;
+              }
+              if (opts.account === undefined) {
+                send({ id: msg.id, ok: false, error: ACCOUNT_UNSERVED });
+                return;
+              }
+              send({ id: msg.id, ok: true, account: await opts.account.read() });
+              return;
+            }
             case "devices.list":
               if (!ownRoad()) {
                 send({ id: msg.id, ok: false, error: DEVICES_TICKET_REFUSAL });
@@ -885,7 +909,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, setup: await init().get() });
               return;
             case "init.keys":
-              send({ id: msg.id, ok: true, setup: await init().keys({ ...(msg.solari !== undefined ? { solari: msg.solari } : {}), ...(msg.rows !== undefined ? { rows: msg.rows } : {}) }) });
+              send({ id: msg.id, ok: true, setup: await init().keys({ ...(msg.provider !== undefined ? { provider: msg.provider } : {}), ...(msg.key !== undefined ? { key: msg.key } : {}), ...(msg.rows !== undefined ? { rows: msg.rows } : {}) }) });
               return;
             case "init.start":
               send({ id: msg.id, ok: true, job: await init().start({ road: msg.road, ...(msg.harness !== undefined ? { harness: msg.harness } : {}) }) });

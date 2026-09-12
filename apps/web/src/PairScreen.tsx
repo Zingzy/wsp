@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // What a page from a host beyond this computer shows before it can dial
-// anything: the one time code the person read off wsp pair on the host, and
+// anything: the one time code the person read off wsp host pair on the host, and
 // the token it buys, kept in this browser. One input, one button and one error
 // line: nothing here has a host to read a theme, a font or a workspace from.
 import { useState, type FormEvent } from "react";
@@ -10,7 +10,7 @@ import { Input } from "./components/ui/input";
 import { Label } from "./components/ui/label";
 
 export const PAIR_HEADING = "Pair this browser";
-const PAIR_HINT = "Run wsp pair on the computer the host runs on and type the code it prints.";
+const PAIR_HINT = "Run wsp host pair on the computer the host runs on and type the code it prints.";
 
 export function PairScreen({ onRedeem }: { onRedeem: (code: string) => Promise<void> }) {
   const [code, setCode] = useState("");

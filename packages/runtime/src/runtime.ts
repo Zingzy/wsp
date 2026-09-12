@@ -199,7 +199,7 @@ import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./
 import { PlaceAbsentError, PlaceBackend, isPlaceAbsent, parsePlaceMachineId, placeMachineId } from "@wsp/engine";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
-import { assertTokenShape, rotateDaemonToken } from "./daemon-token.js";
+import { assertTokenShape, daemonTokenPathOf, rotateDaemonToken } from "./daemon-token.js";
 import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy } from "./idle.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import { POLL_INTERVAL_MS, createStatusTracker, machineStateOf, phaseLeavingGone, providerSaid, type StatusApi, type StatusListOptions, type StatusWatchOptions } from "./status.js";
@@ -494,7 +494,7 @@ export interface HostTerminalConfig {
  * serves its ops and relays its events beside its own, as it does the host's forwards. */
 export interface InitDoor {
   get(): Promise<InitSetup>;
-  keys(keys: { solari?: string; rows?: Record<string, string> }): Promise<InitSetup>;
+  keys(keys: { provider?: string; key?: string; rows?: Record<string, string> }): Promise<InitSetup>;
   start(o: { road: InitRoad; harness?: string }): Promise<InitJob>;
   answer(o: { screen: InitScreenId; ticks?: string[]; answers?: Record<string, string> }): Promise<InitJob>;
   step(o: { at: number }): Promise<InitJob>;
@@ -2303,6 +2303,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       store,
       devices: deviceDoor,
       wiring,
+      // A thunk: the provider table is built below this, and the door reads it only when a line asks where a fork
+      // can land.
+      providers: () => places,
       now: () => clock.now(),
       onStage: event => bus.emit(event),
       ...(opts.placeJoinWaitMs !== undefined ? { joinWaitMs: opts.placeJoinWaitMs } : {}),
@@ -2401,7 +2404,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const daemonTokenOf = async (machine: Machine, path?: string): Promise<string | undefined> => {
     const cached = daemonTokens.get(machine.id);
     if (cached && (cached.hasDaemon || Date.now() - cached.at < DAEMON_TOKEN_MISS_TTL_MS)) return cached.hasDaemon ? daemonToken : undefined;
-    const hasDaemon = await rotateDaemonToken(machine, daemonToken, path);
+    const hasDaemon = await rotateDaemonToken(machine, daemonToken, daemonTokenPathOf(machine, path));
     daemonTokens.set(machine.id, { hasDaemon, at: Date.now() });
     return hasDaemon ? daemonToken : undefined;
   };

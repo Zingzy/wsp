@@ -59,7 +59,7 @@ import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
 import { aimName, aimedHost, wspHome, type HostAim, type HostPick } from "./hosts.js";
 import { joinedAlready, placeFilePath, placeKeyPath, placeLogPath, placeLogin, placeReport, readPlaceFile, stopPlaceService, sweepPlace, writePlaceFile, wspArgvOf } from "./place-report.js";
-import { PROVIDER_ENV, addedBy, addedProviders, providerBackendFor, providerModule, type ProviderEnv } from "./providers.js";
+import { PROVIDER_ENV, addedBy, addedProviders, isPlace, placeIdOf, providerBackendFor, providerModule, type ProviderEnv } from "./providers.js";
 import { publicHostname } from "./relay-link.js";
 import { pairOnLoopbackLine, reachAddresses } from "./pairing.js";
 import {
@@ -120,10 +120,11 @@ export function placeWiring(statePath: string, env: ProviderEnv): PlaceWiring {
     install: placeInstaller(),
     provider: () => {
       const module = providerModule(env);
-      // A row that answers for no way of being added is no place to show: a host set up to fork nowhere has none.
-      if (addedBy(module) === undefined) return undefined;
+      // A row that is nowhere work can stand is no place to show: a host set up to fork nowhere has none. The row
+      // wears the word its own machines wear, so a stand-in serving a fixture shows the cloud it is standing in for.
+      if (!isPlace(module, env)) return undefined;
       const { pricing } = providerBackendFor(env);
-      return { id: module.id, rateUsdPerHour: pricing.rateUsdPerHour(pricing.defaultSize) };
+      return { id: placeIdOf(module, env), rateUsdPerHour: pricing.rateUsdPerHour(pricing.defaultSize) };
     },
     hostName: hostNameHere,
     // This computer under the name a person would type for it, and what it is off the same read a place sends about
@@ -187,8 +188,8 @@ export const ADD_LOOPBACK_REFUSAL =
  * the device, and a remove takes the place alone: the token is still good until somebody hands it back, from the
  * joined computer's own leave or from here. */
 export const deviceLeftLine = (name: string, deviceIds: readonly string[]): string => {
-  // One command per id: wsp devices revoke takes exactly one, so a line joining them would be a line that refuses.
-  const revoke = deviceIds.map(id => `wsp devices revoke ${id}`).join(", ");
+  // One command per id: wsp host devices revoke takes exactly one, so a line joining them would be a line that refuses.
+  const revoke = deviceIds.map(id => `wsp host devices revoke ${id}`).join(", ");
   const one = deviceIds.length === 1;
   return `${name} still holds ${one ? "a token" : `${deviceIds.length} tokens`} for this wsp, which its own window signs in with; ${revoke} take${one ? "s it" : " them"} back.`;
 };
@@ -320,7 +321,7 @@ export interface PlaceOpts extends HostPick {
 }
 
 /** Handing out a join code and taking a place back out happen at the host's own terminal and nowhere else, the same
- * rule wsp pair and wsp devices read. */
+ * rule wsp host pair and wsp host devices read. */
 function aimHere(word: string, opts: PlaceOpts): HostAim {
   const aim = aimedHost(opts.statePath, opts);
   if (aim.kind !== "here") {

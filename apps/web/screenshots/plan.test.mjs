@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { threadId } from "./fixture-state.mjs";
+import { fixtureState, threadId } from "./fixture-state.mjs";
 import { indexMarkdown, readSurfaces, selectorFor, shotName, shotPlan, stepFor } from "./plan.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -115,6 +115,31 @@ describe("the folder a run leaves", () => {
   });
 });
 
+describe("every row the surfaces list aims at", () => {
+  const SURFACES = JSON.parse(readFileSync(join(HERE, "surfaces.json"), "utf8")).surfaces;
+
+  it("is a row the fixture that surface is served from really holds", () => {
+    // The list names a workspace, a thread and a joined computer by id, and a fixture that stopped holding one
+    // photographs a click that lands on nothing. Read here rather than in a browser, so a fixture reshaped for
+    // one reason cannot quietly cost a shot.
+    for (const surface of SURFACES) {
+      const state = fixtureState(surface.fixture ?? "mac-in-use");
+      const threads = new Set(Object.values(state.sessions).flatMap(doc => doc.sessions.map(row => row.threadId)));
+      for (const step of surface.steps ?? []) {
+        const word = step.includes(":") && !step.startsWith("row-id=") && !step.startsWith("place-row=") ? step.slice(step.indexOf(":") + 1) : step;
+        const held = word.startsWith("row-id=ws:")
+          ? state.workspaces[word.slice("row-id=ws:".length)] !== undefined
+          : word.startsWith("row-id=thread:")
+            ? threads.has(threadId(word.slice("row-id=thread:".length)))
+            : word.startsWith("place-row=")
+              ? (state.places ?? {})[word.slice("place-row=".length)] !== undefined
+              : true;
+        expect([surface.name, word, held]).toEqual([surface.name, word, true]);
+      }
+    }
+  });
+});
+
 describe("a surface that names its own fixture", () => {
   it("carries the name onto every shot, and says so in the index", () => {
     const read = list([{ name: "image", at: "/", fixture: "image-built" }]);
@@ -149,6 +174,7 @@ describe("the surfaces list this repo ships", () => {
       "composer-folder",
       "composer-folder-refused",
       "settings-where",
+      "settings-account",
       "add-computer",
       "settings-image-fresh",
       "settings-image-built",

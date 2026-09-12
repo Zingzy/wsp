@@ -8,8 +8,7 @@ import type { Readable, Writable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { INSTRUCTIONS } from "./skill.js";
-import type { HostPick } from "./hosts.js";
-import { VERBS, dialHost, hasTool, toolFailure, toolName, type HostClient, type VerbDeps } from "./verbs.js";
+import { VERBS, dialHost, hasTool, toolFailure, toolName, type DialOpts, type HostClient, type VerbDeps } from "./verbs.js";
 import { VERSION } from "./version.js";
 
 export interface Dialer {
@@ -20,7 +19,7 @@ export interface Dialer {
 /** One socket to the host across tool calls, dropped when it closes so the next call dials again. Which host that
  * is comes from the same reading the command line takes, so `wsp mcp --host <alias>` serves the tools against the
  * host on another computer that alias names. */
-export function dialer(statePath: string, pick: HostPick = {}): Dialer {
+export function dialer(statePath: string, pick: DialOpts = {}): Dialer {
   let client: Promise<HostClient> | undefined;
   const dial = (): Promise<HostClient> =>
     (client ??= dialHost(statePath, pick).then(
@@ -45,9 +44,13 @@ export function dialer(statePath: string, pick: HostPick = {}): Dialer {
 }
 
 /** Which host the tools go to, off the words the server was started with: the same reading the command line takes. */
-const pickOf = (opts: { env: VerbDeps["env"]; host?: string }): HostPick => ({ env: opts.env, ...(opts.host !== undefined ? { host: opts.host } : {}) });
+const pickOf = (opts: { env: VerbDeps["env"]; host?: string; start?: VerbDeps["start"] }): DialOpts => ({
+  env: opts.env,
+  ...(opts.host !== undefined ? { host: opts.host } : {}),
+  ...(opts.start !== undefined ? { start: opts.start } : {}),
+});
 
-export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: VerbDeps["alsoHere"]; cwd?: string; env: VerbDeps["env"]; host?: string }): McpServer {
+export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: VerbDeps["alsoHere"]; cwd?: string; env: VerbDeps["env"]; host?: string; start?: VerbDeps["start"] }): McpServer {
   const server = new McpServer({ name: "wsp", version: VERSION }, { instructions: INSTRUCTIONS });
   const deps: VerbDeps = { statePath, env: opts.env, client: opts.dial ?? dialer(statePath, pickOf(opts)), ...(opts.alsoHere !== undefined ? { alsoHere: opts.alsoHere } : {}), ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}) };
   for (const verb of VERBS) {
@@ -58,7 +61,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: V
 }
 
 /** The server on stdio until the agent is done with it: its stdin ending closes the transport, and the host socket with it. */
-export async function serveMcp(statePath: string, opts: { alsoHere?: VerbDeps["alsoHere"]; cwd?: string; env: VerbDeps["env"]; host?: string }, streams: { input: Readable; output: Writable } = { input: process.stdin, output: process.stdout }): Promise<void> {
+export async function serveMcp(statePath: string, opts: { alsoHere?: VerbDeps["alsoHere"]; cwd?: string; env: VerbDeps["env"]; host?: string; start?: VerbDeps["start"] }, streams: { input: Readable; output: Writable } = { input: process.stdin, output: process.stdout }): Promise<void> {
   const dial = dialer(statePath, pickOf(opts));
   const server = mcpServer(statePath, { dial, ...opts });
   const transport = new StdioServerTransport(streams.input, streams.output);

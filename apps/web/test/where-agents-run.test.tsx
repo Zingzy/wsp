@@ -5,7 +5,7 @@
 // event stream.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CODE_EXPIRED_LINE, CODE_GOOD_LINE, DEFAULT_PREFERENCES, PLACES_WORDS, doorPortHeldLine, placeAddSheetWord, type EventUnion, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
+import { CODE_EXPIRED_LINE, CODE_GOOD_LINE, DEFAULT_PREFERENCES, PLACES_WORDS, doorPortHeldLine, placeAddSheetWord, type EventUnion, type PlaceDoorView, type PlaceView, type WorkspaceView } from "@wsp/protocol";
 import { makeApi, ProtocolClient, type Api, type InstallStage, type SshLogin } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { AddComputerSheet } from "../src/settings/AddComputerSheet.js";
@@ -91,12 +91,21 @@ afterEach(() => {
   cleanup();
 });
 
+const ascii: PlaceView = { id: "box", kind: "provider", name: "box", default: false, shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 40 * 1024 ** 3, rateUsdPerHour: 0.018 };
+
+/** The workspaces the app holds, as the sidebar lists them: this computer's own, a fork at the provider, and the
+ * one workspace a joined computer is. */
+const workspace = (id: string, kind: WorkspaceView["kind"], machineId: string): WorkspaceView => ({ id, name: id, kind, machineId, phase: "running", golden: "", createdAt: "2026-09-11T00:00:00.000Z" });
+const mine = workspace("ws_a", "local", "local");
+const onLaptop = workspace("ws_b", "place", "place:p_1");
+const fork = (id: string): WorkspaceView => workspace(id, "cloud", `fk_${id}`);
+
 /** The four facts of a row; a row that can be acted on carries a fifth cell for its menu. */
 const cells = (row: HTMLElement): string[] => within(row).getAllByRole("cell").slice(0, 4).map(c => c.textContent ?? "");
 
 describe("Where agents run", () => {
   it("lists this computer first with its size and disk, and says how long a computer that is not answering has been away, once", () => {
-    useStore.setState({ places: [here, laptop] });
+    useStore.setState({ places: [here, laptop], workspaces: [mine, onLaptop] });
     render(<WhereAgentsRun now={NOW} />);
     const rows = screen.getAllByRole("row").slice(1);
     expect(cells(rows[0]!)[0]).toContain("This Mac");
@@ -112,6 +121,16 @@ describe("Where agents run", () => {
     expect(cells(rows[1]!).slice(1)).toEqual(["4 cores · 8 GB".replace(/ /g, " "), "91 GB", "1 · agents only"]);
     // The whole sentence rides the row's title, so the table and the sidebar row say one thing.
     expect(rows[1]!.getAttribute("title")).toBe("old-macbook is not answering; it connects on its own when it is on");
+  });
+
+  it("counts the workspaces standing on each row off the list the sidebar shows, not off the row", () => {
+    // This Mac's own workspace and the forks at a provider are recorded on no row at all, so a cell read off the
+    // row said 0 under Workspaces while the sidebar showed three.
+    useStore.setState({ places: [{ ...here, workspaceId: undefined }, ascii], workspaces: [mine, fork("ws_x"), fork("ws_y")] });
+    render(<WhereAgentsRun now={NOW} />);
+    const rows = screen.getAllByRole("row").slice(1);
+    expect(cells(rows[0]!)[3]).toBe("1 · agents only");
+    expect(cells(rows[1]!)[3]).toBe("2");
   });
 
   it("keeps the default mark beside the name and the state word in the slot, so a default that is away says both", () => {

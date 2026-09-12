@@ -166,7 +166,7 @@ describe("the tick taken", () => {
     const refused = async (): Promise<WorkspaceView> => { throw new Error("one local workspace per host"); };
     expect(await runLocal({ createLocalWorkspace: refused }, output)).toBeUndefined();
     expect(said.join("")).toContain("this computer was not made a workspace: one local workspace per host");
-    expect(said.join("")).toContain("wsp new --local");
+    expect(said.join("")).toContain("wsp new <name> --on it");
   });
 });
 

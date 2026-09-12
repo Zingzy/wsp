@@ -43,6 +43,7 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
   const select = useStore(s => s.select);
   const openSettings = useStore(s => s.openSettings);
   const openAddComputer = useStore(s => s.openAddComputer);
+  const openConnectProvider = useStore(s => s.openConnectProvider);
   const createLocalWorkspace = useStore(s => s.createLocalWorkspace);
   // One local workspace per host: the row the section registry gives says whether a pick makes it or goes to it.
   const hasLocal = workspaces.some(w => isLocalWorkspace(w));
@@ -83,8 +84,9 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
       newLocalWorkspace: () => void createLocalWorkspace(),
       openSettings,
       openAddComputer,
+      openConnectProvider,
     }),
-    [createLocalWorkspace, openAddComputer, openSettings, select, setSidebarMode, toggleRightPanel, toggleSidebar],
+    [createLocalWorkspace, openAddComputer, openConnectProvider, openSettings, select, setSidebarMode, toggleRightPanel, toggleSidebar],
   );
   const items = useMemo(
     () => buildPaletteItems({ projects, selectedId, query, canCreate: api !== null, hasLocal, labs, sidebarMode, handlers, verbs }),

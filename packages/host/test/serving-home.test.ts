@@ -2,7 +2,7 @@
 // Which home a line works on when it names none. The reading has two
 // spellings, one for this computer and one in sh for a box answering over
 // ssh before any wsp of its own has run, so every case here is put to both
-// and they have to agree: the desktop's probe and the box's own wsp pair
+// and they have to agree: the desktop's probe and the box's own wsp host pair
 // cannot pick different homes.
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -108,7 +108,7 @@ describe("the home this computer's host serves", () => {
     writeFileSync(join(cwd, ".env"), "SOLARI_API_KEY=slr_live_fake\n");
     expect(defaultStatePath(cwd, {})).toBe(join(cwd, ".wsp", "state.json"));
 
-    // The two readings above are the only lines that pick a state, so wsp pair, wsp devices and every other verb
+    // The two readings above are the only lines that pick a state, so wsp host pair, wsp host devices and every other verb
     // or command that names no --state comes through this one rule.
     const source = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8");
     const calls = source

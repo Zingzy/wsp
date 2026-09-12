@@ -13,7 +13,7 @@ import type { CliIO } from "../src/cli.js";
 import { connectCommand } from "../src/connect.js";
 import { dialWindowMs, readHost } from "../src/hosts.js";
 import { startConnector, type Connector } from "../src/connector.js";
-import { publicHostname, readRelayClient, readRelayRecord, relayCommand, relayHostUrl, relayRecordPath, startRelay, type RelayDeps } from "../src/relay-link.js";
+import { accountHere, publicHostname, readRelayClient, readRelayRecord, relayCommand, relayHostUrl, relayRecordPath, startRelay, type RelayDeps } from "../src/relay-link.js";
 import { CLOUDFLARED } from "../src/connector.js";
 import type { DialOpts, HostClient } from "../src/verbs.js";
 
@@ -56,6 +56,8 @@ interface FakeRelay {
   pending: number;
   /** What the tunnel route answers; a hostname of null is a relay with no zone. */
   tunnel: { tunnelToken: string | null; hostname: string | null; why?: string };
+  /** What the approval says about who approved it; empty for a relay from before it named one. */
+  login: { login?: string };
   hosts: { id: string; name: string; hostname: string | null }[];
   clients: { id: string; name: string; thisOne: boolean }[];
   /** Called as each request arrives, for a test that cares what was already true by then. */
@@ -68,7 +70,7 @@ interface FakeRelay {
 const isQuickTunnel = (name: string): boolean => /^[a-z0-9-]+\.trycloudflare\.com$/i.test(name);
 
 async function fakeRelay(): Promise<FakeRelay> {
-  const state: FakeRelay = { url: "", calls: [], pending: 1, tunnel: { tunnelToken: null, hostname: null, why: "this relay has no zone" }, hosts: [], clients: [] };
+  const state: FakeRelay = { url: "", calls: [], pending: 1, login: { login: "zingzy" }, tunnel: { tunnelToken: null, hostname: null, why: "this relay has no zone" }, hosts: [], clients: [] };
   const server = createServer((req, res) => {
     void (async () => {
       const chunks: Buffer[] = [];
@@ -96,7 +98,7 @@ async function fakeRelay(): Promise<FakeRelay> {
         const started = state.calls.filter(c => c.line === "POST /link/start").at(-1);
         const kind = started?.body["kind"];
         const name = String(started?.body["name"] ?? "");
-        return send(200, kind === "client" ? { state: "approved", token: "client-token", name } : { state: "approved", token: "host-token", hostId: "hbox1", name });
+        return send(200, kind === "client" ? { state: "approved", token: "client-token", name, ...state.login } : { state: "approved", token: "host-token", hostId: "hbox1", name, ...state.login });
       }
       if (line === "POST /hosts/hbox1/tunnel") return send(200, state.tunnel);
       if (line === "POST /hosts/hbox1/heartbeat") {
@@ -177,7 +179,7 @@ function box(): { statePath: string; dir: string; home: string } {
   return { statePath: join(dir, "state.json"), dir, home: tempDir("relay-home") };
 }
 
-describe("wsp relay link", () => {
+describe("wsp host link", () => {
   it("prints the code and the page, waits for the approval and keeps the token where only this user reads it", async () => {
     const relay = await fakeRelay();
     const { statePath, home, dir } = box();
@@ -256,7 +258,7 @@ describe("a linked box starting up", () => {
     const hostname = await up.hostname();
     expect(publicHostname(statePath)).toBe(hostname);
 
-    // wsp status and wsp pair read this: with the connector stopped, the name in the record serves nothing.
+    // wsp status and wsp host pair read this: with the connector stopped, the name in the record serves nothing.
     await up.close();
     expect(publicHostname(statePath)).toBeUndefined();
   });
@@ -310,7 +312,7 @@ describe("a linked box starting up", () => {
 
     relay.pending = 1;
     const listed: string[] = [];
-    expect(await relayCommand(io(listed), { statePath, home }, ["hosts", relay.url], {}, deps(dir))).toBe(0);
+    expect(await relayCommand(io(listed), { statePath, home }, ["linked", relay.url], {}, deps(dir))).toBe(0);
     expect(listed.join("\n")).toContain("https://name-2.trycloudflare.com");
     expect(listed.join("\n")).not.toContain("name-1.trycloudflare.com");
   });
@@ -388,7 +390,7 @@ describe("a linked box starting up", () => {
   });
 });
 
-describe("wsp relay unlink", () => {
+describe("wsp host unlink", () => {
   it("takes the host off the relay, stops the connector it started and forgets the token", async () => {
     const relay = await fakeRelay();
     const { statePath, home, dir } = box();
@@ -428,7 +430,7 @@ describe("wsp relay unlink", () => {
 
   it("says there is nothing to unlink on a box that never linked", async () => {
     const { statePath, home, dir } = box();
-    await expect(relayCommand(io(), { statePath, home }, ["unlink"], {}, deps(dir))).rejects.toThrow(/relay link/);
+    await expect(relayCommand(io(), { statePath, home }, ["unlink"], {}, deps(dir))).rejects.toThrow(/wsp host link/);
   });
 });
 
@@ -441,7 +443,7 @@ describe("the person's own client", () => {
     ];
     const { statePath, home, dir } = box();
     const log: string[] = [];
-    expect(await relayCommand(io(log), { statePath, home }, ["hosts", relay.url], {}, deps(dir))).toBe(0);
+    expect(await relayCommand(io(log), { statePath, home }, ["linked", relay.url], {}, deps(dir))).toBe(0);
 
     expect(readRelayClient(home)).toMatchObject({ relayUrl: relay.url, token: "client-token" });
     expect(statSync(join(home, "relay-client.json")).mode & 0o777).toBe(0o600);
@@ -452,7 +454,7 @@ describe("the person's own client", () => {
 
     const before = relay.calls.length;
     relay.pending = 1;
-    await relayCommand(io(), { statePath, home }, ["hosts"], {}, deps(dir));
+    await relayCommand(io(), { statePath, home }, ["linked"], {}, deps(dir));
     // The second listing signs in again for nothing if the token is not kept.
     expect(relay.calls.slice(before).map(c => c.line)).toEqual(["GET /hosts"]);
   });
@@ -465,7 +467,7 @@ describe("the person's own client", () => {
     const statePath = join(dir, "state.json");
     await relayCommand(io(), { statePath, home: dir }, ["link", relay.url], {}, deps(dir));
     relay.pending = 1;
-    await relayCommand(io(), { statePath, home: dir }, ["hosts", relay.url], {}, deps(dir));
+    await relayCommand(io(), { statePath, home: dir }, ["linked", relay.url], {}, deps(dir));
 
     expect(readRelayRecord(statePath)!.token).toBe("host-token");
     expect(readRelayClient(dir)!.token).toBe("client-token");
@@ -476,18 +478,18 @@ describe("the person's own client", () => {
     const relay = await fakeRelay();
     const other = await fakeRelay();
     const { statePath, home, dir } = box();
-    await relayCommand(io(), { statePath, home }, ["hosts", relay.url], {}, deps(dir));
-    await expect(relayCommand(io(), { statePath, home }, ["hosts", other.url], {}, deps(dir))).rejects.toThrow(relay.url);
+    await relayCommand(io(), { statePath, home }, ["linked", relay.url], {}, deps(dir));
+    await expect(relayCommand(io(), { statePath, home }, ["linked", other.url], {}, deps(dir))).rejects.toThrow(relay.url);
     expect(readRelayClient(home)!.relayUrl).toBe(relay.url);
   });
 
   it("says to sign in again when the relay has taken this computer's sign-in away", async () => {
     const relay = await fakeRelay();
     const { statePath, home, dir } = box();
-    await relayCommand(io(), { statePath, home }, ["hosts", relay.url], {}, deps(dir));
-    relay.refuse = { status: 401, error: "this computer's sign-in was taken away; run wsp relay hosts <url> to sign in again" };
+    await relayCommand(io(), { statePath, home }, ["linked", relay.url], {}, deps(dir));
+    relay.refuse = { status: 401, error: "this computer's sign-in was taken away; run wsp host linked <url> to sign in again" };
     const err: string[] = [];
-    await expect(relayCommand(io([], err), { statePath, home }, ["hosts"], {}, deps(dir))).rejects.toThrow(/sign in again/);
+    await expect(relayCommand(io([], err), { statePath, home }, ["linked"], {}, deps(dir))).rejects.toThrow(/sign in again/);
   });
 
   it("lists the computers signed in to the relay and takes one away", async () => {
@@ -497,7 +499,7 @@ describe("the person's own client", () => {
       { id: "c2", name: "the laptop", thisOne: false },
     ];
     const { statePath, home, dir } = box();
-    await relayCommand(io(), { statePath, home }, ["hosts", relay.url], {}, deps(dir));
+    await relayCommand(io(), { statePath, home }, ["linked", relay.url], {}, deps(dir));
     const log: string[] = [];
     expect(await relayCommand(io(log), { statePath, home }, ["clients"], {}, deps(dir))).toBe(0);
     expect(log.join("\n")).toContain("the Mac");
@@ -508,11 +510,11 @@ describe("the person's own client", () => {
     expect(relay.calls.some(c => c.line === "DELETE /clients/c2" && c.token === "client-token")).toBe(true);
   });
 
-  it("names a host's address for wsp connect, and says so when the relay has none for it", async () => {
+  it("names a host's address for wsp host connect, and says so when the relay has none for it", async () => {
     const relay = await fakeRelay();
     relay.hosts = [{ id: "hbox1", name: "box", hostname: "hbox1.boxes.example" }, { id: "hattic", name: "attic", hostname: null }];
     const { home, dir } = box();
-    await relayCommand(io(), { statePath: join(dir, "state.json"), home }, ["hosts", relay.url], {}, deps(dir));
+    await relayCommand(io(), { statePath: join(dir, "state.json"), home }, ["linked", relay.url], {}, deps(dir));
 
     expect(await relayHostUrl(home, "box", deps(dir))).toBe("https://hbox1.boxes.example");
     await expect(relayHostUrl(home, "attic", deps(dir))).rejects.toThrow(/attic/);
@@ -528,7 +530,7 @@ describe("the person's own client", () => {
   });
 });
 
-describe("wsp connect --relay", () => {
+describe("wsp host connect --relay", () => {
   /** A host that answers the redeem, so this test is about which address the dial was handed and nothing else. */
   const paired: HostClient = {
     request: (async () => ({})) as HostClient["request"],
@@ -545,7 +547,7 @@ describe("wsp connect --relay", () => {
     const relay = await fakeRelay();
     relay.hosts = [{ id: "hbox1", name: "box", hostname: "hbox1.boxes.example" }];
     const { statePath, home, dir } = box();
-    await relayCommand(io(), { statePath, home }, ["hosts", relay.url], {}, deps(dir));
+    await relayCommand(io(), { statePath, home }, ["linked", relay.url], {}, deps(dir));
 
     const dialled: DialOpts[] = [];
     const log: string[] = [];
@@ -579,5 +581,39 @@ describe("wsp connect --relay", () => {
         window: dialWindowMs,
       }),
     ).rejects.toThrow(/--relay/);
+  });
+});
+
+describe("who this wsp is signed in to", () => {
+  it("reads as no sign-in while neither record is on this computer, and on a host serving no state file", () => {
+    const { statePath, home } = box();
+    expect(accountHere(statePath, home)).toEqual({ signedIn: false });
+    // A bare path must not send the read at whatever relay.json the working folder holds.
+    expect(accountHere(undefined, home)).toEqual({ signedIn: false });
+    expect(accountHere("", home)).toEqual({ signedIn: false });
+  });
+
+  it("names the account the box was linked under", async () => {
+    const relay = await fakeRelay();
+    const { statePath, home, dir } = box();
+    await relayCommand(io(), { statePath, home }, ["link", relay.url], {}, deps(dir));
+    expect(accountHere(statePath, home)).toEqual({ signedIn: true, login: "zingzy" });
+  });
+
+  it("names the account this computer signed in under, a wsp home apart from the box's state", async () => {
+    const relay = await fakeRelay();
+    const { statePath, home, dir } = box();
+    await relayCommand(io(), { statePath, home }, ["linked", relay.url], {}, deps(dir));
+    expect(accountHere(statePath, home)).toEqual({ signedIn: true, login: "zingzy" });
+  });
+
+  it("says signed in with no name against a relay whose approval names no account", async () => {
+    // A relay from before the approval carried a login: the record is a sign-in all the same, and the row says so
+    // rather than reading as signed out.
+    const relay = await fakeRelay();
+    relay.login = {};
+    const { statePath, home, dir } = box();
+    await relayCommand(io(), { statePath, home }, ["link", relay.url], {}, deps(dir));
+    expect(accountHere(statePath, home)).toEqual({ signedIn: true });
   });
 });

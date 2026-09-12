@@ -221,7 +221,7 @@ describe("where a verb dials", () => {
     expect(hostAddress("/nowhere/state.json", { host: "box", env: {}, home })).toEqual({ url: `ws://box.local:4400${WS_PATH}`, token: "tok-d_box" });
   });
 
-  it("gives a url typed on the line no token, which is the road wsp connect takes and nothing else", () => {
+  it("gives a url typed on the line no token, which is the road wsp host connect takes and nothing else", () => {
     expect(hostAddress("/nowhere/state.json", { host: "http://127.0.0.1:14400", env: {}, home: tempDir("hosts-none") })).toEqual({
       url: `ws://127.0.0.1:14400${WS_PATH}`,
       token: "",
@@ -230,7 +230,7 @@ describe("where a verb dials", () => {
 
   it("refuses a state file no host serves in one sentence", () => {
     const gone = join(tempDir("hosts-empty"), "state.json");
-    expect(() => hostAddress(gone, { env: {}, home: tempDir("hosts-none") })).toThrow(`no wsp host is serving ${gone}; run wsp up first`);
+    expect(() => hostAddress(gone, { env: {}, home: tempDir("hosts-none") })).toThrow(`no wsp host is serving ${gone}`);
   });
 });
 

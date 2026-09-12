@@ -17,7 +17,7 @@ describe("the exit code every wsp verb answers with", () => {
     expect(exitClassOf(Object.assign(new Error("unauthorized"), { kind: "auth", status: 401 }))).toBe("auth");
     for (const kind of ["concurrency", "plan", "missing", "conflict", "exists", "transient", "unknown"]) expect(exitClassOf(Object.assign(new Error("no"), { kind })), kind).toBe("provider");
     expect(exitClassOf(new Error("Unknown option '--json'"))).toBe("provider");
-    expect(exitClassOf(new Error("no wsp host is serving /x; run wsp up first"))).toBe("provider");
+    expect(exitClassOf(new Error("no host answered for /x within 20.0s"))).toBe("provider");
     expect(exitClassOf("a string")).toBe("provider");
     expect(exitClassOf(undefined)).toBe("provider");
   });

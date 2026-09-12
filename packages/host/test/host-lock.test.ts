@@ -28,6 +28,7 @@ interface Lock {
   port: number;
   wsPort: number;
   startedAt: string;
+  startedBy?: "verb";
 }
 
 function readLock(path: string): Lock {
@@ -98,6 +99,13 @@ describe("serve takes host.lock next to the state file", () => {
     );
     // The loser must not take the winner's lock with it.
     expect(readLock(lockPath).port).toBe(first.port);
+    expect((await fetch(`http://127.0.0.1:${first.port}/`)).status).toBe(200);
+  });
+
+  it("names wsp down when the lock a second host meets was written by a host a verb started", async () => {
+    const first = await start();
+    writeFileSync(lockPath, JSON.stringify({ ...readLock(lockPath), startedBy: "verb" }));
+    await expect(start()).rejects.toThrow("wsp down stops it, or point --state at a different file.");
     expect((await fetch(`http://127.0.0.1:${first.port}/`)).status).toBe(200);
   });
 

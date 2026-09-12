@@ -1386,15 +1386,14 @@ export const PROVIDER_KEY_WORDS: Record<string, { keyName: string; keyConsole?: 
   solari: { keyName: "Solari API key", keyConsole: SOLARI_CONSOLE },
 };
 
-/** The quiet row at the sidebar's bottom while no golden is sealed, and every word of the modal it opens: the init
- * job drawn in the app. Micro-labels are the caps mono words over a screen, headlines the one sentence under them,
- * keycaps the one primary button each screen has. Nothing here asks the person to run a command. */
+/** Every word of the six screens that build the image, opened from Settings under the title the image section
+ * gives them. Micro-labels are the caps mono words over a screen, headlines the one sentence under them, keycaps
+ * the one primary button each screen has. Nothing here asks the person to run a command, and nothing here is a
+ * word for a computer or a provider: those are PLACES_WORDS. */
 export const CLOUD_SETUP_WORDS = {
-  row: "Set up cloud machines",
-  title: "Cloud machines",
   choice: {
-    headline: "Set up cloud machines",
-    top: "Your setup goes on one image, built once and copied for every workspace",
+    headline: "What goes on your image",
+    top: "What your agents need goes on one image, built once and copied for every workspace",
     manual: "Choose what goes on the image",
     agent: "Let an agent choose from your usage",
     agentWith: "with",
@@ -1485,7 +1484,8 @@ export const CLOUD_SETUP_WORDS = {
   agent: {
     headline: "Reading what your agents used",
     top: "Your agent reads this computer and writes the recipe the next screens start from",
-    title: "Set up cloud machines",
+    /** What the thread this road opens is called, which is what the sidebar's row for it reads. */
+    title: "Build your image",
     /** The link to the thread doing the work, which the sidebar focuses. */
     open: "Open the thread",
     /** The headline once the turn ended without the recipe, and the two ways on from there. */
@@ -1510,8 +1510,10 @@ export const CLOUD_SETUP_WORDS = {
   create: {
     /** Why a new cloud workspace is held back while the image is still being built; the stage count follows it. */
     building: "the image is still building",
-    /** The same where no image is sealed and no build runs, which is a computer the setup has not run on. */
-    none: "set up cloud machines first",
+    /** The same where no image is sealed and no build runs, which is a computer nothing has been built on. */
+    none: "build your image first",
+    /** The word beside that sentence, which opens the screens that build it. */
+    build: "Build your image",
     /** The word beside the building sentence, which opens the build the count is of. */
     open: "Open the build",
   },
@@ -1875,7 +1877,7 @@ export interface CloudCreateRefusal {
 export function cloudCreateRefusal(state: { hasGolden: boolean | null; job: Pick<InitJob, "phase" | "rows"> | null }): CloudCreateRefusal | null {
   if (state.hasGolden !== false) return null;
   const words = CLOUD_SETUP_WORDS.create;
-  if (state.job === null || !initJobBuilding(state.job.phase)) return { line: words.none, word: CLOUD_SETUP_WORDS.row };
+  if (state.job === null || !initJobBuilding(state.job.phase)) return { line: words.none, word: words.build };
   return { line: `${words.building} · ${initStageCountLine(initStageCount(initBuildRows(state.job.rows).rows))}`, word: words.open };
 }
 
@@ -1920,11 +1922,12 @@ export function initCostLine(size: WorkspaceSize, rateUsdPerHour: number): strin
 export function initSetupLines(setup: InitSetup): string[] {
   const held = (yes: boolean): string => (yes ? CLOUD_SETUP_WORDS.keys.saved : CLOUD_SETUP_WORDS.keys.unset);
   const agents = setup.agents.length === 0 ? "none found" : setup.agents.map(a => (a.configured ? `${a.name} (${MCP_ADDED_WORD})` : a.name)).join(", ");
-  const lines = [`Solari key: ${held(setup.keys.solari)}`, `Agents here: ${agents}`];
+  const keys = Object.entries(setup.keys).map(([provider, yes]) => `${PROVIDER_KEY_WORDS[provider]?.keyName ?? provider}: ${held(yes)}`);
+  const lines = [...keys, `Agents here: ${agents}`];
   if (setup.pricing !== null) lines.push(initCostLine(setup.pricing.size, setup.pricing.rateUsdPerHour));
   const job = setup.job;
   if (job === null) {
-    lines.push("No setup is running; the app's sidebar row starts one.");
+    lines.push("No setup is running; the app's Image section starts one.");
     return lines;
   }
   lines.push(`Setup on the ${job.road} road: ${initProgressLine(job)}${job.error !== undefined ? ` (${job.error})` : ""}`);
@@ -2091,7 +2094,7 @@ export function noKindLine(kind: string): string {
  * from it, and the dial that records a workspace refuses a machine that names none, so a record without one is one
  * to make again rather than one to guess a folder for. */
 export function noMachineHomeLine(name: string): string {
-  return `${name} carries no home folder for its machine; record it again with wsp new --ssh`;
+  return `${name} carries no home folder for its machine; add that computer again with wsp add user@host`;
 }
 
 /** What the roads that need a daemon are refused with on a machine reached over ssh before one is on it: the
@@ -2911,7 +2914,7 @@ export const HOST_WORDS = {
     portPlaceholder: "22",
     keycap: "Connect",
     cancel: "Cancel",
-    directNote: "The app pairs with the host at this address, with the code wsp pair printed on that computer, and opens it.",
+    directNote: "The app pairs with the host at this address, with the code wsp host pair printed on that computer, and opens it.",
     sshNote: "The app logs in over ssh, starts wsp there when nothing serves, forwards its port to this computer and pairs.",
     /** Why Connect is held, as its tooltip. */
     fillFirst: "type the address and the code first",
@@ -2929,11 +2932,11 @@ export function offlineFor(ms: number): string {
 
 /** The Workspaces cell of that table: how many stand on the computer, and the one thing about it that changes what
  * a person may put there. Whether the computer is answering is not one of them: the state slot beside its name
- * carries that, and a row that said it twice was a row that said it in two wordings. */
-export function placeWorkspacesCell(view: PlaceView): string {
-  const count = view.workspaceId === undefined ? 0 : 1;
-  if (count === 0) return "0";
-  return view.docker === true ? `${count}` : `${count} · agents only`;
+ * carries that, and a row that said it twice was a row that said it in two wordings. The count is what the caller
+ * reads off the workspace list, never off the row: a row carries at most the one workspace its join recorded, so
+ * this computer's own workspace and a provider's forks are on neither. */
+export function placeWorkspacesCell(view: PlaceView, count: number): string {
+  return view.docker === true || view.kind === "provider" ? `${count}` : `${count} · agents only`;
 }
 
 /** The one line that takes wsp off a computer it is typed on. */
@@ -2945,12 +2948,10 @@ export const PLACES_WORDS = {
   columns: ["Computer", "Size", "Disk free", "Workspaces"],
   addComputer: "Add a computer",
   connectProvider: "Connect a provider",
-  /** Why Connect a provider is held: the sheet behind it belongs to the image and provider work. */
-  connectProviderHeld: "arrives with the provider sheet",
   sheet: {
     title: "Add a computer",
     description: "A computer you own runs threads for your wsp. It connects to this Mac over your network. You open nothing on it.",
-    appRoad: "On that computer, open wsp and press This Mac joins another wsp. Type these.",
+    appRoad: 'On that computer, open wsp and press "This Mac joins another wsp". Type these.',
     address: "Address",
     code: "Code",
     waiting: "waiting for it to connect",

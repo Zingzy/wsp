@@ -9,9 +9,9 @@
 // step reads the key as dots with `saved` in its slot and Continue moves on
 // without asking; a quiet Change empties the field for a new one.
 //
-// Nothing here knows a provider by name: every word, price, ghost and key road
-// comes off the row in providers.ts, so a provider added tomorrow is a row
-// there and nothing else.
+// Nothing here knows a provider by name: every word, price and ghost comes off
+// the row in providers.ts and the key goes to the host under that row's own id,
+// so a provider added tomorrow is a row there and nothing else.
 import { ExternalLinkIcon } from "lucide-react";
 import { fmtMemGb, fmtRate, sizeWord, type Capabilities, type InitSetup } from "@wsp/protocol";
 import { useEffect, useState, type KeyboardEvent } from "react";
@@ -25,27 +25,26 @@ import { useStore } from "../protocol/store.js";
 import { requestNewWorkspace } from "../shell/shellRequests.js";
 import { CARD, FIELD_LABEL, LONE_FIELD, NAME, ROW, ROW_LINE, STATE_WORD } from "../sidebar/cloud-setup/rows.js";
 import { CONNECT_PROVIDER_WORDS } from "./format.js";
-import { keyConsoleOf, providerRows, type ProviderRow } from "./providers.js";
+import { keyConsoleOf, keyHeld, providerRows, type ProviderRow } from "./providers.js";
 import { PlaceTable } from "./PlaceTable.js";
 import { RefusalSlot, RoadLines } from "./sheetParts.js";
 
 const WORDS = CONNECT_PROVIDER_WORDS;
 
-/** What the provider said about the key last pressed: what happened, what to do about it, and whether pressing
- * again is worth anything, which is true of a check nothing answered and false of a key it refused. */
+/** What the provider said about the key last pressed: what happened and what to do about it. */
 export interface KeySaid {
   said: string;
   fix: string;
-  retry: boolean;
 }
 
-/** A refusal read as a person reads it. A provider that answered and said no is a key to change; anything that came
- * back with no answer from the provider at all is worth pressing again. */
+/** A refusal read as a person reads it: a provider that answered and said no is a key to change, and one that never
+ * answered is a road to try again. Either way the keycap says Try again, since either way the next press is the
+ * person's own move on this step. */
 export function keySaid(row: ProviderRow, e: unknown): KeySaid {
   const text = errorText(e);
   const status = /\b(401|403)\b/.exec(text);
-  if (status !== null) return { said: WORDS.refused(row.name, status[1]!), fix: WORDS.refusedFix(row.name), retry: false };
-  return { said: WORDS.unreached(row.name), fix: WORDS.unreachedFix, retry: true };
+  if (status !== null) return { said: WORDS.refused(row.name, status[1]!), fix: WORDS.refusedFix(row.name) };
+  return { said: WORDS.unreached(row.name), fix: WORDS.unreachedFix };
 }
 
 export function ConnectProviderSheet({ open, onOpenChange, rows = providerRows() }: { open: boolean; onOpenChange: (open: boolean) => void; rows?: readonly ProviderRow[] }) {
@@ -77,9 +76,8 @@ export function ConnectProviderSheet({ open, onOpenChange, rows = providerRows()
   if (picked === undefined) return null;
 
   // A key this computer already holds, which the sheet shows as dots until Change empties the field for a new one.
-  const kept = setup !== null && picked.held?.(setup) === true && !changing;
-  const noRoad = picked.save === undefined;
-  const held = kept ? undefined : key.trim() === "" ? WORDS.pasteFirst : noRoad ? WORDS.noRoad(picked.name) : undefined;
+  const kept = setup !== null && keyHeld(picked, setup) && !changing;
+  const held = kept || key.trim() !== "" ? undefined : WORDS.pasteFirst;
   const connected = (): void => {
     setAt("connected");
     void api?.capabilities().then(c => setOffers(c.sizes), () => setOffers([]));
@@ -89,10 +87,12 @@ export function ConnectProviderSheet({ open, onOpenChange, rows = providerRows()
       connected();
       return;
     }
-    if (held !== undefined || busy || picked.save === undefined || api === null) return;
+    if (held !== undefined || busy || api?.initKeys === undefined) return;
     setBusy(true);
     setSaid(null);
-    picked.save(api, key.trim()).then(
+    // The host puts the key to the provider before it writes it, so a key that provider refuses never lands and
+    // what it said comes back as this call's own refusal.
+    api.initKeys({ provider: picked.id, key: key.trim() }).then(
       () => {
         setBusy(false);
         connected();
@@ -147,9 +147,11 @@ export function ConnectProviderSheet({ open, onOpenChange, rows = providerRows()
                   {WORDS.back}
                 </Button>
                 {/* A key being saved is busy rather than held, so the keycap keeps its accent while the provider
-                    answers; its reason, where it has one, is in the field's own slot. */}
-                <Button data-k="save" held={held !== undefined} disabled={busy} onClick={save}>
-                  {kept ? WORDS.continueWord : said?.retry === true ? WORDS.tryAgain : WORDS.save}
+                    answers and says what it is doing; its reason, where it has one, is in the field's own slot.
+                    The press itself is what holds a second send, since a button a person can still read as live
+                    must not take one. */}
+                <Button data-k="save" held={held !== undefined} onClick={save}>
+                  {kept ? WORDS.continueWord : busy ? WORDS.checking(picked.name) : said !== null ? WORDS.tryAgain : WORDS.save}
                 </Button>
               </>
             ) : null}

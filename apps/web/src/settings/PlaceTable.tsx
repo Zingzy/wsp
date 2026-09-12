@@ -7,8 +7,10 @@
 //
 // Every column word and every cell rule is the protocol's: PLACES_WORDS.columns,
 // fmtSize, fmtBytes, absentOf and placeWorkspacesCell, so the app and the
-// command line read one table. The head is the shipped TableHead's own style,
-// which is a tier above the zone label over the section.
+// command line read one table. How many workspaces stand on a row is the
+// caller's to count, since only the app holds the workspace list a count is read
+// off. The head is the shipped TableHead's own style, which is a tier above the
+// zone label over the section.
 import type { ReactNode } from "react";
 import { PLACES_WORDS, fmtBytes, fmtSize, placeWorkspacesCell, type PlaceView } from "@wsp/protocol";
 import { Skeleton } from "../components/ui/skeleton.js";
@@ -52,7 +54,7 @@ export function PlaceTable({ children, menu = true, k = "places-table" }: { chil
 /** One computer or provider. The default mark rides beside the name and the state slot is the state's, so a
  * computer that is the default and is also away says both and no column moves when either word arrives.
  * The chevron, where the row opens, comes after them. */
-export function PlaceRow({ place, now, here = false, trail, menu, open, onToggle }: { place: PlaceView; now: number; /** Whether this is the computer the host runs on, which the list puts first. */ here?: boolean; /** The chevron after the state word, where the row opens. */ trail?: ReactNode; menu?: ReactNode; open?: boolean; onToggle?: () => void }) {
+export function PlaceRow({ place, now, workspaces = 0, here = false, trail, menu, open, onToggle }: { place: PlaceView; now: number; /** How many workspaces stand on this row, counted off the app's own list by placeWorkspaceCounts. */ workspaces?: number; /** Whether this is the computer the host runs on, which the list puts first. */ here?: boolean; /** The chevron after the state word, where the row opens. */ trail?: ReactNode; menu?: ReactNode; open?: boolean; onToggle?: () => void }) {
   const name = placeName(place, here);
   // The one reading of a computer that is not answering, which the sidebar row, the pane and the composer read
   // too: the slot beside the name holds the one word.
@@ -78,7 +80,7 @@ export function PlaceRow({ place, now, here = false, trail, menu, open, onToggle
       </TableCell>
       <TableCell className={CELL}>{place.shape === undefined ? <Waiting /> : fmtSize(place.shape, placeCpuWord(place))}</TableCell>
       <TableCell className={cn(CELL, "text-right")}>{place.diskFreeBytes === undefined ? <Waiting right /> : fmtBytes(place.diskFreeBytes)}</TableCell>
-      <TableCell className={CELL}>{place.shape === undefined ? <Waiting /> : placeWorkspacesCell(place)}</TableCell>
+      <TableCell className={CELL}>{place.shape === undefined ? <Waiting /> : placeWorkspacesCell(place, workspaces)}</TableCell>
       {menu === undefined ? null : <TableCell className="text-right">{menu}</TableCell>}
     </TableRow>
   );

@@ -15,7 +15,7 @@ import { defaultHomeIn, homeNamed } from "./serving-home.js";
 /** The address predicate has one home in the protocol; the command line's callers read it from here. */
 export { isUrl };
 
-/** What this computer keeps about a host on another one: the address a person gave wsp connect, the device the host
+/** What this computer keeps about a host on another one: the address a person gave wsp host connect, the device the host
  * minted for this computer and the token that names it. The token opens the host, so the file is the person's own. */
 export interface HostRecord {
   url: string;
@@ -37,7 +37,7 @@ export interface SshLogin {
   port?: number;
 }
 
-/** One connected host as wsp hosts prints it: never the token, which no listing has any use for. */
+/** One connected host as wsp host list prints it: never the token, which no listing has any use for. */
 export interface HostEntry {
   alias: string;
   url: string;
@@ -76,7 +76,7 @@ const ALIAS = new RegExp(`^[${ALIAS_FIRST}][${ALIAS_CHARS}]{0,${ALIAS_MAX - 1}}$
 const aliasOk = (alias: string): boolean => ALIAS.test(alias) && !alias.includes("..");
 
 /** The alias itself, or the refusal for a word that could never be one. Every road that writes a name reads it
- * here, and `wsp connect` reads it before the dial that spends a code, so a name it would refuse costs nothing. */
+ * here, and `wsp host connect` reads it before the dial that spends a code, so a name it would refuse costs nothing. */
 export function checkedAlias(alias: string): string {
   if (!aliasOk(alias)) throw usageRefusal(`${JSON.stringify(alias)} is not a host alias.`, `A name is letters, digits, dots, dashes and underscores, opens with a letter or a digit, and is at most ${ALIAS_MAX} characters.`);
   return alias;
@@ -177,7 +177,7 @@ export function setDefaultHost(home: string, alias: string): void {
 export { wsUrlOf } from "@wsp/protocol";
 
 /** Which host a line runs against: the host on this computer, an alias this computer paired with, or an address
- * typed on the line, which carries no token and is only a road for wsp connect. */
+ * typed on the line, which carries no token and is only a road for wsp host connect. */
 export type HostAim = { kind: "here" } | { kind: "alias"; alias: string; record: HostRecord } | { kind: "url"; url: string; token?: string };
 
 /** An aim at a host on another computer: what a reading that takes the name a line gave hands back, since only the
@@ -196,18 +196,18 @@ export interface HostPick {
 export function noSuchHostLine(alias: string, home: string): string {
   const known = listHosts(home).map(h => h.alias);
   const has = known.length === 0 ? "this computer is paired with none" : `this computer is paired with ${known.join(", ")}`;
-  return `no host named ${alias} is connected; ${has}, and wsp connect <url> --code <code> adds one.`;
+  return `no host named ${alias} is connected; ${has}, and wsp host connect <url> --code <code> adds one.`;
 }
 
 /** What the person reads when a line names an address where an alias goes. An address carries no token, and only
  * the redeem of a pairing code can make one, so every other verb wants the name that redeem gave the host. */
 export function addressNotPairedLine(url: string): string {
-  return `--host takes the name of a host this computer is paired with; ${url} is an address, so run wsp connect ${url} --code <code> with a code from wsp pair on it first.`;
+  return `--host takes the name of a host this computer is paired with; ${url} is an address, so run wsp host connect ${url} --code <code> with a code from wsp host pair on it first.`;
 }
 
 /** What the person reads when a host answered the socket and refused the token this computer holds. */
 export function deviceRefusedLine(alias: string, url: string): string {
-  return `the host ${alias} refused this computer's token, which it has taken away; run wsp pair on ${url} and wsp connect ${url} --code <code> --name ${alias} to pair again.`;
+  return `the host ${alias} refused this computer's token, which it has taken away; run wsp host pair on ${url} and wsp host connect ${url} --code <code> --name ${alias} to pair again.`;
 }
 
 /** What the person reads when a host did not answer at all. Private on purpose: the stamped refusal below is the
@@ -252,7 +252,7 @@ export const HOST_SIDE_ACCESS = "Handing out access is the one thing a paired co
 
 /** What the person reads when a line that runs at the host's own terminal is aimed at one on another computer: the
  * thing it does happens over there and nowhere else, so there is no road from here to there. Every way a line is
- * aimed reads the same, whether a --host flag, WSP_HOST or the default alias wsp hosts marks did the aiming. */
+ * aimed reads the same, whether a --host flag, WSP_HOST or the default alias wsp host list marks did the aiming. */
 export function hostSideOnlyLine(word: string, where: string): string {
   return `wsp ${word} runs on the computer the host runs on, and this line is aimed at ${where}.`;
 }
@@ -297,13 +297,13 @@ export function aimedHost(statePath: string, pick: HostPick = {}): HostAim {
 
 function aimAt(named: string, home: string, env: Readonly<Record<string, string | undefined>>): AimElsewhere {
   // An address with a token beside it in this environment is a host this line may drive; one without is only the
-  // road wsp connect takes, since nothing else on this computer holds a token for it.
+  // road wsp host connect takes, since nothing else on this computer holds a token for it.
   if (isUrl(named)) {
     const carried = hostFromEnv(env);
     return { kind: "url", url: named, ...(carried?.url === named ? { token: carried.token } : {}) };
   }
   const record = readHost(home, named);
-  if (record === undefined) throw usageRefusal(noSuchHostLine(named, home), "Run wsp hosts to read the names this computer knows.");
+  if (record === undefined) throw usageRefusal(noSuchHostLine(named, home), "Run wsp host list to read the names this computer knows.");
   return { kind: "alias", alias: named, record };
 }
 

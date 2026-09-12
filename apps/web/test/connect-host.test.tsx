@@ -98,7 +98,7 @@ describe("the connect sheet", () => {
   });
 
   it("a refusal lands under the field it is about, in the host's words, and the sheet stays", async () => {
-    const bridge = fakeBridge({ connectHost: vi.fn(async () => ({ ok: false as const, at: "code" as const, error: "that pairing code is not one this host is waiting for; run wsp pair on the host for a fresh one" })) });
+    const bridge = fakeBridge({ connectHost: vi.fn(async () => ({ ok: false as const, at: "code" as const, error: "that pairing code is not one this host is waiting for; run wsp host pair on the host for a fresh one" })) });
     const onClose = vi.fn();
     render(<ConnectHostSheet onClose={onClose} />);
     fireEvent.change(field(HOST_WORDS.sheet.address), { target: { value: "http://127.0.0.1:14400" } });

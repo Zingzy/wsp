@@ -86,7 +86,7 @@ async function redeem(port: number, code: string): Promise<{ deviceToken?: strin
   return reply as { deviceToken?: string; error?: string };
 }
 
-/** A code, minted the way wsp pair does: over a socket holding the host's own token. */
+/** A code, minted the way wsp host pair does: over a socket holding the host's own token. */
 async function pairCode(wsPort: number, token: string): Promise<string> {
   const ws = new WebSocket(`ws://127.0.0.1:${wsPort}`);
   await new Promise<void>((done, fail) => {
@@ -202,7 +202,7 @@ describe("the address every reading names", () => {
   });
 
   it("says once, as it starts, that the page is now reachable and pairing is the gate", () => {
-    expect(listenBeyondLoopbackLine("0.0.0.0")).toContain("wsp pair");
+    expect(listenBeyondLoopbackLine("0.0.0.0")).toContain("wsp host pair");
   });
 });
 
@@ -248,7 +248,7 @@ describe("the probe wsp status and wsp up --service wait on", () => {
 });
 
 describe("the lock the host writes", () => {
-  it("records the address it bound so wsp status and wsp pair read it back", async () => {
+  it("records the address it bound so wsp status and wsp host pair read it back", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-listen-state-"));
     dirs.push(dir);
     const statePath = join(dir, "state.json");

@@ -36,7 +36,7 @@ export async function checkSetup(opts: SetupOptions): Promise<Setup> {
   return { ready: false };
 }
 
-/** The first launch's last step: this computer recorded as the one local workspace, the road wsp new --local takes,
+/** The first launch's last step: this computer recorded as the one local workspace, the road wsp new --on it takes,
  * over a runtime the window then serves. With or without a provider key: the cloud is what a person adds later, and
  * adding it never blocks what they have. A record already there is the one kept. */
 export async function recordThisComputer(opts: SetupOptions): Promise<{ runtime: Runtime; workspace: WorkspaceView }> {

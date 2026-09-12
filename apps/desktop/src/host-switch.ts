@@ -2,8 +2,8 @@
 // The window moves between hosts. The app's own host is one session and every
 // saved host another; whichever the window is on is what the origin gate on
 // every bridge call reads, so a page from anywhere else is answered nothing.
-// The hosts are the hosts file wsp connect writes, read and written through
-// the one module the command line uses, so wsp hosts and the Hosts menu are one
+// The hosts are the hosts file wsp host connect writes, read and written through
+// the one module the command line uses, so wsp host list and the Hosts menu are one
 // list. The app's own host is never stopped by a move: a person who comes back
 // finds it as they left it. A road to a host is one entry in ROADS: how it is
 // opened the first time, how a saved one is reached again, and what it holds
@@ -85,7 +85,7 @@ const isAuth = (e: unknown): boolean => (e as { kind?: unknown }).kind === "auth
 const failed = (at: FieldAt, e: unknown): Refusal => ({ ok: false, at, error: text(e) });
 
 const ADDRESS_LINE = `the address starts with http:// or https://, like ${HOST_WORDS.sheet.addressPlaceholder}`;
-const CODE_LINE = `a pairing code is ${PAIR_CODE_LENGTH} characters; wsp pair on that computer prints one`;
+const CODE_LINE = `a pairing code is ${PAIR_CODE_LENGTH} characters; wsp host pair on that computer prints one`;
 const LOGIN_LINE = `the login is ${HOST_WORDS.sheet.loginPlaceholder}, as ssh takes it`;
 const NO_SSH_LINE = "this app has no ssh road";
 
@@ -187,10 +187,10 @@ export function hostSwitcher(deps: SwitcherDeps): HostSwitcher {
       if (held !== undefined) return held;
       try {
         const opened = await road.open(ask);
-        // The same road wsp connect takes, so the record is the one wsp hosts lists and wsp disconnect takes away.
+        // The same road wsp host connect takes, so the record is the one wsp host list lists and wsp host forget takes away.
         await connect(io, opts, { code: opened.code, name: opened.alias }, [opened.url]);
         const record = readHost(deps.home, opened.alias);
-        if (record === undefined) throw new Error(`wsp connect wrote no record for ${opened.alias}`);
+        if (record === undefined) throw new Error(`wsp host connect wrote no record for ${opened.alias}`);
         const remembered: HostRecord = { ...record, label: opened.label, road: opened.road, ...(opened.ssh !== undefined ? { ssh: opened.ssh } : {}) };
         writeHost(deps.home, opened.alias, remembered);
         await moveTo(sessionOf(opened.alias, remembered, opened.url));

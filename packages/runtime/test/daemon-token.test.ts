@@ -1,9 +1,28 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
-import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, assertTokenShape, rotateDaemonTokenScript, writeDaemonTokenScript } from "../src/daemon-token.js";
+import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, assertTokenShape, daemonTokenPathOf, rotateDaemonTokenScript, writeDaemonTokenScript } from "../src/daemon-token.js";
+import type { Machine } from "@wsp/engine";
 
 const TOKEN = "0123456789abcdef".repeat(3);
+
+describe("where a machine's daemon token is written", () => {
+  const machine = (daemonTokenPath?: string): Machine => ({ id: "m1", daemonTokenPath } as unknown as Machine);
+
+  it("takes the machine's own file where it names one, whatever road asked, and the road's otherwise", () => {
+    // A stand-in machine's guest is a folder on the computer asking, and a shell there cannot write under the root
+    // of a Linux machine that does not exist. One road asked for the guest's path on such a machine, found no
+    // token, and every other road read that miss for a minute: the terminal, the files and the live readings all
+    // said the machine had not answered.
+    expect(daemonTokenPathOf(machine("/tmp/stand-in/m1/.wsp-daemon-token"), DAEMON_TOKEN_PATH)).toBe("/tmp/stand-in/m1/.wsp-daemon-token");
+    expect(daemonTokenPathOf(machine("/tmp/stand-in/m1/.wsp-daemon-token"))).toBe("/tmp/stand-in/m1/.wsp-daemon-token");
+    // A machine that names none is every machine wsp forks and every one it reaches over ssh: the road decides.
+    expect(daemonTokenPathOf(machine(), DAEMON_TOKEN_PATH)).toBe(DAEMON_TOKEN_PATH);
+    expect(daemonTokenPathOf(machine(), "/home/dev/.wsp/daemon-token")).toBe("/home/dev/.wsp/daemon-token");
+    // Nothing asked and nothing named leaves the rotation's own default standing.
+    expect(daemonTokenPathOf(machine())).toBeUndefined();
+  });
+});
 
 describe("daemon token scripts", () => {
   it("write the token only inside a NAME='value' assignment, owner-readable, replaced whole", () => {

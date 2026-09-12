@@ -209,6 +209,19 @@ describe("command palette", () => {
     expect(useStore.getState().addComputerOpen).toBe(true);
   });
 
+  it("carries Connect a provider beside it, and reaches it by what it costs rather than the word provider", async () => {
+    await mountShell();
+    mod("k");
+    await waitFor(() => expect(palette()).not.toBeNull());
+    expect(inPalette().getByText(PLACES_WORDS.connectProvider)).toBeTruthy();
+    fireEvent.change(screen.getByPlaceholderText(/Search commands/), { target: { value: "cost" } });
+    await waitFor(() => expect(inPalette().queryByText(PLACES_WORDS.addComputer)).toBeNull());
+    fireEvent.click(inPalette().getByText(PLACES_WORDS.connectProvider));
+    await waitFor(() => expect(palette()).toBeNull());
+    expect(useStore.getState().settingsOpen).toBe(true);
+    expect(useStore.getState().connectProviderOpen).toBe(true);
+  });
+
   it("filters by query and switches workspace from a row", async () => {
     await mountShell();
     mod("k");
