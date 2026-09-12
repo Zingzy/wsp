@@ -126,6 +126,8 @@ describe("the surfaces list this repo ships", () => {
       "sidebar",
       "workspace",
       "composer-thread",
+      "composer-slash-menu",
+      "composer-slash-filtered",
       "machine",
       "cloud-setup",
       "spawned-thread",

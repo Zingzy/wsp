@@ -800,8 +800,13 @@ export function takesMcpServers(catalog: Pick<HarnessCatalog, "mcpServers"> | nu
   return catalog?.mcpServers === true;
 }
 
+/** Whatever carries a harness's screen-only commands: the catalog itself, or a caller that holds the list alone. */
+export interface ScreenCommandsHolder {
+  readonly screenCommands?: ReadonlyArray<ScreenCommand>;
+}
+
 /** The commands of this harness that work only in its CLI's own terminal; none for a catalog from before the field. */
-export function screenCommandsOf(catalog: Pick<HarnessCatalog, "screenCommands"> | null | undefined): ReadonlyArray<ScreenCommand> {
+export function screenCommandsOf(catalog: ScreenCommandsHolder | null | undefined): ReadonlyArray<ScreenCommand> {
   return catalog?.screenCommands ?? NO_SCREEN_COMMANDS;
 }
 
@@ -809,7 +814,7 @@ const NO_SCREEN_COMMANDS: ReadonlyArray<ScreenCommand> = [];
 
 /** The screen-only command a message would hand the CLI, or null. Only a slash that opens the whole message is a
  * command to the CLI; anywhere else it reads the words as text, so this reads the first word alone. */
-export function screenCommandTyped(catalog: Pick<HarnessCatalog, "screenCommands"> | null | undefined, prompt: string): ScreenCommand | null {
+export function screenCommandTyped(catalog: ScreenCommandsHolder | null | undefined, prompt: string): ScreenCommand | null {
   const name = /^\/(\S+)/.exec(prompt.trim())?.[1];
   if (name === undefined) return null;
   return screenCommandsOf(catalog).find(c => c.name === name) ?? null;
@@ -3927,7 +3932,7 @@ export { folderName, parentFolderName, placeDaemonPaths, placeOwnedPaths, rootsP
 export * from "./daemon-contract.js";
 export * from "./projects.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importDest, importRequest, registerRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
-export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";
+export { addressFromHash, appHash, workspaceHash, type AppAddress } from "./app-address.js";
 export * from "./app-ports.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";
