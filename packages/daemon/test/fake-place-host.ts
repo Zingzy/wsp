@@ -50,6 +50,8 @@ export interface FakeHost {
   dials: () => number;
   /** Every frame the place sent after the handshake, in order. */
   frames: Record<string, unknown>[];
+  /** Every place.prove the place sent, report and all. */
+  proofs: Record<string, unknown>[];
   /** The socket the place is holding, once it has proved. */
   socket: Promise<ServerSocket>;
   publicKey: string;
@@ -60,6 +62,7 @@ export async function fakePlaceHost(opts: { key?: PlacePair; wrongTranscript?: b
   const wss = new WebSocketServer({ host: "127.0.0.1", port: 0 });
   servers.push(wss);
   const frames: Record<string, unknown>[] = [];
+  const proofs: Record<string, unknown>[] = [];
   let dials = 0;
   let held!: (s: ServerSocket) => void;
   const socket = new Promise<ServerSocket>(done => (held = done));
@@ -83,6 +86,7 @@ export async function fakePlaceHost(opts: { key?: PlacePair; wrongTranscript?: b
         return;
       }
       if (frame["op"] === "place.prove") {
+        proofs.push(frame);
         ws.send(JSON.stringify({ id: frame["id"], ok: true }));
         held(ws);
         return;
@@ -91,7 +95,7 @@ export async function fakePlaceHost(opts: { key?: PlacePair; wrongTranscript?: b
     });
   });
   const port = await listening(wss);
-  return { url: `http://127.0.0.1:${port}`, dials: () => dials, frames, socket, publicKey: key.publicKey };
+  return { url: `http://127.0.0.1:${port}`, dials: () => dials, frames, proofs, socket, publicKey: key.publicKey };
 }
 
 /** The port a fresh server bound, once it has: address() answers null until the loop turns. */

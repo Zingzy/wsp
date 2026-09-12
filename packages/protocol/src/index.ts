@@ -2788,6 +2788,7 @@ const DAEMON_CONTENTS = [
   "0ad3a1c3e98d5b75bf94d610b9e166a7ad1bb5e79ee7ab4905d6b738fb5eded9",
   "01030623497a43f044916ca27731dbfa4c92c6b82765a9e9dbd6426d69b1ee4e",
   "a6ae68d8af502a8a5ecf9795ca11ca0b9b12cda2792e45eee3376c7e4d57917b",
+  "055dcf11b2a17e8959ab3a6246c2d17f89eb3837c59b31d3a8138c6dc7b6c322",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -2825,7 +2826,10 @@ const DAEMON_CONTENTS = [
  * module serves every other op instead of refusing to start. Version 18 finds that native module where a packaged
  * command carries it: the command bundles node-pty rather than requiring it, and a bundled CommonJS module arrives
  * with a default export and no named one, so a daemon running inside the packaged command opened no terminal at
- * all until this. */
+ * all until this. Version 20 takes every option as a flag,
+ * one per option, reads its ports, load, processes and pty modes off one /proc root, logs its samplers' starts and
+ * stops, and builds a place's report and sweep off the home it is pointed at, so a test suite drives it as a binary
+ * and the words and numbers it answers with are the protocol's, held in one fixture set. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the daemon's sources, the dependency
@@ -3903,7 +3907,8 @@ export {
   type Rgb,
   type ThemePreset,
 } from "./workspace-look.js";
-export { placeDaemonPaths, rootsPathIn, sshDaemonPaths, underProject, workFolderIn } from "./project-path.js";
+export { placeDaemonPaths, placeOwnedPaths, rootsPathIn, sshDaemonPaths, underProject, workFolderIn } from "./project-path.js";
+export * from "./daemon-contract.js";
 export * from "./projects.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importDest, importRequest, registerRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";

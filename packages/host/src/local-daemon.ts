@@ -10,9 +10,8 @@
 
 import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
-import { platform } from "node:os";
 import { join } from "node:path";
-import { portSourceFor, startDaemon, type DaemonHandle } from "@wsp/daemon";
+import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { connectDaemon, type DaemonReach } from "@wsp/runtime";
 // LOOPBACK is the protocol's, which every road that binds or dials this computer reads. Here the reason is also
 // that a firewall prompt on macOS or Windows is a wall a local workspace must never hit.
@@ -51,7 +50,7 @@ export class LocalDaemon {
     //
     // The kind is what picks the modules the Live rows and the Processes tab read: this computer answers for itself,
     // with os, df and ps, where a guest daemon reads the /proc a Mac does not have.
-    const handle = await startDaemon({ host: LOOPBACK, port: 0, token, kind: "local", root: opts.root, workFolder: opts.workFolder, inboxDir, rootsPath, portsSource: portSourceFor(platform()) });
+    const handle = await startDaemon({ host: LOOPBACK, port: 0, token, kind: "local", root: opts.root, workFolder: opts.workFolder, inboxDir, rootsPath });
     return new LocalDaemon(handle, token, opts.root);
   }
 

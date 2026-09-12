@@ -1,7 +1,7 @@
 [
   {
     "type": "inbox.file",
-    "path": "/root/inbox/a.png",
-    "bytes": 1024
+    "path": "/root/inbox/upload.bin",
+    "bytes": 64
   }
 ]

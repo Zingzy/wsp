@@ -2,19 +2,13 @@
   {
     "id": 1,
     "op": "place.auth",
-    "placeId": "pl_7"
+    "placeId": "p_ab12cd34"
   },
   {
     "id": 1,
     "op": "place.auth",
-    "placeId": "pl_7",
-    "nonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-  },
-  {
-    "id": 1,
-    "op": "place.auth",
-    "placeId": "pl_7",
-    "nonce": "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!="
+    "placeId": "p_ab12cd34",
+    "nonce": "short"
   },
   {
     "id": 1,
