@@ -8,9 +8,13 @@ import type { ThreadStatusPill } from "./Sidebar.logic";
 export function ThreadStatusLabel({
   status,
   compact = false,
+  word = true,
 }: {
   status: ThreadStatusPill;
   compact?: boolean;
+  /** False draws the dot alone at the same size, the word left to the hover text: a row whose place already says
+   * what the word would (a spawned row under the thread that opened it, while it works). */
+  word?: boolean;
 }) {
   if (compact) {
     return (
@@ -49,7 +53,7 @@ export function ThreadStatusLabel({
             status.pulse ? "animate-status-pulse" : ""
           }`}
         />
-        <span className="hidden md:inline">{status.label}</span>
+        {word ? <span className="hidden md:inline">{status.label}</span> : null}
       </TooltipTrigger>
       <TooltipPopup side="top">{status.label}</TooltipPopup>
     </Tooltip>
@@ -60,14 +64,14 @@ export function ThreadStatusLabel({
  * Non-interactive leading status for a thread row in compact contexts like
  * the sidebar and the command palette: the thread status dot.
  */
-export function ThreadRowLeadingStatus({ status }: { status: ThreadStatusPill | null }) {
+export function ThreadRowLeadingStatus({ status, word = true }: { status: ThreadStatusPill | null; word?: boolean }) {
   if (!status) {
     return null;
   }
 
   return (
     <span className="inline-flex shrink-0 items-center gap-1.5">
-      <ThreadStatusLabel status={status} />
+      <ThreadStatusLabel status={status} word={word} />
     </span>
   );
 }

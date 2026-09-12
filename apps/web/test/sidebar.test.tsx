@@ -5,7 +5,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DROP_A_FOLDER_LINE, FREE_WORD, PROVIDER_UNREACHED_LINE, exportFromLine, harmonyDots, importIntoLine, registerRequest, registeredLine, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceTheme, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DROP_A_FOLDER_LINE, FREE_WORD, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, exportFromLine, harmonyDots, importIntoLine, registerRequest, registeredLine, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceTheme, type WorkspaceView } from "@wsp/protocol";
 import { WORKSPACE_WORDS } from "../src/actions/format.js";
 import { onOpenCommandPalette } from "../src/commandPaletteBus.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
@@ -19,6 +19,7 @@ import { SWIPE_GAP_MS } from "../src/sidebar/spaceSwipe.js";
 import { glyphStateClass, leadDimClass } from "../src/sidebar/workspaceRows.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 import { caps } from "./caps.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 // The triggers keep their elements, and no popup mounts: this file focuses and
 // clicks the search row, and Base UI's positioning against jsdom's zero-size
@@ -75,7 +76,7 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     capabilities: vi.fn(async () => (caps())),
     startSession: vi.fn(async (o: { workspaceId: string }) => session("s_x", o.workspaceId)),
     portReach: vi.fn(async (_id: string, port: number) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: NOW + 3_600_000 })),
-    daemonReach: vi.fn(async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 })),
+    daemon: noDaemonApi,
     sessionHistory: vi.fn(async () => []),
     listSnapshots: vi.fn(async () => ({ name: "default", head: null, versions: [] })),
     snapshotStorage: async () => null,
@@ -248,10 +249,10 @@ describe("rows from the fixture wire", () => {
       expect(mark.nextElementSibling?.className).toContain("text-[var(--top-row-meta)]");
       return { label: provenance(title).getAttribute("aria-label"), text: provenance(title).textContent, mark: mark.getAttribute("data-harness-mark"), svg: mark.tagName, tone, size: [...mark.classList].find(c => c.startsWith("size-")) };
     };
-    expect(reads("fix the port list")).toEqual({ label: "Claude Code · cli", text: "cli", mark: "claude", svg: "svg", tone: "text-agent-claude", size: "size-[13px]" });
-    expect(reads("upgrade node")).toEqual({ label: "Codex · you", text: "you", mark: "codex", svg: "svg", tone: undefined, size: "size-[13px]" });
-    expect(reads("before provenance")).toEqual({ label: "Claude Code · you", text: "you", mark: "claude", svg: "svg", tone: "text-agent-claude", size: "size-[13px]" });
-    expect(reads("from the director")).toEqual({ label: "Claude Code · agent", text: "agent", mark: "claude", svg: "svg", tone: "text-agent-claude", size: "size-[13px]" });
+    expect(reads("fix the port list")).toEqual({ label: "Claude Code · cli", text: "·cli", mark: "claude", svg: "svg", tone: "text-agent-claude", size: "size-[13px]" });
+    expect(reads("upgrade node")).toEqual({ label: "Codex · you", text: "·you", mark: "codex", svg: "svg", tone: undefined, size: "size-[13px]" });
+    expect(reads("before provenance")).toEqual({ label: "Claude Code · you", text: "·you", mark: "claude", svg: "svg", tone: "text-agent-claude", size: "size-[13px]" });
+    expect(reads("from the director")).toEqual({ label: "Claude Code · agent", text: "·agent", mark: "claude", svg: "svg", tone: "text-agent-claude", size: "size-[13px]" });
     const line = provenance("fix the port list").closest<HTMLElement>("[data-thread-meta]")!;
     expect(line.className).toContain("font-mono");
     expect(line.className).toContain("text-[var(--top-row-meta)]");
@@ -273,14 +274,14 @@ describe("rows from the fixture wire", () => {
     );
     await waitFor(() => expect(screen.getByText("fix the port list")).toBeDefined());
     const provenance = (title: string): HTMLElement => rowOf(title).querySelector<HTMLElement>("[data-thread-provenance]")!;
-    const word = (title: string): HTMLElement | null => rowOf(title).querySelector<HTMLElement>("[data-thread-project]");
+    const word = (title: string): HTMLElement | null => rowOf(title).querySelector<HTMLElement>("[data-thread-word]");
     expect(word("fix the port list")!.textContent).toBe("spoo");
     expect(word("upgrade node")!.textContent).toBe("wsp");
-    expect(word("no project")).toBeNull();
+    expect(word("no project")!.textContent).toBe("you");
     // Mark, then the project, then who opened it: `✳ · spoo · cli`, the dots drawn as text and not as chips.
     expect(provenance("fix the port list").textContent).toBe("·spoo·cli");
     expect(provenance("fix the port list").getAttribute("aria-label")).toBe("Claude Code · spoo · cli");
-    expect(provenance("no project").textContent).toBe("you");
+    expect(provenance("no project").textContent).toBe("·you");
     expect(provenance("no project").getAttribute("aria-label")).toBe("Claude Code · you");
     const line = word("fix the port list")!.closest<HTMLElement>("[data-thread-meta]")!;
     expect(line.className).toContain("font-mono");
@@ -310,9 +311,9 @@ describe("rows from the fixture wire", () => {
     expect(title.nextElementSibling!.textContent).toBe("48m");
     const meta = rowOf(LONG).querySelector<HTMLElement>("[data-thread-meta]")!;
     expect(meta.contains(title)).toBe(false);
-    expect(meta.textContent).toBe("Working·you");
+    expect(meta.textContent).toBe("Working··you");
     expect(meta.className).toContain("font-mono");
-    expect(rowOf(SHORT).querySelector("[data-thread-meta]")!.textContent).toBe("cli");
+    expect(rowOf(SHORT).querySelector("[data-thread-meta]")!.textContent).toBe("·cli");
     expect(rowOf(SHORT).className).toBe(rowOf(LONG).className);
   });
 
@@ -497,7 +498,7 @@ describe("rows from the fixture wire", () => {
     expect(title("fix the port list").className).not.toContain("text-sidebar-muted-foreground");
   });
 
-  it("a workspace row's meta line is one mono line in a fixed order: cost today, rate, the edge note, the nap countdown last, whole in its title", async () => {
+  it("a workspace row's meta line is one mono line in a fixed order: cost today, the edge note, the nap countdown last, cut at the row's cap with the whole of it in its title", async () => {
     await mount(
       fakeApi(
         [API, WEB],
@@ -506,22 +507,23 @@ describe("rows from the fixture wire", () => {
       "api",
     );
     // The cost leads before the meter's first tick too: a paused row is never a blank line.
-    await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("$0.00 today · $0.110/hr · edge slow · naps in 14m"));
+    await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("$0.00 today · edge slow…"));
     expect(stateSlot(rowOf("api")).textContent).toBe("");
     expect(stateSlot(rowOf("web")).textContent).toBe("Paused");
     expect(metaOf(rowOf("web")).textContent).toBe("$0.00 today");
     act(() =>
       useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 120_000, accruedUsd: 0.29, at: new Date(NOW).toISOString() }),
     );
-    await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("$0.29 today · $0.110/hr · edge slow · naps in 14m"));
+    await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("$0.29 today · edge slow…"));
     const meta = metaOf(rowOf("api"));
-    expect(meta.getAttribute("title")).toBe(meta.textContent);
+    // What was cut is on the row's hover text whole, so nothing a person needs is only half said.
+    expect(meta.getAttribute("title")).toBe("$0.29 today · edge slow · naps in 14m");
     expect(meta.className).toContain("font-mono");
     expect(meta.className).toContain("truncate");
     // The whole line is one span: the width cuts it from the right, nothing decides what to leave out.
     expect(meta.children).toHaveLength(0);
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API) }));
-    await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("$0.29 today · $0.110/hr · active"));
+    await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("$0.29 today · active"));
   });
 
   it("every row leads with its kind's glyph and no state dot: the laptop for this computer, the cloud for a fork, green while the machine runs and muted otherwise; line two says what the machine is, line three what it costs, and the state is a word on the right", async () => {
@@ -563,7 +565,7 @@ describe("rows from the fixture wire", () => {
     expect(metaOf(rowOf("zingzy-mac")).textContent).toBe(FREE_WORD);
     expect(stateSlot(rowOf("zingzy-mac")).textContent).toBe("");
     // The cloud rows beside it: the spend, the countdown and the paused word all read in their own slots.
-    expect(metaOf(rowOf("api")).textContent).toBe("$0.00 today · $0.110/hr · naps in 14m");
+    expect(metaOf(rowOf("api")).textContent).toBe("$0.00 today · naps in 14m");
     expect(stateSlot(rowOf("web")).textContent).toBe("Paused");
     for (const name of ["zingzy-mac", "api", "web", "old"]) {
       expect(machineOf(rowOf(name)).className).toContain("font-mono");
@@ -1088,7 +1090,7 @@ describe("new workspace dialog", () => {
     const { input } = await openDialog();
     fireEvent.change(input, { target: { value: "gamma" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(rowOf("gamma").textContent).toMatch(/machine cap/i));
+    await waitFor(() => expect(rowOf("gamma").textContent).toMatch(/no more workspaces/i));
     expect(rowOf("gamma").getAttribute("aria-busy")).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(useStore.getState().toast).toBeNull();
@@ -1173,7 +1175,7 @@ describe("gone machines", () => {
     fireEvent.click(screen.getByRole("button", { name: "Forget old" }));
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog.textContent).toContain("Forget old?");
-    expect(dialog.textContent).toContain("Its record and 1 thread leave this computer; the machine is already gone.");
+    expect(dialog.textContent).toContain("Its record and 1 thread leave this computer; the computer it ran on is already gone.");
     expect(api.forget).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole("button", { name: "Forget" }));
     await waitFor(() => expect(api.forget).toHaveBeenCalledTimes(1));
@@ -1673,5 +1675,105 @@ describe("Spaces mode", () => {
     fireEvent.keyDown(typed, { key: "Enter" });
     await waitFor(() => expect(api.renameWorkspace).toHaveBeenCalledWith("ws_a", "renamed in spaces"));
     await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+  });
+});
+
+describe("a thread another thread's agent opened", () => {
+  it("names where it runs in the meta line's mono, drops the workspace it shares with the row above it, and stands without the word Working while it works", async () => {
+    const lead = session("s1", "ws_a", { prompt: "ship the search rewrite", startedBy: "person", threadId: "th_lead" });
+    await mount(
+      fakeApi(
+        [API],
+        // The provider the record carries is what the row names, never the id the provider minted for the machine.
+        [status(API, { machineId: "sb_9f2c1d8a", provider: "solari" })],
+        [
+          lead,
+          session("s2", "ws_a", { prompt: "write the migration", startedBy: "agent", threadId: "th_mig", parentThreadId: "th_lead" }),
+          session("s3", "ws_a", { status: "failed", prompt: "review the diff", startedBy: "agent", threadId: "th_rev", parentThreadId: "th_lead" }),
+        ],
+      ),
+      "api",
+    );
+    await waitFor(() => expect(screen.getByText("write the migration")).toBeDefined());
+    const meta = (title: string): HTMLElement => rowOf(title).querySelector<HTMLElement>("[data-thread-meta]")!;
+    // The workspace it runs in is the one it is drawn under, so the slot holds where that workspace runs and nothing else.
+    expect(meta("write the migration").textContent).toBe("··solari");
+    expect(meta("write the migration").className).toContain("font-mono");
+    // The dot alone says it works, the rule a workspace row already follows; a row that failed keeps its word.
+    expect(meta("write the migration").textContent).not.toContain("Working");
+    expect(meta("review the diff").textContent).toBe("Ended··solari");
+    // The opener word is dropped on a spawned row: the indent says an agent opened it. The row above keeps both.
+    expect(meta("write the migration").textContent).not.toContain("agent");
+    expect(meta("ship the search rewrite").textContent).toBe("Working··you");
+    expect(rowOf("write the migration").className).toContain("pl-5");
+    expect(rowOf("write the migration").querySelector("[data-thread-provenance]")!.getAttribute("aria-label")).toBe("Claude Code · solari");
+  });
+});
+
+describe("the row's third line", () => {
+  it("is cut at the sidebar's cap with the whole sentence on the row's hover text", async () => {
+    // A sentence the runtime writes, longer than the row's room: the cut is what keeps the half a person can act
+    // on from being decided by the width.
+    const note = "putting the helper back on this machine";
+    await mount(fakeApi([API], [status(API, { daemonNote: note })]), "api");
+    const line = () => metaOf(rowOf("api"));
+    await waitFor(() => expect(line().textContent).toBe("putting the helper back on…"));
+    expect(line().textContent!.length).toBeLessThanOrEqual(30);
+    expect(line().getAttribute("title")).toBe(note);
+    // A line inside the room is left whole, and its title is the same words.
+    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { vaultedAt: "2026-09-08T07:10:04.444Z", vaultRefused: "the export was 646 MB, over the 200 MB cap" }) }));
+    await waitFor(() => expect(line().textContent).toBe("no backup since 2026-09-08"));
+    expect(line().getAttribute("title")).toBe("no backup since 2026-09-08");
+  });
+});
+
+describe("a window on another computer while the wsp it shows is asleep", () => {
+  const served = (token: string | undefined) => {
+    (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 7788, wsPath: "/ws", paired: true, version: "0.0.0", ...(token === undefined ? {} : { token }) };
+  };
+
+  afterEach(() => {
+    delete (window as unknown as { __WSP__?: unknown }).__WSP__;
+  });
+
+  it("reads the asleep line under the search row in the prose mono, never as an alert, and only on a page the host did not serve on this computer", async () => {
+    served(undefined);
+    await mount(fakeApi([API], [status(API)]), "api");
+    expect(screen.queryByText(HOST_ASLEEP_LINE)).toBeNull();
+    act(() => useStore.getState().setConn("reconnecting"));
+    const line = await screen.findByText(HOST_ASLEEP_LINE);
+    expect(line.closest("[data-sidebar-search]")).not.toBeNull();
+    expect(line.className).toContain("font-mono");
+    expect(line.className).not.toMatch(/border|bg-|destructive|warning/);
+    expect(line.getAttribute("role")).toBeNull();
+    // The rows stay as they were last known: the workspaces are on their own computers and keep working.
+    expect(rowOf("api")).toBeDefined();
+    act(() => useStore.getState().setConn("live"));
+    await waitFor(() => expect(screen.queryByText(HOST_ASLEEP_LINE)).toBeNull());
+  });
+
+  it("the rows on the sleeping computer take no green and keep an empty state slot, while a workspace at a provider keeps the word it was last known by", async () => {
+    served(undefined);
+    const MAC = { ...view("ws_mac", "this Mac"), kind: "local" as const };
+    await mount(fakeApi([MAC, WEB], [status(MAC), status(WEB)]), "this Mac");
+    const glyph = (name: string) => [...rowOf(name).querySelector("[data-workspace-lead] svg")!.classList];
+    await waitFor(() => expect(glyph("this Mac")).toContain("text-success-foreground"));
+    act(() => useStore.getState().setConn("reconnecting"));
+    await screen.findByText(HOST_ASLEEP_LINE);
+    // Its computer is the one asleep, so nothing here knows what it is doing: no green, and no word in its slot.
+    expect(glyph("this Mac")).not.toContain("text-success-foreground");
+    expect(stateSlot(rowOf("this Mac")).textContent).toBe("");
+    // A workspace at a provider keeps running while that computer sleeps, so its row is left as it was.
+    expect(stateSlot(rowOf("web")).textContent).toBe("Paused");
+    act(() => useStore.getState().setConn("live"));
+    await waitFor(() => expect(glyph("this Mac")).toContain("text-success-foreground"));
+  });
+
+  it("says nothing of the kind on the computer the host runs on, where the page carries the host's own token", async () => {
+    served("t_local");
+    await mount(fakeApi([API], [status(API)]), "api");
+    act(() => useStore.getState().setConn("reconnecting"));
+    await waitFor(() => expect(useStore.getState().conn).toBe("reconnecting"));
+    expect(screen.queryByText(HOST_ASLEEP_LINE)).toBeNull();
   });
 });

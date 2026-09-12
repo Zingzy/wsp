@@ -191,14 +191,14 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { GUEST_WSP_BIN, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadWord, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct } from "@wsp/protocol";
-import { mcpServersBlocked, actionRefusal, copyIsCurrent, forksNoMachines, kindWords, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState, placeAbsentLine, placeDaemonPaths, placeNoPaneRoadLine, placeWorkspaceGoneLine, workFolderIn } from "@wsp/protocol";
+import { mcpServersBlocked, actionRefusal, copyIsCurrent, forksNoMachines, IDLE_REASON, kindWords, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState, placeAbsentLine, placeDaemonPaths, placeNoPaneRoadLine, placeWorkspaceGoneLine, workFolderIn } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
 import { PlaceBackend, parsePlaceMachineId, placeMachineId } from "@wsp/engine";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
 import { DAEMON_TOKEN_PATH, assertTokenShape, rotateDaemonToken } from "./daemon-token.js";
-import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy, idleReason } from "./idle.js";
+import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy } from "./idle.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import { POLL_INTERVAL_MS, createStatusTracker, machineStateOf, phaseLeavingGone, providerSaid, type StatusApi, type StatusListOptions, type StatusWatchOptions } from "./status.js";
 import { makeDevices, type DeviceDoor } from "./devices.js";
@@ -222,6 +222,10 @@ export interface HarnessAdapterContext {
    * harness at its store there. On the person's own computer it is their shell's, so a store variable is set only
    * where their shell sets it, and their login is the turn's login. */
   env: Readonly<Record<string, string>>;
+  /** wsp's half of a turn this workspace's agent refuses for want of a sign-in, from the one rule every door reads
+   * for how it is signed in: it differs between the person's own computer and a machine, which the adapter cannot
+   * know, so it is told the road from here rather than guessing one. */
+  signInRefusal: string;
 }
 
 /** What every machine wsp runs agents on tells them, cloud fork and ssh machine alike, and this computer never does:
@@ -1056,6 +1060,11 @@ export interface Runtime {
     get(id: string, origin?: Caller): Promise<WorkspaceView>;
     /** Every workspace this host holds, less the ones the caller's origin may not drive. */
     list(origin?: Caller): Promise<WorkspaceView[]>;
+    /** The workspace a name or an id names, off the reading list() serves: every verb that takes a workspace from a
+     * person or an agent comes through here, so what the listing shows and what a verb accepts are one thing. A name
+     * nothing here carries is refused as absent, and one the caller may not drive with the sentence of the rule that
+     * hides it rather than as missing. */
+    resolve(ref: string, origin?: Caller): Promise<WorkspaceView>;
     nap(id: string, origin?: Caller): Promise<WorkspaceView>;
     wake(id: string, origin?: Caller): Promise<WorkspaceView>;
     /** Stops a wake that is asking the provider again on its own, and answers with the record it leaves behind. The
@@ -2071,6 +2080,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (line !== undefined) throw new Error(line);
   };
   const drivesId = (workspaceId: string, caller: Caller | undefined): boolean => refusalFor(live.get(workspaceId)?.record, caller) === undefined;
+  /** Every workspace this host holds, as any door serves them: one a create has not finished is not there yet. */
+  const held = (): LiveWorkspace[] => [...live.values()].filter(e => !e.creating);
+  /** The workspaces this caller is served, which is the one reading behind the listings and behind resolving a name.
+   * Both lists a person meets are built here, so neither can drop a workspace the other keeps and no verb denies a
+   * name the listing just showed. */
+  const listedFor = (caller: Caller | undefined): LiveWorkspace[] => held().filter(e => refusalFor(e.record, caller) === undefined);
   /** Recording a machine that already exists is this computer's own act, whatever the kind takes once it is
    * recorded: the address and the key a record stands on are the person's to name, so a request relayed from a
    * machine is refused before anything is dialled and again where the record is written. */
@@ -2444,6 +2459,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return home !== undefined ? { home } : {};
   };
 
+  /** Which provider forked this workspace's machine, by the id the host's own registry gives the module it wired.
+   * One module is wired at a time, so that is the answer for every fork this host holds; a kind whose machine the
+   * person owns is forked by nobody and carries none. The day a record carries the provider its image came from,
+   * that record wins here. */
+  const providerOf = (r: WorkspaceRecord): string | undefined => (kindWords(r.kind).driven ? places.wired : undefined);
+
   const view = (r: WorkspaceRecord): WorkspaceView => ({
     ...((): { folder?: string } => {
       const folder = moduleOf(r.kind).folder(r);
@@ -2471,6 +2492,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     ...(agentsOf(r) !== undefined ? { agents: agentsOf(r)! } : {}),
     ...(r.parentThreadId !== undefined ? { parentThreadId: r.parentThreadId } : {}),
     ...(r.rootThreadId !== undefined ? { rootThreadId: r.rootThreadId } : {}),
+    ...(providerOf(r) !== undefined ? { provider: providerOf(r)! } : {}),
   });
 
   /** One fact of a workspace's look: a value sets it, null clears it back to none, and undefined leaves what the
@@ -3391,7 +3413,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
     onIdle: async (id, windowMs) => {
       try {
-        await napWith(id, idleReason(windowMs));
+        await napWith(id, IDLE_REASON.of(windowMs));
       } catch (e) {
         if (e instanceof MoveUnansweredError) throw e;
         // A machine the pause found gone settled its record on the way out; the gone event dropped this window.
@@ -3954,7 +3976,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async list(origin) {
       await ready();
-      return [...live.values()].filter(e => !e.creating && refusalFor(e.record, origin) === undefined).map(e => view(e.record));
+      return listedFor(origin).map(e => view(e.record));
+    },
+
+    async resolve(ref, origin) {
+      await ready();
+      const rows = held();
+      // A name names one workspace at most: the create and the rename both refuse a name another already holds.
+      const entry = rows.find(e => e.record.id === ref) ?? rows.find(e => e.record.name === ref);
+      if (entry === undefined) throw new Error(noWorkspaceRefusal(ref));
+      refuseRelayed(entry.record, origin);
+      return view(entry.record);
     },
 
     async nap(id, origin) {
@@ -4535,7 +4567,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const kind = moduleOf(entry.record.kind);
     return {
       harness,
-      adapter: factory({ machine: entry.machine, workspaceId: entry.record.id, execStream: execFactoryFor(entry), home: id => kind.home(entry, id), env: { ...kind.env(entry, harness), ...turnEnv } }),
+      adapter: factory({
+        machine: entry.machine,
+        workspaceId: entry.record.id,
+        execStream: execFactoryFor(entry),
+        home: id => kind.home(entry, id),
+        env: { ...kind.env(entry, harness), ...turnEnv },
+        signInRefusal: signInRefusalLine({ kind: entry.record.kind }),
+      }),
     };
   };
 
@@ -6510,7 +6549,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     store,
     records: async () => {
       await ready();
-      return [...live.values()].filter(e => !e.creating).map(e => ({
+      return held().map(e => ({
         ...view(e.record),
         size: e.record.size,
         // The rate follows the machine's kind: a local workspace's backend prices it at zero, so no cost line rides its row.
@@ -6636,7 +6675,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     preferences,
     status: {
       ...status,
-      list: async (o, origin) => (await status.list(o)).filter(row => drivesId(row.id, origin)),
+      // Which workspaces this caller is served is decided here, after the probes, off the same reading the other
+      // listing and every verb take: a record dropped while the probes ran leaves both lists at once, so nothing a
+      // person is shown is denied by the next line they type.
+      list: async (o, origin) => {
+        const rows = await status.list(o);
+        const shown = new Set(listedFor(origin).map(e => e.record.id));
+        return rows.filter(row => shown.has(row.id));
+      },
       // A cost read answers for a workspace this host no longer holds, so the origin rule is read off the record when
       // there is one rather than through entryOf, which refuses an id it does not know.
       history: async (workspaceId, origin) => {

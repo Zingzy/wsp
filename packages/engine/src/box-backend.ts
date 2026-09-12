@@ -10,7 +10,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { moveTimedOutLine, providerRoadRetryLine, shellQuote, type Capabilities } from "@wsp/protocol";
-import { MoveUnansweredError, ROAD_TRIES, backoffMs, classify, isMissing, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
+import { GuestUnusableError, MoveUnansweredError, ROAD_TRIES, backoffMs, classify, isMissing, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
 import { DAEMON_ENV_FILE, DEADLINE_EXIT, INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
 import { BUILDER_LABEL, CREATED_AT_LABEL, DOCTOR_LABEL, GOLDEN_LABEL, HOST_LABEL, NAME_LABEL, OWNER_LABEL, SMOKE_LABEL, WORKSPACE_LABEL, WSP_LABEL } from "./labels.js";
@@ -104,8 +104,21 @@ export const ENV_LANDING_MS = 60_000;
 
 /** PUT /files decodes at most this many bytes (measured 2026-09-11: 8 MB answered 400 box_direct_failed). */
 export const FILE_PUT_MAX = 5 * 1024 * 1024;
-/** The sync command endpoint's ceiling on one command, in seconds; a longer figure is refused with invalid_timeout. */
-export const COMMAND_TIMEOUT_MAX_S = 600;
+/** The longest one command may ask the sync endpoint for. The edge in front of it cuts a request at about 70 s
+ * (`Request timeout after 69998ms`, three sightings, 2026-09-11) whatever timeoutSeconds says, and the fetch cap
+ * adds 30 s of room for the round trip on top, so a command that stays inline is bounded here and anything longer
+ * runs detached on the guest instead. */
+export const BOX_INLINE_MAX_MS = 30_000;
+
+/** Whose machine a box is, in the words a person reads when the provider left one unusable. */
+const BOX_PROVIDER = "Box by ASCII";
+
+/** The dynamic loader's own wording for EMFILE, anchored to the two programs every command starts in, the shell and
+ * the sudo that wraps it: a child of a command that hits the limit prints the same line under its own name, and that
+ * is the command's failure, not the box's. On a box still streaming a large restore in, every open() of a shared
+ * library goes through the provider's lazy filesystem, and that process alone runs at the image's soft limit of 1024
+ * open files (read off a live box, 2026-09-12). */
+const LOADER_EMFILE = /^(bash|sudo): error while loading shared libraries: .*: Error 24/m;
 
 /** How a box's own state reads as a machine state. `error` is folded into gone: nothing runs on it again and the
  * runtime's road out of gone is a rebuild. */
@@ -265,6 +278,16 @@ function boxKind(e: WspError): WspError {
   if (e.kind !== "concurrency" && ((e.code !== undefined && CAP_CODES.has(e.code)) || CAP_WORDS.test(e.message))) return { ...e, kind: "concurrency" };
   return e;
 }
+
+/** Whether a refusal is the provider saying the box is not ready for this call yet. Its two restore codes say so in
+ * words; a gateway status says it by answering nothing at all, which a box that has just read ready does for its
+ * first minutes while its disk still streams in (measured 2026-09-11: a create that would have worked failed on
+ * three fast retries of a 502). A snapshot the provider could not take reads as its own kind and is not here. */
+const stillRestoring = (e: unknown): boolean => {
+  const { kind, code } = e as Partial<WspError>;
+  if (kind === "transient") return true;
+  return kind === "conflict" && (code === "box_restoring" || code === "box_starting");
+};
 
 function fail(e: WspError): never {
   throw Object.assign(new Error(e.message || `${e.kind} (${e.status})`), e);
@@ -439,17 +462,17 @@ export class BoxBackend implements MachineBackend {
     }
   }
 
-  /** Runs one call against a box that may still be taking its disk in: a refusal with box_restoring or box_starting
-   * is the provider saying not yet, and is asked again at the poll pace inside the restore budget; every other
-   * refusal is the caller's at once. */
-  async whileRestoring<T>(call: () => Promise<T>): Promise<T> {
+  /** Runs one call against a box that may still be taking its disk in: the provider's two restore refusals and a
+   * gateway answer are it saying not yet, and are asked again at the poll pace inside the restore budget; every
+   * other refusal is the caller's at once. `signal` ends the asking where its caller stopped waiting. */
+  async whileRestoring<T>(call: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     const started = this.clock.now();
     for (;;) {
+      if (signal?.aborted === true) throw signal.reason instanceof Error ? signal.reason : new Error("the call was stopped by its caller");
       try {
         return await call();
       } catch (e) {
-        const code = (e as Partial<WspError>).code;
-        if ((e as Partial<WspError>).kind !== "conflict" || (code !== "box_restoring" && code !== "box_starting")) throw e;
+        if (!stillRestoring(e)) throw e;
         if (this.clock.now() - started >= this.budgets.restoreMs) throw e;
         await this.clock.sleep(this.budgets.pollMs);
       }
@@ -485,6 +508,7 @@ export class BoxBackend implements MachineBackend {
     try {
       // Commands sent before ready run before the box is usable, so the handle is given back once it reads ready.
       const view = await this.settle(id, v => STATE_MAP[v.state] === "running", this.budgets.createMs, "create");
+      await machine.proveRoad();
       // A box deployed from a named snapshot is named after the snapshot, whatever the create asked (measured
       // 2026-09-11), and the name is where the labels live: it is set again once the box stands.
       if (view.name !== body.name) await this.request("PATCH", `/boxes/${encodeURIComponent(id)}`, { body: { name: body.name } });
@@ -660,17 +684,43 @@ export class BoxMachine implements Machine {
   }
 
   async exec(cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult> {
-    const timeoutS = Math.min(COMMAND_TIMEOUT_MAX_S, Math.max(1, Math.ceil((opts?.timeoutMs ?? INLINE_EXEC_MS) / 1000)));
+    const timeoutMs = opts?.timeoutMs ?? INLINE_EXEC_MS;
+    // The detached road's own execs ask for the inline span, so they stay on the road above and nothing recurses.
+    if (timeoutMs > BOX_INLINE_MAX_MS) return execDetached(this, cmd, { deadlineMs: timeoutMs, pollMs: this.backend.budgets.pollMs });
+    return this.execInline(cmd, timeoutMs);
+  }
+
+  /** One command on the sync endpoint, with the two readings that make a guest nothing can run the provider's fault.
+   * `signal` ends the waiting where its caller stopped waiting; the seam hands one to a resume and to nothing else. */
+  private async execInline(cmd: string, timeoutMs: number, signal?: AbortSignal): Promise<ExecResult> {
+    const timeoutS = Math.max(1, Math.ceil(timeoutMs / 1000));
     const res = await this.backend.whileRestoring(() => this.backend.request<CommandView>("POST", this.path("/commands"), {
       body: { command: sudoCommand(cmd), timeoutSeconds: timeoutS },
       // The call holds while the command runs; the cap is the command's own timeout plus room for the round trip.
       capMs: timeoutS * 1000 + 30_000,
-    }));
-    return { exitCode: res.exitCode ?? (res.timedOut === true ? DEADLINE_EXIT : -1), stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
+      ...(signal !== undefined ? { signal } : {}),
+    }), signal).catch((e: unknown) => {
+      // The agent that runs the endpoint failing to spawn the shell at all reads as the guest being dead, not as a
+      // command refused: the message is the agent's own (`D.stdout.on` of nothing, seen 2026-09-11).
+      if ((e as Partial<WspError>).kind === "unknown" && (e as Partial<WspError>).status === 500) {
+        throw new GuestUnusableError(this.id, BOX_PROVIDER, (e as WspError).message, (e as WspError).status);
+      }
+      throw e;
+    });
+    const stderr = res.stderr ?? "";
+    // The endpoint answered the command, so the status behind this reading is the one request() returns on.
+    if (LOADER_EMFILE.test(stderr)) throw new GuestUnusableError(this.id, BOX_PROVIDER, stderr.trim(), 200);
+    return { exitCode: res.exitCode ?? (res.timedOut === true ? DEADLINE_EXIT : -1), stdout: res.stdout ?? "", stderr };
+  }
+
+  /** One command on the road every other command takes, so a guest the provider left running but unusable is found
+   * where it can still be acted on rather than two minutes later, when the daemon has not answered. */
+  async proveRoad(signal?: AbortSignal): Promise<void> {
+    await this.execInline("true", INLINE_EXEC_MS, signal);
   }
 
   run(script: string, opts: RunOptions): Promise<ExecResult> {
-    return execDetached(this, script, opts);
+    return execDetached(this, script, { ...opts, pollMs: opts.pollMs ?? this.backend.budgets.pollMs });
   }
 
   /** The machine's environment, as the seam promises a fork its envs: the API's own `env` reaches the box user's
@@ -742,6 +792,7 @@ export class BoxMachine implements Machine {
     const ttlSeconds = await this.backend.ttlSecondsFor(last === undefined ? undefined : this.backend.clock.now() + last.spanMs);
     await this.backend.request("POST", this.path("/resume"), { body: { ttlSeconds }, signal });
     await this.backend.settle(this.id, v => STATE_MAP[v.state] === "running", this.backend.budgets.resumeMs, "resume", signal);
+    await this.proveRoad(signal);
   }
 
   /** The provider deletes in the background and answers an operation, which read blocked for the rest of the spike

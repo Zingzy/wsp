@@ -19,11 +19,6 @@ export function backstopMs(windowMs: number | null): number {
   return windowMs === null ? IDLE_OFF_BACKSTOP_MS : windowMs * 2;
 }
 
-/** The reason a status carries when this policy napped the workspace. */
-export function idleReason(windowMs: number): string {
-  return `idle ${Math.round(windowMs / 60_000)} min`;
-}
-
 export interface IdlePolicyOptions {
   /** The window for a workspace right now; null means auto-nap is off for it. */
   windowOf(id: string): number | null;

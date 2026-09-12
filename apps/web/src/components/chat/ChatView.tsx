@@ -10,10 +10,12 @@
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import type { LegendListRef } from "@legendapp/list/react";
 import { turnSettledParts } from "@wsp/protocol";
-import { useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
+import { useStatus, useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { cn } from "../../lib/utils";
-import { DEFAULT_TIMESTAMP_FORMAT, turnWait, type TimestampFormat, type TurnSummary } from "./adapt";
+import { DEFAULT_TIMESTAMP_FORMAT, pausedLine, turnWait, type TimestampFormat, type TurnSummary } from "./adapt";
+import { whereWord } from "../../sidebar/workspaceRows";
+import { TimelineRuleLine } from "./TimelineRuleLine";
 import { MessagesTimeline, type MachineWait } from "./MessagesTimeline";
 import { useNewThreadRequests } from "./newThreadRequests";
 import { useChatThread, type ChatThreadHandle } from "./useChatThread";
@@ -54,14 +56,23 @@ export function ChatView({
     },
     [api],
   );
-  // A Working thread on a machine that is not running is a contradiction: the row says what it waits for instead.
+  // A Working thread on a workspace that is not running is a contradiction: the row says what it waits for instead,
+  // naming the workspace and, while it wakes, where it runs, since that is what the send is waiting on.
   const state = useWorkspaceState(workspaceId);
+  const status = useStatus(workspaceId);
+  const runs = useMemo(
+    () => ({ name: workspace?.name ?? workspaceId, where: workspace === null ? workspaceId : whereWord({ workspace, status }) }),
+    [workspace, workspaceId, status],
+  );
   const machineWait = useMemo<MachineWait | null>(() => {
     if (state === null || !view.running) return null;
-    const wait = turnWait(state);
+    const wait = turnWait(state, runs);
     if (wait === null) return null;
-    return { label: wait.label, onWake: wait.wake ? () => void wake(workspaceId) : null };
-  }, [state, view.running, wake, workspaceId]);
+    return { label: wait.label, elapsed: wait.elapsed, onWake: wait.wake ? () => void wake(workspaceId) : null };
+  }, [state, view.running, wake, workspaceId, runs]);
+  // Nothing is running and the workspace is paused: the last thing that happened to this thread is the nap, and the
+  // next send is what wakes it. One line under the transcript in the timeline's own rule grammar, never a dialog.
+  const paused = state === "paused" && !view.running ? pausedLine(status?.reason) : null;
   const { startNewThread, hydrated } = thread;
   useEffect(() => {
     // The latest view takes the request once its transcript is in, so it knows which thread it leaves behind.
@@ -102,6 +113,11 @@ export function ChatView({
         )}
       </div>
       {thread.hydrated && view.settled !== null ? <SettledFooter turn={view.settled} /> : null}
+      {thread.hydrated && paused !== null ? (
+        <div className="mx-auto w-full max-w-5xl px-4 pb-1">
+          <TimelineRuleLine data-workspace-paused line={paused} />
+        </div>
+      ) : null}
       {children?.(thread)}
     </div>
   );

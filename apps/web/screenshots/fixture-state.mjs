@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The throwaway states a screenshot run and a persona lab serve, one per kind
 // of person: what their sidebar holds, whether an image is sealed, and what
-// their threads say. The default is a person with this computer alone, three
-// workspaces of the local kind, folders imported into two of them and two
-// threads with the transcript each replays, so no surface is photographed
-// empty; the rest vary the setup a tester meets. Nothing here is a real
-// machine, a real key or a real folder, and the forks are served by the
-// provider that answers out of memory, so no fixture dials anything.
+// their threads say. The default is a person with this computer alone, four
+// workspaces of the local kind, folders imported into three of them and the
+// threads with the transcript each replays, one of them opened by another
+// thread's agent, so no surface is photographed empty and the spawned row's
+// grammar is in a shot; the rest vary the setup a tester meets. Nothing here
+// is a real computer, a real key or a real folder, and the copies are served
+// by the provider that answers out of memory, so no fixture dials anything.
 
 /** Every stamp hangs off the hour this run started in rather than a date written here: the app words a
  * thread's time as a distance from now, and a fixed date would drift into the future and read "now" on
@@ -164,6 +165,28 @@ const MIGRATE = {
   costUsd: 1.14,
 };
 
+/** A lead thread and the one its own agent opened under it, so a shot carries the spawned row's grammar: the
+ * workspace dropped where it is the row above's, then where that workspace runs, and no opener word. */
+const SEARCH = {
+  id: "search",
+  prompt: "ship the search rewrite",
+  title: "Ship the search rewrite",
+  thought: "The index is the slow half, so read how the query is built before touching the ranking.",
+  tool: { name: "Read", input: '{"file_path":"apps/api/src/search/query.ts"}', result: "export function buildQuery(term: string) {\n  return db.select().where(like(links.slug, `%${term}%`));\n}" },
+  reply: "The query is a LIKE over every row. I opened a thread to write the index migration while I take the ranking.",
+  costUsd: 0.63,
+};
+
+const MIGRATION = {
+  id: "migration",
+  prompt: "write the migration for the click index",
+  title: "Write the migration",
+  thought: "One index on clicks(link_id, at) covers both reads; write it as a migration rather than by hand.",
+  tool: { name: "Write", input: '{"file_path":"apps/api/migrations/0007_click_index.sql"}', result: "CREATE INDEX clicks_link_at ON clicks (link_id, at);" },
+  reply: "The migration is written and runs in 40 ms on the copy of the table I tried it against.",
+  costUsd: 0.21,
+};
+
 /** One store as the JSON file holds it: one object per collection, keyed the way the runtime keys it. Every
  * fixture below builds one. */
 const store = ({ workspaces, sessions = {}, transcripts = {}, goldens, devices }) => ({
@@ -200,8 +223,9 @@ const macOnly = () =>
       workspace("ws_api", "api", { projects: [project("spoo", 48_200_000, 60 * 20), project("wsp", 133_000_000, 60 * 5)] }),
       workspace("ws_web", "web", { projects: [project("landing", 9_400_000, 60 * 9)] }),
       workspace("ws_notes", "notes"),
+      workspace("ws_fix", "spoo-fix", { projects: [project("spoo", 48_200_000, 60 * 20)] }),
     ],
-    ...API_THREADS(),
+    ...merge(API_THREADS(), threadsOn("ws_fix", [[SEARCH, 12], [spawned("migration", MIGRATION, "search", "search"), 9]])),
   });
 
 /** This computer and an old laptop that redeemed a pairing code: a second workspace of the local kind, its own

@@ -113,7 +113,7 @@ export function ExportProjectDialog({ workspace, onClose }: { workspace: Workspa
             <DialogDescription>{exportFromLine(workspace.name)}</DialogDescription>
           </DialogHeader>
           <DialogPanel className="flex flex-col">
-            <TripSection k="source" label="Folder on the machine" htmlFor="export-source">
+            <TripSection k="source" label="Folder on the workspace" htmlFor="export-source">
               <FolderField
                 id="export-source"
                 placeholder="/root/project"

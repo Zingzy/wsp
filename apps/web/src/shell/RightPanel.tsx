@@ -110,7 +110,7 @@ export function RightPanel({
         <Empty className="flex-1">
           <EmptyHeader>
             <EmptyTitle>Nothing open here.</EmptyTitle>
-            <EmptyDescription>Pick a surface from the tab strip above.</EmptyDescription>
+            <EmptyDescription>Pick a panel from the tab strip above.</EmptyDescription>
           </EmptyHeader>
         </Empty>
       )}

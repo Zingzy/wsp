@@ -416,6 +416,11 @@ export const WorkspaceView = z.object({
    * workspace a person made. The root is what the machine cap counts against. */
   parentThreadId: z.string().optional(),
   rootThreadId: z.string().optional(),
+  /** Which provider this workspace's machine was forked at, by the id that provider's own module carries in the
+   * host's registry (`solari`, `box`, `docker`). The runtime stamps it, since the host is the one that knows which
+   * module it wired; absent on every kind wsp does not fork, whose machine is the person's own. A row names this
+   * where it would otherwise have only the provider's opaque id for the machine. */
+  provider: z.string().optional(),
 });
 export type WorkspaceView = z.infer<typeof WorkspaceView>;
 
@@ -450,7 +455,7 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
 const WORKSPACE_OUT = {
   id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, projects: true, folder: true, home: true,
   claudeSessionId: true, gone: true, theme: true, glyph: true, daemonNote: true, daemonRefusedAt: true, vaultedAt: true, vaultRefused: true, wakeRefused: true,
-  agents: true, parentThreadId: true, rootThreadId: true,
+  agents: true, parentThreadId: true, rootThreadId: true, provider: true,
 } as const;
 
 /** A workspace as every verb answers with it: the view without the display stream a desktop machine carries, which
@@ -857,6 +862,12 @@ export type DeltaKind = z.infer<typeof DeltaKind>;
 export const TurnStatus = z.enum(["completed", "interrupted", "failed"]);
 export type TurnStatus = z.infer<typeof TurnStatus>;
 
+/** What the agent refused a turn for, where it named a cause wsp knows: the word every door reads to class the
+ * failure, since the sentence is the agent's and no door may read a reason out of its words. Adding a cause is an
+ * entry here and its road on the client that shows one. */
+export const TurnRefusal = z.enum(["sign-in"]);
+export type TurnRefusal = z.infer<typeof TurnRefusal>;
+
 export const TurnResult = z.object({
   status: TurnStatus,
   durationMs: z.number().optional(),
@@ -864,6 +875,8 @@ export const TurnResult = z.object({
   usage: z.record(z.unknown()).optional(),
   text: z.string().optional(),
   error: z.string().optional(),
+  /** Set only on a turn the agent refused outright for a cause wsp knows; the status is failed with it. */
+  refusal: TurnRefusal.optional(),
 });
 export type TurnResult = z.infer<typeof TurnResult>;
 
@@ -2070,9 +2083,12 @@ export type EventsSubscribeReply = z.infer<typeof EventsSubscribeReply>;
 
 // --- daemon wire protocol (ws://0.0.0.0:7070, auth frame first, 4401 on anything else) ---
 
-/** Client-side health of a daemon link. reauth-needed: the daemon refused the token, and a browser link asks the
- * host for its current one before redialling; the host's own link stops there. dead is terminal. */
-export const DaemonLinkStatus = z.enum(["connecting", "live", "reauth-needed", "dead"]);
+/** Client-side health of a daemon link. connecting: dialling, or waiting for a daemon that is not there yet.
+ * reauth-needed: the daemon refused the token the host sent. A browser link holds no token of its own, so it opens
+ * a channel again and the host dials with the one it holds now; the host's own link stops there. refused: the door
+ * answered the upgrade with a status, so no retry at the usual pace opens anything; the link holds this until a
+ * dial gets past the door, and retries at the ceiling. dead is terminal. */
+export const DaemonLinkStatus = z.enum(["connecting", "live", "reauth-needed", "refused", "dead"]);
 export type DaemonLinkStatus = z.infer<typeof DaemonLinkStatus>;
 
 const reqId = z.union([z.string(), z.number()]);
@@ -2535,6 +2551,29 @@ export const DEVICE_REVOKE_REFUSAL = "a paired device may only revoke itself; ru
  * device token. */
 export const API_UNAUTHORIZED = "this host listens beyond the computer it runs on, so this route needs a paired device token in an Authorization header; run wsp pair on the host";
 
+/** A frame the page sends a daemon through the host: the daemon's own op and params, no id. The host numbers
+ * frames on its socket to the daemon and hands the daemon's answer back under the request that carried the frame,
+ * so a page's ids never reach a machine. auth is refused: the host sent the auth frame when it opened the channel. */
+export const DaemonFrame = z.object({ op: z.string().refine(op => op !== "auth", "the host authenticates the channel") }).passthrough();
+export type DaemonFrame = z.infer<typeof DaemonFrame>;
+
+export const DaemonOpenReply = z.object({ channel: z.string() });
+export type DaemonOpenReply = z.infer<typeof DaemonOpenReply>;
+/** The daemon's reply as it sent it; id is the host's number on its own socket and means nothing to the page. */
+export const DaemonSendReply = z.object({ reply: DaemonResponse });
+export type DaemonSendReply = z.infer<typeof DaemonSendReply>;
+
+/** What the host pushes to the one socket that opened a channel. Never on the event bus, never sequenced, never
+ * replayed: a pty chunk is not history. event is the daemon's frame untouched; the page validates it against
+ * DaemonEvent as it always did, since a daemon of another version may push a type this host does not know and
+ * the host acts on none of them. daemon.closed says the daemon socket ended without the page asking: code and
+ * reason are the WebSocket close the host saw, 4401 with the daemon's sentence when it refused the token. */
+export const DaemonChannelEvent = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("daemon.event"), channel: z.string(), event: z.object({ type: z.string() }).passthrough() }),
+  z.object({ type: z.literal("daemon.closed"), channel: z.string(), code: z.number().int(), reason: z.string() }),
+]);
+export type DaemonChannelEvent = z.infer<typeof DaemonChannelEvent>;
+
 // --- places: a computer you own, joined by dialling this host ---------------
 
 /** How many bytes each side's challenge is. Thirty-two: a nonce is what keeps a signature from being replayed, and
@@ -2786,6 +2825,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * The name defaults to what the address calls the machine. Replies with { workspace }. */
   z.object({ id: reqId, op: z.literal("workspaces.createSsh"), address: z.string(), name: z.string().optional(), port: z.number().int().optional(), keyPath: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("workspaces.list") }),
+  /** The workspace a person's word names, by id or by name, off the same reading workspaces.list serves: a name no
+   * workspace here carries is refused as absent, and one this caller may not drive by the rule that hides it, so a
+   * verb never denies a workspace the listing just showed. Replies with { workspace }. */
+  z.object({ id: reqId, op: z.literal("workspaces.resolve"), ref: z.string() }),
   z.object({ id: reqId, op: z.literal("workspaces.get"), workspaceId: z.string() }),
   z.object({ id: reqId, op: z.literal("workspaces.nap"), workspaceId: z.string() }),
   z.object({ id: reqId, op: z.literal("workspaces.wake"), workspaceId: z.string() }),
@@ -2827,8 +2870,18 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** A person acted in the workspace through a road the runtime cannot see (typed into
    * a terminal over the browser's daemon link); the idle countdown starts over. */
   z.object({ id: reqId, op: z.literal("workspaces.touch"), workspaceId: z.string() }),
-  /** Replies with a DaemonReachView; the runtime remints the edge token when it nears expiry. */
-  z.object({ id: reqId, op: z.literal("workspaces.daemonReach"), workspaceId: z.string() }),
+  /** Opens a channel to the workspace's daemon and replies with a DaemonOpenReply. The host dials the road the
+   * workspace's kind answers with and sends its own token as the first frame. Refused with kind "refused" when the
+   * door answered the upgrade with anything but 101 (the sentence carries the status and the body's first line),
+   * with kind "reauth" when the daemon took the upgrade and closed 4401 on the token, and with the runtime's own
+   * sentence and no kind when the machine has no road or no daemon yet, or the dial failed or timed out. */
+  z.object({ id: reqId, op: z.literal("daemon.open"), workspaceId: z.string() }),
+  /** Sends one frame down a channel this socket opened and replies with a DaemonSendReply carrying the daemon's own
+   * answer, ok or not. Refused (ok false, no kind) when the channel is not this socket's or died before the daemon
+   * answered. */
+  z.object({ id: reqId, op: z.literal("daemon.send"), channel: z.string(), frame: DaemonFrame }),
+  /** Closes a channel this socket opened; no daemon.closed follows a close the page asked for. */
+  z.object({ id: reqId, op: z.literal("daemon.close"), channel: z.string() }),
   /** Starts a turn and replies with a SessionStartResult. On a thread whose turn is still running the runtime never
    * starts a second one on the session: the message joins the running turn when the harness steers (the reply names
    * that turn), and otherwise waits for it to end before starting. */
@@ -2915,13 +2968,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Moves the golden's head to a version already in its manifest; replies with a
    * SnapshotRollbackResult. A version outside the manifest fails with kind "missing". */
   z.object({ id: reqId, op: z.literal("snapshots.rollback"), version: z.number(), name: z.string().optional() }),
-  /** Replies with a DaemonReachView for a live builder (wsp init's sign-in
-   * terminal dials it). Asked per dial like workspaces.daemonReach: the edge token
-   * expires hourly and a builder may sit for hours before it is sealed. */
-  z.object({ id: reqId, op: z.literal("golden.builderReach"), builderId: z.string() }),
   /** Replies with { reach: PortReachView } for one guest port, cached per port
-   * while fresh like workspaces.daemonReach. A port outside the daemon's
-   * listening set still mints: the user may have typed it. */
+   * while fresh. A port outside the daemon's listening set still mints: the
+   * user may have typed it. */
   z.object({
     id: reqId,
     op: z.literal("workspaces.portReach"),
@@ -3061,8 +3110,9 @@ export const RUNTIME_OPS: readonly string[] = RuntimeOp.options.map(o => o.shape
  * refused again by the tree rule, and every act by the guard, so this list is the outer door and not the only one.
  * What is deliberately not here: sealing the golden and rolling its snapshots, the project goldens, the person's
  * keys and their init, their preferences, their folders, importing and exporting a folder, every road that hands out
- * or takes away access to this host, and the two roads that move a running turn's access mode or answer a permission
- * prompt, which are the person's guard on an agent and not an agent's to lift. */
+ * or takes away access to this host, the two roads that move a running turn's access mode or answer a permission
+ * prompt, which are the person's guard on an agent and not an agent's to lift, and the daemon channel, which carries
+ * the panes a person types into while a thread drives its workspace through workspaces.exec and the session ops. */
 export const THREAD_OPS: readonly string[] = [
   "auth",
   "events.subscribe",
@@ -3076,10 +3126,12 @@ export const THREAD_OPS: readonly string[] = [
   "capabilities.get",
   "workspaces.create",
   "workspaces.list",
+  // Every verb a thread runs names its workspace as a person does, so the door that reads a name is open to the
+  // same tokens the list is: the tree rule refuses the names outside it here exactly as it hides them there.
+  "workspaces.resolve",
   "workspaces.get",
   "workspaces.touch",
   "workspaces.wake",
-  "workspaces.daemonReach",
   "workspaces.exec",
   "harnesses.list",
   "sessions.start",
@@ -3287,7 +3339,7 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
-export { actionRefusal, agentsKindRefusal, agentsMayDrive, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, type MachineOnDelete, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, type SendBlock, sendRefusal, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
+export { actionRefusal, agentsKindRefusal, agentsMayDrive, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, type MachineOnDelete, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";
