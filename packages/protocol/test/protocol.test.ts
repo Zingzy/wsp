@@ -1227,6 +1227,22 @@ describe("thread provenance", () => {
     expect(threadRan([])).toBe(false);
   });
 
+  it("foldThreads carries the latest turn's process on this computer, so the pane heads a thread's tree with its name", () => {
+    const [here, elsewhere] = foldThreads([
+      { ...row, id: "s1", threadId: "thr_a", status: "running", prompt: "read the docs", pid: 4_242 },
+      { ...row, id: "s2", threadId: "thr_b", status: "running", prompt: "on a machine" },
+    ]);
+    expect(here!.pid).toBe(4_242);
+    expect(elsewhere).not.toHaveProperty("pid");
+    expect(ThreadView.parse(here!).pid).toBe(4_242);
+    // The latest turn is the one running: a thread whose earlier turn had a process carries none now.
+    const [over] = foldThreads([
+      { ...row, id: "s3", threadId: "thr_c", status: "completed", pid: 99 },
+      { ...row, id: "s4", threadId: "thr_c", status: "completed" },
+    ]);
+    expect(over).not.toHaveProperty("pid");
+  });
+
   it("foldThreads carries the latest turn's open prompt, so the word every row reads comes off the fold and nowhere else", () => {
     const [asked, quiet] = foldThreads([
       { ...row, id: "s1", threadId: "thr_a", status: "running", prompt: "write it", asking: "Permission for Write: out.txt" },
