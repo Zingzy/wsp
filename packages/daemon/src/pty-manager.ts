@@ -10,7 +10,10 @@ const SCROLLBACK_CAP_BYTES = 256 * 1024;
  * a terminal. Every other op this daemon answers needs none of it, so it is loaded at the first pty and not before.
  * The one import, awaited once and kept. */
 let loading: Promise<typeof PtySpawn> | undefined;
-const ptySpawn = (): Promise<typeof PtySpawn> => (loading ??= import("node-pty").then(m => m.spawn));
+// The default export as well as the named one: node-pty is CommonJS, and where this daemon runs inside the packaged
+// wsp command it is inlined into that bundle, where a CommonJS module arrives with a default and no named exports.
+const ptySpawn = (): Promise<typeof PtySpawn> =>
+  (loading ??= import("node-pty").then(m => m.spawn ?? (m as unknown as { default?: { spawn: typeof PtySpawn } }).default?.spawn) as Promise<typeof PtySpawn>);
 
 export interface PtyCreateOpts {
   cols?: number;

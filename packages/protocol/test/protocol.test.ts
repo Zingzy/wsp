@@ -1005,6 +1005,10 @@ describe("daemon files and diff ops", () => {
       unitDir: "/home/maya/.config/systemd/user",
       binDir: "/home/maya/.local/bin",
       rootsPath: "/home/maya/.wsp/roots",
+      // A computer joined as a place keeps these three beside the daemon's own, so one sweep takes the lot.
+      placeFile: "/home/maya/.wsp/place.json",
+      placeKey: "/home/maya/.wsp/place-key.pem",
+      placeLog: "/home/maya/.wsp/place.log",
     });
     // The deploy on the host writes these and the runtime reads the token and the port back off them, which is
     // why the rule sits here and in neither of them.
