@@ -266,6 +266,9 @@ export interface HarnessSession {
   /** What a later host process attaches to this turn by, on a harness whose run outlives the host that started it;
    * absent where it does not, and the row is settled as cut when this process goes. */
   readonly run?: string;
+  /** The process this turn leads on the computer the host runs on, where it runs there; absent on a turn running on
+   * another machine, whose pids are not this computer's. */
+  readonly pid?: number;
   /** Stops the process this session owns; finished settles after it, once session.end has been emitted. */
   interrupt(): Promise<void>;
   /** Present on a harness that takes a message mid-turn; absent means it cannot. not-running when the turn had not
@@ -730,10 +733,10 @@ export interface LocalWiring {
    * arrives in, so the panes and the status probe read one view. The host starts that daemon on the first call and
    * closes it in close(); a host that wires none leaves the local workspace's panes with nothing to dial. */
   daemonRoad?: () => Promise<DaemonReachView>;
-  /** This computer's own cpu, memory and disk, pushed to the listener every poll tick until the returned detach
-   * runs. Read in the host process, so the Live rows of the workspace that is this computer stand whether or not
-   * its daemon is up: a port, a token and a pty have nothing to do with what `os`, `df` and the memory road read.
-   * One sampler however many listeners there are; it starts with the first and stops with the last. */
+  /** This computer's own cpu, memory and disk, pushed to the listener every sample until the returned detach runs.
+   * Read off this computer's daemon, the one reader of a machine's load wsp has, so the Live rows of the workspace
+   * that is this computer start it if nothing else has. One watch however many listeners there are; it opens with
+   * the first and closes with the last. */
   sysSamples?: (fn: (s: SysSample) => void) => Promise<() => void>;
   /** Frees whatever the wiring holds open on this computer when the runtime closes. */
   close?: () => Promise<void>;
@@ -2377,7 +2380,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** `launch` is carried only by a row the start road wrote before its turn reached the machine, and settles when the
    * turn's harness holds the row or the start gave it up: a send behind such a row waits on it, and the file never
    * takes the row, since a restart could re-open nothing from it. */
-  const sessions = new Map<string, { view: SessionView; turnId: string; notify?: readonly string[]; turnToken?: string; scopeDeviceId?: string; handle?: SessionHandle; end?: (reason: string) => void; turnLive?: TurnLive; run?: string; launch?: Promise<void> }>();
+  const sessions = new Map<string, { view: SessionView; turnId: string; notify?: readonly string[]; turnToken?: string; scopeDeviceId?: string; handle?: SessionHandle; end?: (reason: string) => void; turnLive?: TurnLive; run?: string; pid?: number; launch?: Promise<void> }>();
   /** Every exec stream still running, so the machine going away ends it the way it ends a session. */
   const execs = new Set<{ workspaceId: string; end: (reason: string) => void }>();
   const indexFlushes = new Map<string, Promise<void>>();
@@ -5223,7 +5226,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     };
     // One row per turn, never two: the key the start road held this turn under goes as the harness's own takes over.
     if (turnId !== rowId) sessions.delete(turnId);
-    sessions.set(rowId, { view, turnId, ...(notify !== undefined ? { notify } : {}), ...(turnToken !== undefined ? { turnToken } : {}), ...(scopeDeviceId !== undefined ? { scopeDeviceId } : {}), handle, end, turnLive, ...(started.run !== undefined ? { run: started.run } : {}) });
+    sessions.set(rowId, { view, turnId, ...(notify !== undefined ? { notify } : {}), ...(turnToken !== undefined ? { turnToken } : {}), ...(scopeDeviceId !== undefined ? { scopeDeviceId } : {}), handle, end, turnLive, ...(started.run !== undefined ? { run: started.run } : {}), ...(started.pid !== undefined ? { pid: started.pid } : {}) });
     void persistSessions(workspaceId);
     /** The turn's process is over: its status settles, its token stops naming anything, and the harness's own title
      * for the session is read again, since it writes one as the turn settles. */
@@ -5620,15 +5623,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A listing that names a workspace refuses like any other verb naming one; a listing of them all leaves out
       // the rows the caller may not drive, as workspaces.list does.
       if (workspaceId !== undefined) refuseRelayed(live.get(workspaceId)?.record, origin);
-      const all = [...sessions.values()].map(s => s.view).filter(v => drivesId(v.workspaceId, origin));
-      const rows = workspaceId === undefined ? all : all.filter(v => v.workspaceId === workspaceId);
+      const all = [...sessions.values()].filter(s => drivesId(s.view.workspaceId, origin));
+      const held = workspaceId === undefined ? all : all.filter(s => s.view.workspaceId === workspaceId);
+      const rows = held.map(s => s.view);
       // A refresh is where a rename made inside the harness reaches us: nothing on this side changed. A row that
       // already carries a title is answered from the index and its read goes out unawaited, so a wedged guest
       // costs the listing nothing and the rename lands on the next refresh, which is the window the TTL promises.
       // A row with none blocks, so a thread is titled on the first listing that sees it.
       const asked = titleRows(rows).map(view => ({ first: view.harnessTitle === undefined, done: refreshTitle(view, false) }));
       await Promise.all(asked.filter(a => a.first).map(a => a.done));
-      return rows.map(v => ({ ...v }));
+      // The turn's process rides the answer and never the row itself: it is this host's to know while the turn runs,
+      // and a pid written down outlives the process it named.
+      return held.map(s => ({ ...s.view, ...(s.view.status === "running" && s.pid !== undefined ? { pid: s.pid } : {}) }));
     },
 
     async history(workspaceId, origin) {

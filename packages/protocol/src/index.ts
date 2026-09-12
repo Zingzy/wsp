@@ -573,6 +573,11 @@ export const SessionView = z.object({
    * absent on a turn waiting on nobody. The harness is stopped on the question while it stands, so this is the one
    * fact that says a thread is waiting on the person rather than working. */
   asking: z.string().optional(),
+  /** The process this turn leads on the computer the host runs on, where the turn runs there: the pid the Processes
+   * pane heads this thread's tree with. Absent on a turn running on another machine, whose pids are not this
+   * computer's, and on a turn that is over. It is never written down: a pid outlives nothing, and the computer is
+   * free to hand it to a stranger the moment the turn ends. */
+  pid: z.number().int().optional(),
 });
 export type SessionView = z.infer<typeof SessionView>;
 
@@ -606,6 +611,8 @@ export const ThreadView = z.object({
   asking: z.string().optional(),
   /** What this thread has cost: its rows' figures added up. Absent where no row of it carries one. */
   costUsd: z.number().optional(),
+  /** The latest turn's process on the computer the host runs on, as SessionView.pid carries it. */
+  pid: z.number().int().optional(),
 });
 export type ThreadView = z.infer<typeof ThreadView>;
 
@@ -652,6 +659,7 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.endedAt !== undefined ? { endedAt: latest.endedAt } : {}),
       ...(latest.cwd !== undefined ? { cwd: latest.cwd } : {}),
       ...(latest.asking !== undefined ? { asking: latest.asking } : {}),
+      ...(latest.pid !== undefined ? { pid: latest.pid } : {}),
       turns: turns.length,
       ran: threadRan(turns),
       ...(first.parentThreadId !== undefined ? { parentThreadId: first.parentThreadId } : {}),
@@ -2148,14 +2156,13 @@ export type ForwardEvent = z.infer<typeof ForwardOpenEvent> | z.infer<typeof For
 /** What a computer joining this host passes through when the host installs the agent on it over ssh, in order.
  * One list for the line a terminal prints and the rows the app draws, so neither invents a step the other has not
  * got. */
-export const PlaceAddStep = z.enum(["connect", "node", "wsp", "service", "join"]);
+export const PlaceAddStep = z.enum(["connect", "wsp", "service", "join"]);
 export type PlaceAddStep = z.infer<typeof PlaceAddStep>;
 
 /** What each step reads as while it runs. The note beside it carries what the computer answered (its system, the
  * node it got), which is the step's own to say and never a second sentence about it. */
 export const PLACE_ADD_WORDS: Record<PlaceAddStep, string> = {
   connect: "connecting over ssh",
-  node: "installing node",
   wsp: "installing wsp",
   service: "starting the agent",
   join: "waiting for it to connect to this computer",
@@ -2875,6 +2882,7 @@ const DAEMON_CONTENTS = [
   "a6ae68d8af502a8a5ecf9795ca11ca0b9b12cda2792e45eee3376c7e4d57917b",
   "055dcf11b2a17e8959ab3a6246c2d17f89eb3837c59b31d3a8138c6dc7b6c322",
   "09e441a435678290871e210158d5f8fef3b43b307c5ec917086a201583c037a5",
+  "386b54104e2a8abf8f45f9a35fe767971b72d5d00da68c4d8ae0aa9630b7cc6d",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -2916,16 +2924,23 @@ const DAEMON_CONTENTS = [
  * one per option, reads its ports, load, processes and pty modes off one /proc root, logs its samplers' starts and
  * stops, and builds a place's report and sweep off the home it is pointed at, so a test suite drives it as a binary
  * and the words and numbers it answers with are the protocol's, held in one fixture set. Version 21 takes
- * --runtime-root, where a place's daemon keeps the layers and the workspaces it runs itself. */
+ * --runtime-root, where a place's daemon keeps the layers and the workspaces it runs itself. Version 22 is one
+ * static binary, built from the Rust sources under daemon/ for each chip a machine can be: the deploy lands the two
+ * Linux builds and keeps the one uname names, the unit and the supervisor start it by its path with one set of
+ * flags, a computer joined as a place runs the same binary under its login's own manager, this computer's
+ * workspace spawns it, and the guest keeps no node, no npm install and no native module for the daemon; the wsp
+ * command beside it still runs on the node the machine carries. The binary also answers a plain HTTP request 426,
+ * as the host's status probe reads a daemon by. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
-/** sha256 of what a deploy installs on a guest and this record can hold: the daemon's sources, the dependency
- * pins its bundle carries, the scripts the host writes beside them, and DAEMON_ROOTS_PATH. The host's
+/** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
+ * is built from, the lock that pins its dependencies, the C library the Linux builds link and its pinned release,
+ * the contract fixtures its words and numbers are held to (the version itself left out of them, since it is this
+ * record), the scripts the host writes beside it, DAEMON_ROOTS_PATH and the work-score line. The host's
  * daemon-content test recomputes it and fails when that content moved and this record did not, so changed content
- * cannot reach nobody: a start script gained a PATH line under an unchanged version once and every machine
- * already running kept the old one. Left out, and on the guest anyway because the daemon's dist bundles them: the
- * rest of this file, the DaemonAuthRequest schema the daemon reads, and zod. Hashing the protocol whole would
- * turn every edit to it into a redeploy of every machine. */
+ * cannot reach nobody: a start script gained a PATH line under an unchanged version once and every machine already
+ * running kept the old one. Left out: the rest of this file, which the binary reads only through the fixtures;
+ * hashing the protocol whole would turn every edit to it into a redeploy of every machine. */
 export const DAEMON_CONTENT_SHA = DAEMON_CONTENTS[DAEMON_CONTENTS.length - 1]!;
 
 /** The file on the guest naming the imported project folders, one absolute path per line: the runtime writes it

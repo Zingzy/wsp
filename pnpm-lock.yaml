@@ -33,9 +33,6 @@ importers:
       '@types/node':
         specifier: ^22.20.1
         version: 22.20.1
-      '@wsp/daemon':
-        specifier: workspace:*
-        version: link:../../packages/daemon
       '@wsp/host':
         specifier: workspace:*
         version: link:../../packages/host
@@ -175,9 +172,6 @@ importers:
       '@types/node':
         specifier: ^22.20.1
         version: 22.20.1
-      '@wsp/daemon':
-        specifier: workspace:*
-        version: link:../../packages/daemon
 
   apps/www:
     dependencies:
@@ -343,9 +337,6 @@ importers:
       '@wsp/collect':
         specifier: workspace:*
         version: link:../collect
-      '@wsp/daemon':
-        specifier: workspace:*
-        version: link:../daemon
       '@wsp/engine':
         specifier: workspace:*
         version: link:../engine
@@ -414,9 +405,6 @@ importers:
       '@types/node':
         specifier: ^22.20.1
         version: 22.20.1
-      '@wsp/daemon':
-        specifier: workspace:*
-        version: link:../daemon
       '@wsp/host':
         specifier: workspace:*
         version: link:../host

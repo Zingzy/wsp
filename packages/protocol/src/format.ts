@@ -1948,12 +1948,12 @@ export function noImportRoadLine(name: string, machine: string): string {
   return `${name} is ${machine}, which lands no folder yet; import to a fork, or register the folder on this computer`;
 }
 
-/** What a machine that cannot build the daemon is refused with. node-pty ships prebuilt binaries for macOS and
- * Windows only, so the terminal's native part is compiled where the daemon runs; a machine wsp builds carries the
- * floor's toolchain, and a machine somebody already owns may carry none. Said before the install rather than
- * after, since a daemon that installed half of itself restarts forever under its unit. */
-export const NO_BUILD_TOOLS_LINE =
-  "this machine has no C compiler, so the daemon's terminal cannot be built on it; install a build toolchain (on Debian or Ubuntu: sudo apt-get install build-essential) and deploy the daemon again";
+/** What a machine without a node the wsp command runs on is refused with. The daemon itself is one static binary
+ * and asks nothing of the machine; the wsp command that rides beside it, which every turn's agent drives the host
+ * through, still runs on node. A machine wsp builds carries the floor's; a machine somebody already owns may carry
+ * none, or one too old. Said before the install rather than after, so nothing lands on a machine that refuses. */
+export const NO_NODE_LINE =
+  "this machine has no Node 22, which the wsp command beside the daemon runs on; install Node 22 or newer on it and deploy the daemon again";
 
 /** What a machine whose login does not linger is refused with. Its own systemd stops when its last session ends
  * and takes the daemon with it, so a daemon deployed there is gone the moment the host's connection closes; the
@@ -1964,7 +1964,7 @@ export const NO_LINGER_LINE =
 /** Every sentence a machine's own checks refuse with, in one place beside them. Read by the rule that keeps each
  * one's first clause short enough for a row, so a refusal added later takes that rule without anyone remembering
  * where it is checked. Nothing decides anything by searching this: which ending a throw is comes off its mark. */
-export const MACHINE_LACKS_LINES: readonly string[] = [NO_BUILD_TOOLS_LINE, NO_LINGER_LINE];
+export const MACHINE_LACKS_LINES: readonly string[] = [NO_NODE_LINE, NO_LINGER_LINE];
 
 /** The marks the checks a machine takes before a daemon is put on it end with, put on where the throw happens
  * rather than matched against text: a check added to a place's preflight is then one shell line and one sentence,

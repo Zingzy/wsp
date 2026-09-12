@@ -11,7 +11,7 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::{timeout, timeout_at, Instant};
@@ -30,6 +30,11 @@ const MESSAGE_MAX_BYTES: usize = 100 * 1024 * 1024;
 const CLOSE_WAIT: Duration = Duration::from_secs(5);
 /// A socket with no quiet cut: the sleep it never reaches.
 const FOREVER: Duration = Duration::from_secs(60 * 60 * 24 * 365);
+/// The most of a request head that is read ahead of the framing before the rest is left to it.
+const HEAD_MAX_BYTES: usize = 16 * 1024;
+/// What a plain HTTP request is answered with: the one status the host's probe reads as a daemon, since nothing
+/// else on a machine answers it, as node's ws server answered it before.
+const UPGRADE_REQUIRED: &[u8] = b"HTTP/1.1 426 Upgrade Required\r\nUpgrade: websocket\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
 
 /// Bytes read since the handshake and whether they crossed the cap, shared by the stream that counts inside its
 /// read and the task that acts on the trip.
@@ -56,15 +61,23 @@ impl PreAuth {
     }
 }
 
-/// The TCP stream with its read side counted.
+/// The TCP stream with its read side counted, handing back first the request head read ahead of the framing.
 struct Counted {
     inner: TcpStream,
     pre: Arc<PreAuth>,
+    ahead: Vec<u8>,
+    ahead_at: usize,
 }
 
 impl AsyncRead for Counted {
     fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
         let this = self.get_mut();
+        if this.ahead_at < this.ahead.len() {
+            let n = buf.remaining().min(this.ahead.len() - this.ahead_at);
+            buf.put_slice(&this.ahead[this.ahead_at..this.ahead_at + n]);
+            this.ahead_at += n;
+            return Poll::Ready(Ok(()));
+        }
         let before = buf.filled().len();
         let polled = Pin::new(&mut this.inner).poll_read(cx, buf);
         if let Poll::Ready(Ok(())) = &polled {
@@ -100,11 +113,44 @@ fn text(value: &impl serde::Serialize) -> Message {
     Message::text(serde_json::to_string(value).expect("a frame serialises"))
 }
 
-/// One socket, start to end: the handshake and the auth frame under the deadline, then the op loop.
-pub(crate) async fn serve(tcp: TcpStream, ctx: Arc<Ctx>) {
-    let pre = Arc::new(PreAuth::default());
-    let stream = Counted { inner: tcp, pre: Arc::clone(&pre) };
+/// The request head up to its blank line, or as much of it as the cap allows; nothing when the peer went first.
+async fn read_head(tcp: &mut TcpStream) -> io::Result<Vec<u8>> {
+    let mut head = Vec::new();
+    let mut chunk = [0u8; 1024];
+    while !head.ends_with(b"\r\n\r\n") && !head.windows(4).any(|w| w == b"\r\n\r\n") && head.len() < HEAD_MAX_BYTES {
+        let n = tcp.read(&mut chunk).await?;
+        if n == 0 {
+            return Err(io::ErrorKind::UnexpectedEof.into());
+        }
+        head.extend_from_slice(&chunk[..n]);
+    }
+    Ok(head)
+}
+
+/// Whether a request head asks for the WebSocket upgrade: the one header the framing insists on, read the way it
+/// reads it, so a request that would fail the handshake is answered instead of dropped.
+fn asks_for_upgrade(head: &[u8]) -> bool {
+    String::from_utf8_lossy(head).lines().any(|line| {
+        let Some((name, value)) = line.split_once(':') else { return false };
+        name.trim().eq_ignore_ascii_case("upgrade") && value.trim().eq_ignore_ascii_case("websocket")
+    })
+}
+
+/// One socket, start to end: the handshake and the auth frame under the deadline, then the op loop. A plain HTTP
+/// request, which the host's status probe sends, is answered 426 and closed: that answer is how a probe tells a
+/// daemon from an edge speaking for a machine that has none.
+pub(crate) async fn serve(mut tcp: TcpStream, ctx: Arc<Ctx>) {
     let deadline = Instant::now() + ctx.auth_deadline;
+    let Ok(Ok(head)) = timeout_at(deadline, read_head(&mut tcp)).await else {
+        return;
+    };
+    if !asks_for_upgrade(&head) {
+        let _ = tcp.write_all(UPGRADE_REQUIRED).await;
+        let _ = tcp.shutdown().await;
+        return;
+    }
+    let pre = Arc::new(PreAuth::default());
+    let stream = Counted { inner: tcp, pre: Arc::clone(&pre), ahead: head, ahead_at: 0 };
     let config = WebSocketConfig::default().max_message_size(Some(MESSAGE_MAX_BYTES)).max_frame_size(Some(MESSAGE_MAX_BYTES));
     let Ok(Ok(mut ws)) = timeout_at(deadline, tokio_tungstenite::accept_async_with_config(stream, Some(config))).await else {
         return;

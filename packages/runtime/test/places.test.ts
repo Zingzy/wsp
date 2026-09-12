@@ -614,7 +614,7 @@ describe("putting the agent on a computer over ssh", () => {
         ...wiring(hostKey),
         install: async (req, stage) => {
           minted = req.code;
-          stage("node", "running");
+          stage("wsp", "running");
           throw new Error("ssh refused the login (publickey)");
         },
       },
@@ -622,7 +622,7 @@ describe("putting the agent on a computer over ssh", () => {
     srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
     runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
     await expect(runtime.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now())).rejects.toThrow("publickey");
-    expect(stages.map(s => `${s.step} ${s.state}`)).toEqual(["node running", "node failed"]);
+    expect(stages.map(s => `${s.step} ${s.state}`)).toEqual(["wsp running", "wsp failed"]);
     expect(stages.at(-1)?.note).toContain("publickey");
     // An install that never reached a join leaves its code unspent, and the person's next add mints another.
     expect(await runtime.devices.spend(minted, 1)).toBe(true);

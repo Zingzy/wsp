@@ -4,13 +4,12 @@
 // for. One bundle carries both chips, so every check here runs against both slices. These hold the config both roads
 // read and what the packaged bundle carries.
 import { execFileSync, spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
-import { hostTarget, MAC_TARGETS } from "../scripts/pty.mjs";
-import { executableIn, packaged, ptyBuildIn, resourcesIn } from "./packaged.js";
+import { describe, expect, it } from "vitest";
+import { hostTarget, MAC_TARGETS } from "../scripts/targets.mjs";
+import { daemonIn, executableIn, packaged, resourcesIn } from "./packaged.js";
 
 const desktop = fileURLToPath(new URL("..", import.meta.url));
 const config = readFileSync(join(desktop, "electron-builder.yml"), "utf8");
@@ -80,19 +79,10 @@ function startable(targets: readonly string[]): MacTarget[] {
   return targets.filter((target): target is MacTarget => target === hostTarget() || run("arch", [`-${SLICE[target as MacTarget]}`, "/usr/bin/true"]).ok);
 }
 
-/** What the app's main process does with node-pty, run by the bundle's own executable as node: load the native
- * module from the bundle's resources and run a shell through the pty it opens. */
-const PROBE = `const { spawn } = await import(process.argv[2]);
-let said = "";
-const p = spawn("/bin/sh", ["-c", "echo wsp-pty-ok"], {});
-p.onData(d => { said += d; });
-p.onExit(() => { process.stdout.write(said); process.exit(0); });
-`;
-
 // The first x86_64 start of a freshly built bundle pays Rosetta translating Electron's binary ahead of time, measured
 // at 28 s on this Mac with nothing else running and past a minute on one that is busy; every start after it is under
-// half a second, and the arm64 slice never pays it. That cost belongs to the translation and not to node-pty, so a
-// start that does nothing pays it under a budget that fits it, and the probe then runs under one that fits a start.
+// half a second, and the arm64 slice never pays it. So a start that does nothing pays it under a budget that fits
+// it, and the daemon then runs under one that fits a start.
 const TRANSLATE_MS = 300_000;
 const START_MS = 60_000;
 
@@ -110,11 +100,6 @@ function ended(r: SpawnSyncReturns<string>): Record<string, unknown> {
 
 /** What a run that did what it was asked looks like. */
 const WORKED = { status: 0, signal: null, error: undefined };
-
-const made: string[] = [];
-afterEach(() => {
-  for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true });
-});
 
 describe.skipIf(!onMac || macTree === undefined)("the packaged mac bundle", () => {
   it("carries both chips in one bundle, so a download runs on Apple silicon and on Intel alike", () => {
@@ -134,31 +119,21 @@ describe.skipIf(!onMac || macTree === undefined)("the packaged mac bundle", () =
     }
   });
 
-  it("carries node-pty's native build for each slice, thin for the chip that loads it", () => {
+  it("carries the daemon for each slice, thin for the chip that runs it, signed the way the app is", () => {
     for (const target of MAC_TARGETS as MacTarget[]) {
-      const build = ptyBuildIn(macTree!, target);
-      expect(readdirSync(build)).toContain("spawn-helper");
-      expect(archsOf(join(build, "pty.node"))).toEqual([SLICE[target]]);
+      const bin = daemonIn(macTree!, target);
+      expect(archsOf(bin)).toEqual([SLICE[target]]);
+      expect(run("codesign", ["-dvv", bin]).said).toMatch(HARDENED);
     }
   });
 
-  it("signs node-pty's native module and spawn-helper the same way, which a deep sign of the app leaves out", () => {
-    for (const target of MAC_TARGETS as MacTarget[]) {
-      const build = ptyBuildIn(macTree!, target);
-      for (const file of readdirSync(build)) expect(run("codesign", ["-dvv", join(build, file)]).said).toMatch(HARDENED);
-    }
-  });
-
-  it("starts V8 and loads node-pty under that runtime, on every slice this machine can start", () => {
-    const dir = mkdtempSync(join(tmpdir(), "wsp-signing-probe-"));
-    made.push(dir);
-    writeFileSync(join(dir, "probe.mjs"), PROBE);
-    const lib = join(resourcesIn(macTree!), "node_modules", "node-pty", "lib", "index.js");
+  it("starts as node, and runs the daemon it carries, on every slice this machine can start", () => {
     const slices = startable(macTree!.targets);
     expect(slices).toContain(hostTarget());
     for (const target of slices) {
       expect({ target, ...ended(asNode(target, ["-e", ""], TRANSLATE_MS)) }).toMatchObject({ target, ...WORKED });
-      expect({ target, ...ended(asNode(target, [join(dir, "probe.mjs"), lib], START_MS)) }).toMatchObject({ target, ...WORKED, said: expect.stringContaining("wsp-pty-ok") });
+      const daemon = spawnSync("arch", [`-${SLICE[target]}`, daemonIn(macTree!, target), "--help"], { encoding: "utf8", timeout: START_MS });
+      expect({ target, ...ended(daemon) }).toMatchObject({ target, ...WORKED, said: expect.stringContaining("wsp-daemon") });
     }
   }, MAC_TARGETS.length * (TRANSLATE_MS + START_MS) + 60_000);
 
