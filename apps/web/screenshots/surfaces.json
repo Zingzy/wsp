@@ -1,0 +1,36 @@
+{
+  "widths": [1440, 390],
+  "surfaces": [
+    {
+      "name": "sidebar",
+      "at": "/",
+      "steps": ["390:key:Escape", "390:sidebar=trigger"],
+      "wait": "row-id=thread:th_redirect"
+    },
+    {
+      "name": "workspace",
+      "at": "/",
+      "steps": ["390:key:Escape", "390:sidebar=trigger", "row-id=ws:ws_web", "390:key:Escape"],
+      "wait": "testid=composer-editor"
+    },
+    {
+      "name": "composer-thread",
+      "at": "/",
+      "steps": ["390:key:Escape", "390:sidebar=trigger", "row-id=thread:th_redirect", "390:key:Escape"],
+      "wait": "testid=composer-editor"
+    },
+    {
+      "name": "machine",
+      "at": "/",
+      "steps": ["1440:row-id=ws:ws_api", "surface-launch=machine"],
+      "wait": "right-panel-tabbar"
+    },
+    {
+      "name": "cloud-setup",
+      "at": "/",
+      "steps": ["390:key:Escape", "390:sidebar=trigger", "cloud-setup-row"],
+      "wait": "k=choice",
+      "settleMs": 700
+    }
+  ]
+}
