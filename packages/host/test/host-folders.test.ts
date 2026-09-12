@@ -71,6 +71,25 @@ describe("this computer's folder listing", () => {
     expect(names(listHostFolders({ dir: home }, { home }).folders)).toEqual(["Applications", "code"]);
   });
 
+  it("hides the Library a Mac keeps in the home itself, wherever that home sits, and lists one anywhere else", () => {
+    const { home } = tree();
+    mkdirSync(join(home, "Library"), { recursive: true });
+    mkdirSync(join(home, "code", "Library"), { recursive: true });
+    // A home under a temp folder, which is where every lab account and every test home sits: the home decides, so
+    // the path's shape has no say.
+    const onAMac = listHostFolders({ dir: home }, { home, platform: "darwin" });
+    expect(names(onAMac.folders)).toEqual(["Applications", "code"]);
+    expect(onAMac.hidden).toBe(1);
+    // Asked for, it is a row like any other.
+    expect(names(listHostFolders({ dir: home, hidden: true }, { home, platform: "darwin" }).folders)).toContain("Library");
+    // A Library inside their own work is theirs, on a Mac as anywhere.
+    expect(names(listHostFolders({ dir: join(home, "code") }, { home, platform: "darwin" }).folders)).toContain("Library");
+    // No other computer keeps one in the home, so nothing is hidden there.
+    const elsewhere = listHostFolders({ dir: home }, { home, platform: "linux" });
+    expect(names(elsewhere.folders)).toEqual(["Applications", "Library", "code"]);
+    expect(elsewhere.hidden).toBe(0);
+  });
+
   it("lists the dot-named folders too when they are asked for, and still says how many of the level they are", () => {
     const { home } = tree();
     const listing = listHostFolders({ dir: join(home, "code"), hidden: true }, { home });

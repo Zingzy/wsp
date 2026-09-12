@@ -81,12 +81,16 @@ function Surface({ workspace, series }: { workspace: WorkspaceView; series: Work
   );
 }
 
+/** Every row of the pane, header and foot included: 12 px at the left and 20 px at the right, so the 6 px scroll
+ * bar rides in the outer 8 px and never covers a value. The hairlines run edge to edge, being the row's own. */
+const PANE_INSET = "pl-3 pr-5";
+
 function Header({ workspace, status }: { workspace: WorkspaceView; status: WorkspaceStatus | null }) {
   const machineId = status?.machineId ?? workspace.machineId;
   const verbs = useWorkspaceVerbs();
   const copy = actionById(resolveActions(workspaceActions, workspaceTarget(workspace, status), verbs, false), "copy-id");
   return (
-    <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
+    <div className={cn("flex items-center gap-2 border-b border-border/60 py-2", PANE_INSET)}>
       <MachineLead workspace={workspace} />
       <span className="min-w-0 truncate text-sm font-medium">{workspace.name}</span>
       <span className="ml-auto flex min-w-0 items-center gap-0.5 font-mono text-[.7rem] text-muted-foreground">
@@ -109,7 +113,7 @@ function MachineLead({ workspace }: { workspace: WorkspaceView }) {
 
 function Section({ label, aside, children }: { label: string; aside?: ReactNode; children: ReactNode }) {
   return (
-    <section className="border-b border-border/50 px-3 py-2.5 last:border-b-0">
+    <section className={cn("border-b border-border/50 py-2.5 last:border-b-0", PANE_INSET)}>
       <div className="flex items-baseline gap-2 text-[.65rem] font-medium uppercase tracking-wider text-muted-foreground">
         <span>{label}</span>
         {aside !== undefined && <span className="ml-auto font-mono normal-case tracking-normal text-muted-foreground/80">{aside}</span>}
@@ -926,7 +930,7 @@ function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; sta
   ].filter(button => button !== null);
   if (buttons.length === 0 && note === null && upgrade.phase.kind !== "failed") return null;
   return (
-    <footer className="flex flex-col gap-2 border-t border-border/60 p-3">
+    <footer className={cn("flex flex-col gap-2 border-t border-border/60 py-3", PANE_INSET)}>
       {buttons.length > 0 && <div className="flex gap-2">{buttons}</div>}
       {open && status && choice && (
         <div className="flex flex-col gap-2 rounded-md border border-border/60 p-2.5">

@@ -61,6 +61,8 @@ export const ADD_COMPUTER_WORDS = {
     portPlaceholder: "22",
     addon: "ssh",
     note: "Your ssh agent and config are used as they stand. Nothing is asked for a key unless ssh refuses.",
+    /** The folder the install makes on the box, in that line's fact slot, since the step's own words leave it out. */
+    folder: "~/.wsp",
     add: "Add",
     adds: "adds",
     loginFirst: "type the login first",

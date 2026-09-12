@@ -146,9 +146,11 @@ export function ConnectProviderSheet({ open, onOpenChange, rows = providerRows()
                 <Button variant="outline" onClick={() => setAt("pick")}>
                   {WORDS.back}
                 </Button>
-                {/* Held, the keycap is the quiet variant in the same slot and its reason stands under the field;
-                    while the provider is asked it keeps the loud one and says what it is doing. */}
-                <Button data-k="save" {...(held === undefined ? {} : { variant: "outline" as const })} disabled={held !== undefined} onClick={save}>
+                {/* A key being saved is busy rather than held, so the keycap keeps its accent while the provider
+                    answers and says what it is doing; its reason, where it has one, is in the field's own slot.
+                    The press itself is what holds a second send, since a button a person can still read as live
+                    must not take one. */}
+                <Button data-k="save" held={held !== undefined} onClick={save}>
                   {kept ? WORDS.continueWord : busy ? WORDS.checking(picked.name) : said !== null ? WORDS.tryAgain : WORDS.save}
                 </Button>
               </>
@@ -198,7 +200,7 @@ function Pick({ rows, pickedId, onPick }: { rows: readonly ProviderRow[]; picked
 /** The key step: one field on its own, the two-line slot under it, and the link to where a key comes from, which
  * does not move when the slot fills. A key this computer already holds reads as dots with `saved` in the field's
  * own slot, and the quiet Change under it empties the field for a new one. */
-function KeyStep({ row, value, said, kept, held, onChange, onChange0, onEnter }: { row: ProviderRow; value: string; said: KeySaid | null; kept: boolean; /** Why the keycap is held, which stands in the slot until there is something to press. */ held?: string; onChange: (v: string) => void; /** Change pressed on a key this computer holds. */ onChange0: () => void; onEnter: () => void }) {
+function KeyStep({ row, value, said, kept, held, onChange, onChange0, onEnter }: { row: ProviderRow; value: string; said: KeySaid | null; kept: boolean; /** Why Save is held, which stands in the slot until a key is pasted. */ held?: string; onChange: (v: string) => void; /** Change pressed on a key this computer holds. */ onChange0: () => void; onEnter: () => void }) {
   const id = "connect-provider-key";
   const consoleAt = keyConsoleOf(row);
   return (
@@ -232,7 +234,7 @@ function KeyStep({ row, value, said, kept, held, onChange, onChange0, onEnter }:
             </span>
           ) : null}
         </div>
-        <RefusalSlot k="key-refusal" {...(said !== null ? { said: said.said, fix: said.fix } : held === undefined ? {} : { note: held })} />
+        <RefusalSlot k="key-refusal" {...(said === null ? (held === undefined ? {} : { waiting: held }) : { said: said.said, fix: said.fix })} />
       </div>
       {kept ? (
         <Button data-k="change" variant="link" className="h-auto self-start p-0 text-[13px] text-muted-foreground hover:text-foreground sm:text-[13px]" onClick={onChange0}>

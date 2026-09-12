@@ -136,11 +136,9 @@ export const WHERE_PICK_WORDS = {
   /** How long the first workspace there takes, which is the image being built before it. */
   firstBuild: "builds your image there first, about 4 min",
   imageThere: (version: number): string => `your image is there, v${version}`,
-  /** The dialog with nowhere to put a workspace: what this computer already is, and what to do about it. */
-  hereIsTheOne: `${THIS_COMPUTER_WORD} is already a workspace, the only one it can be`,
+  /** The dialog with nowhere to put a workspace: what is missing, and what to do about it. */
+  nowhereYet: "Nowhere to put a new workspace yet.",
   addOne: "Add a computer you own or connect a provider, and workspaces can be created there.",
-  /** Why Create is held with nowhere to put one. */
-  nowhere: "add a computer or connect a provider first",
   /** Why Create is held with no name typed. */
   nameFirst: "give the workspace a name",
 } as const;

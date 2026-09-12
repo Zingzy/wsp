@@ -70,7 +70,7 @@ describe("Connect a provider", () => {
     expect(screen.getByText("Prices are read from the provider for a 2 vCPU, 4 GB workspace. Your key stays on this Mac.")).toBeTruthy();
   });
 
-  it("asks for a key in the picked provider's own words, and holds Save until one is pasted", async () => {
+  it("asks for a key in the picked provider's own words, and holds Save as the outline until one is pasted", async () => {
     mount(ROWS, fakeHost().api);
     await settle();
     fireEvent.click(document.querySelector('[data-k="continue"]')!);
@@ -81,26 +81,15 @@ describe("Connect a provider", () => {
     expect(screen.getByText("API key")).toBeTruthy();
     expect(screen.queryByText("Box API key")).toBeNull();
     expect(document.querySelector('[data-k="where"]')?.textContent).toContain("Get one at ASCII");
-    expect(document.querySelector<HTMLButtonElement>('[data-k="save"]')?.disabled).toBe(true);
-    type("ascii_live_9f3k2mx0");
-    expect(document.querySelector<HTMLButtonElement>('[data-k="save"]')?.disabled).toBe(false);
-  });
-
-  it("says why Save is held under the field it is about, in the quiet variant, and never on a hover a held button cannot take", async () => {
-    mount(ROWS, fakeHost().api);
-    await settle();
-    fireEvent.click(document.querySelector('[data-k="continue"]')!);
-    const save = document.querySelector<HTMLButtonElement>('[data-k="save"]')!;
-    expect(save.disabled).toBe(true);
-    expect(save.className).toContain("border");
-    expect(save.className).not.toContain("bg-primary");
+    const save = (): HTMLButtonElement => document.querySelector<HTMLButtonElement>('[data-k="save"]')!;
+    expect(save().disabled).toBe(true);
+    expect(save().hasAttribute("data-held")).toBe(true);
+    // The reason stands in the field's own slot before any click, since nothing hovers a disabled keycap.
     expect(document.querySelector('[data-k="key-refusal"]')?.textContent).toBe("paste the key first");
-    expect(document.querySelectorAll("[data-slot=tooltip-trigger]")).toHaveLength(0);
-    // A key typed empties the slot and hands the keycap back its loud variant in the same place.
+    expect(document.querySelector('[data-slot="tooltip-trigger"]')).toBeNull();
     type("ascii_live_9f3k2mx0");
-    const live = document.querySelector<HTMLButtonElement>('[data-k="save"]')!;
-    expect(live.disabled).toBe(false);
-    expect(live.className).toContain("bg-primary");
+    expect(save().disabled).toBe(false);
+    expect(save().hasAttribute("data-held")).toBe(false);
     expect(document.querySelector('[data-k="key-refusal"]')?.textContent).toBe("");
   });
 
