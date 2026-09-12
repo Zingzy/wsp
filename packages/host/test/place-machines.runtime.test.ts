@@ -4,17 +4,22 @@
 // a throwaway root, answering the same frames from the kernel instead of a
 // Docker daemon. One daemon serves every case here, so the file holds its own
 // lifecycle instead of the Docker file's per-case sweep. Root, cgroup v2 and a
-// registry are what it needs, so it runs under WSP_RUNTIME_LIVE=1 alone.
+// registry are what it needs, so it runs under WSP_RUNTIME_LIVE=1 alone. The last case deploys the daemon onto a
+// workspace and reads its hello back through the forward, which takes apt, nodejs.org and npm from inside.
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type WebSocket from "ws";
+import type { DaemonEvent } from "@wsp/protocol";
 import { LinkBackend, OWNER_LABEL, type ExecResult, type Machine, type MachineSpec } from "@wsp/engine";
+import { connectDaemon } from "@wsp/runtime";
 import { closeFakePlaceHosts, fakePlaceHost, placePair, testPlaceFile } from "../../daemon/test/fake-place-host.js";
 import { spawnDaemon, type DaemonUnderTest } from "../../daemon/test/harness.js";
+import { deployDaemon } from "../src/doctor.js";
 import { linkOver } from "./machine-link.js";
 
 const RUNTIME_LIVE = process.env["WSP_RUNTIME_LIVE"] === "1";
@@ -22,6 +27,23 @@ const RUNTIME_BIN = process.env["WSP_DAEMON_BIN"] ?? fileURLToPath(new URL("../.
 /** This run's own label, so two suites on one box never list or kill each other's workspaces. */
 const LIVE_OWNER = `live-665-${process.pid}`;
 const CGROUPS = "/sys/fs/cgroup/wsp";
+/** A line answered on the workspace's port 7070 from every address it has; the base image carries perl and nothing
+ * else that listens. */
+const ANSWER_ON_7070 = "nohup perl -MIO::Socket::INET -e '$s = IO::Socket::INET->new(LocalAddr => \"0.0.0.0\", LocalPort => 7070, Listen => 5, ReuseAddr => 1) or die $!; while ($c = $s->accept) { print $c \"hello from inside\\n\"; close $c }' > /dev/null 2> /tmp/listen.err & sleep 0.5; cat /tmp/listen.err";
+
+/** One line read off a fresh connection to the box's loopback port, inside two seconds. */
+const readLine = (port: number): Promise<string> =>
+  new Promise((done, fail) => {
+    const socket = connect({ host: "127.0.0.1", port });
+    let text = "";
+    socket.setTimeout(2_000, () => fail(new Error(`127.0.0.1:${port} answered nothing in 2 s`)));
+    socket.on("data", chunk => {
+      text += String(chunk);
+      if (text.includes("\n")) socket.end();
+    });
+    socket.on("error", fail);
+    socket.on("close", () => done(text.trim()));
+  });
 
 describe.skipIf(!RUNTIME_LIVE)("the whole road, over a daemon link a place proved, with the runtime on the far side", () => {
   let daemon: DaemonUnderTest;
@@ -186,6 +208,49 @@ describe.skipIf(!RUNTIME_LIVE)("the whole road, over a daemon link a place prove
     expect(shape).toMatchObject({ cpu: 1, memMb: 768 });
     expect(shape.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T.*Z$/);
   }, 60_000);
+
+  it("answers the daemon road at the published port on the box's loopback", async () => {
+    const machine = await create({ kind: "sandbox" });
+    expect(await exec(machine, ANSWER_ON_7070)).toMatchObject({ exitCode: 0, stderr: "" });
+    const started = Date.now();
+    const reach = await machine.previewUrl!(7070);
+    times["previewUrl"] = Date.now() - started;
+    // The route the far side published, on its own loopback: the forward is what turns it into one here, and here
+    // the forward is the identity since this test runs on the box.
+    expect(reach.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(reach.token).toBe("");
+    const port = Number(new URL(reach.url).port);
+    expect(await readLine(port)).toBe("hello from inside");
+    expect((await machine.previewUrl!(7070)).url).toBe(reach.url);
+  }, 60_000);
+
+  it("carries a daemon deployed onto a workspace back through the forward, and connectDaemon reads its hello", async () => {
+    const machine = await create({ kind: "sandbox", cpu: 2, memMb: 2048 });
+    // What the deploy needs on a plain ubuntu: curl for the node tarball, a toolchain for node-pty. All of it comes
+    // in over the workspace's own outbound road.
+    const started = Date.now();
+    const apt = await machine.exec(
+      "export DEBIAN_FRONTEND=noninteractive; apt-get update -qq > /tmp/apt.log 2>&1 && apt-get install -y -qq curl ca-certificates python3 make g++ >> /tmp/apt.log 2>&1; echo apt $?; tail -c 300 /tmp/apt.log",
+      { timeoutMs: 600_000 },
+    );
+    expect(apt.stdout, apt.stdout).toContain("apt 0");
+    times["apt install curl ca-certificates python3 make g++"] = Date.now() - started;
+    const deploying = Date.now();
+    const { token, node } = await deployDaemon(machine, { token: randomBytes(24).toString("hex") });
+    times["deployDaemon"] = Date.now() - deploying;
+    expect(node).toMatch(/^v\d+/);
+    expect(await machine.daemonAnswers!({ timeoutMs: 10_000 })).toBe(true);
+    const reach = await machine.previewUrl!(7070);
+    const events: DaemonEvent[] = [];
+    const link = connectDaemon({ previewUrl: reach.url, token, onEvent: e => events.push(e) });
+    try {
+      await link.ready;
+      expect(events.find(e => e.type === "daemon.hello")).toMatchObject({ type: "daemon.hello" });
+      expect((events.find(e => e.type === "daemon.hello") as { root: string }).root).toMatch(/^\//);
+    } finally {
+      link.close();
+    }
+  }, 900_000);
 
   it("holds a memory cap: 700 MB touched under a 512 MB cap exits 137", async () => {
     const machine = await create({ kind: "sandbox", memMb: 512 });

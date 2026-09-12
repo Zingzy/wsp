@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::io;
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
 
 use nix::mount::{mount, umount2, MntFlags, MsFlags};
@@ -53,6 +54,10 @@ impl Layout {
     }
     pub fn record(&self, id: &str) -> PathBuf {
         self.workspace(id).join("workspace.json")
+    }
+    /// The workspace's network: its link, its addresses and the ports published for it.
+    pub fn net(&self, id: &str) -> PathBuf {
+        self.workspace(id).join("net.json")
     }
     /// What the boot command prints, since its first process is nobody's child to read.
     pub fn boot_log(&self, id: &str) -> PathBuf {
@@ -181,17 +186,70 @@ pub fn config_json(c: &Config) -> Value {
     spec
 }
 
-/// The three files bound over /etc: the hostname, a hosts file naming it, and this computer's resolv.conf.
-pub fn write_etc(etc: &Path, hostname: &str) -> Result<(), Error> {
+/// The three files bound over /etc: the hostname, a hosts file naming it and the box at `host.wsp.internal` once
+/// the gateway is known, and the box's resolvers.
+pub fn write_etc(etc: &Path, hostname: &str, gateway: Option<Ipv4Addr>) -> Result<(), Error> {
     fs::create_dir_all(etc).map_err(at(etc))?;
     let hostname_file = etc.join("hostname");
     fs::write(&hostname_file, format!("{hostname}\n")).map_err(at(&hostname_file))?;
     let hosts = etc.join("hosts");
-    fs::write(&hosts, format!("127.0.0.1\tlocalhost\n::1\tlocalhost ip6-localhost ip6-loopback\n127.0.0.1\t{hostname}\n"))
-        .map_err(at(&hosts))?;
+    fs::write(&hosts, hosts_text(hostname, gateway)).map_err(at(&hosts))?;
     let resolv = etc.join("resolv.conf");
-    fs::write(&resolv, fs::read("/etc/resolv.conf").unwrap_or_default()).map_err(at(&resolv))?;
+    fs::write(&resolv, resolv_text(&read_or_empty(BOX_RESOLV), &read_or_empty(UPSTREAM_RESOLV))).map_err(at(&resolv))?;
     Ok(())
+}
+
+pub fn hosts_text(hostname: &str, gateway: Option<Ipv4Addr>) -> String {
+    let mut text = format!("127.0.0.1\tlocalhost\n::1\tlocalhost ip6-localhost ip6-loopback\n127.0.0.1\t{hostname}\n");
+    if let Some(gateway) = gateway {
+        text.push_str(&format!("{gateway}\t{}\n", crate::net::HOST_NAME));
+    }
+    text
+}
+
+const BOX_RESOLV: &str = "/etc/resolv.conf";
+/// Where systemd-resolved keeps the resolvers it forwards to, when the box's own file names only its stub.
+const UPSTREAM_RESOLV: &str = "/run/systemd/resolve/resolv.conf";
+/// The resolvers Docker hands a container when the box names none it can use.
+const DEFAULT_NAMESERVERS: [&str; 2] = ["8.8.8.8", "8.8.4.4"];
+
+fn read_or_empty(path: &str) -> String {
+    fs::read_to_string(path).unwrap_or_default()
+}
+
+/// The box's resolv.conf as a workspace can use it: a nameserver on the box's own loopback is a stub the workspace
+/// cannot reach, so the upstream file stands in for it; IPv6 nameservers go, since the workspace has no IPv6 route;
+/// a box with no usable nameserver gets Docker's defaults. Search and options lines come along as they are.
+pub fn resolv_text(box_file: &str, upstream: &str) -> String {
+    let usable = |file: &str| -> Vec<String> {
+        file.lines()
+            .filter_map(|line| line.trim().strip_prefix("nameserver").map(str::trim))
+            .filter_map(|word| word.parse::<IpAddr>().ok())
+            .filter(|ip| matches!(ip, IpAddr::V4(v4) if !v4.is_loopback()))
+            .map(|ip| ip.to_string())
+            .collect()
+    };
+    let (mut servers, source) = match usable(box_file) {
+        found if !found.is_empty() => (found, box_file),
+        _ => match usable(upstream) {
+            found if !found.is_empty() => (found, upstream),
+            _ => (Vec::new(), box_file),
+        },
+    };
+    if servers.is_empty() {
+        servers = DEFAULT_NAMESERVERS.iter().map(|s| (*s).to_owned()).collect();
+    }
+    let mut text = String::new();
+    for server in servers {
+        text.push_str(&format!("nameserver {server}\n"));
+    }
+    for line in source.lines().map(str::trim) {
+        if line.starts_with("search ") || line.starts_with("options ") {
+            text.push_str(line);
+            text.push('\n');
+        }
+    }
+    text
 }
 
 /// The overlay: the chain's layers as lowers, newest first as overlayfs reads them, the workspace's own upper
@@ -271,12 +329,26 @@ mod tests {
     }
 
     #[test]
-    fn the_etc_files_name_the_host() {
+    fn the_etc_files_name_the_host_and_the_box_once_the_gateway_is_known() {
         let dir = tempfile::tempdir().unwrap();
-        write_etc(dir.path(), "wsp-b").unwrap();
+        write_etc(dir.path(), "wsp-b", None).unwrap();
         assert_eq!(fs::read_to_string(dir.path().join("hostname")).unwrap(), "wsp-b\n");
-        assert!(fs::read_to_string(dir.path().join("hosts")).unwrap().contains("127.0.0.1\twsp-b"));
-        assert!(dir.path().join("resolv.conf").is_file());
+        let hosts = fs::read_to_string(dir.path().join("hosts")).unwrap();
+        assert!(hosts.contains("127.0.0.1\twsp-b") && !hosts.contains("host.wsp.internal"), "{hosts}");
+        let resolv = fs::read_to_string(dir.path().join("resolv.conf")).unwrap();
+        assert!(resolv.contains("nameserver "), "{resolv}");
+        write_etc(dir.path(), "wsp-b", Some(Ipv4Addr::new(10, 65, 0, 5))).unwrap();
+        assert!(fs::read_to_string(dir.path().join("hosts")).unwrap().ends_with("10.65.0.5\thost.wsp.internal\n"));
+    }
+
+    #[test]
+    fn the_resolvers_handed_in_are_ones_a_workspace_can_reach() {
+        let stub = "# stub\nnameserver 127.0.0.53\noptions edns0 trust-ad\nsearch .\n";
+        let upstream = "nameserver 2a01:4ff:ff00::add:2\nnameserver 185.12.64.1\nnameserver 185.12.64.2\nsearch corp.example\n";
+        assert_eq!(resolv_text(stub, upstream), "nameserver 185.12.64.1\nnameserver 185.12.64.2\nsearch corp.example\n");
+        assert_eq!(resolv_text("nameserver 1.1.1.1\nsearch lan\n", upstream), "nameserver 1.1.1.1\nsearch lan\n");
+        assert_eq!(resolv_text("nameserver ::1\n", ""), "nameserver 8.8.8.8\nnameserver 8.8.4.4\n");
+        assert_eq!(resolv_text("", ""), "nameserver 8.8.8.8\nnameserver 8.8.4.4\n");
     }
 
     #[test]

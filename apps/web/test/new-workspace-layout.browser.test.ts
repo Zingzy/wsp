@@ -2,9 +2,10 @@
 // The new-workspace dialog in a real Chromium, both themes: the size rows
 // share one height with each other, read in the muted mono voice the Where
 // caption uses, carry no border or fill of their own, and the rates read at AA;
-// and with nothing to fork yet, the Create keycap is held with the reason as
-// its tooltip. Photographed in each state and theme. Runs only when asked for
-// (WSP_RENDER=1) and skips without Playwright's Chromium.
+// and with nothing to fork yet, the Create keycap is held as the outline with
+// its reason in the caption under Where. Photographed in each state and theme.
+// Runs only when asked for (WSP_RENDER=1) and skips without Playwright's
+// Chromium.
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -106,21 +107,23 @@ describe.skipIf(renderSkipped !== undefined)("the new-workspace dialog laid out 
     }
   });
 
-  it.each(["dark", "light"] as const)("in the %s theme a build still running holds the Create keycap and puts its reason in the tooltip", async theme => {
+  it.each(["dark", "light"] as const)("in the %s theme a build still running holds the Create keycap as the outline and writes its reason in the caption", async theme => {
     const line = `${CLOUD_SETUP_WORDS.create.building} · 5 of 13`;
     await page!.goto(`${base}?theme=${theme}&refusal=${encodeURIComponent(line)}`);
     const create = page!.locator("[role=dialog] button", { hasText: "Create" });
     await create.waitFor();
     expect(await create.isDisabled()).toBe(true);
-    // The reason hangs on the wrapper, since a disabled button takes no hover of its own.
-    await page!.locator("[data-k=create-reason]").hover();
-    const popup = page!.locator("[data-slot=tooltip-popup]");
-    await popup.waitFor();
-    expect(await popup.textContent()).toBe(line);
-    const ratios = await textContrast(page!, "[data-slot=tooltip-popup]");
+    // The reason is on the screen before any pointer moves, in the caption under the field the keycap waits on.
+    expect(await page!.locator("[data-k=where-caption]").textContent()).toBe(line);
+    expect(await page!.locator("[data-slot=tooltip-popup]").count()).toBe(0);
+    // Held reads as the outline's hairline on the popover's own fill, never as the loudest thing on the card.
+    const drawn = await create.evaluate(el => ({ fill: getComputedStyle(el).backgroundColor, edge: getComputedStyle(el).borderColor }));
+    const loud = await page!.locator("[role=dialog] button", { hasText: "Cancel" }).evaluate(el => getComputedStyle(el).backgroundColor);
+    console.info(`${theme}: the held Create is ${drawn.fill} inside ${drawn.edge}, beside Cancel's ${loud}`);
+    expect(drawn.fill).toBe(loud);
+    const ratios = await textContrast(page!, "[data-k=where-caption]");
     console.info(`${theme}: the held keycap's reason reads at ${ratios.map(r => r.toFixed(2)).join(", ")} to 1`);
     for (const ratio of ratios) expect(ratio).toBeGreaterThanOrEqual(4.5);
-    // The whole window, since the tooltip is a popup beside the card and a shot of the card alone would cut it.
     await page!.screenshot({ path: join(SHOTS, `new-workspace-building-${theme}.png`) });
   });
 });
