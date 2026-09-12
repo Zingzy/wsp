@@ -145,7 +145,7 @@ describe("the MCP server over the host", () => {
   it("offers the verbs as tools, each described", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "folders", "forget", "fork", "image", "image_build", "image_move", "import", "new", "pause", "places", "projects", "rebuild", "recipe", "recipe_scan", "rename", "run", "send", "setup", "snapshot", "stop", "terminal_config", "thread_forget", "thread_read", "thread_rename", "threads", "threads_wait", "wake", "workspaces", "workspaces_agents"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "folders", "forget", "fork", "image", "image_build", "image_move", "import", "new", "pause", "places", "projects", "rebuild", "recipe", "recipe_scan", "rename", "run", "send", "setup", "snapshot", "stop", "terminal_config", "thread_allow", "thread_deny", "thread_forget", "thread_read", "thread_rename", "threads", "threads_wait", "wake", "workspaces", "workspaces_agents"]);
     expect(Object.keys((tools.find(t => t.name === "folders")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["folder", "hidden"]);
     expect(Object.keys((tools.find(t => t.name === "terminal_config")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["scheme"]);
     expect(Object.keys((tools.find(t => t.name === "import")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agents", "cut", "folder", "keep", "replace", "workspace", "yes"]);
@@ -440,7 +440,7 @@ describe("the MCP server over the host", () => {
     expect(paused.structured).toEqual({ workspace: expect.objectContaining({ name: "alpha", phase: "napping" }) });
     expect((await rt.workspaces.list())[0]!.phase).toBe("napping");
     const missing = await call("pause", { workspace: "nope" });
-    expect(missing).toEqual(failedWith("no workspace nope"));
+    expect(missing).toEqual(failedWith("no workspace nope", "usage"));
   });
 
   it("wake wakes a paused workspace and returns it running; on a running one it is a no-op that returns it as it is", async () => {
@@ -454,7 +454,7 @@ describe("the MCP server over the host", () => {
     const again = await call("wake", { workspace: "alpha" });
     expect(again.structured).toEqual({ workspace: expect.objectContaining({ name: "alpha", phase: "running" }) });
     const missing = await call("wake", { workspace: "nope" });
-    expect(missing).toEqual(failedWith("no workspace nope"));
+    expect(missing).toEqual(failedWith("no workspace nope", "usage"));
   });
 
   it("exec, run and send on a paused workspace wake it first and then run", async () => {
@@ -496,7 +496,7 @@ describe("the MCP server over the host", () => {
     expect(after.machineId).not.toBe(alpha!.machineId);
     expect(built.structured).toEqual({ workspace: expect.objectContaining({ id: alpha!.id, machineId: after.machineId, phase: "running" }) });
     expect(built.text).toBe(`alpha running on ${after.machineId}`);
-    expect(await call("rebuild", { workspace: "nope" })).toEqual(failedWith("no workspace nope"));
+    expect(await call("rebuild", { workspace: "nope" })).toEqual(failedWith("no workspace nope", "usage"));
   });
 
   it("forget drops a workspace whose machine is gone and says what went; one whose machine exists is a tool error with the reason", async () => {
@@ -539,7 +539,7 @@ describe("the MCP server over the host", () => {
     expect(await rt.workspaces.list()).toEqual([]);
     expect(await store.get("workspaces", alpha!.id)).toBeUndefined();
     const missing = await call("delete", { workspace: "nope", confirm: true });
-    expect(missing).toEqual(failedWith("no workspace nope"));
+    expect(missing).toEqual(failedWith("no workspace nope", "usage"));
   });
 
   it("run opens a thread under the named agent, started by the local agent, and returns the reply as the result", async () => {
@@ -701,7 +701,7 @@ describe("the MCP server over the host", () => {
       ["claude", "person", "from the app", 1],
     ]);
     const missing = await call("send", { thread: "nope", message: "x" });
-    expect(missing).toEqual(failedWith("no thread nope"));
+    expect(missing).toEqual(failedWith("no thread nope", "usage"));
   });
 
   it("send into a thread whose last turn was cut puts the cut line first in the result text and flags it; the send after that is plain", async () => {
@@ -753,7 +753,7 @@ describe("the MCP server over the host", () => {
     expect(idle).toEqual({ text: `thread ${row!.threadId} not running`, structured: { threadId: row!.threadId, outcome: "not-running" }, isError: false });
     expect(held.interrupted).toHaveLength(1);
     const missing = await call("stop", { thread: "nope" });
-    expect(missing).toEqual(failedWith("no thread nope"));
+    expect(missing).toEqual(failedWith("no thread nope", "usage"));
   });
 
   it("thread_rename names the thread in the agent's own store and returns the outcome; an agent that keeps no name is an answer, not an error", async () => {
@@ -779,7 +779,7 @@ describe("the MCP server over the host", () => {
       structured: { threadId: codexRow.threadId, title: "the name", harness: "codex", outcome: "unsupported" },
       isError: false,
     });
-    expect(await call("thread_rename", { thread: "nope", title: "the name" })).toEqual(failedWith("no thread nope"));
+    expect(await call("thread_rename", { thread: "nope", title: "the name" })).toEqual(failedWith("no thread nope", "usage"));
   });
 
   it("thread_read answers with the thread's messages as the app lists them, its tool call one row, and with last the whole final message alone", async () => {
@@ -805,7 +805,7 @@ describe("the MCP server over the host", () => {
     // The reply the start returned and the reply a read of it gives are the same message, whole.
     expect(last.text.split("\n").slice(1).join("\n")).toBe(opened.text);
     expect(launchedScripts(backend).filter(script => script.includes("sessions"))).toEqual([]);
-    expect(await call("thread_read", { thread: "nope" })).toEqual(failedWith("no thread nope"));
+    expect(await call("thread_read", { thread: "nope" })).toEqual(failedWith("no thread nope", "usage"));
   });
 
   it("run with notify tells that thread when the new one ends, through the same start the CLI makes: the running parent is steered the line and the child's transcript names the parent", async () => {
@@ -830,7 +830,7 @@ describe("the MCP server over the host", () => {
     expect(held.starts).toHaveLength(2);
 
     const missing = await call("run", { workspace: "alpha", task: "x", notify: ["nope"] });
-    expect(missing).toEqual(failedWith("no thread nope"));
+    expect(missing).toEqual(failedWith("no thread nope", "usage"));
   });
 
   it("run with notify me, called by an agent inside a turn, names that turn's thread: the server reads the token off the environment it runs with", async () => {
@@ -915,7 +915,7 @@ describe("the MCP server over the host", () => {
     held.release(2, "docs done");
     expect((await call("threads_wait", { threads: [a!.threadId!] })).text).toBe(`thread ${a!.threadId!.slice(0, 8)} finished (completed): a done`);
     expect((await call("threads_wait", { threads: [b.threadId!] })).text).toBe(`thread ${b.threadId!.slice(0, 8)} finished (completed): docs done`);
-    expect(await call("threads_wait", { threads: ["nope"] })).toEqual(failedWith("no thread nope"));
+    expect(await call("threads_wait", { threads: ["nope"] })).toEqual(failedWith("no thread nope", "usage"));
   });
 
   it("a failed turn is a tool error carrying the harness's reason", async () => {

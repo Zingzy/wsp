@@ -193,7 +193,7 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { GUEST_WSP_BIN, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct } from "@wsp/protocol";
-import { DAEMON_TOKEN_PATH, mcpServersBlocked, actionRefusal, buildsImages, copyIsCurrent, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState, absentComputer, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeWorkspaceGoneLine, workspacePlace, workFolderIn } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, mcpServersBlocked, actionRefusal, buildsImages, copyIsCurrent, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState, absentComputer, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeWorkspaceGoneLine, workspacePlace, workFolderIn } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { PlaceAbsentError, PlaceBackend, isPlaceAbsent, parsePlaceMachineId, placeMachineId } from "@wsp/engine";
@@ -4152,7 +4152,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const rows = held();
       // A name names one workspace at most: the create and the rename both refuse a name another already holds.
       const entry = rows.find(e => e.record.id === ref) ?? rows.find(e => e.record.name === ref);
-      if (entry === undefined) throw new Error(noWorkspaceRefusal(ref));
+      if (entry === undefined) throw notFoundRefusal(noWorkspaceRefusal(ref));
       refuseRelayed(entry.record, origin);
       return view(entry.record);
     },
@@ -4422,6 +4422,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async forget(id, origin) {
       const entry = await entryOf(id, origin);
+      const kind = entry.record.kind;
+      if (!kindWords(kind).driven) throw Object.assign(new Error(forgetUndrivenRefusal(entry.record.name, machineWord(kind))), { kind: "conflict" });
       const state = await entry.machine.state();
       if (state !== "gone") {
         throw Object.assign(new Error(`${entry.record.name}'s machine ${entry.machine.id} is still ${state}; pause it or delete it at the provider first`), { kind: "conflict" });
@@ -4988,11 +4990,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
      * too, since it may stand for hours past the synchronous run that raised it. */
     let answerAsk: HarnessSession["answer"];
 
-    /** What the row says the thread is waiting on, and the turn's own reading of whether it is blocked on a person:
-     * the oldest prompt still open leads, since that is the one the harness stopped at. Written on every open and
-     * close, so the sidebar, the command line and the turn's idle clock read one fact. */
+    /** What the row says the thread is waiting on, and the turn's own reading of whether it is blocked on a person,
+     * by the protocol's one rule for which open prompt leads. Written on every open and close, so the sidebar, the
+     * command line and the turn's idle clock read one fact. */
     const readsOpen = (): void => {
-      const lead = [...open.values()][0];
+      const lead = leadAsk(open.values());
       if (lead === undefined) delete view.asking;
       else view.asking = askingLine(lead);
       if (t.waiting !== undefined) t.waiting.on = open.size > 0;
@@ -5750,7 +5752,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await ready();
       const held = [...sessions].filter(([, s]) => s.view.threadId === threadId);
       const workspaceId = held[0]?.[1].view.workspaceId;
-      if (workspaceId === undefined) throw new Error(`no thread ${threadWord(threadId)}`);
+      if (workspaceId === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
       await entryOf(workspaceId, origin);
       if (threadRan(held.map(([, s]) => s.view))) throw Object.assign(new Error(threadForgetRefusal(threadId)), { kind: "conflict" });
       for (const [id] of held) sessions.delete(id);

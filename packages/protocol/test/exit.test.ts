@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { EXIT_CODES, EXIT_WORDS, ExitClass, VerbFailure, authRefusal, exitClassOf, usageRefusal, verbFailure } from "../src/index.js";
+import { EXIT_CODES, EXIT_WORDS, ExitClass, VerbFailure, authRefusal, exitClassOf, notFoundRefusal, usageRefusal, verbFailure } from "../src/index.js";
 
 describe("the exit code every wsp verb answers with", () => {
   it("is one table: ok 0, provider 1, auth 2, usage 3, each class with its words", () => {
@@ -14,6 +14,8 @@ describe("the exit code every wsp verb answers with", () => {
     expect(exitClassOf(usageRefusal("wsp new takes one name.", "usage: wsp new <name>"))).toBe("usage");
     expect(exitClassOf(Object.assign(new Error("2x9 is not a size"), { kind: "invalid" }))).toBe("usage");
     expect(exitClassOf(authRefusal("unauthorized"))).toBe("auth");
+    // A name this host holds nothing by is a value nothing takes, whichever door was typed and however far it got.
+    expect(exitClassOf(notFoundRefusal("no workspace nope"))).toBe("usage");
     expect(exitClassOf(Object.assign(new Error("unauthorized"), { kind: "auth", status: 401 }))).toBe("auth");
     for (const kind of ["concurrency", "plan", "missing", "conflict", "exists", "transient", "unknown"]) expect(exitClassOf(Object.assign(new Error("no"), { kind })), kind).toBe("provider");
     expect(exitClassOf(new Error("Unknown option '--json'"))).toBe("provider");
