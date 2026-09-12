@@ -2168,6 +2168,17 @@ export type PlaceView = z.infer<typeof PlaceView>;
  * was installed on, so both sides of the wire read the same word for it. */
 export const HERE_PLACE_ID = "here";
 
+/** The one written form of a workspace's machine on a joined computer: the id names the place the link belongs to
+ * and nothing else. Written here rather than in the backend that mints it because every client reads it back to
+ * say which computer a workspace stands on. */
+export const placeMachineId = (placeId: string): string => `place:${placeId}`;
+
+/** The place an id names, or nothing when the id is not one of ours: a record from another backend. */
+export function parsePlaceMachineId(id: string): string | undefined {
+  const placeId = id.startsWith("place:") ? id.slice("place:".length) : "";
+  return placeId === "" ? undefined : placeId;
+}
+
 /** A computer you own finished its join, with the address it dialled from as `ws` reported it. The view carries
  * what it said about itself, so the sheet fills its row off this one event. */
 export const PlaceJoinedEvent = z.object({ type: z.literal("place.joined"), place: PlaceView, from: z.string() });

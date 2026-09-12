@@ -284,7 +284,7 @@ describe("command palette", () => {
     await mountShell();
     const seen: string[] = [];
     const off = onNewThreadRequest(d => seen.push(d.workspaceId));
-    act(() => useStore.setState({ creations: [{ key: "creating:1", name: "beta", workspaceId: null, lines: [], failed: null }], selectedId: "creating:1" }));
+    act(() => useStore.setState({ creations: [{ key: "creating:1", name: "beta", askedAt: Date.now(), workspaceId: null, lines: [], failed: null }], selectedId: "creating:1" }));
     mod("n");
     mod("j");
     mod("b", { altKey: true });

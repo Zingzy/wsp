@@ -2,7 +2,7 @@
 // The store's session folding: rows come from the sessions.list op, the
 // session.* events decide when to refetch and what to patch in between.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLOUD_SETUP_WORDS, DEFAULT_THEME, type GoldenManifest, type InitJob, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, DEFAULT_THEME, type GoldenManifest, type InitJob, type PlaceView, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api, type ProtocolEvent } from "../src/protocol/client.js";
 import { LAST_WORKSPACE_KEY } from "../src/protocol/lastWorkspace.js";
 import { useStore } from "../src/protocol/store.js";
@@ -164,7 +164,7 @@ describe("the workspace the address opens on", () => {
     expect(JSON.parse(window.localStorage.getItem(LAST_WORKSPACE_KEY)!)).toEqual({ "/Users/dev/.wsp/state.json": "ws_b" });
     useStore.getState().select("ws_a", "thr_1");
     expect(JSON.parse(window.localStorage.getItem(LAST_WORKSPACE_KEY)!)).toEqual({ "/Users/dev/.wsp/state.json": "ws_a" });
-    useStore.setState({ creations: [{ key: "c1", name: "new", workspaceId: null, lines: [], failed: null }], selectedId: "c1" });
+    useStore.setState({ creations: [{ key: "c1", name: "new", askedAt: Date.now(), workspaceId: null, lines: [], failed: null }], selectedId: "c1" });
     expect(JSON.parse(window.localStorage.getItem(LAST_WORKSPACE_KEY)!)).toEqual({ "/Users/dev/.wsp/state.json": "ws_a" });
     useStore.setState({ selectedId: null });
     expect(await refreshed(rows())).toBe("ws_a");
@@ -252,6 +252,9 @@ describe("the address is the one record of what the person is reading", () => {
 });
 
 describe("store creations", () => {
+  const HERE_PLACE: PlaceView = { id: "here", kind: "computer", name: "studio.local", default: false, present: true };
+  const HETZNER_PLACE: PlaceView = { id: "p_1", kind: "computer", name: "hetzner", default: true, docker: true, present: true };
+
   const stage = (over: Partial<Extract<ProtocolEvent, { type: "workspace.creating" }>> = {}): ProtocolEvent => ({
     type: "workspace.creating",
     workspaceId: "ws_new",
@@ -334,6 +337,48 @@ describe("store creations", () => {
     finish(view("ws_new"));
     expect(await done).toBe("ws_new");
     expect(useStore.getState().creations).toEqual([]);
+  });
+
+  it("the image being built where the create is going reads as the first lines of that create's log", async () => {
+    const { api, emit } = fakeApi([view("ws_a")], []);
+    api.createFromGoldenHead = () => new Promise<WorkspaceView>(() => {});
+    useStore.getState().bind(api);
+    await flush();
+    useStore.setState({ places: [HERE_PLACE, HETZNER_PLACE] });
+    void useStore.getState().createWorkspace("beta", undefined, undefined, "p_1");
+    expect(useStore.getState().creations[0]!.where).toBe("p_1");
+
+    // The build names the place by the word its backend table keys it with, which is the same row.
+    emit({ type: "golden.stage", name: "default", stage: "installing-harness", place: "hetzner" });
+    emit({ type: "golden.stage", name: "default", stage: "snapshotting", detail: "about 4.2 GB", place: "hetzner" });
+    // The image's own build, at no place, belongs to the init screens and never to a create's log.
+    emit({ type: "golden.stage", name: "default", stage: "installing-tools" });
+    // A build at a computer this create is not going to is another road's.
+    emit({ type: "golden.stage", name: "default", stage: "installing-tools", place: "old-macbook" });
+    emit(stage({ stage: "ready", message: "Ready.", elapsedMs: 210_000 }));
+
+    expect(useStore.getState().creations[0]!.lines.map(l => [l.stage, l.message, l.notice])).toEqual([
+      ["image", "building your image on hetzner · installing agents", undefined],
+      ["image", "building your image on hetzner · taking the snapshot", "about 4.2 GB"],
+      ["ready", "Ready.", undefined],
+    ]);
+  });
+
+  it("stamps an image line's elapsed from the moment the create was asked, so the log's right column grows", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-09-12T09:27:00.000Z"));
+      useStore.setState({ places: [HERE_PLACE, HETZNER_PLACE], creations: [], api: null });
+      // The row is made by hand: what is measured is the clock, not the road that asked.
+      useStore.setState({ creations: [{ key: "c1", name: "spoo-fix", askedAt: Date.now(), where: "p_1", workspaceId: null, lines: [], failed: null }] });
+      vi.advanceTimersByTime(4_100);
+      useStore.getState().applyEvent({ type: "golden.stage", name: "default", stage: "installing-harness", place: "hetzner" });
+      vi.advanceTimersByTime(108_000);
+      useStore.getState().applyEvent({ type: "golden.stage", name: "default", stage: "snapshotting", place: "hetzner" });
+      expect(useStore.getState().creations[0]!.lines.map(l => l.elapsedMs)).toEqual([4_100, 112_100]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("a reply that lands before the created event finishes the row from the reply, and carries its notice as the toast", async () => {

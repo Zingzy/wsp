@@ -35,6 +35,8 @@ import { ForgetWorkspaceDialog } from "../ForgetWorkspaceDialog.js";
 import { ScrollArea } from "../ui/scroll-area.js";
 import { idleLabel, money, percentLabel } from "./format.js";
 import { TONE_TEXT } from "../../lib/tone.js";
+import { THIS_COMPUTER_WORD } from "../../settings/places.js";
+import { whereRuns } from "../../sidebar/workspaceRows.js";
 import { workspaceKindGlyph } from "../../workspaceKindGlyph.js";
 import { SnapshotStorageLine } from "./SnapshotStorageLine.js";
 import { UsageChart, UsageRangeToggle } from "./UsageChart.js";
@@ -141,6 +143,7 @@ interface FactsProps {
  * (nothing), the system it runs, how long it has been up and the folder its commands start in. */
 function Facts({ workspace, status, pendingSize, kind }: FactsProps) {
   const capabilities = useCapabilities();
+  const places = useStore(s => s.places);
   const now = useClock(status?.idleAt !== undefined);
   const zombie = status?.reach.state === "zombie";
   // Reach is not a row of its own: the protocol folds a machine that stopped answering into the state word, which
@@ -157,11 +160,15 @@ function Facts({ workspace, status, pendingSize, kind }: FactsProps) {
   // The whole sentence, where the row above shows its first clause: the instruction is at the end of it, and this
   // is the surface with room for the command a person types on their own machine.
   const daemonLacks = (status ?? workspace).daemonRefusedAt?.why;
+  const where = whereRuns(places, { workspace, status });
   return (
     <Section label="Workspace">
       <div className="mt-1 divide-y divide-border/40">
         <Row label="State" k="state" title={stateWord}>
           <span className={cn(zombie && "text-destructive-foreground")}>{stateWord}</span>
+        </Row>
+        <Row label="Where" k="where" title={where}>
+          {where}
         </Row>
         <Row label="Size" k="size" title={pendingSize ? `${fmtSize(pendingSize)} · resizing` : status ? fmtSize(status.size, kind.cpu) : "pending"}>
           {pendingSize ? (
@@ -327,10 +334,17 @@ function Projects({ workspace, status, kind, onTaken }: { workspace: WorkspaceVi
         )}
       </div>
       <p className="mt-1 min-h-4 text-[11px] text-muted-foreground" data-k="projects-note">
-        {busy ? "Taking the snapshot…" : note}
+        {busy ? "Taking the snapshot…" : (note ?? importWord(kind))}
       </p>
     </Section>
   );
+}
+
+/** What the import road on this kind does to the folder, as the note under the buttons: on this computer nothing
+ * is carried, and a person about to import a 4 GB repo is owed that before they press it. Read off the kind's own
+ * import road, so a kind that copies says nothing here and the road is never compared by kind. */
+function importWord(kind: WorkspaceKindWords): string | null {
+  return kind.imports === "registers" ? `On ${THIS_COMPUTER_WORD} a folder is registered where it is, not copied.` : null;
 }
 
 /** Re-renders once a second while a countdown is showing. */
