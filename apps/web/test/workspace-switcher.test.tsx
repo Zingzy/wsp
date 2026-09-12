@@ -24,6 +24,7 @@ import { recentThreads, useThreadHistory } from "../src/shell/threadHistory.js";
 import { releasesSwitchHold, stepSwitcherAt, SWITCHER_PAINT_DELAY_MS, useWorkspaceSwitcher } from "../src/shell/workspaceSwitcher.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { caps } from "./caps.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 const CAPS = caps();
 
@@ -65,7 +66,7 @@ function fakeApi(): Api {
     capabilities: async () => CAPS,
     startSession: async o => ({ id: "s9", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
-    daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
+    daemon: noDaemonApi,
     sessionHistory: async () => [],
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     snapshotStorage: async () => null,

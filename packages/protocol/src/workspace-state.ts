@@ -3,7 +3,7 @@
 // provider's word and the daemon reach only change it where they contradict
 // it. Every client renders these words, and the runtime refuses a send with
 // the same sentence the composer shows, so one screen never says two things.
-import { fmtThreads, MACHINE_WSP_FORKS, OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
+import { fmtThreads, JOINED_COMPUTER, MACHINE_WSP_FORKS, OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
 import type { HarnessCatalog, MachineState, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
 
 export type WorkspaceState = "running" | "pausing" | "paused" | "waking" | "unreachable" | "gone";
@@ -80,6 +80,10 @@ export const MACHINE_LEFT = "machine is left as it is";
  * file on it, and a delete takes exactly those off again; the machine is theirs and stays. */
 const SSH_SWEPT = "daemon, its unit and its login line come off the machine, which is otherwise left as it is";
 
+/** What deleting a place's workspace leaves: the computer is still a place in this wsp, holding its link and ready
+ * for another workspace, and the one road that takes wsp off it is the remove that drops the place itself. */
+const PLACE_KEPT = "computer stays joined as a place; wsp remove takes the agent off it";
+
 /** The two readings a pane waits on. Each is one module per kind: the cloud kind and a machine over ssh read
  * that machine's own /proc through the daemon on it, and this computer reads its own host. */
 export type KindReading = "metrics" | "processes";
@@ -90,6 +94,7 @@ export const WORKSPACE_KIND_WORDS: Record<WorkspaceKind, WorkspaceKindWords> = {
   cloud: { machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", driven: true, daemon: true, metrics: true, processes: true, imports: "copies", importsAt: "same path", agents: true, onDelete: { asked: "machine is deleted at the provider", done: machineId => `machine ${machineId} is gone at the provider` } },
   local: { machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", driven: false, daemon: true, metrics: true, processes: true, imports: "registers", importsAt: "same path", agents: false, onDelete: { asked: MACHINE_LEFT, done: () => `its ${MACHINE_LEFT}` } },
   ssh: { machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", driven: false, daemon: true, metrics: true, processes: true, imports: "copies", importsAt: "under home", agents: false, onDelete: { asked: SSH_SWEPT, done: () => `its ${SSH_SWEPT}` } },
+  place: { machine: JOINED_COMPUTER, rowReadsMachine: true, cpu: "cores", driven: false, daemon: true, metrics: true, processes: true, imports: "copies", importsAt: "under home", agents: false, onDelete: { asked: PLACE_KEPT, done: () => `its ${PLACE_KEPT}` } },
 };
 
 export function kindWords(kind: WorkspaceKind): WorkspaceKindWords {
@@ -236,16 +241,21 @@ const CONTROL_WORDS: Record<Exclude<ScreenControl, "sign-in">, string> = {
   docs: "wsp's docs are at wsp.apidocumentation.com",
 };
 
+/** How the person signs this workspace's agent in, in one place: the sign-in is the machine's, so the Machine tab
+ * signs a machine in and this computer is signed in from its own terminal. Both the composer's line for a sign-in
+ * command and a turn the agent refused for want of a sign-in read this rule, so the two never send a person two ways. */
+export function signInRoad(view: Pick<WorkspaceView, "kind">): string {
+  return isLocalWorkspace(view) ? `sign in from a terminal on ${THIS_COMPUTER}` : "sign this machine in from the Machine tab";
+}
+
+/** wsp's half of a turn the agent refused for want of a sign-in: the road above, and that the turn is the person's
+ * to send again once they have taken it. The agent's own sentence names its login command; this names where. */
+export const signInRefusalLine = (view: Pick<WorkspaceView, "kind">): string => `${signInRoad(view)}, then send again`;
+
 /** The composer's line for a slash command the CLI runs only in its own terminal, in place of a turn that would answer
- * the command is not available: what the command is, then the wsp control that serves the same intent. The sign-in
- * road is the machine's: the Machine tab signs a machine in, and this computer is signed in from its own terminal. */
+ * the command is not available: what the command is, then the wsp control that serves the same intent. */
 export function screenCommandLine(command: ScreenCommand, catalog: Pick<HarnessCatalog, "label">, view: Pick<WorkspaceView, "kind">): string {
-  const control =
-    command.control === "sign-in"
-      ? isLocalWorkspace(view)
-        ? `sign in from a terminal on ${THIS_COMPUTER}`
-        : "sign this machine in from the Machine tab"
-      : CONTROL_WORDS[command.control];
+  const control = command.control === "sign-in" ? signInRoad(view) : CONTROL_WORDS[command.control];
   return `/${command.name} works only in ${catalog.label}'s own terminal; ${control}`;
 }
 

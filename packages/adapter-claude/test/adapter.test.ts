@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
+import { signInRefusalLine } from "@wsp/protocol";
 import type { AdapterEvent, ExecStream, ExecStreamFactory, TurnResult } from "@wsp/protocol";
 import { createClaudeAdapter, type ClaudeSession } from "../src/adapter.js";
 import { CLAUDE_SCREEN_COMMANDS } from "../src/catalog.js";
@@ -749,6 +750,74 @@ describe("result classification", () => {
     const { onEvent } = collect();
     const result = await adapter.start({ prompt: "x", onEvent }).finished;
     expect(result.error).toBe("claude answered with no output and no usage after 1.5s: line two\nline three\nline four\nline five\nline six");
+  });
+
+  it("the CLI's refusal for want of a sign-in is a failed turn carrying its sentence once: the line it wrote itself is no delta and no reply", async () => {
+    // The three lines a home with no login gave on 2.1.257 (measured 2026-09-12), trimmed to the fields read here.
+    const init = `{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}","model":"claude-opus-5[1m]"}`;
+    const refusal = `{"type":"assistant","message":{"id":"m1","model":"<synthetic>","role":"assistant","type":"message","content":[{"type":"text","text":"Not logged in · Please run /login"}]},"session_id":"${FIXTURE_SESSION_ID}","error":"authentication_failed","is_api_error_message":true}`;
+    const result = `{"type":"result","subtype":"success","is_error":true,"terminal_reason":"api_error","num_turns":1,"result":"Not logged in · Please run /login","duration_ms":88,"total_cost_usd":0,"usage":{"input_tokens":0,"output_tokens":0},"session_id":"${FIXTURE_SESSION_ID}"}`;
+    const exec = scriptedExec([init, refusal, result], { exitCode: 1 });
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg", signInRefusal: signInRefusalLine({ kind: "local" }) });
+    const { events, onEvent } = collect();
+
+    const turn = await adapter.start({ prompt: "say hi", onEvent }).finished;
+
+    expect(turn).toEqual({
+      status: "failed",
+      durationMs: 88,
+      costUsd: 0,
+      usage: { input_tokens: 0, output_tokens: 0 },
+      error: "Not logged in · Please run /login; sign in from a terminal on this computer, then send again",
+      refusal: "sign-in",
+    });
+    expect(turn.text).toBeUndefined();
+    expect(events.map((e) => e.type)).toEqual(["session.start", "turn.done", "session.end"]);
+    expect(events[1]).toMatchObject({ type: "turn.done", result: turn });
+
+    // The road is the caller's, from the one rule every door reads, so the same refusal on a machine sends the
+    // person to the Machine tab rather than to a terminal that is not theirs.
+    const onMachine = scriptedExec([init, refusal, result], { exitCode: 1 });
+    const there = createClaudeAdapter({ exec: onMachine.factory, configDir: "/root/.claude-cfg", signInRefusal: signInRefusalLine({ kind: "cloud" }) });
+    const away = await there.start({ prompt: "say hi", onEvent: () => {} }).finished;
+    expect(away).toMatchObject({ status: "failed", refusal: "sign-in", error: "Not logged in · Please run /login; sign this machine in from the Machine tab, then send again" });
+
+    // A caller that handed no road leaves the CLI's own sentence to stand alone; the cause still classes the turn.
+    const bare = scriptedExec([init, refusal, result], { exitCode: 1 });
+    const alone = await createClaudeAdapter({ exec: bare.factory, configDir: "/root/.claude-cfg" }).start({ prompt: "say hi", onEvent: () => {} }).finished;
+    expect(alone).toMatchObject({ status: "failed", refusal: "sign-in", error: "Not logged in · Please run /login" });
+  });
+
+  it("a user abort is read before the error flag: a success stamped aborted_streaming is interrupted, not a refusal", async () => {
+    const init = `{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}"}`;
+    const abortedSuccess = `{"type":"result","subtype":"success","is_error":true,"terminal_reason":"aborted_streaming","duration_ms":812,"result":"stopped","session_id":"${FIXTURE_SESSION_ID}"}`;
+    const exec = scriptedExec([init, abortedSuccess]);
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg", signInRefusal: signInRefusalLine({ kind: "local" }) });
+
+    const turn = await adapter.start({ prompt: "x", onEvent: () => {} }).finished;
+
+    expect(turn).toMatchObject({ status: "interrupted", text: "stopped" });
+    expect(turn.error).toBeUndefined();
+    expect(turn.refusal).toBeUndefined();
+  });
+
+  it("a refusal the CLI named no cause wsp knows keeps its own sentence alone; a turn that did work and exited 0 still reads completed", async () => {
+    const init = `{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}"}`;
+    const overloaded = `{"type":"assistant","message":{"id":"m1","model":"<synthetic>","role":"assistant","type":"message","content":[{"type":"text","text":"API Error: 529 overloaded"}]},"session_id":"${FIXTURE_SESSION_ID}","error":"overloaded","is_api_error_message":true}`;
+    const errored = `{"type":"result","subtype":"success","is_error":true,"result":"API Error: 529 overloaded","duration_ms":40,"session_id":"${FIXTURE_SESSION_ID}"}`;
+    const exec = scriptedExec([init, overloaded, errored], { exitCode: 1 });
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg", signInRefusal: signInRefusalLine({ kind: "local" }) });
+    const refused = await adapter.start({ prompt: "x", onEvent: () => {} }).finished;
+    expect(refused).toMatchObject({ status: "failed", error: "API Error: 529 overloaded" });
+    expect(refused.refusal).toBeUndefined();
+
+    const worked = scriptedExec(fixtureLines());
+    const second = createClaudeAdapter({ exec: worked.factory, configDir: "/root/.claude-cfg" });
+    const { events, onEvent } = collect();
+    const done = await second.start({ prompt: "x", onEvent }).finished;
+    expect(done).toMatchObject({ status: "completed", text: "Server is live at :3000 and answered: Hello, World!", costUsd: 0.0187 });
+    expect(done.error).toBeUndefined();
+    expect(events.filter((e) => e.type === "turn.delta").length).toBeGreaterThan(0);
   });
 
   it("a completed result with text keeps its status whatever its usage says; one with usage keeps it whatever its text says", async () => {

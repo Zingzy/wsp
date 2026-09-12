@@ -10,6 +10,7 @@ import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace,
 import { nodeHost, readGhosttyConfig } from "@wsp/collect";
 import { hostFolders } from "./host-folders.js";
 import { projectBundler } from "./project-bundle.js";
+import { imageExporter } from "./image.js";
 import { projectLander } from "./project-export.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 import { describeStorage } from "./storage.js";
@@ -364,6 +365,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       forwards: relay,
       projects: bundlerFor,
       landing: projectLander(homes),
+      imageExport: imageExporter,
       folders: hostFolders(() => rt.workspaces.list()),
       terminalConfig: { read: scheme => readGhosttyConfig(nodeHost(), scheme) },
       ...(opts.init !== undefined ? { init: opts.init } : {}),

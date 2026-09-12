@@ -85,6 +85,19 @@ describe("one module per service manager", () => {
     expect(launchd.afterLoad).toBeUndefined();
   });
 
+  it("names the agent on a computer joined as a place apart from the host, so one computer can hold both", () => {
+    // One service per file it serves, and a place's own file is its place file: the role is the one word the two
+    // name functions turn on, and the host's names are what they were.
+    const there: ServiceAddress = { role: "place", statePath: "/home/maya/.wsp/place.json", home: "/home/maya", uid: 1000 };
+    const theirTag = serviceTag(there.statePath);
+    expect(SERVICE_MANAGERS.launchd.unit(there).name).toBe(`com.wsp.place.${theirTag}`);
+    expect(SERVICE_MANAGERS.systemd.unit(there).name).toBe(`wsp-place-${theirTag}.service`);
+    expect(SERVICE_MANAGERS.systemd.text(planFor(there)) ).toContain("Description=wsp place serving /home/maya/.wsp/place.json");
+    // The word is absent on every caller that means the host, which is what keeps its names as they were.
+    expect(SERVICE_MANAGERS.launchd.unit({ ...there, role: "host" }).name).toBe(`com.wsp.host.${theirTag}`);
+    expect(SERVICE_MANAGERS.launchd.unit(at).name).toBe(`com.wsp.host.${tag}`);
+  });
+
   it("the systemd user unit restarts the host, comes back at login, and says what a user unit alone asks for", () => {
     const systemd = SERVICE_MANAGERS.systemd;
     expect(systemd.unit(at)).toEqual({ name: `wsp-host-${tag}.service`, path: `/Users/z/.config/systemd/user/wsp-host-${tag}.service` });

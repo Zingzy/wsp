@@ -8,10 +8,14 @@ import { DaemonEvent, type DaemonLinkStatus } from "@wsp/protocol";
 import WebSocket from "ws";
 
 export interface ReachOptions {
-  /** Solari previewUrl (https, pt_token already embedded) or a ws:// url in tests. */
-  previewUrl: string;
-  /** The daemon's own token, sent as the first frame on every dial; never in the URL. */
-  token: string;
+  /** Solari previewUrl (https, pt_token already embedded) or a ws:// url in tests. One of this and socket. */
+  previewUrl?: string;
+  /** A socket that is already open and already authenticated by the road that opened it: the link a place dialled
+   * out on. Nothing redials it, since only that computer can open one, and a close is the end of this reach. */
+  socket?: WebSocket;
+  /** The daemon's own token, sent as the first frame on every dial; never in the URL. Not read on a socket, whose
+   * handshake was the auth. */
+  token?: string;
   onEvent: (e: DaemonEvent) => void;
   /** Fires on every transition; reauth-needed and dead are terminal. */
   onStatus?: (s: DaemonLinkStatus) => void;
@@ -51,7 +55,9 @@ interface Pending {
 }
 
 export function connectDaemon(opts: ReachOptions): DaemonReach {
-  const url = daemonWsUrl(opts.previewUrl);
+  if (opts.previewUrl === undefined && opts.socket === undefined) throw new Error("connectDaemon needs a previewUrl to dial or an open socket to take over");
+  if (opts.previewUrl !== undefined && opts.token === undefined) throw new Error("connectDaemon needs the daemon's token to dial a previewUrl");
+  const url = opts.previewUrl === undefined ? "" : daemonWsUrl(opts.previewUrl);
   const heartbeatMs = opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
   const backoff = opts.backoffMs ?? defaultBackoff;
 
@@ -142,6 +148,13 @@ export function connectDaemon(opts: ReachOptions): DaemonReach {
 
   function scheduleReconnect(): void {
     if (closed) return;
+    // A socket somebody else opened cannot be opened again from here: the place dials this host, so the link ending
+    // is this reach ending, and the place's own redial is what brings the next one.
+    if (opts.socket !== undefined) {
+      setStatus("dead");
+      readyReject(new Error("the place's link closed")); // no-op once ready resolved
+      return;
+    }
     setStatus("connecting");
     attempt++;
     retryTimer = setTimeout(dial, backoff(attempt));
@@ -149,7 +162,8 @@ export function connectDaemon(opts: ReachOptions): DaemonReach {
 
   async function ritual(sock: WebSocket): Promise<void> {
     try {
-      await send("auth", { token: opts.token });
+      // The auth frame is the dial's; a socket the far side opened proved itself by the handshake that opened it.
+      if (opts.previewUrl !== undefined) await send("auth", { token: opts.token });
       await send("ports.watch");
       await send("inbox.watch");
       await send("inbox.rescan");
@@ -188,7 +202,23 @@ export function connectDaemon(opts: ReachOptions): DaemonReach {
     });
   }
 
-  dial();
+  /** A socket already open: the same listeners a dial installs, and the ritual as soon as the loop turns. */
+  function take(sock: WebSocket): void {
+    ws = sock;
+    sock.addEventListener("message", ev => handleMessage(ev.data));
+    sock.addEventListener("error", () => {});
+    sock.addEventListener("close", () => {
+      if (ws !== sock) return;
+      stopHeartbeat();
+      flushPending("connection lost");
+      if (closed) return;
+      scheduleReconnect();
+    });
+    void ritual(sock);
+  }
+
+  if (opts.socket !== undefined) take(opts.socket);
+  else dial();
 
   return {
     ready,

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { actionRefusal, agentsKindRefusal, agentsMayDrive, computerOffline, deleteNotice, importDest, screenCommandLine, screenCommandTyped, screenCommandsOf, goneRefusal, isBilling, isLocalWorkspace, kindWords, MACHINE_WSP_FORKS, machineWord, needsRebuild, NOT_ON_THIS_KIND, OVER_SSH, providerCannotRefusal, reachShown, relayedRefusal, sendRefusal, servesReading, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, workspaceStateOf, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
+import { actionRefusal, agentsKindRefusal, agentsMayDrive, computerOffline, deleteNotice, importDest, screenCommandLine, screenCommandTyped, screenCommandsOf, goneRefusal, isBilling, isLocalWorkspace, kindWords, MACHINE_WSP_FORKS, machineWord, needsRebuild, NOT_ON_THIS_KIND, OVER_SSH, providerCannotRefusal, reachShown, relayedRefusal, sendRefusal, servesReading, signInRefusalLine, signInRoad, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, workspaceStateOf, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
 
 describe("workspaceState", () => {
   it("phase alone: running, pausing, napping and waking each have one word", () => {
@@ -199,7 +199,7 @@ describe("what a workspace's kind changes about its words", () => {
   });
 
   it("every kind has a row in the table, so adding one is a row here and nothing else", () => {
-    expect(Object.keys(WORKSPACE_KIND_WORDS).sort()).toEqual(["cloud", "local", "ssh"]);
+    expect(Object.keys(WORKSPACE_KIND_WORDS).sort()).toEqual(["cloud", "local", "place", "ssh"]);
   });
 
   it("the delete sentence says what the delete does to this kind's machine, the ssh sweep included", () => {
@@ -282,5 +282,18 @@ describe("a slash command that works only in the CLI's own terminal", () => {
     expect(screenCommandLine(SCREEN[0]!, catalog, {})).toContain("Machine tab");
     // Every line is one sentence for the composer's slot: no line break, sentence case, nothing but words.
     for (const command of SCREEN) for (const view of [cloud, local]) expect(screenCommandLine(command, catalog, view)).toMatch(/^\/[a-z]+ works only in [^\n]+; [a-z][^\n]+[^.]$/);
+  });
+
+  it("the composer's sign-in line and a refused turn's half read one road rule, so the two never send a person two ways", () => {
+    const cloud = { kind: "cloud" as const };
+    const local = { kind: "local" as const };
+    expect(signInRoad(local)).toBe(`sign in from a terminal on ${THIS_COMPUTER}`);
+    expect(signInRoad(cloud)).toBe("sign this machine in from the Machine tab");
+    // A record from before kinds existed is a provider fork, so it reads the machine's road here too.
+    expect(signInRoad({})).toBe(signInRoad(cloud));
+    for (const view of [cloud, local, {}]) {
+      expect(signInRefusalLine(view)).toBe(`${signInRoad(view)}, then send again`);
+      expect(screenCommandLine(SCREEN[0]!, catalog, view)).toContain(signInRoad(view));
+    }
   });
 });

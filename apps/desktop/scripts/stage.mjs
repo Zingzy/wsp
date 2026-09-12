@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Lays out build/app, the directory electron-builder packages: the bundled
-// main, command and preload, the onboarding page with the agents' marks, every shipped asset in the
+// main, command and preload, the onboarding page, every shipped asset in the
 // host's own packed layout (build/app/assets, one folder up from the bundles,
 // where the host's asset table reads them back from for the window and for
 // the wsp command alike), and node-pty, the one package the bundles leave
 // external. An unpackaged run finds node-pty under build/app/node_modules; a
 // packaged app gets it from scripts/after-pack.mjs, which alone knows which
 // target each packaged tree runs.
-import { cpSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ptyPackage, stagePty } from "./pty.mjs";
 
@@ -31,16 +31,13 @@ rmSync(join(app, ASSETS_DIR), { recursive: true, force: true });
 for (const kind of ASSET_KINDS) stageAsset(workspaceAsset(kind), app, kind);
 
 // The onboarding page draws with the web app's own stylesheet, whose built name carries a hash, so the page is
-// written with that name; the agents' marks it draws are the web app's vendored svgs, copied beside it.
+// written with that name.
 const webAssets = join(app, ASSETS_DIR, "web", "assets");
 const webCss = readdirSync(webAssets).find(f => /^index-.*\.css$/.test(f));
 if (webCss === undefined) throw new Error(`web stylesheet not found under ${webAssets}`);
 const page = readFileSync(join(root, "src", "onboarding.html"), "utf8");
 if (!page.includes("__WEB_CSS__")) throw new Error("onboarding.html has no __WEB_CSS__ to write the stylesheet into");
 writeFileSync(join(app, "main", "onboarding.html"), page.replace("__WEB_CSS__", `../${ASSETS_DIR}/web/assets/${webCss}`));
-const marks = join(dirname(workspaceAsset("web")), "src", "assets", "agents");
-rmSync(join(app, "main", "agents"), { recursive: true, force: true });
-cpSync(marks, join(app, "main", "agents"), { recursive: true, filter: p => p === marks || p.endsWith(".svg") });
 
 rmSync(join(app, "node_modules"), { recursive: true, force: true });
 // This machine's own build, for an unpackaged run: a packaged tree gets the build for the target it runs, from the

@@ -8,7 +8,7 @@
 // and machine, and leaves the threads on that machine alone.
 import { describe, expect, it, vi } from "vitest";
 import { BLANK_NAME_REFUSAL, RECORD_RESTORED, nameDeletingRefusal, nameTakenRefusal, type EventUnion, type WorkspaceTheme } from "@wsp/protocol";
-import { createRuntime } from "../src/runtime.js";
+import { copyKey, createRuntime } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend } from "./stub-backend.js";
 
@@ -69,7 +69,7 @@ describe("the sweep records a machine of this setup that no record claims", () =
   it("a machine forked before the stamps is recorded under its machine id as its name and the golden head as its image", async () => {
     const backend = stubBackend();
     const store = memoryStore();
-    await store.put("goldens", "default", { head: 1, versions: [{ version: 1, snapshotId: "snap_head", baseTemplate: "base", setupSha: "x", createdAt: ago(3_600_000), smoke: { cmd: "true", exitCode: 0 } }] });
+    await store.put("goldens", copyKey("default", "default"), { head: 1, versions: [{ version: 1, snapshotId: "snap_head", baseTemplate: "base", setupSha: "x", createdAt: ago(3_600_000), smoke: { cmd: "true", exitCode: 0 } }] });
     const rt = createRuntime({ backend, store, adapters: {} });
     await rt.workspaces.list();
     const { id: owner } = (await store.get("owner", "id")) as { id: string };

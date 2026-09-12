@@ -78,6 +78,10 @@ export interface DeviceDoor {
   /** Spends the code for a device of that name, or nothing when the host holds no such unexpired code. A spent or
    * expired code is deleted either way, so one guess never gets two tries. */
   redeem(code: string, name: string, now: number): Promise<PairedDevice | undefined>;
+  /** Spends a code with no device behind it, for a road that proves itself another way: a place holds a key of its
+   * own from the join on, so the code buys the record and never a token. One code store, so a code spent by either
+   * road is spent for both. */
+  spend(code: string, now: number): Promise<boolean>;
   /** A device with no pairing code behind it: the host itself minting a token for a turn it is about to launch,
    * scoped to that turn's thread. The same door as a redeem, so a scoped token is revoked, listed and read by the
    * one road every other token takes. */
@@ -128,12 +132,13 @@ export function makeDevices(store: Store): DeviceDoor {
     return { deviceId: record.id, deviceToken, device: viewOf(record) };
   };
 
-  const spend = async (code: string, name: string, now: number): Promise<PairedDevice | undefined> => {
+  /** The code half of a redeem, on its own: whether this host was holding it and it had not run out. Spent either
+   * way, so one guess never gets two tries, and whatever the caller does with the answer. */
+  const spendCode = async (code: string, now: number): Promise<boolean> => {
     const held = await store.get(PAIRINGS, code);
-    if (!isPairing(held)) return undefined;
+    if (!isPairing(held)) return false;
     await store.delete(PAIRINGS, code);
-    if (now > held.expiresAt) return undefined;
-    return admit(name, undefined, now);
+    return now <= held.expiresAt;
   };
 
   return {
@@ -147,7 +152,8 @@ export function makeDevices(store: Store): DeviceDoor {
         await store.put(PAIRINGS, code, { code, expiresAt } satisfies PairingRecord);
         return { code, expiresAt };
       }),
-    redeem: (code, name, now) => oneAtATime(() => spend(code, name, now)),
+    redeem: (code, name, now) => oneAtATime(async () => ((await spendCode(code, now)) ? admit(name, undefined, now) : undefined)),
+    spend: (code, now) => oneAtATime(() => spendCode(code, now)),
     mint: (name, scope, now) => oneAtATime(() => admit(name, scope, now)),
     match: async token => {
       const digest = hashOf(token);
