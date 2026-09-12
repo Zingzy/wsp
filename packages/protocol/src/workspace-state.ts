@@ -236,16 +236,21 @@ const CONTROL_WORDS: Record<Exclude<ScreenControl, "sign-in">, string> = {
   docs: "wsp's docs are at wsp.apidocumentation.com",
 };
 
+/** How the person signs this workspace's agent in, in one place: the sign-in is the machine's, so the Machine tab
+ * signs a machine in and this computer is signed in from its own terminal. Both the composer's line for a sign-in
+ * command and a turn the agent refused for want of a sign-in read this rule, so the two never send a person two ways. */
+export function signInRoad(view: Pick<WorkspaceView, "kind">): string {
+  return isLocalWorkspace(view) ? `sign in from a terminal on ${THIS_COMPUTER}` : "sign this machine in from the Machine tab";
+}
+
+/** wsp's half of a turn the agent refused for want of a sign-in: the road above, and that the turn is the person's
+ * to send again once they have taken it. The agent's own sentence names its login command; this names where. */
+export const signInRefusalLine = (view: Pick<WorkspaceView, "kind">): string => `${signInRoad(view)}, then send again`;
+
 /** The composer's line for a slash command the CLI runs only in its own terminal, in place of a turn that would answer
- * the command is not available: what the command is, then the wsp control that serves the same intent. The sign-in
- * road is the machine's: the Machine tab signs a machine in, and this computer is signed in from its own terminal. */
+ * the command is not available: what the command is, then the wsp control that serves the same intent. */
 export function screenCommandLine(command: ScreenCommand, catalog: Pick<HarnessCatalog, "label">, view: Pick<WorkspaceView, "kind">): string {
-  const control =
-    command.control === "sign-in"
-      ? isLocalWorkspace(view)
-        ? `sign in from a terminal on ${THIS_COMPUTER}`
-        : "sign this machine in from the Machine tab"
-      : CONTROL_WORDS[command.control];
+  const control = command.control === "sign-in" ? signInRoad(view) : CONTROL_WORDS[command.control];
   return `/${command.name} works only in ${catalog.label}'s own terminal; ${control}`;
 }
 

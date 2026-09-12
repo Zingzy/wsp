@@ -11,7 +11,7 @@ import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { WebSocketServer } from "ws";
 import { GUEST_SUPERVISOR_PATH, GUEST_USER_ENV, TOOLS_PATH, DAEMON_ENV_FILE } from "@wsp/engine";
 import { assetDir, assetProof } from "../src/assets.js";
-import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, GUEST_DAEMON_DIR, GUEST_WSP_BIN, shellQuote, sshDaemonPaths, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, GUEST_DAEMON_DIR, GUEST_WSP_BIN, shellQuote, signInRefusalLine, sshDaemonPaths, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { isReserved, LocalBackend, NoProviderBackend } from "@wsp/engine";
@@ -1281,6 +1281,27 @@ describe("the doctor's local road", () => {
     const io = record();
     expect(await localDoctor(rt, io)).toBe(1);
     expect(io.lines.join("\n")).toContain('DOCTOR FAIL: the reply did not carry the word this run asked for: "sure thing"');
+    expect(await rt.workspaces.list()).toEqual([]);
+    await rt.close();
+  });
+
+  it("a turn the agent refused fails the run with the refusal's own sentence: it is the turn's error, and a refusal carries no reply to read", async () => {
+    const refused: HarnessAdapterFactory = () => ({
+      steers: false,
+      probeCatalog: async () => ({ version: "9.9.9", models: [], efforts: [], permissionModes: [] }),
+      start: ({ onEvent }) => {
+        const sessionId = "33333333-3333-4333-8333-333333333333";
+        const result = { status: "failed", error: `Not logged in · Please run /login; ${signInRefusalLine({ kind: "local" })}`, refusal: "sign-in" } as const;
+        onEvent({ type: "session.start", sessionId });
+        onEvent({ type: "turn.done", sessionId, result });
+        onEvent({ type: "session.end", sessionId, exitCode: 1, sawResult: true });
+        return { localId: sessionId, finished: Promise.resolve(result), interrupt: async () => {} };
+      },
+    });
+    const { rt } = localRuntime({ claude: refused });
+    const io = record();
+    expect(await localDoctor(rt, io)).toBe(1);
+    expect(io.lines.join("\n")).toContain(`DOCTOR FAIL: the turn ended failed: Not logged in · Please run /login; ${signInRefusalLine({ kind: "local" })}`);
     expect(await rt.workspaces.list()).toEqual([]);
     await rt.close();
   });
