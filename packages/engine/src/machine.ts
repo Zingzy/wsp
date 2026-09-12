@@ -79,6 +79,10 @@ export interface Machine {
   uploadUrl(path: string): Promise<string>;
   /** Optional: the backends that have a route to a guest port at all. */
   previewUrl?(port: number): Promise<PreviewReach>;
+  /** Optional: where this machine keeps its daemon's token, when it is not the guest path a fork boots with. A
+   * stand-in machine whose guest is a folder on the computer asking names the file inside it, since nothing there
+   * can write the guest's own. Absent leaves the path the road takes for that kind of machine. */
+  readonly daemonTokenPath?: string;
   /** Optional: whether the daemon inside the guest is listening, asked over the road this machine's own calls take
    * rather than by dialling a route from here. Present where a route this computer dials is not the truth about
    * the guest: a container's published port lands on the loopback of the computer its Docker daemon runs on, which

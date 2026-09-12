@@ -8,6 +8,9 @@
 // joined here rather than through node:path: this package is bundled into the
 // browser and imports nothing outside itself.
 
+/** A folder without the slashes somebody typed at the end of it. */
+const at = (folder: string): string => folder.replace(/\/+$/, "");
+
 /** Whether path is the folder itself or sits inside it; a sibling that shares the prefix is not. */
 export function underProject(path: string, root: string): boolean {
   return path === root || path.startsWith(`${root}/`);
@@ -27,7 +30,7 @@ export const parentFolderName = (path: string): string => {
  * home of whichever daemon reads it: DAEMON_ROOTS_PATH is this answered for a guest, whose home is /root, and this
  * computer's own daemon answers it for the person's home. */
 export function rootsPathIn(home: string): string {
-  return `${home.replace(/\/+$/, "")}/.wsp/roots`;
+  return `${at(home)}/.wsp/roots`;
 }
 
 /** The folder every turn and every exec starts in on a computer somebody owns, wsp's own under their home. Not the
@@ -35,7 +38,7 @@ export function rootsPathIn(home: string): string {
  * thread run on a local workspace committed inside the person's own repo from there (measured 2026-09-08). One rule
  * for this computer and for a computer joined as a place, since both are somebody's own. */
 export function workFolderIn(home: string): string {
-  return `${home.replace(/\/+$/, "")}/wsp-work`;
+  return `${at(home)}/wsp-work`;
 }
 
 /** Everywhere the daemon on a computer the person owns keeps something, whether wsp put it there over ssh or the
@@ -71,8 +74,8 @@ export function placeDaemonPaths(home: string): {
   placeKey: string;
   placeLog: string;
 } {
-  const at = home.replace(/\/+$/, "");
-  const wsp = `${at}/.wsp`;
+  const under = at(home);
+  const wsp = `${under}/.wsp`;
   return {
     wsp,
     dir: `${wsp}/daemon`,
@@ -86,9 +89,9 @@ export function placeDaemonPaths(home: string): {
     manifestPath: `${wsp}/manifest.json`,
     profileFile: `${wsp}/profile.sh`,
     nodeDir: `${wsp}/node`,
-    unitDir: `${at}/.config/systemd/user`,
-    binDir: `${at}/.local/bin`,
-    rootsPath: rootsPathIn(at),
+    unitDir: `${under}/.config/systemd/user`,
+    binDir: `${under}/.local/bin`,
+    rootsPath: rootsPathIn(under),
     placeFile: `${wsp}/place.json`,
     placeKey: `${wsp}/place-key.pem`,
     placeLog: `${wsp}/place.log`,
@@ -107,3 +110,10 @@ export function placeOwnedPaths(home: string): string[] {
 /** The same paths under the name the ssh road has always called them. One function, two names, so nothing keeps a
  * second copy of where a daemon on somebody's own computer puts its token, its port file and its run folder. */
 export const sshDaemonPaths = placeDaemonPaths;
+
+/** What a stand-in provider keeps in the folder a harness names for it: the records every host on that state file
+ * reads, so two of them see one fleet, and a folder per machine standing in for that machine's disk. The layout is
+ * written here because the harness that seeds the records and the host that answers out of them both name it and
+ * neither may guess. */
+export const standInRecordsPath = (root: string): string => `${at(root)}/records.json`;
+export const standInMachinePath = (root: string, machineId: string): string => `${at(root)}/machines/${machineId}`;

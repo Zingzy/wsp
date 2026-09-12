@@ -5,24 +5,26 @@
 // /var/folders as "a temp folder, not my repo" and stopped trusting what the
 // app told them about their files.
 //
-// Four things live in it beyond the fixture state. A copy of the built app,
+// Five things live in it beyond the fixture state. A copy of the built app,
 // which the host is pointed at, so a build landing on main while a tester
 // drives cannot change the page under them. An agent home of the lab's own,
-// signed in with the agents' key, so a turn carries none of this computer's
-// MCP servers and none of its skills: one tester's agent reached the person's
-// real host through their own configuration and wrote a workspace record
-// there, which is the one thing a lab may not do. A small repository for a
-// turn to work in. And a wsp on the tester's path, bound to this lab, so
-// nothing has to be pasted into a shell: a tester who wrote their own wrapper
-// instead ran every verb against the person's own state file and keys.
+// signed in with the agents' key, carrying this lab's own wsp tools and none of
+// this computer's other MCP servers and none of its skills: one tester's agent
+// reached the person's real host through their own configuration and wrote a
+// workspace record there, which is the one thing a lab may not do, and a turn
+// with no wsp tools at all does not know it is inside wsp. A small repository
+// for a turn to work in. A folder for the stand-in provider's own machines. And
+// a wsp on the tester's path, bound to this lab, so nothing has to be pasted
+// into a shell: a tester who wrote their own wrapper instead ran every verb
+// against the person's own state file and keys.
 import { CATALOG_AGENTS, hasLogin } from "@wsp/catalog";
-import { shellQuote } from "@wsp/protocol";
+import { MCP_SERVER_NAME, shellQuote, standInRecordsPath } from "@wsp/protocol";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
-import { agentStores, HOST_BIN, REPO, WEB_DIR } from "./host.mjs";
+import { agentStoreRows, HOST_BIN, REPO, WEB_DIR } from "./host.mjs";
 
 /** Where a lab's homes live, for a run that wants them somewhere else: a throwaway root for a dry run. */
 export const LAB_ROOT_ENV = "WSP_LAB_ROOT";
@@ -77,35 +79,78 @@ export function treeSha() {
   }
 }
 
+/** When the folder being copied was last written, to the second: the newest file in it. A build that landed while
+ * a lab was starting is told from the one before it by this without anybody having to read a hash. */
+export function builtAt(dir) {
+  let newest = 0;
+  const walk = at => {
+    for (const entry of readdirSync(at, { withFileTypes: true })) {
+      const path = join(at, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else newest = Math.max(newest, statSync(path).mtimeMs);
+    }
+  };
+  walk(dir);
+  return new Date(newest).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+/** Why a start stops rather than serving what it copied: the folder moved under the copy. One run in a round of
+ * nine served an app no other run served and nothing could say what it was, because the copy was taken while a
+ * build was writing the folder. */
+export const appMovedLine = (from, was, now) =>
+  `${from} changed while it was being copied (${was}, then ${now}), so this lab would serve an app no other run can be told from. Wait for the build to finish and start the lab again.`;
+
 /** Copies the built app into the lab's home and answers what it is, with a hash of the wsp command serving it
  * beside it. The host serves this copy rather than the checkout's dist folder: two of nine runs in one round
  * provably saw different apps, because a build landing mid-run rewrote the folder the host was reading from, and
- * no log could say which app a tester had met. The command is recorded rather than copied, since its bundle
- * resolves its imports out of the checkout it was built in and would find none beside a copy. */
-export function copyApp(home) {
+ * no log could say which app a tester had met. The source is hashed on both sides of the copy and the copy itself
+ * against them, since a build writing the folder mid-copy leaves a home nobody can name the app of. The command is
+ * recorded rather than copied, since its bundle resolves its imports out of the checkout it was built in and would
+ * find none beside a copy. */
+export function copyApp(home, { from = join(WEB_DIR, "dist"), hash = folderHash, command = () => folderHash(dirname(HOST_BIN)) } = {}) {
+  const was = hash(from);
   const dir = join(home, "app");
-  cpSync(join(WEB_DIR, "dist"), dir, { recursive: true });
-  return { dir, hash: folderHash(dir), command: folderHash(dirname(HOST_BIN)) };
+  cpSync(from, dir, { recursive: true });
+  const copied = hash(dir);
+  const now = hash(from);
+  if (now !== was) throw new Error(appMovedLine(from, was, now));
+  if (copied !== was) throw new Error(appMovedLine(from, was, copied));
+  return { dir, hash: copied, command: command(), builtAt: builtAt(from) };
 }
 
 /** What an agent's store holds when a lab writes it: onboarding already answered, so a turn does not open with a
- * wizard, and nothing else. No MCP server, so the only wsp tools a turn has are the ones this host hands it; no
- * project, so no folder of the person's is remembered. */
+ * wizard, and no project, so no folder of the person's is remembered. */
 const FIRST_RUN = { hasCompletedOnboarding: true, installMethod: "native", numStartups: 5 };
 
-/** The file an agent reads its own first-run answers out of, under the store it was given. Claude Code's name for
- * it; an agent whose store this lab does not know the shape of gets the folder and nothing in it. */
-const FIRST_RUN_FILE = ".claude.json";
+/** The wsp tools a turn in this lab has: this lab's own wsp, which carries this lab's host and nothing of the
+ * person's in its own environment. A real Mac gets these from the first-run row, and without them a tester's agent
+ * does not know it is inside wsp: one spent twelve minutes and $0.68 writing JSON-RPC by hand to find its own
+ * threads, and an orchestrator fanned its work out through its harness's background agents rather than threads. */
+export const labMcpServer = home => ({ command: join(binDir(home), "wsp"), args: ["mcp"] });
+
+/** The file an agent reads its first-run answers and its own MCP servers out of when it has been pointed at a
+ * store rather than left on a home: the catalog's own path for that file with the home taken off, and the agent's
+ * own folder taken off too where the path goes through it, since the store is that folder. A different question
+ * from the host's (`mcpConfigFile`, which resolves the same path against a home), so the answer is written here
+ * and not borrowed from there. An agent whose config the catalog does not know gets the folder and nothing in it. */
+const storeConfig = agent => {
+  if (agent.mcp === undefined) return undefined;
+  const under = agent.mcp.files[0].replace(/^~\//, "");
+  return under.startsWith(`${agent.stateHome}/`) ? under.slice(agent.stateHome.length + 1) : under;
+};
 
 /** Every agent store a turn in this lab reads, made and filled where that agent looks for it: the store is the
  * folder the host points the agent at, not the home, so a file written beside the home is a file no agent opens
- * (measured 2026-09-12: the agent's own 38 KB file sat in the store while the lab's sat unread in the home). */
-export function writeAgentHome(home) {
+ * (measured 2026-09-12: the agent's own 38 KB file sat in the store while the lab's sat unread in the home). The
+ * server is written by the agent's own config module, so a lab spells no agent's format a second time. */
+export function writeAgentHome(home, server = labMcpServer(home)) {
   const written = [];
-  for (const store of Object.values(agentStores(home))) {
+  for (const { agent, store } of agentStoreRows(home)) {
     mkdirSync(join(store, "skills"), { recursive: true });
-    const path = join(store, FIRST_RUN_FILE);
-    writeFileSync(path, `${JSON.stringify(FIRST_RUN, null, 2)}\n`);
+    const name = storeConfig(agent);
+    if (name === undefined) continue;
+    const path = join(store, name);
+    writeFileSync(path, agent.mcp.format.place(JSON.stringify(FIRST_RUN), MCP_SERVER_NAME, server).text);
     written.push(path);
   }
   return written;
@@ -161,6 +206,19 @@ export function writeKeys(home, keys) {
       .join("\n")}\n`,
     { mode: 0o600 },
   );
+  return path;
+}
+
+/** Where the stand-in a lab serves its forks through keeps its own machines, and what it holds before the host
+ * comes up: the snapshots this fixture's image says the account is paying for. Inside the lab's home, so its
+ * records and every machine's folder go when the lab does, and so a tester's command on a fork runs in a folder of
+ * the lab's and nowhere near the person's own. */
+export const standInRoot = home => join(home, "stand-in");
+
+export function writeStandIn(home, snapshots) {
+  const path = standInRecordsPath(standInRoot(home));
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify({ machines: {}, snapshots }, null, 2)}\n`);
   return path;
 }
 

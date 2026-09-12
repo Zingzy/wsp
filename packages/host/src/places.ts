@@ -55,7 +55,7 @@ import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
 import { aimName, aimedHost, wspHome, type HostAim, type HostPick } from "./hosts.js";
 import { joinedAlready, placeFilePath, placeKeyPath, placeLogPath, placeReport, readPlaceFile, stopPlaceService, sweepPlace, writePlaceFile } from "./place-report.js";
-import { PROVIDER_ENV, addedBy, addedProviders, providerBackendFor, providerModule, type ProviderEnv } from "./providers.js";
+import { PROVIDER_ENV, addedBy, addedProviders, isPlace, placeIdOf, providerBackendFor, providerModule, type ProviderEnv } from "./providers.js";
 import { publicHostname } from "./relay-link.js";
 import { pairOnLoopbackLine, reachAddresses } from "./pairing.js";
 import {
@@ -117,10 +117,11 @@ export function placeWiring(statePath: string, env: ProviderEnv): PlaceWiring {
     install: placeInstaller(),
     provider: () => {
       const module = providerModule(env);
-      // A row that answers for no way of being added is no place to show: a host set up to fork nowhere has none.
-      if (addedBy(module) === undefined) return undefined;
+      // A row that is nowhere work can stand is no place to show: a host set up to fork nowhere has none. The row
+      // wears the word its own machines wear, so a stand-in serving a fixture shows the cloud it is standing in for.
+      if (!isPlace(module, env)) return undefined;
       const { pricing } = providerBackendFor(env);
-      return { id: module.id, rateUsdPerHour: pricing.rateUsdPerHour(pricing.defaultSize) };
+      return { id: placeIdOf(module, env), rateUsdPerHour: pricing.rateUsdPerHour(pricing.defaultSize) };
     },
     hostName: hostNameHere,
     // This computer under the name a person would type for it, and what it is off the same read a place sends about

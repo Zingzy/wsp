@@ -9,8 +9,8 @@
 // it, since the runtime never imports the daemon package (that runs in guests).
 
 import { randomBytes } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { connectDaemon, type DaemonReach } from "@wsp/runtime";
 // LOOPBACK is the protocol's, which every road that binds or dials this computer reads. Here the reason is also
@@ -26,6 +26,10 @@ export interface LocalDaemonOptions {
   root: string;
   /** The folder turns write in, whose volume the Machine tab's disk row reads. */
   workFolder: string;
+  /** The file this daemon reads its token from at every auth frame, for a daemon whose token something else
+   * rotates: a stand-in provider's machine, whose token the runtime writes through the machine's own exec. The
+   * first token is minted here and written there. Without one the token lives in this process alone. */
+  tokenPath?: string;
 }
 
 /** The in-process daemon for this computer's workspace: it starts on loopback with a fresh token and hands out the
@@ -33,8 +37,9 @@ export interface LocalDaemonOptions {
 export class LocalDaemon {
   private constructor(
     private readonly handle: DaemonHandle,
-    private readonly token: string,
+    private readonly minted: string,
     readonly root: string,
+    private readonly tokenPath?: string,
   ) {}
 
   static async start(opts: LocalDaemonOptions): Promise<LocalDaemon> {
@@ -45,13 +50,38 @@ export class LocalDaemon {
     // This daemon's root is the person's home, so rootsPathIn names its roots file; the option's default names the
     // guest's, /root, which on a Linux computer is another user's folder and answers EACCES on every op.
     const rootsPath = rootsPathIn(opts.root);
+    // Written before the daemon starts, since it refuses to start with no token to read; from then on the file is
+    // the token, and whatever rotates it is answered without this daemon being restarted.
+    if (opts.tokenPath !== undefined) {
+      mkdirSync(dirname(opts.tokenPath), { recursive: true });
+      writeFileSync(opts.tokenPath, token, { mode: 0o600 });
+    }
     // Loopback only: a firewall prompt on macOS or Windows is a wall a local workspace must never hit, and nothing
     // off this computer has any business on its daemon.
     //
     // The kind is what picks the modules the Live rows and the Processes tab read: this computer answers for itself,
     // with os, df and ps, where a guest daemon reads the /proc a Mac does not have.
-    const handle = await startDaemon({ host: LOOPBACK, port: 0, token, kind: "local", root: opts.root, workFolder: opts.workFolder, inboxDir, rootsPath });
-    return new LocalDaemon(handle, token, opts.root);
+    const handle = await startDaemon({
+      host: LOOPBACK,
+      port: 0,
+      kind: "local",
+      root: opts.root,
+      workFolder: opts.workFolder,
+      inboxDir,
+      rootsPath,
+      ...(opts.tokenPath === undefined ? { token } : { tokenPath: opts.tokenPath }),
+    });
+    return new LocalDaemon(handle, token, opts.root, opts.tokenPath);
+  }
+
+  /** The token this daemon opens on now: the file's where one was named, since something else may have rotated it. */
+  private get token(): string {
+    if (this.tokenPath === undefined) return this.minted;
+    try {
+      return readFileSync(this.tokenPath, "utf8").trim();
+    } catch {
+      return this.minted;
+    }
   }
 
   /** The port the daemon bound; 0 asked for a free one. */
