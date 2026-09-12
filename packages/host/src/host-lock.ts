@@ -12,6 +12,9 @@ export interface HostLock {
   /** The address the host bound, absent on a lock a host of an earlier build wrote, which bound this computer alone. */
   address?: string;
   startedAt: string;
+  /** Set when a verb started this host for itself rather than a person typing wsp up: wsp down stops such a host,
+   * and a second wsp up is told so. Absent means somebody is holding it open. */
+  startedBy?: "verb";
 }
 
 function isHostLock(v: unknown): v is HostLock {
@@ -56,7 +59,7 @@ function readLock(path: string): HostLock | undefined {
 function heldBy(lock: HostLock, statePath: string): Error {
   return new Error(
     `another wsp host (pid ${lock.pid}) is already serving ${statePath} on port ${lock.port} (ws ${lock.wsPort}). ` +
-      "Stop it first, or point --state at a different file.",
+      (lock.startedBy === "verb" ? "wsp down stops it, or point --state at a different file." : "Stop it first, or point --state at a different file."),
   );
 }
 
@@ -129,7 +132,7 @@ function refuseIfServed(lockPath: string, statePath: string): void {
 
 /** Seeded with the requested ports so a refusal during startup can name them;
  * rewritten with the bound ports once the host is up. */
-export function takeLock(lockPath: string, statePath: string, ports: { port: number; wsPort: number; address?: string }): HostLock {
+export function takeLock(lockPath: string, statePath: string, ports: { port: number; wsPort: number; address?: string; startedBy?: "verb" }): HostLock {
   refuseIfServed(lockPath, statePath);
   const lock: HostLock = { pid: process.pid, ...ports, startedAt: new Date().toISOString() };
   mkdirSync(dirname(lockPath), { recursive: true });

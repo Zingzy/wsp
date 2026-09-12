@@ -495,11 +495,11 @@ describe("store creations", () => {
     expect(action.word).toBe(CLOUD_SETUP_WORDS.create.open);
     action.run();
     expect(useStore.getState().setupOpen).toBe(true);
-    // With no build to point at, the same road says the setup instead and its word opens that.
+    // With no build to point at, the same road says the image instead and its word opens the screens that build it.
     useStore.setState({ initJob: null, setupOpen: false });
     expect(await useStore.getState().createWorkspace("gamma")).toBeNull();
     expect(useStore.getState().toast).toBe(CLOUD_SETUP_WORDS.create.none);
-    expect(useStore.getState().toastAction!.word).toBe(CLOUD_SETUP_WORDS.row);
+    expect(useStore.getState().toastAction!.word).toBe(CLOUD_SETUP_WORDS.create.build);
     // A named snapshot carries its own image, so that fork is never held back by the golden's absence.
     api.createWorkspace = async () => view("ws_new");
     expect(await useStore.getState().createWorkspace("proj-fork", "snap_project")).toBe("ws_new");

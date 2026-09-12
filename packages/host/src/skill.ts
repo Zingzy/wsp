@@ -57,7 +57,7 @@ function bullets(lines: readonly string[], from: number): string[] {
 
 /** The agents a thread runs on, from the adapter registry, so the instructions promise no agent the host refuses. */
 export function agentsLine(agents: readonly string[]): string {
-  return `The agents this host runs threads on, the only values thread_new and fork take as agent: ${agents.join(", ")}.`;
+  return `The agents this host runs threads on, the only values run and fork take as agent: ${agents.join(", ")}.`;
 }
 
 /** The MCP server's instructions: the skill's opening paragraph, then the setup walkthrough's, the agents the host

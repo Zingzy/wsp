@@ -14,7 +14,7 @@
 // The channel runs both ways: set_permission_mode is this host's own request,
 // and the CLI answers it with a control_response carrying the request's id.
 
-import { PERMISSION_ALLOW, PERMISSION_DENY } from "@wsp/protocol";
+import { PERMISSION_ALLOW, PERMISSION_DENY, pickedOptions, questionAnswerInput, questionOptions } from "@wsp/protocol";
 import type { PermissionAsk, PermissionOption } from "@wsp/protocol";
 
 /** The one flag that routes the CLI's permission prompts to this process instead of having it deny them itself. */
@@ -39,7 +39,9 @@ function str(value: unknown): string | undefined {
 
 /** What one line of the CLI's stream is, as far as the control channel cares. */
 export type ControlLine =
-  | { kind: "ask"; ask: PermissionAsk }
+  /** `agentId` is the CLI's handle for the subagent whose run raised this, where one did; the caller turns it into
+   * the tool call that launched that subagent, which is the only handle the rest of wsp knows it by. */
+  | { kind: "ask"; ask: PermissionAsk; agentId?: string }
   | { kind: "cancel"; requestId: string }
   /** A control_request of a subtype this adapter does not answer; the CLI is told so it stops waiting. */
   | { kind: "unknown"; requestId: string; subtype: string }
@@ -85,19 +87,28 @@ export function controlLine(event: Record<string, unknown>): ControlLine {
   }
   const detail = str(request.description);
   const toolUseId = str(request.tool_use_id);
+  const agentId = str(request.agent_id);
+  const input = JSON.stringify(request.input ?? null);
+  // A call that only asks the person something carries the question's own choices and no allow: there is nothing to
+  // consent to, and the CLI reads the pick off the input it hands back.
+  const asked = questionOptions(toolName, input);
   return {
     kind: "ask",
+    ...(agentId !== undefined ? { agentId } : {}),
     ask: {
       askId: requestId,
       toolName,
       ...(toolUseId !== undefined ? { toolUseId } : {}),
-      input: JSON.stringify(request.input ?? null),
+      input,
       ...(detail !== undefined && detail !== "" ? { detail } : {}),
-      options: [
-        { id: PERMISSION_ALLOW, label: "Allow", effect: "allow" },
-        { id: PERMISSION_DENY, label: "Deny", effect: "deny" },
-        ...modes,
-      ],
+      options:
+        asked.length > 0
+          ? asked
+          : [
+              { id: PERMISSION_ALLOW, label: "Allow", effect: "allow" },
+              { id: PERMISSION_DENY, label: "Deny", effect: "deny" },
+              ...modes,
+            ],
     },
   };
 }
@@ -105,17 +116,20 @@ export function controlLine(event: Record<string, unknown>): ControlLine {
 /** One line of the stdin channel: the answer to a prompt, in the shape the CLI's control channel takes. A mode pick
  * is an allow that also carries the permission update the CLI suggested, which is how it stops asking for the rest
  * of the session. `input` is the tool's input as the ask carried it, handed back unchanged: the channel lets a host
- * rewrite it and this one never does. */
+ * rewrite it, and the one rewrite this host makes is the person's answer to a question, which the CLI reads off the
+ * input rather than off the pick. */
 export function controlAnswerLine(ask: PermissionAsk, optionId: string, denyMessage: string): string {
-  const option = ask.options.find(o => o.id === optionId);
-  if (option === undefined) throw new Error(`${optionId} is not an option on this permission prompt`);
-  const updatedInput = JSON.parse(ask.input) ?? {};
+  const picked = pickedOptions(ask.options, optionId);
+  const option = picked?.[0];
+  if (picked === undefined || option === undefined) throw new Error(`${optionId} is not an option on this permission prompt`);
+  const answered = option.effect === "answer" ? questionAnswerInput(ask.toolName, ask.input, picked.map(o => o.id)) : undefined;
+  const updatedInput = answered ?? JSON.parse(ask.input) ?? {};
   const response =
     option.effect === "deny"
       ? { behavior: "deny", message: denyMessage }
-      : option.effect === "allow"
-        ? { behavior: "allow", updatedInput }
-        : { behavior: "allow", updatedInput, updatedPermissions: [{ type: "setMode", mode: option.mode, destination: "session" }] };
+      : option.effect === "mode"
+        ? { behavior: "allow", updatedInput, updatedPermissions: [{ type: "setMode", mode: option.mode, destination: "session" }] }
+        : { behavior: "allow", updatedInput };
   return JSON.stringify({ type: "control_response", response: { subtype: "success", request_id: ask.askId, response } });
 }
 

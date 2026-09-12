@@ -11,15 +11,15 @@ This page is the sequence the wsp skill teaches that agent. `wsp mcp install --a
 Two things are the person's and never the agent's.
 
 - **Sign-ins.** No tool can finish one. The run hands the page over and waits; the person opens it in their own browser.
-- **Keys.** The Solari key and any Anthropic key live in `~/.wsp/.env`. They are never typed into a conversation and never read back. `wsp up` reads them off the file itself, so starting the host is the agent's job and the keys still never pass through it.
+- **Keys.** The Solari key and any Anthropic key live in `~/.wsp/.env`. They are never typed into a conversation and never read back. A host reads them off the file itself, so nothing about them passes through the agent.
 
 ## The sequence
 
 Every step ends in what to expect. The agent runs the command, reads that line, and stops at the first one that does not match rather than carrying on.
 
-1. **Health check.** `wsp --version`, then `wsp threads --json`. With no `wsp` on the path, `npm i -g @zingzy/wsp` puts it there; `npx @zingzy/wsp` is worse, since its cache write fails under a sandboxed agent. Expect `wsp <version>` and then `{"threads":[]}`, which means a host is already serving and the agent can skip to the first workspace. `no wsp host is serving <path>; run wsp up first` means nothing serves.
+1. **Health check.** `wsp --version`, then `wsp threads --json`. With no `wsp` on the path, `npm i -g @zingzy/wsp` puts it there; `npx @zingzy/wsp` is worse, since its cache write fails under a sandboxed agent. Expect `wsp <version>` and then `{"threads":[]}`. A `starting the host for <path>` line on stderr before it means nothing was serving and the command started a host, which is the ordinary road.
 
-2. **Ask the host which state it is in.** `wsp up` serves until stopped, so the agent starts it detached and reads the first lines: `nohup wsp up > /tmp/wsp-up.log 2>&1 &`. Five answers are possible and each is a branch, not a failure. `app http://127.0.0.1:4400` with `runtime ws ws://127.0.0.1:4410` means a key and a golden are both there. `no golden yet; run wsp init` means the key is there and the image is not. `Solari API key: no terminal to ask on; set SOLARI_API_KEY in the environment, ./.env, or ~/.wsp/.env.` means no key at all. An `EADDRINUSE` naming 4400 or 4410 means something else holds a port, so start again with `--port 4401 --ws-port 4411`. `another wsp host (pid <n>) is already serving <path>` means one of yours is up; use it.
+2. **Read the host's log when nothing answers.** `no host answered for <path> within 20.0s`, with the log's last lines under it, means the host the command started could not serve, and the log says why. `Solari API key: no terminal to ask on; set SOLARI_API_KEY in the environment, ./.env, or ~/.wsp/.env.` in it means no key at all, which is the next step. A `Workspace <name> (ws_...) is this computer` line means the state held neither an image nor a workspace, so the host recorded this computer and served that.
 
 3. **The key.** The agent asks you to write `SOLARI_API_KEY=<key>` into `~/.wsp/.env`, and `ANTHROPIC_API_KEY=<key>` beside it if you pay Anthropic by the token. On a Claude subscription you skip that line and sign in on the machine during init instead.
 
@@ -41,13 +41,13 @@ Every step ends in what to expect. The agent runs the command, reads that line, 
 
    The agent hands you that line as it comes: the page, the code when there is one, and the command that opens it. It then reads the tool's own status on the machine and moves on when it says signed in, or when `waitSeconds` pass. Expect one `sign-in-result` line per hand-off, then `Golden v<n> sealed.` in the log, `Workspace first (<id>) forked from golden v<n>.` on the first seal, and `Open http://127.0.0.1:4400/`.
 
-7. **The host.** Init serves a host for as long as it runs. When nothing serves after it ends, the agent runs step two's detached `wsp up` again.
+7. **The host.** Init serves a host for as long as it runs, and when nothing serves after it ends the next command starts one, so there is nothing for the agent to do here.
 
 8. **First workspace.** The first seal forks one, named `first`. `wsp wake first` answers with its state and `wsp new dev` makes another. A refusal naming the account's machine cap means two are already up; the builder stays up ten minutes after a seal and counts as one.
 
-9. **Import the project.** `wsp import <folder> --to first` prints the plan and moves nothing: the repository, the files and their size, the caches left behind, each secret-shaped file with its default, and the agents with sessions for the folder. The agent puts the secret-shaped rows to you, then runs it again with `--yes` or `--keep <path>`. Then `wsp snapshot first`, so the next workspace starts from a project golden with the project in place.
+9. **Import the project.** `wsp import first <folder>` prints the plan and moves nothing: the repository, the files and their size, the caches left behind, each secret-shaped file with its default, and the agents with sessions for the folder. The agent puts the secret-shaped rows to you, then runs it again with `--yes` or `--keep <path>`. Then `wsp snapshot first`, so the next workspace starts from a project golden with the project in place.
 
-10. **First thread.** `wsp thread new --in first --cwd <the project folder on the machine> --notify me "<the task>"`. Expect `thread <id>` first on stdout, the reply when it is complete, and the same thread in your sidebar.
+10. **First thread.** `wsp run first --cwd <the project folder on the machine> --notify me "<the task>"`. Expect `thread <id>` first on stdout, the reply when it is complete, and the same thread in your sidebar.
 
 <Callout type="info">
   `wsp doctor` is not the health check. It forks a live machine to prove the whole reach path, bills while it runs, and does not speak JSON.

@@ -237,9 +237,9 @@ describe("a provider as a place", () => {
 
 describe("the table wsp places prints", () => {
   const rows: PlaceView[] = [
-    { id: "here", kind: "computer", name: "zingzys-mac", default: false, shape: { cpu: 8, memMb: 16384 }, docker: true, present: true },
-    { id: "p_1", kind: "computer", name: "box", default: true, shape: { cpu: 4, memMb: 4096 }, diskFreeBytes: 831 * 1024 ** 3, docker: true, present: true, lastSeenAt: "2026-09-12T00:00:00.000Z" },
-    { id: "solari", kind: "provider", name: "solari", default: false, rateUsdPerHour: 0.018 },
+    { id: "here", kind: "computer", name: "zingzys-mac", default: false, shape: { cpu: 8, memMb: 16384 }, docker: true, present: true, takesForks: false },
+    { id: "p_1", kind: "computer", name: "box", default: true, shape: { cpu: 4, memMb: 4096 }, diskFreeBytes: 831 * 1024 ** 3, docker: true, present: true, lastSeenAt: "2026-09-12T00:00:00.000Z", takesForks: true },
+    { id: "solari", kind: "provider", name: "solari", default: false, rateUsdPerHour: 0.018, takesForks: true },
   ];
 
   it("carries the cores, the memory, the free disk, the docker and the presence, with the default marked once", () => {
@@ -520,7 +520,7 @@ describe("wsp add on a computer reached over ssh", () => {
   it("asks the host to do it, prints each step as it lands and says what joined", async () => {
     const io = captured();
     const frames: ((frame: Record<string, unknown>) => void)[] = [];
-    const place: PlaceView = { id: "p_1", kind: "computer", name: "box", default: true, shape: { cpu: 4, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, docker: true, present: true };
+    const place: PlaceView = { id: "p_1", kind: "computer", name: "box", default: true, shape: { cpu: 4, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, docker: true, present: true, takesForks: true };
     const client = {
       request: async (op: string, params?: Record<string, unknown>) => {
         expect(op).toBe("places.add");
@@ -752,9 +752,9 @@ describe("what a remove says about the device the join bought", () => {
     expect(await removeCommand(io, opts, ["old-macbook"], removeDeps(removeClient([{ id: "d_1", name: "old-macbook" }])))).toBe(0);
     const said = io.lines.join("\n");
     expect(said).toContain(deviceLeftLine("old-macbook", ["d_1"]));
-    expect(said).toContain("wsp devices revoke d_1 takes it back.");
-    // One command per id, since wsp devices revoke takes exactly one.
-    expect(deviceLeftLine("old-macbook", ["d_1", "d_2"])).toContain("wsp devices revoke d_1, wsp devices revoke d_2 take them back.");
+    expect(said).toContain("wsp host devices revoke d_1 takes it back.");
+    // One command per id, since wsp host devices revoke takes exactly one.
+    expect(deviceLeftLine("old-macbook", ["d_1", "d_2"])).toContain("wsp host devices revoke d_1, wsp host devices revoke d_2 take them back.");
     // The line sits before the last one, so what is gone is still the sentence the remove ends on.
     expect(io.lines.at(-1)).toBe("old-macbook is no longer a place in this wsp.");
   });
@@ -764,7 +764,7 @@ describe("what a remove says about the device the join bought", () => {
     const io = captured();
     const opts = { statePath: join(home, "state.json"), home, env: { HOME: home, WSP_HOME: home } };
     expect(await removeCommand(io, opts, ["old-macbook"], removeDeps(removeClient([{ id: "d_2", name: "a browser tab" }])))).toBe(0);
-    expect(io.lines.join("\n")).not.toContain("wsp devices revoke");
+    expect(io.lines.join("\n")).not.toContain("wsp host devices revoke");
   });
 });
 

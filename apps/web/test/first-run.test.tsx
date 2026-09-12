@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The window with no golden: the shell as always, since this computer is a
-// workspace of its own, and at the sidebar's bottom one keycap button that
-// opens the way to cloud machines; with a golden sealed the button is not there.
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+// The window on a Mac that is the only computer a person has: the shell as
+// always, since this computer is a workspace of its own, and at the sidebar's
+// bottom one keycap button that adds another; once a second computer or a
+// provider is there the button is not.
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLOUD_SETUP_WORDS, type GoldenManifest, type WorkspaceView } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, PLACES_WORDS, type GoldenManifest, type PlaceView, type WorkspaceView } from "@wsp/protocol";
 import { Shell } from "../src/App.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -17,10 +18,13 @@ const manifest: GoldenManifest = {
 };
 const first: WorkspaceView = { id: "ws_first", name: "first", machineId: "m_fork", phase: "running", golden: "snap_golden-v1", createdAt: "t" };
 const local: WorkspaceView = { id: "ws_local", name: "thisbox", kind: "local", machineId: "local", phase: "running", golden: "", createdAt: "t" };
+const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", default: true, present: true, shape: { cpu: 8, memMb: 16384 } };
+const ascii: PlaceView = { id: "box", kind: "provider", name: "box", default: false, rateUsdPerHour: 0.018 };
 const CAPS = caps();
 
-function fakeApi(opts: { golden?: GoldenManifest; workspaces?: WorkspaceView[] }) {
+function fakeApi(opts: { golden?: GoldenManifest; workspaces?: WorkspaceView[]; places?: PlaceView[] }) {
   return {
+    placesList: vi.fn(async () => opts.places ?? []),
     listWorkspaces: vi.fn(async () => opts.workspaces ?? []),
     getWorkspace: vi.fn(async () => first),
     createWorkspace: vi.fn(async () => first),
@@ -49,7 +53,7 @@ function fakeApi(opts: { golden?: GoldenManifest; workspaces?: WorkspaceView[] }
 }
 
 beforeEach(() => {
-  useStore.setState({ api: null, capabilities: null, hasGolden: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false });
+  useStore.setState({ api: null, capabilities: null, hasGolden: null, workspaces: [], places: [], placesRead: false, statuses: {}, costs: {}, spending: {}, toast: null, selectedId: null, sessions: {}, ready: false, settingsOpen: false, addComputerOpen: false, setupOpen: false });
 });
 afterEach(cleanup);
 
@@ -61,12 +65,12 @@ async function mount(opts: Parameters<typeof fakeApi>[0]) {
   return api;
 }
 
-describe("the window before a golden exists", () => {
+describe("the window on a Mac with no other computer", () => {
   it("is the shell on this computer, with one muted mono keycap at the sidebar's bottom for the cloud", async () => {
     await mount({ workspaces: [local] });
     await waitFor(() => expect(screen.getByText("Workspaces")).toBeDefined());
     await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_local"));
-    const row = await screen.findByRole("button", { name: CLOUD_SETUP_WORDS.row });
+    const row = await screen.findByRole("button", { name: PLACES_WORDS.addComputer });
     expect(row.closest("[data-slot=sidebar-footer]")).not.toBeNull();
     // The kit's keycap parts it from the list by its own border, no hairline over it; the words are centred mono, muted, one tone up on hover.
     expect(row.getAttribute("data-slot")).toBe("button");
@@ -75,7 +79,7 @@ describe("the window before a golden exists", () => {
     expect(row.className).toContain("font-mono");
     expect(row.className).toContain("text-sidebar-muted-foreground");
     expect(row.className).toContain("hover:text-sidebar-foreground");
-    expect(row.textContent).toBe(CLOUD_SETUP_WORDS.row);
+    expect(row.textContent).toBe(PLACES_WORDS.addComputer);
     // One cloud glyph, the halo on it alone: no glow class on the row, no badge, nothing animated at rest.
     const glyphs = row.querySelectorAll("svg");
     expect(glyphs).toHaveLength(1);
@@ -87,25 +91,49 @@ describe("the window before a golden exists", () => {
     expect(screen.queryByText(/No golden image yet/)).toBeNull();
   });
 
-  it("the row opens the cloud setup modal on its first choice, never on a command to run, and closing it leaves the shell as it was", async () => {
+  it("the row opens Settings with the Add a computer sheet over it, and never the image screens", async () => {
     await mount({ workspaces: [local] });
-    const row = await screen.findByRole("button", { name: CLOUD_SETUP_WORDS.row });
+    const row = await screen.findByRole("button", { name: PLACES_WORDS.addComputer });
     fireEvent.click(row);
-    const dialog = await screen.findByRole("dialog");
-    expect(dialog.textContent).toContain(CLOUD_SETUP_WORDS.title);
-    expect(dialog.textContent).toContain(CLOUD_SETUP_WORDS.choice.headline);
-    expect(dialog.textContent).not.toMatch(/wsp init|terminal/i);
-    expect(dialog.textContent).not.toMatch(/sk-ant|slr_live/);
-    fireEvent.keyDown(dialog, { key: "Escape" });
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(screen.getByRole("button", { name: CLOUD_SETUP_WORDS.row })).toBeDefined();
+    await waitFor(() => expect(useStore.getState().addComputerOpen).toBe(true));
+    expect(useStore.getState().settingsOpen).toBe(true);
+    expect(useStore.getState().setupOpen).toBe(false);
+    const sheet = await screen.findByText(PLACES_WORDS.sheet.description);
+    expect(sheet).toBeDefined();
+    expect(document.body.textContent).not.toContain(CLOUD_SETUP_WORDS.choice.headline);
+    expect(document.body.textContent).not.toMatch(/wsp init|slr_live/);
   });
 
-  it("with a golden sealed the row is not there, and the first workspace is selected", async () => {
-    await mount({ golden: manifest, workspaces: [first] });
+  it("with a provider connected the row is not there, and the first workspace is selected", async () => {
+    await mount({ golden: manifest, workspaces: [first], places: [here, ascii] });
     await waitFor(() => expect(screen.getByText("Workspaces")).toBeDefined());
-    await waitFor(() => expect(useStore.getState().hasGolden).toBe(true));
-    expect(screen.queryByRole("button", { name: CLOUD_SETUP_WORDS.row })).toBeNull();
+    await waitFor(() => expect(useStore.getState().places.length).toBe(2));
+    expect(screen.queryByRole("button", { name: PLACES_WORDS.addComputer })).toBeNull();
     await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_first"));
+  });
+
+  it("draws no keycap until the host has said what it runs on, so a foot with a provider in it never fills and empties", async () => {
+    // The list starts empty and is filled by a reply of its own: a keycap drawn on that empty list appears on every
+    // load and goes again a moment later on every wsp that has a second row.
+    let answer = (places: PlaceView[]): void => void places;
+    const api = fakeApi({ golden: manifest, workspaces: [first] });
+    api.placesList = vi.fn(() => new Promise<PlaceView[]>(resolve => (answer = resolve)));
+    useStore.getState().bind(api);
+    render(<Shell />);
+    await waitFor(() => expect(screen.getByText("Workspaces")).toBeDefined());
+    expect(useStore.getState().placesRead).toBe(false);
+    expect(screen.queryByRole("button", { name: PLACES_WORDS.addComputer })).toBeNull();
+    await act(async () => {
+      answer([here, ascii]);
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(useStore.getState().placesRead).toBe(true));
+    expect(screen.queryByRole("button", { name: PLACES_WORDS.addComputer })).toBeNull();
+  });
+
+  it("stands while this computer is the only row, whatever the image has been built to", async () => {
+    await mount({ golden: manifest, workspaces: [first], places: [here] });
+    await waitFor(() => expect(useStore.getState().hasGolden).toBe(true));
+    expect(await screen.findByRole("button", { name: PLACES_WORDS.addComputer })).toBeDefined();
   });
 });

@@ -135,6 +135,14 @@ if (typeof globalThis.ClipboardEvent === "undefined") {
   (window as unknown as { ClipboardEvent?: unknown }).ClipboardEvent = ClipboardEvent;
 }
 
+// jsdom has no PointerEvent, and the checkbox and radio primitives re-dispatch a click as one; without it every
+// tick in a test throws inside the primitive. One home for it, since every case that ticks a box needs it.
+if (typeof globalThis.PointerEvent === "undefined") {
+  class PointerEvent extends MouseEvent {}
+  (globalThis as { PointerEvent?: unknown }).PointerEvent = PointerEvent;
+  (window as unknown as { PointerEvent?: unknown }).PointerEvent = PointerEvent;
+}
+
 // The app records what a person is reading in the page's address, so a case that opened a thread leaves one behind
 // and the next case would open on it. Every case starts on a page with no address, as a first visit does.
 beforeEach(() => {

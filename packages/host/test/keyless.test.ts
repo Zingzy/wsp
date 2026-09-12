@@ -43,11 +43,11 @@ describe("a computer with no machine provider key", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  /** This computer recorded as a workspace, then a host serving that state file with no key: the provider module is
-   * the one a keyless host wires, and the ssh client is the fake, so a dial proves the road and reaches nothing. */
+  /** A host serving this state file with no key: the provider module is the one a keyless host wires, and the ssh
+   * client is the fake, so a dial proves the road and reaches nothing. The host records this computer as it starts,
+   * which is the one workspace a state file with nothing in it gains. */
   async function serving(): Promise<void> {
     const io = captured();
-    expect(await cli(["new", "--local", "mybox", "--state", statePath], io)).toBe(0);
     const rt = createRuntime({
       backend: new NoProviderBackend(),
       store: jsonFileStore(statePath),
@@ -61,39 +61,18 @@ describe("a computer with no machine provider key", () => {
     expect(io.errors).toEqual([]);
   }
 
-  it("records a machine of the person's own over ssh and lists it, with no key and nothing asked", async () => {
-    await serving();
-    const made = captured();
-    expect(await cli(["new", "--ssh", "dev@box", "--state", statePath], made)).toBe(0);
-    expect(made.errors).toEqual([]);
-    // The kind's own word for the machine, and under it the key the one dial read, to compare with the machine's own.
-    const [created, notice] = made.lines[0]!.split("\n");
-    expect(created).toMatch(/^created box ws_[0-9a-f]+ \(a computer over ssh\)$/);
-    expect(notice).toContain("ssh-ed25519 SHA256:box");
-
-    const listed = captured();
-    expect(await cli(["workspaces", "--state", statePath], listed)).toBe(0);
-    const rows = listed.lines[0]!.split("\n");
-    expect(rows[0]).toMatch(/^WORKSPACE/);
-    expect(rows.map(r => r.split(/ {2,}/)[0])).toEqual(["WORKSPACE", "mybox", "box"]);
-    expect(rows[2]).toContain("a computer over ssh");
-  });
-
-  it("makes this computer the workspace, serves it and lists it, with no key and nothing asked", async () => {
-    const io = captured();
-    expect(await cli(["new", "--local", "mybox", "--state", statePath], io)).toBe(0);
-    expect(io.errors).toEqual([]);
-    expect(io.lines[0]).toMatch(/^created mybox ws_[0-9a-f]+ \(this computer\)$/);
-    // The record is in the state file, which is the one thing wsp up needs to serve.
-    const stored = JSON.parse(readFileSync(statePath, "utf8")) as { workspaces: Record<string, { name: string; kind: string }> };
-    expect(Object.values(stored.workspaces).map(w => [w.name, w.kind])).toEqual([["mybox", "local"]]);
-
+  it("makes this computer the workspace as it starts, serves it and lists it, with no key and nothing asked", async () => {
     // The whole real wiring, provider module and all, brought up with no key in the environment.
     const served = captured();
     handle = await up(served, { port: 0, wsPort: 0, statePath, webDir });
     expect(handle).toBeDefined();
     expect(served.errors).toEqual([]);
-    expect(served.lines[0]).toBe(`app         http://127.0.0.1:${handle!.port}`);
+    // The record is in the state file, which is the one thing a host needs to serve anything.
+    const stored = JSON.parse(readFileSync(statePath, "utf8")) as { workspaces: Record<string, { name: string; kind: string }> };
+    expect(Object.values(stored.workspaces).map(w => w.kind)).toEqual(["local"]);
+    // The first line is the workspace this start recorded; the addresses follow it.
+    expect(served.lines[0]).toMatch(/^Workspace .+ is this computer;/);
+    expect(served.lines[1]).toBe(`app         http://127.0.0.1:${handle!.port}`);
     // Nothing forks here, so the missing Claude key is about the threads that run on this computer, not about forks.
     expect(served.lines.at(-1)).toBe(noClaudeKeyNote(true));
     const listed = captured();
@@ -108,7 +87,10 @@ describe("a computer with no machine provider key", () => {
     await serving();
     // The golden's head, a project golden, and a sibling of a workspace that is here: three roads whose own
     // refusals would each name a second road that cannot be taken on a computer with no provider.
-    for (const argv of [["new", "alpha"], ["new", "beta", "--from", "proj"], ["fork", "mybox"]]) {
+    const listed = captured();
+    expect(await cli(["workspaces", "--state", statePath], listed)).toBe(0);
+    const here = listed.lines[0]!.split("\n")[1]!.split(/ {2,}/)[0]!;
+    for (const argv of [["new", "alpha"], ["new", "beta", "--from", "proj"], ["fork", here]]) {
       const road = argv.join(" ");
       const asked = captured();
       expect([road, await cli([...argv, "--state", statePath], asked)]).toEqual([road, 1]);

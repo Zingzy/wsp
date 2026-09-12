@@ -7,10 +7,12 @@
 // session id repeats across turns. Wire order is the timeline order. createdAt
 // is the wire's `at` (ms epoch) as ISO, else the caller's receipt clock, else
 // "" for unstamped history.
-import { AFTER_CUT_LINE, NOTIFY_ME, toolCallFacts, type SessionEvent, type SessionHarness, type TurnResult } from "@wsp/protocol";
+import { AFTER_CUT_LINE, NOTIFY_ME, internalToolResult, subagentTaskLine, toolActivityLine, toolCallFacts, toolResultLine, type SessionEvent, type SessionHarness, type TurnResult } from "@wsp/protocol";
 import type {
   ChatMessage,
   PermissionPrompt,
+  SubagentLine,
+  SubagentRun,
   TimelineEntry,
   TurnState,
   TurnSummary,
@@ -39,6 +41,10 @@ type SessionDelta = Extract<SessionEvent, { type: "session.delta" }>;
 interface ToolCall {
   readonly entryIndex: number;
   input: string;
+  /** What the call itself answered, once it really has, read by the fold that opens later so a subagent's life is
+   * keyed off the call whatever order the frames arrive in. The harness's own note to the agent is not an answer:
+   * it says a background agent was launched, and a launch is where the work starts. */
+  answered?: { readonly at: string; readonly failed: boolean };
 }
 
 interface TurnBuild {
@@ -51,6 +57,8 @@ interface TurnBuild {
   tools: Map<string, ToolCall>;
   /** Tool calls without an id resolve to the newest open one, as the CLI streams them in order. */
   openAnonymousTool: number | null;
+  /** Where each subagent's fold sits in the timeline, by the call that launched it. */
+  subagents: Map<string, number>;
   /** The reply's result once session.done landed; the turn stays running until session.end applies its status. */
   reply: TurnResult | null;
 }
@@ -81,6 +89,61 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
     const entry = timeline[index];
     return entry?.kind === "work" ? entry.entry : undefined;
   };
+  const subagent = (index: number | undefined): SubagentRun | undefined => {
+    const entry = index === undefined ? undefined : timeline[index];
+    return entry?.kind === "subagent" ? entry.subagent : undefined;
+  };
+  const subagentEntry = (run: SubagentRun, createdAt: string): TimelineEntry => ({
+    id: `subagent:${run.parentToolUseId}`,
+    kind: "subagent",
+    createdAt,
+    subagent: run,
+  });
+  /** The fold one subagent's lines gather under, opened the first time it writes. It takes the place of the call
+   * that launched it where that call already has a row: the fold is that call, read as the run it started, and two
+   * rows for one launch would say the same thing twice. */
+  const foldFor = (t: TurnBuild, parentToolUseId: string, at: string): number => {
+    const held = t.subagents.get(parentToolUseId);
+    if (held !== undefined) return held;
+    const call = t.tools.get(parentToolUseId);
+    const launched = call === undefined ? undefined : work(call.entryIndex);
+    const openedAt = call === undefined || launched === undefined ? at : timeline[call.entryIndex]!.createdAt;
+    const ended = call?.answered;
+    const run: SubagentRun = {
+      parentToolUseId,
+      turnId: t.summary.turnId,
+      title: (call === undefined ? undefined : subagentTaskLine(call.input)) ?? launched?.detail ?? launched?.label ?? "Subagent",
+      lines: [],
+      prompts: [],
+      state: ended === undefined ? "running" : ended.failed ? "failed" : "done",
+      startedAt: openedAt,
+      endedAt: ended?.at ?? null,
+    };
+    const index = call !== undefined && launched !== undefined ? call.entryIndex : push(subagentEntry(run, openedAt));
+    if (call !== undefined && launched !== undefined) replace(index, subagentEntry(run, openedAt));
+    t.subagents.set(parentToolUseId, index);
+    return index;
+  };
+  const changeFold = (t: TurnBuild, parentToolUseId: string, at: string, change: (run: SubagentRun) => SubagentRun): void => {
+    const index = foldFor(t, parentToolUseId, at);
+    const run = subagent(index);
+    if (run === undefined) return;
+    replace(index, subagentEntry(change(run), timeline[index]!.createdAt));
+  };
+  /** One line inside a fold, or a change to the one the same call already wrote: a subagent's tool call streams its
+   * input and then its result, and both land on one line. */
+  const addFoldLine = (t: TurnBuild, parentToolUseId: string, at: string, line: Omit<SubagentLine, "id" | "label"> & { label?: string }, key?: string): void => {
+    changeFold(t, parentToolUseId, at, run => {
+      const held = key === undefined ? -1 : run.lines.findIndex(l => l.id === key);
+      if (held >= 0) {
+        const lines = [...run.lines];
+        // A call's result reaches the line its input opened and says only what it changes; the call's own words stand.
+        lines[held] = { ...lines[held]!, ...line, label: line.label ?? lines[held]!.label, id: key! };
+        return { ...run, lines };
+      }
+      return { ...run, lines: [...run.lines, { ...line, label: line.label ?? "", id: key ?? `${run.parentToolUseId}:l${run.lines.length}` }] };
+    });
+  };
   const closeOpenMessage = (t: TurnBuild): void => {
     if (t.openMessage === null) return;
     const m = message(t.openMessage);
@@ -106,6 +169,11 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
       if (w && w.toolLifecycleStatus === "inProgress") {
         replace(call.entryIndex, workEntry({ ...w, toolLifecycleStatus: "stopped" }, timeline[call.entryIndex]!.createdAt));
       }
+    }
+    // The harness ends the subagents it started when its turn ends, so a fold still running at the reply is one
+    // whose launch never answered; a slot left reading nothing would say it is still working.
+    for (const parentToolUseId of t.subagents.keys()) {
+      changeFold(t, parentToolUseId, at, run => (run.state === "running" ? { ...run, state: "stopped", endedAt: at || null } : run));
     }
     if (result.status === "completed" && !t.sawText && result.text !== undefined && result.text.length > 0) {
       addMessage(t, "assistant", result.text, at, false);
@@ -162,7 +230,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
       completedAt: null,
     };
     turns.push(summary);
-    return { summary, startCount: count, ordinal: 0, openMessage: null, sawText: false, tools: new Map(), openAnonymousTool: null, reply: null };
+    return { summary, startCount: count, ordinal: 0, openMessage: null, sawText: false, tools: new Map(), openAnonymousTool: null, subagents: new Map(), reply: null };
   };
   /** A delta, done or end whose turn never started here (history capped mid-turn) still needs a turn to hang on. */
   const turnFor = (event: SessionEvent, at: string): TurnBuild => {
@@ -219,18 +287,39 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
           ...(event.toolUseId !== undefined ? { toolUseId: event.toolUseId } : {}),
           input: event.input,
           ...(event.detail !== undefined ? { detail: event.detail } : {}),
+          ...(event.parentToolUseId !== undefined ? { parentToolUseId: event.parentToolUseId } : {}),
           options: event.options,
           createdAt: at,
           outcome: null,
           optionId: null,
         };
+        // A subagent's own prompt sits inside that subagent's fold, where the fold's title says who is asking; a
+        // prompt in the flat stream says nothing about which of several running agents raised it.
+        if (event.parentToolUseId !== undefined) {
+          changeFold(t, event.parentToolUseId, at, run => ({ ...run, prompts: [...run.prompts, permission] }));
+          promptRows.set(event.askId, t.subagents.get(event.parentToolUseId)!);
+          continue;
+        }
         promptRows.set(event.askId, push({ id: `permission:${event.askId}`, kind: "permission", createdAt: at, permission }));
         continue;
       }
       case "session.permission.closed": {
         const index = promptRows.get(event.askId);
         const row = index === undefined ? undefined : timeline[index];
-        if (index === undefined || row?.kind !== "permission") continue;
+        if (index === undefined || row === undefined) continue;
+        if (row.kind === "subagent") {
+          replace(index, {
+            ...row,
+            subagent: {
+              ...row.subagent,
+              prompts: row.subagent.prompts.map(p =>
+                p.askId === event.askId ? { ...p, outcome: event.outcome, optionId: event.optionId ?? null } : p,
+              ),
+            },
+          });
+          continue;
+        }
+        if (row.kind !== "permission") continue;
         replace(index, {
           ...row,
           permission: { ...row.permission, outcome: event.outcome, optionId: event.optionId ?? null },
@@ -265,7 +354,59 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
     }
   }
 
+  /** Every line a subagent wrote, inside its own fold. Read before the parent's own rules so a child's prose never
+   * reaches the parent's open message: two agents writing at once would otherwise land in one paragraph with no
+   * space between their sentences. */
+  function applyChildDelta(t: TurnBuild, e: SessionDelta, at: string, parent: string): void {
+    switch (e.kind) {
+      case "text":
+      case "thinking":
+        addFoldLine(t, parent, at, { createdAt: at, kind: e.kind, label: e.text });
+        return;
+      case "tool_use": {
+        const name = e.toolName ?? "tool";
+        addFoldLine(t, parent, at, { createdAt: at, kind: "tool", label: toolActivityLine(name, e.text), status: "inProgress" }, foldLineKey(parent, e.toolUseId));
+        return;
+      }
+      case "tool_result":
+        addFoldLine(
+          t,
+          parent,
+          at,
+          {
+            createdAt: at,
+            kind: "tool",
+            status: e.isError === true ? "failed" : "completed",
+            ...(toolResultLine(e.text, e.isError === true) !== undefined ? { detail: toolResultLine(e.text, e.isError === true)! } : {}),
+          },
+          foldLineKey(parent, e.toolUseId),
+        );
+        return;
+      default: {
+        const _exhaustive: never = e.kind;
+        return;
+      }
+    }
+  }
+
   function applyDelta(t: TurnBuild, e: SessionDelta, at: string): void {
+    if (e.parentToolUseId !== undefined) {
+      closeOpenMessage(t);
+      applyChildDelta(t, e, at, e.parentToolUseId);
+      return;
+    }
+    // The launching call's own result closes the fold. Where the harness marked that result its own note to the
+    // agent it neither draws nor ends anything: it is written to a model, carries handles no person needs, and says
+    // a background agent was launched rather than that it finished. Where it is the subagent's answer it is the last
+    // line inside the fold, which is where that subagent's work is read.
+    if (e.kind === "tool_result" && e.toolUseId !== undefined && t.subagents.has(e.toolUseId)) {
+      if (internalToolResult(e.text)) return;
+      const answer = toolResultLine(e.text, e.isError === true);
+      if (answer !== undefined) addFoldLine(t, e.toolUseId, at, { createdAt: at, kind: "text", label: answer });
+      changeFold(t, e.toolUseId, at, run => ({ ...run, state: e.isError === true ? "failed" : "done", endedAt: at || null }));
+      t.tools.delete(e.toolUseId);
+      return;
+    }
     switch (e.kind) {
       case "text": {
         const open = t.openMessage !== null ? message(t.openMessage) : undefined;
@@ -294,17 +435,21 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
         const existingEntry = existing ? work(existing.entryIndex) : undefined;
         if (existing && existingEntry && existingEntry.toolLifecycleStatus === "inProgress") {
           existing.input += e.text;
-          const named = e.toolName ?? existingEntry.label;
-          replace(existing.entryIndex, workEntry({ ...existingEntry, label: named, toolTitle: named, ...toolCallFacts(named, existing.input) }, timeline[existing.entryIndex]!.createdAt));
+          const arriving = e.toolName ?? existingEntry.label;
+          const grown = toolCallFacts(arriving, existing.input);
+          const named = grown.title ?? arriving;
+          replace(existing.entryIndex, workEntry({ ...existingEntry, label: named, toolTitle: named, ...grown }, timeline[existing.entryIndex]!.createdAt));
           return;
         }
         const toolName = e.toolName ?? "tool";
+        const facts = toolCallFacts(toolName, e.text);
+        const named = facts.title ?? toolName;
         const base: WorkLogEntry = {
-          id: "", turnId: null, createdAt: at, label: toolName, toolTitle: toolName, tone: "tool",
+          id: "", turnId: null, createdAt: at, label: named, toolTitle: named, tone: "tool",
           toolLifecycleStatus: "inProgress", sourceActivityKind: "tool.started",
           ...(e.toolUseId !== undefined ? { toolCallId: e.toolUseId } : {}),
         };
-        const index = addWork(t, { ...base, ...toolCallFacts(toolName, e.text) }, at);
+        const index = addWork(t, { ...base, ...facts }, at);
         const registryKey = e.toolUseId ?? `anon:${index}`;
         t.tools.set(registryKey, { entryIndex: index, input: e.text });
         if (e.toolUseId === undefined) t.openAnonymousTool = index;
@@ -315,18 +460,19 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
         const key = e.toolUseId ?? (t.openAnonymousTool !== null ? `anon:${t.openAnonymousTool}` : undefined);
         const call = key !== undefined ? t.tools.get(key) : undefined;
         const entry = call ? work(call.entryIndex) : undefined;
-        const orphanOutput = summarizeOutput(e.text);
+        const note = internalToolResult(e.text);
+        const output = note ? undefined : summarizeOutput(e.text);
         if (!call || !entry) {
           addWork(t, {
             createdAt: at, label: e.toolName ?? "tool", toolTitle: e.toolName ?? "tool", tone: "tool",
             ...(e.toolUseId !== undefined ? { toolCallId: e.toolUseId } : {}),
             toolLifecycleStatus: e.isError ? "failed" : "completed", sourceActivityKind: "tool.completed",
-            ...(orphanOutput !== undefined ? { detail: orphanOutput } : {}),
+            ...(output !== undefined ? { detail: output } : {}),
           }, at);
           return;
         }
         const failed = e.isError === true || entry.toolLifecycleStatus === "failed";
-        const output = summarizeOutput(e.text);
+        if (!note) call.answered = { at, failed };
         replace(call.entryIndex, workEntry({
           ...entry,
           toolLifecycleStatus: failed ? "failed" : "completed",
@@ -357,6 +503,12 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
 function thinkingEntry<T extends Omit<WorkLogEntry, "id" | "turnId" | "detail" | "preview">>(base: T, text: string): T & Pick<WorkLogEntry, "detail" | "preview"> {
   const preview = summarizeOutput(text);
   return { ...base, detail: text, ...(preview !== undefined ? { preview } : {}) };
+}
+
+/** The line one of a subagent's tool calls owns inside its fold; a call with no id of its own takes a line of its
+ * own rather than overwriting the last. */
+function foldLineKey(parent: string, toolUseId: string | undefined): string | undefined {
+  return toolUseId === undefined ? undefined : `${parent}:t${toolUseId}`;
 }
 
 function messageEntry(m: ChatMessage): TimelineEntry {

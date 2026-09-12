@@ -808,16 +808,17 @@ describe("serveRuntime workspaces.exec", () => {
 });
 
 describe("serveRuntime init door (the host's init job, read and driven from the app)", () => {
-  const JOB: InitJob = { id: "init_1", road: "manual", phase: "answering", keys: { solari: true }, step: 0, stoppable: true, screens: [], rows: [], progress: { done: 0, total: 0 }, log: [] };
-  const SETUP = { keys: { solari: true }, home: "/Users/me", agents: [{ id: "claude", name: "Claude Code", configured: true, takesTools: true }], pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 }, job: null };
+  const JOB: InitJob = { id: "init_1", road: "manual", phase: "answering", keys: { box: false, solari: true }, step: 0, stoppable: true, screens: [], rows: [], progress: { done: 0, total: 0 }, log: [] };
+  const SETUP = { keys: { box: false, solari: true }, keyProvider: "solari", home: "/Users/me", agents: [{ id: "claude", name: "Claude Code", configured: true, takesTools: true }], pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 }, job: null };
   function fakeDoor() {
     const calls: unknown[] = [];
     const listeners = new Set<Parameters<InitDoor["on"]>[0]>();
     const door: InitDoor = {
       get: async () => SETUP,
+      // As the host answers: one entry per provider it can hold a key for, the one just saved true.
       keys: async k => {
         calls.push(["keys", k]);
-        return { ...SETUP, keys: { solari: true } };
+        return { ...SETUP, keys: { ...SETUP.keys, ...(k.provider === undefined ? {} : { [k.provider]: true }) } };
       },
       step: async o => {
         calls.push(["step", o]);
@@ -870,9 +871,9 @@ describe("serveRuntime init door (the host's init job, read and driven from the 
     srv = await serveRuntime(rt(), { port: 0, authToken: "secret", init: door });
     const c = await WsClient.connect(srv.port, { token: "secret" });
     expect((await c.request("init.get"))["setup"]).toEqual(SETUP);
-    const saved = await c.request("init.keys", { solari: "slr_live_fake", rows: { "logins/claude": "sk-ant-x" } });
-    expect(saved["setup"]).toEqual({ ...SETUP, keys: { solari: true } });
-    expect(JSON.stringify(saved)).not.toMatch(/slr_live_fake|sk-ant-x/);
+    const saved = await c.request("init.keys", { provider: "box", key: "ascii_live_fake", rows: { "logins/claude": "sk-ant-x" } });
+    expect(saved["setup"]).toEqual({ ...SETUP, keys: { box: true, solari: true } });
+    expect(JSON.stringify(saved)).not.toMatch(/ascii_live_fake|sk-ant-x/);
     expect((await c.request("init.start", { road: "agent", harness: "claude" }))["job"]).toMatchObject({ road: "agent", phase: "reading" });
     expect((await c.request("init.answer", { screen: "tools", ticks: ["gh"], answers: { "logins/gh": "machine" } }))["job"]).toEqual(JOB);
     expect((await c.request("init.step", { at: 2 }))["job"]).toMatchObject({ step: 2 });
@@ -881,7 +882,7 @@ describe("serveRuntime init door (the host's init job, read and driven from the 
     expect((await c.request("init.signInCode", { tool: "gcloud", code: "4/0Afake" }))["job"]).toMatchObject({ phase: "signing-in" });
     expect((await c.request("init.cancel"))["job"]).toMatchObject({ phase: "cancelled" });
     expect(calls).toEqual([
-      ["keys", { solari: "slr_live_fake", rows: { "logins/claude": "sk-ant-x" } }],
+      ["keys", { provider: "box", key: "ascii_live_fake", rows: { "logins/claude": "sk-ant-x" } }],
       ["start", { road: "agent", harness: "claude" }],
       ["answer", { screen: "tools", ticks: ["gh"], answers: { "logins/gh": "machine" } }],
       ["step", { at: 2 }],

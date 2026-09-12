@@ -159,7 +159,7 @@ describe("the workspace a folder on this computer belongs to", () => {
   });
 
   it("the refusal names the folder and the road that lands it", () => {
-    expect(noWorkspaceForFolderLine("/Users/dev/my repo", "--in <workspace>")).toBe("no workspace holds a project for /Users/dev/my repo; name one with --in <workspace>, or wsp import '/Users/dev/my repo' --to <workspace> lands it there");
+    expect(noWorkspaceForFolderLine("/Users/dev/my repo", "<workspace>")).toBe("no workspace holds a project for /Users/dev/my repo; name one with <workspace>, or wsp import <workspace> '/Users/dev/my repo' lands it there");
     // The tool has no flag to pass, so its refusal names its own word.
     expect(noWorkspaceForFolderLine("/Users/dev/spoo", "workspace")).toContain("name one with workspace,");
   });

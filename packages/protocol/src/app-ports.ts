@@ -67,7 +67,7 @@ export function isWildcard(address: string): boolean {
 }
 
 /** Whether a word is an address rather than a name: a host is reached at an http, https, ws or wss address, and a
- * word with any of those schemes is one, wherever it is typed (a --host flag, wsp connect, the app's connect sheet). */
+ * word with any of those schemes is one, wherever it is typed (a --host flag, wsp host connect, the app's connect sheet). */
 export function isUrl(word: string): boolean {
   return /^(https?|wss?):\/\//i.test(word);
 }
@@ -104,7 +104,7 @@ export function joinAddressOf(typed: string): string | undefined {
 }
 
 /** An address and a port as the authority of a URL: an IPv6 literal needs brackets and everything else is itself.
- * The one rule, so the address wsp pair prints and the one every local tool dials are spelled the same way. */
+ * The one rule, so the address wsp host pair prints and the one every local tool dials are spelled the same way. */
 export function authority(address: string, port: number): string {
   const bracketed = address.includes(":") && !address.startsWith("[") ? `[${address}]` : address;
   return `${bracketed}:${port}`;
@@ -120,7 +120,7 @@ export function relayUrlOf(hostname: string): string {
 /** The one line a host binding beyond this computer prints as it starts, so nobody learns from a stranger that the
  * page was reachable. */
 export function listenBeyondLoopbackLine(address: string): string {
-  return `listening on ${address}: anyone who can reach this computer there can load the page, and pairing is the gate. Run wsp pair for a code, and wsp devices to see who took one.`;
+  return `listening on ${address}: anyone who can reach this computer there can load the page, and pairing is the gate. Run wsp host pair for a code, and wsp host devices to see who took one.`;
 }
 
 export interface AppPorts {

@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LAUNCHD_PATH, serve, shimPath, startHost, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
-import { CLOUD_SETUP_WORDS, GET_THE_APP_WORD, HOST_WORDS, WS_PATH, fmtSize, hereWord, kindWords } from "@wsp/protocol";
+import { GET_THE_APP_WORD, HOST_WORDS, PLACES_WORDS, WS_PATH, fmtSize, hereWord, kindWords } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -295,7 +295,7 @@ async function refused(url: string): Promise<boolean> {
   }
 }
 
-/** A pairing code off a host, the way wsp pair gets one: one socket with the host's own token, one pair.issue. */
+/** A pairing code off a host, the way wsp host pair gets one: one socket with the host's own token, one pair.issue. */
 async function pairingCodeOf(host: HostHandle): Promise<string> {
   const ws = new WebSocket(`ws://127.0.0.1:${host.port}${WS_PATH}`);
   await new Promise<void>((done, fail) => {
@@ -516,10 +516,10 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(existsSync(join(home, ".claude", "skills", "wsp", "SKILL.md"))).toBe(true);
     expect(readFileSync(join(home, ".codex", "config.toml"), "utf8")).toContain("[mcp_servers.wsp]");
 
-    // The app opens on this computer, and the cloud row waits at the sidebar's bottom.
+    // The app opens on this computer, and the keycap that adds another waits at the sidebar's bottom.
     const row = win.locator("[data-cloud-setup-row]");
     await row.waitFor();
-    expect(await row.textContent()).toBe(CLOUD_SETUP_WORDS.row);
+    expect(await row.textContent()).toBe(PLACES_WORDS.addComputer);
     const shots: string[] = [];
     // The shots show the shell at rest: no focus ring from the click that just happened, and the theme painted.
     const rest = async (): Promise<void> => {
@@ -529,13 +529,13 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       });
     };
     await rest();
-    shots.push(await photographWindow(app, win, join(SHOTS, "app-cloud-row-dark.png"), "#101010"));
+    shots.push(await photographWindow(app, win, join(SHOTS, "app-add-computer-row-dark.png"), "#101010"));
     await row.click();
     const dialog = win.getByRole("dialog");
     await dialog.waitFor();
-    expect(await dialog.textContent()).toContain(CLOUD_SETUP_WORDS.choice.headline);
+    expect(await dialog.textContent()).toContain(PLACES_WORDS.sheet.description);
     expect(await dialog.textContent()).not.toMatch(/wsp init|terminal/i);
-    shots.push(await photographWindow(app, win, join(SHOTS, "app-cloud-dialog-dark.png"), "#101010"));
+    shots.push(await photographWindow(app, win, join(SHOTS, "app-add-computer-sheet-dark.png"), "#101010"));
     await win.keyboard.press("Escape");
     await dialog.waitFor({ state: "detached" });
     // The page follows the record's theme and tells the shell, so the light side is picked where the record is written:
@@ -728,7 +728,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     await win.waitForSelector("[data-host-foot]");
     const here = hereWord(process.platform === "darwin");
     expect(await win.locator("[data-host-label]").textContent()).toBe(here);
-    // The code as wsp pair mints it, over the second host's own socket with its own token.
+    // The code as wsp host pair mints it, over the second host's own socket with its own token.
     const code = await pairingCodeOf(existing);
     // The menu bar's Hosts menu opens the sheet, the road a person takes.
     await hostsMenu(launched.app, HOST_WORDS.connectMenu);
@@ -746,7 +746,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       { label: HOST_WORDS.connectMenu, checked: false, enabled: true },
       { label: HOST_WORDS.disconnect(`127.0.0.1:${existing.port}`), checked: false, enabled: true },
     ]);
-    // The record is the one wsp connect writes, under the launch's own wsp home, with what the desktop adds.
+    // The record is the one wsp host connect writes, under the launch's own wsp home, with what the desktop adds.
     const record = JSON.parse(readFileSync(join(launched.home, "hosts", "127.0.0.1.json"), "utf8")) as Record<string, unknown>;
     expect(record).toMatchObject({ url: `http://127.0.0.1:${existing.port}`, label: `127.0.0.1:${existing.port}`, road: "direct" });
     expect(typeof record["deviceToken"]).toBe("string");

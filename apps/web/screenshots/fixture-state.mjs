@@ -2,13 +2,18 @@
 // The throwaway states a screenshot run and a persona lab serve, one per kind
 // of person: what their sidebar holds, whether an image is sealed, and what
 // their threads say. The default is what the screenshot run photographs, this
-// computer with work on it, four workspaces of the local kind, folders
-// imported into three of them and the threads with the transcript each
+// computer with work on it and two computers of the person's own joined to it,
+// the folders imported into this one and the threads with the transcript each
 // replays, one of them opened by another thread's agent, so no surface is
 // photographed empty and the spawned row's grammar is in a shot; the rest vary
 // the setup a tester meets. Nothing here is a real computer, a real key or a
 // real folder, and the copies are served by the provider that answers out of
 // memory, so no fixture dials anything.
+//
+// One workspace stands on one machine, and this computer is one machine, so no
+// fixture puts two rows on it: a sidebar wsp refuses to make is a sidebar a
+// tester judges the product by, and one read three rows here and could not say
+// which computer two of them were on.
 //
 // Every folder a fixture names sits under the home the host serving it runs
 // in, and a workspace of the local kind is named the way wsp names one here. A
@@ -148,7 +153,10 @@ const CHART = {
 const HEAD_SNAPSHOT = "fksnap_v2";
 
 /** A fork of a sealed image, as the record holds one: no folder of its own, since a fork's shell lands in the
- * machine's home, and a size, so nothing asks the provider what shape it is. */
+ * machine's home, and a size, so nothing asks the provider what shape it is. A project on one is named after the
+ * fork it sits on: the image a snapshot takes is named after the projects it holds, so a fork called api holding a
+ * project called spoo answers "Image of spoo taken" on a screen headed api, and no persona here has ever heard of
+ * spoo. */
 const fork = (id, name, machineId, extra = {}) => ({
   id,
   name,
@@ -307,8 +315,6 @@ const merge = (...parts) => ({
   transcripts: Object.assign({}, ...parts.map(p => p.transcripts)),
 });
 
-const API_THREADS = () => threadsOn("ws_api", [[CHART, 300], [REDIRECT, 45]]);
-
 /** The meter one workspace opens with, as the host's own cost history holds it: the stretch it has been awake and
  * what that came to at its rate. Without one every fork in a fixture reads $0.0000 accrued beside a rate per hour,
  * since the meter starts at the tick after the host came up, and five testers asked what the number was for. The
@@ -335,22 +341,30 @@ const meter = (workspaceId, { rateUsdPerHour, hours, phase = "running" }) => [
  * (`packages/engine/src/fake-backend.ts`): four cores and 8 GB. */
 const FORK_RATE = 0.16;
 
-/** This computer after a while of use: three workspaces of the local kind, folders imported into two of them,
- * threads on one, and no image sealed, so the cloud setup button stands in the sidebar's foot. What the screenshot
- * run photographs, since a surface with nothing on it shows a reviewer nothing. */
+/** This computer after a while of use, with two computers of the person's own joined to it: one workspace on each,
+ * the folders imported into this one, threads on two of them, and no image sealed, so the cloud setup button
+ * stands in the sidebar's foot. What the screenshot run photographs, since a surface with nothing on it shows a
+ * reviewer nothing.
+ *
+ * Three rows and not five: one workspace stands on one machine, and this computer is one machine, so the four
+ * local rows this fixture used to carry are a sidebar wsp refuses to make (`alreadyRecorded`). The ids stay where
+ * they were, since the surfaces list names rows by id: ws_api is this computer now, and ws_web the workspace on
+ * the old MacBook. The threads that stood on the rows that went stand on this computer, which is where a person
+ * with one Mac would have run them. */
 const macInUse = () =>
   store({
     workspaces: [
-      workspace("ws_api", "api", { projects: [project("spoo", 48_200_000, 60 * 20), project("wsp", 133_000_000, 60 * 5)] }),
-      workspace("ws_web", "web", { projects: [project("landing", 9_400_000, 60 * 9)] }),
-      workspace("ws_notes", "notes"),
-      workspace("ws_fix", "spoo-fix", { projects: [project("spoo", 48_200_000, 60 * 20)] }),
+      workspace("ws_api", THIS_COMPUTER, { projects: [project("spoo", 48_200_000, 60 * 20), project("wsp", 133_000_000, 60 * 5), project("landing", 9_400_000, 60 * 9)] }),
+      onPlace("ws_web", "web", "p_oldmacbook", { cpu: 4, memMb: 8192 }, { HOME: "/Users/maya", USER: "maya", PATH: "/usr/local/bin:/usr/bin:/bin" }),
       onPlace("ws_hetzner", "box-build", "p_hetzner", { cpu: 2, memMb: 4096 }),
     ],
-    ...merge(API_THREADS(), threadsOn("ws_fix", [[SEARCH, 12], [spawned("migration", MIGRATION, "search", "search"), 9]]), threadsOn("ws_hetzner", [[CHART, 200], [REDIRECT, 30]])),
+    ...merge(
+      threadsOn("ws_api", [[CHART, 300], [REDIRECT, 45], [SEARCH, 12], [spawned("migration", MIGRATION, "search", "search"), 9]]),
+      threadsOn("ws_hetzner", [[CHART, 200], [REDIRECT, 30]]),
+    ),
     places: {
       p_hetzner: place("p_hetzner", "hetzner", 1, { platform: "linux", os: "Ubuntu 24.04", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, docker: true, login: { HOME: "/root", USER: "root", PATH: "/usr/bin" } }, "ws_hetzner"),
-      p_oldmacbook: place("p_oldmacbook", "old-macbook", 120),
+      p_oldmacbook: place("p_oldmacbook", "old-macbook", 120, {}, "ws_web"),
     },
   });
 
@@ -360,15 +374,17 @@ const macInUse = () =>
  * what differs is what they try to do in it. */
 const thisComputer = () => store({ workspaces: [workspace("ws_here", THIS_COMPUTER)] });
 
-/** This computer and an old laptop the person joined: a workspace standing on that computer, and the laptop itself
- * in the places collection with the shape it reported, four cores and 8 GB. It was a workspace of the local kind
- * until a tester met his own ThinkPad claiming this Mac's ten cores and a folder on this Mac: a joined computer is
- * a place, and a local workspace is this computer alone. No thread on either, since nothing has been run here yet. */
+/** This computer and an old laptop the person joined: this computer as the one workspace it is, the laptop as a
+ * workspace standing on that computer, and the laptop itself in the places collection with the shape it reported,
+ * four cores and 8 GB. It was a workspace of the local kind until a tester met his own ThinkPad claiming this Mac's
+ * ten cores and a folder on this Mac: a joined computer is a place, and a local workspace is this computer alone.
+ * One row for this Mac and not two, because one workspace stands on one machine and this computer is one machine
+ * (`alreadyRecorded`): a tester read "the only one it can be" beside three rows and could not tell which computer
+ * two of them were on. No thread on either, since nothing has been run here yet. */
 const macAndLaptop = () =>
   store({
     workspaces: [
-      workspace("ws_api", "api", { projects: [project("spoo", 48_200_000, 60 * 20)] }),
-      workspace("ws_web", "web", { projects: [project("landing", 9_400_000, 60 * 9)] }),
+      workspace("ws_here", THIS_COMPUTER, { projects: [project("spoo", 48_200_000, 60 * 20), project("landing", 9_400_000, 60 * 9)] }),
       onPlace("ws_laptop", "old-laptop", "p_oldlaptop", { cpu: 4, memMb: 8192 }, { HOME: "/home/dev", USER: "dev", PATH: "/usr/local/bin:/usr/bin:/bin" }),
     ],
     places: {
@@ -384,11 +400,11 @@ const macAndLaptop = () =>
 
 /** This computer and a server of the person's own running Docker: the server is a place, and the workspace on it
  * stands there rather than at a provider. A fork at a cloud named "vps-build" was read as a rented machine wearing
- * the word for her own box. */
+ * the word for her own box. This computer is one row, for macAndLaptop's reason. */
 const macAndVps = () =>
   store({
     workspaces: [
-      workspace("ws_api", "api", { projects: [project("spoo", 48_200_000, 60 * 20)] }),
+      workspace("ws_here", THIS_COMPUTER, { projects: [project("spoo", 48_200_000, 60 * 20)] }),
       onPlace("ws_build", "build", "p_vps", { cpu: 2, memMb: 4096 }),
     ],
     places: {
@@ -402,23 +418,23 @@ const macAndVps = () =>
     },
   });
 
-/** Forks on Box by ASCII and nothing else: no workspace on this computer at all, and no thread on either fork,
- * since this person has run nothing yet. */
+/** One fork on Box by ASCII, asleep: no workspace on this computer at all, and no thread on it, since this person
+ * has run nothing yet. This is the persona who comes to paste a key, so nothing of theirs may be awake and
+ * spending while they type one: two running forks and $2.44 read to a tester as money already gone on a cloud
+ * nobody had given a key to, and the meter moving a cent while the screen said "naps to $0" read as the product
+ * contradicting itself. */
 const asciiOnly = () =>
   store({
-    workspaces: [
-      fork("ws_api", "api", "fk_ascii_1", { projects: [project("spoo", 48_200_000, 60 * 20)] }),
-      fork("ws_web", "web", "fk_ascii_2", { projects: [project("landing", 9_400_000, 60 * 9)] }),
-    ],
+    workspaces: [fork("ws_api", "api", "fk_ascii_1.paused", { phase: "napping", projects: [project("api", 48_200_000, 60 * 20)] })],
     goldens: sealed(),
-    meters: Object.fromEntries([meter("ws_api", { rateUsdPerHour: FORK_RATE, hours: 8 }), meter("ws_web", { rateUsdPerHour: FORK_RATE, hours: 6 })]),
+    meters: Object.fromEntries([meter("ws_api", { rateUsdPerHour: FORK_RATE, hours: 3, phase: "napping" })]),
   });
 
 /** Forks on Solari and nothing else, one of them napping, which is where most of a fleet sits. */
 const solariOnly = () =>
   store({
     workspaces: [
-      fork("ws_api", "api", "fk_slr_1", { projects: [project("spoo", 48_200_000, 60 * 20)] }),
+      fork("ws_api", "api", "fk_slr_1", { projects: [project("api", 48_200_000, 60 * 20)] }),
       fork("ws_web", "web", "fk_slr_2.paused", { phase: "napping", vaultedAt: new Date(ago(90)).toISOString() }),
     ],
     goldens: sealed(),
@@ -432,7 +448,7 @@ const bothProviders = () =>
   store({
     workspaces: [
       workspace("ws_here", THIS_COMPUTER, { projects: [project("wsp", 133_000_000, 60 * 5)] }),
-      fork("ws_api", "api", "fk_slr_1", { projects: [project("spoo", 48_200_000, 60 * 20)] }),
+      fork("ws_api", "api", "fk_slr_1", { projects: [project("api", 48_200_000, 60 * 20)] }),
       fork("ws_web", "web", "fk_slr_2.paused", { phase: "napping" }),
     ],
     goldens: sealed(),
@@ -555,13 +571,10 @@ const macAndBoxes = () =>
 
 /** A person whose image is sealed and built in two places: what Settings > Image reads when there is a record to
  * read. One copy stands on the record as it is now and one was built from the record before it, so the table shows
- * both standing words. */
+ * both standing words. One workspace, for macInUse's reason: this computer is one machine. */
 const imageBuilt = () =>
   store({
-    workspaces: [
-      workspace("ws_api", "api", { projects: [project("spoo", 48_200_000, 60 * 20)] }),
-      workspace("ws_web", "web", { projects: [project("landing", 9_400_000, 60 * 9)] }),
-    ],
+    workspaces: [workspace("ws_api", THIS_COMPUTER, { projects: [project("spoo", 48_200_000, 60 * 20), project("landing", 9_400_000, 60 * 9)] })],
     goldens: Object.fromEntries([copyAt("hetzner", 90), copyAt("ascii", 60, { imageHash: OLDER_HASH })]),
     images: imageRecord(),
   });
@@ -598,6 +611,20 @@ const fixtureRow = name => {
 export function fixtureState(name = "mac-in-use", { home = homedir() } = {}) {
   HOME = resolve(home);
   return fixtureRow(name).build();
+}
+
+/** How big every snapshot in a fixture's image reads. Two of them sit inside the stand-in's ten free GB, so the
+ * line pricing what an account is storing shows a size and owes nothing. */
+const SNAPSHOT_BYTES = Math.round(4.2 * 1024 ** 3);
+
+/** What the provider behind a fixture is already holding: one snapshot per version of every image the fixture says
+ * was sealed, in the shape a provider lists them. A stand-in that listed none answered "0 snapshots" on the line
+ * that prices an account's storage while the Versions table above it showed two, and a snapshot taken on the same
+ * screen did not move it. */
+export function fixtureSnapshots(state) {
+  return Object.entries(state.goldens ?? {}).flatMap(([golden, manifest]) =>
+    manifest.versions.map(v => ({ id: v.snapshotId, name: `wsp-standin-${golden.replace(/[^a-z0-9]+/g, "-")}-v${v.version}`, sizeBytes: SNAPSHOT_BYTES, createdAt: v.createdAt })),
+  );
 }
 
 /** Every folder a fixture expects to exist, so whoever serves it can make them: the projects imported into its

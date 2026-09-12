@@ -117,7 +117,7 @@ export async function linkApprove(ctx: Ctx): Promise<Response> {
   // One name, one box, per account: a client asks for a box by the name on this page, so two of them would be a
   // line that could go to either.
   if (row.kind === "host" && (await hostNamed(ctx.env, who.id, row.name)) !== undefined) {
-    throw refuse(409, `you already have a box called ${row.name}; take it off with wsp relay unlink there, or link this one under another name with wsp relay link <url> --name <name>`);
+    throw refuse(409, `you already have a box called ${row.name}; take it off with wsp host unlink there, or link this one under another name with wsp host link <url> --name <name>`);
   }
   const hostId = row.kind === "host" ? newId("h", ctx.deps.random) : null;
   if (!(await approveLink(ctx.env, code, who.id, hostId))) throw refuse(409, "that code was already approved");
@@ -148,5 +148,13 @@ export async function linkPoll(ctx: Ctx): Promise<Response> {
     await insertClient(ctx.env, { id: subject, account_id: row.account_id!, name: row.name, created_at: new Date(ctx.deps.now()).toISOString() });
   }
   const token = await mintToken(ctx.env.RELAY_SIGNING_KEY, { kind: row.kind, subject: subject!, account: row.account_id!, issuedAt: ctx.deps.now() });
-  return Response.json({ state: "approved", token, name: row.name, ...(row.host_id !== null ? { hostId: row.host_id } : {}) });
+  // Who approved it, so the box can say whose account it is on without holding a token that reads this relay back.
+  const account = await accountOf(ctx.env, row.account_id!);
+  return Response.json({
+    state: "approved",
+    token,
+    name: row.name,
+    ...(account === undefined ? {} : { login: account.login }),
+    ...(row.host_id !== null ? { hostId: row.host_id } : {}),
+  });
 }

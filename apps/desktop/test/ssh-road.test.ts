@@ -2,7 +2,7 @@
 // The ssh road as the main process drives it: one login finds wsp on the box
 // and reads the lock the way servingHost does, the service started when
 // nothing serves, the box's port forwarded to a free one here with the
-// forward's pid recorded, and wsp pair read for its code. A saved host is
+// forward's pid recorded, and wsp host pair read for its code. A saved host is
 // reached by reading the lock again, so a service that came back on another
 // port or another address is found there. Every ssh is a fake child here; the
 // words, the argv and the pids are what is checked.
@@ -128,7 +128,7 @@ describe("sshRoad", () => {
     const d = fakeDeps((args, child) => {
       if (isForward(args)) return;
       if (isProbe(args)) return child.say(probeAnswer(LOCK, "/home/maya/.npm-global/bin/wsp"));
-      if (remote(args) === "/home/maya/.npm-global/bin/wsp pair") return child.say("code        ABCDEFGH\n");
+      if (remote(args) === "/home/maya/.npm-global/bin/wsp host pair") return child.say("code        ABCDEFGH\n");
       child.fail(`unexpected: ${remote(args)}`);
     });
     const road = sshRoad(d);
@@ -148,7 +148,7 @@ describe("sshRoad", () => {
     const d = fakeDeps((args, child) => {
       if (isForward(args)) return;
       if (isProbe(args)) return child.say(probeAnswer(LOCK));
-      if (remote(args) === `${WSP} pair`) return child.say("code        ABCD-EFGH\nexpires     in 10m\nopen        http://127.0.0.1:4400\n");
+      if (remote(args) === `${WSP} host pair`) return child.say("code        ABCD-EFGH\nexpires     in 10m\nopen        http://127.0.0.1:4400\n");
       child.fail(`unexpected: ${remote(args)}`);
     });
     const road = sshRoad(d);
@@ -173,12 +173,12 @@ describe("sshRoad", () => {
         started = true;
         return child.say("app         http://127.0.0.1:4400\n");
       }
-      if (remote(args) === `${WSP} pair`) return child.say("code        ABCDEFGH\n");
+      if (remote(args) === `${WSP} host pair`) return child.say("code        ABCDEFGH\n");
       child.fail(`unexpected: ${remote(args)}`);
     });
     const road = sshRoad(d);
     expect(await road.open({ address: "maya@box" })).toEqual({ url: "http://127.0.0.1:52001", code: "ABCDEFGH" });
-    expect(d.spawned.map(remote).filter(c => c.startsWith(WSP))).toEqual([`${WSP} up --service --listen 127.0.0.1 --port 0`, `${WSP} pair`]);
+    expect(d.spawned.map(remote).filter(c => c.startsWith(WSP))).toEqual([`${WSP} up --service --listen 127.0.0.1 --port 0`, `${WSP} host pair`]);
     road.closeAll();
   });
 
@@ -230,7 +230,7 @@ describe("sshRoad", () => {
 
   it("a box serving a moved home is forwarded and paired for the host that home runs, with the probe run by a real sh", async () => {
     // The box's folders are real here and the probe script is run by sh over them, so what the road forwards to is
-    // the home the box's own wsp pair would work on and not a second reading of the pointer.
+    // the home the box's own wsp host pair would work on and not a second reading of the pointer.
     const dir = mkdtempSync(join(tmpdir(), "wsp-ssh-box-"));
     dirs.push(dir);
     const bin = join(dir, "bin");
@@ -247,7 +247,7 @@ describe("sshRoad", () => {
         const ran = spawnSync("/bin/sh", ["-c", command], { env: { PATH: `${bin}:/usr/bin:/bin`, HOME: user }, encoding: "utf8" });
         return child.say(ran.stdout, ran.status ?? 0);
       }
-      if (command === `${wsp} pair`) return child.say("code        ABCDEFGH\n");
+      if (command === `${wsp} host pair`) return child.say("code        ABCDEFGH\n");
       child.fail(`unexpected: ${command}`);
     };
 
@@ -260,7 +260,7 @@ describe("sshRoad", () => {
     const road = sshRoad(d);
     expect(await road.open({ address: "maya@box", port: 2222 })).toEqual({ url: "http://127.0.0.1:52001", code: "ABCDEFGH" });
     expect(forwardTarget(d.spawned.find(isForward)!)).toBe("127.0.0.1:52001:127.0.0.1:4400");
-    expect(d.spawned.map(remote).filter(c => c.startsWith(wsp))).toEqual([`${wsp} pair`]);
+    expect(d.spawned.map(remote).filter(c => c.startsWith(wsp))).toEqual([`${wsp} host pair`]);
     road.closeAll();
 
     // The moved home's host is gone: the pointer goes unfollowed and the box's own home is what answers.

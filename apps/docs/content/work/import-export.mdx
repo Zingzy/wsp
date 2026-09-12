@@ -8,9 +8,9 @@ A project gets onto a machine with `import` and comes home with `export`. Both m
 
 ```bash
 wsp folders /Users/you                          # what is inside, for naming a folder to import
-wsp import /Users/you/app --to dev              # the plan; nothing moves yet
-wsp import /Users/you/app --to dev --yes        # the plan's defaults
-wsp import /Users/you/app --to dev --keep .env --agents claude
+wsp import dev /Users/you/app              # the plan; nothing moves yet
+wsp import dev /Users/you/app --yes        # the plan's defaults
+wsp import dev /Users/you/app --keep .env --agents claude
 ```
 
 The folder lands at the same path on the machine. That path must not exist there unless `--replace`. Caches, installs and build output stay behind and are recreated on the machine.

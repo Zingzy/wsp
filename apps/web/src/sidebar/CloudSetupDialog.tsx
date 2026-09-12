@@ -17,6 +17,7 @@ import { Dialog, DialogSheet, DialogTitle } from "../components/ui/dialog.js";
 import { errorText } from "../lib/utils.js";
 import { RequestError } from "../protocol/client.js";
 import { useStore } from "../protocol/store.js";
+import { IMAGE_WORDS } from "../settings/image.js";
 import { draftOf, SetupAnswers, type Draft } from "./cloud-setup/SetupAnswers.js";
 import { SetupAgent } from "./cloud-setup/SetupAgent.js";
 import { SetupAsk } from "./cloud-setup/SetupAsk.js";
@@ -45,7 +46,7 @@ const shownOf = (job: InitJob): InitScreen[] => job.screens.filter(s => s.id !==
 /** What the host kept of a step the person left mid-answer, if anything. */
 const keptAt = (job: InitJob, at: string): InitDraft | undefined => job.drafts?.find(d => d.at === at);
 
-export function CloudSetupDialog({ title, onClose }: { title?: string; onClose: () => void }) {
+export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
   const api = useStore(s => s.api);
   const job = useStore(s => s.initJob);
   const select = useStore(s => s.select);
@@ -113,7 +114,7 @@ export function CloudSetupDialog({ title, onClose }: { title?: string; onClose: 
     setSaving(true);
     void (async () => {
       try {
-        setSetup(await api.initKeys!({ solari: keys.solari }));
+        setSetup(await api.initKeys!({ key: keys.solari }));
         start();
       } catch (e) {
         const kind = e instanceof RequestError ? e.kind : undefined;
@@ -264,7 +265,7 @@ export function CloudSetupDialog({ title, onClose }: { title?: string; onClose: 
       }}
     >
       <DialogSheet data-cloud-setup-dialog initialFocus={false}>
-        <DialogTitle className={title === undefined ? "sr-only" : "absolute top-5 left-6 font-heading font-semibold text-xl leading-none"}>{title ?? CLOUD_SETUP_WORDS.title}</DialogTitle>
+        <DialogTitle className="absolute top-5 left-6 font-heading font-semibold text-xl leading-none">{IMAGE_WORDS.sheet}</DialogTitle>
         {body}
       </DialogSheet>
     </Dialog>

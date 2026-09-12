@@ -45,6 +45,7 @@ import { LinkBackend, PlaceAbsentError, SSH_STORE_VARS, isPlainPath, plainPath, 
 import type { WebSocket } from "ws";
 import type { DeviceDoor } from "./devices.js";
 import { openPlaceForward, type PlaceForward } from "./place-forward.js";
+import type { PlaceBackends } from "./runtime.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import type { Store } from "./store.js";
 
@@ -158,6 +159,10 @@ export interface PlaceDoorOptions {
   devices: DeviceDoor;
   wiring: PlaceWiring;
   recording: PlaceRecording;
+  /** Where this host can fork beyond the computers joined to it: the provider it is wired to and every other
+   * provider whose key it holds. A thunk because the runtime builds that table after this door. Absent leaves the
+   * wired provider as the only one, which is what a runtime with no provider table has. */
+  providers?: () => PlaceBackends;
   /** Every daemon event a place pushes; the panes and the inbox read these once they ride the link. */
   onDaemonEvent?: (placeId: string, event: DaemonEvent) => void;
   /** How far an install on a computer this host has never met has got; the runtime puts these on its own stream. */
@@ -400,6 +405,27 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   };
 
   const records = async (): Promise<PlaceRecord[]> => (await store.list(PLACES)).filter(isPlaceRecord).sort((a, b) => a.joinedAt.localeCompare(b.joinedAt));
+  /** The provider this host forks on when nobody names a place: the place a record with no place word stands on.
+   * The wiring is what says whether this host forks on a provider at all; a runtime served with no wiring of its
+   * own has a one-row table standing for its backend, which is no place a person names. */
+  const wiredProvider = (): string | undefined => wiring.provider()?.id;
+  /** Every provider a fork can land at, in the table's own order, the wired one among them. A host wired to one
+   * cloud that holds the key for another can fork at either, so both are rows a person names. */
+  const providerIds = (): readonly string[] => {
+    const wired = wiredProvider();
+    if (wired === undefined) return [];
+    const table = opts.providers?.().list() ?? [];
+    return table.includes(wired) ? table : [wired];
+  };
+  /** The backend of a provider row, or nothing when the word names no provider this host holds a key for. */
+  const providerBackend = (placeId: string): MachineBackend | undefined => opts.providers?.().backend(placeId);
+  /** What one provider charges an hour for its default size, read off the backend the host built for it, so a row
+   * added by saving a key carries its price with no second table. */
+  const providerRate = (placeId: string): number | undefined => {
+    const at = placeId === wiredProvider() ? undefined : providerBackend(placeId);
+    if (at === undefined) return placeId === wiredProvider() ? wiring.provider()?.rateUsdPerHour : undefined;
+    return at.pricing.rateUsdPerHour(at.pricing.defaultSize);
+  };
   const recordOf = async (placeId: string): Promise<PlaceRecord | undefined> => {
     const found = await store.get(PLACES, placeId);
     return isPlaceRecord(found) ? found : undefined;
@@ -527,6 +553,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     lastSeenAt: record.lastSeenAt,
     daemonVersion: record.report.daemonVersion,
     agents: record.report.agents,
+    // A joined computer forks only where it has a Docker of its own; without one it runs the person's agents as
+    // its own one workspace and that is the whole of it.
+    takesForks: record.report.docker === true,
     ...(record.workspaceId !== undefined ? { workspaceId: record.workspaceId } : {}),
   });
 
@@ -654,17 +683,26 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
 
     nameOf: placeId => kept.get(placeId)?.name ?? placeId,
 
-    offerOf: placeId => kept.get(placeId)?.backendFacts?.offer,
+    offerOf: placeId => kept.get(placeId)?.backendFacts?.offer ?? (providerIds().includes(placeId) ? placeId : undefined),
 
     backendOf(placeId) {
       const made = backends.get(placeId);
       if (made !== undefined) return made;
       const facts = kept.get(placeId)?.backendFacts;
-      return facts === undefined ? undefined : backendFrom(placeId, facts);
+      if (facts !== undefined) return backendFrom(placeId, facts);
+      // No record and no facts: the word names a provider row rather than a computer, and its backend is the one
+      // the host built for that provider.
+      return kept.has(placeId) ? undefined : providerBackend(placeId);
     },
 
     async forkingBackend(placeId) {
       const record = (await recordOf(placeId)) ?? kept.get(placeId);
+      // A place that is no joined computer is a provider row: it forks by its own module and there is no link to
+      // ask what it forks with.
+      if (record === undefined) {
+        const at = providerBackend(placeId);
+        if (at !== undefined) return at;
+      }
       const name = record?.name ?? placeId;
       if (record === undefined || !record.report.docker) {
         backends.delete(placeId);
@@ -735,20 +773,25 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const found = all.find(r => r.id === word || r.name === word);
       if (found !== undefined) return { placeId: found.id };
       const here = wiring.here().name;
-      const provider = wiring.provider()?.id;
-      if (word === HERE_PLACE_ID || word === here || (provider !== undefined && word === provider)) return {};
-      throw new Error(noSuchPlaceRefusal(word, [here, ...all.map(r => r.name), ...(provider === undefined ? [] : [provider])]));
+      const providers = providerIds();
+      // The wired provider is where a record with no place word already stands, so naming it is that same road and
+      // the record stays as every record before joined computers existed.
+      if (word === HERE_PLACE_ID || word === here || word === wiredProvider()) return {};
+      if (providers.includes(word)) return { placeId: word };
+      throw new Error(noSuchPlaceRefusal(word, [here, ...all.map(r => r.name), ...providers]));
     },
 
     async defaultPlace() {
       const marked = await defaultId();
       if (marked === undefined) return {};
       const found = (await records()).find(r => r.id === marked);
-      return found === undefined ? {} : { placeId: found.id };
+      if (found !== undefined) return { placeId: found.id };
+      // A provider the last fork landed on that is not the one this host is wired to is still that place.
+      return marked !== wiredProvider() && providerIds().includes(marked) ? { placeId: marked } : {};
     },
 
     async markUsed(placeId) {
-      await markDefault(placeId ?? wiring.provider()?.id ?? HERE_PLACE_ID);
+      await markDefault(placeId ?? wiredProvider() ?? HERE_PLACE_ID);
     },
 
     async add(req, at) {
@@ -830,11 +873,11 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     async list() {
       const defaulted = await defaultId();
       const here = wiring.here();
-      const provider = wiring.provider();
+      const providers = providerIds();
       const held = await records();
-      // This computer first, the computers joined to it after, the provider last; exactly one default, which falls
+      // This computer first, the computers joined to it after, the providers last; exactly one default, which falls
       // to this computer when the mark names a row that is no longer here.
-      const marked = held.some(r => r.id === defaulted) || (provider !== undefined && provider.id === defaulted) ? defaulted : HERE_PLACE_ID;
+      const marked = held.some(r => r.id === defaulted) || (defaulted !== undefined && providers.includes(defaulted)) ? defaulted : HERE_PLACE_ID;
       const room = new Map(await Promise.all(held.map(async r => [r.id, await forksOf(r)] as const)));
       return [
         {
@@ -847,14 +890,18 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           ...(here.diskFreeBytes !== undefined ? { diskFreeBytes: here.diskFreeBytes } : {}),
           ...(here.docker !== undefined ? { docker: here.docker } : {}),
           present: true,
+          // This computer is where the person's own agents run, never something the host forks into: a copy of the
+          // image on a Docker here is the provider row's, which is the one that says it forks.
+          takesForks: false,
         },
         ...held.map(r => {
           const forks = room.get(r.id);
           return { ...viewOf(r, marked), ...(forks !== undefined ? { forks } : {}) };
         }),
-        ...(provider === undefined
-          ? []
-          : [{ id: provider.id, kind: "provider" as const, name: provider.id, default: marked === provider.id, rateUsdPerHour: provider.rateUsdPerHour }]),
+        ...providers.map(id => {
+          const rate = providerRate(id);
+          return { id, kind: "provider" as const, name: id, default: marked === id, takesForks: true, ...(rate !== undefined ? { rateUsdPerHour: rate } : {}) };
+        }),
       ];
     },
 

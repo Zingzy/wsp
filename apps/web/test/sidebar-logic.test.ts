@@ -207,7 +207,7 @@ describe("workspace row labels", () => {
     expect(line([{ asking: "Run: ls" }, ...asked])).toBe("Run: ls");
     expect(line([{ asking: null }])).toBe("$0.50 today · active");
     // The row cuts it at its own cap, as it does every line three; the whole sentence rides the row's title.
-    const long = "Run: wsp --version && wsp hosts && wsp workspaces";
+    const long = "Run: wsp --version && wsp host list && wsp workspaces";
     const cut = rowLineCut(line([{ asking: long }]));
     expect(cut).toBe("Run: wsp --version && wsp…");
     expect(cut.length).toBeLessThanOrEqual(ROW_LINE_MAX);

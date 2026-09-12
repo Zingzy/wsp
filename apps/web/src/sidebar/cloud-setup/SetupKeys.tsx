@@ -35,9 +35,13 @@ export interface KeyCheckShown {
 export function SetupKeys({ setup, onSave, onBack, refusal, check = null, busy = false, change = false }: { setup: InitSetup; /** The key typed to save, or nothing when the saved one stands and the step is only passed. */ onSave: (keys: { solari?: string }) => void; onBack: () => void; refusal: string | null; check?: KeyCheckShown | null; busy?: boolean; /** Open with the field empty for a new key though one is saved: the way here from a build the saved key failed. */ change?: boolean }) {
   const words = CLOUD_SETUP_WORDS.keys;
   const [solari, setSolari] = useState("");
+  // Whether this computer holds the key this step asks for: the host says which provider that is, and the record of
+  // what is held is keyed by the same word. Reading one provider's entry by name would ask about another's key on a
+  // computer set up for anything else.
+  const saved = setup.keyProvider !== undefined && setup.keys[setup.keyProvider] === true;
   // A saved key stands as dots until Change empties the field; without one the field is open from the start.
-  const [changing, setChanging] = useState(!setup.keys.solari || change);
-  const kept = setup.keys.solari && !changing;
+  const [changing, setChanging] = useState(!saved || change);
+  const kept = saved && !changing;
   // The key the last press sent, so what the provider said about it goes as soon as the field holds something else:
   // a refusal standing over a freshly typed key would be describing a key that is no longer there.
   const [sent, setSent] = useState<string | null>(null);

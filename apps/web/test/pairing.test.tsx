@@ -48,7 +48,7 @@ describe("where the page dials", () => {
     expect(pageToken(boot(), window.localStorage)).toBe("host-token");
   });
 
-  it("names this browser by its platform and the host it reached, so wsp devices has a row worth reading", () => {
+  it("names this browser by its platform and the host it reached, so wsp host devices has a row worth reading", () => {
     expect(deviceName({ protocol: "http:", host: "box:4400" }, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)")).toBe("a Mac in a browser at box:4400");
   });
 });

@@ -28,7 +28,9 @@ describe("what wsp says when it will not run a line", () => {
 
   const run = async (...argv: string[]): Promise<{ code: number; io: Captured }> => {
     const io = captured();
-    const code = await cli([...argv, "--state", statePath], io, undefined, env);
+    // Nothing starts a host here: what a refused line says is the whole of this file, and a line that got as far as
+    // the dial is held to the one sentence it leaves when there is nothing to reach.
+    const code = await cli([...argv, "--state", statePath], io, undefined, env, false);
     return { code, io };
   };
 
@@ -42,13 +44,16 @@ describe("what wsp says when it will not run a line", () => {
     }
   });
 
-  it("answers an unknown word under mcp and under relay the same way, one line and a pointer, with no usage dump", async () => {
+  it("answers an unknown word under mcp and under host the same way, one line and a pointer, with no usage dump", async () => {
     const mcp = await run("mcp", "nope");
     expect(mcp.code).toBe(EXIT_CODES.usage);
     expect(mcp.io.errors).toEqual(["unknown command: mcp nope. Run wsp mcp --help for the list."]);
-    const relay = await run("relay", "nope");
-    expect(relay.code).toBe(EXIT_CODES.usage);
-    expect(relay.io.errors).toEqual(["unknown command: relay nope. Run wsp --help for the list."]);
+    // The word the plumbing folds under opens lines rather than being one, so it answers with the lines it opens.
+    const host = await run("host", "nope");
+    expect(host.code).toBe(EXIT_CODES.usage);
+    expect(host.io.errors).toHaveLength(1);
+    expect(host.io.errors[0]).toContain("wsp host opens a line rather than being one.");
+    expect(host.io.errors[0]).toContain("usage: wsp host pair");
   });
 
   it("takes help as the word for the flag, printing what wsp --help prints and exiting 0", async () => {
@@ -60,19 +65,45 @@ describe("what wsp says when it will not run a line", () => {
     expect(word.io.lines).toEqual([HELP]);
   });
 
-  it("names the stray word and the flag its workspace belongs behind when a thread is opened on two words", async () => {
-    const { code, io } = await run("thread", "new", "api", "say hi");
+  it("names the third word when a thread is opened on more than a workspace and a task", async () => {
+    const { code, io } = await run("run", "api", "say hi", "and this");
     expect(code).toBe(EXIT_CODES.usage);
-    expect(io.errors).toEqual(["wsp thread new takes one task; api reads as a second one. Name the workspace with --in api, and quote the task."]);
+    expect(io.errors[0]).toContain("wsp run takes a workspace and a task; and this reads as a third word.");
     // The name is the line's own prefix, so the sentence behind it never says it a second time.
-    expect(io.errors[0]!.match(/wsp thread new/g)).toHaveLength(1);
-    expect(io.errors[0]).not.toContain("wsp thread new: wsp thread new");
+    expect(io.errors[0]!.startsWith("wsp run: wsp run")).toBe(false);
+  });
+
+  it("answers a word wsp used to have as it answers any other word nothing knows: one line and the pointer, with nothing dialled", async () => {
+    // No old word is kept as a road, hidden or otherwise: the release note says what moved, once, and the command
+    // line carries none of it.
+    for (const argv of [["pair"], ["devices"], ["connect", "http://box:4400"], ["hosts"], ["disconnect", "box"]]) {
+      const { code, io } = await run(...argv);
+      const line = argv.join(" ");
+      expect(code, line).toBe(EXIT_CODES.usage);
+      expect(io.lines, line).toEqual([]);
+      expect(io.errors, line).toEqual([`unknown command: ${argv[0]!}. Run wsp --help for the list.`]);
+    }
+    // A word that still opens lines answers with the lines it opens, whatever it used to open.
+    const thread = await run("thread", "new", "x", "t");
+    expect(thread.code).toBe(EXIT_CODES.usage);
+    expect(thread.io.errors[0]).toContain("wsp thread opens a line rather than being one.");
+    const relay = await run("relay", "link", "http://relay");
+    expect(relay.code).toBe(EXIT_CODES.usage);
+    expect(relay.io.errors).toEqual(["unknown command: relay. Run wsp --help for the list."]);
+    // A flag wsp used to read is the parser's own unknown option, with the line's usage under it.
+    for (const argv of [["import", "/tmp/x", "--to", "alpha"], ["threads", "--in", "alpha"], ["new", "x", "--local"], ["new", "x", "--ssh", "maya@box"]]) {
+      const { code, io } = await run(...argv);
+      const line = argv.join(" ");
+      expect(code, line).toBe(EXIT_CODES.usage);
+      expect(io.errors[0], line).toContain("Unknown option");
+      expect(io.errors[0], line).toContain("usage: wsp ");
+    }
   });
 
   it("says a thread opened on no words at all what to put in quotes", async () => {
-    const { code, io } = await run("thread", "new");
+    const { code, io } = await run("run");
     expect(code).toBe(EXIT_CODES.usage);
-    expect(io.errors).toEqual(['wsp thread new takes one task and got none. Put the task in quotes: wsp thread new --in <workspace> "say hi".']);
+    expect(io.errors).toEqual(['wsp run takes a task and got none. Put the task in quotes: wsp run <workspace> "say hi".']);
   });
 
   it("answers every verb in one line that never says the verb's name twice over, and refuses one with both halves", async () => {

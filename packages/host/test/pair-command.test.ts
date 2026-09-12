@@ -11,7 +11,7 @@ import { EXIT_CODES } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { advertisedUrl, deviceLines, hostReach, pairLines, pairOnLoopbackLine, reachAddresses, devicesCommand, pairCommand } from "../src/pairing.js";
 import { hostSideOnlyFix, hostSideOnlyLine } from "../src/hosts.js";
-import { cli, type CliIO } from "../src/cli.js";
+import { cli, HOST_FLAG, type CliIO } from "../src/cli.js";
 import { dialAddress } from "../src/host-lock.js";
 import { setDefaultHost, writeHost, type HostRecord } from "../src/hosts.js";
 import type { HostClient } from "../src/verbs.js";
@@ -70,7 +70,7 @@ function homeWithBox(marked: boolean): string {
   return home;
 }
 
-describe("wsp pair", () => {
+describe("wsp host pair", () => {
   it("prints the code, when it expires and the address to open, and closes its socket", async () => {
     const now = Date.parse("2026-09-11T10:00:00.000Z");
     const host = fakeHost({ "pair.issue": { code: "7K3MQP2X", expiresAt: now + 600_000 } });
@@ -89,7 +89,7 @@ describe("wsp pair", () => {
   });
 });
 
-describe("wsp devices", () => {
+describe("wsp host devices", () => {
   it("lists what took a code, with a row per device and never a token", async () => {
     const host = fakeHost({
       "devices.list": {
@@ -111,7 +111,7 @@ describe("wsp devices", () => {
     const host = fakeHost({ "devices.list": { devices: [] } });
     const log: string[] = [];
     await devicesCommand(io(log, []), here(), [], deps(host.client));
-    expect(log).toEqual(["No computer is paired with this host. Run wsp pair for a code."]);
+    expect(log).toEqual(["No computer is paired with this host. Run wsp host pair for a code."]);
   });
 
   it("revokes by id, and exits non-zero on an id nothing is paired under", async () => {
@@ -130,7 +130,7 @@ describe("wsp devices", () => {
   it("refuses a word it does not know and a revoke with no id", async () => {
     const host = fakeHost({});
     for (const args of [["forget", "d_1"], ["revoke"], ["revoke", "d_1", "d_2"]]) {
-      await expect(devicesCommand(io([], []), here(), args, deps(host.client))).rejects.toThrow(/wsp devices/);
+      await expect(devicesCommand(io([], []), here(), args, deps(host.client))).rejects.toThrow(/wsp host devices/);
     }
   });
 
@@ -139,7 +139,7 @@ describe("wsp devices", () => {
     // read process.env instead would find no host at all and hand the code out over the wire.
     const host = fakeHost({ "devices.list": { devices: [] } });
     const home = homeWithBox(true);
-    await expect(devicesCommand(io([], []), { statePath: "/s/state.json", env: { WSP_HOME: home } }, [], deps(host.client))).rejects.toThrow(hostSideOnlyLine("devices", "box"));
+    await expect(devicesCommand(io([], []), { statePath: "/s/state.json", env: { WSP_HOME: home } }, [], deps(host.client))).rejects.toThrow(hostSideOnlyLine("host devices", "box"));
     expect(host.asked).toEqual([]);
     expect(host.closes()).toBe(0);
   });
@@ -150,13 +150,13 @@ describe("a host side command aimed at a host on another computer", () => {
     const host = fakeHost({ "devices.list": { devices: [] }, "pair.issue": { code: "7K3MQP2X", expiresAt: 0 } });
     const home = homeWithBox(false);
     // A flag naming a host this computer paired with, with nothing marked as the default.
-    await expect(devicesCommand(io([], []), { ...here(home), host: "box" }, [], deps(host.client))).rejects.toThrow(hostSideOnlyLine("devices", "box"));
-    await expect(pairCommand(io([], []), { ...here(home), host: "box" }, [], deps(host.client))).rejects.toThrow(hostSideOnlyLine("pair", "box"));
+    await expect(devicesCommand(io([], []), { ...here(home), host: "box" }, [], deps(host.client))).rejects.toThrow(hostSideOnlyLine("host devices", "box"));
+    await expect(pairCommand(io([], []), { ...here(home), host: "box" }, [], deps(host.client))).rejects.toThrow(hostSideOnlyLine("host pair", "box"));
     // The default alias, with no flag and nothing in the environment: the aim no host on this computer wins back,
     // which is the road that reached the remote host by accident.
     const marked = homeWithBox(true);
-    await expect(devicesCommand(io([], []), here(marked), [], deps(host.client))).rejects.toThrow(hostSideOnlyLine("devices", "box"));
-    await expect(pairCommand(io([], []), here(marked), [], deps(host.client))).rejects.toThrow(hostSideOnlyLine("pair", "box"));
+    await expect(devicesCommand(io([], []), here(marked), [], deps(host.client))).rejects.toThrow(hostSideOnlyLine("host devices", "box"));
+    await expect(pairCommand(io([], []), here(marked), [], deps(host.client))).rejects.toThrow(hostSideOnlyLine("host pair", "box"));
     // Nothing was dialled: a code handed out over a device token is a code the host would refuse anyway, and the
     // refusal has to read as a line the person can act on rather than as the host's own.
     expect(host.asked).toEqual([]);
@@ -164,7 +164,7 @@ describe("a host side command aimed at a host on another computer", () => {
   });
 
   // The flag is one key of the shared parse: a word that does not declare it is refused before its command runs,
-  // which is how wsp devices --host box answered "Unknown option '--host'" while the help promised the flag on
+  // which is how wsp host devices --host box answered "Unknown option '--host'" while the help promised the flag on
   // every verb. Each door is its own case, since each is a line a person types and the third reaches the flag
   // through its parent's declaration rather than a list written out beside it. The home is named by the
   // environment this call is given, so nothing here reads the person's own.
@@ -174,21 +174,33 @@ describe("a host side command aimed at a host on another computer", () => {
     expect(errors).toEqual([`${hostSideOnlyLine(word, "box")} ${hostSideOnlyFix()}`]);
   };
 
-  it("wsp pair takes a typed --host and answers that sentence, not the parse's unknown option", async () => {
-    await typed(["pair", "--host", "box"], "pair");
+  it("wsp host pair takes a typed --host and answers that sentence, not the parse's unknown option", async () => {
+    await typed(["host", "pair", "--host", "box"], "host pair");
   });
 
-  it("wsp devices takes a typed --host and answers that sentence, not the parse's unknown option", async () => {
-    await typed(["devices", "--host", "box"], "devices");
+  it("wsp host devices takes a typed --host and answers that sentence, not the parse's unknown option", async () => {
+    await typed(["host", "devices", "--host", "box"], "host devices");
   });
 
-  it("wsp devices revoke takes a typed --host and answers that sentence, not the parse's unknown option", async () => {
-    await typed(["devices", "revoke", "d_1a2b3c4d", "--host", "box"], "devices");
+  it("wsp host devices revoke takes a typed --host and answers that sentence, not the parse's unknown option", async () => {
+    await typed(["host", "devices", "revoke", "d_1a2b3c4d", "--host", "box"], "host devices");
+  });
+
+  it("the plumbing answers under wsp host alone: the old top level word is no command, and the folded line still runs at the host's own terminal", async () => {
+    const gone: string[] = [];
+    expect(await cli(["pair"], io([], gone), undefined, { WSP_HOME: homeWithBox(false) })).toBe(EXIT_CODES.usage);
+    expect(gone).toEqual(["unknown command: pair. Run wsp --help for the list."]);
+    expect(HOST_FLAG["host pair"]).toBe("hostSide");
+    expect(HOST_FLAG["host devices"]).toBe("hostSide");
+    // The words select the command; wsp host devices revoke reaches it as the two words plus what follows.
+    const revoked: string[] = [];
+    expect(await cli(["host", "devices", "revoke"], io([], revoked), undefined, { WSP_HOME: homeWithBox(false) })).toBe(EXIT_CODES.usage);
+    expect(revoked[0]).toContain("wsp host devices takes nothing, or revoke and one device id.");
   });
 
   it("says which command it is and where the line was aimed, then where to run it", () => {
-    expect(hostSideOnlyLine("pair", "box")).toContain("wsp pair");
-    expect(hostSideOnlyLine("pair", "box")).toContain("box");
+    expect(hostSideOnlyLine("host pair", "box")).toContain("wsp host pair");
+    expect(hostSideOnlyLine("host pair", "box")).toContain("box");
     expect(hostSideOnlyFix()).toContain("Run it in a terminal over there");
   });
 });

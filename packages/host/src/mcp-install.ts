@@ -65,18 +65,24 @@ function npxBeside(execPath: string): string {
   return existsSync(beside) ? beside : "npx";
 }
 
-/** How an agent starts this same wsp again, the one rule for every agent's config. Run out of npx's cache, the
- * command is npx with this version pinned: the cache path goes with a sweep or a version bump, and the pin brings
- * the same wsp back. Run behind the desktop's shim, the command is that shim. Run as the wsp on PATH, the command is
- * that binary. Any other start (a checkout, a bin folder PATH does not hold) is this node with the flags and script
- * it was given. */
-export function mcpServerCommand(run: RunningWsp): McpServerSpec {
-  if (run.shim !== undefined) return { command: run.shim, args: ["mcp"] };
+/** How this same wsp is started again, the one rule every road that has to say it reads: an agent's own config, and
+ * the host a verb brings up for itself. Run out of npx's cache, the command is npx with this version pinned: the
+ * cache path goes with a sweep or a version bump, and the pin brings the same wsp back. Run behind the desktop's
+ * shim, the command is that shim. Run as the wsp on PATH, the command is that binary. Any other start (a checkout,
+ * a bin folder PATH does not hold) is this node with the flags and script it was given. */
+export function wspCommand(run: RunningWsp): McpServerSpec {
+  if (run.shim !== undefined) return { command: run.shim, args: [] };
   const script = run.argv[1];
-  if (script !== undefined && script.split(sep).includes(NPX_CACHE_DIR)) return { command: npxBeside(run.execPath), args: ["-y", `${NPM_PACKAGE}@${run.version}`, "mcp"] };
+  if (script !== undefined && script.split(sep).includes(NPX_CACHE_DIR)) return { command: npxBeside(run.execPath), args: ["-y", `${NPM_PACKAGE}@${run.version}`] };
   const wsp = onPath("wsp", run.PATH);
-  if (script !== undefined && wsp !== undefined && sameFile(script, wsp)) return { command: wsp, args: ["mcp"] };
-  return { command: run.execPath, args: [...run.execArgv, script ?? "wsp", "mcp"] };
+  if (script !== undefined && wsp !== undefined && sameFile(script, wsp)) return { command: wsp, args: [] };
+  return { command: run.execPath, args: [...run.execArgv, script ?? "wsp"] };
+}
+
+/** The line that starts this same wsp on its stdio tool server, for an agent's own config. */
+export function mcpServerCommand(run: RunningWsp): McpServerSpec {
+  const wsp = wspCommand(run);
+  return { command: wsp.command, args: [...wsp.args, "mcp"] };
 }
 
 /** The server every agent's config gets: the command that runs this same wsp, then `--state <path>`, so the
@@ -117,6 +123,25 @@ function installSkill(agent: AgentEntry, home: string): string {
   mkdirSync(dirname(file.abs), { recursive: true });
   writeFileSync(file.abs, WSP_SKILL);
   return file.tilde;
+}
+
+/** Brings every skill copy already on this computer up to this wsp's, and writes none where there is none: a copy
+ * an install wrote once falls behind the binary at the next release, and an agent reading the old words calls a
+ * verb that is gone. Answers the files it rewrote, `~/`-relative. An agent that never took the skill is left alone,
+ * since writing one uninvited puts wsp in a folder nobody asked it into. */
+export function refreshSkills(home: string): string[] {
+  const written: string[] = [];
+  for (const agent of CATALOG_AGENTS) {
+    const file = skillFile(agent, home);
+    try {
+      if (readFileSync(file.abs, "utf8") === WSP_SKILL) continue;
+    } catch {
+      continue;
+    }
+    writeFileSync(file.abs, WSP_SKILL);
+    written.push(file.tilde);
+  }
+  return written;
 }
 
 /** The catalog's agent under this id; an id it does not know is refused with the ids that do have an MCP config. */
