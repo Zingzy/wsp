@@ -2,12 +2,16 @@
 // One thread's row under its workspace, in the workspace row's grammar. Every
 // row in the list is a thread, so no glyph leads it: the title takes the line
 // from the row's inset up to a fixed mono time column at the right edge; under
-// it the status pill, the agent's mark, the project the thread works in where
-// it sits in one of the workspace's, and who opened the thread. Renaming turns
-// that title into the sidebar's one name box in the same slot, opened from
-// the menu or by a double-click on the title, so the row keeps its height and
-// its grammar while a name is typed.
-import type { MouseEvent } from "react";
+// it the status dot, the agent's mark, and the words workspaceRows gives the
+// row, which are the project and who opened the thread on a row a person or
+// the command line opened, and the workspace with where it runs on one another
+// thread's agent opened. A spawned row that works stands on its dot alone, the
+// rule a workspace row already follows, since its indent and the row above say
+// the rest; every other state keeps its word. Renaming turns the title into the
+// sidebar's one name box in the same slot, opened from the menu or by a
+// double-click on the title, so the row keeps its height and its grammar while
+// a name is typed.
+import { Fragment, type MouseEvent } from "react";
 import { agentName } from "@wsp/catalog";
 import { THREAD_WORDS } from "../actions/format.js";
 import type { SidebarThreadSnapshot } from "../adapt/index.js";
@@ -19,11 +23,13 @@ import { RowNameInput } from "./RowNameInput.js";
 import { ROW_META_CLASS, TWO_LINE_ROW_CLASS, threadRowId } from "./rowGrammar.js";
 import { isThreadWorking } from "./Sidebar.logic.js";
 import { ThreadRowLeadingStatus } from "./ThreadStatusIndicators.js";
-import { openerWord, provenanceLabel, threadPill } from "./workspaceRows.js";
+import { provenanceLabel, threadMetaWords, threadPill } from "./workspaceRows.js";
 
 export function ThreadRow({
   thread,
   time,
+  runs,
+  under,
   active,
   renaming,
   saving,
@@ -35,6 +41,10 @@ export function ThreadRow({
 }: {
   thread: SidebarThreadSnapshot;
   time: string;
+  /** The workspace this thread runs in and where that workspace runs, which a spawned row names in place of the project. */
+  runs: { readonly workspace: string; readonly where: string };
+  /** The workspace whose rows this one is drawn under: the row names its own only where the two differ. */
+  under: string;
   active: boolean;
   /** The name is being typed on this row: the title slot holds the input instead of the text. */
   renaming: boolean;
@@ -50,6 +60,11 @@ export function ThreadRow({
   const pill = threadPill(thread);
   // The Idle header can be shut, so the row carries the difference itself, in the title's colour.
   const idle = !isThreadWorking(thread);
+  const words = threadMetaWords(thread, runs, under);
+  const label = provenanceLabel(thread, words);
+  // A spawned row at work says it with the dot alone: the indent already says an agent opened it, and the word
+  // would push where it runs out of the 256 px sidebar.
+  const saysState = thread.parentThreadId === null || idle;
   return (
     <SidebarMenuSubItem data-thread-item>
       <SidebarMenuSubButton
@@ -82,21 +97,19 @@ export function ThreadRow({
             <span className={cn(ROW_META_CLASS, "w-[3ch] shrink-0 text-right")}>{time}</span>
           </span>
           <span data-thread-meta className={cn(ROW_META_CLASS, "flex min-w-0 items-center gap-1.5")}>
-            <ThreadRowLeadingStatus status={pill} />
+            <ThreadRowLeadingStatus status={pill} word={saysState} />
             {pill ? <span aria-hidden>·</span> : null}
             <Tooltip>
-              <TooltipTrigger render={<span data-thread-provenance aria-label={provenanceLabel(thread)} className="inline-flex min-w-0 items-center gap-1 text-sidebar-foreground" />}>
+              <TooltipTrigger render={<span data-thread-provenance aria-label={label} className="inline-flex min-w-0 items-center gap-1 text-sidebar-foreground" />}>
                 <HarnessMark harness={thread.harness} label={agentName(thread.harness)} className="size-[13px]" />
-                {thread.project !== null ? (
-                  <>
+                {words.map((word, at) => (
+                  <Fragment key={`${at}-${word}`}>
                     <span aria-hidden className="text-[var(--top-row-meta)]">·</span>
-                    <span data-thread-project className="truncate text-[var(--top-row-meta)]">{thread.project}</span>
-                    <span aria-hidden className="text-[var(--top-row-meta)]">·</span>
-                  </>
-                ) : null}
-                <span className="truncate text-[var(--top-row-meta)]">{openerWord(thread.startedBy)}</span>
+                    <span data-thread-word className="truncate text-[var(--top-row-meta)]">{word}</span>
+                  </Fragment>
+                ))}
               </TooltipTrigger>
-              <TooltipPopup side="top">{provenanceLabel(thread)}</TooltipPopup>
+              <TooltipPopup side="top">{label}</TooltipPopup>
             </Tooltip>
           </span>
         </span>

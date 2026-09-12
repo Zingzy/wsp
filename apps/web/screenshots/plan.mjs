@@ -23,6 +23,9 @@ const AT_WIDTH = /^(\d+):(.+)$/;
 /** A step that presses a key rather than clicking. The narrow window opens with the right panel over the
  * whole shell and no control of its own on top, so Escape is the only way to the sidebar under it. */
 const KEY = /^key:(.+)$/;
+/** The one step that is neither: the network under the window goes, which is what a window on another computer
+ * sees the moment the computer running wsp falls asleep. The rows stay as they were last known. */
+const OFFLINE = "offline";
 
 const fail = message => {
   throw new Error(`surfaces list: ${message}`);
@@ -49,20 +52,21 @@ export function stepFor(word, widths) {
   if (width !== undefined && !widths.includes(width)) fail(`a step is kept for width ${width}, which the list does not shoot`);
   const bare = kept === null ? word : kept[2];
   const key = KEY.exec(typeof bare === "string" ? bare : "");
-  const step = key === null ? { click: selectorFor(bare) } : { key: key[1] };
+  const step = bare === OFFLINE ? { offline: true } : key === null ? { click: selectorFor(bare) } : { key: key[1] };
   return width === undefined ? step : { width, ...step };
 }
 
 /** What the index says a step was. */
-const stepWords = step => (step.key === undefined ? `\`${step.click}\`` : `the ${step.key} key`);
+const stepWords = step => (step.offline === true ? "the network going" : step.key === undefined ? `\`${step.click}\`` : `the ${step.key} key`);
 
 const surfaceFrom = (raw, index, widths) => {
   if (raw === null || typeof raw !== "object") fail(`surface ${index} is not an object`);
-  const { name, at, steps, wait, settleMs, fixture } = raw;
+  const { name, at, steps, wait, settleMs, fixture, remote } = raw;
   if (typeof name !== "string" || !NAME.test(name)) fail(`surface ${index} needs a name of lowercase words and dashes, got ${JSON.stringify(name)}`);
   if (typeof at !== "string" || !at.startsWith("/")) fail(`${name}: "at" is the route or hash the page opens, starting with /`);
   if (steps !== undefined && !Array.isArray(steps)) fail(`${name}: "steps" is an array of data attribute words and key presses`);
   if (settleMs !== undefined && (typeof settleMs !== "number" || settleMs < 0)) fail(`${name}: "settleMs" is a count of milliseconds`);
+  if (remote !== undefined && typeof remote !== "boolean") fail(`${name}: "remote" says whether the page is served to another computer`);
   const own = raw.widths;
   if (own !== undefined && (!Array.isArray(own) || own.some(w => !widths.includes(w)))) fail(`${name}: "widths" picks from the list's own ${widths.join(", ")}`);
   if (fixture !== undefined && (typeof fixture !== "string" || !NAME.test(fixture))) fail(`${name}: "fixture" is the name of a fixture the state file serves`);
@@ -74,6 +78,7 @@ const surfaceFrom = (raw, index, widths) => {
     ...(fixture !== undefined ? { fixture } : {}),
     settleMs: settleMs ?? DEFAULT_SETTLE_MS,
     widths: own ?? widths,
+    remote: remote === true,
   };
 };
 
@@ -106,7 +111,7 @@ export function shotPlan(list) {
       for (const surface of list.surfaces) {
         if (!surface.widths.includes(width)) continue;
         const steps = surface.steps.filter(s => s.width === undefined || s.width === width).map(({ width: _kept, ...step }) => step);
-        shots.push({ name: surface.name, at: surface.at, steps, wait: surface.wait, ...(surface.fixture === undefined ? {} : { fixture: surface.fixture }), settleMs: surface.settleMs, theme, width, height: list.heights[width], file: shotName(surface.name, theme, width) });
+        shots.push({ name: surface.name, at: surface.at, steps, wait: surface.wait, ...(surface.fixture === undefined ? {} : { fixture: surface.fixture }), settleMs: surface.settleMs, remote: surface.remote, theme, width, height: list.heights[width], file: shotName(surface.name, theme, width) });
       }
     }
   }
@@ -123,7 +128,8 @@ export function indexMarkdown(list, written, meta) {
   for (const surface of list.surfaces) {
     const rows = plan.filter(s => s.name === surface.name && has.has(s.file));
     if (rows.length === 0) continue;
-    lines.push(`## ${surface.name}`, "", `Route \`${surface.at}\`${surface.steps.length > 0 ? `, then ${surface.steps.map(s => `${stepWords(s)}${s.width === undefined ? "" : ` (at ${s.width} only)`}`).join(", ")}` : ""}${surface.fixture === undefined ? "" : `, served from the ${surface.fixture} fixture`}.`, "", "| theme | width | file |", "| --- | --- | --- |");
+    const road = `Route \`${surface.at}\`${surface.remote ? ", served to a window on another computer" : ""}${surface.steps.length > 0 ? `, then ${surface.steps.map(s => `${stepWords(s)}${s.width === undefined ? "" : ` (at ${s.width} only)`}`).join(", ")}` : ""}${surface.fixture === undefined ? "" : `, served from the ${surface.fixture} fixture`}.`;
+    lines.push(`## ${surface.name}`, "", road, "", "| theme | width | file |", "| --- | --- | --- |");
     for (const row of rows) lines.push(`| ${row.theme} | ${row.width} | [${row.file}](${row.file}) |`);
     lines.push("");
   }

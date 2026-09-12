@@ -24,7 +24,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.
 export type WorkspaceStart = "fresh" | "import";
 
 const STARTS: ReadonlyArray<{ value: WorkspaceStart; label: string; detail: string }> = [
-  { value: "fresh", label: "Start fresh", detail: "Nothing on the machine but your golden image." },
+  { value: "fresh", label: "Start fresh", detail: "Nothing on it but your image." },
   { value: "import", label: "Import a project", detail: "Then pick a folder on this Mac; it lands at the same path, caches left behind." },
 ];
 
@@ -73,7 +73,7 @@ export function NewWorkspaceDialog({
         >
           <DialogHeader>
             <DialogTitle>New workspace</DialogTitle>
-            <DialogDescription>A fresh machine forked from your golden image.</DialogDescription>
+            <DialogDescription>A copy of your image where you pick.</DialogDescription>
           </DialogHeader>
           <DialogPanel className="flex flex-col gap-3">
             <div className="flex flex-col gap-2">

@@ -1,42 +1,118 @@
 {
-  "widths": [1440, 1280, 390],
-  "heights": { "1280": 800 },
+  "widths": [
+    1440,
+    1280,
+    390
+  ],
+  "heights": {
+    "1280": 800
+  },
   "surfaces": [
     {
       "name": "sidebar",
       "at": "/",
-      "steps": ["390:key:Escape", "390:sidebar=trigger"],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger"
+      ],
       "wait": "row-id=thread:th_redirect"
     },
     {
       "name": "workspace",
       "at": "/",
-      "steps": ["390:key:Escape", "390:sidebar=trigger", "row-id=ws:ws_web", "390:key:Escape"],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=ws:ws_web",
+        "390:key:Escape"
+      ],
       "wait": "testid=composer-editor"
     },
     {
       "name": "composer-thread",
       "at": "/",
-      "steps": ["390:key:Escape", "390:sidebar=trigger", "row-id=thread:th_redirect", "390:key:Escape"],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:th_redirect",
+        "390:key:Escape"
+      ],
       "wait": "testid=composer-editor"
     },
     {
       "name": "machine",
       "at": "/",
-      "steps": ["1440:row-id=ws:ws_api", "surface-launch=machine"],
+      "steps": [
+        "1440:row-id=ws:ws_api",
+        "surface-launch=machine"
+      ],
       "wait": "right-panel-tabbar"
     },
     {
       "name": "cloud-setup",
       "at": "/",
-      "steps": ["390:key:Escape", "390:sidebar=trigger", "cloud-setup-row"],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "cloud-setup-row"
+      ],
       "wait": "k=choice",
+      "settleMs": 700
+    },
+    {
+      "name": "spawned-thread",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:th_search",
+        "390:key:Escape"
+      ],
+      "wait": "testid=composer-editor"
+    },
+    {
+      "name": "host-asleep",
+      "at": "/",
+      "remote": true,
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=ws:ws_api",
+        "offline"
+      ],
+      "wait": "sidebar-asleep",
+      "settleMs": 700
+    },
+    {
+      "name": "settings-where",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row"
+      ],
+      "wait": "k=places-table"
+    },
+    {
+      "name": "add-computer",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "k=add-computer-button"
+      ],
+      "wait": "k=add-computer",
       "settleMs": 700
     },
     {
       "name": "settings-image-fresh",
       "at": "/",
-      "steps": ["390:key:Escape", "key:Meta+Comma"],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row"
+      ],
       "wait": "k=image-facts",
       "settleMs": 700
     },
@@ -44,7 +120,11 @@
       "name": "settings-image-built",
       "at": "/",
       "fixture": "image-built",
-      "steps": ["390:key:Escape", "key:Meta+Comma"],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row"
+      ],
       "wait": "k=image-copies",
       "settleMs": 700
     },
@@ -52,7 +132,12 @@
       "name": "settings-image-sheet",
       "at": "/",
       "fixture": "image-built",
-      "steps": ["390:key:Escape", "key:Meta+Comma", "k=edit-image"],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "k=edit-image"
+      ],
       "wait": "k=choice",
       "settleMs": 700
     }

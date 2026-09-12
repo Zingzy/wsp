@@ -5,7 +5,7 @@
 // under one id each, turn.completed carries usage, turn.failed the error.
 import { randomUUID } from "node:crypto";
 import { RUN_EXIT_MS, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, endAfterResult, endRun, titlePrompt } from "@wsp/protocol";
-import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnResult } from "@wsp/protocol";
+import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv } from "./command.js";
 import { parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
@@ -90,11 +90,12 @@ const MISSING_ENV = /Missing environment variable: `([^`]+)`/;
 const RECONNECTING = /^Reconnecting\.\.\./;
 const RECONNECT_STALL_MS = 90_000;
 
-/** The words for a failure the CLI reported in its own; undefined when its message stands as it is. */
-function failureWords(message: string, login: string): string | undefined {
-  if (UNAUTHORIZED.test(message)) return codexNotSignedInLine(login);
+/** The words for a failure the CLI reported in its own, with what wsp classes it as where it claims a cause;
+ * undefined when the CLI's message stands as it is. */
+function failureWords(message: string, login: string): { line: string; cause?: TurnRefusal } | undefined {
+  if (UNAUTHORIZED.test(message)) return { line: codexNotSignedInLine(login), cause: "sign-in" };
   const missing = MISSING_ENV.exec(message);
-  return missing === null ? undefined : codexMissingEnvLine(missing[1]!);
+  return missing === null ? undefined : { line: codexMissingEnvLine(missing[1]!) };
 }
 
 function rec(value: unknown): Record<string, unknown> | undefined {
@@ -190,8 +191,9 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     let interruptRequested = false;
     let turnResult: TurnResult | undefined;
     let lastText: string | undefined;
-    /** The words for the last failure the stream showed, if any: a 401, a missing env var, or the reconnect loop. */
-    let words: string | undefined;
+    /** The last failure the stream showed, if any, in wsp's words and under the cause it claims: a 401, a missing
+     * env var, or the reconnect loop. */
+    let words: { line: string; cause?: TurnRefusal } | undefined;
     /** The last top-level error event: what the CLI said last when it dies without a turn.failed. */
     let lastError: string | undefined;
     let stallTimer: ReturnType<typeof setTimeout> | undefined;
@@ -213,7 +215,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       if (stallTimer !== undefined) return;
       stalledAt = Date.now();
       stallTimer = setTimeout(() => {
-        words = codexReconnectLine(Date.now() - (stalledAt ?? startedAt));
+        words = { line: codexReconnectLine(Date.now() - (stalledAt ?? startedAt)) };
         void escalate();
       }, deps.reconnectStallMs ?? RECONNECT_STALL_MS);
     };
@@ -257,7 +259,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
               sawResult = true;
               const message = str(rec(event.error)?.message) ?? "codex reported a failed turn";
               words = failureWords(message, deps.login) ?? words;
-              turnResult = { status: "failed", durationMs: Date.now() - startedAt, error: words ?? message };
+              turnResult = { status: "failed", durationMs: Date.now() - startedAt, error: words?.line ?? message, ...(words?.cause !== undefined ? { refusal: words.cause } : {}) };
               emit({ type: "turn.done", sessionId: threadId, result: turnResult });
               endAfter();
               break;
@@ -285,7 +287,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         turnResult = interruptRequested
           ? { status: "interrupted" }
           : words !== undefined
-            ? { status: "failed", error: words }
+            ? { status: "failed", error: words.line, ...(words.cause !== undefined ? { refusal: words.cause } : {}) }
             : { status: "failed", error: streamError ?? died };
         emit({ type: "turn.done", sessionId: threadId, result: turnResult });
       }

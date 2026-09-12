@@ -4,7 +4,7 @@
 // sidebarProjectGrouping.ts SidebarProjectSnapshot and Sidebar.logic.ts
 // resolveThreadStatusPill (commit 57a66608). Phase is the product word and
 // leads; machine state and reach only add when they diverge from it.
-import { foldThreads, projectAt, workspaceProjects, workspaceStateOf, workspaceWord, type SessionView, type ThreadView, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { foldThreads, IDLE_REASON, projectAt, workspaceProjects, workspaceStateOf, workspaceWord, type SessionView, type ThreadView, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicator } from "./view-model.js";
 
 export interface SidebarInput {
@@ -82,25 +82,37 @@ function indicatorTone(state: WorkspaceState): StatusIndicator["tone"] {
   }
 }
 
-/** What the thread shows in place of "Working" while its workspace cannot run the turn; null while the machine runs. */
-export function turnWait(state: WorkspaceState): { readonly label: string; readonly wake: boolean } | null {
+/** What the timeline's line says in place of "Working" while the thread's workspace cannot run the turn, and
+ * whether to offer the wake beside it; null while the workspace runs. Every line names the workspace, and the
+ * waking one names where it runs too, since that is the send's whole answer: the turn starts there in a moment.
+ * The elapsed rides beside the words on the row, not in them, because it ticks. */
+export function turnWait(state: WorkspaceState, workspace: { readonly name: string; readonly where: string }): { readonly label: string; readonly wake: boolean; readonly elapsed: boolean } | null {
   switch (state) {
     case "running":
       return null;
     case "pausing":
     case "paused":
-      return { label: "Waiting for the machine to wake", wake: true };
+      return { label: `waiting for ${workspace.name} to wake`, wake: true, elapsed: false };
     case "waking":
-      return { label: "Waking the machine", wake: false };
+      return { label: `waking ${workspace.name} on ${workspace.where}`, wake: false, elapsed: true };
     case "unreachable":
-      return { label: "Waiting for the machine to answer", wake: false };
+      return { label: `waiting for ${workspace.name} to answer`, wake: false, elapsed: false };
     case "gone":
-      return { label: "The machine is gone", wake: false };
+      return { label: `${workspace.name} is gone`, wake: false, elapsed: false };
     default: {
       const _exhaustive: never = state;
       return null;
     }
   }
+}
+
+/** The line a paused workspace puts under its last turn, where nothing is running and the next send is what wakes
+ * it: the state, and what it napped after where the status that brought the nap said so. The window is read back
+ * through the protocol's own marker, which the runtime writes the reason with, so neither side can reword it alone.
+ * A window that was not open at the nap is told none of that and says the state alone rather than guessing. */
+export function pausedLine(reason: string | undefined): string {
+  const window = IDLE_REASON.windowIn(reason);
+  return window === undefined ? "paused" : `paused after ${window} idle`;
 }
 
 function deriveThread(thread: ThreadView, workspace: Pick<WorkspaceView, "projects">): SidebarThreadSnapshot {
@@ -111,6 +123,7 @@ function deriveThread(thread: ThreadView, workspace: Pick<WorkspaceView, "projec
     workspaceId: thread.workspaceId,
     title: thread.title,
     status: thread.status,
+    ran: thread.ran,
     startedAt: thread.startedAt !== undefined ? new Date(thread.startedAt).toISOString() : null,
     endedAt: thread.endedAt !== undefined ? new Date(thread.endedAt).toISOString() : null,
     indicator: threadIndicator(thread),

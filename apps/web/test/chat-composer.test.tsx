@@ -4,7 +4,7 @@
 // shape as chat.test.tsx; no live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { screenCommandLine, sendRefusal, stillWorkingLine, type EventUnion, type HarnessCatalog, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { HOST_ASLEEP_SEND, screenCommandLine, SEND_BLOCK_WORDS, sendRefusal, stillWorkingLine, type EventUnion, type HarnessCatalog, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
@@ -12,6 +12,8 @@ import type { Api, ConnStatus, ProtocolEvent, StartSessionOptions } from "../src
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { composerSendBlock } from "../src/components/chat/ChatComposer.js";
 import { SEND_LABEL, WAKE_AND_SEND_LABEL } from "../src/components/chat/ComposerPrimaryActions.js";
+import { COMPOSER_STATE_WORDS } from "../src/composer-state-words.js";
+import { NOT_READY_NAMES } from "../screenshots/ready.mjs";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { requestComposerFocus, requestNewThread } from "../src/shell/shellRequests.js";
 import { CHAT_HARNESS, CHAT_STREAM, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
@@ -257,7 +259,7 @@ describe("composer slash menu", () => {
     await press(editor, "Enter");
     await waitFor(() => expect(screen.queryByRole("status")).not.toBeNull());
     expectPlainLine(screenCommandLine(SCREEN_COMMANDS[0]!, CLAUDE_CATALOG, workspace));
-    expect(screen.getByRole("status").textContent).toContain("Machine tab");
+    expect(screen.getByRole("status").textContent).toContain("Workspace panel");
     expect(started).toHaveLength(0);
     expect(draft()).toBe("/login");
     expect(isEditable(editor)).toBe(true);
@@ -291,7 +293,7 @@ describe("composer slash menu", () => {
     expect(started).toHaveLength(0);
   });
 
-  it("the line for a sign-in command on this computer names the person's own terminal, not the Machine tab", async () => {
+  it("the line for a sign-in command on this computer names the person's own terminal, not the Workspace panel", async () => {
     const local: WorkspaceView = { ...workspace, kind: "local" };
     const { api, started } = fixtureApi([local]);
     await setup(api);
@@ -375,6 +377,20 @@ describe("composer while the workspace is not live", () => {
     expect(sendButton().disabled).toBe(false);
   });
 
+  it("says it is connecting in the same words the harness that drives this app waits on", async () => {
+    const { api } = fixtureApi([workspace]);
+    await setup(api, "connecting");
+    // One file holds the word. The button renders it, and the harness that drives the built app reads it to know
+    // the app is not ready for a key press yet; a second spelling in either place puts a driven step back on a
+    // page that is still loading, with nothing said about it.
+    expect(sendButton().getAttribute("aria-label")).toBe(SEND_BLOCK_WORDS.connecting);
+    expect(NOT_READY_NAMES).toContain(SEND_BLOCK_WORDS.connecting);
+    // The composer's own states are the other half of that list, and the two names it exports come from the same
+    // file, so every word the button can wear has exactly one home.
+    expect(NOT_READY_NAMES).toContain(COMPOSER_STATE_WORDS.connecting);
+    expect([SEND_LABEL, WAKE_AND_SEND_LABEL]).toEqual([COMPOSER_STATE_WORDS.send, COMPOSER_STATE_WORDS.wakeAndSend]);
+  });
+
   it("a running workspace's button reads plain Send", async () => {
     const { api } = fixtureApi([workspace]);
     await setup(api);
@@ -407,6 +423,26 @@ describe("composer while the workspace is not live", () => {
     release();
     await waitFor(() => expect(calls).toEqual([`wake ${WS}`, "start"]));
     expect(started[0]!.prompt).toBe("hello");
+  });
+
+  it("on a window the host did not serve on this computer, a socket that drops reads as that computer asleep, not as wsp gone", async () => {
+    (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 7788, wsPath: "/ws", paired: true, version: "0.0.0" };
+    try {
+      const { api } = fixtureApi([workspace]);
+      await setup(api);
+      act(() => useStore.getState().setConn("reconnecting"));
+      await waitFor(() => expect(screen.getByRole("status").textContent).toBe(HOST_ASLEEP_SEND));
+      expect(screen.getByRole("status").textContent).not.toBe(sendRefusal("reconnecting"));
+      const send = screen.getByRole("button", { name: HOST_ASLEEP_SEND }) as HTMLButtonElement;
+      expect(send.disabled).toBe(true);
+      expect(isEditable(composerEditor())).toBe(false);
+      // A page the host served on this computer says what it has always said: wsp itself is not running here.
+      (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 7788, wsPath: "/ws", paired: true, version: "0.0.0", token: "t_local" };
+      act(() => useStore.getState().setConn("closed"));
+      await waitFor(() => expect(screen.getByRole("status").textContent).toBe(sendRefusal("closed")));
+    } finally {
+      delete (window as unknown as { __WSP__?: unknown }).__WSP__;
+    }
   });
 
   it("a gone machine reads the same way: the gone sentence, one line, no panel", async () => {

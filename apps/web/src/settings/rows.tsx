@@ -2,12 +2,11 @@
 // The settings column's grammar, in one place so the page and every section it
 // mounts read it from here rather than from each other: a caps mono zone label
 // over a section, then one hairline row per pick with its label at the left and
-// its control at the right edge, and the mono fact slot a row's numbers go in.
+// its control at the right edge. The classes those two wear stay in format.js
+// with the page's other words.
 import type { ReactNode } from "react";
 import { cn } from "../lib/utils.js";
-
-export const ZONE_LABEL = "font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground";
-export const FACT = "font-mono text-[11px] tabular-nums text-muted-foreground";
+import { ZONE_LABEL } from "./format.js";
 
 export function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (

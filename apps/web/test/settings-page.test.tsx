@@ -92,7 +92,7 @@ describe("the settings page", () => {
     useStore.getState().bind(api);
     await flush();
     render(<SettingsPage />);
-    expect(screen.getAllByRole("region").map(s => s.getAttribute("aria-labelledby"))).toEqual(["settings-appearance", "settings-terminal", "settings-image", "settings-about"]);
+    expect(screen.getAllByRole("region").map(s => s.getAttribute("aria-labelledby"))).toEqual(["settings-appearance", "settings-terminal", "settings-image", "settings-where", "settings-about"]);
     expect(screen.getByText("Appearance").tagName).toBe("H2");
     expect(screen.getByText("Terminal").tagName).toBe("H2");
     expect(screen.getByText("About").tagName).toBe("H2");

@@ -15,8 +15,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { cn } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
 import { CloudSetupDialog } from "../sidebar/CloudSetupDialog.js";
+import { FACT } from "./format.js";
 import { builtFact, builtWhen, IMAGE_WORDS, imageFacts } from "./image.js";
-import { FACT, Row, Section } from "./rows.js";
+import { Row, Section } from "./rows.js";
 
 const CELL = "font-mono text-xs tabular-nums text-foreground";
 const QUIET = "text-muted-foreground";

@@ -542,6 +542,8 @@ describe("agents spawning agents", () => {
       // sibling's: that guard is the person's on the agent, and an agent moving it is the guard moving itself.
       expect(refused).toContain("sessions.access");
       expect(refused).toContain("sessions.answer");
+      // Dropping a thread from the person's own lists is the person's, not one thread's act on another.
+      expect(refused).toContain("sessions.forget");
       // The panes a person types into are the person's: a thread drives its workspace through the exec and session
       // ops, and the channel that carries a pty, a file read and a git status to a browser is shut to it by name.
       expect(refused).toContain("daemon.open");

@@ -4,6 +4,7 @@
 import { createRuntime, memoryStore } from "@wsp/runtime";
 import { describe, expect, it } from "vitest";
 import { makeRuntime, providerSlotOf, swapProvider } from "../src/cli.js";
+import { SOLARI_KEY_ENV } from "../src/providers.js";
 import { stubBackend } from "./stub-backend.js";
 
 describe("the provider slot behind a host's runtime", () => {
@@ -11,14 +12,14 @@ describe("the provider slot behind a host's runtime", () => {
     const rt = makeRuntime({}, "/tmp/wsp-provider-swap/state.json");
     try {
       expect(providerSlotOf(rt)?.current().capabilities.previewUrls).toBe(false);
-      swapProvider(rt, { solari: "slr_live_fake" });
+      swapProvider(rt, { [SOLARI_KEY_ENV]: "slr_live_fake" });
       expect(providerSlotOf(rt)?.current().capabilities.previewUrls).toBe(true);
     } finally {
       await rt.close();
     }
     const bare = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
     try {
-      expect(() => swapProvider(bare, { solari: "slr_live_fake" })).toThrow(/no provider slot/);
+      expect(() => swapProvider(bare, { [SOLARI_KEY_ENV]: "slr_live_fake" })).toThrow(/no provider slot/);
     } finally {
       await bare.close();
     }

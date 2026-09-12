@@ -476,11 +476,14 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(await page.textContent("#slot")).toBe(here.map(a => a.id).join(" · "));
     expect(await page.textContent("#line")).toBe(`Lets ${here.map(a => a.name).join(" and ")} open threads and workspaces on this Mac.`);
     expect(await page.isChecked("#tools")).toBe(true);
-    expect(await page.$$eval("button", els => els.map(el => el.id))).toEqual(["open", "join"]);
+    // The one screen that stands carries its keycap and its quiet link; the join screen behind that link and the
+    // joined screen behind it stand in the page with it, each hidden until it is reached.
+    expect(await page.$$eval("#welcome button", els => els.map(el => el.id))).toEqual(["open", "join"]);
+    expect(await page.$$eval(".setup", els => els.map(el => `${el.id}:${(el as HTMLElement).hidden}`))).toEqual(["welcome:false", "joining:true", "joined:true"]);
     expect(await page.textContent("#open")).toContain("Open wsp");
     expect(await page.textContent("#join")).toBe("This Mac joins another wsp");
     // The column is the SetupScreen's, and nothing scrolls.
-    expect(await page.$eval(".setup", el => el.getBoundingClientRect().width)).toBe(560);
+    expect(await page.$eval("#welcome", el => el.getBoundingClientRect().width)).toBe(560);
     expect(await fits()).toBe(true);
     // The entrance plays once from CSS; the photograph is the screen at rest after it.
     await page.waitForFunction(() => document.getAnimations().length === 0);

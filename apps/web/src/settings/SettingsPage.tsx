@@ -5,9 +5,10 @@
 // The control's own label is the explanation: no sentence under any pick,
 // though a section may put one sentence of its own in a row of the same shape.
 // Every pick goes to the host's preferences record and paints at once, so a
-// browser tab on the same host follows. Image and About take no pick: one says
-// what this computer has sealed, the other the release each half is on.
-import { SidebarMode, TerminalSizeSource, ThemePreference, fmtPx, type TerminalConfig } from "@wsp/protocol";
+// browser tab on the same host follows. Image, Where agents run and About take
+// no pick: they say what this computer has sealed, where its agents run, and
+// the release each half of the app is on.
+import { PLACES_WORDS, SidebarMode, TerminalSizeSource, ThemePreference, fmtPx, type TerminalConfig } from "@wsp/protocol";
 import { useEffect, useState } from "react";
 import { SIDEBAR_MODE_WORDS } from "../actions/format.js";
 import { Button } from "../components/ui/button.js";
@@ -15,14 +16,17 @@ import { NumberField, NumberFieldDecrement, NumberFieldGroup, NumberFieldIncreme
 import { ScrollArea } from "../components/ui/scroll-area.js";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
 import { cn } from "../lib/utils.js";
-import { usePreferences, useStore } from "../protocol/store.js";
+import { useAddComputerOpen, useLabs, usePreferences, useStore } from "../protocol/store.js";
 import { SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "../shell/sidebarWidth.js";
 import { appTerminalFontSize } from "../terminal/ghostty/surface.js";
 import { appScheme } from "../terminal/ghosttyConfig.js";
 import { shellVersions } from "../shell/shellVersion.js";
-import { SETTINGS_WORDS, TERMINAL_SIZE_FACT, TERMINAL_SIZE_WORDS, THEME_WORDS, versionFact } from "./format.js";
+import { FACT, SETTINGS_WORDS, TERMINAL_SIZE_FACT, TERMINAL_SIZE_WORDS, THEME_WORDS, versionFact } from "./format.js";
+import { AddComputerSheet } from "./AddComputerSheet.js";
 import { ImageSection } from "./ImageSection.js";
-import { FACT, Row, Section } from "./rows.js";
+import { Row, Section } from "./rows.js";
+import { WhereAgentsRun } from "./WhereAgentsRun.js";
+
 
 const THEMES = ThemePreference.options.map(theme => ({ value: theme, label: THEME_WORDS[theme] }));
 const BODIES = SidebarMode.options.map(mode => ({ value: mode, label: SIDEBAR_MODE_WORDS[mode].name }));
@@ -34,6 +38,9 @@ export function SettingsPage() {
   const readHostConfig = useStore(s => s.api?.hostTerminalConfig);
   const [file, setFile] = useState<TerminalConfig | null>(null);
   const versions = shellVersions();
+  const labs = useLabs();
+  const addComputer = useAddComputerOpen();
+  const closeAddComputer = useStore(s => s.closeAddComputer);
   // The file's size is a fact the host already reads for the pane; the page shows it beside the pick that would use it.
   useEffect(() => {
     if (readHostConfig === undefined) return;
@@ -51,6 +58,7 @@ export function SettingsPage() {
   return (
     <ScrollArea className="min-h-0 flex-1">
       <div data-settings-page className="mx-auto flex w-full max-w-[672px] flex-col gap-8 px-6 py-6">
+        {labs ? (
         <Section id="settings-appearance" title={SETTINGS_WORDS.appearance}>
           <Row id="settings-theme" label={SETTINGS_WORDS.theme}>
             <SegmentedControl aria-labelledby="settings-theme" value={preferences.theme} segments={THEMES} onChange={theme => void setPreferences({ theme })} />
@@ -88,6 +96,8 @@ export function SettingsPage() {
             </NumberField>
           </Row>
         </Section>
+        ) : null}
+        {labs ? (
         <Section id="settings-terminal" title={SETTINGS_WORDS.terminal}>
           <Row id="settings-text-size" label={SETTINGS_WORDS.textSize}>
             <span className={FACT} data-k="terminal-size">
@@ -96,7 +106,11 @@ export function SettingsPage() {
             <SegmentedControl aria-labelledby="settings-text-size" value={preferences.terminalSize} segments={SIZES} onChange={terminalSize => void setPreferences({ terminalSize })} />
           </Row>
         </Section>
+        ) : null}
         <ImageSection />
+        <Section id="settings-where" title={PLACES_WORDS.section}>
+          <WhereAgentsRun />
+        </Section>
         <Section id="settings-about" title={SETTINGS_WORDS.about}>
           <Row id="settings-version" label={SETTINGS_WORDS.version}>
             {/* A row with no control still stands as tall as one, so the rhythm down the column never breaks. */}
@@ -106,6 +120,7 @@ export function SettingsPage() {
           </Row>
         </Section>
       </div>
+      {addComputer ? <AddComputerSheet onClose={closeAddComputer} /> : null}
     </ScrollArea>
   );
 }

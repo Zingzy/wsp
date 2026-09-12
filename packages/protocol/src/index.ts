@@ -8,6 +8,7 @@
 // home a second copy cannot grow beside.
 
 import { z } from "zod";
+import { DEFAULT_PLACE_PORT } from "./app-ports.js";
 import { HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
 import { openingTitle, threadWord, titleLine } from "./format.js";
@@ -416,6 +417,11 @@ export const WorkspaceView = z.object({
    * workspace a person made. The root is what the machine cap counts against. */
   parentThreadId: z.string().optional(),
   rootThreadId: z.string().optional(),
+  /** Which provider this workspace's machine was forked at, by the id that provider's own module carries in the
+   * host's registry (`solari`, `box`, `docker`). The runtime stamps it, since the host is the one that knows which
+   * module it wired; absent on every kind wsp does not fork, whose machine is the person's own. A row names this
+   * where it would otherwise have only the provider's opaque id for the machine. */
+  provider: z.string().optional(),
 });
 export type WorkspaceView = z.infer<typeof WorkspaceView>;
 
@@ -450,7 +456,7 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
 const WORKSPACE_OUT = {
   id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, projects: true, folder: true, home: true,
   claudeSessionId: true, gone: true, theme: true, glyph: true, daemonNote: true, daemonRefusedAt: true, vaultedAt: true, vaultRefused: true, wakeRefused: true,
-  agents: true, parentThreadId: true, rootThreadId: true,
+  agents: true, parentThreadId: true, rootThreadId: true, provider: true,
 } as const;
 
 /** A workspace as every verb answers with it: the view without the display stream a desktop machine carries, which
@@ -489,6 +495,12 @@ export type SessionOrigin = z.infer<typeof SessionOrigin>;
 export const TitleSource = z.enum(["seed", "auto", "person"]);
 export type TitleSource = z.infer<typeof TitleSource>;
 
+/** What the agent refused a turn for, where it named a cause wsp knows: the word every door reads to class the
+ * failure, since the sentence is the agent's and no door may read a reason out of its words. Adding a cause is an
+ * entry here and its road on the client that shows one. */
+export const TurnRefusal = z.enum(["sign-in"]);
+export type TurnRefusal = z.infer<typeof TurnRefusal>;
+
 export const SessionView = z.object({
   id: z.string(),
   workspaceId: z.string(),
@@ -521,6 +533,10 @@ export const SessionView = z.object({
    * session runs here whatever folder it asks for, since the CLI keys the session to it; the shell folder the
    * agent's tool calls move rides the delta events instead. */
   cwd: z.string().optional(),
+  /** What the agent refused this turn for, where it named a cause wsp knows, off the turn's own result: a refused
+   * turn did none of the work it was asked for, so a row carrying this is a turn that ran nothing. Absent on every
+   * turn the agent worked on, however it ended. */
+  refusal: TurnRefusal.optional(),
   /** What the session runs with, as the harness's own slugs: the start request's model until the harness announces
    * its own; effort as requested, since the CLI never echoes it, and the permission mode the turn is at, which is
    * the start's until a pick moves a running turn to another one. */
@@ -551,11 +567,22 @@ export const ThreadView = z.object({
   /** The folder the latest turn's harness runs in, as SessionView.cwd; absent when no turn recorded one. */
   cwd: z.string().optional(),
   turns: z.number().int().positive(),
+  /** Whether any turn of this thread ever did work, as threadRan reads the rows: false is a launch that never got
+   * going, the thread a forget removes. */
+  ran: z.boolean(),
   /** The opening turn's parent and root, so a listing draws the tree a root thread spawned without reading rows. */
   parentThreadId: z.string().optional(),
   rootThreadId: z.string().optional(),
 });
 export type ThreadView = z.infer<typeof ThreadView>;
+
+/** Whether a turn of these rows ever did any work: one is still working, or one announced a harness session and
+ * ended for something other than a refusal. Announcing is not enough on its own, since both CLIs announce their
+ * session before they learn they have no sign-in, and a refused turn did none of the work it was asked for. A
+ * thread with no such turn never got going, so nothing of it was written down anywhere and dropping it loses none. */
+export function threadRan(turns: ReadonlyArray<Pick<SessionView, "claudeSessionId" | "status" | "refusal">>): boolean {
+  return turns.some(turn => turn.status === "running" || (turn.claudeSessionId !== undefined && turn.refusal === undefined));
+}
 
 /** Folds the session index into threads, in the order each thread's first turn appears. The one place a row from
  * before provenance was recorded is read as a person's; clients print the answer and never decide it. */
@@ -587,6 +614,7 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.endedAt !== undefined ? { endedAt: latest.endedAt } : {}),
       ...(latest.cwd !== undefined ? { cwd: latest.cwd } : {}),
       turns: turns.length,
+      ran: threadRan(turns),
       ...(first.parentThreadId !== undefined ? { parentThreadId: first.parentThreadId } : {}),
       ...(first.rootThreadId !== undefined ? { rootThreadId: first.rootThreadId } : {}),
     };
@@ -856,12 +884,6 @@ export type DeltaKind = z.infer<typeof DeltaKind>;
 
 export const TurnStatus = z.enum(["completed", "interrupted", "failed"]);
 export type TurnStatus = z.infer<typeof TurnStatus>;
-
-/** What the agent refused a turn for, where it named a cause wsp knows: the word every door reads to class the
- * failure, since the sentence is the agent's and no door may read a reason out of its words. Adding a cause is an
- * entry here and its road on the client that shows one. */
-export const TurnRefusal = z.enum(["sign-in"]);
-export type TurnRefusal = z.infer<typeof TurnRefusal>;
 
 export const TurnResult = z.object({
   status: TurnStatus,
@@ -1547,6 +1569,8 @@ export interface HostsView {
   here: string;
   current: string | null;
   hosts: HostListing[];
+  /** What this computer is to another wsp, when it joined one: the menu grows the two rows for it. */
+  place?: { hostName: string; awake: boolean };
 }
 
 /** What the connect sheet asks the shell for: an address with the code wsp pair printed there, or an ssh login the
@@ -1556,6 +1580,33 @@ export type HostConnectAsk = { road: "direct"; url: string; code: string } | { r
 /** How a host move or connect ended: done, or refused in the host's own words with the field the words are about, so
  * the sheet can put them under it. */
 export type HostOutcome = { ok: true } | { ok: false; error: string; at: "url" | "code" | "address" };
+
+/** What the join screen sends the shell: the address as it is typed on the other screen, and the code beside it. */
+export const JoinAsk = z.object({ address: z.string().max(200), code: z.string().max(64) });
+export type JoinAsk = z.infer<typeof JoinAsk>;
+
+/** What the joined screen reads: this computer as the other wsp now holds it, and the wsp it joined. */
+export interface PlaceJoined {
+  name: string;
+  hostName: string;
+  hostUrl: string;
+  os: string;
+  shape: WorkspaceSize;
+  diskFreeBytes?: number;
+  docker: boolean;
+}
+
+/** How a join ended: done, or refused with the field the two halves belong under. */
+export type JoinOutcome = { ok: true; joined: PlaceJoined } | { ok: false; at: "address" | "code"; error: TwoPartRefusal };
+
+/** What this computer is to another wsp, read off its place file. */
+export interface PlaceStanding {
+  hostName: string;
+  hostUrl: string;
+  alias: string;
+  joinedAt: string;
+  awake: boolean;
+}
 
 /** The class the desktop preload puts on the html element when the window has no title bar of its own: the app's
  * header row is the window's frame, the traffic lights sit in it and the sidebar shows the window's frosted glass. */
@@ -1615,6 +1666,16 @@ export interface DesktopBridge {
   disconnectHost(alias: string): Promise<HostOutcome>;
   /** The shell's own menu asked for the connect sheet. Returns the unsubscribe. */
   onConnectHostOpen(handler: () => void): () => void;
+  /** Joining this computer to another wsp, and what it is to that wsp once it has. Absent on a shell from before
+   * the bridge carried them, as `version` is: the page and the shell are two halves that ship together and can be
+   * two releases apart, so a page that would use one of these reads for it first. */
+  joinWsp?(ask: JoinAsk): Promise<JoinOutcome>;
+  /** What this computer is to another wsp, or nothing when it belongs to none. */
+  place?(): Promise<PlaceStanding | undefined>;
+  /** Takes this computer back out of that wsp and returns the window to its own. */
+  leaveWsp?(): Promise<HostOutcome>;
+  /** Holds this computer out of idle sleep while it is joined, or lets it go; answers the standing as it now is. */
+  setStayAwake?(on: boolean): Promise<PlaceStanding>;
 }
 
 // --- golden image (manifest, interactive builder, build stages) ---------------
@@ -2027,6 +2088,42 @@ export const ForwardOpenEvent = z.object({ type: z.literal("forward.open"), forw
 export const ForwardCloseEvent = z.object({ type: z.literal("forward.close"), workspaceId: z.string(), port: RelayPort });
 export type ForwardEvent = z.infer<typeof ForwardOpenEvent> | z.infer<typeof ForwardCloseEvent>;
 
+export const PlaceKind = z.enum(["computer", "provider"]);
+export type PlaceKind = z.infer<typeof PlaceKind>;
+
+/** One row of wsp places: a computer of the person's own, this computer itself, or the provider this host forks on. */
+export const PlaceView = z.object({
+  id: z.string(),
+  kind: PlaceKind,
+  name: z.string(),
+  default: z.boolean(),
+  /** A computer: what it reported last. */
+  os: z.string().optional(),
+  shape: WorkspaceSize.optional(),
+  diskFreeBytes: z.number().int().optional(),
+  docker: z.boolean().optional(),
+  present: z.boolean().optional(),
+  joinedAt: z.string().optional(),
+  lastSeenAt: z.string().optional(),
+  daemonVersion: z.number().int().optional(),
+  /** The catalog ids of the agents that computer found on itself, as it last reported them. */
+  agents: z.array(z.string()).optional(),
+  /** The workspace recorded on this computer, when the join could record one. */
+  workspaceId: z.string().optional(),
+  /** A provider: its hourly rate for the default size. */
+  rateUsdPerHour: z.number().optional(),
+});
+export type PlaceView = z.infer<typeof PlaceView>;
+
+/** A computer you own finished its join, with the address it dialled from as `ws` reported it. The view carries
+ * what it said about itself, so the sheet fills its row off this one event. */
+export const PlaceJoinedEvent = z.object({ type: z.literal("place.joined"), place: PlaceView, from: z.string() });
+export const PlacePresentEvent = z.object({ type: z.literal("place.present"), placeId: z.string(), from: z.string() });
+export const PlaceAbsentEvent = z.object({ type: z.literal("place.absent"), placeId: z.string() });
+export const PlaceRemovedEvent = z.object({ type: z.literal("place.removed"), placeId: z.string() });
+/** The four as one type, so the host's door and the app's fold read one shape. */
+export type PlaceEvent = z.infer<typeof PlaceJoinedEvent> | z.infer<typeof PlacePresentEvent> | z.infer<typeof PlaceAbsentEvent> | z.infer<typeof PlaceRemovedEvent>;
+
 export const EventUnion = z.discriminatedUnion("type", [
   WorkspaceCreatingEvent.extend(sequenced),
   WorkspaceCreatedEvent.extend(sequenced),
@@ -2060,6 +2157,10 @@ export const EventUnion = z.discriminatedUnion("type", [
   PreferencesChangedEvent.extend(sequenced),
   InitJobEvent.extend(sequenced),
   InitNeedsYouEvent.extend(sequenced),
+  PlaceJoinedEvent.extend(sequenced),
+  PlacePresentEvent.extend(sequenced),
+  PlaceAbsentEvent.extend(sequenced),
+  PlaceRemovedEvent.extend(sequenced),
 ]);
 export type EventUnion = z.infer<typeof EventUnion>;
 
@@ -2078,12 +2179,16 @@ export type EventsSubscribeReply = z.infer<typeof EventsSubscribeReply>;
 
 // --- daemon wire protocol (ws://0.0.0.0:7070, auth frame first, 4401 on anything else) ---
 
-/** Client-side health of a daemon link. connecting: dialling, or waiting for a daemon that is not there yet.
- * reauth-needed: the daemon refused the token the host sent. A browser link holds no token of its own, so it opens
- * a channel again and the host dials with the one it holds now; the host's own link stops there. refused: the door
- * answered the upgrade with a status, so no retry at the usual pace opens anything; the link holds this until a
- * dial gets past the door, and retries at the ceiling. dead is terminal. */
-export const DaemonLinkStatus = z.enum(["connecting", "live", "reauth-needed", "refused", "dead"]);
+/** Client-side health of a daemon link. opening: a link that has never been open is being dialled, so nothing is
+ * coming back yet and nothing may be promised back. connecting: a link that was open once is being dialled again.
+ * unanswered: a link that has never been open and whose first-answer bound has passed, so what it dials is not
+ * answering and the person is owed what to do instead of a wait. reauth-needed: the daemon refused the token the
+ * host sent. A browser link holds no token of its own, so it opens a channel again and the host dials with the one
+ * it holds now; the host's own link stops there. refused: the door answered the upgrade with a status, so no retry
+ * at the usual pace opens anything; the link holds this until a dial gets past the door, and retries at the ceiling.
+ * dead is terminal. The host's own link reports neither opening nor unanswered, as it reports no refusal: no person
+ * reads its words. */
+export const DaemonLinkStatus = z.enum(["opening", "connecting", "live", "reauth-needed", "refused", "unanswered", "dead"]);
 export type DaemonLinkStatus = z.infer<typeof DaemonLinkStatus>;
 
 const reqId = z.union([z.string(), z.number()]);
@@ -2520,6 +2625,19 @@ export const PAIR_CODE_TTL_MS = 10 * 60_000;
  * long, which no reachable host answers enough guesses of. */
 export const PAIR_CODE_LENGTH = 8;
 
+/** A pairing code as every screen shows it: the alphabet's letters in two halves, which is how a person reads one
+ * across a room. The one grouping, so the sheet that shows a code and the field that takes one agree. */
+export function shownPairCode(code: string): string {
+  const letters = code.replace(/-/g, "").toUpperCase().slice(0, PAIR_CODE_LENGTH);
+  const half = Math.ceil(PAIR_CODE_LENGTH / 2);
+  return letters.length <= half ? letters : `${letters.slice(0, half)}-${letters.slice(half)}`;
+}
+
+
+/** A pairing code as the host takes it, whichever screen it was copied off: the letters alone, upper case. A
+ * person copies the code they can read, so the dash the screens put in it is one this reading takes back out. */
+export const sentPairCode = (shown: string): string => shown.replace(/-/g, "").toUpperCase();
+
 /** The symbols a pairing code is written in: the digits and the letters, less the four that a person reading one
  * screen and typing into another confuses (I, L, O, U). Thirty-two of them, so each character is five bits and a
  * random byte masked to five bits is uniform. */
@@ -2612,6 +2730,9 @@ export const PlaceReport = z.object({
   daemonPort: z.number().int().min(1).max(65535).optional(),
   /** The line that runs wsp on this place, word by word, for the tools a turn's agent is given later. */
   wsp: z.array(z.string()).min(1),
+  /** The catalog ids of the agents found on that computer's own login PATH, for the line the person reads as it
+   * joins. Capped because it lands in a sentence, not in a list a person scrolls. */
+  agents: z.array(z.string().max(32)).max(32),
   /** Which of the host's addresses this link reached; the address a turn on the place is told to dial back. */
   dialed: z.string().refine(isHttpUrl, "http or https URL"),
 });
@@ -2619,9 +2740,28 @@ export type PlaceReport = z.infer<typeof PlaceReport>;
 
 /** The first frame of a joining place: spends a join code (the pairing code road) for a place record that holds
  * this key. Answered with PlaceJoinReply; the socket then continues with place.prove as an auth would. */
-export const PlaceJoinRequest = z.object({ id: reqId, op: z.literal("place.join"), code: z.string().max(64), publicKey: PlacePublicKey, nonce: PlaceNonce, report: PlaceReport });
+export const PlaceJoinRequest = z.object({
+  id: reqId,
+  op: z.literal("place.join"),
+  code: z.string().max(64),
+  publicKey: PlacePublicKey,
+  nonce: PlaceNonce,
+  report: PlaceReport,
+  /** The joining computer also wants a device token for its own window. One code buys both, since the person's
+   * intent was one act; absent on a join typed in a terminal, which wants no window. */
+  client: z.object({ name: z.string().min(1).max(200) }).optional(),
+});
 export type PlaceJoinRequest = z.infer<typeof PlaceJoinRequest>;
-export const PlaceJoinReply = z.object({ placeId: z.string(), hostPublicKey: PlacePublicKey, nonce: PlaceNonce, signature: PlaceSignature });
+export const PlaceJoinReply = z.object({
+  placeId: z.string(),
+  hostPublicKey: PlacePublicKey,
+  nonce: PlaceNonce,
+  signature: PlaceSignature,
+  /** What the primary computer calls itself, which is what the joined computer shows a person from then on. */
+  hostName: z.string().min(1).max(200),
+  /** Handed back only to a join that asked for one: the token this computer's own window holds. */
+  device: z.object({ deviceId: z.string(), deviceToken: z.string().min(1) }).optional(),
+});
 export type PlaceJoinReply = z.infer<typeof PlaceJoinReply>;
 
 /** The first frame of a place that already joined: names itself and challenges the host. */
@@ -2641,31 +2781,6 @@ export type PlaceProveRequest = z.infer<typeof PlaceProveRequest>;
 export function placeLinkTranscript(role: "host" | "place", placeId: string, challenge: string, answer: string): Uint8Array {
   return new TextEncoder().encode(`wsp place link v1\n${role}\n${placeId}\n${challenge}\n${answer}\n`);
 }
-
-export const PlaceKind = z.enum(["computer", "provider"]);
-export type PlaceKind = z.infer<typeof PlaceKind>;
-
-/** One row of wsp places: a computer of the person's own, this computer itself, or the provider this host forks on. */
-export const PlaceView = z.object({
-  id: z.string(),
-  kind: PlaceKind,
-  name: z.string(),
-  default: z.boolean(),
-  /** A computer: what it reported last. */
-  os: z.string().optional(),
-  shape: WorkspaceSize.optional(),
-  diskFreeBytes: z.number().int().optional(),
-  docker: z.boolean().optional(),
-  present: z.boolean().optional(),
-  joinedAt: z.string().optional(),
-  lastSeenAt: z.string().optional(),
-  daemonVersion: z.number().int().optional(),
-  /** The workspace recorded on this computer, when the join could record one. */
-  workspaceId: z.string().optional(),
-  /** A provider: its hourly rate for the default size. */
-  rateUsdPerHour: z.number().optional(),
-});
-export type PlaceView = z.infer<typeof PlaceView>;
 
 /** The refusal a join whose code this host is not holding gets. Spent, expired and never minted read the same, so
  * guessing tells a caller nothing about which; the words differ from a pairing code's only in naming the verb that
@@ -2705,6 +2820,55 @@ export const placeNoPaneRoadLine = (name: string): string => `${name} is connect
  * host runs on and nowhere else. */
 export const PLACES_TICKET_REFUSAL = "a socket let in on a ticket cannot see or change the places this host holds; run wsp places on the computer the host runs on";
 
+/** Where a computer you own dials this wsp: the port the door answers on and every address it can be reached at.
+ * A host that already binds beyond this computer answers its own port and opens nothing. */
+export const PlaceDoorView = z.object({
+  port: z.number().int().min(1).max(65535),
+  /** `http://<address>:<port>` for every address this computer answers on that leaves it, loopback left out. */
+  addresses: z.array(z.string().url()).min(1),
+  /** The relay hostname as an https address, when the host is linked and its connector is running. */
+  relay: z.string().url().optional(),
+});
+export type PlaceDoorView = z.infer<typeof PlaceDoorView>;
+
+/** The refusal a socket let in on a ticket gets for opening the door computers you own dial: the same rule the
+ * device and place ops read, since the door is who may reach this wsp. */
+export const PLACE_DOOR_REFUSAL = "a socket let in on a ticket cannot open the door computers you own dial; run wsp add on the computer the host runs on";
+
+/** The refusal for a host that serves no such door at all: wsp up serves one, a bare runtime does not. */
+export const PLACE_DOOR_UNSERVED = "this host opens no door for computers you own; wsp up serves one";
+
+/** A refusal in two halves: what happened, which the app draws in the destructive ink, and what to do about it,
+ * which it draws in the foreground ink. One shape, so every screen that refuses reads the same way. */
+export const TwoPartRefusal = z.object({ what: z.string(), fix: z.string() });
+export type TwoPartRefusal = z.infer<typeof TwoPartRefusal>;
+
+export const JOIN_ADDRESS_LINE: TwoPartRefusal = {
+  what: "That is not an address.",
+  fix: `Type it as the other screen shows it, like 192.168.1.20:${DEFAULT_PLACE_PORT}.`,
+};
+export const joinNoAnswer = (at: string): TwoPartRefusal => ({
+  what: `Nothing answered at ${at}.`,
+  fix: "Check both computers are on one network and the address on the other screen.",
+});
+export const JOIN_CODE_REFUSED: TwoPartRefusal = {
+  what: "That code is not one the other computer is waiting for.",
+  fix: "Press New code there and type the new one.",
+};
+export const JOIN_ALREADY: TwoPartRefusal = {
+  what: "This computer already runs threads for another wsp.",
+  fix: "Leave it from the sidebar first.",
+};
+
+/** How long the code on the Add a computer sheet is good for, said in the words beside it. */
+export const CODE_GOOD_LINE = "the code is good for 10 minutes";
+export const CODE_EXPIRED_LINE = "the code expired; press New code";
+
+/** What the sheet says when somebody else already holds the door's port: a fixed port, since the place file on the
+ * other computer names it for good, so a fallback port would be a computer that can never dial back. */
+export const doorPortHeldLine = (port: number): string =>
+  `port ${port} is held by another program on this computer, so no computer you own can reach this wsp; free it and open Add a computer again`;
+
 /** What a computer joined as a place keeps about the wsp it belongs to, in the file the join writes and the agent
  * reads on every attempt: the id its host knows it by, the addresses to dial in order, the host's public key pinned
  * at that join, and where its own private key is. The shape and the two readings of it live here because the join
@@ -2712,11 +2876,16 @@ export const PLACES_TICKET_REFUSAL = "a socket let in on a ticket cannot see or 
 export interface PlaceFile {
   placeId: string;
   name: string;
+  /** What the wsp this computer joined calls itself, learned at the join: the one word the joined computer shows. */
+  hostName: string;
   /** LAN address first, the host's tunnel hostname after it; dialled in this order on every attempt. */
   hostUrls: string[];
   hostPublicKey: string;
   keyPath: string;
   joinedAt: string;
+  /** Whether this computer is held out of idle sleep while it is joined. The hold lives in the agent, which watches
+   * this file, so the toggle is a write here and quitting the app changes nothing. */
+  awake: boolean;
 }
 
 /** The mode the place file and the private key beside it are kept at: the person's own and nobody else's. A key any
@@ -2738,6 +2907,8 @@ export function parsePlaceFile(text: string): PlaceFile | undefined {
     f !== null &&
     typeof f.placeId === "string" &&
     typeof f.name === "string" &&
+    typeof f.hostName === "string" &&
+    typeof f.awake === "boolean" &&
     Array.isArray(f.hostUrls) &&
     f.hostUrls.every(u => typeof u === "string") &&
     typeof f.hostPublicKey === "string" &&
@@ -2778,6 +2949,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Takes a place back out: sweeps wsp off that computer over its link, drops the workspaces standing on it and
    * the place record. Answers `{ removed, swept, note? }`. */
   z.object({ id: reqId, op: z.literal("places.remove"), placeId: z.string() }),
+  /** Opens the door computers you own dial, when this host binds loopback alone, and answers where it is; a host
+   * already bound beyond loopback answers its own port and opens nothing. Answers a PlaceDoorView. The person's
+   * own road only, as every other place op is. */
+  z.object({ id: reqId, op: z.literal("places.door") }),
   /** Replies with an EventsSubscribeReply, then pushes events on this socket. With `after`, the seq of the last event
    * this client saw, every retained event past it is pushed first, oldest first, before anything live; `stream` is
    * the id that came with that seq, so a runtime that is not the one that issued it answers gap instead. */
@@ -2943,6 +3118,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Names the session's harness session in the harness's own store and keeps the name on the thread's rows; replies
    * with a SessionRenameResult. Takes the runtime's session id, as sessions.interrupt does. */
   z.object({ id: reqId, op: z.literal("sessions.rename"), sessionId: z.string(), title: z.string() }),
+  /** Drops a thread no turn ever ran on: its rows and its transcript rows go and nothing is asked of the machine.
+   * Takes the runtime's thread id, the one the rows carry, not a session id; refused with threadForgetRefusal's
+   * sentence once a turn reached the agent. */
+  z.object({ id: reqId, op: z.literal("sessions.forget"), threadId: z.string() }),
   z.object({ id: reqId, op: z.literal("golden.get"), name: z.string() }),
   /** Replies with the backend's Capabilities; the UI gates features on these. */
   z.object({ id: reqId, op: z.literal("capabilities.get") }),
@@ -3334,7 +3513,7 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
-export { actionRefusal, agentsKindRefusal, agentsMayDrive, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, type MachineOnDelete, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
+export { actionRefusal, agentsKindRefusal, agentsMayDrive, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, type MachineOnDelete, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";
@@ -3390,5 +3569,5 @@ export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./
 export * from "./app-ports.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";
-export { HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
+export { HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, TURN_TOKEN_ENV } from "./env.js";
 export type { AdapterAttachOptions, AdapterEvent, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";
