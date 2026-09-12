@@ -247,6 +247,9 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
 
     return {
       lines: lines.iterate(),
+      // The leader of the turn's own group, which is every process the turn started: what names this turn's tree in
+      // the pane that lists this computer's processes.
+      ...(pgid !== undefined ? { pid: pgid } : {}),
       teardown: () => signal("SIGTERM"),
       kill: () => signal("SIGKILL"),
       write: async line => {

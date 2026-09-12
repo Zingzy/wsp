@@ -62,6 +62,31 @@ const pwdAdapter: HarnessAdapterFactory = ctx => ({
   },
 });
 
+/** An adapter that leads a real child on this computer for as long as its turn runs and reports the process it
+ * leads, as the shipped ones do off their stream. */
+function pidAdapter(): { factory: HarnessAdapterFactory; end: (nth: number) => void } {
+  const ends: (() => void)[] = [];
+  const factory: HarnessAdapterFactory = ctx => ({
+    steers: false,
+    start: ({ onEvent }) => {
+      const sessionId = randomUUID();
+      const stream = ctx.execStream("sleep 30", { env: { ...ctx.env } });
+      const result: TurnResult = { status: "completed", text: "done" };
+      const finished = new Promise<TurnResult>(resolve => {
+        ends.push(() => {
+          stream.kill();
+          onEvent({ type: "turn.done", sessionId, result });
+          onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+          resolve(result);
+        });
+      });
+      onEvent({ type: "session.start", sessionId });
+      return { localId: sessionId, finished, interrupt: async () => {}, ...(stream.pid !== undefined ? { pid: stream.pid } : {}) };
+    },
+  });
+  return { factory, end: nth => ends[nth]!() };
+}
+
 /** An adapter that says what the launch environment named this turn's token, read out of a real child process on
  * this computer, and whose turn runs on until it is ended: the token means something only while the turn does. It
  * steers, so a line sent into one of its running turns lands there rather than opening another. */
@@ -157,6 +182,22 @@ describe("local workspace", () => {
     expect(listed.map(w => ({ name: w.name, kind: w.kind }))).toEqual([{ name: "my-mac", kind: "local" }]);
     // This computer is forked by nobody, so no provider rides its view and a row reads the kind's own words for it.
     expect(listed.map(w => w.provider)).toEqual([undefined]);
+  });
+
+  it("a listing names the process a turn runs in on this computer while it runs, and never once it is over", async () => {
+    const { factory, end } = pidAdapter();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: factory }, local: localWiring });
+    const ws = await rt.workspaces.createLocal("mac");
+    const handle = await rt.sessions.start(ws.id, { prompt: "work" });
+    const running = (await rt.sessions.list(ws.id))[0]!;
+    expect(running.status).toBe("running");
+    // A process this computer is running right now, which is what the pane heads the thread's tree with.
+    expect(() => process.kill(running.pid!, 0)).not.toThrow();
+    end(0);
+    await handle.finished;
+    const over = (await rt.sessions.list(ws.id))[0]!;
+    expect(over.status).not.toBe("running");
+    expect(over.pid).toBeUndefined();
   });
 
   it("there is one local workspace per host", async () => {
