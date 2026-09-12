@@ -7,10 +7,11 @@ import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useRightPanelStore, type RightPanelSurface } from "../rightPanelStore.js";
 import { openPanelTerminal, splitPanelTerminal, type SplitDirection } from "../shell/shellCommands.js";
 import { useTerminalViewportConfig } from "../terminal/fontSetting.js";
-import { getTerminals, onTerminals, type WorkspaceTerminals } from "../terminal/link.js";
+import { getTerminals, NOT_OPENED_YET, onTerminals, type WorkspaceTerminals } from "../terminal/link.js";
+import { useTerminalPane } from "../terminal/paneWords.js";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty.js";
-import { lostTerminals, terminalLabels, useTerminalPane } from "./WorkspaceTerminalDrawer.js";
+import { lostTerminals, terminalLabels } from "./WorkspaceTerminalDrawer.js";
 
 const NO_TABS: readonly never[] = [];
 
@@ -25,7 +26,7 @@ export function useTerminalSurfaces(workspaceId: string): ReadonlyMap<string, st
   const subscribe = useCallback((fn: () => void) => (terms ? terms.onTabs(fn) : () => {}), [terms]);
   const tabs = useSyncExternalStore(subscribe, () => (terms ? terms.tabs() : NO_TABS));
   const subscribeStatus = useCallback((fn: () => void) => (terms ? terms.onStatus(fn) : () => {}), [terms]);
-  const status = useSyncExternalStore(subscribeStatus, () => (terms ? terms.status() : "connecting"));
+  const status = useSyncExternalStore(subscribeStatus, () => (terms ? terms.status() : NOT_OPENED_YET));
   const reconcile = useRightPanelStore(s => s.reconcileTerminalSurfaces);
   useEffect(() => {
     if (terms && status === "live") reconcile(workspaceId, tabs.map(t => t.ptyId));
