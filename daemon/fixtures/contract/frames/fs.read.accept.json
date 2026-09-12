@@ -1,0 +1,19 @@
+[
+  {
+    "id": 1,
+    "op": "fs.read",
+    "path": "README.md"
+  },
+  {
+    "id": 2,
+    "op": "fs.read",
+    "path": "logo.png",
+    "encoding": "base64"
+  },
+  {
+    "id": 3,
+    "op": "fs.read",
+    "path": "a.txt",
+    "encoding": "utf8"
+  }
+]
