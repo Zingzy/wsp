@@ -27,7 +27,7 @@ import {
   type PlaceReport,
   type PlaceView,
 } from "@wsp/protocol";
-import { createRuntime, type Runtime } from "../src/runtime.js";
+import { createRuntime, wiredPlace, type Runtime } from "../src/runtime.js";
 import { newPlaceKeyPair, type PlaceInstallRequest, type PlaceKeyPair, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -96,9 +96,12 @@ const signWith = (pem: string, bytes: Uint8Array): string => sign(null, bytes, c
 /** One join, as a computer would make it: the frame, the check of the host's own signature, and the prove. */
 async function join(
   hostKey: PlaceKeyPair,
-  opts: { code: string; name?: string; client?: { name: string }; report?: PlaceReport; proveReport?: PlaceReport; expectProved?: boolean } = { code: "" },
+  opts: { code: string; name?: string; client?: { name: string }; report?: PlaceReport; proveReport?: PlaceReport; expectProved?: boolean; answers?: (c: WsClient) => void } = { code: "" },
 ): Promise<{ client: WsClient; placeId: string; reply: Record<string, unknown>; proved: Record<string, unknown>; pair: PlaceKeyPair }> {
   const client = await WsClient.connect(srv!.port);
+  // What this computer answers is on the socket before the handshake is: the host may send its first frame the
+  // moment the prove lands, and a computer that only starts listening afterwards would miss it.
+  opts.answers?.(client);
   const pair = newPlaceKeyPair();
   const mine = nonce();
   const sent = opts.report ?? report(opts.name);
@@ -116,8 +119,15 @@ async function join(
 }
 
 /** A place that already joined, dialling in again: the handshake it runs on every attempt. */
-async function relink(hostKey: PlaceKeyPair, placeId: string, pair: PlaceKeyPair, sent: PlaceReport = report()): Promise<{ client: WsClient; proved: Record<string, unknown> }> {
+async function relink(
+  hostKey: PlaceKeyPair,
+  placeId: string,
+  pair: PlaceKeyPair,
+  sent: PlaceReport = report(),
+  answers?: (c: WsClient) => void,
+): Promise<{ client: WsClient; proved: Record<string, unknown> }> {
   const client = await WsClient.connect(srv!.port);
+  answers?.(client);
   const mine = nonce();
   const challenged = await client.request("place.auth", { placeId, nonce: mine });
   expect(challenged.ok, String(challenged["error"])).toBe(true);
@@ -764,3 +774,466 @@ describe("the door a computer you own dials", () => {
     relayed.close();
   });
 });
+
+/** A joined computer that forks: it answers the machine ops on the socket it opened, as the agent on it does, and
+ * records what the host asked it for. Nothing here is the server half itself, which lives with the agent; this is
+ * one computer's worth of answers, so the runtime's own roads are what the test is reading. */
+interface ForkingPlace {
+  created: Record<string, unknown>[];
+  killed: string[];
+  paused: number;
+  resumed: number;
+  snapshots: string[];
+  tunnels: { tunnelId: string; port: number }[];
+  /** What the next create answers with instead of a machine; cleared after one use. */
+  refuseCreate?: { error: string; kind: string; status: number };
+  /** Every op the host sent, in order. */
+  ops: string[];
+  /** How many times each op was asked. */
+  asked: Record<string, number>;
+  /** The ask of the machine's own daemon check that first answers yes; every one before it answers no. */
+  daemonAnswersAfter: number;
+  /** Holds every resume frame until it is called, for a wake a test wants in flight. */
+  holdResumes(): () => void;
+}
+
+const PLACE_FACTS = {
+  offer: "docker",
+  capabilities: {
+    liveCloneForks: false,
+    pauseMode: "memory",
+    resize: false,
+    replacesMachine: true,
+    previewUrls: false,
+    signedUrls: false,
+    containers: false,
+    callbackRelay: true,
+    diskSnapshots: true,
+    snapshotListing: true,
+    templates: true,
+    kept: false,
+    sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0 }],
+  },
+  pricing: { defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: { freeGb: 0, usdPerGbMonth: 0, billedFrom: "" } },
+  lifecycle: { budgets: { wakeAttempts: 1, daemonAnswersMs: 30_000 } },
+  baseTemplates: { sandbox: "ubuntu:24.04", desktop: "ubuntu:24.04" },
+};
+
+const PLACE_ROADS = { previewUrl: true, daemonAnswers: true, putBytes: true, describe: true, facts: true, metrics: true };
+
+function forks(
+  client: WsClient,
+  capacity: {
+    cores: number;
+    memMb: number;
+    memRoomMb: number;
+    machineMemMb: number;
+    diskFreeBytes: number;
+    images: { id: string; sizeBytes: number }[];
+    machines: { running: number; paused: number };
+  } = {
+    cores: 4,
+    memMb: 8192,
+    memRoomMb: 9000,
+    machineMemMb: 4096,
+    diskFreeBytes: 10 * 1024 * 1024 * 1024,
+    images: [{ id: "sha256:i", sizeBytes: 4 * 1024 * 1024 * 1024 }],
+    machines: { running: 1, paused: 0 },
+  },
+): ForkingPlace {
+  let held: ((...args: never[]) => void)[] | undefined;
+  const seen: ForkingPlace = {
+    created: [],
+    killed: [],
+    paused: 0,
+    resumed: 0,
+    snapshots: [],
+    tunnels: [],
+    ops: [],
+    asked: {},
+    daemonAnswersAfter: 1,
+    holdResumes: () => {
+      held = [];
+      return () => {
+        for (const release of held ?? []) release();
+        held = undefined;
+      };
+    },
+  };
+  let made = 0;
+  // The container's own word for itself, as a Docker daemon would answer it: a wake reads it before it resumes.
+  let state: "running" | "paused" = "running";
+  client.ws.on("message", raw => {
+    const frame = JSON.parse(String(raw)) as Record<string, unknown>;
+    const op = typeof frame["op"] === "string" ? frame["op"] : undefined;
+    if (op === undefined) return;
+    const id = frame["id"];
+    const say = (payload: Record<string, unknown>): void => client.ws.send(JSON.stringify({ id, ok: true, ...payload }));
+    const machine = (machineId: string): Record<string, unknown> => ({ machine: { id: machineId, kind: "sandbox", daemonSupervisor: "entrypoint", roads: PLACE_ROADS } });
+    if (op.startsWith("machine.") || op.startsWith("tunnel.")) seen.ops.push(op);
+    seen.asked[op] = (seen.asked[op] ?? 0) + 1;
+    switch (op) {
+      case "machine.backend":
+        return say(PLACE_FACTS);
+      case "machine.capacity":
+        return say(capacity);
+      case "machine.create": {
+        if (seen.refuseCreate !== undefined) {
+          const refusal = seen.refuseCreate;
+          delete seen.refuseCreate;
+          return void client.ws.send(JSON.stringify({ id, ok: false, ...refusal }));
+        }
+        seen.created.push(frame["spec"] as Record<string, unknown>);
+        return say(machine(`k${++made}`));
+      }
+      case "machine.get":
+        return say(machine(String(frame["machineId"])));
+      case "machine.state":
+        return say({ state });
+      case "machine.exec":
+        return say({ result: { exitCode: 0, stdout: "", stderr: "" } });
+      case "machine.describe":
+        return say({ shape: { cpu: 2, memMb: 4096 } });
+      case "machine.facts":
+        return say({ facts: { os: "Ubuntu 24.04", uptimeMs: 1000, folder: "/root" } });
+      case "machine.metrics":
+        return say({});
+      case "machine.daemonAnswers":
+        return say({ answers: (seen.asked[op] ?? 0) >= seen.daemonAnswersAfter });
+      case "machine.previewUrl":
+        return say({ reach: { url: "http://127.0.0.1:49155", token: "", expiresAt: 1 } });
+      case "machine.snapshot":
+        seen.snapshots.push(String(frame["name"]));
+        return say({ snapshotId: `sha256:${String(frame["name"])}` });
+      case "machine.pause":
+        seen.paused++;
+        state = "paused";
+        return say({});
+      case "machine.resume": {
+        seen.resumed++;
+        state = "running";
+        if (held === undefined) return say({});
+        held.push(() => say({}));
+        return;
+      }
+      case "machine.kill":
+        seen.killed.push(String(frame["machineId"]));
+        return say({});
+      case "machine.putBytes":
+        return say({});
+      // A container mints no signed URL, as the Docker machine's own answer says; a nap that would have exported a
+      // vault through one reads the refusal and keeps the vault it had.
+      case "machine.downloadUrl":
+      case "machine.uploadUrl":
+        return void client.ws.send(JSON.stringify({ id, ok: false, error: "a container serves no signed URL" }));
+      case "tunnel.open":
+        seen.tunnels.push({ tunnelId: String(frame["tunnelId"]), port: Number(frame["port"]) });
+        return say({});
+      case "tunnel.write":
+      case "tunnel.close":
+        return say({});
+      case "exec":
+        return say({ exitCode: 0, stdout: "", stderr: "", truncated: false });
+      default:
+        return;
+    }
+  });
+  return seen;
+}
+
+describe("a fork on a computer you joined", () => {
+  it("lands on that computer's backend and not on this host's, and the record and the view say where", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({ backend, store, adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    let place!: ForkingPlace;
+    const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
+    sockets.push(client.ws);
+    const made = await runtime.workspaces.create({ golden: "snap_g", name: "x", on: "srv" });
+    expect(place.created).toHaveLength(1);
+    expect(backend.machines).toHaveLength(0);
+    expect(made.place).toBe(placeId);
+    expect((await runtime.workspaces.get(made.id)).place).toBe(placeId);
+    expect(await store.get("workspaces", made.id)).toMatchObject({ place: placeId });
+    // The place a fork landed on is where the next one lands when nobody says.
+    expect((await placesOf()).find(p => p.default)!.id).toBe(placeId);
+  });
+
+  it("says the computer it was forked on where a record names one, and this host's own provider otherwise", async () => {
+    const backend = stubBackend();
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, places: wiredPlace("solari", backend), placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c) });
+    sockets.push(client.ws);
+    const there = await runtime.workspaces.create({ golden: "snap_g", name: "x", on: "srv" });
+    // The fork stands on a computer that offers Docker, and this host forks at Solari: the row says Docker, which
+    // is what made it, and place says which computer it is on.
+    expect(there.provider).toBe("docker");
+    expect(there.place).toBeDefined();
+    await runtime.places!.markUsed(undefined);
+    const here = await runtime.workspaces.create({ golden: "snap_g", name: "y" });
+    expect(here.provider).toBe("solari");
+    expect(here.place).toBeUndefined();
+    // A computer the person owns is forked by nobody, so it names no provider at all.
+    expect((await runtime.workspaces.list()).find(w => w.kind === "place")!.provider).toBeUndefined();
+  });
+
+  it("takes the default place when nobody names one, and the host's own provider when that is the default", async () => {
+    const backend = stubBackend();
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    let place!: ForkingPlace;
+    const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
+    sockets.push(client.ws);
+    await runtime.workspaces.create({ golden: "snap_g", name: "x" });
+    expect(place.created).toHaveLength(1);
+    expect(backend.machines).toHaveLength(0);
+    // The provider named as the place a fork lands on: the host's own backend takes it and the record carries none.
+    await runtime.places!.markUsed(undefined);
+    const second = await runtime.workspaces.create({ golden: "snap_g", name: "y" });
+    expect(backend.machines).toHaveLength(1);
+    expect(second.place).toBeUndefined();
+    expect(place.created).toHaveLength(1);
+  });
+
+  it("refuses a word that names no place, and names what this host holds", async () => {
+    const { hostKey } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 } });
+    const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c) });
+    sockets.push(client.ws);
+    await expect(runtime!.workspaces.create({ golden: "snap_g", name: "x", on: "nowhere" })).rejects.toThrow(/no place named nowhere; you have .*srv.*solari/);
+  });
+
+  it("refuses a computer that forks nowhere, in its own words", async () => {
+    const { hostKey } = await serving();
+    const { client } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { docker: false }), answers: c => forks(c) });
+    sockets.push(client.ws);
+    await expect(runtime!.workspaces.create({ golden: "snap_g", name: "x", on: "srv" })).rejects.toThrow(/srv runs your agents but has no Docker/);
+    expect((await runtime!.workspaces.list()).filter(w => w.name === "x")).toEqual([]);
+  });
+
+  it("names the wall when that computer holds no copy of the image, and records nothing", async () => {
+    const { hostKey } = await serving();
+    let place!: ForkingPlace;
+    const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
+    sockets.push(client.ws);
+    place.refuseCreate = { error: "no such image: snap_g", kind: "missing", status: 404 };
+    await expect(runtime!.workspaces.create({ golden: "snap_g", name: "x", on: "srv" })).rejects.toThrow(/srv holds no copy of snap_g/);
+    expect((await runtime!.workspaces.list()).filter(w => w.name === "x")).toEqual([]);
+  });
+
+  it("gives the daemon on a machine that was stopped the whole budget to answer, rather than one ask at the start", async () => {
+    const backend = stubBackend();
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey) });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    let place!: ForkingPlace;
+    const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
+    sockets.push(client.ws);
+    const made = await runtime.workspaces.create({ golden: "snap_g", name: "x", on: "srv" });
+    await runtime.workspaces.nap(made.id);
+    // The daemon says no to the wake's first ask and yes to its second, which is a container still coming up off
+    // its own layers; the machine that comes back is the one that napped and not a fresh fork of the image.
+    const asked = place.asked["machine.daemonAnswers"] ?? 0;
+    place.daemonAnswersAfter = asked + 2;
+    expect((await runtime.workspaces.wake(made.id)).machineId).toBe(made.machineId);
+    expect(place.asked["machine.daemonAnswers"]).toBeGreaterThan(asked + 1);
+  });
+
+  it("naps and wakes on that computer and never on this host's provider", async () => {
+    const backend = stubBackend();
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey) });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    let place!: ForkingPlace;
+    const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
+    sockets.push(client.ws);
+    const made = await runtime.workspaces.create({ golden: "snap_g", name: "x", on: "srv" });
+    await runtime.workspaces.nap(made.id);
+    expect(place.paused).toBe(1);
+    await runtime.workspaces.wake(made.id);
+    expect(place.resumed).toBe(1);
+    expect(backend.machines).toHaveLength(0);
+  });
+
+  it("takes a snapshot of a fork on that computer there, and asks this host's provider for none", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({ backend, store, adapters: {}, placeLinks: wiring(hostKey) });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    let place!: ForkingPlace;
+    const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
+    sockets.push(client.ws);
+    // A fork of a project golden carries that project from birth, which is what the verb names the image after;
+    // nothing is imported here, since what this test reads is which computer the snapshot is taken on.
+    await store.put("project-goldens", "snap_p", {
+      snapshotId: "snap_p",
+      golden: "snap_g",
+      projects: [{ name: "proj", dest: "/root/proj", importedAt: "2026-09-12T00:00:00.000Z", size: 20 }],
+      workspaceId: "ws_older",
+      workspaceName: "older",
+      createdAt: "2026-09-12T00:00:00.000Z",
+    });
+    const made = await runtime.workspaces.create({ golden: "snap_p", name: "x", on: "srv" });
+    const golden = await runtime.workspaces.snapshot(made.id);
+    expect(place.snapshots).toHaveLength(1);
+    expect(place.snapshots[0]).toContain("proj");
+    expect(golden.snapshotId).toBe(`sha256:${place.snapshots[0]!}`);
+    expect(backend.snapshots).toEqual([]);
+  });
+
+  it("says the computer is not connected rather than asking the provider anything, and reads it again when it is back", async () => {
+    const { hostKey } = await serving();
+    const { client, placeId, pair: key } = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c) });
+    sockets.push(client.ws);
+    const made = await runtime!.workspaces.create({ golden: "snap_g", name: "x", on: "srv" });
+    client.close();
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
+    const away = (await runtime!.status.list()).find(r => r.id === made.id)!;
+    expect(away.reach.state).toBe("unreachable");
+    expect(away.reason).toContain("srv is not connected right now");
+    expect(away.machineState).toBe("running");
+    const back = await relink(hostKey, placeId, key, report("srv"), c => forks(c));
+    sockets.push(back.client.ws);
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === true);
+    await until(async () => (await runtime!.status.list()).find(r => r.id === made.id)!.reach.state !== "unreachable");
+  });
+
+  it("leaves a fork that was live through the blip alone, wake and all, when its computer dials again", async () => {
+    const { hostKey } = await serving();
+    let first!: ForkingPlace;
+    const { client, placeId, pair: key } = await join(hostKey, { code: await code(), name: "srv", answers: c => (first = forks(c)) });
+    sockets.push(client.ws);
+    const made = await runtime!.workspaces.create({ golden: "snap_g", name: "x", on: "srv" });
+    await runtime!.workspaces.nap(made.id);
+    // A wake in flight across the relink: the machine resumes and its daemon says no, so the wake is still asking
+    // when the computer's new socket lands.
+    first.daemonAnswersAfter = Number.MAX_SAFE_INTEGER;
+    const waking = runtime!.workspaces.wake(made.id);
+    await until(async () => first.resumed === 1);
+    let second!: ForkingPlace;
+    const back = await relink(hostKey, placeId, key, report("srv"), c => (second = forks(c)));
+    sockets.push(back.client.ws);
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === true);
+    // The second caller joins the wake in flight rather than finding a record the presence beat replaced.
+    const joined = runtime!.workspaces.wake(made.id);
+    expect((await waking).id).toBe(made.id);
+    expect((await joined).id).toBe(made.id);
+    // One resume and one create between the two sockets: the wake was joined, not started again, and nothing
+    // forked the image afresh behind it.
+    expect(first.resumed + second.resumed).toBe(1);
+    expect(first.created.length + second.created.length).toBe(1);
+    // And the record was never read again off the store: a fork this host was holding live is left exactly as it
+    // is, which is what keeps the wake, the nap and the delete in flight from being thrown away by a beat.
+    expect(second.ops).not.toContain("machine.get");
+  });
+
+  it("holds a fork on a computer that is away at host start, and reads its machine once it dials in", async () => {
+    const store = memoryStore();
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey) });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    const first = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c) });
+    sockets.push(first.client.ws);
+    const made = await runtime.workspaces.create({ golden: "snap_g", name: "x", on: "srv" });
+    await runtime.workspaces.nap(made.id);
+    first.client.close();
+    await srv.close();
+    await runtime.close();
+    // A second host over the same store, with that computer away: the record keeps the word it was left with.
+    runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey) });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    expect((await runtime.workspaces.get(made.id)).phase).toBe("napping");
+    let place!: ForkingPlace;
+    const back = await relink(hostKey, first.placeId, first.pair, report("srv"), c => (place = forks(c)));
+    sockets.push(back.client.ws);
+    await until(async () => place.ops.includes("machine.get"));
+  });
+
+  it("carries one port on this computer to one port on that one, for as long as the host runs", async () => {
+    const { hostKey } = await serving();
+    let place!: ForkingPlace;
+    const { client, placeId, pair: key } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
+    sockets.push(client.ws);
+    const first = await runtime!.places!.forward(placeId, 32768);
+    const again = await runtime!.places!.forward(placeId, 32768);
+    expect(again.localPort).toBe(first.localPort);
+    await dialLocal(first.localPort);
+    await until(async () => place.tunnels.some(t => t.port === 32768));
+    // The listener stays bound while that computer is away: the route this host handed out keeps its port.
+    client.close();
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
+    await expect(dialLocal(first.localPort, true)).resolves.toBe("cut");
+    let second!: ForkingPlace;
+    const back = await relink(hostKey, placeId, key, report("srv"), c => (second = forks(c)));
+    sockets.push(back.client.ws);
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === true);
+    expect((await runtime!.places!.forward(placeId, 32768)).localPort).toBe(first.localPort);
+    await dialLocal(first.localPort);
+    await until(async () => second.tunnels.some(t => t.port === 32768));
+  });
+
+  it("counts a napping fork in the column too, so it agrees with the workspace list", async () => {
+    const { hostKey } = await serving();
+    const { client, placeId } = await join(hostKey, {
+      code: await code(),
+      name: "srv",
+      // One running and one napping machine on that computer, as its own backend counts them under a stopping nap.
+      answers: c =>
+        forks(c, {
+          cores: 4,
+          memMb: 8192,
+          memRoomMb: 9000,
+          machineMemMb: 4096,
+          diskFreeBytes: 10 * 1024 * 1024 * 1024,
+          images: [{ id: "sha256:i", sizeBytes: 4 * 1024 * 1024 * 1024 }],
+          machines: { running: 1, paused: 1 },
+        }),
+    });
+    sockets.push(client.ws);
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.forks !== undefined);
+    expect((await placesOf()).find(p => p.id === placeId)!.forks).toEqual({ running: 2, room: 2 });
+  });
+
+  it("shows how many forks a place holds of how many it takes", async () => {
+    const { hostKey } = await serving();
+    const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c) });
+    sockets.push(client.ws);
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.forks !== undefined);
+    // Nine thousand megabytes of room at four thousand a fork is two; ten gigabytes of disk at four an image is two.
+    expect((await placesOf()).find(p => p.id === placeId)!.forks).toEqual({ running: 1, room: 2 });
+  });
+
+  it("refuses to take a computer out from under the forks standing on it, and sweeps nothing", async () => {
+    const { hostKey } = await serving();
+    let place!: ForkingPlace;
+    const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
+    sockets.push(client.ws);
+    const swept: string[] = [];
+    client.ws.on("message", raw => {
+      const frame = JSON.parse(String(raw)) as { op?: string };
+      if (frame.op === "place.leave") swept.push("asked");
+    });
+    await runtime!.workspaces.create({ golden: "snap_g", name: "x", on: "srv" });
+    await expect(runtime!.places!.remove(placeId)).rejects.toThrow(/srv still holds a fork \(x\); delete them first/);
+    expect(swept).toEqual([]);
+    expect(place.killed).toEqual([]);
+  });
+});
+
+/** One connection to a port this host is forwarding; answers what it read, or "cut" when the far side refused it. */
+function dialLocal(port: number, expectCut = false): Promise<string> {
+  return new Promise((done, fail) => {
+    const socket = netConnect({ host: "127.0.0.1", port });
+    socket.on("error", e => (expectCut ? done("cut") : fail(e)));
+    socket.on("close", () => done(expectCut ? "cut" : "closed"));
+    socket.on("connect", () => {
+      socket.write("hello");
+      if (!expectCut) setTimeout(() => socket.destroy(), 60);
+    });
+  });
+}

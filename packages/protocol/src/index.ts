@@ -417,10 +417,15 @@ export const WorkspaceView = z.object({
    * workspace a person made. The root is what the machine cap counts against. */
   parentThreadId: z.string().optional(),
   rootThreadId: z.string().optional(),
-  /** Which provider this workspace's machine was forked at, by the id that provider's own module carries in the
-   * host's registry (`solari`, `box`, `docker`). The runtime stamps it, since the host is the one that knows which
-   * module it wired; absent on every kind wsp does not fork, whose machine is the person's own. A row names this
-   * where it would otherwise have only the provider's opaque id for the machine. */
+  /** The place a fork lives on, by id; absent on a fork at the host's own provider and on every workspace that is
+   * not a fork. The command line and the app show its name after the workspace's. */
+  place: z.string().optional(),
+  /** Which provider this workspace's machine was forked at, by the id that provider's own module carries in a
+   * registry (`solari`, `box`, `docker`): the host's own where it forked the machine, and the joined computer's
+   * own offer where `place` names one, so the two fields cannot disagree about where a machine lives. The runtime
+   * stamps it; absent on every kind wsp does not fork, whose machine is the person's own, and on a place this host
+   * has not yet heard what it forks with. A row names this where it would otherwise have only the provider's
+   * opaque id for the machine. */
   provider: z.string().optional(),
 });
 export type WorkspaceView = z.infer<typeof WorkspaceView>;
@@ -456,7 +461,7 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
 const WORKSPACE_OUT = {
   id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, projects: true, folder: true, home: true,
   claudeSessionId: true, gone: true, theme: true, glyph: true, daemonNote: true, daemonRefusedAt: true, vaultedAt: true, vaultRefused: true, wakeRefused: true,
-  agents: true, parentThreadId: true, rootThreadId: true, provider: true,
+  agents: true, parentThreadId: true, rootThreadId: true, place: true, provider: true,
 } as const;
 
 /** A workspace as every verb answers with it: the view without the display stream a desktop machine carries, which
@@ -576,6 +581,10 @@ export const ThreadView = z.object({
 });
 export type ThreadView = z.infer<typeof ThreadView>;
 
+/** The thread a turn's row belongs to: the runtime's thread id, else the row's own, since a row the runtime stamped
+ * no thread on is a thread of one turn. The one rule for grouping rows by thread. */
+export const threadKeyOf = (session: SessionView): string => session.threadId ?? session.id;
+
 /** Whether a turn of these rows ever did any work: one is still working, or one announced a harness session and
  * ended for something other than a refusal. Announcing is not enough on its own, since both CLIs announce their
  * session before they learn they have no sign-in, and a refused turn did none of the work it was asked for. A
@@ -589,7 +598,7 @@ export function threadRan(turns: ReadonlyArray<Pick<SessionView, "claudeSessionI
 export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] {
   const byThread = new Map<string, SessionView[]>();
   for (const session of sessions) {
-    const key = session.threadId ?? session.id;
+    const key = threadKeyOf(session);
     const turns = byThread.get(key);
     if (turns === undefined) byThread.set(key, [session]);
     else turns.push(session);
@@ -2140,6 +2149,8 @@ export const PlaceView = z.object({
   workspaceId: z.string().optional(),
   /** A provider: its hourly rate for the default size. */
   rateUsdPerHour: z.number().optional(),
+  /** How many forks the place holds and how many more it takes, by forkRoom; absent on a place that forks nowhere. */
+  forks: z.object({ running: z.number().int(), room: z.number().int() }).optional(),
 });
 export type PlaceView = z.infer<typeof PlaceView>;
 
@@ -2359,11 +2370,6 @@ export type DaemonExecRequest = z.infer<typeof DaemonExecRequest>;
 export const DaemonExecReply = z.object({ exitCode: z.number().int(), stdout: z.string(), stderr: z.string(), truncated: z.boolean() });
 export type DaemonExecReply = z.infer<typeof DaemonExecReply>;
 
-/** The refusal `place.leave` gets on a socket that is not the link this computer opened to its host. The op takes
- * this computer out of a wsp, so only the road it dialled out on may ask for it: an inbound socket holding the
- * daemon token is a client on this machine, and a client on this machine does not un-join it. */
-export const PLACE_LEAVE_ROAD_REFUSAL = "place.leave is answered only on the link this computer opened to its host; run wsp leave here to take this computer out of a wsp";
-
 export const DaemonRequest = z.discriminatedUnion("op", [
   z.object({
     id: reqId,
@@ -2437,6 +2443,273 @@ export const DaemonRequest = z.discriminatedUnion("op", [
 ]);
 export type DaemonRequest = z.infer<typeof DaemonRequest>;
 
+// --- machines over a place link -------------------------------------------
+//
+// One computer drives another computer's machines: every call the engine's
+// MachineBackend and Machine interfaces carry, as a frame on the link the
+// place opened. The data shapes live here rather than in the engine because
+// they are the wire and the interface at once, and two copies of a spec would
+// drift the day a field is added on one side.
+
+/** What keeps the daemon running on a machine: the guest's own service manager, or the machine's boot itself on a
+ * guest that has none (a container, whose PID 1 is the only thing that outlives an exec). */
+export const DaemonSupervisor = z.enum(["systemd", "entrypoint"]);
+export type DaemonSupervisor = z.infer<typeof DaemonSupervisor>;
+
+export const MachineSpec = z.object({
+  kind: MachineKind,
+  template: z.string().optional(),
+  fromSnapshot: z.string().optional(),
+  cpu: z.number().optional(),
+  memMb: z.number().optional(),
+  /** Root disk in GiB; the provider default applies when absent (Solari: 4, and 20 is its cap). */
+  diskGb: z.number().optional(),
+  envs: z.record(z.string()).optional(),
+  labels: z.record(z.string()).optional(),
+  /** What the provider does when the machine sits idle past its window; the provider default (Solari: pause)
+   * applies when absent. */
+  onIdle: z.enum(["pause", "kill"]).optional(),
+  /** Rolling idle window before onIdle fires; the provider default (Solari: 30 min documented) applies when absent. */
+  idleTimeoutMs: z.number().optional(),
+  /** One per create attempt: the provider answers a repeat of the same request under it with the machine it already
+   * booted. Minted fresh after a kill, since a replay names the dead machine (measured 2026-09-04). */
+  idempotencyKey: z.string().optional(),
+});
+export type MachineSpec = z.infer<typeof MachineSpec>;
+
+export const ExecResult = z.object({ exitCode: z.number().int(), stdout: z.string(), stderr: z.string() });
+export type ExecResult = z.infer<typeof ExecResult>;
+
+/** The provider's own view of a machine's size and birth. Solari's resume can rebuild a VM on a fresh host at
+ * default size while keeping the id, so a wake compares the size against what was created. createdAt moves to the
+ * resume time on every Solari resume (measured), healthy or not: record it, never judge by it. */
+export const MachineShape = z.object({
+  cpu: z.number().optional(),
+  memMb: z.number().optional(),
+  /** The root disk the provider granted, in GiB; a dropped or misspelled disk field boots the default and says
+   * nothing else. */
+  diskGb: z.number().optional(),
+  createdAt: z.string().optional(),
+});
+export type MachineShape = z.infer<typeof MachineShape>;
+
+/** The history the runtime hands a snapshot: whether this machine was ever resumed. The fact is the record's; the
+ * rule about it, if the provider has one, is the backend's. */
+export const MachineLife = z.object({ firstLife: z.boolean() });
+export type MachineLife = z.infer<typeof MachineLife>;
+
+/** The route this host takes to one guest port. On a backend whose capabilities say previewUrls it is a public URL
+ * with the provider's token embedded, the token standalone, and its expiry in epoch ms as the provider sets it; on
+ * one that says otherwise it is a route only the computer holding the backend can take, with no token and an expiry
+ * at the end of the machine's life. */
+export const PreviewReach = z.object({ url: z.string(), token: z.string(), expiresAt: z.number() });
+export type PreviewReach = z.infer<typeof PreviewReach>;
+
+/** One snapshot as the provider lists it; sizeBytes is what storage is billed on. */
+export const SnapshotRow = z.object({
+  id: z.string(),
+  /** The name the snapshot was taken under, which is where wsp's owner mark rides; absent on a backend whose
+   * listing carries none. */
+  name: z.string().optional(),
+  sizeBytes: z.number(),
+  createdAt: z.string().optional(),
+  /** The snapshot this one was taken under, as the provider chains them; null at a root. */
+  parent: z.string().nullable().optional(),
+});
+export type SnapshotRow = z.infer<typeof SnapshotRow>;
+
+/** One template as the provider reports it: a promoted snapshot reads ready at once, a built one moves from
+ * building to ready or failed, with the provider's reason only on failed. */
+export const TemplateRow = z.object({
+  id: z.string(),
+  name: z.string(),
+  status: z.enum(["building", "ready", "failed"]),
+  error: z.string().optional(),
+  /** When the provider says it was promoted or built; absent on a built-in and on a backend that reports none. It
+   * is what gives a template the same grace a snapshot gets before anything may call it an orphan. */
+  createdAt: z.string().optional(),
+});
+export type TemplateRow = z.infer<typeof TemplateRow>;
+
+/** How the provider bills snapshot storage: the free GB shared by every snapshot on the account, the price of each
+ * GB-month past them, and the day billing starts. */
+export const SnapshotStoragePricing = z.object({ freeGb: z.number(), usdPerGbMonth: z.number(), billedFrom: z.string() });
+export type SnapshotStoragePricing = z.infer<typeof SnapshotStoragePricing>;
+
+export const LifecycleBudgets = z.object({
+  /** How many times a wake may resume the machine and check it before a fresh fork replaces it. Each attempt after
+   * the first is a pause and a resume; a provider that bills starts declares 1. */
+  wakeAttempts: z.number().int().min(1),
+  /** How long the guest's daemon gets to answer once the machine reads running, after a fork and after a resume
+   * alike, before the runtime says it did not. */
+  daemonAnswersMs: z.number().positive(),
+  /** How the host keeps asking after a resume the provider did not take: once every everyMs of wall time from the
+   * first ask, for forMs. Absent, the host asks once and stops. */
+  resumeAsks: z.object({ everyMs: z.number(), forMs: z.number() }).optional(),
+});
+export type LifecycleBudgets = z.infer<typeof LifecycleBudgets>;
+
+/** One machine as a backend lists it; size comes off the listing itself, since a per-machine read would reset that
+ * machine's idle timer. */
+export const MachineListRow = z.object({ id: z.string(), state: MachineState, labels: z.record(z.string()), size: WorkspaceSize.optional() });
+export type MachineListRow = z.infer<typeof MachineListRow>;
+
+/** The engine's own error kinds, carried on a refused frame so a container the place's daemon lost reads missing on
+ * the host exactly as it reads on this computer. `absent` is the link's own: the place is not connected. */
+export const MachineErrorKind = z.enum(["concurrency", "plan", "missing", "conflict", "snapshotUnavailable", "transient", "auth", "unknown", "absent"]);
+export type MachineErrorKind = z.infer<typeof MachineErrorKind>;
+
+/** What a backend says about itself once, when a link opens. Pricing carries its numbers and not its function: the
+ * client answers rateUsdPerHour from the matching offer in capabilities.sizes, and 0 where none matches, which is
+ * every size on a computer the person owns. Lifecycle carries budgets alone; a provider whose backstop is pushed
+ * cannot be served over a link yet, and none that can be is. */
+export const BackendFacts = z.object({
+  /** The id of the row this computer serves, off the one table of what a joined computer can offer. What a fork
+   * standing there was forked by: the computer says it, since which kinds there are is the computer's own to know
+   * and the host that drives it reads a backend and never a kind. */
+  offer: z.string(),
+  capabilities: Capabilities,
+  pricing: z.object({ defaultSize: WorkspaceSize, snapshotStorage: SnapshotStoragePricing, builderDiskGb: z.number().optional() }),
+  lifecycle: z.object({ budgets: LifecycleBudgets }).optional(),
+  baseTemplates: z.object({ sandbox: z.string(), desktop: z.string() }).optional(),
+});
+export type BackendFacts = z.infer<typeof BackendFacts>;
+
+/** One machine as the place hands it over: the handle's fields, and which optional roads the handle carries, so the
+ * client builds a machine whose optional methods are present exactly where the place's are. hostUrl is never
+ * carried: the place's answer names the place, and a fork on it dials the host at the address the host advertises. */
+export const MachineHandle = z.object({
+  id: z.string(),
+  kind: MachineKind,
+  streamUrl: z.string().optional(),
+  labels: z.record(z.string()).optional(),
+  seen: z.object({ state: MachineState, createdAt: z.string().optional() }).optional(),
+  replayed: z.boolean().optional(),
+  daemonSupervisor: DaemonSupervisor.optional(),
+  roads: z.object({ previewUrl: z.boolean(), daemonAnswers: z.boolean(), putBytes: z.boolean(), describe: z.boolean(), facts: z.boolean(), metrics: z.boolean() }),
+});
+export type MachineHandle = z.infer<typeof MachineHandle>;
+
+/** What the computer holding a backend has left for one more machine. memRoomMb is the backend's share of the
+ * memory less what its live machines (running and paused alike, a frozen container keeps its memory) are allowed;
+ * diskFreeBytes is the filesystem under the daemon's root; images are the wsp images it holds. */
+export const PlaceCapacity = z.object({
+  cores: z.number(),
+  memMb: z.number(),
+  memRoomMb: z.number(),
+  /** The most one machine's memory limit may name on this computer, which is what a fork of any bigger size is
+   * clamped to. The room a fork takes is not the room the whole computer has, and the rule that says so is the
+   * backend's own, so the number travels rather than the rule. */
+  machineMemMb: z.number(),
+  diskFreeBytes: z.number(),
+  images: z.array(z.object({ id: z.string(), name: z.string().optional(), sizeBytes: z.number() })),
+  machines: z.object({ running: z.number(), paused: z.number() }),
+});
+export type PlaceCapacity = z.infer<typeof PlaceCapacity>;
+
+/** How many more forks a place takes: the memory rule, and the disk rule where an image is there to measure by.
+ * One function, read by the command line's table and the app's place row. */
+export function forkRoom(c: Pick<PlaceCapacity, "memRoomMb" | "diskFreeBytes">, memMb: number, imageBytes: number | undefined): number {
+  const byMemory = Math.floor(c.memRoomMb / memMb);
+  const byDisk = imageBytes === undefined || imageBytes === 0 ? Number.POSITIVE_INFINITY : Math.floor(c.diskFreeBytes / imageBytes);
+  return Math.max(0, Math.min(byMemory, byDisk));
+}
+
+/** Raw bytes per putBytes frame: 4 MiB is 5.4 MiB of base64 in one JSON frame, small enough that a pty stream on
+ * the same link is not held behind it for long, large enough that a daemon bundle goes in one or two. */
+export const MACHINE_PUT_PART_BYTES = 4 * 1024 * 1024;
+
+export const MachineLinkRequest = z.discriminatedUnion("op", [
+  z.object({ id: reqId, op: z.literal("machine.backend") }),
+  z.object({ id: reqId, op: z.literal("machine.capacity") }),
+  z.object({ id: reqId, op: z.literal("machine.checkKey") }),
+  z.object({ id: reqId, op: z.literal("machine.create"), spec: MachineSpec }),
+  z.object({ id: reqId, op: z.literal("machine.get"), machineId: z.string() }),
+  z.object({ id: reqId, op: z.literal("machine.list"), labels: z.record(z.string()).optional() }),
+  z.object({ id: reqId, op: z.literal("machine.deleteSnapshot"), snapshotId: z.string() }),
+  z.object({ id: reqId, op: z.literal("machine.listSnapshots") }),
+  z.object({ id: reqId, op: z.literal("machine.promoteSnapshot"), snapshotId: z.string(), name: z.string() }),
+  z.object({ id: reqId, op: z.literal("machine.getTemplate"), templateId: z.string() }),
+  z.object({ id: reqId, op: z.literal("machine.listTemplates") }),
+  z.object({ id: reqId, op: z.literal("machine.deleteTemplate"), templateId: z.string() }),
+  z.object({ id: reqId, op: z.literal("machine.exec"), machineId: z.string(), cmd: z.string().max(EXEC_BODY_MAX), timeoutMs: z.number().int().positive().optional() }),
+  z.object({ id: reqId, op: z.literal("machine.snapshot"), machineId: z.string(), name: z.string(), life: MachineLife }),
+  z.object({ id: reqId, op: z.literal("machine.pause"), machineId: z.string() }),
+  z.object({ id: reqId, op: z.literal("machine.resume"), machineId: z.string() }),
+  z.object({ id: reqId, op: z.literal("machine.kill"), machineId: z.string() }),
+  z.object({ id: reqId, op: z.literal("machine.state"), machineId: z.string() }),
+  z.object({ id: reqId, op: z.literal("machine.describe"), machineId: z.string() }),
+  z.object({ id: reqId, op: z.literal("machine.facts"), machineId: z.string() }),
+  z.object({ id: reqId, op: z.literal("machine.metrics"), machineId: z.string() }),
+  z.object({ id: reqId, op: z.literal("machine.daemonAnswers"), machineId: z.string(), timeoutMs: z.number().int().positive().optional() }),
+  z.object({ id: reqId, op: z.literal("machine.previewUrl"), machineId: z.string(), port: z.number().int().min(1).max(65535) }),
+  z.object({ id: reqId, op: z.literal("machine.downloadUrl"), machineId: z.string(), path: z.string() }),
+  z.object({ id: reqId, op: z.literal("machine.uploadUrl"), machineId: z.string(), path: z.string() }),
+  /** One part of a file. data is base64 of at most MACHINE_PUT_PART_BYTES raw bytes; parts of one uploadId arrive in
+   * seq order on one socket; the part marked last lands the whole file through the backend's own byte road. The
+   * upload id is a name, never a path: the far side keeps a file under it while the parts arrive, so anything that
+   * could climb out of that folder is refused here, where the shape is read. */
+  z.object({
+    id: reqId,
+    op: z.literal("machine.putBytes"),
+    machineId: z.string(),
+    path: z.string(),
+    uploadId: z
+      .string()
+      .min(1)
+      .max(32)
+      .regex(/^[a-z0-9]+$/),
+    seq: z.number().int().min(0),
+    last: z.boolean(),
+    data: z.string(),
+    timeoutMs: z.number().int().positive().optional(),
+  }),
+]);
+export type MachineLinkRequest = z.infer<typeof MachineLinkRequest>;
+
+// One reply schema per reply, as the files and diff ops have; an op not listed answers the bare ok envelope.
+export const MachineBackendReply = BackendFacts;
+export const MachineCapacityReply = PlaceCapacity;
+export const MachineHandleReply = z.object({ machine: MachineHandle });
+export const MachineListReply = z.object({ machines: z.array(MachineListRow) });
+export const MachineExecReply = z.object({ result: ExecResult });
+export const MachineSnapshotReply = z.object({ snapshotId: z.string() });
+export const MachineStateReply = z.object({ state: MachineState });
+export const MachineShapeReply = z.object({ shape: MachineShape });
+export const MachineFactsReply = z.object({ facts: MachineFacts });
+export const MachineAnswersReply = z.object({ answers: z.boolean() });
+/** The route on the place's own loopback; the host turns it into a route of its own with a forward. */
+export const MachineReachReply = z.object({ reach: PreviewReach });
+export const MachineUrlReply = z.object({ url: z.string() });
+export const MachineSnapshotsReply = z.object({ snapshots: z.array(SnapshotRow) });
+export const MachinePromoteReply = z.object({ templateId: z.string() });
+export const MachineTemplateReply = z.object({ template: TemplateRow });
+export const MachineTemplatesReply = z.object({ templates: z.array(TemplateRow) });
+
+/** What an op meant for the link a computer opened to its host answers on any other socket: the leave op, which
+ * takes this computer out of a wsp, and every machine op, which drives the Docker daemon behind it. One sentence,
+ * since it is one rule: a client holding this daemon's token is a client on this machine, and a client on this
+ * machine neither un-joins it nor forks on it. */
+export const NOT_ON_THIS_ROAD = "not on this road";
+
+/** What a place that holds no copy of the image a fork names is refused with. A place builds its copy on first use;
+ * until it does, the forks land where the image already is. */
+export const placeHoldsNoImageLine = (place: string, image: string): string =>
+  `${place} holds no copy of ${image}; a place builds its copy of your image on first use, and until it does forks land on your default place`;
+
+/** What a remove of a place that still holds forks is refused with: the machines are the person's to delete, and a
+ * place taken out from under them would leave containers nothing here can name. */
+export const placeHoldsForksRefusal = (place: string, names: readonly string[]): string =>
+  `${place} still holds ${names.length === 1 ? "a fork" : `${names.length} forks`} (${names.join(", ")}); delete them first, then wsp remove ${place}`;
+
+/** What a fork on a joined computer with no Docker is refused with: it runs the person's agents over its link and
+ * has nothing to fork with. */
+export const placeForksNowhereLine = (place: string): string =>
+  `${place} runs your agents but has no Docker, so it takes no forks; install Docker on it to fork there`;
+
+/** What a word that names no place this host holds is refused with, naming the ones it does. */
+export const noSuchPlaceRefusal = (word: string, held: readonly string[]): string => `no place named ${word}; you have ${held.join(", ")}`;
+
 export const DaemonErrorCode = z.enum([
   "unsupported",
   "outside-root",
@@ -2457,6 +2730,10 @@ export const DaemonErrorResponse = z.object({
   ok: z.literal(false),
   error: z.string(),
   code: DaemonErrorCode.optional(),
+  /** Set by the machine ops alone, so a backend's own error keeps its meaning across the link: a container the
+   * place's daemon lost reads missing on the host exactly as it reads on the computer holding it. */
+  kind: MachineErrorKind.optional(),
+  status: z.number().int().optional(),
 });
 export const DaemonResponse = z.union([DaemonOkResponse, DaemonErrorResponse]);
 export type DaemonResponse = z.infer<typeof DaemonResponse>;
@@ -2510,7 +2787,8 @@ const DAEMON_CONTENTS = [
   "4c81908db0c4d29e74f00ddd5513e94137f01afeb39b9afbed242368be6097c6",
   "0ad3a1c3e98d5b75bf94d610b9e166a7ad1bb5e79ee7ab4905d6b738fb5eded9",
   "01030623497a43f044916ca27731dbfa4c92c6b82765a9e9dbd6426d69b1ee4e",
-  "4af30dbf43a946994b188e0f151d18f9150856deb3954c57c13a5d4e0905bcf1",
+  "a6ae68d8af502a8a5ecf9795ca11ca0b9b12cda2792e45eee3376c7e4d57917b",
+  "055dcf11b2a17e8959ab3a6246c2d17f89eb3837c59b31d3a8138c6dc7b6c322",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -2548,7 +2826,7 @@ const DAEMON_CONTENTS = [
  * module serves every other op instead of refusing to start. Version 18 finds that native module where a packaged
  * command carries it: the command bundles node-pty rather than requiring it, and a bundled CommonJS module arrives
  * with a default export and no named one, so a daemon running inside the packaged command opened no terminal at
- * all until this. Version 19 takes every option as a flag,
+ * all until this. Version 20 takes every option as a flag,
  * one per option, reads its ports, load, processes and pty modes off one /proc root, logs its samplers' starts and
  * stops, and builds a place's report and sweep off the home it is pointed at, so a test suite drives it as a binary
  * and the words and numbers it answers with are the protocol's, held in one fixture set. */
@@ -3048,6 +3326,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
     agents: WorkspaceAgents.partial().optional(),
     /** Auto-nap window for this workspace; absent takes the runtime default (20 min), null turns it off. */
     idleWindowMs: z.number().nullable().optional(),
+    /** Where this fork lands: a joined computer by name or id, or this computer. Absent takes the place a fork
+     * last landed on. */
+    on: z.string().optional(),
   }),
   /** The one local workspace: this computer. Forks nothing (the machine already exists); refused when this host wired
    * no local backend, when one already exists, or for a name another workspace holds. Replies with { workspace }. */

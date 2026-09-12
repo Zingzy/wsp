@@ -32,6 +32,7 @@ import {
   DaemonEvent,
   DaemonRequest,
   EXEC_BODY_MAX,
+  MachineLinkRequest,
   EXEC_DEADLINE_EXIT,
   EXEC_OUTPUT_MAX,
   EXEC_TIMEOUT_DEFAULT_MS,
@@ -44,10 +45,10 @@ import {
   HTTP_URL_MAX,
   NO_PLACE_FILE_LINE,
   NOT_ON_THIS_KIND,
+  NOT_ON_THIS_ROAD,
   OPEN_SHIM_PATH,
   OPEN_SOCKET_PATH,
   PID_MAX,
-  PLACE_LEAVE_ROAD_REFUSAL,
   PLACE_LINK_NONCE_BYTES,
   PORT_COMMAND_BYTES,
   PRE_AUTH_MAX_BYTES,
@@ -102,13 +103,14 @@ const namesOf = (union: { options: ZodObject<ZodRawShape>[] }, key: string): str
 const filed = (dir: string): string[] => [...new Set(readdirSync(join(CONTRACT, dir)).map(f => f.replace(/\.(accept|reject)\.json$/, "")))].sort();
 
 /** Which schema reads a frame by its op: every op the daemon answers inbound is one DaemonRequest option, the auth
- * frame is its own, and the two the place sends outward to its host are theirs. */
+ * frame is its own, the two the place sends outward to its host are theirs, and the machine ops the host sends a
+ * place over the link are the link's own union. */
 const OUTBOUND: Record<string, ZodTypeAny> = { auth: DaemonAuthRequest, "place.auth": PlaceAuthRequest, "place.prove": PlaceProveRequest };
-const schemaFor = (op: string): ZodTypeAny => OUTBOUND[op] ?? DaemonRequest;
+const schemaFor = (op: string): ZodTypeAny => OUTBOUND[op] ?? (op.startsWith("machine.") ? MachineLinkRequest : DaemonRequest);
 
 describe("every op and every event has its accept and reject frames", () => {
-  it("names one file pair per op the daemon answers, plus auth and the two frames a place sends its host", () => {
-    expect(filed("frames")).toEqual([...namesOf(DaemonRequest, "op"), ...Object.keys(OUTBOUND)].sort());
+  it("names one file pair per op the daemon answers, per machine op on the link, plus auth and the two frames a place sends its host", () => {
+    expect(filed("frames")).toEqual([...namesOf(DaemonRequest, "op"), ...namesOf(MachineLinkRequest, "op"), ...Object.keys(OUTBOUND)].sort());
   });
 
   it("names one file pair per event type the daemon pushes", () => {
@@ -164,7 +166,7 @@ const words = (): Record<string, string> => ({
   noToken: DAEMON_NO_TOKEN,
   unknownOp: unknownOpLine("{op}"),
   portScopeRefusal: portScopeRefusal("{port}"),
-  placeLeaveRoadRefusal: PLACE_LEAVE_ROAD_REFUSAL,
+  notOnThisRoad: NOT_ON_THIS_ROAD,
   notOnThisKind: NOT_ON_THIS_KIND,
   hostKeyRefusal: hostKeyRefusal("{url}"),
   listening: daemonListeningLine("{host}", "{port}"),

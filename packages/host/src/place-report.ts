@@ -116,6 +116,12 @@ export interface PlaceReportOptions {
   home?: string;
   env?: Readonly<Record<string, string | undefined>>;
   run?: RunningWsp;
+  /** Whether this computer can fork, as the agent found out by asking the backend it offers rather than by looking
+   * for a command on the PATH. The agent hands in that answer so the report and the backend it serves on the link
+   * cannot disagree, and it stands for that agent's life: a computer that gains a Docker says so at the next start
+   * of the agent, not at the next dial. Absent leaves the PATH read, which is what a report taken outside the
+   * agent has. */
+  docker?: boolean;
 }
 
 /** What this computer says about itself on every link. Read at each dial rather than once: a laptop gains a Docker,
@@ -135,7 +141,7 @@ export function placeReport(opts: PlaceReportOptions): PlaceSelfReport {
     ...(free !== undefined ? { diskFreeBytes: free } : {}),
     login,
     // Whether this computer can fork at all, which is the one thing the host cannot read from over the link.
-    docker: onPath("docker", env.PATH) !== undefined,
+    docker: opts.docker ?? onPath("docker", env.PATH) !== undefined,
     daemonVersion: DAEMON_VERSION,
     wsp: wspArgvOf(opts.run ?? runningWsp()),
     // Off the login PATH rather than this process's: a service starts with almost none, and what the person can

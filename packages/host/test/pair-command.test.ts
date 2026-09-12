@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { EXIT_CODES } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { advertisedUrl, deviceLines, hostReach, pairLines, pairOnLoopbackLine, reachAddresses, devicesCommand, pairCommand } from "../src/pairing.js";
-import { hostSideOnlyLine } from "../src/hosts.js";
+import { hostSideOnlyFix, hostSideOnlyLine } from "../src/hosts.js";
 import { cli, type CliIO } from "../src/cli.js";
 import { dialAddress } from "../src/host-lock.js";
 import { setDefaultHost, writeHost, type HostRecord } from "../src/hosts.js";
@@ -171,7 +171,7 @@ describe("a host side command aimed at a host on another computer", () => {
   const typed = async (argv: readonly string[], word: string): Promise<void> => {
     const errors: string[] = [];
     expect(await cli([...argv], io([], errors), undefined, { WSP_HOME: homeWithBox(false) }), `wsp ${argv.join(" ")}`).toBe(EXIT_CODES.usage);
-    expect(errors).toEqual([hostSideOnlyLine(word, "box")]);
+    expect(errors).toEqual([`${hostSideOnlyLine(word, "box")} ${hostSideOnlyFix()}`]);
   };
 
   it("wsp pair takes a typed --host and answers that sentence, not the parse's unknown option", async () => {
@@ -186,10 +186,10 @@ describe("a host side command aimed at a host on another computer", () => {
     await typed(["devices", "revoke", "d_1a2b3c4d", "--host", "box"], "devices");
   });
 
-  it("says which command it is and where the line was aimed, and where to run it", () => {
+  it("says which command it is and where the line was aimed, then where to run it", () => {
     expect(hostSideOnlyLine("pair", "box")).toContain("wsp pair");
     expect(hostSideOnlyLine("pair", "box")).toContain("box");
-    expect(hostSideOnlyLine("devices", "http://box.local:4400")).toContain("run it in a terminal over there");
+    expect(hostSideOnlyFix()).toContain("Run it in a terminal over there");
   });
 });
 

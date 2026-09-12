@@ -191,10 +191,10 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { GUEST_WSP_BIN, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct } from "@wsp/protocol";
-import { DAEMON_TOKEN_PATH, mcpServersBlocked, actionRefusal, copyIsCurrent, forksNoMachines, IDLE_REASON, kindWords, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState, placeDaemonPaths, placeWorkspaceGoneLine, workFolderIn } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, mcpServersBlocked, actionRefusal, copyIsCurrent, forksNoMachines, IDLE_REASON, kindWords, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState, placeAbsentLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeWorkspaceGoneLine, workFolderIn } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
-import { PlaceBackend, parsePlaceMachineId, placeMachineId } from "@wsp/engine";
+import { PlaceAbsentError, PlaceBackend, isPlaceAbsent, parsePlaceMachineId, placeMachineId } from "@wsp/engine";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
 import { assertTokenShape, rotateDaemonToken } from "./daemon-token.js";
@@ -408,6 +408,9 @@ export interface CreateWorkspaceOptions extends WorkspaceSpec {
   agents?: Partial<WorkspaceAgents>;
   /** Auto-nap window; undefined takes the runtime default, null turns auto-nap off. */
   idleWindowMs?: number | null;
+  /** The place this fork lands on, by the word a person types for it: a joined computer's name or id, or this
+   * computer. Absent takes the place a fork last landed on. */
+  on?: string;
 }
 
 /** A folder's archive as the host packs it: the bytes, what went in, the secret-shaped paths left out, and the ones
@@ -1576,6 +1579,37 @@ function deadMachine(id: string): Machine {
   };
 }
 
+/** The mark a stand-in for an absent place's machine carries, so the one reading of "nothing about this machine is
+ * known yet" is a fact of the handle rather than a guess from the record's phase. */
+const ABSENT = Symbol("absent machine");
+
+/** Whether this handle is that stand-in. */
+const isAbsentMachine = (m: Machine): boolean => (m as { [ABSENT]?: boolean })[ABSENT] === true;
+
+/** The machine a record standing on a place that is not connected is held by until that place dials in again.
+ * Nothing about it is known right now and nothing is asked: every call rejects the way every road on an absent
+ * place does, so the row reads unreachable with the place's own sentence and the provider is asked nothing. */
+function absentMachine(id: string, kind: MachineKind, line: string): Machine {
+  const away = (): never => {
+    throw new PlaceAbsentError(line);
+  };
+  const machine: Machine = {
+    id,
+    kind,
+    streamUrl: undefined,
+    exec: async () => away(),
+    run: async () => away(),
+    snapshot: async () => away(),
+    pause: async () => away(),
+    resume: async () => away(),
+    kill: async () => away(),
+    state: async () => away(),
+    downloadUrl: async () => away(),
+    uploadUrl: async () => away(),
+  };
+  return Object.assign(machine, { [ABSENT]: true });
+}
+
 /** Reads at most `cap` bytes of the body and cancels the rest; a body that dies mid-read still leaves the status to report. */
 async function readBodyUpTo(res: Response, cap: number): Promise<string> {
   const reader = res.body?.getReader();
@@ -1622,7 +1656,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * the module for a capability or a fact; nothing else compares the kind. Adding a kind (an ssh machine) is a row
    * here and its wiring, nothing more. */
   interface KindModule {
-    backend: MachineBackend;
+    /** The backend the machine of one record lives on. A function of the record because a fork can stand at this
+     * host's own provider or on a computer somebody joined, and which one is a fact of that record rather than of
+     * its kind: everything else a fork meets is the same either way, since the two are the same interface. */
+    backend: (record: WorkspaceRecord) => MachineBackend;
     /** How a turn's process is launched on this workspace's machine, under the limits the registry hands every turn. */
     execStream: (entry: LiveWorkspace, opts?: MachineExecOptions) => ExecStreamFactory;
     /** The folder a turn and a command start in on this kind when the caller names none; undefined leaves it to the
@@ -1834,7 +1871,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
   const modules: Record<WorkspaceKind, KindModule | undefined> = {
     cloud: {
-      backend,
+      // A fork lands either at this host's own provider or on a computer somebody joined; the record says which,
+      // and a place that forks nowhere refuses here rather than at the provider.
+      backend: record => {
+        if (record.place === undefined) return backend;
+        const at = placeDoorOf().backendOf(record.place);
+        if (at === undefined) throw new Error(placeForksNowhereLine(placeDoorOf().nameOf(record.place)));
+        return at;
+      },
       execStream: (entry, o) => machineExecStream(entry.machine, o),
       folder: () => undefined,
       home: (_entry, id) => cloudHome(id),
@@ -1865,7 +1909,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       local === undefined
         ? undefined
         : {
-            backend: local.backend,
+            backend: () => local.backend,
             execStream: (_entry, o) => local.execStream(o),
             folder: () => local.backend.folder,
             home: (_entry, id) => local.home(id),
@@ -1890,7 +1934,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       ssh === undefined
         ? undefined
         : {
-            backend: ssh.backend,
+            backend: () => ssh.backend,
             // The run's script, log and exit code live in wsp's own folder under the machine's home, not a folder
             // every login on it shares: on the person's own machine another account's /tmp folder is theirs, and a
             // turn that cannot write in it would launch nothing.
@@ -1955,7 +1999,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       placeBackend === undefined
         ? undefined
         : {
-            backend: placeBackend,
+            backend: () => placeBackend,
             // The run's script, log and exit code live in wsp's own folder under the place's home, not a folder
             // every login on it shares: on the person's own computer another account's temporary folder is theirs.
             execStream: (entry, o) => machineExecStream(entry.machine, { ...o, runDir: placeDaemonPaths(placeHomeDir(entry)).runDir }),
@@ -1992,11 +2036,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (found === undefined) throw new Error(noKindLine(kind));
     return found;
   };
-  const backendFor = (kind: WorkspaceKind): MachineBackend => moduleOf(kind).backend;
+  const backendFor = (record: WorkspaceRecord): MachineBackend => moduleOf(record.kind).backend(record);
+  /** The backend a kind's machines live on where no record is in hand yet: the create that is about to write one,
+   * and the roads that ask what this host can do at all. The same reading a record gets, off the two facts a record
+   * would carry. */
+  const backendOfKind = (kind: WorkspaceKind, place?: string): MachineBackend =>
+    moduleOf(kind).backend({ kind, ...(place !== undefined ? { place } : {}) } as WorkspaceRecord);
   /** The budgets a kind's backend declares for its naps and wakes. Every reader sits behind the pause refusal or
    * behind a machine's preview route, so a kind without one here is a wiring fault, never a person's road. */
   const lifecycleOf = (entry: LiveWorkspace): Lifecycle => {
-    const lifecycle = backendFor(entry.record.kind).lifecycle;
+    const lifecycle = backendFor(entry.record).lifecycle;
     if (lifecycle === undefined) throw new Error(`${entry.record.kind} machines declare no lifecycle`);
     return lifecycle;
   };
@@ -2035,7 +2084,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const cannotLine = (record: WorkspaceRecord, action: string): string => {
     const kind = record.kind;
     if (!kindWords(kind).driven) return undrivenRefusal(record.name, machineWord(kind), action);
-    if (forksNoMachines(backendFor(kind).capabilities)) return NO_PROVIDER_LINE;
+    if (forksNoMachines(backendFor(record).capabilities)) return NO_PROVIDER_LINE;
     return providerCannotRefusal(record.name, machineWord(kind), action);
   };
   /** The one throw every gate below goes through, so a road that reads a pair of capabilities refuses in the same
@@ -2047,20 +2096,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * names the capability its own move needs and never a neighbour's: a provider that copies a machine's disk but
    * whose forks boot cold takes a snapshot all the same. */
   const refuseCannot = (entry: LiveWorkspace, can: keyof Omit<Capabilities, "sizes" | "pauseMode">, action: string): void => {
-    refuseUnless(entry, backendFor(entry.record.kind).capabilities[can] === true, action);
+    refuseUnless(entry, backendFor(entry.record).capabilities[can] === true, action);
   };
   /** Whether a kind's machines pause at all, which is all the runtime asks of the pause mode: the nap and the wake
    * refuse where no mode is declared, with the same sentence, and never read which mode it is. */
-  const pauses = (kind: WorkspaceKind): boolean => backendFor(kind).capabilities.pauseMode !== undefined;
+  const pauses = (record: WorkspaceRecord): boolean => backendFor(record).capabilities.pauseMode !== undefined;
   const refusePauseless = (entry: LiveWorkspace, action: string): void => {
-    refuseUnless(entry, pauses(entry.record.kind), action);
+    refuseUnless(entry, pauses(entry.record), action);
   };
   /** Whether a workspace holds one of the account's machine slots: only a kind whose machines the provider can nap
    * does, the same fact the pause and wake refusals read, so this computer is never counted against the cap nor
    * named beside the two moves that free a slot. Phase decides the rest off the record alone, since a refusal has
    * no time to ask the provider about every workspace. */
   const holdsSlot = (record: WorkspaceRecord): boolean => {
-    if (!pauses(record.kind)) return false;
+    if (!pauses(record)) return false;
     const state = workspaceState({ phase: record.phase });
     return state !== "paused" && state !== "gone";
   };
@@ -2271,6 +2320,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           entry.record.shape = place.report.shape;
           await persist(entry.record);
         },
+        // The forks on a place are records of their own, and the workspace the place itself is is not one of them:
+        // one carries the place's machine, the others carry a machine that place made.
+        forksOn: async placeId => {
+          await ready();
+          return [...live.values()].filter(e => e.record.place === placeId).map(e => e.record.name);
+        },
         drop: async placeId => {
           await ready();
           const lines: string[] = [];
@@ -2286,6 +2341,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // The door's four events ride the one stream every other event rides, so the app follows a computer joining
     // over the socket it already holds and no road subscribes to the door itself.
     placeDoor.on(e => bus.emit(e));
+    // A computer that dials back in is the moment a record nothing could be asked about can be read at last: only
+    // the ones this host is holding by a stand-in go through the hydration they would have had at host start, and
+    // a fork that was live through the blip is left exactly as it is. A laptop that slept and dialled again is the
+    // common case, so a wake, a nap or a delete in flight must not be thrown away by a presence beat.
+    placeDoor.on(e => {
+      if (e.type !== "place.present") return;
+      void (async () => {
+        await ready();
+        for (const raw of await store.list(WORKSPACES)) {
+          const stored = raw as WorkspaceRecord;
+          if (stored.place === e.placeId && isHeldAway(stored.id)) await hydrateWorkspace(raw);
+        }
+      })().catch((err: unknown) => console.warn(`the records on ${placeDoor!.nameOf(e.placeId)} were not read again: ${err instanceof Error ? err.message : String(err)}`));
+    });
   }
   /** The machines a root thread's forks are landing but have no record for yet, by root: a slot is taken before
    * the first await of a fork and handed back when it lands or fails, so the cap counts what is on its way too. */
@@ -2474,11 +2543,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return home !== undefined ? { home } : {};
   };
 
-  /** Which provider forked this workspace's machine, by the id the host's own registry gives the module it wired.
-   * One module is wired at a time, so that is the answer for every fork this host holds; a kind whose machine the
-   * person owns is forked by nobody and carries none. The day a record carries the provider its image came from,
-   * that record wins here. */
-  const providerOf = (r: WorkspaceRecord): string | undefined => (kindWords(r.kind).driven ? places.wired : undefined);
+  /** Which provider forked this workspace's machine, by the id a registry gives the module that did it. A record
+   * that names the computer it was forked on reads that computer's own offer, since the machine was never at this
+   * host's provider; every other driven kind reads the module this host wired, one at a time. A kind whose machine
+   * the person owns is forked by nobody and carries none, and so does a place this host has not yet heard what it
+   * forks with. The one reading of where a machine lives, so this and `place` on one view cannot disagree. */
+  const providerOf = (r: WorkspaceRecord): string | undefined =>
+    r.place !== undefined ? placeDoor?.offerOf(r.place) : kindWords(r.kind).driven ? places.wired : undefined;
 
   const view = (r: WorkspaceRecord): WorkspaceView => ({
     ...((): { folder?: string } => {
@@ -2507,6 +2578,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     ...(agentsOf(r) !== undefined ? { agents: agentsOf(r)! } : {}),
     ...(r.parentThreadId !== undefined ? { parentThreadId: r.parentThreadId } : {}),
     ...(r.rootThreadId !== undefined ? { rootThreadId: r.rootThreadId } : {}),
+    ...(r.place !== undefined ? { place: r.place } : {}),
     ...(providerOf(r) !== undefined ? { provider: providerOf(r)! } : {}),
   });
 
@@ -2682,7 +2754,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         machineState: machineStateOf(entry.record.phase),
         reach: { state: reach },
         size,
-        rateUsdPerHour: backendFor(entry.record.kind).pricing.rateUsdPerHour(size),
+        rateUsdPerHour: backendFor(entry.record).pricing.rateUsdPerHour(size),
         ...(reason !== undefined ? { reason } : {}),
         ...(entry.wakeAsk !== undefined ? { wakeAsk: entry.wakeAsk } : {}),
         ...(idleAt !== undefined ? { idleAt } : {}),
@@ -2707,6 +2779,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return connectDaemon({ previewUrl: reach.url, token, onEvent: o.onEvent ?? (() => {}), ...(o.heartbeatMs !== undefined ? { heartbeatMs: o.heartbeatMs } : {}) });
   };
 
+  /** How long one ask of a machine's own daemon check gets, and how long before the next one: the budget is the
+   * whole of what the daemon is given, and a boot that is still coming up answers no rather than nothing. */
+  const ASK_DAEMON_MS = 5_000;
+  const ASK_AGAIN_MS = 500;
+
   /** The daemon answering is what proves a resumed guest serves; resume() returning does not (a zombie reports
    * running for 10+ minutes while exec and the edge 502). Asked over the machine's own road where it has one and
    * through the edge where the route is the only way in, since the two readings of one machine's reach would
@@ -2718,9 +2795,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const machine = entry.machine;
     const answersMs = lifecycleOf(entry).budgets.daemonAnswersMs;
     if (machine.daemonAnswers !== undefined) {
+      const deadline = clock.now() + answersMs;
       try {
-        const up = await until(machine.daemonAnswers({ timeoutMs: answersMs }), Date.now() + answersMs, "daemon answer");
-        return up ? undefined : `nothing listens on the daemon's port inside ${machine.id}`;
+        // Asked again until the budget is out rather than once at the start of it: a machine that was stopped for
+        // its nap rather than frozen comes back with its boot still running, and the budget is what the daemon is
+        // given to answer in. A machine that answers at once costs one ask, as it always did.
+        for (;;) {
+          const up = await until(machine.daemonAnswers({ timeoutMs: Math.min(answersMs, ASK_DAEMON_MS) }), deadline, "daemon answer");
+          if (up) return undefined;
+          if (clock.now() >= deadline) return `nothing listens on the daemon's port inside ${machine.id}`;
+          await new Promise<void>(done => clock.schedule(done, ASK_AGAIN_MS, { unref: true }));
+        }
       } catch (e) {
         // The error is in hand here, so it is what the row says: only the edge road, which learns nothing but that
         // it waited, reports the budget.
@@ -2827,7 +2912,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * to reach the machine, which is the machine's own question and not its kind's. Both roads into updateDaemon
    * read this, so neither offers to deploy where the other would not. */
   const canDeployDaemon = (entry: LiveWorkspace): boolean =>
-    moduleOf(entry.record.kind).deployDaemon !== undefined && landsBytes(backendFor(entry.record.kind).capabilities, entry.machine);
+    moduleOf(entry.record.kind).deployDaemon !== undefined && landsBytes(backendFor(entry.record).capabilities, entry.machine);
 
   /** Every road that puts a daemon on a machine runs the kind's deploy through here, and this is the one place
    * that writes down how it went: a machine that answered with what it lacks keeps its own sentence and the
@@ -3105,28 +3190,38 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * A snapshot restores as the kind it was taken from, so the spec names that kind;
    * versions sealed before it was recorded were all sandbox. */
   const fork = (record: WorkspaceRecord, bind: (machine: Machine) => void, override?: WorkspaceSpec, report?: StageReport): Promise<Machine> =>
-    claiming(`workspace/${record.id}`, async b => {
-      const image = await imageOf(record.golden);
-      const golden = image.version;
-      // A project golden's snapshot is the image; only a version's own snapshot may stand behind a template.
-      const spec = forkSpec(record, golden?.kind ?? "sandbox", goldenImage(image.projects === undefined && golden !== undefined ? golden : { snapshotId: record.golden }).spec, override);
-      const machine = await b.create(spec);
-      // Named by its record before the claim is released, so no sweep sees it unclaimed.
-      bind(machine);
-      report?.("machine-booting", `Machine ${machine.id} is booting.`);
-      const named = await setHostname(machine, record.name);
-      report?.("hostname-set", named.refused === undefined ? `Hostname set to ${named.host}.` : "Hostname left as the guest booted it.", named.refused);
-      // The fork carries the golden's copy; this one names the workspace and reads the disk and secrets as they are now.
-      const context = await applyMachineContext(machine, { workspace: { name: record.name }, ...(golden !== undefined ? { golden } : {}) });
-      if (context.failure !== undefined) console.warn(`machine context for ${record.id} on ${machine.id} ${context.summary}`);
-      const shape = await shapeOf(machine);
-      if (shape !== undefined) record.shape = shape;
-      else delete record.shape;
-      record.size = sizeBuilt(shape, spec);
-      if (machine.streamUrl !== undefined) record.screen = { streamUrl: machine.streamUrl };
-      else delete record.screen;
-      return machine;
-    });
+    claiming(
+      `workspace/${record.id}`,
+      async b => {
+        const image = await imageOf(record.golden);
+        const golden = image.version;
+        // A project golden's snapshot is the image; only a version's own snapshot may stand behind a template.
+        const spec = forkSpec(record, golden?.kind ?? "sandbox", goldenImage(image.projects === undefined && golden !== undefined ? golden : { snapshotId: record.golden }).spec, override);
+        // A place that has never held this image says missing about a reference no registry has: the fork lands
+        // nowhere and the sentence says where it would land until that place holds a copy.
+        const machine = await b.create(spec).catch((e: unknown) => {
+          if (record.place === undefined || !isMissing(e)) throw e;
+          throw Object.assign(new Error(placeHoldsNoImageLine(placeDoorOf().nameOf(record.place), spec.fromSnapshot ?? spec.template ?? record.golden)), { kind: "invalid" });
+        });
+        // Named by its record before the claim is released, so no sweep sees it unclaimed.
+        bind(machine);
+        report?.("machine-booting", `Machine ${machine.id} is booting.`);
+        const named = await setHostname(machine, record.name);
+        report?.("hostname-set", named.refused === undefined ? `Hostname set to ${named.host}.` : "Hostname left as the guest booted it.", named.refused);
+        // The fork carries the golden's copy; this one names the workspace and reads the disk and secrets as they are now.
+        const context = await applyMachineContext(machine, { workspace: { name: record.name }, ...(golden !== undefined ? { golden } : {}) });
+        if (context.failure !== undefined) console.warn(`machine context for ${record.id} on ${machine.id} ${context.summary}`);
+        const shape = await shapeOf(machine);
+        if (shape !== undefined) record.shape = shape;
+        else delete record.shape;
+        record.size = sizeBuilt(shape, spec);
+        if (machine.streamUrl !== undefined) record.screen = { streamUrl: machine.streamUrl };
+        else delete record.screen;
+        return machine;
+      },
+      // The record says where its machine lives: this host's own provider, or the computer it was forked on.
+      backendFor(record),
+    );
 
   /** The engine knows three phases. A pause in flight is a nap to it (the wake resumes either way); a gone record's
    * machine is a stand-in it only ever meets through rebuild, which replaces the machine whatever the phase says. */
@@ -3162,7 +3257,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       {
         goldenSnapshot: record.golden,
         // A kind that declares no lifecycle has its nap and wake refused before the engine is asked, so it never wakes.
-        wakeAttempts: backendFor(record.kind).lifecycle?.budgets.wakeAttempts ?? 0,
+        wakeAttempts: backendFor(record).lifecycle?.budgets.wakeAttempts ?? 0,
         resurrect: (override?: Partial<MachineSpec>) =>
           fork(record, m => {
             entry.machine = m;
@@ -3449,7 +3544,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     onBackstop: (id, until) => {
       const entry = live.get(id);
       if (entry === undefined || entry.record.phase !== "running") return;
-      void backendFor(entry.record.kind)
+      void backendFor(entry.record)
         .lifecycle?.backstop?.(entry.machine, until)
         .catch((e: unknown) => console.warn(`backstop of ${id} on ${entry.machine.id} not set: ${e instanceof Error ? e.message : String(e)}`));
     },
@@ -3536,6 +3631,93 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     for (const [id, b] of [...builders]) if (!seen.has(id) && b.life !== "own") builders.delete(id);
   };
 
+  /** Whether this host holds that workspace by a stand-in for a machine it could not ask anything about: the one
+   * reading of "nothing is known about this one yet", which is what a place dialling in is the moment to fix. A
+   * record with no live entry at all reads the same, since a hydration that never ran holds nothing either. */
+  const isHeldAway = (id: string): boolean => {
+    const entry = live.get(id);
+    return entry === undefined || isAbsentMachine(entry.machine);
+  };
+
+  /** One stored workspace read into a live one: what the provider says about its machine decides the phase, and
+   * the record follows. Read once for every record at hydration, and again for a record on a place the moment that
+   * place dials in, since until then nothing could be asked about its machine. */
+  const hydrateWorkspace = async (raw: unknown): Promise<void> => {
+    const stored = raw as Omit<WorkspaceRecord, "size" | "kind"> & { size?: WorkspaceSize; kind?: WorkspaceKind; project?: WorkspaceProject };
+    const kind: WorkspaceKind = stored.kind ?? "cloud";
+    // A record from before a workspace held a list of projects carries the one it imported under `project`.
+    const { project: single, ...rest } = stored;
+    const projects = rest.projects ?? (single !== undefined ? [single] : undefined);
+    // A record whose kind this host wired no module for, or whose place forks nothing any more, is left as it
+    // was: only the host that owns that machine can serve it.
+    let at: MachineBackend;
+    try {
+      at = moduleOf(kind).backend(stored as WorkspaceRecord);
+    } catch (e) {
+      console.warn(`workspace ${stored.id} is left as it was: ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+    // The store is the fleet's truth and get(id) the provider's: a record whose machine the provider lost is
+    // gone and one whose machine it holds paused is napping, whatever phase either was left at, and both say so
+    // before anything lists it or meters it. A machine on a place that is not connected is neither: nothing can
+    // be asked about it until that computer dials in, so the record keeps the word it was left with.
+    const goldenKind = (await imageOf(stored.golden).catch(() => undefined))?.version?.kind ?? "sandbox";
+    let missing: string | undefined;
+    let absent = false;
+    const machine = await at.get(stored.machineId).catch((e: unknown) => {
+      if (isPlaceAbsent(e)) {
+        absent = true;
+        // The kind is the golden's, which the record names: a desktop fork on a computer that is away is a desktop
+        // fork, and nothing about it is guessed while nothing can be asked.
+        return absentMachine(stored.machineId, goldenKind, e instanceof Error ? e.message : String(e));
+      }
+      if (!isMissing(e)) throw e;
+      missing = providerSaid(e);
+      return deadMachine(stored.machineId);
+    });
+    // The state rides on the view get() just fetched; a second read would reset the provider's idle timer.
+    const atProvider = missing !== undefined ? "gone" : absent ? undefined : (machine.seen?.state ?? (await machine.state()));
+    // A record left gone leaves it on the one predicate every road out of gone reads, and on nothing else. Any
+    // other record follows the provider whatever word it was left with: paused means the pause landed or the
+    // resume never did, running means the pause never took or the resume landed with nobody left to write it.
+    // Only a machine still starting leaves the stored word standing, and a pausing one then reads napping: a
+    // wake resumes it either way.
+    const phase: WorkspacePhase =
+      atProvider === undefined
+        ? stored.phase
+        : stored.phase === "gone"
+          ? (phaseLeavingGone(atProvider) ?? "gone")
+          : atProvider === "gone"
+            ? "gone"
+            : atProvider === "paused"
+              ? "napping"
+              : atProvider === "running"
+                ? "running"
+                : stored.phase === "pausing"
+                  ? "napping"
+                  : stored.phase;
+    const record: WorkspaceRecord = {
+      ...rest,
+      kind,
+      phase,
+      size: stored.size ?? sizeBuilt(await shapeOf(machine), at.pricing.defaultSize),
+      ...(projects !== undefined ? { projects } : {}),
+      ...(machine.streamUrl !== undefined ? { screen: { streamUrl: machine.streamUrl } } : {}),
+    };
+    if (phase === "gone") record.gone = stored.gone ?? goneWords(stored.machineId, { by: "record load", at: clock.now(), ...(missing !== undefined ? { answer: missing } : {}) });
+    else delete record.gone;
+    attach(record, machine);
+    if (phase !== stored.phase) {
+      if (phase === "gone") console.warn(goneLogLine(stored.id, record.gone!));
+      else console.warn(`workspace ${stored.id} was left ${stored.phase} and its machine is ${String(atProvider)} at the provider; the record hydrates ${phase}`);
+      await persist(record);
+    } else if (single !== undefined) await persist(record);
+    if (phase === "running" && !absent) {
+      idle.touch(stored.id);
+      void syncDaemon(live.get(stored.id)!);
+    }
+  };
+
   let hydrated: Promise<void> | undefined;
   const ready = (): Promise<void> => {
     hydrated ??= (async () => {
@@ -3546,69 +3728,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         await store.put(OWNER, "id", { id: owner });
       }
       await migrateCopies();
-      for (const raw of await store.list(WORKSPACES)) {
-        const stored = raw as Omit<WorkspaceRecord, "size" | "kind"> & { size?: WorkspaceSize; kind?: WorkspaceKind; project?: WorkspaceProject };
-        const kind: WorkspaceKind = stored.kind ?? "cloud";
-        // A record from before a workspace held a list of projects carries the one it imported under `project`.
-        const { project: single, ...rest } = stored;
-        const projects = rest.projects ?? (single !== undefined ? [single] : undefined);
-        // A record whose kind this host wired no module for is left as it was: only the host that owns that machine can serve it.
-        let module: KindModule;
-        try {
-          module = moduleOf(kind);
-        } catch (e) {
-          console.warn(`workspace ${stored.id} is left as it was: ${e instanceof Error ? e.message : String(e)}`);
-          continue;
-        }
-        // The store is the fleet's truth and get(id) the provider's: a record whose machine the provider lost is
-        // gone and one whose machine it holds paused is napping, whatever phase either was left at, and both say
-        // so before anything lists it or meters it.
-        let missing: string | undefined;
-        const machine = await module.backend.get(stored.machineId).catch((e: unknown) => {
-          if (!isMissing(e)) throw e;
-          missing = providerSaid(e);
-          return deadMachine(stored.machineId);
-        });
-        // The state rides on the view get() just fetched; a second read would reset the provider's idle timer.
-        const atProvider = missing !== undefined ? "gone" : (machine.seen?.state ?? (await machine.state()));
-        // A record left gone leaves it on the one predicate every road out of gone reads, and on nothing else. Any
-        // other record follows the provider whatever word it was left with: paused means the pause landed or the
-        // resume never did, running means the pause never took or the resume landed with nobody left to write it.
-        // Only a machine still starting leaves the stored word standing, and a pausing one then reads napping: a
-        // wake resumes it either way.
-        const phase: WorkspacePhase =
-          stored.phase === "gone"
-            ? (phaseLeavingGone(atProvider) ?? "gone")
-            : atProvider === "gone"
-              ? "gone"
-              : atProvider === "paused"
-                ? "napping"
-                : atProvider === "running"
-                  ? "running"
-                  : stored.phase === "pausing"
-                    ? "napping"
-                    : stored.phase;
-        const record: WorkspaceRecord = {
-          ...rest,
-          kind,
-          phase,
-          size: stored.size ?? sizeBuilt(await shapeOf(machine), module.backend.pricing.defaultSize),
-          ...(projects !== undefined ? { projects } : {}),
-          ...(machine.streamUrl !== undefined ? { screen: { streamUrl: machine.streamUrl } } : {}),
-        };
-        if (phase === "gone") record.gone = stored.gone ?? goneWords(stored.machineId, { by: "record load", at: clock.now(), ...(missing !== undefined ? { answer: missing } : {}) });
-        else delete record.gone;
-        attach(record, machine);
-        if (phase !== stored.phase) {
-          if (phase === "gone") console.warn(goneLogLine(stored.id, record.gone!));
-          else console.warn(`workspace ${stored.id} was left ${stored.phase} and its machine is ${atProvider} at the provider; the record hydrates ${phase}`);
-          await persist(record);
-        } else if (single !== undefined) await persist(record);
-        if (phase === "running") {
-          idle.touch(stored.id);
-          void syncDaemon(live.get(stored.id)!);
-        }
-      }
+      // The places are read before the workspaces: a fork standing on one asks which backend it lives on, and that
+      // answer comes off what the place last said about itself rather than off a socket that may not be open.
+      await placeDoor?.load();
+      for (const raw of await store.list(WORKSPACES)) await hydrateWorkspace(raw);
       for (const raw of await store.list(TRANSCRIPTS)) {
         const t = raw as TranscriptRecord;
         transcripts.set(t.workspaceId, t.events);
@@ -3692,6 +3815,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const createStaged = async (o: CreateWorkspaceOptions, id: string, report: StageReport, spawned?: ThreadScope, landed?: () => void): Promise<CreatedWorkspace> => {
     const image = await imageOf(o.golden);
     const inherited = image.version?.size;
+    // Where this fork lands: the word the person typed, else the place a fork last landed on. This host's own
+    // provider is a place with no id, which is what every fork before joined computers existed stood on.
+    const { placeId } = o.on === undefined ? ((await placeDoor?.defaultPlace()) ?? {}) : await placeDoorOf().placeFor(o.on);
+    // The first fork on a joined computer is where this host learns what that computer forks with; every road after
+    // it reads the answer off the place's record.
+    if (placeId !== undefined) await placeDoorOf().forkingBackend(placeId);
+    const at = backendOfKind("cloud", placeId);
     const record: WorkspaceRecord = {
       id,
       name: o.name,
@@ -3706,9 +3836,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(o.labels !== undefined ? { labels: o.labels } : {}),
       },
       ...(o.idleWindowMs !== undefined ? { idleWindowMs: o.idleWindowMs } : {}),
+      ...(placeId !== undefined ? { place: placeId } : {}),
       size: {
-        cpu: o.cpu ?? inherited?.cpu ?? backend.pricing.defaultSize.cpu,
-        memMb: o.memMb ?? inherited?.memMb ?? backend.pricing.defaultSize.memMb,
+        cpu: o.cpu ?? inherited?.cpu ?? at.pricing.defaultSize.cpu,
+        memMb: o.memMb ?? inherited?.memMb ?? at.pricing.defaultSize.memMb,
       },
       firstLife: true,
       // Written before the machine is asked for: the cap counts machines under a root off these two fields, so a
@@ -3719,8 +3850,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       ...(spawned === undefined && o.agents !== undefined ? { agents: agentsFrom(undefined, o.agents) } : {}),
     };
     // Only an asked size is checked: the golden's own is what it was built at, whatever the provider offers today.
-    if (namesSize(o) && !offeredSize(backend.capabilities.sizes, record.size)) {
-      throw Object.assign(new Error(sizeRefusal(sizeWord(record.size), backend.capabilities.sizes)), { kind: "invalid" });
+    if (namesSize(o) && !offeredSize(at.capabilities.sizes, record.size)) {
+      throw Object.assign(new Error(sizeRefusal(sizeWord(record.size), at.capabilities.sizes)), { kind: "invalid" });
     }
     const bind = (m: Machine): void => {
       record.machineId = m.id;
@@ -3787,6 +3918,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       void syncDaemon(entry);
     }
     await persist(record);
+    // The place a fork landed on is where the next one lands when nobody says.
+    await placeDoor?.markUsed(placeId);
     delete entry.creating;
     report("ready", "Ready.");
     const v = view(record);
@@ -3961,7 +4094,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async createLocal(name, origin) {
       await ready();
-      const { backend: mine } = moduleOf("local");
+      const mine = backendOfKind("local");
       // The one place a local workspace's default name lives: this computer's own, so the command line, the app and
       // the MCP tool all land on the same one rather than each defaulting it.
       return recordExisting("local", name ?? hostname(), origin, async () => ({ machine: await mine.get(LOCAL_MACHINE_ID), size: mine.pricing.defaultSize }));
@@ -4128,7 +4261,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // One verb, two moves, and each reads the road its own needs: a request naming a size is a resize, and reads
       // the one thing that says a provider gives a machine a new size, which the button offering the size reads
       // too; one naming none replaces the machine at the size it has, and needs the stand-in alone.
-      if (namesSize(spec)) refuseUnless(entry, resizesMachines(backendFor(entry.record.kind).capabilities), "be resized");
+      if (namesSize(spec)) refuseUnless(entry, resizesMachines(backendFor(entry.record).capabilities), "be resized");
       else refuseCannot(entry, "replacesMachine", "have its machine replaced");
       await entry.ws.upgrade(spec);
       followMachine(entry);
@@ -4367,7 +4500,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // A machine the person keeps runs a thread at the access its harness asks for, bypass one pick away and named
     // after the machine it would touch; a throwaway fork runs bypass. The one place either list is decided, so the
     // composer's picker and the start's own check cannot show different defaults.
-    const forMachine = (c: HarnessCatalog): HarnessCatalog => (backendFor(entry.record.kind).capabilities.kept ? keptAccess(c, THIS_COMPUTER) : c);
+    const forMachine = (c: HarnessCatalog): HarnessCatalog => (backendFor(entry.record).capabilities.kept ? keptAccess(c, THIS_COMPUTER) : c);
     const known: HarnessCatalog = {
       ...table,
       steers: adapter.steers,
@@ -6579,6 +6712,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
   };
 
+  /** Why a machine cannot be asked anything at all this tick: it stands on a computer that is not connected. Every
+   * road to it, the provider read included, rides that computer's link, so the row says so rather than reading a
+   * silence as a machine that died. */
+  const awayLine = (record: WorkspaceRecord): string | undefined =>
+    record.place === undefined || placeDoor?.link(record.place) !== undefined ? undefined : placeAbsentLine(placeDoorOf().nameOf(record.place));
+
   const status = createStatusTracker({
     store,
     records: async () => {
@@ -6587,7 +6726,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...view(e.record),
         size: e.record.size,
         // The rate follows the machine's kind: a local workspace's backend prices it at zero, so no cost line rides its row.
-        rateUsdPerHour: backendFor(e.record.kind).pricing.rateUsdPerHour(e.record.size),
+        rateUsdPerHour: backendFor(e.record).pricing.rateUsdPerHour(e.record.size),
         generation: e.generation,
         // The wake's own line while one is in flight, and the words it left behind once its asking ran out: the poll
         // builds every status from the record, so a row that carried only what was pushed would fall silent between
@@ -6595,6 +6734,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(e.wakeSaid ?? e.record.wakeRefused) !== undefined ? { reason: (e.wakeSaid ?? e.record.wakeRefused)! } : {},
         ...(e.wakeAsk !== undefined ? { wakeAsk: e.wakeAsk } : {}),
         ...(e.record.phase === "running" && idle.idleAt(e.record.id) !== undefined ? { idleAt: idle.idleAt(e.record.id)! } : {}),
+        ...(awayLine(e.record) !== undefined ? { away: awayLine(e.record)! } : {}),
         ...(moduleOf(e.record.kind).hasDaemon(e) ? { daemonReach: () => moduleOf(e.record.kind).daemonRoad(e) } : {}),
         ...(e.machine.daemonAnswers !== undefined ? { daemonAnswers: e.machine.daemonAnswers.bind(e.machine) } : {}),
         providerState: () => e.machine.state(),

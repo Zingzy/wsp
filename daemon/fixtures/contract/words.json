@@ -7,7 +7,7 @@
   "noToken": "daemon refuses to start without an auth token",
   "unknownOp": "unknown op: {op}",
   "portScopeRefusal": "this socket is scoped to port {port}: only tunnel ops on it and ping are allowed",
-  "placeLeaveRoadRefusal": "place.leave is answered only on the link this computer opened to its host; run wsp leave here to take this computer out of a wsp",
+  "notOnThisRoad": "not on this road",
   "notOnThisKind": "not on this kind",
   "hostKeyRefusal": "the host at {url} did not prove the key this computer learned at join; nothing was sent to it",
   "listening": "wsp-daemon listening on {host}:{port}",

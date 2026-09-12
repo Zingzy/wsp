@@ -10,7 +10,10 @@ use std::path::{Path, PathBuf};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
-use wsp_frames::{numbers, words, DaemonAuthRequest, DaemonEvent, DaemonRequest, PlaceAuthRequest, PlaceProveRequest, DAEMON_OPS};
+use wsp_frames::{
+    numbers, words, DaemonAuthRequest, DaemonEvent, DaemonRequest, MachineLinkRequest, PlaceAuthRequest, PlaceProveRequest, DAEMON_OPS,
+    MACHINE_OPS,
+};
 
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/contract")
@@ -88,6 +91,10 @@ fn every_request_frame_reads_as_the_protocol_does() {
                     round_trip::<PlaceProveRequest>(&frame, &at);
                 }
                 ("place.prove", false) => refuses::<PlaceProveRequest>(&frame, &at),
+                (name, true) if name.starts_with("machine.") => {
+                    round_trip::<MachineLinkRequest>(&frame, &at);
+                }
+                (name, false) if name.starts_with("machine.") => refuses::<MachineLinkRequest>(&frame, &at),
                 (_, true) => {
                     round_trip::<DaemonRequest>(&frame, &at);
                 }
@@ -98,9 +105,8 @@ fn every_request_frame_reads_as_the_protocol_does() {
             }
         }
     }
-    // The machine ops join the set with the branch that puts them in the protocol, which is what the set is read from.
     let mut expected: Vec<String> =
-        DAEMON_OPS.iter().chain(["auth", "place.auth", "place.prove"].iter()).map(|s| (*s).to_owned()).collect();
+        DAEMON_OPS.iter().chain(MACHINE_OPS.iter()).chain(["auth", "place.auth", "place.prove"].iter()).map(|s| (*s).to_owned()).collect();
     expected.sort();
     assert_eq!(seen, expected, "every op has one accept file and every accept file names an op");
 }
@@ -157,7 +163,7 @@ fn rendered_words() -> BTreeMap<&'static str, String> {
     m.insert("noToken", words::NO_TOKEN_AT_START.to_owned());
     m.insert("unknownOp", words::unknown_op("{op}"));
     m.insert("portScopeRefusal", words::port_scope_refusal("{port}"));
-    m.insert("placeLeaveRoadRefusal", words::PLACE_LEAVE_ROAD_REFUSAL.to_owned());
+    m.insert("notOnThisRoad", words::NOT_ON_THIS_ROAD.to_owned());
     m.insert("notOnThisKind", words::NOT_ON_THIS_KIND.to_owned());
     m.insert("hostKeyRefusal", words::host_key_refusal("{url}"));
     m.insert("listening", words::listening_line("{host}", "{port}"));

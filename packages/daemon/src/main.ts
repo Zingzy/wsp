@@ -22,8 +22,9 @@ import {
   EXEC_TIMEOUT_DEFAULT_MS,
   GUEST_INBOX_DIR,
   GUEST_MANIFEST_PATH,
+  MachineErrorKind,
+  NOT_ON_THIS_ROAD,
   PID_MAX,
-  PLACE_LEAVE_ROAD_REFUSAL,
   PRE_AUTH_MAX_BYTES,
   TUNNEL_CAP,
   callbackPortOf,
@@ -253,7 +254,12 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
       else if (port === undefined) spotter.spot(p => broadcast({ type: "callback.port", port: p }));
     },
   };
-  const ctx: Ctx = { ptys, manifest, modes, root, roots, getPortWatcher, getInboxWatcher, getSysSampler, getProcSampler, spotter, broadcast };
+  // Every op that belongs to the link a place opens outward, so one sentence refuses all of them on a socket that
+  // is not that link. The leave op is always one of them, whether or not this process is holding a link: which ops
+  // belong to that road is a fact of the wire, and a daemon with no link must still refuse it rather than call it
+  // an op it has never heard of. The rest are whatever the road that dialled out registered.
+  const linkOnly = new Set(["place.leave", ...Object.keys(opts.link?.ops ?? {})]);
+  const ctx: Ctx = { ptys, manifest, modes, root, roots, getPortWatcher, getInboxWatcher, getSysSampler, getProcSampler, spotter, broadcast, linkOnly };
   let openSocket: OpenSocket | undefined;
   if (opts.openSocketPath !== undefined) {
     try {
@@ -336,7 +342,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
       }
       handle(ws, state, ctx, msg).catch((e: unknown) => {
         const error = e instanceof Error ? e.message : String(e);
-        ws.send(JSON.stringify({ id: msg.id ?? null, ok: false, error, ...(e instanceof OpError ? { code: e.code } : {}) }));
+        ws.send(JSON.stringify({ id: msg.id ?? null, ok: false, error, ...(e instanceof OpError ? { code: e.code } : {}), ...refusedAs(e) }));
       });
     });
   };
@@ -381,6 +387,9 @@ interface Ctx {
   getProcSampler(): ProcSampler;
   spotter: CallbackSpotter;
   broadcast(event: DaemonEvent): void;
+  /** The op names the outbound link's own table answers, so a socket that is not that link is refused them by
+   * name rather than answered with the daemon's own words for an op it does not know. */
+  linkOnly: ReadonlySet<string>;
 }
 
 /** 127.0.0.1 first, then ::1: a Node 22 tool listening on "localhost" binds [::1] only (measured, wrangler). */
@@ -399,6 +408,18 @@ function requireTunnel(state: ConnState, msg: Request): Socket {
   const s = state.tunnels.get(id);
   if (!s) throw new OpError("not-found", `no such tunnel: ${id}`);
   return s;
+}
+
+/** What a backend's own refusal carries across the wire: its kind and the status it came from, so a machine the
+ * far side lost reads missing on the asking computer exactly as it reads here. Only an error that already carries
+ * an engine kind has them; every other failure is its sentence alone. */
+function refusedAs(e: unknown): { kind?: string; status?: number } {
+  const kind = MachineErrorKind.safeParse((e as { kind?: unknown } | undefined)?.kind);
+  const status = (e as { status?: unknown } | undefined)?.status;
+  return {
+    ...(kind.success ? { kind: kind.data } : {}),
+    ...(typeof status === "number" ? { status } : {}),
+  };
 }
 
 function reply(ws: WebSocket, id: Request["id"], payload: object): void {
@@ -472,9 +493,12 @@ async function handle(ws: WebSocket, state: ConnState, ctx: Ctx, msg: Request): 
   // belongs to a road lives with that road and no other socket can reach it.
   const own = typeof msg.op === "string" ? state.ops?.[msg.op] : undefined;
   if (own !== undefined) {
-    reply(ws, msg.id, await own());
+    reply(ws, msg.id, await own(msg as Record<string, unknown>));
     return;
   }
+  // An op the outbound link answers, asked on a socket that is not it: a client holding this daemon's token is a
+  // client on this machine, and a client on this machine does not drive the computer's own Docker daemon.
+  if (typeof msg.op === "string" && ctx.linkOnly.has(msg.op)) throw new OpError("forbidden", NOT_ON_THIS_ROAD);
   switch (msg.op) {
     case "pty.create": {
       const s = await ctx.ptys.create({
@@ -685,9 +709,6 @@ async function handle(ws: WebSocket, state: ConnState, ctx: Ctx, msg: Request): 
       );
       return;
     }
-    case "place.leave":
-      // Only the link this computer opened registers a handler for it, and the check above would have answered it.
-      throw new OpError("forbidden", PLACE_LEAVE_ROAD_REFUSAL);
     case "ping": {
       // App-level heartbeat: the previewUrl edge sweeps idle connections and
       // browser clients cannot send protocol pings.

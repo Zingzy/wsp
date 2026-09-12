@@ -7,6 +7,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { IMAGES_AFTER_TURN, noImagesLine, sendRefusal, type EventUnion, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
+import { TABLE_CATALOG, whenAgentsAnswered } from "./agents.js";
 import { composerEditor, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent, StartSessionOptions } from "../src/protocol/client.js";
@@ -79,6 +80,7 @@ function fixtureApi(history: Record<string, SessionEvent[]> = {}, statuses: Work
     upgrade: async id => workspaces.find(w => w.id === id)!,
     capabilities: async () => (caps()),
     listSessions: async () => [],
+    listHarnesses: async () => [TABLE_CATALOG],
     watchStatuses: async () => statuses,
     createFromGoldenHead: async () => workspaces[0]!,
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
@@ -97,6 +99,7 @@ async function setup(api: Api) {
   useStore.getState().bind(api);
   useStore.getState().setConn("live");
   await waitFor(() => expect(useStore.getState().workspaces.length).toBeGreaterThan(0));
+  await whenAgentsAnswered();
   const view = render(<WorkspaceThread workspaceId={WS} />);
   await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
   return view;
