@@ -36,3 +36,10 @@ export const FAKE_AS_ENV = "WSP_FAKE_AS";
  * app into its own home and names it here, so a build landing on main mid-run cannot change the app under a tester.
  * Unset everywhere else, where the host serves the asset built beside it. */
 export const WEB_DIR_ENV = "WSP_WEB_DIR";
+
+/** The folder a stand-in provider keeps its own machines in, for a harness that wants a fixture's forks to behave
+ * like machines: its records go there, so a second host on the same state file reads the same fleet, and each
+ * machine gets a folder of its own there with a daemon rooted in it, which is what puts a terminal, a process list
+ * and live readings on a fork that stands for nothing. Unset everywhere else, where the stand-in holds its
+ * machines for one process and they have no guest at all. */
+export const FAKE_ROOT_ENV = "WSP_FAKE_ROOT";

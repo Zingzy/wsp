@@ -3,7 +3,7 @@
 // pill rollup over wsp thread snapshots, plus our row labels and the
 // new-workspace helpers.
 import { describe, expect, it } from "vitest";
-import { FREE_WORD, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, OVER_SSH, THIS_COMPUTER, THREAD_ARCHIVE_MS, kindWords, machineLacksShort, wakeAskingAgainLine, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, NO_LINGER_LINE, NO_NODE_LINE, OVER_SSH, THIS_COMPUTER, THREAD_ARCHIVE_MS, absentComputer, awayMsOf, kindWords, machineLacksShort, wakeAskingAgainLine, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../src/adapt/index.js";
 import { RequestError } from "../src/protocol/client.js";
 import { threadTree, threadsOpenedBy, workspaceOf } from "../src/sidebar/threadTree.js";
@@ -27,6 +27,7 @@ import {
   compactTimeLabel,
   defaultWorkspaceName,
   machineLine,
+  metaSentences,
   spaceHeaderLines,
   idleCountdownLabel,
   dotClassForTone,
@@ -293,7 +294,9 @@ describe("workspace row labels", () => {
     const line = (reach: ReachState) => workspaceMetaLine({ project: local(reach), cost: tick(0.29), outOfMemory: undefined, nowMs: now });
     // The two are different facts: nothing answering on the port, and no daemon road at all.
     expect(line("no-daemon")).toBe("no daemon answering");
-    expect(line("unsupported")).toBe("no daemon on it");
+    // A machine with no daemon road at all says nothing here: the bare fact had no verb in it and named a thing
+    // the person never installed, and where the machine said what it lacks that is the line instead.
+    expect(line("unsupported")).toBe(FREE_WORD);
     expect(line("reachable")).toBe(FREE_WORD);
     // Its state word is still empty by design, which is why the line is where this goes.
     expect(stateSlotWord({ ...local("no-daemon"), indicator: { label: "Unreachable", tone: "neutral", pulse: false } })).toBe("");
@@ -320,26 +323,28 @@ describe("workspace row labels", () => {
     // so a fork's row saying there is none would be saying something that cannot be true of it.
     expect(line("unsupported")).toBe("$0.29 today · active");
     expect(spaceHeaderLines({ project: driven("unsupported"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).not.toContain("no daemon on it");
+
     expect(daemonGoneLine("unsupported", kindWords("cloud"))).toBeUndefined();
-    expect(daemonGoneLine("unsupported", kindWords("local"))).toBe("no daemon on it");
-    // A machine over ssh carries one under the person's own login, so a row saying there is none is a fact about
-    // that machine, the way it is on this computer.
-    expect(daemonGoneLine("unsupported", kindWords("ssh"))).toBe("no daemon on it");
+    expect(daemonGoneLine("unsupported", kindWords("local"))).toBeUndefined();
+    expect(daemonGoneLine("unsupported", kindWords("ssh"))).toBeUndefined();
+    // The phrase a backend developer read as a status with no verb is on no row of any kind.
+    for (const kind of ["cloud", "local", "ssh", "place"] as const) {
+      expect(daemonGoneLine("unsupported", kindWords(kind), NO_LINGER_LINE)).not.toBe("no daemon on it");
+    }
   });
 
-  it("a machine over ssh says what the machine is and that it is free, and says when its daemon is missing", () => {
+  it("a machine over ssh says what the machine is and that it is free", () => {
     const over = (reach: ReachState) => project({ reach: { state: reach } }, { kind: "ssh" });
     const line = (reach: ReachState) => workspaceMetaLine({ project: over(reach), cost: tick(0.29), outOfMemory: undefined, nowMs: now });
     // wsp neither forks nor bills this machine, so no rate and no spend reach its row whatever its daemon says.
     expect(line("reachable")).toBe(FREE_WORD);
     expect(machineLine(over("unsupported"))).toBe(OVER_SSH);
-    // A daemon is put on it under the person's own login, so one missing is a fact the row carries, as on this
-    // computer; what the runtime is doing about it still leads on both surfaces.
-    expect(line("unsupported")).toBe("no daemon on it");
+    // What the runtime is doing about its daemon still leads on both surfaces.
+    expect(line("unsupported")).toBe(FREE_WORD);
     expect(spaceHeaderLines({ project: over("reachable"), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toEqual([OVER_SSH, FREE_WORD]);
     expect(workspaceMetaLine({ project: project({ reach: { state: "unsupported" }, daemonNote: "updating the helper" }, { kind: "ssh" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
-    // This computer reads the same rule: its host wires a daemon, so one missing is a fact worth the line.
-    expect(workspaceMetaLine({ project: project({ reach: { state: "unsupported" } }, { kind: "local" }), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toBe("no daemon on it");
+    // This computer reads the same rule: what the machine said it lacks is the line, and nothing where it said nothing.
+    expect(workspaceMetaLine({ project: project({ reach: { state: "unsupported" } }, { kind: "local" }), cost: tick(0.29), outOfMemory: undefined, nowMs: now })).toBe(FREE_WORD);
   });
 
   it("a machine that told the host what it lacks says that on its row, in the first clause of what it said", () => {
@@ -347,14 +352,35 @@ describe("workspace row labels", () => {
       workspaceMetaLine({ project: project({ reach: { state: "unsupported" }, daemonRefusedAt: { machineId: "ssh://dev@box:22", at: "2026-09-11T14:04:50.380Z", why } }, { kind: "ssh" }), cost: tick(0.29), outOfMemory: undefined, nowMs: now });
     // Why, rather than the bare fact that none is there: the row cuts from the right, so it takes the head of the
     // sentence, which is what the machine has not got. Both refusals are written to fit it.
-    expect(said(NO_BUILD_TOOLS_LINE)).toBe("this machine has no C compiler");
+    expect(said(NO_NODE_LINE)).toBe("this machine has no Node 22");
     expect(said(NO_LINGER_LINE)).toBe("this login does not linger");
     // The whole sentence carries the command to type, which is at the end of it and no row would show; the
     // Machine tab is where it goes, and that is proved where that surface is rendered.
     expect(NO_LINGER_LINE).toContain("loginctl enable-linger");
     expect(machineLacksShort(NO_LINGER_LINE)).not.toContain("loginctl");
-    // Nothing said, nothing new: the row keeps the fact it always had.
-    expect(daemonGoneLine("unsupported", kindWords("ssh"))).toBe("no daemon on it");
+    // Nothing said, nothing on the line: the row has no fact to spend it on.
+    expect(daemonGoneLine("unsupported", kindWords("ssh"))).toBeUndefined();
+  });
+
+  it("a workspace whose computer is not answering reads one state on the row: the word in the slot, the silence on line three, the whole sentence on its title", () => {
+    const absent = absentComputer("old-laptop", awayMsOf({ lastSeenAt: new Date(now - 38 * 60_000).toISOString() }, now));
+    const on = project({ reach: { state: "unreachable" } }, { kind: "place", machineId: "place:p_oldlaptop" });
+    // The slot names it although wsp neither pauses nor wakes a computer somebody owns: the computer is the one
+    // that is not answering, and a blank slot there was the row that said nothing beside readings of unreachable.
+    expect(stateSlotWord({ ...on, indicator: { label: "Unreachable", tone: "neutral", pulse: false } }, absent)).toBe("Unreachable");
+    expect(stateSlotWord({ ...on, indicator: { label: "Unreachable", tone: "neutral", pulse: false } }, null)).toBe("");
+    // Line three is the silence and what to do about it, and it takes the line ahead of everything else on the
+    // row: nothing else there is known while that computer is not connected.
+    const line = workspaceMetaLine({ project: on, absent, cost: tick(0.29), outOfMemory: undefined, nowMs: now });
+    expect(line).toBe("no answer 38 min · is it on?");
+    expect(rowLineCut(line)).toBe(line);
+    expect(metaSentences({ project: on, absent, outOfMemory: undefined })[0]).toBe(line);
+    // The Spaces header gives it the same lead, over what the machine is.
+    expect(spaceHeaderLines({ project: on, absent, cost: tick(0.29), outOfMemory: undefined, nowMs: now })[0]).toBe(line);
+    // The whole sentence is one string every surface reads, and it never names the machine's id.
+    expect(absent.sentence).toBe("old-laptop is not answering; it connects on its own when it is on");
+    expect(absent.sentence).not.toContain("place:");
+    expect(absent.sentence).not.toContain("daemon");
   });
 
   it("thread pills key on the session state, wear the adapter's word, and use tokens: only the running dot is the success colour", () => {

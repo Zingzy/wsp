@@ -79,7 +79,6 @@ export function placeDaemonPaths(home: string): {
   openSocket: string;
   manifestPath: string;
   profileFile: string;
-  nodeDir: string;
   unitDir: string;
   binDir: string;
   rootsPath: string;
@@ -104,7 +103,6 @@ export function placeDaemonPaths(home: string): {
     openSocket: `${wsp}/open.sock`,
     manifestPath: `${wsp}/manifest.json`,
     profileFile: `${wsp}/profile.sh`,
-    nodeDir: `${wsp}/node`,
     unitDir: `${at}/.config/systemd/user`,
     binDir: `${at}/.local/bin`,
     rootsPath: rootsPathIn(at),
@@ -120,9 +118,16 @@ export function placeDaemonPaths(home: string): {
  * daemon sweeps by this list when its host asks over the link and wsp leave sweeps by it at the terminal. */
 export function placeOwnedPaths(home: string): string[] {
   const at = placeDaemonPaths(home);
-  return [at.placeFile, at.placeKey, at.placeLog, at.dir, at.bundle, at.inbox, at.tokenPath, at.rootsPath, at.nodeDir, at.profileFile, at.openSocket, at.runDir, `${at.wsp}/wsp-npm.log`, at.portFile, `${at.binDir}/wsp-open`, `${at.binDir}/xdg-open`];
+  return [at.placeFile, at.placeKey, at.placeLog, at.dir, at.bundle, at.inbox, at.tokenPath, at.rootsPath, at.profileFile, at.openSocket, at.runDir, at.portFile, `${at.binDir}/wsp-open`, `${at.binDir}/xdg-open`];
 }
 
 /** The same paths under the name the ssh road has always called them. One function, two names, so nothing keeps a
  * second copy of where a daemon on somebody's own computer puts its token, its port file and its run folder. */
 export const sshDaemonPaths = placeDaemonPaths;
+
+/** What a stand-in provider keeps in the folder a harness names for it: the records every host on that state file
+ * reads, so two of them see one fleet, and a folder per machine standing in for that machine's disk. The layout is
+ * written here because the harness that seeds the records and the host that answers out of them both name it and
+ * neither may guess. */
+export const standInRecordsPath = (root: string): string => `${root.replace(/\/+$/, "")}/records.json`;
+export const standInMachinePath = (root: string, machineId: string): string => `${root.replace(/\/+$/, "")}/machines/${machineId}`;

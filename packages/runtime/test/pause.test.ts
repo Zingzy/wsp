@@ -2,14 +2,14 @@
 // A pause is a phase of its own: pausing is persisted and pushed before the
 // provider is asked, sends are refused from then on, and every live session
 // of the workspace ends with a reason the timeline shows as its last row. The
-// same ending runs on delete and when the reach tracker calls the machine a
-// zombie (its retry budget, measured: minutes of silence plus a failed probe).
+// same ending runs on delete. What a machine that has stopped answering costs
+// a running turn, which is nothing, lives in link-drop.test.ts.
 import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MoveUnansweredError, ResumeUnansweredError } from "@wsp/engine";
 import { ALREADY_RUNNING, machineWord, moveTimedOutLine, providerCannotRefusal, RESUME_UNANSWERED, sendRefusal, workspaceState, workspaceWord, type AdapterEvent, type EventUnion, type SessionEvent } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type RuntimeOptions } from "../src/runtime.js";
-import { serveRuntime, type RuntimeServer } from "../src/serve.js";
+import { serveRuntime } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
@@ -247,56 +247,6 @@ describe("sessions end with the machine", () => {
     expect(ends(events)[0]).toMatchObject({ workspaceId: ws.id, reason: "machine deleted while the agent was working" });
     expect(events.findIndex(e => e.type === "session.end")).toBeLessThan(events.findIndex(e => e.type === "workspace.deleted"));
     expect(handle.view()).toMatchObject({ status: "failed", endedAt: expect.any(Number) });
-  });
-});
-
-describe("sessions end when the machine stops answering", () => {
-  const openServers: Server[] = [];
-  let srv: RuntimeServer | undefined;
-  afterEach(async () => {
-    await srv?.close();
-    srv = undefined;
-    await Promise.all(openServers.map(s => { s.closeAllConnections(); return new Promise<void>(r => s.close(() => r())); }));
-    openServers.length = 0;
-  });
-
-  /** The edge answers late, the exec probe fails: the tracker's zombie verdict, as measured twice at rest. */
-  async function unansweringMachine(backend: StubBackend): Promise<void> {
-    const server = createServer((_req, res) => setTimeout(() => res.writeHead(426).end(), 40));
-    await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
-    openServers.push(server);
-    const port = (server.address() as { port: number }).port;
-    backend.machines[0]!.previewUrl = async p => ({ url: `http://127.0.0.1:${port}/?port=${p}`, token: "t", expiresAt: Date.now() + 3_600_000 });
-    backend.execImpl = (_m, cmd) => (cmd === "echo ok" ? { exitCode: 1, stdout: "", stderr: "502" } : { exitCode: 0, stdout: "", stderr: "" });
-  }
-
-  it("the zombie verdict ends the live sessions with the reason, once", async () => {
-    const backend = stubBackend();
-    const { factory } = hangingAdapter();
-    const rt = createRuntime({
-      backend,
-      store: memoryStore(),
-      adapters: { claude: factory },
-      status: { costIntervalMs: 60_000, pollIntervalMs: 5, promptMs: 10, probeTimeoutMs: 500, zombieWindowMs: 80, zombieProbeTimeoutMs: 200 },
-    });
-    const events: EventUnion[] = [];
-    rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
-    const handle = await rt.sessions.start(ws.id, { prompt: "one" });
-    await unansweringMachine(backend);
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const stop = rt.status.watch();
-    try {
-      await until(() => ends(events).length > 0, 5_000);
-      await new Promise(r => setTimeout(r, 60));
-      expect(ends(events)).toHaveLength(1);
-      expect(ends(events)[0]).toMatchObject({ workspaceId: ws.id, reason: "machine stopped answering while the agent was working" });
-      expect(handle.view().status).toBe("failed");
-      expect((await rt.workspaces.get(ws.id)).phase).toBe("running");
-    } finally {
-      stop();
-      warn.mockRestore();
-    }
   });
 });
 

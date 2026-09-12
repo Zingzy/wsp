@@ -3,12 +3,12 @@
 // already words: the name a person reads a row as, and the sentence the Remove
 // dialog computes from what the computer holds. The four cells of a row, the
 // state word after a name, how long a computer has been away and an hourly
-// rate are all the protocol's (placeStateWord, placeWorkspacesCell, fmtSize,
+// rate are all the protocol's (absentComputer, placeWorkspacesCell, fmtSize,
 // fmtBytes, offlineFor, fmtRate) and are not copied here.
 //
 // The New workspace dialog's Where control reads its rows and its caption from
 // the bottom of this file rather than wording a second set of place facts.
-import { FREE_WORD, JOINED_COMPUTER, fmtBytes, fmtRate, hereWord, isLocalWorkspace, parsePlaceMachineId, plural, thisComputer, type CpuWord, type PlaceKind, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, JOINED_COMPUTER, absentComputer, awayMsOf, fmtBytes, fmtRate, hereWord, isLocalWorkspace, plural, thisComputer, workspacePlace, type AbsentComputer, type CpuWord, type PlaceKind, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
 import { PROVIDER_ROWS } from "./providers.js";
 
 /** What a person reads a row as. The first row is the computer the host runs on, which says so rather than giving
@@ -97,11 +97,29 @@ export const placeTakesWorkspaces = (place: PlaceView): boolean => isProviderPla
  * carries names its row; what runs on this computer is the first row, which is the computer the host runs on; and
  * anything else was forked at the provider. The one reading, so the pane's Where row and the table's own holdings
  * cannot disagree about which computer a workspace is on. */
-export function placeOf(places: readonly PlaceView[], workspace: Pick<WorkspaceView, "kind" | "machineId">): PlaceView | undefined {
-  const named = parsePlaceMachineId(workspace.machineId ?? "");
+export function placeOf(places: readonly PlaceView[], workspace: Pick<WorkspaceView, "kind" | "machineId" | "place">): PlaceView | undefined {
+  const named = workspacePlace(workspace);
   if (named !== undefined) return places.find(p => p.id === named);
   if (isLocalWorkspace(workspace)) return places[0];
   return places.find(isProviderPlace);
+}
+
+/** The one state of the computer a workspace stands on, while that computer is not answering; null while it is,
+ * and on every workspace at a provider or on this computer, neither of which reports a link at all. The sidebar
+ * row, the Workspace panel, the composer and the terminal and processes panes all read this one reading, so the
+ * silence of one computer is not worded six ways again. */
+export function absenceOf(places: readonly PlaceView[], workspace: Pick<WorkspaceView, "kind" | "machineId" | "place"> | null, now: number | null): AbsentComputer | null {
+  if (workspace === null) return null;
+  const at = placeOf(places, workspace);
+  return at === undefined ? null : absentOf(at, now);
+}
+
+/** The same reading off one row of the places list, for the table that draws that row: null while the computer
+ * holds its link. The one door to it, so the table and every surface that asks by workspace read one predicate
+ * and compose the words once. A caller with no clock passes none and gets a reading with no figure in its line,
+ * which is every caller that shows the sentence alone. */
+export function absentOf(place: PlaceView, now: number | null, here = false): AbsentComputer | null {
+  return placeIsOffline(place) ? absentComputer(placeName(place, here), now === null ? null : awayMsOf(place, now)) : null;
 }
 
 /** How many workspaces stand on each row, by the id of the row: every workspace the app holds goes to exactly one

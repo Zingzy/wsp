@@ -1,5 +1,5 @@
 {
-  "daemonVersion": 21,
+  "daemonVersion": 22,
   "execBodyMax": 16384,
   "execOutputMax": 2097152,
   "execTimeoutDefaultMs": 20000,

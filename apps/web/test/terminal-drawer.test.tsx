@@ -15,7 +15,7 @@ import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
 import { RightPanel } from "../src/shell/RightPanel.js";
-import { openPanelTerminal } from "../src/shell/shellCommands.js";
+import { openDrawerTerminal, openPanelTerminal, splitActivePanelTerminal, splitDrawerTerminal } from "../src/shell/shellCommands.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../src/terminal/link.js";
 import { caps } from "./caps.js";
@@ -177,6 +177,57 @@ describe("terminal as a right-panel surface", () => {
     useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [view], statuses: {}, costs: {}, spending: {}, toast: null, selectedId: WS, sessions: {}, ready: true });
   });
 
+  it("a computer that is not answering refuses the Terminal and Processes panels in the panel itself, and asks for no pty", async () => {
+    const onPlace: WorkspaceView = { ...view, kind: "place", machineId: "place:p_oldlaptop" };
+    const { count } = fakeLink();
+    act(() =>
+      useStore.setState({
+        workspaces: [onPlace],
+        places: [{ id: "p_oldlaptop", kind: "computer", name: "old-laptop", default: true, present: false, lastSeenAt: new Date(Date.now() - 38 * 60_000).toISOString(), workspaceId: WS }],
+      }),
+    );
+    render(<Panel />);
+    const sentence = "old-laptop is not answering; it connects on its own when it is on";
+    // The launcher card carries the sentence where the panel would have opened, rather than a grey line at the
+    // foot of the sidebar in the opposite corner from the click.
+    const card = (key: string) => document.querySelector<HTMLElement>(`[data-surface-launch="${key}"]`)!;
+    await waitFor(() => expect(card("terminal").getAttribute("data-available")).toBe("false"));
+    expect(within(card("terminal")).getByText(sentence)).toBeTruthy();
+    expect(card("processes").getAttribute("data-available")).toBe("false");
+    expect(within(card("processes")).getByText(sentence)).toBeTruthy();
+    // The one sentence that says what happened reads at the muted ink's own alpha; the dimming that says the card
+    // is held sits on the title and the icon, which the person is not being asked to read.
+    for (const key of ["terminal", "processes"]) {
+      expect(card(key).className).not.toContain("opacity-40");
+      expect(within(card(key)).getByText(sentence).className).not.toContain("opacity");
+      expect(card(key).querySelector("[data-surface-card-head]")!.className).toContain("opacity-40");
+    }
+    fireEvent.click(card("terminal"));
+    await new Promise(r => setTimeout(r, 50));
+    expect(count("pty.create")).toBe(0);
+    expect(useStore.getState().toast).toBeNull();
+    expect(document.body.textContent).not.toContain("daemon unreachable");
+  });
+
+  it("asks for no pty on an absent computer from the shortcut, the split or the panel's own button either, so nothing toasts", async () => {
+    const onPlace: WorkspaceView = { ...view, kind: "place", machineId: "place:p_oldlaptop" };
+    const { count } = fakeLink();
+    act(() =>
+      useStore.setState({
+        workspaces: [onPlace],
+        places: [{ id: "p_oldlaptop", kind: "computer", name: "old-laptop", default: true, present: false, lastSeenAt: new Date(Date.now() - 38 * 60_000).toISOString(), workspaceId: WS }],
+      }),
+    );
+    // The tab click is held by the panel; these three roads reach the link directly, and from a pane that was
+    // open before the silence the toast the ticket names was one keypress away.
+    await openDrawerTerminal(WS);
+    await splitDrawerTerminal(WS);
+    await openPanelTerminal(WS);
+    await splitActivePanelTerminal(WS);
+    expect(count("pty.create")).toBe(0);
+    expect(useStore.getState().toast).toBeNull();
+  });
+
   it("mounts the drawer in panel mode for a terminal surface and labels its tab from the link", async () => {
     const { wt, writes } = fakeLink();
     const tab = await wt.open();
@@ -309,7 +360,7 @@ describe("reload adopts the daemon's ptys", () => {
     render(<WorkspaceTerminalDrawer workspaceId={WS} />);
     // Until the daemon has answered, the stored ptys are not shown as terminals: no surface binds to a pty the link does not know.
     // Nothing has been open on this link, so the pane says what is being started and never that something is coming back.
-    await screen.findByText(/Starting a terminal on this workspace/);
+    await screen.findByText(/Starting a terminal on drawer/);
     expect(canvases("drawer")).toHaveLength(0);
     releaseList();
     await waitFor(() => expect(canvases("drawer")).toHaveLength(2));
@@ -339,7 +390,7 @@ describe("reload adopts the daemon's ptys", () => {
       </>,
     );
     // Before the daemon answers, neither side shows a terminal or drops the panel's surface.
-    await waitFor(() => expect(screen.getAllByText(/Starting a terminal on this workspace/)).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByText(/Starting a terminal on drawer/)).toHaveLength(2));
     expect(selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS).surfaces.map(s => s.id)).toEqual(["terminal:p2"]);
     releaseList();
     await waitFor(() => expect(useTerminalDrawerStore.getState().byWorkspaceId[WS]?.terminalIds).toEqual(["p1", "p3"]));

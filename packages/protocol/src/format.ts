@@ -678,6 +678,12 @@ export function openingTitle(text: string): string {
   return cutLine(/^.*?[.!?](?=\s|$)/.exec(line)?.[0] ?? line, OPENING_TITLE_MAX);
 }
 
+/** The most characters the third line of a workspace row holds: the row leaves 201 px for text at the sidebar's
+ * default 256 px and 11 px mono fits 30 of them there, so a longer line is cut by the width with no say in where.
+ * Here rather than in the app because the lines written for that slot are written here too, and the cut is what
+ * takes the half that says what to do off a line nobody measured. */
+export const ROW_LINE_MAX = 30;
+
 /** Text cut to at most room characters, at a word boundary where one fits, with the ellipsis counted inside the
  * room and drawn only where something was taken off. One rule for every line a surface cuts itself: a thread's
  * title from its opening turn, a sidebar row's third line. */
@@ -1948,12 +1954,12 @@ export function noImportRoadLine(name: string, machine: string): string {
   return `${name} is ${machine}, which lands no folder yet; import to a fork, or register the folder on this computer`;
 }
 
-/** What a machine that cannot build the daemon is refused with. node-pty ships prebuilt binaries for macOS and
- * Windows only, so the terminal's native part is compiled where the daemon runs; a machine wsp builds carries the
- * floor's toolchain, and a machine somebody already owns may carry none. Said before the install rather than
- * after, since a daemon that installed half of itself restarts forever under its unit. */
-export const NO_BUILD_TOOLS_LINE =
-  "this machine has no C compiler, so the daemon's terminal cannot be built on it; install a build toolchain (on Debian or Ubuntu: sudo apt-get install build-essential) and deploy the daemon again";
+/** What a machine without a node the wsp command runs on is refused with. The daemon itself is one static binary
+ * and asks nothing of the machine; the wsp command that rides beside it, which every turn's agent drives the host
+ * through, still runs on node. A machine wsp builds carries the floor's; a machine somebody already owns may carry
+ * none, or one too old. Said before the install rather than after, so nothing lands on a machine that refuses. */
+export const NO_NODE_LINE =
+  "this machine has no Node 22, which the wsp command beside the daemon runs on; install Node 22 or newer on it and deploy the daemon again";
 
 /** What a machine whose login does not linger is refused with. Its own systemd stops when its last session ends
  * and takes the daemon with it, so a daemon deployed there is gone the moment the host's connection closes; the
@@ -1964,7 +1970,7 @@ export const NO_LINGER_LINE =
 /** Every sentence a machine's own checks refuse with, in one place beside them. Read by the rule that keeps each
  * one's first clause short enough for a row, so a refusal added later takes that rule without anyone remembering
  * where it is checked. Nothing decides anything by searching this: which ending a throw is comes off its mark. */
-export const MACHINE_LACKS_LINES: readonly string[] = [NO_BUILD_TOOLS_LINE, NO_LINGER_LINE];
+export const MACHINE_LACKS_LINES: readonly string[] = [NO_NODE_LINE, NO_LINGER_LINE];
 
 /** The marks the checks a machine takes before a daemon is put on it end with, put on where the throw happens
  * rather than matched against text: a check added to a place's preflight is then one shell line and one sentence,
@@ -2756,29 +2762,12 @@ export function offlineFor(ms: number): string {
   return hours < 24 ? `${hours} h` : `${Math.floor(hours / 24)} d`;
 }
 
-/** The mono word after a computer's name in the Where agents run table: nothing while it holds its link, one word
- * when it does not. The slot stands either way, so the word arriving moves no column, and one word is all the
- * column can hold beside the three facts the table never shrinks. */
-export function placeStateWord(view: PlaceView): string {
-  return view.present === false ? "offline" : "";
-}
-
-/** The same state with how long the computer has been away, for the row's title and anywhere else with room for
- * the figure. The table's own slot takes the word alone. */
-export function placeAwayWord(view: PlaceView, now: number): string {
-  const word = placeStateWord(view);
-  if (word === "") return "";
-  const since = view.lastSeenAt === undefined ? NaN : Date.parse(view.lastSeenAt);
-  return Number.isNaN(since) ? word : `${word} · ${offlineFor(now - since)}`;
-}
-
 /** The Workspaces cell of that table: how many stand on the computer, and the one thing about it that changes what
- * a person may put there. A computer that is not answering says so ahead of what it cannot run, since the second
- * fact is about a computer this wsp is not talking to. The count is what the caller reads off the workspace list,
- * never off the row: a row carries at most the one workspace its join recorded, so this computer's own workspace
- * and a provider's forks are on neither. */
+ * a person may put there. Whether the computer is answering is not one of them: the state slot beside its name
+ * carries that, and a row that said it twice was a row that said it in two wordings. The count is what the caller
+ * reads off the workspace list, never off the row: a row carries at most the one workspace its join recorded, so
+ * this computer's own workspace and a provider's forks are on neither. */
 export function placeWorkspacesCell(view: PlaceView, count: number): string {
-  if (view.present === false) return `${count} · not answering`;
   return view.docker === true || view.kind === "provider" ? `${count}` : `${count} · agents only`;
 }
 
