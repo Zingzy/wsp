@@ -176,7 +176,14 @@ export type MessagesTimelineRow =
     }
   | { readonly kind: "proposed-plan"; readonly id: string; readonly createdAt: string; readonly proposedPlan: ProposedPlan }
   | { readonly kind: "permission"; readonly id: string; readonly createdAt: string; readonly permission: PermissionPrompt }
-  | { readonly kind: "working"; readonly id: string; readonly createdAt: string | null }
+  | {
+      readonly kind: "working";
+      readonly id: string;
+      readonly createdAt: string | null;
+      /** A prompt of this turn is open and nobody has answered it, so the turn is stopped on a question and the
+       * elapsed count is time the person has kept it waiting, not time it worked. */
+      readonly waitingOnYou: boolean;
+    }
   | { readonly kind: "thinking"; readonly id: string; readonly createdAt: string | null };
 
 // --- composer prompts ---------------------------------------------------------

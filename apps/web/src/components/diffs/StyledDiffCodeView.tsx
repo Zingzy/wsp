@@ -234,6 +234,16 @@ const DIFF_VIEW_UNSAFE_CSS = `${DIFF_SURFACE_THEME_UNSAFE_CSS}
   text-decoration-color: currentColor;
 }
 
+/* A changed word sits on the strongest tint its row carries, and the grammar's own colour for that word was
+   picked against the code surface, not against that tint: a changed number in the light theme measured 2.19:1
+   over it. Changed words read in the ink the surface reads in, so the tint says where and the ink says what. The
+   descendant selector is not decoration: the token spans inside carry their colour inline, and an inline colour
+   on a child is not beaten by any rule on its parent. */
+[data-diff-span],
+[data-diff-span] * {
+  color: var(--code-foreground) !important;
+}
+
 /* Expanding a file mounts its body all at once; easing it in matches the 200ms the app's
    collapsibles take. Appearance only — the viewer owns geometry, so height cannot animate.
    Departing content cuts, the same one-way rule the pull request chrome fold follows. */

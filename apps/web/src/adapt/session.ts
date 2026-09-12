@@ -386,6 +386,13 @@ function compactLines(text: string): string[] {
   return text.split(/\r?\n/).map(line => line.replace(/\s+/g, " ").trim()).filter(line => line.length > 0);
 }
 
+/** Whether a prompt is one nobody has answered. Written once because three surfaces ask it and each of them says
+ * something different when it is true: the prompt row offers its options, the thread's row and header say the
+ * thread needs the person, and the elapsed count says the thread is waiting rather than working. */
+export function isPromptOpen(permission: Pick<PermissionPrompt, "outcome">): boolean {
+  return permission.outcome === null;
+}
+
 /** The line a row shows for a command: its first non-empty line, whole; the row's width cuts it. */
 export function commandFirstLine(command: string): string {
   return compactLines(command)[0] ?? command.trim();

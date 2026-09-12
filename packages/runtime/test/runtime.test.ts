@@ -6272,7 +6272,7 @@ describe("a thread whose start named who to tell", () => {
     const kidThread = kid.view().threadId!;
     h.end(1, "done", { durationMs: 1_500, costUsd: 0.0042 });
     await vi.waitFor(() => expect(h.starts).toHaveLength(3));
-    const line = `thread ${kidThread.slice(0, 8)} finished (completed, 1.5s, $0.0042): done`;
+    const line = `thread ${kidThread.slice(0, 8)} finished (completed, 1.5s, $0.00): done`;
     expect(h.starts[2]).toMatchObject({ prompt: line, resume: parentSid });
     expect(h.steered).toEqual([]);
     const rows = await rt.sessions.list(ws.id);
@@ -6297,7 +6297,7 @@ describe("a thread whose start named who to tell", () => {
     expect(parent.view().status).toBe("running");
     const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: [parentThread] });
     h.end(1, "done", { durationMs: 1_500, costUsd: 0.0042 });
-    const line = `thread ${kid.view().threadId!.slice(0, 8)} finished (completed, 1.5s, $0.0042): done`;
+    const line = `thread ${kid.view().threadId!.slice(0, 8)} finished (completed, 1.5s, $0.00): done`;
     await settle();
     // The parent's turn has replied, so it takes no steer; the line queues behind that process, as any send does.
     expect(h.steered).toEqual([]);
@@ -6324,7 +6324,7 @@ describe("a thread whose start named who to tell", () => {
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
     const turn = await rt.sessions.start(ws.id, { prompt: "orchestrate", notify: ["me"] });
     h.reply(0, "the reply", { durationMs: 1_500, costUsd: 0.0042 });
-    const line = `thread ${turn.view().threadId!.slice(0, 8)} finished (completed, 1.5s, $0.0042): the reply`;
+    const line = `thread ${turn.view().threadId!.slice(0, 8)} finished (completed, 1.5s, $0.00): the reply`;
     await rt.workspaces.nap(ws.id);
     expect(events.filter(e => e.type === "session.notify").map(e => (e as { text: string }).text)).toEqual([line]);
     expect((await rt.sessions.list(ws.id))[0]!.status).toBe("completed");
@@ -6342,7 +6342,7 @@ describe("a thread whose start named who to tell", () => {
     const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
     const turn = await rt1.sessions.start(ws.id, { prompt: "orchestrate", notify: ["me"] });
     h1.reply(0, "the reply", { durationMs: 1_500, costUsd: 0.0042 });
-    const line = `thread ${turn.view().threadId!.slice(0, 8)} finished (completed, 1.5s, $0.0042): the reply`;
+    const line = `thread ${turn.view().threadId!.slice(0, 8)} finished (completed, 1.5s, $0.00): the reply`;
     await rt1.close();
 
     const rt2 = createRuntime({ backend, store, adapters: { claude: held(false).adapter } });

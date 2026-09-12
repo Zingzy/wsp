@@ -243,10 +243,20 @@ export function fmtElapsed(ms: number): string {
   return seconds < 60 ? `${seconds}s` : fmtDuration(seconds * 1_000);
 }
 
-/** A turn's cost in dollars: cents, or four places under a cent so a short turn does not read as free. */
+/** Every spend figure a person reads, in one shape: cents, whatever the size. Three figures in one thread used to
+ * read $0.51, $0.22 and $0.0000, and a reader cannot tell at a glance that the third is the smallest of them. A
+ * turn under a cent reads $0.00, which is what it costs to the cent. */
 export function fmtCost(usd: number): string {
-  return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
+  return `$${usd.toFixed(2)}`;
 }
+
+/** The word beside a figure nobody is billed for: what the agent's own table lists for the tokens a turn spent, on
+ * a computer whose turns run on the person's own sign-in. The composer's model menu says the whole of it in
+ * whoPaysLines; this is the word the figure itself carries, where a person meets the figure long before the menu. */
+export const LIST_PRICE_WORD = "list price";
+
+/** A spend figure with the word that says what it is, where the surface has one to give it. */
+const spendFigure = (usd: number, word: string | undefined): string => (word === undefined ? fmtCost(usd) : `${fmtCost(usd)} ${word}`);
 
 /** How much of the reply a finished line carries: `tail`, its last line, which is what a person reads in a sidebar
  * row and what a wait answers with; `whole`, the final message entire, which is what a thread woken by the line acts
@@ -297,18 +307,18 @@ export function openedSpendPart(costUsd: number): string {
 
 /** The turn's own cost where a second figure stands beside it. The two count different things, one turn against
  * whole threads, so where both are shown each says which spend it is and neither can be read as the other. */
-export function turnSpendPart(costUsd: number): string {
-  return `${fmtCost(costUsd)} this turn`;
+export function turnSpendPart(costUsd: number, word?: string): string {
+  return `${spendFigure(costUsd, word)} this turn`;
 }
 
 /** What a settled turn says beside its outcome word, in the order every client shows it: how long it worked, what
  * it cost, and what the threads it opened cost where it opened any. The app's chat footer and the command line's
  * last line read from this one list. */
-export function turnSettledParts(turn: { durationMs?: number | null; costUsd?: number | null }, openedCostUsd?: number | null): string[] {
+export function turnSettledParts(turn: { durationMs?: number | null; costUsd?: number | null }, openedCostUsd?: number | null, spendWord?: string): string[] {
   const opened = typeof openedCostUsd === "number" && openedCostUsd > 0;
   const parts: string[] = [];
   if (typeof turn.durationMs === "number") parts.push(`Worked for ${fmtDuration(turn.durationMs)}`);
-  if (typeof turn.costUsd === "number") parts.push(opened ? turnSpendPart(turn.costUsd) : fmtCost(turn.costUsd));
+  if (typeof turn.costUsd === "number") parts.push(opened ? turnSpendPart(turn.costUsd, spendWord) : spendFigure(turn.costUsd, spendWord));
   if (opened) parts.push(openedSpendPart(openedCostUsd));
   return parts;
 }

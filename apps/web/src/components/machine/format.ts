@@ -2,6 +2,8 @@
 // Words the machine surface puts next to wire values; the state word itself is
 // the protocol's, read from the same fold every other surface reads.
 
+/** The rate rows and the chart's own axis ticks, which need places a spend figure does not: what a person reads as
+ * a spend goes through the protocol's fmtCost, the one shape every surface shows a figure in. */
 export const money = (n: number, digits = 4): string => `$${n.toFixed(digits)}`;
 
 /** A tick's wall-clock time in the person's zone, hours and minutes. */

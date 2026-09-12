@@ -1121,6 +1121,10 @@ function PermissionTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "per
   return <PermissionPromptRow permission={row.permission} onAnswer={ctx.onAnswerPermission} />;
 }
 
+/** What the elapsed count leads with while a prompt of the turn is open: the count is then time the person has kept
+ * the turn waiting, and a thread stopped on a question is not working. */
+const WAITING_ON_YOU_LEAD = "Waiting for you";
+
 function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "working" }> }) {
   const { isPreparingWorktree, machineWait } = use(TimelineRowActivityCtx);
   if (machineWait !== null) {
@@ -1144,7 +1148,7 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
     <div className="border-b border-border/60 pb-2 pt-1">
       <div className="flex h-6 min-w-0 items-baseline px-1 text-sm leading-relaxed text-muted-foreground tabular-nums">
         <span
-          key={isPreparingWorktree ? "setup" : "working"}
+          key={isPreparingWorktree ? "setup" : row.waitingOnYou ? "waiting" : "working"}
           className="relative shrink-0 overflow-hidden whitespace-nowrap transition-opacity duration-150 starting:opacity-0 motion-reduce:transition-none"
         >
           {isPreparingWorktree ? (
@@ -1152,6 +1156,14 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
               Setting up worktree…
               <ActivityShimmerOverlay>Setting up worktree…</ActivityShimmerOverlay>
             </>
+          ) : row.waitingOnYou ? (
+            row.createdAt ? (
+              <>
+                {WAITING_ON_YOU_LEAD} <span aria-hidden>·</span> <WorkingTimer createdAt={row.createdAt} />
+              </>
+            ) : (
+              WAITING_ON_YOU_LEAD
+            )
           ) : row.createdAt ? (
             <>
               Working for <WorkingTimer createdAt={row.createdAt} />

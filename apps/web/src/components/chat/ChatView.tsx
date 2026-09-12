@@ -12,10 +12,10 @@
 // turn's own cost against what those threads spent.
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import type { LegendListRef } from "@legendapp/list/react";
-import { turnSettledParts } from "@wsp/protocol";
+import { isLocalWorkspace, LIST_PRICE_WORD, turnSettledParts, whoPaysLines } from "@wsp/protocol";
 import { threadLink } from "../../actions/threadActions";
 import { deriveSidebarProjects } from "../../adapt";
-import { useStatus, useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
+import { useHarnessCatalog, useStatus, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { cn } from "../../lib/utils";
 import { DEFAULT_TIMESTAMP_FORMAT, pausedLine, turnWait, type TimestampFormat, type TurnSummary } from "./adapt";
@@ -25,13 +25,11 @@ import { TimelineRuleLine } from "./TimelineRuleLine";
 import { MessagesTimeline, type MachineWait } from "./MessagesTimeline";
 import { useNewThreadRequests } from "./newThreadRequests";
 import { useChatThread, type ChatThreadHandle } from "./useChatThread";
+import { DEFAULT_HARNESS } from "./ComposerOptionPickers";
 import { TRANSCRIPT_LOADING } from "../../transcript-words";
+import { useAppDark } from "../../settings/theme";
 
 const noopImageExpand = () => {};
-
-function resolveDocumentTheme(): "light" | "dark" {
-  return typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "dark" : "light";
-}
 
 export function ChatView({
   workspaceId,
@@ -45,6 +43,10 @@ export function ChatView({
   children?: ((thread: ChatThreadHandle) => ReactNode) | undefined;
 }) {
   const workspace = useWorkspace(workspaceId);
+  // The page starts on the dark side (index.html) and the preference flips it after the first paint, so a side read
+  // once during a render stays wrong until something else repaints: a fenced block highlighted for the other side
+  // draws its line in the ink the box's own background is.
+  const appDark = useAppDark();
   const wake = useStore(s => s.wake);
   const select = useStore(s => s.select);
   const newThread = useStore(s => s.newThread);
@@ -89,6 +91,15 @@ export function ChatView({
   // next send is what wakes it. One line under the transcript in the timeline's own rule grammar, never a dialog.
   const paused = state === "paused" && !view.running ? pausedLine(status?.reason) : null;
   const { startNewThread, hydrated, threadKey } = thread;
+  // What the footer's figure is: on this computer the turn ran on the person's own sign-in, so the number is the
+  // agent's own list price and nobody is billed for it. The word goes on the figure from the record alone, which
+  // the page has before it draws the footer at all; a word that arrived a moment after the figure would be the
+  // change this ticket took off the sidebar's line. The sentence the model menu's foot carries rides the figure's
+  // title once the catalog holding the agent's own name is in, since nobody opens that menu before sending.
+  const onThisComputer = workspace !== null && isLocalWorkspace(workspace);
+  const turnRows = useThreadSessions(workspaceId, threadKey);
+  const catalog = useHarnessCatalog(turnRows.at(-1)?.harness ?? DEFAULT_HARNESS, workspaceId);
+  const listPrice = onThisComputer && catalog !== null ? whoPaysLines(catalog, where).join(" ") : null;
   const asked = useNewThreadRequests(s => s.pending.has(workspaceId));
   useEffect(() => {
     // The latest view takes the request once its transcript is in, so it knows which thread it leaves behind.
@@ -131,7 +142,7 @@ export function ChatView({
             onOpenFile={onOpenFile}
             markdownCwd={cwd}
             workspaceRoot={cwd}
-            resolvedTheme={resolveDocumentTheme()}
+            resolvedTheme={appDark ? "dark" : "light"}
             timestampFormat={timestampFormat}
           />
         )}
@@ -141,7 +152,7 @@ export function ChatView({
           <OpenedThreadRows opened={opened} onOpen={select} />
         </div>
       ) : null}
-      {thread.hydrated && view.settled !== null ? <SettledFooter turn={view.settled} openedCostUsd={openedSpend(opened)} /> : null}
+      {thread.hydrated && view.settled !== null ? <SettledFooter turn={view.settled} openedCostUsd={openedSpend(opened)} onThisComputer={onThisComputer} listPrice={listPrice} /> : null}
       {thread.hydrated && paused !== null ? (
         <div className="mx-auto w-full max-w-5xl px-4 pb-1">
           <TimelineRuleLine data-workspace-paused line={paused} />
@@ -213,9 +224,9 @@ const TURN_STATUS: Record<TurnSummary["state"], string> = {
  * the type ladder's 11 px mono, the size the rule lines above it and the row meta in the sidebar read at. A narrow
  * window breaks the line between facts and never inside one: a duration or a price split over two lines is a
  * figure a person has to reassemble before they can read it. */
-function SettledFooter({ turn, openedCostUsd }: { turn: TurnSummary; openedCostUsd: number }) {
+function SettledFooter({ turn, openedCostUsd, onThisComputer, listPrice }: { turn: TurnSummary; openedCostUsd: number; onThisComputer: boolean; listPrice: string | null }) {
   const failed = turn.state !== "completed";
-  const parts = turnSettledParts(turn, openedCostUsd);
+  const parts = turnSettledParts(turn, openedCostUsd, onThisComputer ? LIST_PRICE_WORD : undefined);
   return (
     <div
       data-testid="settled-footer"
@@ -226,7 +237,7 @@ function SettledFooter({ turn, openedCostUsd }: { turn: TurnSummary; openedCostU
     >
       <span className="whitespace-nowrap">{TURN_STATUS[turn.state]}</span>
       {parts.map(part => (
-        <span key={part} className="whitespace-nowrap">
+        <span key={part} className="whitespace-nowrap" {...(listPrice !== null && part.includes(LIST_PRICE_WORD) ? { title: listPrice } : {})}>
           <span aria-hidden className="pe-2">·</span>
           {part}
         </span>
