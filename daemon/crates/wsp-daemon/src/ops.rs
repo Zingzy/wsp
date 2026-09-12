@@ -12,23 +12,32 @@ use base64::Engine;
 use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
-    numbers, words, DaemonErrorCode, DaemonErrorResponse, DaemonOp, Empty, FsReadEncoding, PtyAttachReply, PtyCreateReply, PtyListReply,
-    Reply, RequestId, DAEMON_OPS, MACHINE_OPS,
+    numbers, words, DaemonErrorCode, DaemonErrorResponse, DaemonOp, Empty, FsReadEncoding, PlaceLeaveReply, PtyAttachReply, PtyCreateReply,
+    PtyListReply, Reply, RequestId, DAEMON_OPS, MACHINE_OPS,
 };
 
 use crate::exec::{run_exec, ExecOptions};
 use crate::paths::OpError;
 use crate::proc::{kill_process, ProcSampler, ProtectedPids};
 use crate::pty::{passwd_row, process_env, pump, PtyCreateOpts};
-use crate::{frame_text as text, fs, git, paths, Ctx, Listener, Outbound};
+use crate::{frame_text as text, fs, git, paths, Ctx, Listener, Outbound, Outgoing};
 
 type Detach = Box<dyn FnOnce() + Send>;
+
+/// Which road a socket came in on: dialled by a client of this machine, or opened outward by this place to its
+/// host. The leave op and the machine ops are the link's alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Road {
+    Inbound,
+    Link,
+}
 
 /// What one authed socket holds between frames.
 pub(crate) struct Conn {
     /// Set when the auth frame named a port: only tunnel ops on it and ping are answered.
     pub(crate) scope: Option<NonZeroU16>,
     pub(crate) out: Outbound,
+    pub(crate) road: Road,
     /// What the socket's close undoes: every pty and mode listener an attach on it made. None once closed, so an
     /// attach still being answered when the socket went undoes itself at once instead of outliving it.
     detaches: Mutex<Option<Vec<Detach>>>,
@@ -38,8 +47,8 @@ pub(crate) struct Conn {
 }
 
 impl Conn {
-    pub(crate) fn new(scope: Option<NonZeroU16>, out: Outbound) -> Conn {
-        Conn { scope, out, detaches: Mutex::new(Some(Vec::new())), proc_watch: Mutex::new(None) }
+    pub(crate) fn new(scope: Option<NonZeroU16>, out: Outbound, road: Road) -> Conn {
+        Conn { scope, out, road, detaches: Mutex::new(Some(Vec::new())), proc_watch: Mutex::new(None) }
     }
 
     fn on_close(&self, detach: Detach) {
@@ -125,18 +134,36 @@ fn answer<T: Serialize>(id: Option<RequestId>, result: Result<T, OpError>) -> St
     }
 }
 
-pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> String {
+/// One frame in, one reply out. The reply is the text to write, or the leave's, which the loop writes and then
+/// stops on.
+pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Outgoing {
     // Any JSON value is a frame, as the node daemon reads it; a non-object simply carries no op and no id.
     let Ok(frame) = serde_json::from_str::<Value>(raw) else {
-        return text(&DaemonErrorResponse::new(None, words::INVALID_JSON));
+        return Outgoing::Text(text(&DaemonErrorResponse::new(None, words::INVALID_JSON)));
     };
     let id = id_of(&frame);
     if let Some(port) = conn.scope {
         if !in_port_scope(port, &frame) {
-            return refuse(id, DaemonErrorCode::Forbidden, words::port_scope_refusal(port.get()));
+            return Outgoing::Text(refuse(id, DaemonErrorCode::Forbidden, words::port_scope_refusal(port.get())));
         }
     }
     let op = frame.get("op").and_then(Value::as_str);
+    if conn.road == Road::Link {
+        // The road that opened this socket answers its own ops before the daemon's switch sees them.
+        match op {
+            Some("place.leave") => {
+                let home = crate::place::place_home(ctx.options.home.as_deref());
+                let swept = fs::blocking(move || Ok(crate::place::sweep_place_home(&home))).await.unwrap_or_default();
+                return Outgoing::Leave(text(&Reply::new(id, PlaceLeaveReply { swept })));
+            }
+            Some(name) if MACHINE_OPS.contains(&name) => return Outgoing::Text(text(&wsp_runtime::answer_machine_op(id, name))),
+            _ => {}
+        }
+    }
+    Outgoing::Text(handle_op(conn, ctx, &frame, id, op).await)
+}
+
+async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<RequestId>, op: Option<&str>) -> String {
     match op {
         Some("ping") => ok(id),
         // The leave op and the machine ops are the link's; one sentence for the one rule, as the node daemon says it.
@@ -154,7 +181,7 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Strin
             }
         }
         Some(name) if DAEMON_OPS.contains(&name) => refuse(id, DaemonErrorCode::Unsupported, not_built(name)),
-        _ => fail(id, words::unknown_op(&op_word(&frame))),
+        _ => fail(id, words::unknown_op(&op_word(frame))),
     }
 }
 
@@ -344,17 +371,21 @@ mod tests {
         Bench { ctx: Arc::new(Ctx::new(options, Box::new(|_| {}))), _token: token, root }
     }
 
-    fn conn(scope: Option<u16>) -> (Arc<Conn>, mpsc::UnboundedReceiver<String>) {
+    fn conn(scope: Option<u16>) -> (Arc<Conn>, mpsc::UnboundedReceiver<Outgoing>) {
+        conn_on(scope, Road::Inbound)
+    }
+
+    fn conn_on(scope: Option<u16>, road: Road) -> (Arc<Conn>, mpsc::UnboundedReceiver<Outgoing>) {
         let (tx, rx) = mpsc::unbounded_channel();
-        (Arc::new(Conn::new(scope.and_then(NonZeroU16::new), Outbound(tx))), rx)
+        (Arc::new(Conn::new(scope.and_then(NonZeroU16::new), Outbound(tx), road)), rx)
     }
 
     async fn reply(bench: &Bench, conn: &Arc<Conn>, frame: Value) -> Value {
-        serde_json::from_str(&handle(conn, &bench.ctx, &frame.to_string()).await).unwrap()
+        serde_json::from_str(handle(conn, &bench.ctx, &frame.to_string()).await.text()).unwrap()
     }
 
     async fn reply_raw(bench: &Bench, conn: &Arc<Conn>, raw: &str) -> Value {
-        serde_json::from_str(&handle(conn, &bench.ctx, raw).await).unwrap()
+        serde_json::from_str(handle(conn, &bench.ctx, raw).await.text()).unwrap()
     }
 
     #[tokio::test]
@@ -447,6 +478,35 @@ mod tests {
                 "{op}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn on_the_link_every_machine_op_is_answered_by_the_runtime_stub_and_the_leave_sweeps_then_stops() {
+        let b = bench();
+        let (link, _rx) = conn_on(None, Road::Link);
+        for op in MACHINE_OPS {
+            assert_eq!(
+                reply(&b, &link, json!({"id": 3, "op": op})).await,
+                json!({"id": 3, "ok": false, "error": format!("this computer's backend has no {op}")}),
+                "{op}"
+            );
+        }
+        // An inbound socket on the same daemon still gets the road refusal.
+        let (inbound, _rx2) = conn(None);
+        assert_eq!(reply(&b, &inbound, json!({"id": 4, "op": "machine.list"})).await["error"], words::NOT_ON_THIS_ROAD);
+        let home = tempfile::tempdir().unwrap();
+        let at = wsp_frames::place_daemon_paths(home.path());
+        std::fs::create_dir_all(&at.wsp).unwrap();
+        std::fs::write(&at.place_file, "{}").unwrap();
+        std::fs::write(&at.token_path, "t\n").unwrap();
+        let mut options = Options::new(b._token.path());
+        options.home = Some(home.path().to_path_buf());
+        let ctx = Arc::new(Ctx::new(options, Box::new(|_| {})));
+        let out = handle(&link, &ctx, &json!({"id": 21, "op": "place.leave"}).to_string()).await;
+        let Outgoing::Leave(text) = &out else { panic!("a leave stops the daemon after its reply") };
+        let swept = json!([at.place_file.to_string_lossy(), at.token_path.to_string_lossy()]);
+        assert_eq!(serde_json::from_str::<Value>(text).unwrap(), json!({"id": 21, "ok": true, "swept": swept}));
+        assert!(!at.place_file.exists() && !at.token_path.exists());
     }
 
     #[tokio::test]

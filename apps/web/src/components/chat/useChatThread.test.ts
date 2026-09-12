@@ -843,7 +843,7 @@ describe("a reload while a turn runs", () => {
   // The running turn's open prompt: recorded after the reply this reload reads was built, so only the socket has it.
   const PROMPT: SessionEvent = {
     type: "session.permission", ...second, at: R0 + 62_000, askId: "ask_1", toolName: "Bash",
-    input: '{"command":"pnpm build"}', options: [{ id: "allow", label: "Allow", effect: "allow" }], waitMs: 600_000,
+    input: '{"command":"pnpm build"}', options: [{ id: "allow", label: "Allow", effect: "allow" }],
   };
   const SEEN = "2026-09-12T13:00:00.000Z";
   const LANDED = "2026-09-12T13:00:01.000Z";

@@ -2,11 +2,12 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, DAEMON_VERSION, FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, NO_LINGER_LINE, NOT_ON_THIS_KIND, fmtBytes, fmtSize, imageKeptLine, kindWords, machineLacksShort, servesReading, workspaceKind } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, DAEMON_VERSION, FREE_WORD, LINEAGE_MARKS, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, NO_LINGER_LINE, NOT_ON_THIS_KIND, fmtBytes, fmtSize, imageKeptLine, kindWords, machineLacksShort, placeMachineId, servesReading, workspaceKind } from "@wsp/protocol";
 import type {
   Capabilities,
   EventUnion,
   GoldenMissingTool,
+  PlaceView,
   ProjectGolden,
   SnapshotLineage,
   SnapshotRollbackResult,
@@ -69,6 +70,9 @@ const CAPS = caps({
 });
 
 const EMPTY_LINEAGE: SnapshotLineage = { name: "default", head: null, versions: [] };
+
+/** The marks column's words, read from the table the surface reads: the words are the person's and move with it. */
+const { head: HEAD, fork: THIS_ONE, volatile: VOLATILE } = LINEAGE_MARKS;
 
 // The surface's cost series listens through api.subscribe like the store does,
 // so tests push events through the same channel.
@@ -191,11 +195,12 @@ const pg = (snapshotId: string, golden: string, over: Partial<ProjectGolden> = {
 });
 
 describe("machine facts", () => {
-  it("renders id, state, reach and size from the enriched status", async () => {
+  it("renders id, state and size from the enriched status, the state in the one word every surface reads", async () => {
     await mount([view("ws_a", "api")]);
     expect(fact("machine-id")).toBe("m_ws_a_0123456789abcdef");
     expect(fact("state")).toBe("Running");
-    expect(fact("reach")).toBe("reachable");
+    // Reach has no row of its own: a machine that stopped answering reads as its state, here and on every row.
+    expect(document.querySelector('[data-k="reach"]')).toBeNull();
     expect(fact("size")).toBe("2 vCPU · 4 GB");
   });
 
@@ -203,8 +208,8 @@ describe("machine facts", () => {
     const w = view("ws_a", "api");
     const api = await mount([w]);
     act(() => api.emit({ type: "workspace.status", status: { ...status(w), machineState: "starting", idleAt: Date.now() + 90_000 } }));
-    await waitFor(() => expect(fact("state")).toBe("Running · computer starting"));
-    for (const k of ["state", "reach", "size", "awake", "idle"]) {
+    await waitFor(() => expect(fact("state")).toBe("Waking"));
+    for (const k of ["state", "size", "idle"]) {
       const el = document.querySelector(`[data-k="${k}"]`)!;
       expect(el.getAttribute("title")).toBe(el.textContent);
       expect(el.className).toContain("truncate");
@@ -284,30 +289,26 @@ describe("machine facts", () => {
     const stop = (await screen.findByRole("button", { name: "Stop api" })) as HTMLButtonElement;
     expect([stop.textContent, stop.disabled, stop.title]).toEqual(["Stop", false, "Stop asking the provider to wake this workspace"]);
     expect(document.querySelectorAll("footer button")).toHaveLength(2);
-    expect(screen.getByRole("button", { name: "upgrade api" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "resize api" })).toBeDefined();
   });
 
-  it("shows machine-state divergence next to the phase", async () => {
+  it("a provider still starting the machine reads Waking, the word the row shows, not the phase with the provider's word beside it", async () => {
     const w = view("ws_a", "api");
     const api = await mount([w]);
     act(() => api.emit({ type: "workspace.status", status: { ...status(w), machineState: "starting" } }));
-    await waitFor(() => expect(fact("state")).toBe("Running · computer starting"));
+    await waitFor(() => expect(fact("state")).toBe("Waking"));
+    expect(document.body.textContent).not.toContain("computer starting");
   });
 
-  it("renders reach slow as edge slow and no-daemon in words", async () => {
+  it("a machine that stopped answering reads Unreachable in the state row, and no wire word stands in a row of its own", async () => {
     const w = view("ws_a", "api");
     const api = await mount([w]);
-    act(() => api.emit({ type: "workspace.status", status: { ...status(w), reach: { state: "slow" } } }));
-    await waitFor(() => expect(fact("reach")).toBe("edge slow"));
+    act(() => api.emit({ type: "workspace.status", status: { ...status(w), reach: { state: "unreachable" } } }));
+    await waitFor(() => expect(fact("state")).toBe("Unreachable"));
     act(() => api.emit({ type: "workspace.status", status: { ...status(w), reach: { state: "no-daemon" } } }));
-    await waitFor(() => expect(fact("reach")).toBe("no daemon"));
-  });
-
-  it("renders awake time from the cost event's awakeMs", async () => {
-    const api = await mount([view("ws_a", "api")]);
-    expect(fact("awake")).toBe("pending");
-    act(() => api.emit(costEvent("ws_a", 0.11, 125_000, "2026-09-01T00:02:05Z")));
-    await waitFor(() => expect(fact("awake")).toBe("2m 5s"));
+    await waitFor(() => expect(fact("state")).toBe("Unreachable"));
+    expect(document.body.textContent).not.toContain("no daemon");
+    expect(document.body.textContent).not.toContain("Awake");
   });
 
   it("shows the runtime's reason when the status carries one", async () => {
@@ -463,18 +464,18 @@ describe("usage", () => {
 });
 
 describe("lineage", () => {
-  it("renders live disk and the golden base while no golden was ever sealed", async () => {
+  it("renders live disk and the image it started from while no image was ever sealed", async () => {
     await mount([view("ws_a", "api")]);
     expect(screen.getByText("Live disk")).toBeDefined();
     expect(screen.getByText("created 2026-08-30")).toBeDefined();
-    await waitFor(() => expect(fact("golden")).toBe("snap_golden01"));
+    await waitFor(() => expect(fact("golden")).toBe("Image"));
   });
 
   it("lists versions newest first, marks head and this fork, offers rollback only off head", async () => {
     await mount([onV12()], CAPS, twoVersions);
-    await waitFor(() => expect(marks("v12")).toEqual(["head", "this one", "volatile"]));
+    await waitFor(() => expect(marks("v12")).toEqual([HEAD, THIS_ONE, VOLATILE]));
     expect(fact("v11")).toBe("v11");
-    expect(marks("v11")).toEqual(["volatile"]);
+    expect(marks("v11")).toEqual([VOLATILE]);
     expect(document.querySelector("[data-slot='badge']")).toBeNull();
     const word = document.querySelector("[data-mark='head']")!;
     expect(word.className).toContain("font-mono");
@@ -488,8 +489,8 @@ describe("lineage", () => {
 
   it("a version only its snapshot holds says volatile in the marks column; one with a template recorded wears no word for it", async () => {
     await mount([onV12()], CAPS, { ...twoVersions, versions: [gv(11), { ...gv(12), templateId: "tpl_wsp-default-v12" }] });
-    await waitFor(() => expect(marks("v12")).toEqual(["head", "this one"]));
-    expect(marks("v11")).toEqual(["volatile"]);
+    await waitFor(() => expect(marks("v12")).toEqual([HEAD, THIS_ONE]));
+    expect(marks("v11")).toEqual([VOLATILE]);
     const word = document.querySelector("[data-mark='volatile']")!;
     expect(word.className).toContain("font-mono");
     expect(word.className).toContain("text-muted-foreground");
@@ -503,7 +504,7 @@ describe("lineage", () => {
     ];
     const lineage: SnapshotLineage = { name: "default", head: 12, versions: [{ ...gv(11), missingTools: [{ id: "tools/brew-cask/raycast", name: "Raycast", outcome: "skipped", note: "macOS app, no Linux build" }] }, { ...gv(12), missingTools: missing }] };
     await mount([onV12()], CAPS, lineage);
-    await waitFor(() => expect(marks("v12")).toEqual(["head", "this one", "volatile"]));
+    await waitFor(() => expect(marks("v12")).toEqual([HEAD, THIS_ONE, VOLATILE]));
     const lists = document.querySelectorAll("[data-k='missing-tools']");
     expect(lists).toHaveLength(1);
     expect(lists[0]!.closest("li")?.querySelector("[data-k='v12']")).not.toBeNull();
@@ -520,7 +521,7 @@ describe("lineage", () => {
     const docker = { id: "base/docker", name: "Docker engine and compose", outcome: "failed" as const, note: "E: Unable to locate package docker-compose-v2" };
     const lineage: SnapshotLineage = { name: "default", head: 12, versions: [gv(11), { ...gv(12), missingTools: [docker] }] };
     await mount([onV12()], CAPS, lineage);
-    await waitFor(() => expect(marks("v12")).toEqual(["head", "this one", "volatile"]));
+    await waitFor(() => expect(marks("v12")).toEqual([HEAD, THIS_ONE, VOLATILE]));
     const row = document.querySelector("[data-k='missing-tools'] li")!;
     expect(row.querySelector("[data-k='missing-tool']")?.textContent).toBe("Docker engine and compose");
     expect(row.querySelector("[data-k='missing-note']")?.textContent).toBe("E: Unable to locate package docker-compose-v2");
@@ -532,7 +533,7 @@ describe("lineage", () => {
   it("names the shell calls the forked version silenced, once and under that version alone", async () => {
     const lineage: SnapshotLineage = { name: "default", head: 12, versions: [{ ...gv(11), silenced: ["fzf"] }, { ...gv(12), silenced: ["starship", "eza", "diskbloom"] }] };
     await mount([onV12()], CAPS, lineage);
-    await waitFor(() => expect(marks("v12")).toEqual(["head", "this one", "volatile"]));
+    await waitFor(() => expect(marks("v12")).toEqual([HEAD, THIS_ONE, VOLATILE]));
     const lines = document.querySelectorAll("[data-k='silenced']");
     expect(lines).toHaveLength(1);
     expect(lines[0]!.closest("li")?.querySelector("[data-k='v12']")).not.toBeNull();
@@ -543,7 +544,7 @@ describe("lineage", () => {
   it("names the forked version's shell noise on one line, under that version alone", async () => {
     const lineage: SnapshotLineage = { name: "default", head: 12, versions: [{ ...gv(11), shellNoise: "old noise, 1 line" }, { ...gv(12), shellNoise: "zsh: command not found: starship, 2 lines" }] };
     await mount([onV12()], CAPS, lineage);
-    await waitFor(() => expect(marks("v12")).toEqual(["head", "this one", "volatile"]));
+    await waitFor(() => expect(marks("v12")).toEqual([HEAD, THIS_ONE, VOLATILE]));
     const lines = document.querySelectorAll("[data-k='shell-noise']");
     expect(lines).toHaveLength(1);
     expect(lines[0]!.closest("li")?.querySelector("[data-k='v12']")).not.toBeNull();
@@ -555,7 +556,7 @@ describe("lineage", () => {
     const bare = { id: "base/docker", note: "E: Unable to locate package docker-compose-v2" } as unknown as GoldenMissingTool;
     const lineage: SnapshotLineage = { name: "default", head: 12, versions: [gv(11), { ...gv(12), missingTools: [bare] }] };
     await mount([onV12()], CAPS, lineage);
-    await waitFor(() => expect(marks("v12")).toEqual(["head", "this one", "volatile"]));
+    await waitFor(() => expect(marks("v12")).toEqual([HEAD, THIS_ONE, VOLATILE]));
     const row = document.querySelector("[data-k='missing-tools'] li")!;
     expect(row.querySelector("[data-k='missing-tool']")?.textContent).toBe("base/docker");
     expect(row.querySelector("[data-k='missing-note']")?.textContent).toBe("E: Unable to locate package docker-compose-v2");
@@ -570,7 +571,7 @@ describe("lineage", () => {
     const lineage: SnapshotLineage = { name: "default", head: 12, versions: [gv(11), { ...gv(12), missingTools: missing }] };
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     await mount([onV12()], CAPS, lineage);
-    await waitFor(() => expect(marks("v12")).toEqual(["head", "this one", "volatile"]));
+    await waitFor(() => expect(marks("v12")).toEqual([HEAD, THIS_ONE, VOLATILE]));
     const rows = [...document.querySelectorAll("[data-k='missing-tools'] li")].map(li => li.querySelector("[data-k='missing-note']")?.textContent);
     expect(rows).toEqual(["no Linux bottle", "curl: not found"]);
     expect([...document.querySelectorAll("[data-k='missing-tools'] [data-mark]")].map(el => el.textContent)).toEqual(["skipped", "failed"]);
@@ -580,7 +581,7 @@ describe("lineage", () => {
 
   it("a version that recorded no missing tools gets no list and no label", async () => {
     await mount([onV12()], CAPS, twoVersions);
-    await waitFor(() => expect(marks("v12")).toEqual(["head", "this one", "volatile"]));
+    await waitFor(() => expect(marks("v12")).toEqual([HEAD, THIS_ONE, VOLATILE]));
     expect(document.querySelector("[data-k='missing-tools']")).toBeNull();
     expect(screen.queryByText("not on this image")).toBeNull();
   });
@@ -593,7 +594,7 @@ describe("lineage", () => {
     const lineage: SnapshotLineage = { name: "default", head: 12, versions: [{ ...gv(11), leftBehind: [{ id: "agents/claude", path: "~/.claude/settings.json", note: "hook left behind: ~/old" }] }, { ...gv(12), leftBehind }] };
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     await mount([onV12()], CAPS, lineage);
-    await waitFor(() => expect(marks("v12")).toEqual(["head", "this one", "volatile"]));
+    await waitFor(() => expect(marks("v12")).toEqual([HEAD, THIS_ONE, VOLATILE]));
     const lists = document.querySelectorAll("[data-k='left-behind']");
     expect(lists).toHaveLength(1);
     expect(lists[0]!.closest("li")?.querySelector("[data-k='v12']")).not.toBeNull();
@@ -611,7 +612,7 @@ describe("lineage", () => {
 
   it("a version that recorded nothing left behind gets no such list", async () => {
     await mount([onV12()], CAPS, twoVersions);
-    await waitFor(() => expect(marks("v12")).toEqual(["head", "this one", "volatile"]));
+    await waitFor(() => expect(marks("v12")).toEqual([HEAD, THIS_ONE, VOLATILE]));
     expect(document.querySelector("[data-k='left-behind']")).toBeNull();
     expect(screen.queryByText("left on this computer")).toBeNull();
   });
@@ -627,8 +628,8 @@ describe("lineage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Roll back" }));
     await waitFor(() => expect(api.rollbackSnapshot).toHaveBeenCalledTimes(1));
     expect(api.rollbackSnapshot).toHaveBeenCalledWith(11);
-    await waitFor(() => expect(marks("v11")).toEqual(["head", "volatile"]));
-    expect(marks("v12")).toEqual(["this one", "volatile"]);
+    await waitFor(() => expect(marks("v11")).toEqual([HEAD, VOLATILE]));
+    expect(marks("v12")).toEqual([THIS_ONE, VOLATILE]);
     expect(screen.getByText("New workspaces use v11. Existing workspaces keep their image.")).toBeDefined();
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   });
@@ -649,7 +650,7 @@ describe("lineage", () => {
     await screen.findByRole("alertdialog");
     fireEvent.click(screen.getByRole("button", { name: "Roll back" }));
     await waitFor(() => expect(screen.getByText("rollback target v11 not in manifest")).toBeDefined());
-    expect(marks("v12")).toEqual(["head", "this one", "volatile"]);
+    expect(marks("v12")).toEqual([HEAD, THIS_ONE, VOLATILE]);
   });
 
   it("refetches the lineage when a golden seals", async () => {
@@ -660,7 +661,7 @@ describe("lineage", () => {
     act(() => api.emit({ type: "golden.stage", name: "default", stage: "snapshotting" }));
     expect(api.listSnapshots).toHaveBeenCalledTimes(1);
     act(() => api.emit({ type: "golden.stage", name: "default", stage: "sealed" }));
-    await waitFor(() => expect(marks("v13")).toEqual(["head", "volatile"]));
+    await waitFor(() => expect(marks("v13")).toEqual([HEAD, VOLATILE]));
     expect(api.listSnapshots).toHaveBeenCalledTimes(2);
   });
 });
@@ -670,7 +671,7 @@ describe("a workspace behind the golden's head", () => {
 
   it("says which version it is on and which is available, on its own row, and offers the move there instead of a rollback", async () => {
     const api = await mount([onV11()], CAPS, twoVersions);
-    await waitFor(() => expect(marks("v11")).toEqual(["this one", "volatile"]));
+    await waitFor(() => expect(marks("v11")).toEqual([THIS_ONE, VOLATILE]));
     const row = document.querySelector("[data-k='v11']")!.closest("li")!;
     expect(row.textContent).toContain("on image v11, v12 available");
     // Two different actions, both on that row: Update moves this workspace, Roll back moves the head for every
@@ -690,10 +691,10 @@ describe("a workspace behind the golden's head", () => {
 
   it("the moved workspace is the one the rail holds: the row follows to the head and the offer goes", async () => {
     await mount([onV11()], CAPS, twoVersions);
-    await waitFor(() => expect(marks("v11")).toEqual(["this one", "volatile"]));
+    await waitFor(() => expect(marks("v11")).toEqual([THIS_ONE, VOLATILE]));
     fireEvent.click(screen.getByRole("button", { name: "update api to v12" }));
     fireEvent.click(await screen.findByRole("button", { name: "Move" }));
-    await waitFor(() => expect(marks("v12")).toEqual(["head", "this one", "volatile"]));
+    await waitFor(() => expect(marks("v12")).toEqual([HEAD, THIS_ONE, VOLATILE]));
     expect(fact("v11")).toBe("v11");
     expect(useStore.getState().workspaces[0]!.golden).toBe("snap_golden-v12");
     expect(screen.queryByRole("button", { name: /^update api to/ })).toBeNull();
@@ -704,7 +705,7 @@ describe("a workspace behind the golden's head", () => {
     ["gone" as const, "api's machine is gone; rebuild it to move it to a newer image"],
   ])("a %s workspace is not moved: the button is dead and the row says why, since the move replaces the machine", async (phase, why) => {
     await mount([{ ...onV11(), phase }], CAPS, twoVersions);
-    await waitFor(() => expect(marks("v11")).toEqual(["this one", "volatile"]));
+    await waitFor(() => expect(marks("v11")).toEqual([THIS_ONE, VOLATILE]));
     expect(screen.getByRole("button", { name: "update api to v12" })).toHaveProperty("disabled", true);
     expect(fact("lineage-note")).toBe(why);
     // Roll back is the golden's action, not this workspace's, so a stopped machine never takes it away.
@@ -720,13 +721,13 @@ describe("a workspace behind the golden's head", () => {
     cleanup();
     // The runtime looks at the image it forked from, not at what was imported into it afterwards; so does this.
     await mount([{ ...onV11(), projects: [PROJECT] }], CAPS, twoVersions);
-    await waitFor(() => expect(marks("v11")).toEqual(["this one", "volatile"]));
+    await waitFor(() => expect(marks("v11")).toEqual([THIS_ONE, VOLATILE]));
     expect(screen.getByRole("button", { name: "update api to v12" })).toHaveProperty("disabled", false);
   });
 
   it("a workspace on the head is offered nothing to move to", async () => {
     await mount([onV12()], CAPS, twoVersions);
-    await waitFor(() => expect(marks("v12")).toEqual(["head", "this one", "volatile"]));
+    await waitFor(() => expect(marks("v12")).toEqual([HEAD, THIS_ONE, VOLATILE]));
     expect(screen.queryByRole("button", { name: /^update api to/ })).toBeNull();
     expect(document.body.textContent).not.toContain("available");
   });
@@ -737,7 +738,7 @@ describe("a workspace behind the golden's head", () => {
     delete (api as { updateImage?: unknown }).updateImage;
     useStore.getState().bind(api);
     render(<MachineSurface workspaceId="ws_a" />);
-    await waitFor(() => expect(marks("v11")).toEqual(["this one", "volatile"]));
+    await waitFor(() => expect(marks("v11")).toEqual([THIS_ONE, VOLATILE]));
     expect(document.querySelector("[data-k='v11']")!.closest("li")!.textContent).toContain("on image v11, v12 available");
     expect(screen.queryByRole("button", { name: /^update api to/ })).toBeNull();
     expect(screen.getByRole("button", { name: "roll back to v11" })).toBeDefined();
@@ -746,7 +747,7 @@ describe("a workspace behind the golden's head", () => {
   it("a failed move leaves the note with the reason and the workspace where it was", async () => {
     const api = await mount([onV11()], CAPS, twoVersions);
     api.updateImage.mockRejectedValueOnce(new Error("at cap"));
-    await waitFor(() => expect(marks("v11")).toEqual(["this one", "volatile"]));
+    await waitFor(() => expect(marks("v11")).toEqual([THIS_ONE, VOLATILE]));
     fireEvent.click(screen.getByRole("button", { name: "update api to v12" }));
     fireEvent.click(await screen.findByRole("button", { name: "Move" }));
     await waitFor(() => expect(fact("lineage-note")).toBe("at cap"));
@@ -754,7 +755,7 @@ describe("a workspace behind the golden's head", () => {
 
   it("cancelling the move touches nothing", async () => {
     const api = await mount([onV11()], CAPS, twoVersions);
-    await waitFor(() => expect(marks("v11")).toEqual(["this one", "volatile"]));
+    await waitFor(() => expect(marks("v11")).toEqual([THIS_ONE, VOLATILE]));
     fireEvent.click(screen.getByRole("button", { name: "update api to v12" }));
     await screen.findByRole("alertdialog");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -765,7 +766,7 @@ describe("a workspace behind the golden's head", () => {
   it("the note names the files of the image's own this workspace had changed, so a person sees what did not follow the image", async () => {
     const api = await mount([onV11()], CAPS, twoVersions);
     api.updateImage.mockResolvedValueOnce({ workspace: { ...onV11(), golden: "snap_golden-v12" }, moved: true, kept: [".zshrc", ".claude/settings.json"] });
-    await waitFor(() => expect(marks("v11")).toEqual(["this one", "volatile"]));
+    await waitFor(() => expect(marks("v11")).toEqual([THIS_ONE, VOLATILE]));
     fireEvent.click(screen.getByRole("button", { name: "update api to v12" }));
     fireEvent.click(await screen.findByRole("button", { name: "Move" }));
     await waitFor(() => expect(fact("lineage-note")).toContain("kept 2 changed files: .claude/settings.json, .zshrc"));
@@ -774,7 +775,7 @@ describe("a workspace behind the golden's head", () => {
   it("a move that replaced no machine says so rather than claiming the image's files came across", async () => {
     const api = await mount([onV11()], CAPS, twoVersions);
     api.updateImage.mockResolvedValueOnce({ workspace: onV11(), moved: false, kept: [] });
-    await waitFor(() => expect(marks("v11")).toEqual(["this one", "volatile"]));
+    await waitFor(() => expect(marks("v11")).toEqual([THIS_ONE, VOLATILE]));
     fireEvent.click(screen.getByRole("button", { name: "update api to v12" }));
     fireEvent.click(await screen.findByRole("button", { name: "Move" }));
     await waitFor(() => expect(fact("lineage-note")).toContain(IMAGE_ALREADY_NEWEST));
@@ -783,7 +784,7 @@ describe("a workspace behind the golden's head", () => {
   it("a move off an image that lists no files of its own says the whole home came across", async () => {
     const api = await mount([onV11()], CAPS, twoVersions);
     api.updateImage.mockResolvedValueOnce({ workspace: { ...onV11(), golden: "snap_golden-v12" }, moved: true, kept: [], fallback: true });
-    await waitFor(() => expect(marks("v11")).toEqual(["this one", "volatile"]));
+    await waitFor(() => expect(marks("v11")).toEqual([THIS_ONE, VOLATILE]));
     fireEvent.click(screen.getByRole("button", { name: "update api to v12" }));
     fireEvent.click(await screen.findByRole("button", { name: "Move" }));
     await waitFor(() => expect(fact("lineage-note")).toContain(imageKeptLine([], true)));
@@ -793,7 +794,7 @@ describe("a workspace behind the golden's head", () => {
     const retired = [{ id: "tools/brew/yq", name: "yq" }, { id: "shell/zshrc", name: "~/.zshrc" }];
     const lineage: SnapshotLineage = { name: "default", head: 12, versions: [gv(11), { ...gv(12), retired }] };
     await mount([onV12()], CAPS, lineage);
-    await waitFor(() => expect(marks("v12")).toEqual(["head", "this one", "volatile"]));
+    await waitFor(() => expect(marks("v12")).toEqual([HEAD, THIS_ONE, VOLATILE]));
     const lists = document.querySelectorAll("[data-k='retired-rows']");
     expect(lists).toHaveLength(1);
     expect(lists[0]!.querySelector("p")?.textContent).toBe("retired, still on this image");
@@ -809,21 +810,22 @@ describe("project goldens in the lineage", () => {
     const api = await mount([{ ...view("ws_a", "api"), golden: "snap_p2", projects: [PROJECT] }], CAPS, twoVersions, undefined, goldens);
     await waitFor(() => expect(rowsUnder("v12")).toEqual(["pg-snap_p2", "pg-snap_p1"]));
     expect(rowsUnder("v11")).toEqual(["pg-snap_p3"]);
-    expect(marks("v12")).toEqual(["head", "volatile"]);
-    expect(marks("pg-snap_p2")).toEqual(["this one"]);
+    expect(marks("v12")).toEqual([HEAD, VOLATILE]);
+    expect(marks("pg-snap_p2")).toEqual([THIS_ONE]);
     expect(marks("pg-snap_p1")).toEqual([]);
     expect(screen.getByText("snapshot 2026-09-06 · imported 2026-09-06 · from task-a")).toBeDefined();
     // What is on the disk is the projects section's to list; the lineage row says when the fork was made and no more.
     expect(screen.getByText("created 2026-08-30")).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: "new workspace proj from snap_p1" }));
+    fireEvent.click(screen.getByRole("button", { name: "new workspace from the image of proj taken on api, v12" }));
     // The name a person reads on the row it makes: a copy of the project, never the verb under it.
-    await waitFor(() => expect(api.createWorkspace).toHaveBeenCalledWith("snap_p1", "proj-copy", undefined));
+    await waitFor(() => // A fork of a project golden names no computer: it goes where the image it carries already stands.
+    expect(api.createWorkspace).toHaveBeenCalledWith("snap_p1", "proj-copy", undefined, undefined));
     expect(api.createFromGoldenHead).not.toHaveBeenCalled();
   });
 
   it("without any project golden the versions render as before and nothing is listed under them", async () => {
     await mount([onV12()], CAPS, twoVersions);
-    await waitFor(() => expect(marks("v12")).toEqual(["head", "this one", "volatile"]));
+    await waitFor(() => expect(marks("v12")).toEqual([HEAD, THIS_ONE, VOLATILE]));
     expect(document.querySelector("[data-k^='pg-']")).toBeNull();
     // Nothing to image yet: the projects section holds the button, dead until a project lands.
     expect(screen.getByRole("button", { name: /^snapshot / })).toHaveProperty("disabled", true);
@@ -831,9 +833,9 @@ describe("project goldens in the lineage", () => {
 
   it("snapshot as image sits in the projects section once a project is loaded: it calls the api, the lineage lists the new golden and the section says what it is for; a refusal shows the runtime's sentence", async () => {
     const api = await mount([{ ...onV12(), projects: [PROJECT] }], CAPS, twoVersions);
-    await waitFor(() => expect(marks("v12")).toEqual(["head", "this one", "volatile"]));
+    await waitFor(() => expect(marks("v12")).toEqual([HEAD, THIS_ONE, VOLATILE]));
     expect(api.listProjectGoldens).toHaveBeenCalledTimes(1);
-    const button = screen.getByRole("button", { name: "snapshot api as a project golden" });
+    const button = screen.getByRole("button", { name: "snapshot api as an image" });
     expect(button.textContent).toBe("Snapshot as image");
     expect(button.closest("section")!.textContent).toContain("Projects");
     fireEvent.click(button);
@@ -841,7 +843,7 @@ describe("project goldens in the lineage", () => {
     await waitFor(() => expect(rowsUnder("v12")).toEqual(["pg-snap_taken"]));
     // The golden taken here is known here, so the list is not read again for it.
     expect(api.listProjectGoldens).toHaveBeenCalledTimes(1);
-    expect(fact("projects-note")).toBe("Project golden of proj taken. New workspaces from it start with the projects in place.");
+    expect(fact("projects-note")).toBe("Image of proj taken. New workspaces from it start with the projects in place.");
 
     api.snapshotWorkspace.mockRejectedValueOnce(new Error("snapshot of api refused: machine m1 is not first-life (it was resumed); snapshots only come from fresh machines"));
     fireEvent.click(button);
@@ -869,7 +871,7 @@ describe("the projects section", () => {
     expect(rows()[0]!.querySelector("[data-cell='folder']")!.getAttribute("title")).toBe("/root/spoo");
     const section = rows()[0]!.closest("section")!;
     expect(within(section).getByRole("button", { name: "Import a folder" })).toBeDefined();
-    expect(within(section).getByRole("button", { name: "snapshot api as a project golden" }).textContent).toBe("Snapshot as image");
+    expect(within(section).getByRole("button", { name: "snapshot api as an image" }).textContent).toBe("Snapshot as image");
     expect(document.querySelector("[data-k='projects-none']")).toBeNull();
   });
 
@@ -879,7 +881,7 @@ describe("the projects section", () => {
     // A browser tab has no drop, so the line names the one road it has.
     expect(fact("projects-none")).toBe("No projects yet. Import a folder.");
     expect(screen.getByRole("button", { name: "Import a folder" })).toHaveProperty("disabled", false);
-    expect(screen.getByRole("button", { name: "snapshot api as a project golden" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "snapshot api as an image" })).toHaveProperty("disabled", true);
   });
 
   it("import a folder asks through the registry's request for this workspace, so the sidebar's dialog opens as the row's menu would open it", async () => {
@@ -891,7 +893,7 @@ describe("the projects section", () => {
     off();
   });
 
-  it("this computer lists the folders registered on it and offers no snapshot, since it is not a machine to image", async () => {
+  it("this computer lists the folders registered on it, says a folder there is registered and not copied, and offers no snapshot", async () => {
     const mac: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "", projects: [{ name: "wsp", dest: "/Users/dev/wsp", importedAt: "2026-09-06T00:00:00Z", size: 133_000_000 }] };
     const api = fakeApi([mac]);
     api.watchStatuses = vi.fn(async () => [{ ...status(mac), kind: "local" as const, size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }]);
@@ -899,9 +901,52 @@ describe("the projects section", () => {
     render(<MachineSurface workspaceId="ws_m" />);
     await waitFor(() => expect(rows().map(r => r.getAttribute("data-k"))).toEqual(["project-wsp"]));
     expect(screen.getByRole("button", { name: "Import a folder" })).toBeDefined();
-    expect(screen.queryByRole("button", { name: /as a project golden$/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /as an image$/ })).toBeNull();
+    // Nothing is carried here, which a person about to import a large folder is owed before they press it.
+    expect(fact("projects-note")).toBe("On this Mac a folder is registered where it is, not copied.");
     // No lineage draws and no snapshot is offered here, so the tab asks the host for no project goldens.
     expect(api.listProjectGoldens).not.toHaveBeenCalled();
+  });
+
+  it("a workspace that copies says nothing about registering, and what a snapshot did takes the same slot", async () => {
+    await mount([{ ...view("ws_a", "api"), projects: [SPOO] }]);
+    expect(fact("projects-note")).toBe("");
+  });
+});
+
+describe("where a workspace runs", () => {
+  const HERE_PLACE: PlaceView = { id: "here", kind: "computer", name: "studio.local", default: false, present: true };
+  const HETZNER: PlaceView = { id: "p_1", kind: "computer", name: "hetzner", default: true, docker: true, present: true };
+  const ASCII: PlaceView = { id: "box", kind: "provider", name: "box", default: false, rateUsdPerHour: 0.018 };
+
+  it("names the computer a workspace stands on and what that computer is", async () => {
+    useStore.setState({ places: [HERE_PLACE, HETZNER, ASCII] });
+    const on: WorkspaceView = { ...view("ws_p", "box-build"), kind: "place", machineId: placeMachineId("p_1"), golden: "" };
+    const api = fakeApi([on]);
+    api.watchStatuses = vi.fn(async () => [{ ...status(on), kind: "place" as const, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0 }]);
+    useStore.getState().bind(api);
+    render(<MachineSurface workspaceId="ws_p" />);
+    await waitFor(() => expect(fact("where")).toBe("hetzner · a computer you joined"));
+  });
+
+  it("says the provider a fork was made at, and says this computer is this computer", async () => {
+    useStore.setState({ places: [HERE_PLACE, HETZNER, ASCII] });
+    await mount([view("ws_a", "api")]);
+    expect(fact("where")).toBe("ASCII · a provider");
+    cleanup();
+
+    const mac: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
+    const api = fakeApi([mac]);
+    api.watchStatuses = vi.fn(async () => [{ ...status(mac), kind: "local" as const, size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }]);
+    useStore.getState().bind(api);
+    render(<MachineSurface workspaceId="ws_m" />);
+    await waitFor(() => expect(fact("where")).toBe("this Mac"));
+  });
+
+  it("falls back to the row's own short word on a host that lists no computers", async () => {
+    useStore.setState({ places: [] });
+    await mount([{ ...view("ws_a", "api"), provider: "box" }]);
+    expect(fact("where")).toBe("box");
   });
 });
 
@@ -914,7 +959,7 @@ describe("gone machines", () => {
     api.forget = forget;
     const forgetButton = await screen.findByRole("button", { name: "Forget api" });
     expect(screen.queryByRole("button", { name: "Pause api" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "upgrade api" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "resize api" })).toBeNull();
     fireEvent.click(forgetButton);
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog.textContent).toContain("Forget api?");
@@ -978,7 +1023,7 @@ describe("pause and wake", () => {
 });
 
 describe("upgrade", () => {
-  const openPicker = () => fireEvent.click(screen.getByRole("button", { name: "upgrade api" }));
+  const openPicker = () => fireEvent.click(screen.getByRole("button", { name: "resize api" }));
 
   it("offers the provider's sizes above the current one on both counts, the current left out, with the estimated rate", async () => {
     await mount([view("ws_a", "api")]);
@@ -1033,7 +1078,7 @@ describe("upgrade", () => {
 
   it("a backend that cannot resize gets no Upgrade button and no sentence about it; Pause stays, and the footer ends there", async () => {
     await mount([view("ws_a", "api")], { ...CAPS, resize: false });
-    expect(screen.queryByRole("button", { name: "upgrade api" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "resize api" })).toBeNull();
     expect(document.querySelector('[data-k="resize-hint"]')).toBeNull();
     expect(document.body.textContent).not.toContain("cannot resize");
     expect(screen.getByRole("button", { name: "Pause api" })).toBeDefined();
@@ -1046,14 +1091,14 @@ describe("upgrade", () => {
     // A resize replaces the machine and then asks for a new size, so the button reads the whole road: offering a
     // picker off the size flag alone would hand a person a confirm the runtime refuses.
     await mount([view("ws_a", "api")], { ...CAPS, resize: true, replacesMachine: false });
-    expect(screen.queryByRole("button", { name: "upgrade api" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "resize api" })).toBeNull();
     expect(document.querySelector('[data-k="resize-hint"]')).toBeNull();
     expect(screen.getByRole("button", { name: "Pause api" })).toBeDefined();
   });
 
   it("a machine already at the largest size offered gets no Upgrade button either", async () => {
     await mount([view("ws_a", "api")], { ...CAPS, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] });
-    expect(screen.queryByRole("button", { name: "upgrade api" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "resize api" })).toBeNull();
     expect(document.body.textContent).not.toContain("Largest size");
   });
 });
@@ -1070,8 +1115,7 @@ describe("zombie", () => {
     const api = await mount([w]);
     expect(screen.queryByRole("button", { name: "Rebuild api" })).toBeNull();
     act(() => api.emit({ type: "workspace.status", status: zombie(w) }));
-    await waitFor(() => expect(fact("reach")).toBe("zombie"));
-    expect(document.querySelector('[data-reach="zombie"]')).not.toBeNull();
+    await waitFor(() => expect(fact("reason")).toBe("m_ws_a answered nothing for 92s after slow at 14:02:11"));
     expect(fact("reason")).toBe("m_ws_a answered nothing for 92s after slow at 14:02:11");
     expect(screen.getByRole("button", { name: "Rebuild api" })).toBeDefined();
   });
@@ -1089,7 +1133,7 @@ describe("zombie", () => {
     fireEvent.click(screen.getByRole("button", { name: "Rebuild" }));
     await waitFor(() => expect(rebuild).toHaveBeenCalledTimes(1));
     expect(rebuild).toHaveBeenCalledWith("ws_a");
-    await waitFor(() => expect(screen.getByText("Workspace rebuilt from the golden.")).toBeDefined());
+    await waitFor(() => expect(screen.getByText("Workspace rebuilt from your image.")).toBeDefined());
   });
 
   it("a machine that stopped answering with memory near full says so, names the next size up, and offers the rebuild only after them", async () => {
@@ -1140,14 +1184,13 @@ describe("gone machine", () => {
   it("reads Gone with the provider's words, no rate and no nap window, offers the rebuild and neither pause, wake nor upgrade", async () => {
     await mount([gone()]);
     expect(fact("state")).toBe("Gone");
-    expect(fact("reach")).toBe("gone");
     expect(fact("reason")).toBe(WORDS);
     expect(fact("idle")).toBe("not scheduled");
     expect(fact("rate")).toBe("$0.000/hr");
     expect(screen.getByRole("button", { name: "Rebuild api" })).toBeDefined();
     expect(screen.queryByRole("button", { name: "Pause api" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Wake api" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "upgrade api" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "resize api" })).toBeNull();
   });
 
   it("the rebuild asks first, then calls the api once", async () => {
@@ -1396,10 +1439,9 @@ describe("this computer as a workspace", () => {
     }
   });
 
-  it("shows this computer's cores and memory the way it shows a fork's size, in its own word for a cpu, and its state and reach beside them", async () => {
+  it("shows this computer's cores and memory the way it shows a fork's size, in its own word for a cpu, and its state beside them", async () => {
     await mountLocal();
     expect(fact("state")).toBe("Running");
-    expect(fact("reach")).toBe("reachable");
     expect(fact("machine-id")).toBe("local");
   });
 
@@ -1457,9 +1499,9 @@ describe("this computer as a workspace", () => {
     expect(document.body.textContent).not.toContain("Usage");
   });
 
-  it("no lineage section at all: this computer forks from no image, so nothing about goldens is drawn or fetched", async () => {
+  it("no versions section at all: this computer forks from no image, so nothing about versions is drawn or fetched", async () => {
     const api = await mountLocal();
-    expect(document.body.textContent).not.toContain("Lineage");
+    expect(document.body.textContent).not.toContain("Versions");
     expect(document.body.textContent).not.toContain("forks from no image");
     expect(document.querySelector('[data-k="machine"]')).toBeNull();
     expect(document.querySelector('[data-k="golden"]')).toBeNull();
@@ -1478,10 +1520,10 @@ describe("this computer as a workspace", () => {
     expect(lead().getAttribute("class")).not.toMatch(/success|destructive|rounded-full/);
   });
 
-  it("no machine buttons: this computer takes none of pause, wake, upgrade or forget, so the tab ends at its facts", async () => {
+  it("no machine buttons: this computer takes none of pause, wake, resize or forget, so the tab ends at its facts", async () => {
     await mountLocal();
     expect(screen.queryByRole("button", { name: /pause|wake/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: "upgrade zingzy-mac" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "resize zingzy-mac" })).toBeNull();
     expect(document.body.textContent).not.toContain("cannot resize");
   });
 
@@ -1489,8 +1531,8 @@ describe("this computer as a workspace", () => {
     await mount([view("ws_a", "api")]);
     expect(document.querySelector('[data-k="idle"]')).not.toBeNull();
     expect(document.querySelector('[data-k="rate"]')).not.toBeNull();
-    expect(fact("golden")).toBe("snap_golden01");
-    expect(document.body.textContent).toContain("Lineage");
+    expect(fact("golden")).toBe("Image");
+    expect(document.body.textContent).toContain("Versions");
     expect(screen.queryByRole("button", { name: "Pause api" })).not.toBeNull();
   });
 });
@@ -1517,7 +1559,6 @@ describe("a machine over ssh as a workspace", () => {
     expect(fact("folder")).toBe("/home/dev");
     expect(fact("cost")).toBe(FREE_WORD);
     expect(fact("state")).toBe("Running");
-    expect(fact("reach")).toBe("reachable");
     for (const k of ["os", "uptime", "folder"]) {
       const el = document.querySelector(`[data-k="${k}"]`)!;
       expect(el.getAttribute("title")).toBe(el.textContent);

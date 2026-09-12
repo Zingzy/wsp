@@ -12,6 +12,8 @@ import { sidebarMaxWidthBeside } from "../src/rightPanelLayout.js";
 import { RIGHT_PANEL_WIDTH_STORAGE_KEY, useRightPanelStore } from "../src/rightPanelStore.js";
 import { AppShell } from "../src/shell/AppShell.js";
 import { onNewThreadRequest } from "../src/shell/shellRequests.js";
+import { useSignInStore } from "../src/shell/signInStore.js";
+import { WorkspaceCreation } from "../src/shell/WorkspaceCreation.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
 
@@ -284,6 +286,24 @@ class ScriptedSocket {
   }
 }
 
+describe("the sign-in banner over the centre", () => {
+  it("stands above whatever the centre holds, which while a workspace is being created is its log", async () => {
+    useSignInStore.setState({ pages: { "ws_a:8976": { workspaceId: "ws_a", url: "https://github.com/login/device", port: 8976 } } });
+    useStore.getState().bind(fakeApi([view("ws_a", "api")]));
+    render(
+      <AppShell>
+        <WorkspaceCreation creation={{ key: "creating:spoo-fix", name: "spoo-fix", askedAt: Date.now(), workspaceId: "ws_a", lines: [], failed: null }} />
+      </AppShell>,
+    );
+    const bar = await screen.findByTestId("sign-in-banner");
+    const log = screen.getByTestId("creation-log");
+    expect(bar.textContent).toContain("A sign-in page for github.com is ready on api");
+    expect(bar.compareDocumentPosition(log) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(bar.contains(log)).toBe(false);
+    useSignInStore.setState({ pages: {} });
+  });
+});
+
 describe("disconnected banner", () => {
   it("appears while the runtime socket redials and clears when it is back", async () => {
     ScriptedSocket.instances.length = 0;
@@ -374,6 +394,25 @@ describe("the header row", () => {
     expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("api/make me a simple server");
     act(() => useStore.getState().select(null));
     expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("No workspace selected");
+  });
+
+  it("the pane header carries the one thread state a person has to act on, and nothing for a thread that is working or settled", async () => {
+    await mountShell();
+    const rows = (asking?: string) => ({
+      ws_a: [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "running" as const, prompt: "add a health route", threadId: "thr_1", ...(asking !== undefined ? { asking } : {}) }],
+    });
+    act(() => useStore.setState({ sessions: rows() }));
+    await collapse();
+    // The crumb names the thread the centre is on, so the thread is opened before its state is read off the header.
+    act(() => useStore.getState().select("ws_a", "thr_1"));
+    const crumb = () => banner().querySelector("[data-thread-breadcrumb]")!;
+    expect(crumb().textContent).toBe("api/add a health route");
+    act(() => useStore.setState({ sessions: rows("Run: wsp --version") }));
+    expect(crumb().textContent).toBe("api/add a health routeNeeds you");
+    // The whole sentence is the hover text; the header shows the word alone.
+    expect(crumb().querySelector("[title]")!.getAttribute("title")).toBe("Run: wsp --version");
+    act(() => useStore.setState({ sessions: rows() }));
+    expect(crumb().textContent).toBe("api/add a health route");
   });
 
   it("the compose glyph sits in the search row, raises the request for the selected workspace, and leaves with it", async () => {

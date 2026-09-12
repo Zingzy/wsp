@@ -4,13 +4,16 @@
 //! passes a socket and nothing here binds anything but the address it was told.
 
 mod auth;
+mod awake;
 mod door;
 mod exec;
 mod fs;
 mod git;
+mod link;
 mod mode;
 mod ops;
 mod paths;
+mod place;
 mod proc;
 mod proc_local;
 mod pty;
@@ -18,6 +21,8 @@ mod readings;
 mod sys;
 mod sys_local;
 mod urls;
+
+pub use link::place_backoff_ms;
 
 use std::collections::HashMap;
 use std::io;
@@ -114,15 +119,34 @@ pub(crate) fn frame_text(value: &impl serde::Serialize) -> String {
     serde_json::to_string(value).expect("a frame serialises")
 }
 
+/// One item on a socket's outbound channel: a frame to write, or the leave's reply, after which the loop stops.
+pub(crate) enum Outgoing {
+    Text(String),
+    Leave(String),
+}
+
+impl Outgoing {
+    #[cfg(test)]
+    pub(crate) fn text(&self) -> &str {
+        match self {
+            Outgoing::Text(t) | Outgoing::Leave(t) => t,
+        }
+    }
+}
+
 /// The way frames reach one socket from anywhere in the daemon: its serve loop writes what arrives here, in order,
 /// so a handler's events and its reply cannot cross.
 #[derive(Clone)]
-pub(crate) struct Outbound(pub(crate) mpsc::UnboundedSender<String>);
+pub(crate) struct Outbound(pub(crate) mpsc::UnboundedSender<Outgoing>);
 
 impl Outbound {
     /// False once the socket is gone, which is how a listener learns it may be dropped.
     pub(crate) fn send_text(&self, text: &str) -> bool {
-        self.0.send(text.to_owned()).is_ok()
+        self.0.send(Outgoing::Text(text.to_owned())).is_ok()
+    }
+
+    pub(crate) fn send(&self, out: Outgoing) -> bool {
+        self.0.send(out).is_ok()
     }
 
     pub(crate) fn send_event(&self, event: &DaemonEvent) -> bool {
@@ -157,6 +181,8 @@ pub(crate) struct Ctx {
     /// The two samplers, built on the first watch so a daemon nobody asks reads nothing; one each for the daemon.
     sys: Mutex<Option<Arc<sys::SysSampler>>>,
     procs: Mutex<Option<Arc<proc::ProcSampler>>>,
+    /// Told once a leave has been answered, which is what ends the daemon.
+    pub(crate) stop: tokio::sync::Notify,
     authed: Mutex<HashMap<u64, Outbound>>,
     keys: AtomicU64,
 }
@@ -177,9 +203,14 @@ impl Ctx {
             log: Arc::from(log),
             sys: Mutex::new(None),
             procs: Mutex::new(None),
+            stop: tokio::sync::Notify::new(),
             authed: Mutex::new(HashMap::new()),
             keys: AtomicU64::new(1),
         }
+    }
+
+    pub(crate) fn log(&self, line: &str) {
+        (self.log)(line);
     }
 
     /// What this machine's own two modules are built from; the kind picks which modules those are.
@@ -280,10 +311,20 @@ impl Daemon {
         self.listener.local_addr().expect("a bound listener has an address")
     }
 
-    /// Accepts forever; each socket gets its own task and its own door.
+    /// Accepts until a leave answered on the link ends the daemon; each socket gets its own task and its own door.
+    /// A place file turns the outbound link on beside the listener, with the awake hold that reads the same file.
     pub async fn run(self) -> io::Result<()> {
+        if let Some(file) = self.ctx.options.place_file.clone() {
+            let port = self.local_addr().port();
+            tokio::spawn(link::run(Arc::clone(&self.ctx), port));
+            tokio::spawn(awake::hold_while_joined(Arc::clone(&self.ctx), file));
+        }
         loop {
-            let (stream, _) = self.listener.accept().await?;
+            let accepted = tokio::select! {
+                accepted = self.listener.accept() => accepted,
+                _ = self.ctx.stop.notified() => return Ok(()),
+            };
+            let (stream, _) = accepted?;
             // As node's ws does: without it a pty's small frames sit behind the peer's delayed ACK, 40 ms measured.
             let _ = stream.set_nodelay(true);
             let ctx = Arc::clone(&self.ctx);

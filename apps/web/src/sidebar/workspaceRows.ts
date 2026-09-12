@@ -4,8 +4,9 @@
 // but for the one hook beside the where word, which reads that word off the
 // store for the surfaces that hold a workspace's id and no snapshot.
 import { agentName } from "@wsp/catalog";
-import { FREE_WORD, fmtSize, isBilling, isLocalWorkspace, kindWords, machineLacksShort, outOfMemoryRowLine, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspaceStateOf, type MemoryReading, type ReachState, type SessionOrigin, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
+import { FREE_WORD, fmtSize, isBilling, isLocalWorkspace, kindWords, machineLacksShort, outOfMemoryRowLine, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspaceStateOf, type MemoryReading, type ReachState, type SessionOrigin, type PlaceView, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
+import { PLACE_KIND_WORDS, THIS_COMPUTER_WORD, placeName, placeOf } from "../settings/places.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
 import { formatRelativeTimeLabel } from "../lib/timestampFormat.js";
@@ -54,13 +55,15 @@ export function daemonGoneLine(reach: ReachState | null, kind: WorkspaceKindWord
   return lacks === undefined ? "no daemon on it" : machineLacksShort(lacks);
 }
 
-/** The sentences a meta line can carry in place of its counts, in the order a surface draws them: what the
- * runtime is doing to the machine's daemon, then a drop with memory near full, then a daemon that is not there at
- * all, then a nap whose vault was refused. Written once because two surfaces draw them and both have to tell them
- * from a figure: prose takes the ink that reads at AA, the counts beside it keep the whisper. The vault comes last
- * of them: the other three are what a person is waiting on now, and this one holds until the next nap. */
+/** The sentences a meta line can carry in place of its counts, in the order a surface draws them: a thread of this
+ * workspace stopped on a question first, then what the runtime is doing to the machine's daemon, then a drop with
+ * memory near full, then a daemon that is not there at all, then a nap whose vault was refused. Written once
+ * because two surfaces draw them and both have to tell them from a figure: prose takes the ink that reads at AA,
+ * the counts beside it keep the whisper. The vault comes last of them: the others are what a person is waiting on
+ * now, and this one holds until the next nap. */
 export function metaSentences({ project, outOfMemory }: Pick<WorkspaceMetaInput, "project" | "outOfMemory">): string[] {
   return [
+    askingNote(project),
     daemonNote(project),
     outOfMemory === undefined ? undefined : outOfMemoryRowLine(outOfMemory),
     daemonGoneLine(project.reach, kindWords(workspaceKind(project.workspace)), (project.status ?? project.workspace).daemonRefusedAt?.why),
@@ -69,7 +72,7 @@ export function metaSentences({ project, outOfMemory }: Pick<WorkspaceMetaInput,
 }
 
 export interface WorkspaceMetaInput {
-  readonly project: Pick<SidebarProjectSnapshot, "state" | "status" | "workspace" | "reach">;
+  readonly project: Pick<SidebarProjectSnapshot, "state" | "status" | "workspace" | "reach" | "threads">;
   /** The meter's last tick for this workspace; null before the first. */
   readonly cost: { readonly rateUsdPerHour: number; readonly accruedUsd: number } | null;
   /** The last memory sample from a machine whose link then dropped. */
@@ -119,6 +122,13 @@ export function machineLine(project: Pick<SidebarProjectSnapshot, "status" | "wo
   return project.status === null ? null : fmtSize(project.status.size, kind.cpu);
 }
 
+/** The lead of the prompt a thread of this workspace is stopped on, the one sentence a person is waiting on: the
+ * oldest waiting thread's, so a second prompt never takes the line from the one that has waited longest. The row
+ * cuts it at its own cap and the whole sentence rides the row's title, as every line three does. */
+export function askingNote(project: Pick<SidebarProjectSnapshot, "threads">): string | undefined {
+  return project.threads.find(thread => thread.asking !== null)?.asking ?? undefined;
+}
+
 /** What the runtime is doing to this machine's daemon, or why its last attempt failed; the status leads where one
  * has arrived, and nothing is being done when it is absent. */
 export function daemonNote(project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string | undefined {
@@ -160,11 +170,27 @@ const PLAIN = { colorClass: "text-sidebar-whisper/70", dotClass: "bg-sidebar-whi
 /** The computer or the provider a workspace runs on, as a row names it: the provider the record itself carries,
  * else the kind's own word where it has one, else the name wsp holds for the machine, the live one once a status
  * has arrived. The provider leads because this host is wired to one of several and only the record knows which;
- * reading it off the kind would tell a person on Docker or Box that their workspace is at Solari. The one place a
- * surface asks where a workspace runs, so the day a computer carries the name its owner gave it is one edit here. */
+ * reading it off the kind would tell a person on Docker or Box that their workspace is at Solari. A fork whose
+ * record names no provider falls to the kind's word rather than to that machine's id, which names nothing to the
+ * person reading the row. The one place a surface asks where a workspace runs, so the day a computer carries the
+ * name its owner gave it is one edit here. */
 export function whereWord(project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string {
   const record = project.status ?? project.workspace;
   return record.provider ?? kindWords(workspaceKind(project.workspace)).where ?? record.machineId;
+}
+
+/** The fuller reading of the same question, for the pane that has a whole row for it: the computer or provider the
+ * workspace stands on by the name its own row carries, and what that row is. The computer the host runs on says so
+ * in the words a sentence says it in, and nothing more, being the one row a person needs no word for. A workspace this host holds no row for falls back
+ * to the row's own short word, which is what a browser tab on a host without places has.
+ *
+ * Built on placeOf and placeName, the readings the places list already holds, so the pane and the table name a
+ * computer alike. */
+export function whereRuns(places: readonly PlaceView[], project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string {
+  const at = placeOf(places, project.workspace);
+  if (at === undefined) return whereWord(project);
+  if (at === places[0]) return THIS_COMPUTER_WORD;
+  return `${placeName(at)} · ${PLACE_KIND_WORDS[at.kind]}`;
 }
 
 /** The same word for a surface that holds the workspace's id and no snapshot: the record and its status off the
@@ -206,9 +232,12 @@ export function provenanceLabel(thread: Pick<SidebarThreadSnapshot, "harness">, 
   return [agentName(thread.harness), ...words].join(" · ");
 }
 
-/** The pill keys on the session's status and wears the adapter's word: a running thread and one that did not settle carry one, the resting states none. */
-export function threadPill(thread: Pick<SidebarThreadSnapshot, "status" | "indicator">): ThreadStatusPill | null {
+/** The pill keys on the session's state and wears the adapter's word: a running thread, one waiting on the person
+ * and one that did not settle carry one, the resting states none. A thread stopped on a permission prompt carries it
+ * whatever its turn's own status says, since that is the one row on the screen a person can act on. */
+export function threadPill(thread: Pick<SidebarThreadSnapshot, "status" | "indicator" | "asking">): ThreadStatusPill | null {
   if (!thread.indicator) return null;
+  if (thread.asking !== null) return { label: thread.indicator.label, ...PLAIN, pulse: false };
   switch (thread.status) {
     case "running":
       return { label: thread.indicator.label, ...PLAIN, pulse: thread.indicator.pulse };

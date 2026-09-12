@@ -496,6 +496,7 @@ mod tests {
     use super::fake_proc::{auxv, fake_passwd, fake_proc_tree, write_proc, FakeProc, BTIME};
     use super::*;
     use crate::sys::now_ms;
+    use crate::Outgoing;
     use serde_json::{json, Value};
     use std::process::Stdio;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -555,7 +556,7 @@ mod tests {
 
     struct Bench {
         sampler: Arc<ProcSampler>,
-        rx: mpsc::UnboundedReceiver<String>,
+        rx: mpsc::UnboundedReceiver<Outgoing>,
         root: tempfile::TempDir,
         _passwd: tempfile::TempDir,
         clock: Arc<Clock>,
@@ -565,7 +566,7 @@ mod tests {
         fn got(&mut self) -> Vec<Value> {
             let mut out = Vec::new();
             while let Ok(text) = self.rx.try_recv() {
-                let v: Value = serde_json::from_str(&text).unwrap();
+                let v: Value = serde_json::from_str(text.text()).unwrap();
                 assert!(serde_json::from_value::<DaemonEvent>(v.clone()).is_ok(), "the protocol parses {v}");
                 out.push(v);
             }

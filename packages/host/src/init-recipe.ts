@@ -254,6 +254,13 @@ export function rowsHere(entries: readonly ManifestEntry[]): Set<string> {
   return new Set(entries.flatMap(e => catalogIdOf(e) ?? []));
 }
 
+/** The manifest a run reads the recipe against: the catalog's bare rows joined to this computer's, the pins the last
+ * build saved carried, the recipe applied. The screens as data, the run itself and a copy's build read it here, so
+ * a tick lands on the same rows wherever it was made. */
+export function manifestFor(reading: { manifest: Manifest }, recipe: Recipe, statePath: string): Manifest {
+  return applyRecipe(withCatalogAgents(withSavedPins(reading.manifest, readSavedManifest(recipePath(statePath)))), recipe);
+}
+
 export function recipePath(statePath: string): string {
   return join(dirname(statePath), "golden-recipe.json");
 }

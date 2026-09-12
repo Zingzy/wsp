@@ -276,6 +276,7 @@ impl SysSampler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Outgoing;
     use serde_json::Value;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use tokio::sync::mpsc;
@@ -364,15 +365,15 @@ mod tests {
         Arc::new(|_| {})
     }
 
-    fn subscriber() -> (Outbound, mpsc::UnboundedReceiver<String>) {
+    fn subscriber() -> (Outbound, mpsc::UnboundedReceiver<Outgoing>) {
         let (tx, rx) = mpsc::unbounded_channel();
         (Outbound(tx), rx)
     }
 
-    fn drain(rx: &mut mpsc::UnboundedReceiver<String>) -> Vec<Value> {
+    fn drain(rx: &mut mpsc::UnboundedReceiver<Outgoing>) -> Vec<Value> {
         let mut out = Vec::new();
         while let Ok(item) = rx.try_recv() {
-            out.push(serde_json::from_str(&item).unwrap());
+            out.push(serde_json::from_str(item.text()).unwrap());
         }
         out
     }

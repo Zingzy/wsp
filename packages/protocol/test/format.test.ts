@@ -12,11 +12,11 @@ import {
   THIS_COMPUTER,
   PERMISSION_DENIED_LINE,
   accessFromNextMessage,
+  askingLine,
   permissionAskLine,
   permissionPromptWords,
   permissionModeOptionLabel,
   permissionOutcomeLine,
-  permissionUnansweredLine,
   noModelsLine,
   type HarnessCatalog,
   MEMORY_NEAR_FULL,
@@ -1000,12 +1000,13 @@ describe("a record the sweep restored, and a name a fork cannot take", () => {
 });
 
 describe("stillWorkingLine", () => {
-  it("names the thread by its first eight characters, says the reply is in but the agent is still working, and says where a message sent now goes", () => {
-    expect(stillWorkingLine("5ffc2c96-1111-4222-8333-444455556666")).toBe(
-      "thread 5ffc2c96 replied, still working; the message runs as its next turn once that process exits",
-    );
+  it("names the thread by its title, says the reply is in but the agent is still working, and says where a message sent now goes", () => {
+    expect(stillWorkingLine("Fix the port list")).toBe("Fix the port list replied, still working; the message runs as its next turn once that process exits");
+    // A caller with no title for the thread names it as the person looking at it would: an id names no thread.
+    expect(stillWorkingLine()).toBe("This thread replied, still working; the message runs as its next turn once that process exits");
+    expect(stillWorkingLine("  ")).toBe(stillWorkingLine());
     // Nothing in it tells the caller to wait or says the send was refused: the send is never refused.
-    expect(stillWorkingLine("5ffc2c96")).not.toMatch(/wait|refus/);
+    expect(stillWorkingLine()).not.toMatch(/wait|refus/);
   });
 });
 
@@ -1085,8 +1086,8 @@ describe("the nap's words when its vault was not stored", () => {
   });
 
   it("vaultKeptLine says the previous vault stands and why, whatever stopped the export", () => {
-    expect(vaultKeptLine(vaultOverCapLine(797_760_137, 209_715_200))).toBe("nap kept the previous vault; the export was 761 MB, over the 200 MB cap");
-    expect(vaultKeptLine("fetch failed")).toBe("nap kept the previous vault; fetch failed");
+    expect(vaultKeptLine(vaultOverCapLine(797_760_137, 209_715_200))).toBe("the nap kept what was saved before it; the export was 761 MB, over the 200 MB cap");
+    expect(vaultKeptLine("fetch failed")).toBe("the nap kept what was saved before it; fetch failed");
   });
 
   it("vaultStaleLine is the one word every surface shows for a machine whose files are not backed up, short enough for the row, and nothing while the last nap stored a vault", () => {
@@ -1218,10 +1219,10 @@ describe("LINEAGE_MARKS", () => {
   it("names every outcome a missing tool can carry and every state a lineage row shows, each as one short lowercase word or two", () => {
     const outcomes: GoldenMissingTool["outcome"][] = ["skipped", "failed"];
     for (const o of outcomes) expect(LINEAGE_MARKS[o]).toBe(o);
-    expect(LINEAGE_MARKS).toEqual({ now: "now", head: "head", fork: "this one", failed: "failed", skipped: "skipped", volatile: "volatile" });
+    expect(LINEAGE_MARKS).toEqual({ now: "now", head: "newest", fork: "this one", failed: "failed", skipped: "skipped", volatile: "snapshot only" });
     for (const word of Object.values(LINEAGE_MARKS)) {
       expect(word).toMatch(/^[a-z]+( [a-z]+)?$/);
-      expect(word.length).toBeLessThanOrEqual(9);
+      expect(word.length).toBeLessThanOrEqual(13);
     }
   });
 });
@@ -1239,12 +1240,12 @@ describe("template words", () => {
   });
 
   it("the doctor's line per version names the template it promoted and, when other templates already carry the name, how many", () => {
-    expect(templateRecordedLine("default", 2, "tpl_0f1e", 0)).toBe("golden default v2: template tpl_0f1e promoted and recorded");
-    expect(templateRecordedLine("default", 1, "tpl_0f1e", 1)).toBe("golden default v1: template tpl_0f1e promoted and recorded; 1 other template carries its name");
-    expect(templateRecordedLine("default", 1, "tpl_0f1e", 2)).toBe("golden default v1: template tpl_0f1e promoted and recorded; 2 other templates carry its name");
-    expect(templateRecordedLine("default", 1, "tpl_0f1e", undefined)).toBe("golden default v1: template tpl_0f1e promoted and recorded");
-    expect(templateSkippedLine("default", 1, "its snapshot is gone at the provider")).toBe("golden default v1: no template recorded, its snapshot is gone at the provider");
-    expect(NO_TEMPLATES_LINE).toBe("this backend has no templates; goldens stay as snapshots");
+    expect(templateRecordedLine("default", 2, "tpl_0f1e", 0)).toBe("image default v2: template tpl_0f1e promoted and recorded");
+    expect(templateRecordedLine("default", 1, "tpl_0f1e", 1)).toBe("image default v1: template tpl_0f1e promoted and recorded; 1 other template carries its name");
+    expect(templateRecordedLine("default", 1, "tpl_0f1e", 2)).toBe("image default v1: template tpl_0f1e promoted and recorded; 2 other templates carry its name");
+    expect(templateRecordedLine("default", 1, "tpl_0f1e", undefined)).toBe("image default v1: template tpl_0f1e promoted and recorded");
+    expect(templateSkippedLine("default", 1, "its snapshot is gone at the provider")).toBe("image default v1: no template recorded, its snapshot is gone at the provider");
+    expect(NO_TEMPLATES_LINE).toBe("this backend has no templates; image versions stay as snapshots");
   });
 });
 
@@ -1291,10 +1292,10 @@ describe("builderStaysLine and the seal's and the update's last lines", () => {
     expect(SEAL_FAILED_BUILDER_GONE_LINE).toBe("Seal failed and the builder is gone: the provider dropped it after refusing the snapshot. Run wsp init again; the recipe is kept.");
   });
 
-  it("the update's last lines say the golden stands and whether the provider still has the machine the new version ran on", () => {
-    expect(upgradeSealFailedStaysLine(1, "m1", 0.11)).toBe("Golden v1 is unchanged. Builder m1 is as it was, up at about $0.11/hr; run wsp init again to retry, and the sweep stops it once it is six hours old.");
-    expect(upgradeSealFailedGoneLine(1)).toBe("Golden v1 is unchanged and the builder is gone: the provider dropped it after refusing the snapshot. Run wsp init again to retry.");
-    expect(upgradeSealFailedUnreadLine(1, "m1")).toBe("Golden v1 is unchanged. The provider could not be read about builder m1, so nothing on it was touched; run wsp init again to retry, and the sweep stops it once it is six hours old.");
+  it("the update's last lines say the image stands and whether the provider still has the machine the new version ran on", () => {
+    expect(upgradeSealFailedStaysLine(1, "m1", 0.11)).toBe("Image v1 is unchanged. Builder m1 is as it was, up at about $0.11/hr; run wsp init again to retry, and the sweep stops it once it is six hours old.");
+    expect(upgradeSealFailedGoneLine(1)).toBe("Image v1 is unchanged and the builder is gone: the provider dropped it after refusing the snapshot. Run wsp init again to retry.");
+    expect(upgradeSealFailedUnreadLine(1, "m1")).toBe("Image v1 is unchanged. The provider could not be read about builder m1, so nothing on it was touched; run wsp init again to retry, and the sweep stops it once it is six hours old.");
     expect(SEAL_FAILED_LINE).toBe("Seal failed and the builder is gone. Run wsp init again; the recipe is kept.");
   });
 });
@@ -1588,12 +1589,18 @@ describe("the words a relayed permission prompt shows", () => {
     expect(permissionOutcomeLine("cancelled", mode)).toBe("Cancelled with the turn");
   });
 
-  it("tells the agent nobody answered rather than that a person refused, since the two are different facts", () => {
-    const waited = permissionUnansweredLine(5 * 60_000);
-    expect(waited).toContain("5m");
-    expect(waited).toContain("wsp denied it");
-    expect(waited).not.toContain("the person");
+  it("has one deny line, the person's own, and it points the agent at no other access mode", () => {
     expect(PERMISSION_DENIED_LINE).toBe("the person denied this in the chat");
+    for (const word of ["access", "bypass", "mode", "start the thread"]) expect(PERMISSION_DENIED_LINE).not.toContain(word);
+  });
+
+  it("what a thread says it is waiting on is the prompt row's own lead, worded in one place off the whole prompt", () => {
+    const ask = { toolName: "Write", input: '{"file_path":"/root/out.txt","content":"hi"}', detail: "out.txt" };
+    expect(askingLine(ask)).toBe(permissionAskLine(ask.toolName, ask.input, ask.detail));
+    // The whole prompt is in hand, so the lead reads the call's own fields and not only the phrase the harness named.
+    expect(askingLine(ask)).toContain("out.txt");
+    const bare = { toolName: "mcp__wsp__workspaces", input: "{}", detail: undefined };
+    expect(askingLine(bare)).toBe(permissionAskLine(bare.toolName, bare.input, bare.detail));
   });
 
   it("a mode option reads as an allow that also stops the asking, in the picker's own words for the mode", () => {

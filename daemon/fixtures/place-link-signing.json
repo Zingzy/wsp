@@ -1,0 +1,12 @@
+{
+  "note": "a throwaway ed25519 test key; the node side signed both transcripts and the Rust side must produce the same bytes",
+  "privateKeyPem": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIPBZENXbdr0GRTdFbOkTvOvd9bNSFZSg9E07ITco5Lv8\n-----END PRIVATE KEY-----\n",
+  "publicKey": "MCowBQYDK2VwAyEAKu2Acka4DkhLbQDbMcdpiZqyyMEjJEGlKXSCVCvxBFM=",
+  "placeId": "p_ab12cd34",
+  "placeNonce": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+  "hostNonce": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=",
+  "hostTranscript": "d3NwIHBsYWNlIGxpbmsgdjEKaG9zdApwX2FiMTJjZDM0CkJ3Y0hCd2NIQndjSEJ3Y0hCd2NIQndjSEJ3Y0hCd2NIQndjSEJ3Y0hCd2M9CkNRa0pDUWtKQ1FrSkNRa0pDUWtKQ1FrSkNRa0pDUWtKQ1FrSkNRa0pDUWs9Cg==",
+  "placeTranscript": "d3NwIHBsYWNlIGxpbmsgdjEKcGxhY2UKcF9hYjEyY2QzNApDUWtKQ1FrSkNRa0pDUWtKQ1FrSkNRa0pDUWtKQ1FrSkNRa0pDUWtKQ1FrPQpCd2NIQndjSEJ3Y0hCd2NIQndjSEJ3Y0hCd2NIQndjSEJ3Y0hCd2NIQndjPQo=",
+  "hostSignature": "B0zVTbM+7KiIhbe/y277LW1hCunTyGXgF70pLYejPUO2qPSxMVYDeP/GAJAJcPATvJmy3cxdHdIFCMHHS4AXCw==",
+  "placeSignature": "AvJkpeDLI9L0OMiGrWnwHo5zsKLOK8CKr/M/QEtiJXvEddW7g2ipAOcGHBCeeKs64wnEEibfeSxDpha1MlruAw=="
+}

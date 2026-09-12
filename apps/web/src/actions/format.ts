@@ -88,7 +88,7 @@ export const phaseCannot = (state: WorkspaceState): string => PHASE_SLOT[state].
 export const phaseHint = (state: WorkspaceState): string =>
   state === "waking" ? "Stop asking the provider to wake this workspace" : isBilling(state) ? "Suspend the VM and keep the disk" : "Boot the VM from its disk";
 export const FORGET_HINT = "Its computer is gone; forget the workspace to drop it from this computer";
-export const REBUILD_HINT = "The workspace answers nothing; rebuild it from the golden image";
+export const REBUILD_HINT = "The workspace answers nothing; rebuild it from your image";
 
 export function phaseRefusal(state: WorkspaceState): string | null {
   switch (state) {
@@ -182,8 +182,9 @@ export const NO_CLIPBOARD_READ = "The clipboard cannot be read here";
 export const NO_TERMINAL = "No terminal is active";
 export const SPLIT_LIMIT = `max ${MAX_TERMINALS_PER_GROUP} per group`;
 
-/** A thread link named a thread the workspace's list does not carry; the workspace opened instead. */
-export const noSuchThreadLine = (threadId: string): string => `No thread ${threadId} in this workspace; opened the workspace instead`;
+/** A thread link named a thread the workspace's list does not carry; the workspace opened instead. The thread is
+ * not named: the link carried an id, and an id names no thread to the person who followed it. */
+export const noSuchThreadLine = (): string => "That thread is not in this workspace; opened the workspace instead";
 
 /** Show in diff asked for a file the diff does not touch. */
 export const noDiffLine = (fileName: string, scopeLabel: string): string => `${fileName} has no diff in ${scopeLabel.toLowerCase()}`;

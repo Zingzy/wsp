@@ -6,7 +6,8 @@
 // here: whether a copy stands on the record is copyStanding in the protocol,
 // which the command line reads too, and where today ends is daysBack in the
 // app's timestamp reading, which every surface that says "today" reads.
-import { fmtBytes, plural, sealedLoginsHeld, type Recipe, type SealedImage } from "@wsp/protocol";
+import { fmtBytes, plural, sealedLoginsHeld, type PlaceView, type Recipe, type SealedImage, type SealedImageCopy } from "@wsp/protocol";
+import { placeNamed } from "./places.js";
 import { APP_LOCALE, daysBack, parseTimestampDate } from "../lib/timestampFormat.js";
 
 export const IMAGE_WORDS = {
@@ -56,6 +57,11 @@ export function builtWhen(at: string, now: number = Date.now()): string {
   if (back === 1) return `yesterday ${clock}`;
   return `${DAY.format(when)} ${clock}`;
 }
+
+/** The copy one computer or provider holds, or nothing where it holds none. A copy names the place by the word a
+ * person types for it, which is the id on some rows and the name on others, so the row's own reading answers it.
+ * The one match, read by the Remove sentence, the copies table and the New workspace caption alike. */
+export const copyOn = (copies: readonly SealedImageCopy[], place: PlaceView): SealedImageCopy | undefined => copies.find(copy => placeNamed(place, copy.place));
 
 /** The Built row: when the record was sealed and which computer it was sealed from. */
 export const builtFact = (image: SealedImage, now?: number): string => `${builtWhen(image.sealedAt, now)} · from ${image.sealedFrom}`;

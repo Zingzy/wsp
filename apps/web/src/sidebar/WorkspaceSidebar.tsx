@@ -14,7 +14,7 @@
 // sidebar-glass: nothing here paints a background.
 import { ChevronDownIcon, MessageSquarePlusIcon, PlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type WheelEvent } from "react";
-import { DROP_A_FOLDER_LINE, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, cloudCreateRefusal, computerOffline, dropTileLine, goldenHead, isLocalWorkspace, kindWords, registerRequest, registeredLine, workspaceKind, workspaceState, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
+import { DROP_A_FOLDER_LINE, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, cloudCreateRefusal, computerOffline, dropTileLine, goldenHead, isLocalWorkspace, kindWords, registerRequest, registeredLine, workspaceKind, workspaceState, type SealedImageCopy, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { CREATION_ASKED } from "../actions/format.js";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry.js";
@@ -44,7 +44,7 @@ import { ExportProjectDialog } from "./ExportProjectDialog.js";
 import { droppedFolder, useFolderDrag, useWindowFolderDrag } from "./folderDrag.js";
 import { ForwardsList } from "./ForwardsList.js";
 import { ImportProjectDialog } from "./ImportProjectDialog.js";
-import { NewWorkspaceDialog, type WorkspaceStart } from "./NewWorkspaceDialog.js";
+import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
 import { ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, THREE_LINE_ROW_CLASS, groupRowId, threadRowId, workspaceRowId } from "./rowGrammar.js";
 import { SearchRow } from "./SearchRow.js";
 import { SectionRow } from "./SectionRow.js";
@@ -108,11 +108,16 @@ function visibleProjects(projects: ReadonlyArray<SidebarProjectSnapshot>, nowMs:
   });
 }
 
+const NO_COPIES: readonly SealedImageCopy[] = [];
+
 interface DialogState {
   readonly key: number;
   readonly name: string;
-  /** The golden head's size, read when the dialog opens; null until it lands or when no golden says. */
+  /** The image head's size, read when the dialog opens; null until it lands or when no image says. */
   readonly goldenSize: WorkspaceSize | null;
+  /** The copies of the image already built, read when the dialog opens, so a row's caption says whether the image
+   * is there or is built first; empty until they land and on a host that answers for none. */
+  readonly copies: readonly SealedImageCopy[];
 }
 
 /** A project trip's dialog open for one workspace; keyed per opening so its folder and plan reset. */
@@ -141,6 +146,9 @@ export function WorkspaceSidebar() {
   // One local workspace per host: the section's road to this computer says whether a pick makes it or goes to it.
   const hasLocal = useStore(s => s.workspaces.some(w => isLocalWorkspace(w)));
   const capabilities = useCapabilities();
+  // Where a workspace can go: the same list Settings draws, so the dialog and that table never offer two answers.
+  const places = useStore(s => s.places);
+  const openAddComputer = useStore(s => s.openAddComputer);
   const hasGolden = useStore(s => s.hasGolden);
   const initJob = useStore(s => s.initJob);
   // Read on every render of the open dialog, so a build that finishes under it frees the keycap without reopening.
@@ -203,9 +211,13 @@ export function WorkspaceSidebar() {
 
   const openDialog = (): void => {
     const key = Date.now();
-    setDialog({ key, name: defaultWorkspaceName([...workspaces.map(w => w.name), ...creations.map(c => c.name)]), goldenSize: null });
+    setDialog({ key, name: defaultWorkspaceName([...workspaces.map(w => w.name), ...creations.map(c => c.name)]), goldenSize: null, copies: NO_COPIES });
     void api?.getGolden().then(
       manifest => setDialog(d => (d?.key === key ? { ...d, goldenSize: goldenHead(manifest)?.size ?? null } : d)),
+      () => {},
+    );
+    void api?.image?.().then(
+      view => setDialog(d => (d?.key === key ? { ...d, copies: view.copies } : d)),
       () => {},
     );
   };
@@ -234,10 +246,9 @@ export function WorkspaceSidebar() {
   );
   useEffect(() => onProjectTripRequest(request => setTrip({ ...request, key: Date.now() })), []);
 
-  const create = async (name: string, start: WorkspaceStart, size?: WorkspaceSize): Promise<void> => {
+  const create = async (name: string, where?: string, size?: WorkspaceSize): Promise<void> => {
     setDialog(null);
-    const id = await createWorkspace(name, undefined, size);
-    if (start === "import" && id !== null) setTrip({ key: Date.now(), workspaceId: id, trip: "import" });
+    await createWorkspace(name, undefined, size, where);
   };
 
   // The row's rebuild spins until the status names a new machine, so it stands in for the registry's plain call.
@@ -579,6 +590,7 @@ export function WorkspaceSidebar() {
                     <TooltipTrigger
                       render={
                         <SidebarGroupAction
+                          data-k="new-workspace"
                           className="top-1.5 text-sidebar-muted-foreground transition-colors duration-150 disabled:pointer-events-none disabled:opacity-50"
                           aria-label="New workspace"
                           disabled={api === null}
@@ -665,11 +677,17 @@ export function WorkspaceSidebar() {
         <NewWorkspaceDialog
           key={dialog.key}
           initialName={dialog.name}
+          places={places}
+          copies={dialog.copies}
           sizes={capabilities?.sizes ?? []}
           goldenSize={dialog.goldenSize}
           refusal={createRefusal?.line ?? null}
-          onCreate={(name, start, size) => void create(name, start, size)}
+          onCreate={(name, where, size) => void create(name, where, size)}
           onCancel={() => setDialog(null)}
+          onAddComputer={() => {
+            setDialog(null);
+            openAddComputer();
+          }}
         />
       ) : null}
       {trip !== null && tripTarget !== undefined ? (
