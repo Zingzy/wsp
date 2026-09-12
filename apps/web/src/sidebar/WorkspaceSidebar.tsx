@@ -36,6 +36,7 @@ import { desktopBridge } from "../lib/desktopShell.js";
 import { cn, errorText } from "../lib/utils.js";
 import { catalogIn, useCapabilities, useLabs, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useStore, useWorkspace, type Creation } from "../protocol/store.js";
 import { goToAdjacentWorkspace } from "../shell/shellCommands.js";
+import { useLinkDownLine } from "../terminal/paneWords.js";
 import { onForgetWorkspaceRequest, onNewWorkspaceRequest, onProjectTripRequest, onRenameWorkspaceRequest, onWorkspaceLookRequest, type ProjectTripRequest, type WorkspaceLookRequest } from "../shell/shellRequests.js";
 import { ExportProjectDialog } from "./ExportProjectDialog.js";
 import { droppedFolder, useFolderDrag, useWindowFolderDrag } from "./folderDrag.js";
@@ -491,6 +492,8 @@ export function WorkspaceSidebar() {
   };
 
   const offline = useMemo(() => computerOffline(Object.values(statuses)), [statuses]);
+  // A host that is not answering at all is said above in its own words; this one is about the workspace on screen.
+  const linkDown = useLinkDownLine(selectedWorkspace?.id ?? null);
   const search = (
     <div className="px-[var(--sidebar-content-inset)] pt-3 pb-1" data-sidebar-search>
       <div className="relative">
@@ -518,6 +521,10 @@ export function WorkspaceSidebar() {
       {offline ? (
         <p data-sidebar-offline className={cn(ROW_PROSE_CLASS, "px-2 pt-1 leading-4")}>
           {PROVIDER_UNREACHED_LINE}
+        </p>
+      ) : linkDown !== null ? (
+        <p data-sidebar-link-down className={cn(ROW_PROSE_CLASS, "px-2 pt-1 leading-4")}>
+          {linkDown}
         </p>
       ) : null}
     </div>

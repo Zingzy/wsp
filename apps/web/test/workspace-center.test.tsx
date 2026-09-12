@@ -85,7 +85,8 @@ describe("workspace center", () => {
     act(() => useTerminalDrawerStore.getState().toggle(WS));
     const drawer = document.querySelector('[data-terminal-owner="drawer"]');
     expect(drawer).not.toBeNull();
-    expect(drawer!.textContent).toContain("The daemon link is reconnecting; terminals open when it is back");
+    // The link here has never been open, so the drawer says what is being started rather than promising a return.
+    expect(drawer!.textContent).toContain("Starting a terminal on this workspace; the first one opens when it is ready");
     expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
   });
 

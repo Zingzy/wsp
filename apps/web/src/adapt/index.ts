@@ -39,7 +39,7 @@ export {
   type StoppedPort,
 } from "./ports.js";
 export { deriveSidebarProjects, sidebarWorkspaceOrder, workspaceIndicator, threadIndicator, turnWait, type SidebarInput } from "./workspaces.js";
-export { terminalPaneState, terminalPaneTitle, terminalPaneHints, terminalEmptyLine, terminalInputRefusal, type TerminalPaneState, type TerminalPaneInput } from "./terminal-pane.js";
+export { terminalPaneState, terminalPaneTitle, terminalPaneHints, terminalEmptyLine, terminalInputRefusal, linkDownLine, type TerminalPaneState, type TerminalPaneInput } from "./terminal-pane.js";
 export { toTerminalAttachEvent, isPtyEvent } from "./terminal.js";
 export { catalogFor, catalogFromHarness } from "./catalog.js";
 export { repoAbsence } from "./git.js";

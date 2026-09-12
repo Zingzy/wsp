@@ -156,7 +156,7 @@ describe("WorkspaceTerminals", () => {
     let statusChanges = 0;
     wt.onStatus(() => statusChanges++);
     wt.feedStatus("live");
-    expect(wt.status()).toBe("connecting");
+    expect(wt.status()).toBe("opening");
     expect(wt.everOpened()).toBe(false);
     await waitFor(() => expect(wt.status()).toBe("live"));
     expect(statusChanges).toBe(1);

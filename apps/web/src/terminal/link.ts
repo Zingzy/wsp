@@ -13,6 +13,11 @@ import { composedPtyIo, type TerminalIo } from "./pty-io.js";
 /** Mirrors the daemon's per-pty scrollback cap (pty-manager.ts), in UTF-16 units. */
 const MIRROR_CAP = 256 * 1024;
 
+/** The word a link reads on before anything has been open on it: nothing has, so nothing is coming back. Written
+ * here because the model, the hook that reads it for a surface with no pane, and the panel all need the same one,
+ * and a second copy of it drifts silently (it drove no words when it did). */
+export const NOT_OPENED_YET: DaemonLinkStatus = "opening";
+
 /** The one thing a transport must provide. Tests back it with the reach client. */
 export interface TerminalWire {
   request(op: string, params?: Record<string, unknown>): Promise<Record<string, unknown>>;
@@ -56,7 +61,7 @@ export class WorkspaceTerminals {
   #ptys = new Map<string, PtyState>();
   #order: string[] = [];
   #activeId: string | null = null;
-  #status: DaemonLinkStatus = "connecting";
+  #status: DaemonLinkStatus = NOT_OPENED_YET;
   #refusal: string | null = null;
   #wasLive = false;
   /** Bumped on every status change; an attach ritual that outlives its transition stops at the next await. */
@@ -174,6 +179,13 @@ export class WorkspaceTerminals {
   /** True once any pty was ever created; the tab auto-opens only before this. */
   everOpened(): boolean {
     return this.#everOpened;
+  }
+
+  /** True once this model has been live on any link of its own. The model outlives its links (a park, a nap, a
+   * host socket redialling), so this and not the age of a link object is what says whether a person is waiting for
+   * a terminal to come back or watching one start. */
+  everLive(): boolean {
+    return this.#wasLive;
   }
 
   /** The tab's auto-open on first mount; concurrent mounts share one create. */

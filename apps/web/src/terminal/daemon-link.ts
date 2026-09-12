@@ -9,7 +9,7 @@
 import { DaemonErrorCode, DaemonEvent, type DaemonChannelEvent, type DaemonLinkStatus } from "@wsp/protocol";
 import type { DaemonApi } from "../protocol/client.js";
 import { errorText } from "../lib/utils.js";
-import type { TerminalWire } from "./link.js";
+import { NOT_OPENED_YET, type TerminalWire } from "./link.js";
 
 /** The daemon refused a request; code is set when the op sends a typed one (files and diff ops do). */
 export class DaemonRequestError extends Error {
@@ -29,6 +29,12 @@ export interface DaemonLinkOptions {
   onStatus?(s: DaemonLinkStatus, refusal?: string): void;
   heartbeatMs?: number;
   backoffMs?: (attempt: number) => number;
+  /** How long a link that has never been open is given before it reads unanswered. */
+  firstAnswerMs?: number;
+  /** Whether the model this link is opening for has been live before, over a link of its own that is now gone (a
+   * park, a nap, a host socket that redialled). Its tabs and their scrollback are still on screen, so a person is
+   * waiting for a terminal to come back and not watching one start, whatever the age of this link object. */
+  wasLive?: boolean;
 }
 
 export interface DaemonLinkStats {
@@ -46,6 +52,10 @@ export interface DaemonLink extends TerminalWire {
 }
 
 const DEFAULT_HEARTBEAT_MS = 10_000;
+/** How long a first dial is given before the pane stops saying what is being started and says what is not answering
+ * and what to do. Long enough to cover a daemon this host starts on the first dial, short enough that nobody sits in
+ * front of a silent screen wondering. */
+const DEFAULT_FIRST_ANSWER_MS = 20_000;
 const defaultBackoff = (attempt: number): number => Math.min(10_000, 500 * 2 ** (attempt - 1));
 /** What a refused link waits: no retry at the usual pace opens a door that answered with a status, so every dial
  * after one is spaced at the backoff's ceiling until something past the door answers. */
@@ -67,6 +77,8 @@ export function connectDaemonLink(opts: DaemonLinkOptions): DaemonLink {
   let closed = false;
   let attempt = 0;
   let connections = 0;
+  /** Set once the first-answer bound has passed with nothing ever open. */
+  let waited = false;
   let awaitingPong = false;
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -81,6 +93,14 @@ export function connectDaemonLink(opts: DaemonLinkOptions): DaemonLink {
     status = s;
     refusal = said;
     opts.onStatus?.(s, said ?? undefined);
+  }
+
+  /** What a link that is not open reads as. A link that has never been open says what is being started, and says
+   * what is not answering once its bound has passed; only a link that was open once is reconnecting, which is the
+   * one word that promises something back. */
+  function dialing(): DaemonLinkStatus {
+    if (connections > 0 || opts.wasLive === true) return "connecting";
+    return waited ? "unanswered" : NOT_OPENED_YET;
   }
 
   function flushPending(reason: string): void {
@@ -138,7 +158,7 @@ export function connectDaemonLink(opts: DaemonLinkOptions): DaemonLink {
     flushPending("connection lost");
     void opts.daemon.close(on).catch(() => {});
     if (closed) return;
-    setStatus("connecting");
+    setStatus(dialing());
     scheduleRetry();
   }
 
@@ -159,7 +179,7 @@ export function connectDaemonLink(opts: DaemonLinkOptions): DaemonLink {
     flushPending("connection lost");
     if (closed) return;
     // The host rotates the token on every start; the next dial carries what it holds now.
-    setStatus(e.code === 4401 ? "reauth-needed" : "connecting");
+    setStatus(e.code === 4401 ? "reauth-needed" : dialing());
     scheduleRetry();
   }
 
@@ -186,7 +206,7 @@ export function connectDaemonLink(opts: DaemonLinkOptions): DaemonLink {
     if (closed) return;
     retryTimer = null;
     // A door that answered with a status keeps its sentence while the dials go on: nothing here is reconnecting.
-    if (status !== "refused") setStatus("connecting");
+    if (status !== "refused") setStatus(dialing());
     let opened: { channel: string };
     try {
       opened = await opts.daemon.open(opts.workspaceId);
@@ -210,7 +230,7 @@ export function connectDaemonLink(opts: DaemonLinkOptions): DaemonLink {
         scheduleRetry(REFUSED_ATTEMPT);
         return;
       }
-      setStatus("connecting");
+      setStatus(dialing());
       scheduleRetry();
       return;
     }
@@ -233,8 +253,14 @@ export function connectDaemonLink(opts: DaemonLinkOptions): DaemonLink {
     stats.reconnects = connections - 1;
     proven = opened.channel;
     startHeartbeat(opened.channel);
+    clearTimeout(firstAnswerTimer);
     setStatus("live");
   }
+
+  const firstAnswerTimer = setTimeout(() => {
+    waited = true;
+    if (status === NOT_OPENED_YET) setStatus("unanswered");
+  }, opts.firstAnswerMs ?? DEFAULT_FIRST_ANSWER_MS);
 
   void dial();
 
@@ -245,6 +271,7 @@ export function connectDaemonLink(opts: DaemonLinkOptions): DaemonLink {
     stats: () => ({ ...stats }),
     close() {
       closed = true;
+      clearTimeout(firstAnswerTimer);
       if (retryTimer) clearTimeout(retryTimer);
       retryTimer = null;
       const on = channel;
