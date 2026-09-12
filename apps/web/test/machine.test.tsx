@@ -380,17 +380,21 @@ describe("usage", () => {
   const toggle = (name: string) => screen.getByRole("button", { name });
 
   it("reads the total off the series, so the runtime's history stands there before the first live tick", async () => {
-    // The chart drew three hours of spend over a row that read $0.0000 until a tick landed.
+    // The chart drew three hours of spend over a row that read $0.00 until a tick landed.
     await mount([view("ws_a", "api")], CAPS, EMPTY_LINEAGE, HISTORY);
     await waitFor(() => expect(document.querySelector("[data-usage-line]")).not.toBeNull());
-    expect(fact("accrued")).toBe("$0.2200");
+    expect(fact("accrued")).toBe("$0.22");
   });
 
-  it("shows the live rate and accrued total", async () => {
+  it("shows the live rate, and the accrued total in the one shape every spend figure a person reads is in", async () => {
     const api = await mount([view("ws_a", "api")]);
     act(() => api.emit(costEvent("ws_a", 0.11, 60_000, "2026-09-01T00:01:00Z")));
     await waitFor(() => expect(fact("rate")).toBe("$0.110/hr"));
-    expect(fact("accrued")).toBe("$0.0018");
+    // The rate keeps its tenth of a cent, since that is what a provider charges by; the spend reads in cents,
+    // the same as the thread footer's and the sidebar row's.
+    expect(fact("accrued")).toBe("$0.00");
+    act(() => api.emit(costEvent("ws_a", 0.11, 3_600_000 * 2, "2026-09-01T02:00:00Z")));
+    await waitFor(() => expect(fact("accrued")).toBe("$0.22"));
   });
 
   it("starts with a quiet empty state and draws the accrued total as one line from the first tick, never bars", async () => {
@@ -464,10 +468,10 @@ describe("usage", () => {
     const svg = document.querySelector<SVGSVGElement>("[data-usage-chart] svg")!;
     svg.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: 300, bottom: 96, width: 300, height: 96, toJSON: () => ({}) });
     fireEvent.mouseMove(svg, { clientX: 100, clientY: 30 });
-    expect(fact("usage-readout")).toBe(`$0.1100 · $0.110/hr · ${clock(at(60))}`);
+    expect(fact("usage-readout")).toBe(`$0.11 · $0.110/hr · ${clock(at(60))}`);
     expect(svg.querySelector("[data-usage-hover]")).not.toBeNull();
     fireEvent.mouseMove(svg, { clientX: 250, clientY: 30 });
-    expect(fact("usage-readout")).toBe(`$0.2200 · $0.000/hr · ${clock(at(150))}`);
+    expect(fact("usage-readout")).toBe(`$0.22 · $0.000/hr · ${clock(at(150))}`);
     fireEvent.mouseLeave(svg);
     expect(fact("usage-readout")).toBe(`tracked since ${clock(at(0))} · 3 h`);
     expect(svg.querySelector("[data-usage-hover]")).toBeNull();

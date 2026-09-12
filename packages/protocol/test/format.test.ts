@@ -144,6 +144,7 @@ import {
   TURN_WALL_MS,
   turnCutLine,
   turnEndLine,
+  LIST_PRICE_WORD,
   openedSpendPart,
   turnSpendPart,
   turnSettledLine,
@@ -441,8 +442,8 @@ describe("fmtDuration, fmtElapsed and fmtCost", () => {
     expect([0, 999, 1000, 3_400, 9_999, 10_458, 59_600, 60_000, 73_000, 314_200, -5, NaN].map(fmtElapsed)).toEqual(["0s", "0s", "1s", "3s", "9s", "10s", "59s", "1m", "1m 13s", "5m 14s", "0s", "0s"]);
   });
 
-  it("fmtCost reads cents, and four places under a cent", () => {
-    expect([1.94, 0.22, 0.01, 0.0042, 0].map(fmtCost)).toEqual(["$1.94", "$0.22", "$0.01", "$0.0042", "$0.0000"]);
+  it("fmtCost reads cents at every size, so two figures in one thread are never in two shapes", () => {
+    expect([1.94, 0.22, 0.01, 0.0042, 0].map(fmtCost)).toEqual(["$1.94", "$0.22", "$0.01", "$0.00", "$0.00"]);
   });
 });
 
@@ -552,6 +553,11 @@ describe("a turn's activity in one line each", () => {
     // Nothing opened anything, so there is no second figure to weigh the first against and the cost stands bare.
     expect(turnSettledParts({ durationMs: 72_000, costUsd: 1.14 })).toEqual(["Worked for 1m 12s", "$1.14"]);
     expect(turnSettledParts({ durationMs: 72_000, costUsd: 1.14 }, 0)).toEqual(["Worked for 1m 12s", "$1.14"]);
+  });
+
+  it("a surface whose turns cost the person nothing puts the word on the turn's own figure and on no other", () => {
+    expect(turnSettledParts({ durationMs: 72_000, costUsd: 0.13 }, null, LIST_PRICE_WORD)).toEqual(["Worked for 1m 12s", "$0.13 list price"]);
+    expect(turnSettledParts({ durationMs: 72_000, costUsd: 1.14 }, 2.3, LIST_PRICE_WORD)).toEqual(["Worked for 1m 12s", "$1.14 list price this turn", "$2.30 in threads it opened"]);
     // The line a stream with no footer prints never carries a second figure, so it is untouched.
     expect(turnSettledLine({ status: "completed", durationMs: 72_000, costUsd: 1.14 })).toBe("completed · Worked for 1m 12s · $1.14");
   });
@@ -810,7 +816,7 @@ describe("refusedTurn", () => {
       error: "Not logged in · Please run /login; sign in from a terminal on this computer, then send again",
       refusal: "sign-in",
     });
-    expect(turnEndLine(refused)).toBe(`failed · Worked for 88ms · $0.0000: ${refused.error!}`);
+    expect(turnEndLine(refused)).toBe(`failed · Worked for 88ms · $0.00: ${refused.error!}`);
     expect(notifyTail(refused)).toBe(refused.error);
   });
 

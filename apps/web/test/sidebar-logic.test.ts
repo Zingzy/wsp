@@ -171,15 +171,15 @@ describe("workspace row labels", () => {
   };
   const tick = (accruedUsd: number, rateUsdPerHour = 0.11) => ({ rateUsdPerHour, accruedUsd });
 
-  it("the meta line: what it cost today first, in cents, then the edge note and the nap countdown last, the hourly rate left to the pane; the cost leads before the first tick too, as an honest zero", () => {
+  it("the meta line: what it cost today first, in cents, then the edge note and the nap countdown last, the hourly rate left to the pane; before the meter's first tick the line says nothing about spend rather than a zero it would change", () => {
     const meta = (over: Partial<WorkspaceStatus>, cost: ReturnType<typeof tick> | null) => workspaceMetaLine({ project: project(over), cost, outOfMemory: undefined, nowMs: now });
     expect(meta({ idleAt: now + 14.5 * 60_000, reach: { state: "slow" } }, tick(0.0037))).toBe("$0.00 today · edge slow · naps in 14m");
     expect(meta({ idleAt: now + 14.5 * 60_000 }, tick(0.29))).toBe("$0.29 today · naps in 14m");
     expect(meta({ reach: { state: "unreachable" } }, tick(1.235))).toBe("$1.24 today · active");
     expect(meta({ phase: "napping", machineState: "paused", reach: { state: "napping" }, idleAt: now + 60_000 }, tick(0.18, 0))).toBe("$0.18 today");
     expect(meta({ machineState: "gone", reach: { state: "gone" }, idleAt: now + 60_000 }, tick(0.18))).toBe("$0.18 today");
-    expect(meta({}, null)).toBe("$0.00 today · active");
-    expect(meta({ phase: "napping", machineState: "paused", reach: { state: "napping" } }, null)).toBe("$0.00 today");
+    expect(meta({}, null)).toBe("active");
+    expect(meta({ phase: "napping", machineState: "paused", reach: { state: "napping" } }, null)).toBe("");
     // The rate is the pane's row, not this line's: the spend and the countdown are what fit the row's 30 characters.
     expect(meta({}, tick(0.5, 0.15))).toBe("$0.50 today · active");
   });
@@ -218,9 +218,9 @@ describe("workspace row labels", () => {
     expect(workspaceMetaLine({ project: project({ idleAt: now + 60_000, daemonNote: "updating the helper" }), cost: tick(0.5), outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
     expect(workspaceMetaLine({ project: project({ idleAt: now + 60_000 }), cost: tick(0.5), outOfMemory: { used: 3.59 * GiB, total: 3.94 * GiB, load1: 6.4 }, nowMs: now })).toBe("out of memory, 3.6 of 3.9 GB");
     // Before a status arrives the record's own note is the line; a status without one says nothing about the helper.
-    expect(workspaceMetaLine({ project: { ...project({}), status: null }, cost: null, outOfMemory: undefined, nowMs: now })).toBe("$0.00 today");
+    expect(workspaceMetaLine({ project: { ...project({}), status: null }, cost: null, outOfMemory: undefined, nowMs: now })).toBe("");
     expect(workspaceMetaLine({ project: { ...project({}, { daemonNote: "updating the helper" }), status: null }, cost: null, outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
-    expect(workspaceMetaLine({ project: project({}, { daemonNote: "updating the helper" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("$0.00 today · active");
+    expect(workspaceMetaLine({ project: project({}, { daemonNote: "updating the helper" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("active");
   });
 
   it("a nap that could not store a vault says the machine's files are not backed up, on the row and in the Spaces header", () => {
@@ -275,7 +275,8 @@ describe("workspace row labels", () => {
     expect(header({ size: { cpu: 10, memMb: 16384 } }, { kind: "local" })).toEqual(["10 cores · 16 GB", FREE_WORD]);
     // A fork's header is untouched: the size, the spend with its rate, the countdown when one is set.
     expect(header({ idleAt: now + 14.5 * 60_000 }, {}, tick(0.29))).toEqual(["2 vCPU · 4 GB", "$0.29 today · $0.110/hr", "naps in 14m"]);
-    expect(header({})).toEqual(["2 vCPU · 4 GB", "$0.00 today · $0.110/hr"]);
+    // Before the meter's first tick the header says what the machine costs by the hour and nothing about spend.
+    expect(header({})).toEqual(["2 vCPU · 4 GB", "$0.110/hr"]);
     // What the runtime is doing to the daemon still leads on both kinds: it is the one thing there a person waits on.
     expect(header({ daemonNote: "updating the helper" }, { kind: "local" })).toEqual(["updating the helper", "2 cores · 4 GB", FREE_WORD]);
   });

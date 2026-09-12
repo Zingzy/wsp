@@ -611,9 +611,9 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         expect(rows.workspaces[0]!.meta).toBe("$0.29 today · $0.110/hr · naps in 15m");
         expect(rows.workspaces[0]!.title).toBe(rows.workspaces[0]!.meta);
         if (width === 240) expect(rows.workspaces[0]!.metaClipped).toBe(true);
-        // The rows without a tick lead with an honest zero: no second line is ever blank.
-        expect(rows.workspaces[1]!.meta).toBe("$0.00 today");
-        expect(rows.workspaces[2]!.meta).toBe("$0.00 today");
+        // A row whose meter has not ticked says nothing about spend rather than a zero it would change.
+        expect(rows.workspaces[1]!.meta).toBe("");
+        expect(rows.workspaces[2]!.meta).toBe("");
         expect(Math.round(live.metaRight)).toBe(Math.round(live.slotRight));
         // No import or export glyph anywhere; a live row's glyphs are its chevron and plus, a gone row's forget and rebuild.
         expect(rows.trips).toBe(0);
@@ -731,7 +731,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         const moved = await readSpaces();
         expect(moved.icons.map(icon => icon.current)).toEqual([false, true, false]);
         expect(moved.state).toBe("Paused");
-        expect(moved.lines.map(line => line.text)).toEqual(["2 vCPU · 4 GB", "$0.00 today"]);
+        expect(moved.lines.map(line => line.text)).toEqual(["2 vCPU · 4 GB"]);
         expect(moved.barBox.height).toBe(read.barBox.height);
         await page!.locator("[data-space-icon][aria-label=api]").click();
         await page!.waitForFunction(() => document.querySelector("[data-space-header] [data-space-name]")?.textContent === "api");

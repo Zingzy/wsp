@@ -4,7 +4,7 @@
 // background, dashed grid, mono ticks on both axes, the newest point dotted.
 // Hovering reads one instant under the box.
 import { useId, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { accruedAt, rateAt, type WorkspaceCostEvent } from "@wsp/protocol";
+import { accruedAt, fmtCost, rateAt, type WorkspaceCostEvent } from "@wsp/protocol";
 import { cn } from "../../lib/utils.js";
 import { money } from "./format.js";
 import { plotPoints, rangeHeld, smoothPath, timeLabel, trackedLine, usageReadout, USAGE_RANGES, usageSpan, xTicks, yAxis, type UsageRange } from "./usage.js";
@@ -65,7 +65,7 @@ export function UsageChart({ series, range }: { series: WorkspaceCostEvent[]; ra
   const area = end === undefined ? "" : `${line}L${end.x.toFixed(2)} ${BOX}L${xy[0]!.x.toFixed(2)} ${BOX}Z`;
   const overUsd = hover !== null ? accruedAt(series, hover) : null;
   const overRate = hover !== null ? rateAt(series, hover) : null;
-  const readout = hover !== null && overUsd !== null && overRate !== null ? `${money(overUsd)} · ${money(overRate, 3)}/hr · ${timeLabel(hover, span)}` : usageReadout(series, range);
+  const readout = hover !== null && overUsd !== null && overRate !== null ? `${fmtCost(overUsd)} · ${money(overRate, 3)}/hr · ${timeLabel(hover, span)}` : usageReadout(series, range);
   const ticks = xTicks(span);
 
   const track = (e: ReactMouseEvent<SVGSVGElement>): void => {

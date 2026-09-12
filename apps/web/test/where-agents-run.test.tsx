@@ -361,7 +361,7 @@ describe("what the places cost this month", () => {
     render(<WhereAgentsRun now={NOW} />);
     await waitFor(() => expect(document.querySelector("[data-k='places-spend']")?.textContent).toBe("$0.41 this month across 1 provider"));
     // The row that took nothing still says so in its own cell; it is the count of who charged that leaves it out.
-    expect(cells(screen.getAllByRole("row")[3]!)[3]).toBe("1 · $0.0000 this month");
+    expect(cells(screen.getAllByRole("row")[3]!)[3]).toBe("1 · $0.00 this month");
   });
 
   it("leaves a provider nothing was metered on out of the foot's count, and a computer that runs Docker out of the money", async () => {

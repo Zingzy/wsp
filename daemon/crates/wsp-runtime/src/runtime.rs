@@ -211,8 +211,24 @@ impl Runtime {
                 }
                 return Ok(());
             }
-            let pid = State::load(&dir).map_err(container)?.pid;
             let ours = init.as_ref().is_none_or(alive);
+            // A state file youki cannot read any more is still a workspace of ours to end: the cgroup kills what it
+            // holds, and the state directory and the cgroup go by hand, since youki's delete would refuse them.
+            let Ok(state) = State::load(&dir) else {
+                if cgroup.exists() {
+                    fs::write(cgroup.join("cgroup.kill"), "1").map_err(io_at(&cgroup))?;
+                    crate::freeze::wait_unpopulated(&cgroup, KILL_PATIENCE).map_err(io_at(&cgroup))?;
+                }
+                if let (true, Some(init)) = (ours, init.as_ref()) {
+                    wait_reaped(init.pid, KILL_PATIENCE)?;
+                }
+                fs::remove_dir_all(&dir).map_err(io_at(&dir))?;
+                if cgroup.exists() {
+                    fs::remove_dir(&cgroup).map_err(io_at(&cgroup))?;
+                }
+                return Ok(());
+            };
+            let pid = state.pid;
             // A load that fails is an init that left between two reads of /proc: nothing is left to kill, and the
             // delete below takes the rest, as it does for a stopped or half-created container.
             if ours {

@@ -113,8 +113,8 @@ describe("what the Where agents run table says about a computer", () => {
   it("puts the month behind a row beside its count, where the host has metered anything on it", () => {
     const provider = { id: "box", kind: "provider" as const, name: "box", default: false };
     expect(placeWorkspacesCell(provider, 2, 0.41)).toBe("2 · $0.41 this month");
-    // A month that has cost fractions of a cent still reads as a figure rather than rounding to nothing.
-    expect(placeWorkspacesCell(provider, 1, 0.0042)).toBe("1 · $0.0042 this month");
+    // Money is spelled the one way the protocol spells it, which is cents whatever the size.
+    expect(placeWorkspacesCell(provider, 1, 0.0042)).toBe("1 · $0.00 this month");
     // A computer of the person's own is charged by nobody, whether or not it runs copies of the image there.
     expect(placeWorkspacesCell(view({ docker: false }), 1, 0.41)).toBe("1 · agents only");
     expect(placeWorkspacesCell(view({ docker: true }), 1, 0.41)).toBe("1");
@@ -136,9 +136,7 @@ describe("what the Where agents run table says about a computer", () => {
 
   it("says what one place took this month and what it burns now, and what every provider took together", () => {
     expect(placeSpendLine({ monthUsd: 4.12, rateUsdPerHour: 0.16 }, 2)).toBe("$4.12 this month · $0.16/hr now across 2 workspaces");
-    // Money is spelled the one way the protocol spells it (fmtCost), which keeps a figure under a cent rather than
-    // rounding a month that has barely begun down to nothing.
-    expect(placeSpendLine({ monthUsd: 0, rateUsdPerHour: 0 }, 1)).toBe("$0.0000 this month · $0.00/hr now across 1 workspace");
+    expect(placeSpendLine({ monthUsd: 0, rateUsdPerHour: 0 }, 1)).toBe("$0.00 this month · $0.00/hr now across 1 workspace");
     expect(placesSpendFoot(4.53, 2)).toBe("$4.53 this month across 2 providers");
     expect(placesSpendFoot(0.41, 1)).toBe("$0.41 this month across 1 provider");
   });
