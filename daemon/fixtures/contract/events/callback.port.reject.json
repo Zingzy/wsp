@@ -1,0 +1,13 @@
+[
+  {
+    "type": "callback.port",
+    "port": 80
+  },
+  {
+    "type": "callback.port",
+    "port": 65536
+  },
+  {
+    "type": "callback.port"
+  }
+]

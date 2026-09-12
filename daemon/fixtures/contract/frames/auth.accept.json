@@ -1,0 +1,19 @@
+[
+  {
+    "id": 1,
+    "op": "auth",
+    "token": "t"
+  },
+  {
+    "id": "a",
+    "op": "auth",
+    "token": "t",
+    "port": 8123
+  },
+  {
+    "id": 2,
+    "op": "auth",
+    "token": "t",
+    "port": 65535
+  }
+]
