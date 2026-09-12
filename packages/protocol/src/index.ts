@@ -439,6 +439,14 @@ export type WorkspaceView = z.infer<typeof WorkspaceView>;
 export const MachineFacts = z.object({ os: z.string(), uptimeMs: z.number(), folder: z.string() });
 export type MachineFacts = z.infer<typeof MachineFacts>;
 
+/** Whether the machine that reported this system name is a Mac: the name its maker gives it, and the kernel's own
+ * word where the machine answered nothing better, which is what a machine on this computer falls back to. The
+ * folder browsers read it beside the home to know whether that home keeps a Library. Absent is not a Mac: what
+ * reads this hides a folder, and a machine that said nothing has said nothing to hide. */
+export function isMacMachine(osName: string | null | undefined): boolean {
+  return /^(?:macOS|Darwin)\b/.test(osName ?? "");
+}
+
 /** WorkspaceView enriched with what the rail and meta panel render live. */
 export const WorkspaceStatus = WorkspaceView.extend({
   machineState: MachineState,
@@ -560,6 +568,11 @@ export const SessionView = z.object({
    * absent on a turn waiting on nobody. The harness is stopped on the question while it stands, so this is the one
    * fact that says a thread is waiting on the person rather than working. */
   asking: z.string().optional(),
+  /** The process this turn leads on the computer the host runs on, where the turn runs there: the pid the Processes
+   * pane heads this thread's tree with. Absent on a turn running on another machine, whose pids are not this
+   * computer's, and on a turn that is over. It is never written down: a pid outlives nothing, and the computer is
+   * free to hand it to a stranger the moment the turn ends. */
+  pid: z.number().int().optional(),
 });
 export type SessionView = z.infer<typeof SessionView>;
 
@@ -593,6 +606,8 @@ export const ThreadView = z.object({
   asking: z.string().optional(),
   /** What this thread has cost: its rows' figures added up. Absent where no row of it carries one. */
   costUsd: z.number().optional(),
+  /** The latest turn's process on the computer the host runs on, as SessionView.pid carries it. */
+  pid: z.number().int().optional(),
 });
 export type ThreadView = z.infer<typeof ThreadView>;
 
@@ -639,6 +654,7 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.endedAt !== undefined ? { endedAt: latest.endedAt } : {}),
       ...(latest.cwd !== undefined ? { cwd: latest.cwd } : {}),
       ...(latest.asking !== undefined ? { asking: latest.asking } : {}),
+      ...(latest.pid !== undefined ? { pid: latest.pid } : {}),
       turns: turns.length,
       ran: threadRan(turns),
       ...(first.parentThreadId !== undefined ? { parentThreadId: first.parentThreadId } : {}),
@@ -725,6 +741,10 @@ export const HarnessCatalog = z.object({
    * mcpServers this is the adapter's own declaration and no binary's, so a table row is the answer and a client reads
    * it before any machine exists; absent is none. The composer lists none of them and sends nothing for one. */
   screenCommands: z.array(ScreenCommand).optional(),
+  /** Whether an access picked while a turn of this harness runs reaches that turn. The adapter in this host declares
+   * it, as with mcpServers, so the picker says what a pick does to the turn in front of the person before the pick
+   * rather than under the box after it. Read it through movesRunningAccess: absent is a no. */
+  movesAccess: z.boolean().optional(),
   /** Set on the harness a start without one runs, so a client can pick its list without the catalog package. */
   isDefault: z.boolean().optional(),
   /** Why the binary described nothing, in its own adapter's words, when it ran and refused for a reason it can name
@@ -808,6 +828,13 @@ export function readsImages(catalog: HarnessCatalog | null | undefined): boolean
  * machine exists. Absent is a no, which is a catalog from before the field was declared. */
 export function takesMcpServers(catalog: Pick<HarnessCatalog, "mcpServers"> | null | undefined): boolean {
   return catalog?.mcpServers === true;
+}
+
+/** Whether an access picked while a turn runs reaches that turn on this harness. The adapter's own declaration, like
+ * takesMcpServers; absent is a no, which is a catalog from before the field was declared, and a pick then waits for
+ * the person's next message. */
+export function movesRunningAccess(catalog: Pick<HarnessCatalog, "movesAccess"> | null | undefined): boolean {
+  return catalog?.movesAccess === true;
 }
 
 /** Whatever carries a harness's screen-only commands: the catalog itself, or a caller that holds the list alone. */
@@ -3599,7 +3626,7 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("workspaces.exec"), workspaceId: z.string(), argv: z.array(z.string()).min(1), cwd: z.string().optional() }),
   /** Replies with { listing: HostFolderListing }: one level of this computer's own folders, for the picker a browser
    * tab has instead of the desktop shell's dialog. `dir` absent lists the first root and a folder inside the roots
-   * that is gone does the same; a path outside them is refused. `hidden` lists the dot-named folders too, which are
+   * that is gone does the same; a path outside them is refused. `hidden` lists the hidden folders too, which are
    * otherwise only counted. */
   z.object({ id: reqId, op: z.literal("host.folders"), dir: z.string().optional(), hidden: z.boolean().optional() }),
   /** Replies with { config: TerminalConfig }: the person's Ghostty config on the computer running the host, read
@@ -3809,11 +3836,12 @@ export type SessionSteerResult = z.infer<typeof SessionSteerResult>;
 
 // --- session access (what a pick made while a turn runs gets back) ---------------------
 
-/** set: the harness took the mode and this turn's next tool call runs at it. unsupported: the harness takes no
- * access change on a turn already under way (Claude Code's bypass, which is a launch flag on that CLI), so the pick
- * waits for the person's next message. not-running: the turn ended, or its process is gone, before the pick reached
- * it. not-found: this runtime holds no such session. None is an error reply, as a mode the harness's own list does
- * not carry is. */
+/** set: the turn is at the mode, from its next tool call and on the prompt it was stopped on where that mode
+ * answers one; a harness whose CLI takes the change only at launch is set too, where its adapter stands in for it
+ * by answering that turn's prompts itself. unsupported: the harness takes no access change on a turn already under
+ * way and nothing could stand in for it, so the pick is kept and the person's next message carries it.
+ * not-running: the turn ended, or its process is gone, before the pick reached it. not-found: this runtime holds no
+ * such session. None is an error reply, as a mode the harness's own list does not carry is. */
 export const SessionAccessOutcome = z.enum(["set", "not-running", "unsupported", "not-found"]);
 export type SessionAccessOutcome = z.infer<typeof SessionAccessOutcome>;
 export const SessionAccessResult = z.object({ outcome: SessionAccessOutcome });
@@ -3982,7 +4010,7 @@ export {
   type Rgb,
   type ThemePreset,
 } from "./workspace-look.js";
-export { folderName, parentFolderName, placeDaemonPaths, placeOwnedPaths, rootsPathIn, sshDaemonPaths, underProject, workFolderIn } from "./project-path.js";
+export { folderName, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, rootsPathIn, sshDaemonPaths, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importDest, importRequest, registerRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";

@@ -66,6 +66,9 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     pin: { read: "--help", version: "2.1.257", date: "2026-09-05" },
     // --mcp-config takes the servers as JSON on the launch (read off `claude --help` at 2.1.257, 2026-09-10).
     mcpServers: true,
+    // Its control channel takes a mode change while a turn runs, and the prompt that turn is stopped on is answered
+    // with it, so an access picked mid-turn lands on the turn in front of the person.
+    movesAccess: true,
     screenCommands: [...CLAUDE_SCREEN_COMMANDS],
     // The cheapest of the three at $2/$10 per Mtok, as the CLI's own handshake prices them (read 2026-09-07).
     smallModel: "claude-sonnet-5",

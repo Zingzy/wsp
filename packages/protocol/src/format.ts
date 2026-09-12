@@ -845,7 +845,7 @@ export function nextInsideAgentLine(open: string, first: string): string {
 }
 
 /** One level of this computer's own folders in words, the same on the command line and in the app's folder browser:
- * how many folders the level holds, where it sits, and how many of it are dot-named, whether or not those are listed. */
+ * how many folders the level holds, where it sits, and how many of it are hidden, whether or not those are listed. */
 export function folderLevelLine(listing: { dir: string; folders: readonly unknown[]; hidden: number }): string {
   const held = listing.hidden === 0 ? "" : `, ${listing.hidden} hidden`;
   return listing.folders.length === 0 ? `No folders in ${listing.dir}${held}.` : `${plural(listing.folders.length, "folder")} in ${listing.dir}${held}.`;
@@ -2190,14 +2190,23 @@ export function permissionModeOptionLabel(modeLabel: string): string {
   return `Allow, then ${modeLabel}`;
 }
 
-/** What the composer says under the box when a person picked an access while a turn was running and that harness
- * takes no such change mid-turn: the pick is kept and it reaches the agent with the next thing they send. Short
- * because that slot is one line the width of the box and it truncates from the right: a longer sentence lost the
- * half that carries the answer at the window this app is smallest in (measured 2026-09-08, 364 px of slot at a
- * 1200 px viewport), and a line that says when the pick lands is no use cut before the "when". */
-export function accessFromNextMessage(modeLabel: string): string {
-  return `${modeLabel} from your next message`;
+/** What the access picker says over its list while a turn is running: what a pick does to that turn, read before the
+ * pick rather than under the box after it. A harness that takes a mode change mid-turn puts the pick to the turn in
+ * front of the person, the prompt it is stopped on included; one that does not keeps the pick for the next message. */
+export function accessReachLine(movesRunningTurn: boolean): string {
+  return movesRunningTurn ? "Applies to the turn running now" : "Applies from your next message";
 }
+
+/** What the composer says under the box when an access pick the harness's own row said would reach the running turn
+ * came back refused: the two halves every refusal in this app has, what happened and then what to do about it. It
+ * stands only for a refusal the harness actually answered with, never for one the menu said before the pick, so
+ * nobody reads the same sentence twice. Short because that slot is one line the width of the box and it truncates
+ * from the right: 54 characters is what fits at the window this app is smallest in (measured 2026-09-08, 364 px of
+ * slot at a 1200 px viewport), and a refusal cut before its second half is no use. */
+export const ACCESS_REFUSED_WORDS = { said: "The turn refused it.", fix: "Your next message carries it." } as const;
+
+/** Those two halves as the one line that slot holds. */
+export const ACCESS_REFUSED_LINE = `${ACCESS_REFUSED_WORDS.said} ${ACCESS_REFUSED_WORDS.fix}`;
 
 /** The one sentence a second workspace on a machine that already carries one is refused with. wsp forks a machine
  * for every workspace it makes and records one for every machine it does not, so one record stands on one machine

@@ -57,17 +57,26 @@ vi.mock("../src/components/ui/menu.js", () => {
     );
   };
   const MenuGroup = ({ children }: { children: ReactNode }) => <div role="group">{children}</div>;
-  // Base UI's radio items hold the checked state and never close the menu; the stand-in does the same.
+  // The app's kit closes the menu on a radio pick unless the caller says otherwise; the stand-in does the same.
   const RadioCtx = createContext<{ value: unknown; change: (value: unknown) => void }>({ value: null, change: () => {} });
   const MenuRadioGroup = ({ children, value, onValueChange, ...props }: { children: ReactNode; value?: unknown; onValueChange?: (value: unknown) => void; [key: string]: unknown }) => (
     <div role="group" {...(props as Record<string, unknown>)}>
       <RadioCtx.Provider value={{ value, change: onValueChange ?? (() => {}) }}>{children}</RadioCtx.Provider>
     </div>
   );
-  const MenuRadioItem = ({ children, value, ...props }: { children: ReactNode; value: unknown; [key: string]: unknown }) => {
-    const ctx = useContext(RadioCtx);
+  const MenuRadioItem = ({ children, value, closeOnClick = true, ...props }: { children: ReactNode; value: unknown; closeOnClick?: boolean; [key: string]: unknown }) => {
+    const radio = useContext(RadioCtx);
+    const menu = useContext(Ctx);
     return (
-      <div role="menuitemradio" aria-checked={ctx.value === value ? "true" : "false"} onClick={() => ctx.change(value)} {...(props as Record<string, unknown>)}>
+      <div
+        role="menuitemradio"
+        aria-checked={radio.value === value ? "true" : "false"}
+        onClick={() => {
+          radio.change(value);
+          if (closeOnClick) menu.set(false);
+        }}
+        {...(props as Record<string, unknown>)}
+      >
         {children}
       </div>
     );
@@ -97,6 +106,7 @@ import { provideDaemonHello, provideDaemonWire } from "../src/files/wire.js";
 import { DAEMON_HELLO, DAEMON_ROOT, fakeWire, imported, LISTING, PROJECT_DEST, resetSurfaces } from "./surface-harness.js";
 import { CHAT_STREAM, CHAT_WS } from "./fixtures/chat-stream.js";
 import { caps } from "./caps.js";
+import { statusOf } from "./workspace-status.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
 
 let restoreLayout: () => void = () => {};
@@ -186,6 +196,12 @@ const menuRoots = () =>
 const pathField = () => document.querySelector<HTMLInputElement>('[data-k="folder-path"]');
 const refusalSlot = () => document.querySelector<HTMLElement>('[data-k="folder-path-refusal"]');
 const chooseRow = () => document.querySelector<HTMLElement>("[data-composer-folder-choose]");
+/** What the workspace's machine says it is, which is half of the rule that hides a home's own Library. */
+const onAMac = (mac: boolean) => {
+  const workspaceView = useStore.getState().workspaces[0]!;
+  act(() => useStore.setState({ statuses: { [WS]: statusOf(workspaceView, { facts: { os: mac ? "macOS 15.5" : "Ubuntu 24.04.1 LTS", uptimeMs: 1_000, folder: "/" } }) } }));
+};
+
 const openPicker = async (at: string) => {
   fireEvent.click(screen.getByRole("button", { name: `Working folder: ${at}` }));
   await waitFor(() => expect(pathField()).not.toBeNull());
@@ -496,6 +512,78 @@ describe("composer checkout row", () => {
     await waitFor(() => expect(menuEntry("/root/app")).not.toBeNull());
     expect(menuPick("/root")).not.toBeNull();
     expect(screen.queryByRole("button", { name: "New thread here" })).toBeNull();
+  });
+
+  it("walks past the machine's own folders, and the typed path is the road into one on purpose", async () => {
+    // A person's own home, as the machine really answers one: two dot-named folders, a Mac's own Library, and the
+    // one folder they made.
+    const HOME = "/Users/priya";
+    const home = {
+      entries: [
+        { name: ".cache", type: "dir", size: 0, mtime: 1 },
+        { name: ".config", type: "dir", size: 0, mtime: 1 },
+        { name: "Library", type: "dir", size: 0, mtime: 1 },
+        { name: "code", type: "dir", size: 0, mtime: 1 },
+        { name: "notes.md", type: "file", size: 12, mtime: 1 },
+      ],
+      truncated: false,
+      total: 5,
+    };
+    provideDaemonHello(WS, { ...DAEMON_HELLO, root: HOME });
+    const wire = fakeWire({
+      "fs.list": params => {
+        const path = String(params["path"]);
+        if (path === HOME) return home;
+        if (path === `${HOME}/code` || path === `${HOME}/.config`) return { entries: [], truncated: false, total: 0 };
+        throw Object.assign(new Error(`${path} does not exist`), { code: "not-found" });
+      },
+      "git.status": STATUS,
+    });
+    provideDaemonWire(WS, wire);
+    const { api } = fixtureApi();
+    await setup(api);
+    // The machine says what it is; the Library is hidden because this home is its own, not because of the path.
+    onAMac(true);
+    await openPicker(HOME);
+    await waitFor(() => expect(menuEntry(`${HOME}/code`)).not.toBeNull());
+    expect(menuEntry(`${HOME}/.cache`)).toBeNull();
+    expect(menuEntry(`${HOME}/.config`)).toBeNull();
+    expect(menuEntry(`${HOME}/Library`)).toBeNull();
+    expect(Array.from(document.querySelectorAll("[data-composer-folder-entry]")).map(el => el.textContent)).toEqual(["code"]);
+
+    // Hidden from the walk, not out of reach: the path typed whole opens one.
+    typePath(`${HOME}/.config`);
+    await waitFor(() => expect(screen.getByRole("button", { name: `Working folder: ${HOME}/.config` })).toBeTruthy());
+    expect(root()).toBe(`${HOME}/.config`);
+  });
+
+  it("keeps a Library that is not a Mac home's own, since only a Mac keeps one there", async () => {
+    const HOME = "/home/dev";
+    const home = {
+      entries: [
+        { name: ".config", type: "dir", size: 0, mtime: 1 },
+        { name: "Library", type: "dir", size: 0, mtime: 1 },
+        { name: "code", type: "dir", size: 0, mtime: 1 },
+      ],
+      truncated: false,
+      total: 3,
+    };
+    provideDaemonHello(WS, { ...DAEMON_HELLO, root: HOME });
+    provideDaemonWire(
+      WS,
+      fakeWire({
+        "fs.list": params => (String(params["path"]) === HOME ? home : { entries: [], truncated: false, total: 0 }),
+        "git.status": STATUS,
+      }),
+    );
+    const { api } = fixtureApi();
+    await setup(api);
+    onAMac(false);
+    await openPicker(HOME);
+    await waitFor(() => expect(menuEntry(`${HOME}/code`)).not.toBeNull());
+    // The dot folder is the machine's own wherever it runs; the Library on this one is a folder somebody made.
+    expect(menuEntry(`${HOME}/.config`)).toBeNull();
+    expect(menuEntry(`${HOME}/Library`)).not.toBeNull();
   });
 
   it("picks a folder pasted into the field on Enter, whatever level the walk is on, and starts the session there", async () => {
