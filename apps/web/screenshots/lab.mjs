@@ -9,32 +9,43 @@
 //   node lab.mjs url <name>
 //
 // A lab's home is named after the lab, not minted at random, so a later command
-// in another process finds it without being told where it is. The host's pid is
-// written into that home and the stop reads it back: the only process this
-// stops is the one this started, which matters on a computer where several
-// builders and a person's own host are running at once.
+// in another process finds it without being told where it is, and it sits on
+// this computer beside the person's home rather than in a temp folder, which
+// two testers read as "not my repo". The home is pointed at from a file the
+// name alone finds, so a stop run from a shell that names another root still
+// reaches it. The host's pid is written into that home and the stop reads it
+// back: the only process this stops is the one this started, which matters on a
+// computer where several builders and a person's own host are running at once.
 //
 // Nothing here touches the person's own ~/.wsp. HOME and WSP_HOME both point
 // inside the lab's home, which is what keeps the host's current-home pointer
 // out of theirs, and the provider is the one that answers out of memory, so a
 // fixture's forks are served without a key and without dialling anything.
 //
+// What a run served is written down: the commit the checkout stood on, a hash
+// of the app as it was copied into the lab's home, which is the copy the host
+// serves, and a hash of the wsp command serving it, which is the checkout's own
+// since its bundle resolves its imports there. A build landing on main while a
+// tester drives used to change the page under them, and no log could say which
+// app they had met.
+//
 // A tester who lives in a terminal rather than the app runs no fixture of their
-// own: the shell function the start prints is their road. It is the child's own
-// environment, word for word, run from a shell with nothing else in it, because
-// a wsp verb that runs in this process rather than through the host reads
-// whatever the tester's terminal holds: their own state file, their own
-// provider key, and the .env beside whichever checkout they happen to stand in.
-// A tester who ran doctor from their own shell was told both the lab's machines
-// were gone at the provider. The same lines are written into the lab's log and
-// kept in lab.json, so what a run met can be read afterwards.
-import { PERSON_HOME_ENV, shellQuote } from "@wsp/protocol";
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+// own: this lab's wsp is on the path of the shell the start prints. It runs the
+// child's own environment, word for word, from a shell with nothing else in it,
+// because a wsp verb that runs under whatever the tester's terminal holds reads
+// their own state file, their own provider key, and the .env beside whichever
+// checkout they happen to stand in. A tester given a shell function to paste
+// wrote their own wrapper instead and was told both the lab's machines were
+// gone at the provider. The same lines are written into the lab's log and kept
+// in lab.json, so what a run met can be read afterwards.
+import { shellQuote } from "@wsp/protocol";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { FIXTURE_NAMES, fixtureState } from "./fixture-state.mjs";
+import { fixtureCloud, fixtureFolders, FIXTURE_NAMES, fixtureState } from "./fixture-state.mjs";
 import { freePort, HOST_BIN, providerFor, sleep, startHost, whatIsNotBuilt } from "./host.mjs";
+import { AGENT_KEYS, binDir, copyApp, keyLayers, keysFound, labHome, treeSha, writeAgentHome, writeKeys, writeShim, writeWorkFolder } from "./lab-home.mjs";
 
 const USAGE = `usage: node lab.mjs start <name> [--fixture <fixture>]
        node lab.mjs stop <name> [--log <file>]
@@ -51,7 +62,21 @@ function die(why) {
   process.exit(2);
 }
 
-const homeOf = name => join(tmpdir(), `wsp-lab-${name}`);
+/** Where a lab's name is looked up when nobody says: the pointer the start wrote, else the home the root this
+ * shell names would give it. A lab started under one root and stopped from a shell that names another used to be
+ * told there was nothing to stop, and its host stayed up; the pointer is what makes a recorded pid findable. */
+export const homeOf = name => pointedHome(name) ?? labHome(name);
+export const pointerPath = name => join(tmpdir(), `wsp-lab-${name}.json`);
+
+function pointedHome(name) {
+  try {
+    const { home } = JSON.parse(readFileSync(pointerPath(name), "utf8"));
+    return typeof home === "string" && existsSync(join(home, "lab.json")) ? home : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const pidsPath = home => join(home, "lab.pids");
 const factsPath = home => join(home, "lab.json");
 const logPath = home => join(home, "lab.log");
@@ -115,22 +140,29 @@ function readFacts(home) {
   }
 }
 
+/** Why a folder standing where this lab's home goes is not this lab's to remove, or nothing when it is: a lab's
+ * own home holds its record, and an empty folder is nobody's. A root named wrongly in a shell would otherwise
+ * take a real folder with it, and the start removes what it finds before it writes. */
+export function whyNotOursToRemove(home, holds = () => (existsSync(home) ? readdirSync(home) : undefined)) {
+  const held = holds();
+  if (held === undefined || held.length === 0 || held.includes("lab.json")) return undefined;
+  return `${home} is not a lab of this harness (no lab.json in it) and it is not empty, so this start would delete a folder that is somebody's; pick another name, or another root.`;
+}
+
 /** What a lab says when it comes up and when it is asked where it is, in one place so both say the same thing and a
- * tester's notes read alike whichever they ran: where the app is, whose home its turns run under, and the one line
- * that runs a wsp verb against this lab and nothing else. */
+ * tester's notes read alike whichever they ran: where the app is, which build it is serving, what a turn there is
+ * signed in with, and the shell whose wsp is this lab's. */
 export const labLines = facts => [
   `lab ${facts.name} serving ${facts.url} pid ${facts.pid} home ${facts.home}`,
-  `turns run under ${facts.env[PERSON_HOME_ENV]}, the home this computer's agents are signed in to`,
-  "its own wsp, for doctor, setup and every other verb, from a shell carrying nothing of the tester's own:",
-  `  ${labVerb(facts)}`,
+  `built from ${facts.build.sha}, app ${facts.build.app}, command ${facts.build.command}, served out of ${facts.build.appDir}`,
+  facts.signedIn ? "turns run in this lab's own home, signed in with the agents' key, with no MCP server and no skill of this computer's" : `turns run in this lab's own home and none of ${AGENT_KEYS.join(", ")} was found, so an agent there answers that it is not logged in`,
+  "a shell whose wsp is this lab's, carrying nothing of the tester's own:",
+  `  ${labShell(facts)}`,
 ];
 
-/** The shell function a tester runs this lab's wsp verbs through: the child's own environment word for word,
- * nothing else in it, and the lab's home as the folder it runs in, so no .env beside a checkout is read. */
-const labVerb = facts =>
-  `wsp_lab() { (cd ${shellQuote(facts.home)} && env -i ${Object.entries(facts.env)
-    .map(([name, value]) => `${name}=${shellQuote(value)}`)
-    .join(" ")} ${shellQuote(facts.node)} ${shellQuote(facts.bin)} "$@"); }`;
+/** The shell a tester runs this lab's verbs from: nothing of their own in it, and this lab's wsp first on the
+ * path, so `wsp doctor` is this lab's doctor with no wrapper to write and nothing to paste. */
+const labShell = facts => `env -i HOME=${shellQuote(facts.home)} PATH=${shellQuote(facts.env.PATH)} TERM=xterm-256color /bin/sh`;
 
 async function start({ name, fixture }) {
   const unbuilt = whatIsNotBuilt();
@@ -138,23 +170,67 @@ async function start({ name, fixture }) {
     console.error(unbuilt);
     process.exit(1);
   }
-  const home = homeOf(name);
+  const home = labHome(name);
   const running = recordedPids(home).filter(p => alive(p.pid));
   if (running.length > 0) die(`the lab ${name} is already running as pid ${running.map(p => p.pid).join(", ")}; stop it first, or pick another name`);
+  const notALab = whyNotOursToRemove(home);
+  if (notALab !== undefined) die(notALab);
   // A home left by a lab that is gone is a state file, a log and a pid file from the run before; the fixture this
   // run was asked for is what the tester is here to see, so nothing of the last one is kept.
   rmSync(home, { recursive: true, force: true });
   mkdirSync(home, { recursive: true });
 
-  const state = fixtureState(fixture);
+  // Every folder the fixture names is under this home, so a turn starts in a folder of the lab's rather than in
+  // whatever the person keeps under the same name.
+  const state = fixtureState(fixture, { home });
+  // Everything a tester meets is written before the host comes up: the app it serves, the home its turns run in,
+  // the folders those turns start in and the keys that sign them in.
+  const app = copyApp(home);
+  writeAgentHome(home);
+  writeWorkFolder(home, fixtureFolders(state));
+  const keys = keysFound(keyLayers());
+  const key = Object.keys(keys).length > 0;
+  if (key) writeKeys(home, keys);
+  const cloud = fixtureCloud(fixture);
   const port = await freePort();
-  const host = await startHost({ home, state, port, wsPort: await freePort(), logPath: logPath(home), detached: true });
+  const host = await startHost({
+    home,
+    state,
+    port,
+    wsPort: await freePort(),
+    logPath: logPath(home),
+    detached: true,
+    // The lab's own home on both counts: the host's files and the home a turn's agent reads. What signs that agent
+    // in is the key, which travels to the child alone and is never written into the record or the log.
+    personHome: home,
+    appDir: app.dir,
+    binDir: binDir(home),
+    ...(cloud === undefined ? {} : { cloud }),
+    ...(key ? { secrets: keys } : {}),
+  });
   // Detached and let go of: this process wrote the pid down and its job is over, so a tester's shell gets its
   // prompt back rather than holding a lab open for as long as they leave the window there.
   host.child.unref();
-  const facts = { name, fixture, provider: providerFor(state), url: host.base, pid: host.child.pid, home, node: process.execPath, bin: HOST_BIN, env: host.env, startedAt: new Date().toISOString() };
+  const facts = {
+    name,
+    fixture,
+    provider: providerFor(state),
+    ...(cloud === undefined ? {} : { cloud }),
+    url: host.base,
+    pid: host.child.pid,
+    home,
+    node: process.execPath,
+    bin: HOST_BIN,
+    env: host.env,
+    build: { sha: treeSha(), app: app.hash, command: app.command, appDir: app.dir },
+    signedIn: key,
+    startedAt: new Date().toISOString(),
+  };
+  writeShim(home, facts);
   writeFileSync(pidsPath(home), `host ${host.child.pid}\n`);
   writeFileSync(factsPath(home), `${JSON.stringify(facts, null, 2)}\n`);
+  // Where a later command finds this lab whatever its own shell says the root is.
+  writeFileSync(pointerPath(name), `${JSON.stringify({ home }, null, 2)}\n`);
   const lines = labLines(facts);
   // Into the log as well as onto the screen: the log is what is kept when the lab is stopped, and what a run met
   // cannot be worked out afterwards from the host's own lines alone.
@@ -200,6 +276,7 @@ async function stop({ name, log }) {
       console.error(`${what} ${pid} is still there: ${e.message}`);
     }
   }
+  rmSync(pointerPath(name), { force: true });
   const kept = keptLog(name, log);
   if (existsSync(logPath(home))) {
     mkdirSync(dirname(kept), { recursive: true });

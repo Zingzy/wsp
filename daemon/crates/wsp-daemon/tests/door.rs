@@ -592,15 +592,13 @@ async fn answers_a_json_value_that_is_not_an_object_as_an_unknown_op_as_the_node
 }
 
 #[tokio::test]
-async fn refuses_an_op_the_protocol_names_but_this_daemon_lacks_by_name() {
+async fn refuses_the_link_only_ops_on_an_inbound_socket_with_the_road_sentence() {
     let d = start(None).await;
     let (mut c, _) = Client::connect(d.addr, TOKEN, None).await;
-    let r = c.request("sys.watch", json!({})).await;
-    assert_eq!(r, json!({ "id": 2, "ok": false, "code": "unsupported", "error": "sys.watch is not served by this daemon yet" }));
     let r = c.request("machine.create", json!({})).await;
-    assert_eq!(r, json!({ "id": 3, "ok": false, "code": "forbidden", "error": words::NOT_ON_THIS_ROAD }));
+    assert_eq!(r, json!({ "id": 2, "ok": false, "code": "forbidden", "error": words::NOT_ON_THIS_ROAD }));
     let r = c.request("place.leave", json!({})).await;
-    assert_eq!(r, json!({ "id": 4, "ok": false, "code": "forbidden", "error": words::NOT_ON_THIS_ROAD }));
+    assert_eq!(r, json!({ "id": 3, "ok": false, "code": "forbidden", "error": words::NOT_ON_THIS_ROAD }));
 }
 
 #[tokio::test]

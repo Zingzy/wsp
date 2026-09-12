@@ -20,6 +20,7 @@ use wsp_frames::{
 use crate::exec::{run_exec, ExecOptions};
 use crate::manifest::RecordInput;
 use crate::paths::OpError;
+use crate::proc::{kill_process, ProcSampler, ProtectedPids};
 use crate::pty::{passwd_row, process_env, pump, PtyCreateOpts};
 use crate::tunnel::Tunnels;
 use crate::{frame_text as text, fs, git, paths, Ctx, Listener, Outbound, Outgoing};
@@ -44,11 +45,14 @@ pub(crate) struct Conn {
     /// What the socket's close undoes: every pty, mode and watcher listener an op on it made. None once closed, so an
     /// op still being answered when the socket went undoes itself at once instead of outliving it.
     detaches: Mutex<Option<Vec<Detach>>>,
+    /// This socket's proc.watch, so proc.unwatch can end it before the socket does and a second watch on the same
+    /// socket is not a second subscription.
+    proc_watch: Mutex<Option<(u64, Arc<ProcSampler>)>>,
 }
 
 impl Conn {
     pub(crate) fn new(scope: Option<NonZeroU16>, out: Outbound, road: Road) -> Conn {
-        Conn { scope, out, road, tunnels: Tunnels::default(), detaches: Mutex::new(Some(Vec::new())) }
+        Conn { scope, out, road, tunnels: Tunnels::default(), detaches: Mutex::new(Some(Vec::new())), proc_watch: Mutex::new(None) }
     }
 
     fn on_close(&self, detach: Detach) {
@@ -60,6 +64,15 @@ impl Conn {
 
     pub(crate) fn is_closed(&self) -> bool {
         self.detaches.lock().unwrap_or_else(|e| e.into_inner()).is_none()
+    }
+
+    /// Takes a subscription on only while the socket is still open, and keeps what undoes it: an op that awaited
+    /// something takes nothing on for a client that has left, since the close drains what this socket holds once and
+    /// a subscription made after that drain is one nothing removes.
+    fn while_open(&self, take: impl FnOnce() -> Option<Detach>) {
+        if let Some(pending) = &mut *self.detaches.lock().unwrap_or_else(|e| e.into_inner()) {
+            pending.extend(take());
+        }
     }
 
     pub(crate) fn close(&self) {
@@ -186,7 +199,12 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
             | "inbox.rescan"
             | "tunnel.open"
             | "tunnel.write"
-            | "tunnel.close"),
+            | "tunnel.close"
+            | "sys.watch"
+            | "proc.watch"
+            | "proc.unwatch"
+            | "proc.inspect"
+            | "proc.kill"),
         ) => {
             // The typed frame: what the protocol's schema refuses, this refuses as a bad request.
             match serde_json::from_value::<DaemonOp>(frame.clone()) {
@@ -206,6 +224,14 @@ pub(crate) fn not_built(op: &str) -> String {
 
 fn no_such_pty(pty_id: &str) -> String {
     format!("no such pty: {pty_id}")
+}
+
+/// Both proc ops refuse a pid above the Linux pid_max ceiling as a bad request, as the node daemon does.
+fn pid_in_range(pid: std::num::NonZeroU32) -> Result<u32, OpError> {
+    if pid.get() > numbers::PID_MAX {
+        return Err(OpError::coded(DaemonErrorCode::BadRequest, format!("pid must be an integer between 1 and {}", numbers::PID_MAX)));
+    }
+    Ok(pid.get())
 }
 
 /// The real path a request names, inside the daemon's root or a folder the roots file names as of this op.
@@ -359,6 +385,54 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             conn.tunnels.close(&tunnel_id);
             ok(id)
         }
+        DaemonOp::SysWatch => {
+            // One read before the watch is taken: a machine whose module cannot read it refuses here, where the pane
+            // can say so, rather than accepting a stream it will never send and leaving the rows at pending.
+            let watched = async {
+                let sampler = ctx.sys_sampler()?;
+                sampler.probe().await?;
+                let key = ctx.next_key();
+                conn.while_open(|| {
+                    sampler.subscribe(key, conn.out.clone());
+                    Some(Box::new(move || sampler.unsubscribe(key)) as Detach)
+                });
+                Ok(Empty {})
+            };
+            answer(id, watched.await)
+        }
+        DaemonOp::ProcWatch => {
+            let watched = async {
+                let sampler = ctx.proc_sampler()?;
+                sampler.probe().await?;
+                let key = ctx.next_key();
+                conn.while_open(|| {
+                    let mut watch = conn.proc_watch.lock().unwrap_or_else(|e| e.into_inner());
+                    if watch.is_some() {
+                        return None;
+                    }
+                    sampler.subscribe(key, conn.out.clone());
+                    *watch = Some((key, Arc::clone(&sampler)));
+                    Some(Box::new(move || sampler.unsubscribe(key)) as Detach)
+                });
+                Ok(Empty {})
+            };
+            answer(id, watched.await)
+        }
+        DaemonOp::ProcUnwatch => {
+            let watch = conn.proc_watch.lock().unwrap_or_else(|e| e.into_inner()).take();
+            if let Some((key, sampler)) = watch {
+                sampler.unsubscribe(key);
+            }
+            ok(id)
+        }
+        DaemonOp::ProcInspect { pid } => {
+            let inspected = async { ctx.proc_sampler()?.inspect(pid_in_range(pid)?).await };
+            answer(id, inspected.await)
+        }
+        DaemonOp::ProcKill { pid, signal } => {
+            let protected = ProtectedPids { this: std::process::id(), parent: std::os::unix::process::parent_id() };
+            answer(id, pid_in_range(pid).and_then(|pid| kill_process(pid, signal, protected)).map(|()| Empty {}))
+        }
         _ => refuse(id, DaemonErrorCode::Unsupported, not_built(name)),
     }
 }
@@ -446,13 +520,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_op_the_protocol_names_but_this_daemon_lacks_is_refused_by_name() {
+    async fn every_op_the_protocol_names_is_served_so_the_not_built_refusal_has_nothing_left_to_name() {
         let b = bench();
         let (c, _rx) = conn(None);
-        assert_eq!(
-            reply(&b, &c, json!({"id": 1, "op": "sys.watch"})).await,
-            json!({"id": 1, "ok": false, "code": "unsupported", "error": "sys.watch is not served by this daemon yet"})
-        );
         let built = [
             "ping",
             "place.leave",
@@ -476,11 +546,16 @@ mod tests {
             "tunnel.open",
             "tunnel.write",
             "tunnel.close",
+            "sys.watch",
+            "proc.watch",
+            "proc.unwatch",
+            "proc.inspect",
+            "proc.kill",
         ];
-        for op in DAEMON_OPS.iter().filter(|op| !built.contains(op)) {
-            let out = reply(&b, &c, json!({"id": 1, "op": op})).await;
-            assert_eq!(out["code"], "unsupported", "{op}");
-            assert_eq!(out["error"], format!("{op} is not served by this daemon yet"));
+        let unserved: Vec<&&str> = DAEMON_OPS.iter().filter(|op| !built.contains(op)).collect();
+        assert!(unserved.is_empty(), "{unserved:?}");
+        for op in built {
+            assert_ne!(reply(&b, &c, json!({"id": 1, "op": op})).await["code"], "unsupported", "{op}");
         }
     }
 
