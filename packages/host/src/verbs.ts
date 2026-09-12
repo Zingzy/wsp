@@ -150,6 +150,7 @@ import {
   type SessionEvent,
   type SessionOrigin,
   type SessionView,
+  type TurnRefusal,
   type TurnResult,
   type WorkspaceCreateResult,
   type WorkspaceCreatingEvent,
@@ -1430,6 +1431,21 @@ export function turnFailure(turn: Turn): string | undefined {
   return turn.result?.error ?? turn.reason ?? `turn ${turn.result?.status ?? "ended without a result"}`;
 }
 
+/** The refusal each cause an agent named is thrown as, so the exit code and the tool error say which class the
+ * failure was: a turn refused for want of a sign-in is the auth class, which already means no key and no sign-in.
+ * A cause with no row here takes the provider class every other turn failure takes. Adding a cause is a row. */
+const REFUSAL_THROWS: Readonly<Record<TurnRefusal, (message: string) => Error>> = { "sign-in": authRefusal };
+
+/** The turn's failure as the error every door throws for it, classed by what the agent refused it for; nothing when
+ * it completed. The class is read off the cause the adapter stamped, never out of the agent's own words. */
+export function turnRefusal(turn: Turn): Error | undefined {
+  const failure = turnFailure(turn);
+  if (failure === undefined) return undefined;
+  const cause = turn.result?.refusal;
+  const thrown = cause === undefined ? undefined : REFUSAL_THROWS[cause];
+  return thrown === undefined ? new Error(failure) : thrown(failure);
+}
+
 /** What a send that met a running turn on its thread says on stderr: WAITING when the runtime announces the wait,
  * the rest once it answered. A steered message cannot change the running turn's picks, so the line names the flags
  * it dropped. */
@@ -1490,8 +1506,8 @@ async function followVerb(ctx: VerbContext, client: HostClient, start: Record<st
       if (e.type === "session.notify" && e.notify === NOTIFY_ME) ctx.io.error(e.text);
     },
   });
-  const failure = turnFailure(turn);
-  if (failure !== undefined) throw new Error(failure);
+  const failure = turnRefusal(turn);
+  if (failure !== undefined) throw failure;
   return turn;
 }
 
@@ -1755,8 +1771,8 @@ function timeoutFlag(value: string | undefined): number | undefined {
 
 /** The turn's reply as the tool result; a turn that did not complete is a tool error with the harness's reason. */
 function turnOut(turn: Turn): z.infer<typeof TurnOut> {
-  const failure = turnFailure(turn);
-  if (failure !== undefined) throw new Error(failure);
+  const failure = turnRefusal(turn);
+  if (failure !== undefined) throw failure;
   return turnView(turn);
 }
 

@@ -3,7 +3,7 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { ContextMenuItem, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectGolden, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SessionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
+import type { ContextMenuItem, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectGolden, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SessionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnRefusal, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
 import { DEFAULT_PORT } from "./app-ports.js";
 import { compareVersions } from "./semver.mjs";
@@ -285,6 +285,26 @@ export function turnSettledLine(result: TurnResult): string {
 export function turnEndLine(result: TurnResult): string {
   const failure = result.status === "completed" ? undefined : result.error;
   return failure === undefined ? turnSettledLine(result) : `${turnSettledLine(result)}: ${failure}`;
+}
+
+/** A turn the agent refused outright: it answered with an error line of its own and did none of the work. The word
+ * is failed whatever the harness's own subtype said, and the sentence is the agent's with wsp's half after it where
+ * the caller knows the road out. The reply is dropped, since a refusal is not a reply: every road reads a turn that
+ * did not complete by its error alone, so one shape here is what keeps the sentence from being printed twice.
+ * `cause` is what wsp classes the failure by; no door may read a cause out of the agent's words. */
+export function refusedTurn(result: TurnResult, refusal?: { road?: string; cause?: TurnRefusal }): TurnResult {
+  // The result's own text is the agent's sentence and the errors entry beside it is harness telemetry; a harness
+  // that sends both would say the same thing twice, so the sentence wins and the entry is dropped with the reply.
+  const said = (result.text ?? result.error ?? "").trim();
+  const sentence = [said, refusal?.road ?? ""].filter(part => part.length > 0).join("; ");
+  return {
+    status: "failed",
+    ...(result.durationMs !== undefined ? { durationMs: result.durationMs } : {}),
+    ...(result.costUsd !== undefined ? { costUsd: result.costUsd } : {}),
+    ...(result.usage !== undefined ? { usage: result.usage } : {}),
+    ...(sentence.length > 0 ? { error: sentence } : {}),
+    ...(refusal?.cause !== undefined ? { refusal: refusal.cause } : {}),
+  };
 }
 
 /** The clock a read prints beside a row, to the second, in the zone of the computer reading it, which is the
@@ -723,6 +743,12 @@ export const RUN_GONE_LINE = "the machine no longer holds this turn's run, so no
 /** What a command waiting on a turn is told when the host it asked stops: the run is the machine's, not the host's,
  * so it goes on and its reply lands in the thread whether or not this command is still there to see it. */
 export const HOST_STOPPING_LINE = "the host is restarting; the turn goes on and its reply lands in the thread";
+
+/** What a machine is called when the provider reports it running and the road every command takes is dead: whose
+ * machine it is, which one, and the guest's own words, so the failure reads as the provider's and not as wsp's. */
+export function guestUnusableLine(provider: string, machineId: string, detail: string): string {
+  return `${provider} left ${machineId} running but nothing on it can run: ${detail}`;
+}
 
 /** The turn's error when nothing on the machine answered a launch from this computer for the whole reach window:
  * how many times it was tried and over how long. The fetch's own words name a Node error and the machine id,

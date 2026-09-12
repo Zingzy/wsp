@@ -857,6 +857,12 @@ export type DeltaKind = z.infer<typeof DeltaKind>;
 export const TurnStatus = z.enum(["completed", "interrupted", "failed"]);
 export type TurnStatus = z.infer<typeof TurnStatus>;
 
+/** What the agent refused a turn for, where it named a cause wsp knows: the word every door reads to class the
+ * failure, since the sentence is the agent's and no door may read a reason out of its words. Adding a cause is an
+ * entry here and its road on the client that shows one. */
+export const TurnRefusal = z.enum(["sign-in"]);
+export type TurnRefusal = z.infer<typeof TurnRefusal>;
+
 export const TurnResult = z.object({
   status: TurnStatus,
   durationMs: z.number().optional(),
@@ -864,6 +870,8 @@ export const TurnResult = z.object({
   usage: z.record(z.unknown()).optional(),
   text: z.string().optional(),
   error: z.string().optional(),
+  /** Set only on a turn the agent refused outright for a cause wsp knows; the status is failed with it. */
+  refusal: TurnRefusal.optional(),
 });
 export type TurnResult = z.infer<typeof TurnResult>;
 
@@ -3326,7 +3334,7 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
-export { actionRefusal, agentsKindRefusal, agentsMayDrive, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, type MachineOnDelete, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, type SendBlock, sendRefusal, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
+export { actionRefusal, agentsKindRefusal, agentsMayDrive, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, type MachineOnDelete, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";
