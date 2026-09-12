@@ -542,6 +542,10 @@ export const SessionView = z.object({
    * turn did none of the work it was asked for, so a row carrying this is a turn that ran nothing. Absent on every
    * turn the agent worked on, however it ended. */
   refusal: TurnRefusal.optional(),
+  /** What the turns that ran on this row have cost together, as each result reported it; absent where no turn of it
+   * has ended and on a harness that reports no figure, which is not the same as nothing spent. It rides the row so
+   * a listing can say what a thread spent without anyone reading its transcript. */
+  costUsd: z.number().optional(),
   /** What the session runs with, as the harness's own slugs: the start request's model until the harness announces
    * its own; effort as requested, since the CLI never echoes it, and the permission mode the turn is at, which is
    * the start's until a pick moves a running turn to another one. */
@@ -578,6 +582,8 @@ export const ThreadView = z.object({
   /** The opening turn's parent and root, so a listing draws the tree a root thread spawned without reading rows. */
   parentThreadId: z.string().optional(),
   rootThreadId: z.string().optional(),
+  /** What this thread has cost: its rows' figures added up. Absent where no row of it carries one. */
+  costUsd: z.number().optional(),
 });
 export type ThreadView = z.infer<typeof ThreadView>;
 
@@ -606,6 +612,7 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
   return [...byThread].map(([id, turns]) => {
     const first = turns[0]!;
     const latest = turns[turns.length - 1]!;
+    const spent = threadCost(turns);
     // The one title rule every client reads: the harness's own name for the session the next send resumes wins, so
     // a rename made inside the harness shows here, and the opening turn's first sentence stands until one is read.
     const title = latest.harnessTitle !== undefined ? titleLine(latest.harnessTitle) : first.prompt !== undefined ? openingTitle(first.prompt) : first.claudeSessionId ?? first.id;
@@ -626,8 +633,16 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ran: threadRan(turns),
       ...(first.parentThreadId !== undefined ? { parentThreadId: first.parentThreadId } : {}),
       ...(first.rootThreadId !== undefined ? { rootThreadId: first.rootThreadId } : {}),
+      ...(spent !== undefined ? { costUsd: spent } : {}),
     };
   });
+}
+
+/** What a thread has cost: the figures its rows carry, added up; undefined where not one of them reported a
+ * figure, which no reader may take for nothing spent. */
+function threadCost(turns: ReadonlyArray<Pick<SessionView, "costUsd">>): number | undefined {
+  const said = turns.filter(turn => turn.costUsd !== undefined);
+  return said.length === 0 ? undefined : said.reduce((sum, turn) => sum + turn.costUsd!, 0);
 }
 
 // --- harness catalog (what the composer's pickers may offer) -------------------
@@ -1552,6 +1567,10 @@ export interface ContextMenuItem {
   group: string;
   enabled: boolean;
   refusal?: string;
+  /** What a row that can run says on hover, where the label leaves something out a person would want before pressing
+   * it. The two are one slot, read refusal first: a row is either dimmed with a reason or live with a word about
+   * what it does, never both, which is the reading every button in the app already makes. */
+  hint?: string;
   shortcut?: string;
   accelerator?: string;
   destructive?: boolean;
@@ -1594,20 +1613,6 @@ export type HostOutcome = { ok: true } | { ok: false; error: string; at: "url" |
 /** What the join screen sends the shell: the address as it is typed on the other screen, and the code beside it. */
 export const JoinAsk = z.object({ address: z.string().max(200), code: z.string().max(64) });
 export type JoinAsk = z.infer<typeof JoinAsk>;
-
-/** What the joined screen reads: this computer as the other wsp now holds it, and the wsp it joined. */
-export interface PlaceJoined {
-  name: string;
-  hostName: string;
-  hostUrl: string;
-  os: string;
-  shape: WorkspaceSize;
-  diskFreeBytes?: number;
-  docker: boolean;
-}
-
-/** How a join ended: done, or refused with the field the two halves belong under. */
-export type JoinOutcome = { ok: true; joined: PlaceJoined } | { ok: false; at: "address" | "code"; error: TwoPartRefusal };
 
 /** What this computer is to another wsp, read off its place file. */
 export interface PlaceStanding {
@@ -1676,10 +1681,10 @@ export interface DesktopBridge {
   disconnectHost(alias: string): Promise<HostOutcome>;
   /** The shell's own menu asked for the connect sheet. Returns the unsubscribe. */
   onConnectHostOpen(handler: () => void): () => void;
-  /** Joining this computer to another wsp, and what it is to that wsp once it has. Absent on a shell from before
-   * the bridge carried them, as `version` is: the page and the shell are two halves that ship together and can be
-   * two releases apart, so a page that would use one of these reads for it first. */
-  joinWsp?(ask: JoinAsk): Promise<JoinOutcome>;
+  // What this computer is to the wsp it joined, and the two things its window does about it. All three are absent
+  // on a shell from before the bridge carried them, as `version` is: the page and the shell are two halves that ship
+  // together and can be two releases apart, so a page that would use one reads for it first. The join itself is not
+  // among them: it is asked for on the first launch's own page, whose bridge is that page's and not this one.
   /** What this computer is to another wsp, or nothing when it belongs to none. */
   place?(): Promise<PlaceStanding | undefined>;
   /** Takes this computer back out of that wsp and returns the window to its own. */

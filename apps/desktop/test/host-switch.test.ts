@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { listHosts, readHost, writeHost, type HostRecord } from "@wsp/host";
-import { HOST_WORDS } from "@wsp/protocol";
+import { HOST_WORDS, hostsMenuItems } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HostSession } from "../src/host-lifecycle.js";
 import { hostSwitcher, parseConnectAsk, type SwitcherDeps } from "../src/host-switch.js";
@@ -68,6 +68,15 @@ describe("hostSwitcher", () => {
     expect(switcher.current()).toBe(d.local);
     expect(switcher.view()).toEqual({ here: "This Mac", current: null, hosts: [{ alias: "box", label: "127.0.0.1:14400", url: "http://127.0.0.1:14400", road: "direct" }] });
     expect(switcher.token()).toBeUndefined();
+  });
+
+  it("says what this computer is to another wsp, so the menu built off the view grows the leave and the awake rows", () => {
+    const d = deps({ place: () => ({ hostName: "zingzy-mbp", awake: true }) });
+    const view = hostSwitcher(d).view();
+    expect(view.place).toEqual({ hostName: "zingzy-mbp", awake: true });
+    expect(hostsMenuItems(view).map(row => row.label)).toContain(HOST_WORDS.place.leaveRow("zingzy-mbp"));
+    // A Mac that joined nothing carries no such key at all, so the rows are never drawn for it.
+    expect(hostSwitcher(deps()).view().place).toBeUndefined();
   });
 
   it("the page of the host here is answered that host's own token, read beside the state it serves", () => {

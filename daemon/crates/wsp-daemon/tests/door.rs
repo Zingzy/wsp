@@ -448,8 +448,8 @@ async fn answers_a_json_value_that_is_not_an_object_as_an_unknown_op_as_the_node
 async fn refuses_an_op_the_protocol_names_but_this_daemon_lacks_by_name() {
     let d = start(None).await;
     let (mut c, _) = Client::connect(d.addr, TOKEN, None).await;
-    let r = c.request("fs.list", json!({ "path": "." })).await;
-    assert_eq!(r, json!({ "id": 2, "ok": false, "code": "unsupported", "error": "fs.list is not served by this daemon yet" }));
+    let r = c.request("ports.watch", json!({})).await;
+    assert_eq!(r, json!({ "id": 2, "ok": false, "code": "unsupported", "error": "ports.watch is not served by this daemon yet" }));
     let r = c.request("machine.create", json!({})).await;
     assert_eq!(r, json!({ "id": 3, "ok": false, "code": "forbidden", "error": words::NOT_ON_THIS_ROAD }));
     let r = c.request("place.leave", json!({})).await;

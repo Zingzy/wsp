@@ -6,8 +6,11 @@
 mod auth;
 mod door;
 mod exec;
+mod fs;
+mod git;
 mod mode;
 mod ops;
+mod paths;
 mod pty;
 mod urls;
 
@@ -207,22 +210,11 @@ impl Daemon {
     }
 }
 
-/// The root the hello announces: the --root given, else HOME, made absolute against the working directory and
-/// normalised lexically, as node's path.resolve does.
+/// The root the hello announces: the --root given, else HOME, made absolute and normalised as node's path.resolve
+/// does.
 fn resolved_root(root: Option<&Path>) -> String {
     let given = root.map(Path::to_path_buf).or_else(|| std::env::var_os("HOME").map(PathBuf::from)).unwrap_or_else(|| PathBuf::from("/"));
-    let absolute = if given.is_absolute() { given } else { std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")).join(given) };
-    let mut out = PathBuf::from("/");
-    for part in absolute.components() {
-        match part {
-            std::path::Component::Normal(p) => out.push(p),
-            std::path::Component::ParentDir => {
-                out.pop();
-            }
-            _ => {}
-        }
-    }
-    out.to_string_lossy().into_owned()
+    paths::absolute(&given).to_string_lossy().into_owned()
 }
 
 #[cfg(test)]

@@ -104,7 +104,17 @@ describe("the hosts the window can move between", () => {
     stop();
     expect(off).toHaveBeenLastCalledWith("hosts:connect-open", expect.any(Function));
     const first = wsp as DesktopBridge & { join(ask: { address: string; code: string }): Promise<unknown> };
-    await first.join({ address: "192.168.1.20:7788", code: "QW4K7PZX" });
-    expect(invoke).toHaveBeenLastCalledWith("onboarding:join", { address: "192.168.1.20:7788", code: "QW4K7PZX" });
+    await first.join({ address: "192.168.1.20:4420", code: "QW4K7PZX" });
+    expect(invoke).toHaveBeenLastCalledWith("onboarding:join", { address: "192.168.1.20:4420", code: "QW4K7PZX" });
+  });
+
+  it("carries what this computer is to the wsp it joined, leaving it and the awake hold, each on its own channel", async () => {
+    const wsp = await bridge();
+    await wsp.place?.();
+    expect(invoke).toHaveBeenLastCalledWith("place:standing");
+    await wsp.leaveWsp?.();
+    expect(invoke).toHaveBeenLastCalledWith("place:leave");
+    await wsp.setStayAwake?.(true);
+    expect(invoke).toHaveBeenLastCalledWith("place:awake", true);
   });
 });

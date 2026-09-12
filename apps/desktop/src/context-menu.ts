@@ -15,12 +15,17 @@ const isItem = (raw: unknown): raw is ContextMenuItem => {
     typeof item["group"] === "string" &&
     typeof item["enabled"] === "boolean" &&
     optionalString("refusal") &&
+    optionalString("hint") &&
     optionalString("shortcut") &&
     optionalString("accelerator") &&
     (item["destructive"] === undefined || typeof item["destructive"] === "boolean") &&
     (item["checked"] === undefined || typeof item["checked"] === "boolean")
   );
 };
+
+/** What a row says on hover: why it cannot run, else what it does. One slot, refusal first, as every button in the
+ * app reads the same pair. */
+const hoverWords = (item: ContextMenuItem): string | undefined => item.refusal ?? item.hint;
 
 /** Only the page's own shape comes off the wire; anything else is refused before a menu is built from it. */
 export function parseContextMenuItems(raw: unknown): ContextMenuItem[] {
@@ -29,15 +34,17 @@ export function parseContextMenuItems(raw: unknown): ContextMenuItem[] {
 }
 
 /** One row per item in the page's order, a separator where the group changes; a row that cannot run is dimmed with its
- * refusal as the hover text, and a row that marks a state is a checkbox row with its mark. */
+ * refusal as the hover text, a row that can run carries its hint there instead, and a row that marks a state is a
+ * checkbox row with its mark. */
 export function contextMenuTemplate(items: ReadonlyArray<ContextMenuItem>, choose: (id: string) => void): MenuItemConstructorOptions[] {
   const template: MenuItemConstructorOptions[] = [];
   for (const [index, item] of items.entries()) {
     if (index > 0 && items[index - 1]!.group !== item.group) template.push({ type: "separator" });
+    const hover = hoverWords(item);
     template.push({
       label: item.label,
       enabled: item.enabled,
-      ...(item.refusal !== undefined ? { toolTip: item.refusal } : {}),
+      ...(hover !== undefined ? { toolTip: hover } : {}),
       ...(item.accelerator !== undefined ? { accelerator: item.accelerator } : {}),
       ...(item.checked !== undefined ? { type: "checkbox" as const, checked: item.checked } : {}),
       click: () => choose(item.id),

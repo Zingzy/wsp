@@ -3,21 +3,23 @@
 //! through the socket's own channel.
 
 use std::num::NonZeroU16;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
 use base64::Engine;
+use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
-    numbers, words, DaemonErrorCode, DaemonErrorResponse, DaemonOp, Empty, PtyAttachReply, PtyCreateReply, PtyListReply, Reply, RequestId,
-    DAEMON_OPS, MACHINE_OPS,
+    numbers, words, DaemonErrorCode, DaemonErrorResponse, DaemonOp, Empty, FsReadEncoding, PtyAttachReply, PtyCreateReply, PtyListReply,
+    Reply, RequestId, DAEMON_OPS, MACHINE_OPS,
 };
 
 use crate::exec::{run_exec, ExecOptions};
+use crate::paths::OpError;
 use crate::pty::{passwd_row, process_env, pump, PtyCreateOpts};
-use crate::{frame_text as text, Ctx, Listener, Outbound};
+use crate::{frame_text as text, fs, git, paths, Ctx, Listener, Outbound};
 
 type Detach = Box<dyn FnOnce() + Send>;
 
@@ -101,6 +103,15 @@ fn lenient_base64(text: &str) -> Vec<u8> {
     GeneralPurpose::new(&base64::alphabet::STANDARD, config).decode(&clean).unwrap_or_default()
 }
 
+/// An op's outcome on the wire: the body under the ok envelope, or the failure with its code when it carries one.
+fn answer<T: Serialize>(id: Option<RequestId>, result: Result<T, OpError>) -> String {
+    match result {
+        Ok(body) => text(&Reply::new(id, body)),
+        Err(OpError { code: Some(code), message }) => refuse(id, code, message),
+        Err(OpError { code: None, message }) => text(&DaemonErrorResponse::new(id, message)),
+    }
+}
+
 pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> String {
     // Any JSON value is a frame, as the node daemon reads it; a non-object simply carries no op and no id.
     let Ok(frame) = serde_json::from_str::<Value>(raw) else {
@@ -119,7 +130,10 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Strin
         Some(name) if name == "place.leave" || MACHINE_OPS.contains(&name) => {
             refuse(id, DaemonErrorCode::Forbidden, words::NOT_ON_THIS_ROAD)
         }
-        Some(name @ ("pty.create" | "pty.attach" | "pty.write" | "pty.resize" | "pty.kill" | "pty.list" | "exec")) => {
+        Some(
+            name @ ("pty.create" | "pty.attach" | "pty.write" | "pty.resize" | "pty.kill" | "pty.list" | "exec" | "fs.list" | "fs.read"
+            | "git.status" | "git.diff"),
+        ) => {
             // The typed frame: what the protocol's schema refuses, this refuses as a bad request.
             match serde_json::from_value::<DaemonOp>(frame.clone()) {
                 Ok(typed) => serve(conn, ctx, id, name, typed).await,
@@ -138,6 +152,14 @@ pub(crate) fn not_built(op: &str) -> String {
 
 fn no_such_pty(pty_id: &str) -> String {
     format!("no such pty: {pty_id}")
+}
+
+/// The real path a request names, inside the daemon's root or a folder the roots file names as of this op.
+async fn locate(ctx: &Ctx, requested: &str) -> Result<PathBuf, OpError> {
+    let root = PathBuf::from(&ctx.root);
+    let roots_path = ctx.options.roots_path.clone().unwrap_or_else(|| PathBuf::from(numbers::DAEMON_ROOTS_PATH));
+    let requested = requested.to_owned();
+    fs::blocking(move || paths::resolve_inside(&paths::roots_now(&root, &roots_path)?, &requested)).await
 }
 
 async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &str, op: DaemonOp) -> String {
@@ -210,6 +232,21 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             };
             text(&Reply::new(id, run_exec(Path::new(&ctx.root), &env, &cmd, opts).await))
         }
+        DaemonOp::FsList { path, gitignore } => {
+            let listed = async { fs::list_dir(locate(ctx, &path).await?, gitignore == Some(true), numbers::FS_LIST_CAP_ENTRIES).await };
+            answer(id, listed.await)
+        }
+        DaemonOp::FsRead { path, encoding } => {
+            let read = async {
+                fs::read_file_bounded(locate(ctx, &path).await?, encoding.unwrap_or(FsReadEncoding::Utf8), numbers::FS_READ_CAP_BYTES).await
+            };
+            answer(id, read.await)
+        }
+        DaemonOp::GitStatus { cwd } => answer(id, async { git::git_status(&locate(ctx, &cwd).await?).await }.await),
+        DaemonOp::GitDiff { cwd, scope, path } => {
+            let diff = async { git::git_diff(&locate(ctx, &cwd).await?, scope, path.as_deref(), numbers::GIT_DIFF_CAP_BYTES).await };
+            answer(id, diff.await)
+        }
         _ => refuse(id, DaemonErrorCode::Unsupported, not_built(name)),
     }
 }
@@ -225,12 +262,17 @@ mod tests {
     struct Bench {
         ctx: Arc<Ctx>,
         _token: tempfile::NamedTempFile,
+        root: tempfile::TempDir,
     }
 
     fn bench() -> Bench {
         let mut token = tempfile::NamedTempFile::new().unwrap();
         writeln!(token, "t").unwrap();
-        Bench { ctx: Arc::new(Ctx::new(Options::new(token.path()))), _token: token }
+        let root = tempfile::tempdir().unwrap();
+        let mut options = Options::new(token.path());
+        options.root = Some(root.path().to_path_buf());
+        options.roots_path = Some(root.path().join("roots"));
+        Bench { ctx: Arc::new(Ctx::new(options)), _token: token, root }
     }
 
     fn conn(scope: Option<u16>) -> (Arc<Conn>, mpsc::UnboundedReceiver<String>) {
@@ -291,10 +333,24 @@ mod tests {
         let b = bench();
         let (c, _rx) = conn(None);
         assert_eq!(
-            reply(&b, &c, json!({"id": 1, "op": "fs.list", "path": "."})).await,
-            json!({"id": 1, "ok": false, "code": "unsupported", "error": "fs.list is not served by this daemon yet"})
+            reply(&b, &c, json!({"id": 1, "op": "ports.watch"})).await,
+            json!({"id": 1, "ok": false, "code": "unsupported", "error": "ports.watch is not served by this daemon yet"})
         );
-        let built = ["ping", "place.leave", "pty.create", "pty.attach", "pty.write", "pty.resize", "pty.kill", "pty.list", "exec"];
+        let built = [
+            "ping",
+            "place.leave",
+            "pty.create",
+            "pty.attach",
+            "pty.write",
+            "pty.resize",
+            "pty.kill",
+            "pty.list",
+            "exec",
+            "fs.list",
+            "fs.read",
+            "git.status",
+            "git.diff",
+        ];
         for op in DAEMON_OPS.iter().filter(|op| !built.contains(op)) {
             let out = reply(&b, &c, json!({"id": 1, "op": op})).await;
             assert_eq!(out["code"], "unsupported", "{op}");
@@ -341,7 +397,7 @@ mod tests {
             "exec",
             "nonsense",
         ] {
-            assert_eq!(reply(&b, &scoped, json!({"id": 1, "op": op})).await, refused, "{op}");
+            assert_eq!(reply(&b, &scoped, json!({"id": 1, "op": op, "path": ".", "cwd": ".", "scope": "staged"})).await, refused, "{op}");
         }
         assert_eq!(reply(&b, &scoped, json!({"id": 1, "op": "tunnel.open", "tunnelId": "t", "port": 8124})).await, refused);
         let in_scope = reply(&b, &scoped, json!({"id": 1, "op": "tunnel.open", "tunnelId": "t", "port": 8123})).await;
@@ -372,6 +428,36 @@ mod tests {
         assert_eq!(reply(&b, &c, json!({"id": 3, "op": "pty.attach", "ptyId": "pty_9"})).await["error"], "no such pty: pty_9");
         assert_eq!(reply(&b, &c, json!({"id": 4, "op": "pty.kill", "ptyId": "pty_9"})).await["error"], "no such pty: pty_9");
         assert_eq!(reply(&b, &c, json!({"id": 5, "op": "pty.list"})).await, json!({"id": 5, "ok": true, "ptys": []}));
+    }
+
+    #[tokio::test]
+    async fn a_frame_the_protocol_refuses_is_a_bad_request_and_a_coded_refusal_carries_its_code() {
+        let b = bench();
+        let (c, _rx) = conn(None);
+        for frame in [
+            json!({"id": 1, "op": "fs.list", "path": 7}),
+            json!({"id": 1, "op": "fs.list"}),
+            json!({"id": 1, "op": "fs.read", "path": "x", "encoding": "hex"}),
+            json!({"id": 1, "op": "git.status"}),
+            json!({"id": 1, "op": "git.diff", "cwd": ".", "scope": "all"}),
+            json!({"id": 1, "op": "git.diff", "cwd": "."}),
+            json!({"id": 1, "op": "git.diff", "cwd": ".", "scope": "staged", "path": 3}),
+        ] {
+            let out = reply(&b, &c, frame.clone()).await;
+            assert_eq!((out["ok"].as_bool(), out["code"].as_str()), (Some(false), Some("bad-request")), "{frame}");
+        }
+        let missing = b.root.path().join("none.txt");
+        assert_eq!(
+            reply(&b, &c, json!({"id": 2, "op": "fs.read", "path": "none.txt"})).await,
+            json!({"id": 2, "ok": false, "code": "not-found", "error": "none.txt does not exist"})
+        );
+        assert_eq!(reply(&b, &c, json!({"id": 3, "op": "fs.list", "path": missing})).await["code"], "not-found");
+        assert_eq!(
+            reply(&b, &c, json!({"id": 4, "op": "git.status", "cwd": "/etc"})).await,
+            json!({"id": 4, "ok": false, "code": "outside-root", "error": "/etc resolves outside the workspace root"})
+        );
+        let listed = reply(&b, &c, json!({"id": 5, "op": "fs.list", "path": "."})).await;
+        assert_eq!(listed, json!({"id": 5, "ok": true, "entries": [], "truncated": false, "total": 0}));
     }
 
     #[test]

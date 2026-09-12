@@ -59,6 +59,9 @@ const turn = (thread, minutes, workspaceId = "ws_api") => ({
   cwd: thread.cwd ?? join(HOME, "spoo"),
   model: "opus",
   permissionMode: "default",
+  // What the turn on this row cost, as the runtime stamps it: a thread's opener reads its own figure beside what
+  // the threads it opened spent, and a row without one would leave that second figure unsaid.
+  costUsd: thread.costUsd,
   ...(thread.parent === undefined ? {} : { parentThreadId: `th_${thread.parent}`, rootThreadId: `th_${thread.root}` }),
 });
 
