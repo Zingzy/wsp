@@ -5,11 +5,11 @@
 // and they have to agree: the desktop's probe and the box's own wsp pair
 // cannot pick different homes.
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { defaultStatePath } from "../src/cli.js";
+import { defaultStatePath, optsFor, statePick } from "../src/cli.js";
 import { servingHost } from "../src/host-lock.js";
 import { SERVING_HOME_SH, currentHome, currentHomePointer, servingHome } from "../src/serving-home.js";
 
@@ -104,17 +104,74 @@ describe("the home this computer's host serves", () => {
     expect(defaultStatePath(cwd, {})).toBe(join(moved, "state.json"));
     expect(defaultStatePath(cwd, { WSP_HOME: own })).toBe(join(own, "state.json"));
 
-    // A .env in the folder a line runs in marks a dev checkout, and that reading still comes first.
+    // A .env in the folder a line runs in marks a dev checkout, which is the reading where nothing names a state.
     writeFileSync(join(cwd, ".env"), "SOLARI_API_KEY=slr_live_fake\n");
     expect(defaultStatePath(cwd, {})).toBe(join(cwd, ".wsp", "state.json"));
 
-    // statePathFrom and statesHere are the only lines that call it, so wsp pair, wsp devices and every other verb
-    // that names no --state come through this one rule.
+    // The two readings above are the only lines that pick a state, so wsp pair, wsp devices and every other verb
+    // or command that names no --state comes through this one rule.
     const source = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8");
     const calls = source
       .split("\n")
       .map(line => line.trim())
-      .filter(line => line.includes("defaultStatePath(") && !line.startsWith("*") && !line.startsWith("//") && !line.startsWith("export function"));
-    expect(calls).toEqual(["return resolve(flag ?? defaultStatePath());", "return [...new Set([statePath, resolve(defaultStatePath())])];"]);
+      .filter(line => line.includes("statePick(") && !line.startsWith("*") && !line.startsWith("//") && !line.startsWith("export function"));
+    expect(calls).toEqual(["return statePick(undefined, cwd, env).path;", "const pick = statePick(flag, process.cwd(), env);"]);
+  });
+
+  it("keeps a state the person named: WSP_HOME over a checkout's .env, --state over both, and says which one ran", () => {
+    const { user, own, moved } = computer();
+    const cwd = mkdtempSync(join(tmpdir(), "wsp-state-pick-"));
+    dirs.push(cwd);
+    vi.stubEnv("HOME", user);
+    writeFileSync(join(cwd, ".env"), "SOLARI_API_KEY=slr_live_fake\n");
+
+    const named = statePick(undefined, cwd, { WSP_HOME: moved });
+    expect(named.path).toBe(join(moved, "state.json"));
+    expect(named.note).toContain("WSP_HOME");
+    expect(named.note).toContain(join(moved, "state.json"));
+    expect(named.note).toContain(join(cwd, ".wsp", "state.json"));
+
+    const flagged = statePick(join(own, "state.json"), cwd, { WSP_HOME: moved });
+    expect(flagged.path).toBe(join(own, "state.json"));
+    expect(flagged.note).toContain("--state");
+    expect(flagged.note).toContain(join(cwd, ".wsp", "state.json"));
+
+    // Nothing names a state, so the checkout keeps its own, and there is nothing to say about it.
+    expect(statePick(undefined, cwd, {})).toEqual({ path: join(cwd, ".wsp", "state.json") });
+
+    // A .env beside a checkout that names the state which won is not a disagreement.
+    expect(statePick(undefined, cwd, { WSP_HOME: join(cwd, ".wsp") }).note).toBeUndefined();
+
+    // Nor is one folder reached by two names, which is what /tmp and /private/tmp are on a Mac.
+    mkdirSync(join(cwd, ".wsp"), { recursive: true });
+    writeFileSync(join(cwd, ".wsp", "state.json"), "{}\n");
+    const link = join(dirname(cwd), `${basename(cwd)}-link`);
+    symlinkSync(cwd, link);
+    dirs.push(link);
+    expect(statePick(undefined, link, { WSP_HOME: join(cwd, ".wsp") }).note).toBeUndefined();
+  });
+
+  it("gives the commands that parse flags the same reading and the same sentence", () => {
+    const { user, moved } = computer();
+    const cwd = mkdtempSync(join(tmpdir(), "wsp-state-opts-"));
+    dirs.push(cwd);
+    vi.stubEnv("HOME", user);
+    writeFileSync(join(cwd, ".env"), "SOLARI_API_KEY=slr_live_fake\n");
+    const back = process.cwd();
+    process.chdir(cwd);
+    try {
+      const said: string[] = [];
+      expect(optsFor({}, { WSP_HOME: moved }, line => said.push(line)).statePath).toBe(join(moved, "state.json"));
+      expect(said).toHaveLength(1);
+      expect(said[0]).toContain("WSP_HOME");
+      said.length = 0;
+      expect(optsFor({ state: join(moved, "other.json") }, { WSP_HOME: moved }, line => said.push(line)).statePath).toBe(join(moved, "other.json"));
+      expect(said[0]).toContain("--state");
+      said.length = 0;
+      expect(optsFor({}, {}, line => said.push(line)).statePath).toBe(resolve(process.cwd(), ".wsp", "state.json"));
+      expect(said).toEqual([]);
+    } finally {
+      process.chdir(back);
+    }
   });
 });

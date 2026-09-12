@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "pnpm --filter @wsp/protocol --filter @wsp/catalog build && vite",
     "build": "pnpm --filter @wsp/protocol --filter @wsp/catalog build && tsc -b && vite build",
+    "screenshots": "node screenshots/run.mjs",
     "test": "vitest run"
   },
   "dependencies": {

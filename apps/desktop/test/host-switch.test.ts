@@ -2,7 +2,7 @@
 // The window moves between hosts: the session it holds changes, the origin
 // gate every bridge call reads follows it, the app's own host is left running,
 // and the hosts file the command line reads is the one list.
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { listHosts, readHost, writeHost, type HostRecord } from "@wsp/host";
@@ -68,6 +68,25 @@ describe("hostSwitcher", () => {
     expect(switcher.current()).toBe(d.local);
     expect(switcher.view()).toEqual({ here: "This Mac", current: null, hosts: [{ alias: "box", label: "127.0.0.1:14400", url: "http://127.0.0.1:14400", road: "direct" }] });
     expect(switcher.token()).toBeUndefined();
+  });
+
+  it("the page of the host here is answered that host's own token, read beside the state it serves", () => {
+    const dir = home();
+    writeFileSync(join(dir, "host-token"), "host-tok\n");
+    const switcher = hostSwitcher(deps({ statePath: join(dir, "state.json") }));
+    expect(switcher.token()).toBe("host-tok");
+  });
+
+  it("on a host somewhere else the answer is that host's device token, and this computer's own comes back on return", async () => {
+    const dir = home();
+    writeFileSync(join(dir, "host-token"), "host-tok\n");
+    const d = deps({ statePath: join(dir, "state.json") });
+    writeHost(d.home, "box", record("http://127.0.0.1:14400"));
+    const switcher = hostSwitcher(d);
+    expect(await switcher.to("box")).toEqual({ ok: true });
+    expect(switcher.token()).toBe("tok-1");
+    expect(await switcher.to(null)).toEqual({ ok: true });
+    expect(switcher.token()).toBe("host-tok");
   });
 
   it("switching reassigns the session, the origin gate follows it, and the app's own host keeps running", async () => {

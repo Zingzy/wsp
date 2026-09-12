@@ -3,9 +3,9 @@
 // on loopback. There is no control plane; the Solari key is read here
 // and used only for direct calls from this process to the machine API.
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 import { isCancel } from "@clack/prompts";
@@ -77,7 +77,7 @@ import { connectCommand, disconnectCommand, hostsCommand } from "./connect.js";
 import { stopRecordedConnector } from "./connector.js";
 import { publicHostname, readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
 import { aimAddress, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnoredLine, wspHome } from "./hosts.js";
-import { currentHome, currentHomePointer, servingHome } from "./serving-home.js";
+import { currentHome, currentHomePointer, homeNamed, servingHome } from "./serving-home.js";
 import { advertiseWord, devicesCommand, hostReach, pairCommand } from "./pairing.js";
 import { addCommand, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
@@ -189,10 +189,10 @@ options:
                      without the host token and every client pairs for a device
                      token of its own: wsp pair prints a code, wsp devices
                      lists and revokes them
-  --state PATH       state file (default ./.wsp/state.json when the current
-                     directory has a .env, else state.json in the home the
-                     running host serves, which is ~/.wsp unless WSP_HOME or
-                     current-home names another)
+  --state PATH       state file: this word first, else WSP_HOME's state.json,
+                     else ./.wsp/state.json when the current directory has a
+                     .env, else state.json in the home the running host serves,
+                     which is ~/.wsp unless current-home names another
   --host ALIAS       on any verb, and on wsp status: run the line against a
                      host on another computer, by the name wsp connect gave it.
                      WSP_HOST names one for a whole shell. That host serves its
@@ -494,18 +494,55 @@ export function goldenRecipe(
   };
 }
 
-/** The state file a run works on when it names none: a .env in cwd marks a dev checkout whose .wsp state is shared
- * with wspx, and anywhere else the home whose host is serving, so a line typed with no flags on a computer whose
- * host runs under a moved home reaches that host rather than a state file nothing serves. */
-export function defaultStatePath(cwd: string = process.cwd(), env: Readonly<Record<string, string | undefined>> = process.env): string {
-  if (existsSync(join(cwd, ".env"))) return join(cwd, ".wsp", "state.json");
-  return join(servingHome(env), "state.json");
+/** The state a `.env` beside the code marks: a dev checkout shares its `.wsp` state with wspx. One spelling of the
+ * rule, since the bin and the desktop both apply it. */
+export function devCheckoutState(cwd: string): string | undefined {
+  return existsSync(join(cwd, ".env")) ? join(cwd, ".wsp", "state.json") : undefined;
 }
 
-/** The state file a command works on: its `--state` word when it gave one, else this computer's default, absolute
- * either way, so the lock, the token and the recipe beside it name one path whatever the cwd is. */
-function statePathFrom(flag?: string): string {
-  return resolve(flag ?? defaultStatePath());
+/** A path as the file system knows it, so one folder reached by two names (/tmp and /private/tmp on a Mac) is not
+ * read as two states. Where nothing has made the file or its folder yet, the path as written is all there is. */
+function realState(path: string): string {
+  const dir = dirname(path);
+  if (existsSync(path)) return realpathSync(path);
+  return existsSync(dir) ? join(realpathSync(dir), basename(path)) : path;
+}
+
+/** Which state a line runs against, and what a person should be told about the choice. */
+export interface StatePick {
+  path: string;
+  /** The one line stderr gets when a state the person named passed over a .env beside the code. */
+  note?: string;
+}
+
+const passedOverLine = (chosen: string, by: string, cwd: string, dev: string): string =>
+  `this runs against ${chosen}, named by ${by}; the .env in ${cwd} marks ${dev}, which this run does not use.`;
+
+/** The state file a run works on. A state the person chose wins: --state first, then WSP_HOME, since a state
+ * somebody named is never taken off them by a file they did not name, and the choice is said out loud when a .env
+ * beside the code named another. A .env marks a dev checkout only when nothing else names a state, and anywhere
+ * else it is the home whose host is serving, so a line typed with no flags on a computer whose host runs under a
+ * moved home reaches that host rather than a state file nothing serves. */
+export function statePick(flag?: string, cwd: string = process.cwd(), env: Readonly<Record<string, string | undefined>> = process.env): StatePick {
+  const dev = devCheckoutState(cwd);
+  const home = homeNamed(env["WSP_HOME"]);
+  const named = flag !== undefined ? { path: flag, by: "--state" } : home !== undefined ? { path: join(home, "state.json"), by: "WSP_HOME" } : undefined;
+  if (named === undefined) return { path: dev ?? join(servingHome(env), "state.json") };
+  if (dev === undefined || realState(resolve(cwd, dev)) === realState(resolve(cwd, named.path))) return { path: named.path };
+  return { path: named.path, note: passedOverLine(resolve(cwd, named.path), named.by, cwd, dev) };
+}
+
+/** The state file a run that names none works on. */
+export function defaultStatePath(cwd: string = process.cwd(), env: Readonly<Record<string, string | undefined>> = process.env): string {
+  return statePick(undefined, cwd, env).path;
+}
+
+/** The state file a command works on, absolute so the lock, the token and the recipe beside it name one path
+ * whatever the cwd is; a caller with somewhere to say it hears which state won where two readings disagreed. */
+function statePathFrom(flag?: string, env: Readonly<Record<string, string | undefined>> = process.env, note: (line: string) => void = () => {}): string {
+  const pick = statePick(flag, process.cwd(), env);
+  if (pick.note !== undefined) note(pick.note);
+  return resolve(pick.path);
 }
 
 /** The folder every turn and every exec on this computer starts in, made when it is first used. Not the person's
@@ -654,6 +691,7 @@ export interface SharedOpts extends ServeAsked {
 export function optsFor(
   values: Pick<SharedFlags, "port" | "ws-port" | "listen" | "advertise" | "state" | "provider" | "docker-host" | "no-relay">,
   env: Readonly<Record<string, string | undefined>> = process.env,
+  note: (line: string) => void = () => {},
 ): SharedOpts {
   const asked = portsAsked({ port: values.port, wsPort: values["ws-port"], listen: values.listen });
   const advertise = advertiseWord(values.advertise);
@@ -666,7 +704,7 @@ export function optsFor(
     ...(advertise !== undefined ? { advertise } : {}),
     ...provider,
     ...(values["no-relay"] === true ? { relay: false } : {}),
-    statePath: statePathFrom(values.state),
+    statePath: statePathFrom(values.state, env, note),
     home: wspHome(env),
     env,
     providerEnv: providerEnvWith(provider, env),
@@ -1756,6 +1794,9 @@ export const COMMAND_LINES: readonly CommandLine[] = [
  * again; the desktop's bundled command hands in its shim, the npm command the default reading. `env` is the
  * environment the verbs run with, this process's for a real command line and its own for a test. */
 export async function cli(argv: string[], io: CliIO = terminalIO(), run: RunningWsp = runningWsp(), env: Readonly<Record<string, string | undefined>> = process.env): Promise<number> {
+  // One reading for every road out of this process, and the sentence about it said once: a verb, a command and the
+  // tool server all pick their state here, so none of them can run against a state another of them named.
+  const chooseState = (flag?: string): string => statePathFrom(flag, env, line => io.error(line));
   const verb = findVerb(argv);
   // The one verb that runs with no host serving, new --local, builds the runtime over the state file in this process.
   const verbRuntime = async (statePath: string): Promise<LocalRuntime> => {
@@ -1769,8 +1810,8 @@ export async function cli(argv: string[], io: CliIO = terminalIO(), run: Running
       close: () => rt.close(),
     };
   };
-  if (verb !== undefined) return runVerb(verb, argv, io, statePathFrom, { alsoHere, cwd: process.cwd(), env, runtime: verbRuntime });
-  if (argv[0] === MCP_COMMAND) return mcp(io, argv.slice(1), statePathFrom, run, env);
+  if (verb !== undefined) return runVerb(verb, argv, io, chooseState, { alsoHere, cwd: process.cwd(), env, runtime: verbRuntime });
+  if (argv[0] === MCP_COMMAND) return mcp(io, argv.slice(1), chooseState, run, env);
   let values: SharedFlags;
   let positionals: string[];
   try {
@@ -1786,7 +1827,7 @@ export async function cli(argv: string[], io: CliIO = terminalIO(), run: Running
     io.log(HELP);
     return 0;
   }
-  const opts = optsFor(values, env);
+  const opts = optsFor(values, env, line => io.error(line));
   const word = positionals[0] ?? "up";
   const command = COMMANDS[word];
   const json = values.json === true;

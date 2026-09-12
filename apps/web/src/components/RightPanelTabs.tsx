@@ -385,6 +385,7 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
               <button
                 key={action.label}
                 type="button"
+                data-surface-launch={action.key}
                 onClick={action.onClick}
                 onMouseEnter={() => setHighlight(availableActions.indexOf(action))}
                 onMouseLeave={() =>
@@ -410,6 +411,8 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
             ) : (
               <div
                 key={action.label}
+                data-surface-launch={action.key}
+                data-available="false"
                 className={cn(
                   "relative flex w-full flex-col items-start p-4 opacity-40",
                   cardShellClass,

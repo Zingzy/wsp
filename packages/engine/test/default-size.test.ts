@@ -6,9 +6,10 @@ import { ROOT, sourceFiles } from "../../protocol/test/source-files.js";
 
 describe("one place for the size a machine is built at", () => {
   // A backend module owns the sizes of the machines it holds, and nothing else names one: each provider's table, the
-  // module of a host with no provider, whose machines have no shape because there are none, and the two modules for
-  // a computer somebody owns, whose tables offer no size either, since every machine they hold answers with its own.
-  const HOMES = ["solari-backend.ts", "docker-backend.ts", "box-backend.ts", "no-provider-backend.ts", "ssh-backend.ts", "place-backend.ts"].map(f => join("packages", "engine", "src", f));
+  // module of a host with no provider, whose machines have no shape because there are none, the two modules for a
+  // computer somebody owns, whose tables offer no size either, since every machine they hold answers with its own,
+  // and the module that answers out of memory, whose table is what a fixture's forks read as.
+  const HOMES = ["solari-backend.ts", "docker-backend.ts", "box-backend.ts", "no-provider-backend.ts", "ssh-backend.ts", "place-backend.ts", "fake-backend.ts"].map(f => join("packages", "engine", "src", f));
   // A vCPU count or a memory size written into a spec or a recipe; a road that names none takes pricing.defaultSize.
   const RULE = /\b(cpu|memMb):\s*\d/;
 
