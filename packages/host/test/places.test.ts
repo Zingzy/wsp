@@ -5,12 +5,13 @@
 // since installing a launchd agent is not this test's business.
 import { createPrivateKey, generateKeyPairSync, sign } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { ALREADY_JOINED_LINE, PLACE_DOOR_UNSERVED, doorPortHeldLine, placeDaemonPaths, placeLinkTranscript, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, doorPortHeldLine, placeDaemonPaths, placeLinkTranscript, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
 import { BoxBackend, type KeyCheck, type MachineBackend } from "@wsp/engine";
 import { placeLines } from "../src/verbs.js";
 import {
@@ -118,6 +119,17 @@ async function fakeHost(opts: { wrongKey?: boolean; refuse?: string } = {}): Pro
     wss.once("error", fail);
   });
   return { url: `http://127.0.0.1:${port}`, publicKey: key.publicKey, frames };
+}
+
+/** A port this computer held a moment ago and holds no longer, so a dial at it is refused rather than left hanging. */
+async function freePort(): Promise<number> {
+  const server = createServer();
+  const port = await new Promise<number>((done, fail) => {
+    server.once("error", fail);
+    server.listen(0, "127.0.0.1", () => done((server.address() as { port: number }).port));
+  });
+  await new Promise<void>(done => server.close(() => done()));
+  return port;
 }
 
 const joinDepsFor = (home: string, runner: ServiceRunner): Parameters<typeof joinCommand>[3] => ({
@@ -231,7 +243,7 @@ describe("the table wsp places prints", () => {
     expect(printed[1]).toContain("zingzys-mac");
     expect(printed[2]).toContain("box");
     expect(printed[2]).toContain("default");
-    expect(printed[3]).toContain("$0.018/h");
+    expect(printed[3]).toContain("$0.018/hr");
     expect(printed.filter(l => l.includes("default"))).toHaveLength(1);
   });
 
@@ -346,6 +358,20 @@ describe("a computer joining a wsp", () => {
     const host = await fakeHost({ refuse: "that pairing code is not one this host is waiting for" });
     await expect(joinCommand(captured(), [host.url], { code: "X" }, joinDepsFor(home, fakeRunner().run))).rejects.toThrow(/not one this host is waiting for/);
     expect(existsSync(placeFilePath(home))).toBe(false);
+  });
+
+  it("says which of the two things a person typed a refusal is about, where it is about one of them", async () => {
+    // The code: the one refusal a host has for a code it is not holding, spent, expired or never minted.
+    const spent = await fakeHost({ refuse: PLACE_CODE_REFUSAL });
+    await expect(joinCommand(captured(), [spent.url], { code: "X" }, joinDepsFor(tmp("join-code"), fakeRunner().run))).rejects.toMatchObject({ name: "JoinRefused", about: "code" });
+    // The address: nothing is listening there. The port was this computer's a moment ago and is free again.
+    const closed = await freePort();
+    await expect(joinCommand(captured(), [`http://127.0.0.1:${closed}`], { code: "X" }, joinDepsFor(tmp("join-gone"), fakeRunner().run))).rejects.toMatchObject({ name: "JoinRefused", about: "address" });
+    // A refusal about neither field carries neither: a host that would not prove its key, and any other word of its own.
+    const wrong = await fakeHost({ wrongKey: true });
+    await expect(joinCommand(captured(), [wrong.url], { code: "X" }, joinDepsFor(tmp("join-key"), fakeRunner().run))).rejects.toMatchObject({ name: "Error" });
+    const other = await fakeHost({ refuse: "this host takes no places while it is building your image" });
+    await expect(joinCommand(captured(), [other.url], { code: "X" }, joinDepsFor(tmp("join-other"), fakeRunner().run))).rejects.toMatchObject({ name: "Error" });
   });
 
   it("refuses a second join on a computer that already belongs to a wsp", async () => {

@@ -5,13 +5,14 @@ import { rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { fakeProcTree } from "../../../packages/daemon/test/fake-proc.js";
 import { startOldDaemon, type OldDaemon } from "../../../packages/daemon/test/old-daemon.js";
-import { DAEMON_VERSION, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_VERSION, type DaemonLinkStatus, type WorkspaceView } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { getDaemonRoot, getDaemonVersion } from "../src/files/wire.js";
 import { getLive, resetLive } from "../src/machine/live.js";
 import { getProcs, resetProcs } from "../src/machine/procs.js";
+import { terminalEmptyLine, terminalPaneState, terminalPaneTitle } from "../src/adapt/index.js";
 import { getTerminals } from "../src/terminal/link.js";
 import { wireTerminals } from "../src/terminal/wiring.js";
 import { caps } from "./caps.js";
@@ -126,12 +127,13 @@ describe("wireTerminals", () => {
     expect(getDaemonRoot("ws_nap")).toBeNull();
     const napping = getTerminals("ws_nap");
     expect(napping).not.toBeNull();
-    expect(napping!.status()).toBe("connecting");
+    expect(napping!.status()).toBe("opening");
 
     const tab = await getTerminals("ws_run")!.open({ shell: "/bin/sh" });
     expect(relay!.daemon.ptys.list().map(p => p.id)).toEqual([tab.ptyId]);
 
-    // napped: the socket goes away, the model (and its tabs) stays for the wake
+    // napped: the socket goes away, the model (and its tabs) stays for the wake, so it keeps the word of a link
+    // that was up and is coming back rather than one nothing has ever been open on.
     emit({ type: "workspace.napped", workspaceId: "ws_run" });
     await until(() => getTerminals("ws_run")!.status() === "connecting");
     expect(getTerminals("ws_run")!.tabs()).toHaveLength(1);
@@ -213,6 +215,10 @@ describe("wireTerminals", () => {
     await until(() => getTerminals("ws_a")?.status() === "live");
     const tab = await getTerminals("ws_a")!.open({ shell: "/bin/sh" });
 
+    // Every word the model reports from here on, so the relink cannot slip a "starting" through between two beats.
+    const words: DaemonLinkStatus[] = [];
+    const unwatch = getTerminals("ws_a")!.onStatus(() => words.push(getTerminals("ws_a")!.status()));
+
     // Every channel rides the host's socket, so a host that is redialling is a pane with nothing to type into.
     useStore.getState().setConn("reconnecting");
     await until(() => getTerminals("ws_a")!.status() === "connecting");
@@ -220,10 +226,27 @@ describe("wireTerminals", () => {
     expect(getProcs("ws_a").snapshot().reach).toBe("unreachable");
     // The model is kept across the park, as it is across a nap: the tab and its scrollback are still there.
     expect(getTerminals("ws_a")!.tabs().map(t => t.ptyId)).toEqual([tab.ptyId]);
+    // And the person reads the word for that: a terminal they had open is coming back, not one being started. The
+    // link object behind it is gone and the next one is fresh, which is not what happened from where they sit.
+    const parked = terminalPaneState({ state: "running", reach: "reachable", socket: getTerminals("ws_a")!.status() });
+    expect(parked).toEqual({ kind: "reconnecting" });
+    expect(terminalPaneTitle(parked)).toMatch(/^Reconnecting to /);
+    expect(terminalEmptyLine(parked)).not.toMatch(/Starting a terminal/);
+    // The link the redial opens is a fresh object, and a second park still reads the same: what the model has been
+    // outlives every link it has held.
+    useStore.getState().setConn("live");
+    await until(() => getTerminals("ws_a")!.status() === "live");
+    useStore.getState().setConn("reconnecting");
+    await until(() => getTerminals("ws_a")!.status() === "connecting");
 
     useStore.getState().setConn("live");
     await until(() => getTerminals("ws_a")!.status() === "live");
     expect(getLive("ws_a").snapshot().reach).toBe("live");
+    // Not once across two parks and two relinks: the link the redial opens is a fresh object, and it takes the word
+    // from the model rather than from its own age.
+    unwatch();
+    expect(words).not.toContain("opening");
+    expect(new Set(words)).toEqual(new Set(["connecting", "live"]));
   }, 20_000);
 
   it("unwiring closes every link and empties the registry", async () => {

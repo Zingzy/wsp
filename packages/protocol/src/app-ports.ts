@@ -38,21 +38,6 @@ export function wsUrlOf(url: string): string {
   return `${scheme}//${parsed.host}${path}${WS_PATH}`;
 }
 
-/** The address a person types on the join screen, as the join road dials it: a bare `host:port` becomes
- * `http://host:port`, an address that already carries an http or https scheme stays as it is, and anything else,
- * a word with no port or a scheme this road cannot dial, is nothing. The one reading, so the screen's refusal and
- * the socket the join opens can never disagree about what was typed. */
-export function joinAddressOf(typed: string): string | undefined {
-  const word = typed.trim();
-  if (word === "") return undefined;
-  if (/^https?:\/\//i.test(word)) return servedHostname(word) === undefined ? undefined : word;
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(word)) return undefined;
-  const at = `http://${word}`;
-  if (servedHostname(at) === undefined) return undefined;
-  // A port is what makes a bare word an address here: a host and nothing else is a name this road cannot dial.
-  return new URL(at).port === "" ? undefined : at;
-}
-
 /** An address as a person reads and types it: the host and its port, which is the short form joinAddressOf takes
  * back. The door answers with a whole URL and no screen shows one, since a line carrying `http://` is longer than
  * the row it sits in and the scheme is the one part nobody has a choice about. */
@@ -101,6 +86,21 @@ export function servedHostname(word: string): string | undefined {
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return undefined;
   return parsed.hostname === "" ? undefined : parsed.hostname;
+}
+
+/** What a bare address a person types looks like: a name or an IPv4 address with a port, or an IPv6 literal in its
+ * brackets with one. The port is asked for because a wsp is reached at one and no default would be right for both
+ * the app's own and one moved by --port. */
+const BARE_ADDRESS = /^(\[[0-9a-fA-F:]+\]|[a-zA-Z0-9.-]+):\d{1,5}$/;
+
+/** The address typed on the join screen, as the road that dials it wants it: what a person reads off the other
+ * computer is an authority (`192.168.1.20:4400`), which becomes an http address; an address that already carries
+ * http or https is itself; anything else, a bare name with no port or a socket address, is nothing. One reading,
+ * so the field that refuses a word and the dial that follows it cannot disagree about what an address is. */
+export function joinAddressOf(typed: string): string | undefined {
+  const word = typed.trim();
+  if (/^https?:\/\//i.test(word)) return servedHostname(word) === undefined ? undefined : word;
+  return BARE_ADDRESS.test(word) ? `http://${word}` : undefined;
 }
 
 /** An address and a port as the authority of a URL: an IPv6 literal needs brackets and everything else is itself.

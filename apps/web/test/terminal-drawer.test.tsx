@@ -308,7 +308,8 @@ describe("reload adopts the daemon's ptys", () => {
     drawer.split(WS, "p2", "vertical");
     render(<WorkspaceTerminalDrawer workspaceId={WS} />);
     // Until the daemon has answered, the stored ptys are not shown as terminals: no surface binds to a pty the link does not know.
-    await screen.findByText(/The daemon link is reconnecting/);
+    // Nothing has been open on this link, so the pane says what is being started and never that something is coming back.
+    await screen.findByText(/Starting a terminal on this workspace/);
     expect(canvases("drawer")).toHaveLength(0);
     releaseList();
     await waitFor(() => expect(canvases("drawer")).toHaveLength(2));
@@ -338,7 +339,7 @@ describe("reload adopts the daemon's ptys", () => {
       </>,
     );
     // Before the daemon answers, neither side shows a terminal or drops the panel's surface.
-    await waitFor(() => expect(screen.getAllByText(/The daemon link is reconnecting/)).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByText(/Starting a terminal on this workspace/)).toHaveLength(2));
     expect(selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS).surfaces.map(s => s.id)).toEqual(["terminal:p2"]);
     releaseList();
     await waitFor(() => expect(useTerminalDrawerStore.getState().byWorkspaceId[WS]?.terminalIds).toEqual(["p1", "p3"]));

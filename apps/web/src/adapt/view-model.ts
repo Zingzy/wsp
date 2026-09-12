@@ -255,6 +255,8 @@ export interface SidebarThreadSnapshot {
   /** The user's prompt when the runtime recorded one, else the Claude session id, else the row id. */
   readonly title: string;
   readonly status: SessionStatus;
+  /** Whether a turn of this thread ever did work, as the protocol's fold reads the rows. */
+  readonly ran: boolean;
   readonly startedAt: string | null;
   readonly endedAt: string | null;
   readonly indicator: StatusIndicator | null;

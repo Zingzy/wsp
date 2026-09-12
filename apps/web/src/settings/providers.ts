@@ -36,8 +36,10 @@ export interface ProviderRow {
   save?(api: Api, key: string): Promise<void>;
 }
 
-/** What a person calls this provider's key and where they get one, off the one table the host's registry reads. */
-export const keyWordsOf = (row: ProviderRow): { keyName: string; keyConsole?: string } => PROVIDER_KEY_WORDS[row.id] ?? { keyName: "API key" };
+/** Where a person gets this provider's key, off the one table the host's registry reads. The key's own name
+ * there titles the screen the terminal draws; this sheet is titled by the provider already, so its field carries
+ * the plain label and nobody meets the id word. */
+export const keyConsoleOf = (row: ProviderRow): string | undefined => PROVIDER_KEY_WORDS[row.id]?.keyConsole;
 
 export const PROVIDER_ROWS: readonly ProviderRow[] = [
   {

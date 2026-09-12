@@ -19,6 +19,8 @@ import {
   ALREADY_JOINED_LINE,
   JOIN_ADDRESS_LINE,
   LOOPBACK,
+  PLACE_CODE_REFUSAL,
+  fmtRate,
   PLACE_DOOR_UNSERVED,
   PLACE_FILE_MODE,
   PLACE_LINK_NONCE_BYTES,
@@ -40,13 +42,13 @@ import {
   wsUrlOf,
 } from "@wsp/protocol";
 import { checkProviderKey, keyCheckLine, type KeyCheck, type MachineBackend } from "@wsp/engine";
-import { newPlaceKeyPair, signPlaceBytes, verifyPlaceBytes, type PlaceKeyPair, type PlaceWiring } from "@wsp/runtime";
+import { newPlaceKeyPair, signPlaceBytes, verifyPlaceBytes, type HerePlace, type PlaceKeyPair, type PlaceWiring } from "@wsp/runtime";
 import { randomBytes } from "node:crypto";
 import WebSocket from "ws";
 import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
 import { aimName, aimedHost, wspHome, type HostAim, type HostPick } from "./hosts.js";
-import { placeFilePath, placeKeyPath, placeLogPath, placeReport, readPlaceFile, stopPlaceService, sweepPlace, writePlaceFile } from "./place-report.js";
+import { joinedAlready, placeFilePath, placeKeyPath, placeLogPath, placeReport, readPlaceFile, stopPlaceService, sweepPlace, writePlaceFile } from "./place-report.js";
 import { PROVIDER_ENV, addedBy, addedProviders, providerBackendFor, providerModule, type ProviderEnv } from "./providers.js";
 import { publicHostname } from "./relay-link.js";
 import { pairOnLoopbackLine, reachAddresses } from "./pairing.js";
@@ -116,11 +118,16 @@ export function placeWiring(statePath: string, env: ProviderEnv): PlaceWiring {
     hostName: hostNameHere,
     // This computer under the name a person would type for it, and what it is off the same read a place sends about
     // itself, so the row for the computer the host runs on carries the facts every other row carries.
-    here: () => {
-      const report = placeReport({ name: placeNameHere() });
-      return { name: report.name, os: report.os, shape: report.shape, docker: report.docker, ...(report.diskFreeBytes !== undefined ? { diskFreeBytes: report.diskFreeBytes } : {}) };
-    },
+    here: () => placeHere(),
   };
+}
+
+/** What this computer is, as a row of the list of everywhere work can run: read off the same report a place sends
+ * about itself. The one reading, so the row a host keeps for the computer it runs on and the facts a computer is
+ * shown right after it joined somebody else's wsp cannot describe the same computer differently. */
+export function placeHere(name: string = placeNameHere()): HerePlace {
+  const report = placeReport({ name });
+  return { name: report.name, os: report.os, shape: report.shape, docker: report.docker, ...(report.diskFreeBytes !== undefined ? { diskFreeBytes: report.diskFreeBytes } : {}) };
 }
 
 /** How long a join gets to open the socket and finish the handshake. A person is watching, and a host that is not
@@ -148,7 +155,7 @@ export function addableProviders(): string[] {
 }
 
 /** What a provider that just became a place reads as. */
-export const providerPlaceLine = (id: string, rateUsdPerHour: number): string => `place ${id} · $${rateUsdPerHour.toFixed(3)}/h · forks your image`;
+export const providerPlaceLine = (id: string, rateUsdPerHour: number): string => `place ${id} · ${fmtRate(rateUsdPerHour)} · forks your image`;
 
 /** The refusal for a word that is neither a provider wsp holds a key for nor an ssh address, naming all three roads. */
 export function addRefusal(word: string): string {
@@ -340,6 +347,24 @@ export async function removeCommand(io: CliIO, opts: PlaceOpts, args: readonly s
   }
 }
 
+/** Which of the two things a person typed a join refusal is about, where it is about one of them: an address
+ * nothing answered at, or a code the host would not take. A refusal about neither (a host that would not prove its
+ * key, a computer already in a wsp) carries none. */
+export type JoinRefusalAbout = "address" | "code";
+
+/** A join that did not happen, carrying what it was about where that is known. It is thrown where the reason is
+ * known, so a screen with one slot per field puts a refusal under the right field rather than reading it back out
+ * of the sentence. */
+export class JoinRefused extends Error {
+  constructor(
+    readonly about: JoinRefusalAbout,
+    message: string,
+  ) {
+    super(message);
+    this.name = "JoinRefused";
+  }
+}
+
 export interface JoinFlags {
   code?: string;
   codeFile?: string;
@@ -405,24 +430,27 @@ async function handshake(
   let answered: { placeId: string; hostPublicKey: string; hostName: string; device?: { deviceId: string; deviceToken: string } } | undefined;
   try {
     return await new Promise((done, fail) => {
-      const deadline = setTimeout(() => fail(new Error(`the host at ${url} did not answer in ${Math.round(JOIN_MS / 1000)}s`)), JOIN_MS);
+      const deadline = setTimeout(() => fail(new JoinRefused("address", `the host at ${url} did not answer in ${Math.round(JOIN_MS / 1000)}s`)), JOIN_MS);
       const end = (e: Error): void => {
         clearTimeout(deadline);
         fail(e);
       };
-      ws.on("error", (e: Error) => end(new Error(`${url} could not be reached: ${e.message}`)));
-      ws.once("close", () => end(new Error(`${url} closed the socket before this computer had joined`)));
+      ws.on("error", (e: Error) => end(new JoinRefused("address", `${url} could not be reached: ${e.message}`)));
+      ws.once("close", () => end(new JoinRefused("address", `${url} closed the socket before this computer had joined`)));
       ws.once("open", () => ws.send(JSON.stringify({ id: 1, op: "place.join", code, publicKey: pair.publicKey, nonce, report, ...(client ? { client: { name } } : {}) })));
       ws.on("message", raw => {
         let frame: Record<string, unknown>;
         try {
           frame = JSON.parse(String(raw)) as Record<string, unknown>;
         } catch {
-          end(new Error(`${url} sent something that is not a frame`));
+          end(new JoinRefused("address", `${url} sent something that is not a frame`));
           return;
         }
         if (frame["ok"] !== true) {
-          end(new Error(String(frame["error"] ?? `${url} refused this join`)));
+          const said = String(frame["error"] ?? `${url} refused this join`);
+          // The one refusal a host has for a code it is not holding, spent or expired or never minted, is the
+          // protocol's own constant; every other refusal from over there is about neither field.
+          end(said === PLACE_CODE_REFUSAL ? new JoinRefused("code", said) : new Error(said));
           return;
         }
         if (frame["id"] === 1) {
@@ -507,7 +535,7 @@ export async function joinPlace(io: CliIO, opts: JoinPlaceOptions): Promise<Join
   const { home, address, code } = opts;
   if (home === "") throw new Error("a join needs this login's home folder, and this process has none");
   const file = placeFilePath(home);
-  if (readPlaceFile(file) !== undefined) throw new Error(ALREADY_JOINED_LINE);
+  if (joinedAlready(home)) throw new Error(ALREADY_JOINED_LINE);
   const name = opts.name?.trim() !== undefined && opts.name.trim() !== "" ? opts.name.trim() : placeNameHere();
   const now = opts.now ?? Date.now;
   const joined = await handshake(io, address, code, name, home, opts.client === true, opts.dial ?? (url => new WebSocket(wsUrlOf(url))));
@@ -583,7 +611,12 @@ export async function leavePlace(home: string, run?: ServiceRunner, forPlatform:
   return swept.removed;
 }
 
-export async function joinCommand(io: CliIO, args: readonly string[], flags: JoinFlags, deps: JoinDeps = joinDeps()): Promise<number> {
+
+/** The road wsp join takes, and the one the app's own join screen takes through the same function. A caller that
+ * is not a terminal hands the parts of it that differ there (the line its service runs, the home it works under)
+ * and takes the rest as it stands, so nothing about a join is written twice. */
+export async function joinCommand(io: CliIO, args: readonly string[], flags: JoinFlags, given: Partial<JoinDeps> = {}): Promise<number> {
+  const deps: JoinDeps = { ...joinDeps(), ...given };
   const home = deps.home;
   if (home === "") throw new Error("wsp join needs this login's home folder, and this process has none");
   const file = placeFilePath(home);
@@ -604,8 +637,8 @@ export async function joinCommand(io: CliIO, args: readonly string[], flags: Joi
   const [typed] = args;
   if (typed === undefined || args.length !== 1) throw usageRefusal("usage: wsp join <address> --code <code> [--name <name>] [--awake]\n       wsp join --serve");
   const address = joinAddressOf(typed);
-  if (address === undefined) throw usageRefusal(`${JOIN_ADDRESS_LINE.what} ${JOIN_ADDRESS_LINE.fix}`);
-  if (readPlaceFile(file) !== undefined) {
+  if (address === undefined) throw new JoinRefused("address", `${JOIN_ADDRESS_LINE.what} ${JOIN_ADDRESS_LINE.fix}`);
+  if (joinedAlready(home)) {
     io.error(ALREADY_JOINED_LINE);
     return 1;
   }

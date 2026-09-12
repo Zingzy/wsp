@@ -43,6 +43,10 @@ export function readPlaceFile(path: string): PlaceFile | undefined {
   }
 }
 
+/** Whether this computer already belongs to a wsp. The one reading of it: the join refuses on it and a screen that
+ * has its own words for that reads the same thing rather than testing for the file a second time. */
+export const joinedAlready = (home: string): boolean => readPlaceFile(placeFilePath(home)) !== undefined;
+
 /** Writes it at the one mode it is ever kept at; the folder is made first, since a fresh computer has none. */
 export function writePlaceFile(path: string, file: PlaceFile): void {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });

@@ -61,8 +61,9 @@ describe("Connect a provider", () => {
     expect(document.querySelector('[data-k="title"]')?.textContent).toBe("Connect ASCII");
     expect(document.querySelector('[data-k="description"]')?.textContent).toBe("Paste an API key from your ASCII account. It is checked with ASCII before it is saved.");
     expect(document.querySelector<HTMLInputElement>("#connect-provider-key")?.placeholder).toBe("ascii_…");
-    // The field's label is the key's own name, off the one table the host's registry reads.
-    expect(screen.getByText("Box API key")).toBeTruthy();
+    // The sheet's title names the provider, so its field is the plain label and no id word reaches a person.
+    expect(screen.getByText("API key")).toBeTruthy();
+    expect(screen.queryByText("Box API key")).toBeNull();
     expect(document.querySelector('[data-k="where"]')?.textContent).toContain("Get one at ASCII");
     expect(document.querySelector<HTMLButtonElement>('[data-k="save"]')?.disabled).toBe(true);
     type("ascii_live_9f3k2mx0");

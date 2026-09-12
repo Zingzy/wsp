@@ -68,6 +68,7 @@ export const PROVIDER_MODULES: readonly ProviderModule[] = [
     envNames: [PROVIDER_ENV],
     keyEnv: BOX_KEY_ENV,
     keyName: PROVIDER_KEY_WORDS["box"]!.keyName,
+    keyConsole: PROVIDER_KEY_WORDS["box"]!.keyConsole,
     // Named alone: the word says which cloud this computer forks on, and a missing key is asked for by its own
     // variable on the key screen rather than guessed at here.
     selects: env => env[PROVIDER_ENV] === "box",

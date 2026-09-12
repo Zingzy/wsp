@@ -26,7 +26,7 @@ import { useStore } from "../protocol/store.js";
 import { requestNewWorkspace } from "../shell/shellRequests.js";
 import { CARD, FIELD_LABEL, LONE_FIELD, NAME, ROW, ROW_LINE, STATE_WORD } from "../sidebar/cloud-setup/rows.js";
 import { CONNECT_PROVIDER_WORDS } from "./format.js";
-import { keyWordsOf, providerRows, type ProviderRow } from "./providers.js";
+import { keyConsoleOf, providerRows, type ProviderRow } from "./providers.js";
 import { PlaceTable } from "./PlaceTable.js";
 import { RefusalSlot, RoadLines } from "./sheetParts.js";
 
@@ -200,12 +200,12 @@ function Pick({ rows, pickedId, onPick }: { rows: readonly ProviderRow[]; picked
  * own slot, and the quiet Change under it empties the field for a new one. */
 function KeyStep({ row, value, said, kept, onChange, onChange0, onEnter }: { row: ProviderRow; value: string; said: KeySaid | null; kept: boolean; onChange: (v: string) => void; /** Change pressed on a key this computer holds. */ onChange0: () => void; onEnter: () => void }) {
   const id = "connect-provider-key";
-  const words = keyWordsOf(row);
+  const consoleAt = keyConsoleOf(row);
   return (
     <>
       <div className="flex flex-col gap-2">
         <label htmlFor={id} className={FIELD_LABEL}>
-          {words.keyName}
+          {WORDS.key}
         </label>
         <div className="relative w-full">
           <Input
@@ -238,8 +238,8 @@ function KeyStep({ row, value, said, kept, onChange, onChange0, onEnter }: { row
         <Button data-k="change" variant="link" className="h-auto self-start p-0 text-[13px] text-muted-foreground hover:text-foreground sm:text-[13px]" onClick={onChange0}>
           {WORDS.change}
         </Button>
-      ) : words.keyConsole === undefined ? null : (
-        <a data-k="where" href={`https://${words.keyConsole}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 self-start text-[13px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+      ) : consoleAt === undefined ? null : (
+        <a data-k="where" href={`https://${consoleAt}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 self-start text-[13px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
           {WORDS.where(row.name)}
           <ExternalLinkIcon aria-hidden className="size-3" />
         </a>
@@ -250,7 +250,8 @@ function KeyStep({ row, value, said, kept, onChange, onChange0, onEnter }: { row
 
 /** What the provider took: the sizes it offers a workspace, then that the key is accepted and saved here and
  * nowhere else. The sizes are the host's own capabilities, read once the key is saved and the provider is the one
- * this host forks on, so nothing here quotes a price the provider did not. */
+ * this host forks on, so nothing here quotes a price the provider did not. The spec's fourth column, the disk each
+ * size gets, is drawn nowhere: a size offer carries cpus, memory and a rate and no disk at all. */
 function Connected({ row, offers }: { row: ProviderRow; offers: Capabilities["sizes"] }) {
   return (
     <>

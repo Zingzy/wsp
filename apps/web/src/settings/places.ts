@@ -5,7 +5,7 @@
 // state word after a name, how long a computer has been away and an hourly
 // rate are all the protocol's (placeStateWord, placeWorkspacesCell, fmtSize,
 // fmtBytes, offlineFor, fmtRate) and are not copied here.
-import { PROVIDER_KEY_WORDS, fmtBytes, hereWord, type CpuWord, type PlaceView } from "@wsp/protocol";
+import { fmtBytes, hereWord, type CpuWord, type PlaceView } from "@wsp/protocol";
 import { PROVIDER_ROWS } from "./providers.js";
 
 /** What a person reads a row as. The first row is the computer the host runs on, which says so rather than giving
@@ -14,7 +14,7 @@ import { PROVIDER_ROWS } from "./providers.js";
 export function placeName(place: PlaceView, here = false): string {
   if (here) return hereWord(true);
   if (!isProviderPlace(place)) return place.name;
-  return PROVIDER_ROWS.find(row => row.id === place.name)?.name ?? PROVIDER_KEY_WORDS[place.name]?.keyName ?? place.name;
+  return PROVIDER_ROWS.find(row => row.id === place.name)?.name ?? place.name;
 }
 
 /** Whether this row is the provider this host forks on rather than a computer somebody owns. The one reading, so a

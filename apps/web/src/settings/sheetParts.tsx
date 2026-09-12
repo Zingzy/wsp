@@ -15,8 +15,9 @@ import { STATE_WORD } from "../sidebar/cloud-setup/rows.js";
 /** How long the copy glyph stands as a check before it is a copy glyph again. */
 const COPIED_MS = 1_400;
 
-/** How wide a copy row's label column stands, so the values under each other line up whatever their labels are. */
-const LABEL_WIDTH = "w-12";
+/** How wide a copy row's label column stands, so the values under each other line up whatever their labels are:
+ * wide enough for ADDRESS, the longest, at 11 px caps with the tracking the label wears. */
+const LABEL_WIDTH = "w-14";
 
 /** A fact somebody has to type on another computer: its label in a fixed column, the fact in mono, and the glyph
  * that copies it. The code wears the big size, since it is read off one screen and typed on another. */

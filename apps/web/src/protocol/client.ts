@@ -413,6 +413,10 @@ export interface Api {
    * failed carries the machine's own line for the write it refused. Optional so fixtures that never rename need not
    * fake it; a client without it offers no rename. */
   renameSession?(sessionId: string, title: string): Promise<SessionRenameResult>;
+  /** Drops a thread no turn ever ran on from the host's store; takes the runtime's thread id, not a session id. The
+   * host refuses one whose turn reached its agent. Optional so fixtures that never forget one need not fake it; a
+   * client without it offers no forget. */
+  forgetThread?(threadId: string): Promise<void>;
   /** What each harness's CLI takes at launch; the composer's pickers render from it. With a workspace the runtime
    * asks the binaries on its machine, else its table answers. Optional so fixtures without pickers need not fake it;
    * without it the composer shows none. */
@@ -617,6 +621,7 @@ export function makeApi(c: ProtocolClient): Api {
       SessionAccessOutcome.parse((await c.request<{ outcome?: unknown }>("sessions.access", { sessionId, permissionMode })).outcome),
     // Parsed, not trusted: an outcome outside the enum must not read as renamed.
     renameSession: async (sessionId, title) => SessionRenameResult.parse(await c.request<Record<string, unknown>>("sessions.rename", { sessionId, title })),
+    forgetThread: async threadId => void (await c.request("sessions.forget", { threadId })),
     // Parsed, not trusted: a picker renders only values the wire type vouches for.
     listHarnesses: async workspaceId =>
       HarnessCatalog.array().parse((await c.request<{ harnesses?: unknown }>("harnesses.list", workspaceId !== undefined ? { workspaceId } : {})).harnesses),

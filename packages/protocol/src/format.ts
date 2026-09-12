@@ -122,6 +122,15 @@ export function fmtSize(size: WorkspaceSize, cpu: CpuWord = "vCPU"): string {
   return `${size.cpu}\u00a0${cpu}\u00a0·\u00a0${fmtMemGb(size.memMb).replace(" ", "\u00a0")}`;
 }
 
+/** What a computer of the person's own is worth saying in one line: the cores and memory it has, and the room left
+ * where its threads work. The one reading, so the screen a computer joins on and the row it lands in later cannot
+ * describe the same computer differently. A computer that would not say how much room it has leaves that out. The
+ * whole line is joined with no-break spaces, fmtSize's own rule carried on: it is one phrase about one computer. */
+export function placeFactsLine(shape: WorkspaceSize, diskFreeBytes?: number): string {
+  const parts = [fmtSize(shape, "cores"), ...(diskFreeBytes === undefined ? [] : [`${fmtBytes(diskFreeBytes)} free`])];
+  return parts.join(" · ").replace(/ /g, "\u00a0");
+}
+
 /** What a machine wsp neither forks nor pays for costs, on its row's cost line and the Machine tab's Cost row. */
 export const FREE_WORD = "free";
 
@@ -1735,6 +1744,18 @@ export function relayedRecordRefusal(named: string): string {
 /** The short form of a thread id every sentence about a thread uses, so a refusal, a table and a tree all name a
  * thread the same way. */
 export const threadWord = (threadId: string): string => threadId.slice(0, 8);
+
+/** The one sentence a forget is refused with once a turn of the thread did work: the runtime raises it, the command
+ * line prints it and the app's row action shows it without asking, so all three say the same thing. */
+export function threadForgetRefusal(threadId: string): string {
+  return `thread ${threadWord(threadId)} has a turn that ran; only a thread no turn ever ran on can be forgotten`;
+}
+
+/** The one sentence a forget is refused with for a row from before threads: the fold keys such a row by its own
+ * turn id, so no thread here answers to it and nothing a forget could take is named. */
+export function threadWithoutIdRefusal(rowId: string): string {
+  return `${rowId} is a turn from before threads and carries no thread id of its own; no forget can name it`;
+}
 
 /** Every act a thread scoped token can be refused for, and the word each is refused by name with. The table is
  * the whole rule: an act absent from it is one no thread may ask for, and adding an act is one row here. */

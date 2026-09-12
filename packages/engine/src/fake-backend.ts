@@ -9,9 +9,12 @@
 // get() answers for an id it never minted, which is the one thing a fixture
 // needs: a state file naming fk_c0ffee gets a running machine rather than a
 // refusal, and one naming fk_c0ffee.paused gets a machine asleep. The guest is
-// not simulated: exec and run answer exit 0 with nothing, and the machine lands
-// no bytes, so the daemon deploy never starts and every road that needs a guest
-// refuses by capability the way it does on a provider that has none.
+// not simulated: the machine lands no bytes, so the daemon deploy never starts
+// and every road that needs a guest refuses by capability the way it does on a
+// provider that has none, and a road that runs a command anyway is refused with
+// a sentence naming this stand-in. Exit 0 with nothing was worse than a refusal:
+// a tester driving a fixture met "remote launch failed: exit 0: " and read the
+// empty guest as the product losing their thread.
 
 import type { Capabilities, MachineFacts } from "@wsp/protocol";
 import { randomBytes } from "node:crypto";
@@ -51,7 +54,9 @@ const PRICING: BackendPricing = {
 /** Instant everywhere: a wake that never has to ask twice and a daemon that is never waited for. */
 const LIFECYCLE: Lifecycle = { budgets: { wakeAttempts: 1, daemonAnswersMs: 1_000 } };
 
-const NOTHING: ExecResult = { exitCode: 0, stdout: "", stderr: "" };
+/** What a road that reaches for the guest is told. One sentence, naming the stand-in and what it is not, the way
+ * the no-provider module names itself rather than answering a provider's error. */
+export const FAKE_NO_GUEST = "this provider answers out of memory and holds no guest: nothing runs on its machines";
 
 const id = (prefix: string): string => `${prefix}_${randomBytes(6).toString("hex")}`;
 
@@ -82,11 +87,11 @@ class FakeMachine implements Machine {
   }
 
   async exec(): Promise<ExecResult> {
-    return NOTHING;
+    throw new Error(FAKE_NO_GUEST);
   }
 
   async run(): Promise<ExecResult> {
-    return NOTHING;
+    throw new Error(FAKE_NO_GUEST);
   }
 
   async snapshot(name: string): Promise<string> {
