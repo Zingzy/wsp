@@ -8,7 +8,7 @@
 // finds it as they left it. A road to a host is one entry in ROADS: how it is
 // opened the first time, how a saved one is reached again, and what it holds
 // open; adding a road is its entry and nothing else here.
-import { connectCommand, disconnectCommand, aliasFrom, listHosts, noSuchHostLine, readHost, writeHost, type CliIO, type HostRecord } from "@wsp/host";
+import { connectCommand, disconnectCommand, aliasFrom, hostTokenFor, listHosts, noSuchHostLine, readHost, writeHost, type CliIO, type HostRecord } from "@wsp/host";
 import { HOST_WORDS, PAIR_CODE_LENGTH, isUrl, type HostConnectAsk, type HostOutcome, type HostRoad, type HostsView } from "@wsp/protocol";
 import type { HostSession } from "./host-lifecycle.js";
 import { forwardKey, type SshRoad } from "./ssh-road.js";
@@ -33,7 +33,8 @@ export interface SwitcherDeps {
 export interface HostSwitcher {
   current(): HostSession;
   view(): HostsView;
-  /** The device token of the host the window is on, when it is one somewhere else. */
+  /** What the page opens the host the window is on with: the device token for a host somewhere else, and for the
+   * host here its own token, which a page served beyond loopback carries no more than a relayed one does. */
   token(): string | undefined;
   to(alias: string | null): Promise<HostOutcome>;
   connect(ask: HostConnectAsk): Promise<HostOutcome>;
@@ -159,7 +160,7 @@ export function hostSwitcher(deps: SwitcherDeps): HostSwitcher {
       current: current.alias ?? null,
       hosts: listHosts(deps.home).map(h => ({ alias: h.alias, label: h.label ?? h.alias, url: h.url, road: h.road ?? "direct" })),
     }),
-    token: () => current.deviceToken,
+    token: () => (current.remote ? current.deviceToken : hostTokenFor(deps.statePath)),
     async to(alias) {
       try {
         if (alias === null) {
