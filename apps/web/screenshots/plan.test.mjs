@@ -106,7 +106,9 @@ describe("the folder a run leaves", () => {
 describe("the surfaces list this repo ships", () => {
   it("reads, and asks for four files per surface", () => {
     const read = readSurfaces(JSON.parse(readFileSync(join(HERE, "surfaces.json"), "utf8")));
-    expect(read.surfaces.map(s => s.name)).toEqual(["sidebar", "workspace", "composer-thread", "machine", "cloud-setup"]);
+    expect(read.surfaces.map(s => s.name)).toEqual(["sidebar", "workspace", "composer-thread", "machine", "cloud-setup", "spawned-thread", "host-asleep", "settings-where", "add-computer"]);
+    // The one surface shot as a window on another computer, which is the only state the asleep line is drawn in.
+    expect(read.surfaces.filter(s => s.remote).map(s => s.name)).toEqual(["host-asleep"]);
     expect(shotPlan(read)).toHaveLength(read.surfaces.length * 4);
   });
 });

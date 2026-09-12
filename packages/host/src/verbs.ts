@@ -173,6 +173,7 @@ import {
   registerTakesNoConsentLine,
   shellQuote,
   threadOpenedLine,
+  threadWithoutIdRefusal,
   threadWord,
   workspaceForFolder,
   workspaceProjects,
@@ -750,6 +751,20 @@ export function stopLine(stopped: Stopped): string {
   const under = stopped.under ?? [];
   const tree = under.length === 0 ? "" : `, and with it ${under.length} ${under.length === 1 ? "thread" : "threads"} its agents spawned: ${under.map(threadWord).join(", ")}`;
   return `thread ${stopped.threadId} ${STOP_WORDS[stopped.outcome]}${tree}`;
+}
+
+/** Drops the thread from this computer through the runtime, the road the app's row action takes; the runtime
+ * refuses one whose turn ran and nothing on the machine is touched either way. A row from before threads carries
+ * no thread id, so it is refused here in its own words rather than dialled for and answered as a thread nobody has,
+ * which is the guard the app's row action makes before it offers the action at all. */
+export async function forgetThread(client: HostClient, thread: ThreadView): Promise<void> {
+  if (thread.threadId === undefined) throw new Error(threadWithoutIdRefusal(thread.id));
+  await client.request("sessions.forget", { threadId: thread.threadId });
+}
+
+/** The line every director prints for a forget, naming what nobody loses: no turn of the thread did any work. */
+export function threadForgotLine(thread: ThreadView): string {
+  return `forgot thread ${thread.id}: no turn ever ran on it, so nothing of its work is gone`;
 }
 
 /** What a rename came to, as every director prints it: the runtime's five answers, none an error. `error` is the
@@ -2562,6 +2577,33 @@ export const VERBS: readonly Verb[] = [
         await awake(client, await workspaceOf(client, thread.workspaceId), "rename", QUIET_LINE);
         const renamed = await rename(client, thread, title);
         return asText(renameLine(renamed), { ...renamed });
+      },
+    }),
+  },
+  {
+    name: "thread forget",
+    usage: "wsp thread forget <thread>",
+    about: "drops a thread no turn ever ran on, the row a launch that never got going leaves behind; refused once a turn of it did work",
+    options: {},
+    run: async ctx => {
+      const [ref] = ctx.args;
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp thread forget takes one thread.", usageIs(ctx));
+      const client = await ctx.client();
+      const thread = await threadOf(client, ref);
+      await forgetThread(client, thread);
+      ctx.out.emit({ threadId: thread.id, workspaceId: thread.workspaceId }, threadForgotLine(thread));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Drops a thread (by id, or a prefix of it) no turn ever ran on: the row a launch that never got going leaves in threads and in the person's sidebar goes, and nothing is asked of the machine. A launch the agent refused outright, for want of a sign-in, counts as one that ran nothing and goes the same way. Refused in one line once a turn of the thread did work, since that work is written down on it and nowhere else; a whole workspace's threads go with forget or delete on the workspace.",
+      input: { thread: z.string().describe("the thread's id, or a prefix of it that names one, as threads lists them") },
+      output: { threadId: z.string(), workspaceId: z.string() },
+      call: async ({ thread: ref }, deps) => {
+        const client = await deps.client();
+        const thread = await threadOf(client, ref);
+        await forgetThread(client, thread);
+        return asText(threadForgotLine(thread), { threadId: thread.id, workspaceId: thread.workspaceId });
       },
     }),
   },

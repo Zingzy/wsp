@@ -59,6 +59,7 @@ import { ChatImageRow } from "./ChatImages";
 import { useSentImages } from "./composerImages";
 import { PermissionPromptRow } from "./PermissionPromptRow";
 import { ProposedPlanCard } from "./ProposedPlanCard";
+import { TimelineRuleLine } from "./TimelineRuleLine";
 import { ChangedFilesCard } from "./ChangedFilesTree";
 import { shouldAutoExpandChangedFiles } from "./changedFilesPresentation";
 import {
@@ -129,10 +130,12 @@ interface TimelineRowSharedState {
   workGroupViewState: WorkGroupViewState;
 }
 
-/** The machine cannot run the turn right now: what the working row says instead, and the wake to offer, if one applies. */
+/** The workspace cannot run the turn right now: what the working row says instead, the wake to offer where one
+ * applies, and whether the line counts the seconds beside it, which the wake a send started does. */
 export interface MachineWait {
   readonly label: string;
   readonly onWake: (() => void) | null;
+  readonly elapsed: boolean;
 }
 
 interface TimelineRowActivityState {
@@ -1122,16 +1125,19 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
   const { isPreparingWorktree, machineWait } = use(TimelineRowActivityCtx);
   if (machineWait !== null) {
     return (
-      <div className="border-b border-border/60 pb-2 pt-1" data-machine-wait>
-        <div className="flex h-6 min-w-0 items-center gap-3 px-1 text-sm leading-relaxed text-muted-foreground">
-          <span className="shrink-0 whitespace-nowrap">{machineWait.label}</span>
-          {machineWait.onWake !== null ? (
-            <Button size="xs" variant="outline" onClick={machineWait.onWake}>
-              Wake
-            </Button>
-          ) : null}
-        </div>
-      </div>
+      <TimelineRuleLine data-machine-wait className="my-1" line={machineWait.label}>
+        {machineWait.elapsed && row.createdAt !== null ? (
+          <>
+            <span aria-hidden>·</span>
+            <WorkingTimer createdAt={row.createdAt} />
+          </>
+        ) : null}
+        {machineWait.onWake !== null ? (
+          <Button size="xs" variant="outline" onClick={machineWait.onWake}>
+            Wake
+          </Button>
+        ) : null}
+      </TimelineRuleLine>
     );
   }
   return (

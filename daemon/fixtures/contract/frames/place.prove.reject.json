@@ -1,0 +1,294 @@
+[
+  {
+    "id": 2,
+    "op": "place.prove",
+    "report": {
+      "name": "studio",
+      "platform": "darwin",
+      "arch": "arm64",
+      "os": "macOS 15.6",
+      "shape": {
+        "cpu": 8,
+        "memMb": 16384
+      },
+      "diskFreeBytes": 123456789,
+      "login": {
+        "HOME": "/Users/me",
+        "USER": "me",
+        "PATH": "/usr/bin"
+      },
+      "docker": true,
+      "daemonVersion": 17,
+      "daemonPort": 51234,
+      "wsp": [
+        "node",
+        "/Users/me/wsp/dist/bin.js"
+      ],
+      "dialed": "http://192.168.1.20:7080",
+      "agents": [
+        "one",
+        "two"
+      ]
+    }
+  },
+  {
+    "id": 2,
+    "op": "place.prove",
+    "signature": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+    "report": {
+      "name": "studio",
+      "platform": "darwin",
+      "arch": "arm64",
+      "os": "macOS 15.6",
+      "shape": {
+        "cpu": 8,
+        "memMb": 16384
+      },
+      "diskFreeBytes": 123456789,
+      "login": {
+        "HOME": "/Users/me",
+        "USER": "me",
+        "PATH": "/usr/bin"
+      },
+      "docker": true,
+      "daemonVersion": 17,
+      "daemonPort": 51234,
+      "wsp": [
+        "node",
+        "/Users/me/wsp/dist/bin.js"
+      ],
+      "dialed": "http://192.168.1.20:7080",
+      "agents": [
+        "one",
+        "two"
+      ]
+    }
+  },
+  {
+    "id": 2,
+    "op": "place.prove",
+    "signature": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC==",
+    "report": {
+      "name": "",
+      "platform": "darwin",
+      "arch": "arm64",
+      "os": "macOS 15.6",
+      "shape": {
+        "cpu": 8,
+        "memMb": 16384
+      },
+      "diskFreeBytes": 123456789,
+      "login": {
+        "HOME": "/Users/me",
+        "USER": "me",
+        "PATH": "/usr/bin"
+      },
+      "docker": true,
+      "daemonVersion": 17,
+      "daemonPort": 51234,
+      "wsp": [
+        "node",
+        "/Users/me/wsp/dist/bin.js"
+      ],
+      "dialed": "http://192.168.1.20:7080",
+      "agents": [
+        "one",
+        "two"
+      ]
+    }
+  },
+  {
+    "id": 2,
+    "op": "place.prove",
+    "signature": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC==",
+    "report": {
+      "name": "studio",
+      "platform": "windows",
+      "arch": "arm64",
+      "os": "macOS 15.6",
+      "shape": {
+        "cpu": 8,
+        "memMb": 16384
+      },
+      "diskFreeBytes": 123456789,
+      "login": {
+        "HOME": "/Users/me",
+        "USER": "me",
+        "PATH": "/usr/bin"
+      },
+      "docker": true,
+      "daemonVersion": 17,
+      "daemonPort": 51234,
+      "wsp": [
+        "node",
+        "/Users/me/wsp/dist/bin.js"
+      ],
+      "dialed": "http://192.168.1.20:7080",
+      "agents": [
+        "one",
+        "two"
+      ]
+    }
+  },
+  {
+    "id": 2,
+    "op": "place.prove",
+    "signature": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC==",
+    "report": {
+      "name": "studio",
+      "platform": "darwin",
+      "arch": "arm64",
+      "os": "macOS 15.6",
+      "shape": {
+        "cpu": 8,
+        "memMb": 16384
+      },
+      "diskFreeBytes": 123456789,
+      "login": {
+        "HOME": "/Users/me",
+        "USER": "me",
+        "PATH": "/usr/bin"
+      },
+      "docker": true,
+      "daemonVersion": 17,
+      "daemonPort": 51234,
+      "wsp": [],
+      "dialed": "http://192.168.1.20:7080",
+      "agents": [
+        "one",
+        "two"
+      ]
+    }
+  },
+  {
+    "id": 2,
+    "op": "place.prove",
+    "signature": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC==",
+    "report": {
+      "name": "studio",
+      "platform": "darwin",
+      "arch": "arm64",
+      "os": "macOS 15.6",
+      "shape": {
+        "cpu": 8,
+        "memMb": 16384
+      },
+      "diskFreeBytes": 123456789,
+      "login": {
+        "HOME": "/Users/me",
+        "USER": "me",
+        "PATH": "/usr/bin"
+      },
+      "docker": true,
+      "daemonVersion": 17,
+      "daemonPort": 51234,
+      "wsp": [
+        "node",
+        "/Users/me/wsp/dist/bin.js"
+      ],
+      "dialed": "ftp://x",
+      "agents": [
+        "one",
+        "two"
+      ]
+    }
+  },
+  {
+    "id": 2,
+    "op": "place.prove",
+    "signature": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC==",
+    "report": {
+      "name": "studio",
+      "platform": "darwin",
+      "arch": "arm64",
+      "os": "macOS 15.6",
+      "shape": {
+        "cpu": 8,
+        "memMb": 16384
+      },
+      "diskFreeBytes": 123456789,
+      "login": {
+        "HOME": "/Users/me",
+        "USER": "me",
+        "PATH": "/usr/bin"
+      },
+      "docker": true,
+      "daemonVersion": 17,
+      "daemonPort": 70000,
+      "wsp": [
+        "node",
+        "/Users/me/wsp/dist/bin.js"
+      ],
+      "dialed": "http://192.168.1.20:7080",
+      "agents": [
+        "one",
+        "two"
+      ]
+    }
+  },
+  {
+    "id": 2,
+    "op": "place.prove",
+    "signature": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC==",
+    "report": {
+      "name": "studio",
+      "platform": "darwin",
+      "arch": "arm64",
+      "os": "macOS 15.6",
+      "shape": {
+        "cpu": 8,
+        "memMb": 16384
+      },
+      "diskFreeBytes": 123456789,
+      "login": {
+        "HOME": "/Users/me",
+        "USER": "me",
+        "PATH": "/usr/bin"
+      },
+      "docker": true,
+      "daemonVersion": 17,
+      "daemonPort": 51234,
+      "wsp": [
+        "node",
+        "/Users/me/wsp/dist/bin.js"
+      ],
+      "dialed": "http://192.168.1.20:7080",
+      "agents": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ]
+    }
+  },
+  {
+    "id": 2,
+    "op": "place.prove",
+    "signature": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC==",
+    "report": {
+      "name": "studio",
+      "platform": "darwin",
+      "arch": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "os": "macOS 15.6",
+      "shape": {
+        "cpu": 8,
+        "memMb": 16384
+      },
+      "diskFreeBytes": 123456789,
+      "login": {
+        "HOME": "/Users/me",
+        "USER": "me",
+        "PATH": "/usr/bin"
+      },
+      "docker": true,
+      "daemonVersion": 17,
+      "daemonPort": 51234,
+      "wsp": [
+        "node",
+        "/Users/me/wsp/dist/bin.js"
+      ],
+      "dialed": "http://192.168.1.20:7080",
+      "agents": [
+        "one",
+        "two"
+      ]
+    }
+  }
+]

@@ -1,0 +1,26 @@
+[
+  {
+    "type": "proc.snapshot",
+    "at": 1,
+    "daemon": 1200,
+    "total": 1
+  },
+  {
+    "type": "proc.snapshot",
+    "at": 1,
+    "daemon": 1200,
+    "total": 1,
+    "procs": [
+      {
+        "pid": 1
+      }
+    ]
+  },
+  {
+    "type": "proc.snapshot",
+    "at": 1,
+    "daemon": 1.5,
+    "total": 1,
+    "procs": []
+  }
+]

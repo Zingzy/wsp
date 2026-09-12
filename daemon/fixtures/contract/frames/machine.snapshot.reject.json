@@ -1,0 +1,17 @@
+[
+  {
+    "id": 1,
+    "op": "machine.snapshot",
+    "machineId": "m1",
+    "name": "snap"
+  },
+  {
+    "id": 1,
+    "op": "machine.snapshot",
+    "machineId": "m1",
+    "name": "snap",
+    "life": {
+      "firstLife": "yes"
+    }
+  }
+]
