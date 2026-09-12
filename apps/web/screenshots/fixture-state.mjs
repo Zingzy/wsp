@@ -10,23 +10,54 @@
 // real folder, and the copies are served by the provider that answers out of
 // memory, so no fixture dials anything.
 //
-// Every folder a fixture names sits under this computer's own home, and a
-// workspace of the local kind is named the way wsp names one here. A tester
-// given somebody else's home and somebody else's threads spent their first
-// minute working out whose Mac they were on.
+// Every folder a fixture names sits under the home the host serving it runs
+// in, and a workspace of the local kind is named the way wsp names one here. A
+// tester given somebody else's home and somebody else's threads spent their
+// first minute working out whose Mac they were on, and a project folder under
+// the person's own home put a tester's turn inside the person's real
+// repository.
+import { createHash } from "node:crypto";
 import { homedir, hostname } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
-/** This computer, as the app would show it to the person sitting at it: their own home, and the name wsp gives a
- * workspace of the local kind, which is this computer's host name. */
-const HOME = homedir();
+/** The name wsp gives a workspace of the local kind, which is this computer's host name. */
 const THIS_COMPUTER = hostname();
+
+/** The home every folder in a fixture hangs off: the home the host serving it runs under, which for a lab is the
+ * lab's own and for the screenshot run is this computer's. A turn starts in the one project its workspace has, so
+ * a project folder under the person's own home is a tester's agent running inside the person's real repository,
+ * with their project MCP servers, their instruction file and their files to edit (measured 2026-09-12). Set once
+ * per build below and read by every helper here, since every path in a fixture hangs off the same home. */
+let HOME = homedir();
+
+/** The folder a workspace's projects are imported into, the way wsp imports one: under the work folder of the home
+ * the host runs in, never beside the person's own checkouts. */
+const projectDest = name => join(HOME, "wsp-work", name);
 
 /** Every stamp hangs off the hour this run started in rather than a date written here: the app words a
  * thread's time as a distance from now, and a fixed date would drift into the future and read "now" on
  * every row. Rounded to the hour so two runs in one hour are byte for byte the same. */
 const AT = Math.floor(Date.now() / 3_600_000) * 3_600_000;
 const ago = minutes => AT - minutes * 60_000;
+
+/** A UUID for a fixture's own word, the same one every run: the harness refuses a session id that is not a UUID
+ * (`packages/adapter-claude/src/landmines.ts`), so a seeded thread sent into answered with that refusal and a
+ * tester read it as the product losing their message. Minted from the word rather than at random so two runs of
+ * one fixture are byte for byte the same file. */
+const uuidFor = word => {
+  const h = createHash("sha1").update(`wsp-fixture:${word}`).digest();
+  h[6] = (h[6] & 0x0f) | 0x40;
+  h[8] = (h[8] & 0x3f) | 0x80;
+  const hex = h.subarray(0, 16).toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+};
+
+/** The three ids one seeded turn wears, each a UUID and each the same one wherever the fixture names that thread:
+ * the sessions, the transcript's events and a spawned thread's parent all read them through here, so one table
+ * of ids cannot drift into two shapes. */
+export const sessionId = name => uuidFor(`session:${name}`);
+export const threadId = name => uuidFor(`thread:${name}`);
+const turnId = name => uuidFor(`turn:${name}`);
 
 const workspace = (id, name, extra = {}) => ({
   id,
@@ -41,36 +72,36 @@ const workspace = (id, name, extra = {}) => ({
   ...extra,
 });
 
-const project = (name, size, minutes) => ({ name, dest: join(HOME, name), importedAt: new Date(ago(minutes)).toISOString(), size });
+const project = (name, size, minutes) => ({ name, dest: projectDest(name), importedAt: new Date(ago(minutes)).toISOString(), size });
 
 const turn = (thread, minutes, workspaceId = "ws_api") => ({
-  id: `s_${thread.id}`,
+  id: sessionId(thread.id),
   workspaceId,
   harness: "claude",
   status: "completed",
   startedBy: thread.startedBy ?? "person",
-  threadId: `th_${thread.id}`,
-  turnId: `turn_${thread.id}`,
+  threadId: threadId(thread.id),
+  turnId: turnId(thread.id),
   prompt: thread.prompt,
   harnessTitle: thread.title,
   titleSource: "harness",
   startedAt: ago(minutes),
   endedAt: ago(minutes - 3),
-  cwd: thread.cwd ?? join(HOME, "spoo"),
+  cwd: thread.cwd ?? projectDest("spoo"),
   model: "opus",
   permissionMode: "default",
   // What the turn on this row cost, as the runtime stamps it: a thread's opener reads its own figure beside what
   // the threads it opened spent, and a row without one would leave that second figure unsaid.
   costUsd: thread.costUsd,
-  ...(thread.parent === undefined ? {} : { parentThreadId: `th_${thread.parent}`, rootThreadId: `th_${thread.root}` }),
+  ...(thread.parent === undefined ? {} : { parentThreadId: threadId(thread.parent), rootThreadId: threadId(thread.root) }),
 });
 
-const event = (thread, rest, workspaceId = "ws_api") => ({ workspaceId, sessionId: `s_${thread.id}`, threadId: `th_${thread.id}`, turnId: `turn_${thread.id}`, ...rest });
+const event = (thread, rest, workspaceId = "ws_api") => ({ workspaceId, sessionId: sessionId(thread.id), threadId: threadId(thread.id), turnId: turnId(thread.id), ...rest });
 
 /** A whole turn as the transcript holds it: the person's words, a thought, one tool call and its result,
  * the reply, and the two events that close it. */
 const replay = (thread, minutes, workspaceId = "ws_api") => [
-  event(thread, { type: "session.start", at: ago(minutes), prompt: thread.prompt, model: "opus", cwd: thread.cwd ?? join(HOME, "spoo"), ...(thread.harness === undefined ? {} : { harness: thread.harness }) }, workspaceId),
+  event(thread, { type: "session.start", at: ago(minutes), prompt: thread.prompt, model: "opus", cwd: thread.cwd ?? projectDest("spoo"), ...(thread.harness === undefined ? {} : { harness: thread.harness }) }, workspaceId),
   event(thread, { type: "session.delta", at: ago(minutes - 1), kind: "thinking", text: thread.thought }, workspaceId),
   event(thread, { type: "session.delta", at: ago(minutes - 1), kind: "tool_use", toolName: thread.tool.name, toolUseId: `tu_${thread.id}`, text: thread.tool.input }, workspaceId),
   event(thread, { type: "session.delta", at: ago(minutes - 2), kind: "tool_result", toolName: thread.tool.name, toolUseId: `tu_${thread.id}`, text: thread.tool.result }, workspaceId),
@@ -163,16 +194,6 @@ const sealed = () => ({
   },
 });
 
-/** A computer that redeemed a pairing code. Only the digest of a token is ever kept, so a fixture carries a digest
- * of nothing: no token exists that hashes to it. */
-const device = (id, name, minutes) => ({
-  id,
-  name,
-  tokenHash: `no-token-hashes-to-this-${id}`,
-  createdAt: new Date(ago(60 * 30)).toISOString(),
-  lastSeenAt: new Date(ago(minutes)).toISOString(),
-});
-
 /** A thread an agent inside another thread opened: the same shape as a person's, with the tree it hangs in. */
 const spawned = (id, of, parent, root) => ({ ...of, id, parent, root, startedBy: "agent" });
 
@@ -210,12 +231,12 @@ const MIGRATION = {
 
 /** One store as the JSON file holds it: one object per collection, keyed the way the runtime keys it. Every
  * fixture below builds one. */
-const store = ({ workspaces, sessions = {}, transcripts = {}, goldens, devices, images, places }) => ({
+const store = ({ workspaces, sessions = {}, transcripts = {}, goldens, images, places, meters }) => ({
   workspaces: Object.fromEntries(workspaces.map(w => [w.id, w])),
   sessions,
   transcripts,
   ...(goldens !== undefined ? { goldens } : {}),
-  ...(devices !== undefined ? { devices } : {}),
+  ...(meters === undefined ? {} : { "cost-histories": meters }),
   ...(images !== undefined ? { images } : {}),
   ...(places === undefined
     ? {}
@@ -229,7 +250,7 @@ const store = ({ workspaces, sessions = {}, transcripts = {}, goldens, devices, 
 /** A workspace standing on a joined computer: the machine id the engine gives one, so the settings table counts it
  * against that computer's row. Every path a turn there runs under is built from the login it reported, so a record
  * without one is a record no join wrote and the runtime refuses it at startup. */
-const onPlace = (id, name, placeId, size) => ({
+const onPlace = (id, name, placeId, size, login = { HOME: "/root", USER: "root", PATH: "/usr/local/bin:/usr/bin:/bin" }) => ({
   id,
   name,
   machineId: `place:${placeId}`,
@@ -237,9 +258,9 @@ const onPlace = (id, name, placeId, size) => ({
   kind: "place",
   golden: "",
   createdAt: new Date(ago(60 * 20)).toISOString(),
-  home: "/root",
-  folder: "/root",
-  login: { HOME: "/root", USER: "root", PATH: "/usr/local/bin:/usr/bin:/bin" },
+  home: login.HOME,
+  folder: login.HOME,
+  login,
   size,
   shape: size,
 });
@@ -288,6 +309,32 @@ const merge = (...parts) => ({
 
 const API_THREADS = () => threadsOn("ws_api", [[CHART, 300], [REDIRECT, 45]]);
 
+/** The meter one workspace opens with, as the host's own cost history holds it: the stretch it has been awake and
+ * what that came to at its rate. Without one every fork in a fixture reads $0.0000 accrued beside a rate per hour,
+ * since the meter starts at the tick after the host came up, and five testers asked what the number was for. The
+ * last point is minutes old and running, so the host carries the line on from there rather than starting again. */
+const meter = (workspaceId, { rateUsdPerHour, hours, phase = "running" }) => [
+  workspaceId,
+  {
+    workspaceId,
+    points: [
+      {
+        type: "workspace.cost",
+        workspaceId,
+        phase,
+        rateUsdPerHour: phase === "running" ? rateUsdPerHour : 0,
+        awakeMs: hours * 3_600_000,
+        accruedUsd: Number((rateUsdPerHour * hours).toFixed(4)),
+        at: new Date(ago(2)).toISOString(),
+      },
+    ],
+  },
+];
+
+/** What the stand-in charges for the shape every fork in a fixture takes, as its own table prices it
+ * (`packages/engine/src/fake-backend.ts`): four cores and 8 GB. */
+const FORK_RATE = 0.16;
+
 /** This computer after a while of use: three workspaces of the local kind, folders imported into two of them,
  * threads on one, and no image sealed, so the cloud setup button stands in the sidebar's foot. What the screenshot
  * run photographs, since a surface with nothing on it shows a reviewer nothing. */
@@ -313,39 +360,58 @@ const macInUse = () =>
  * what differs is what they try to do in it. */
 const thisComputer = () => store({ workspaces: [workspace("ws_here", THIS_COMPUTER)] });
 
-/** This computer and an old laptop that redeemed a pairing code: a second workspace of the local kind, its own
- * home, and the paired computer in the devices collection. */
+/** This computer and an old laptop the person joined: a workspace standing on that computer, and the laptop itself
+ * in the places collection with the shape it reported, four cores and 8 GB. It was a workspace of the local kind
+ * until a tester met his own ThinkPad claiming this Mac's ten cores and a folder on this Mac: a joined computer is
+ * a place, and a local workspace is this computer alone. No thread on either, since nothing has been run here yet. */
 const macAndLaptop = () =>
   store({
     workspaces: [
       workspace("ws_api", "api", { projects: [project("spoo", 48_200_000, 60 * 20)] }),
       workspace("ws_web", "web", { projects: [project("landing", 9_400_000, 60 * 9)] }),
-      workspace("ws_laptop", "old-laptop", { home: "/home/dev", folder: "/home/dev", createdAt: new Date(ago(60 * 30)).toISOString() }),
+      onPlace("ws_laptop", "old-laptop", "p_oldlaptop", { cpu: 4, memMb: 8192 }, { HOME: "/home/dev", USER: "dev", PATH: "/usr/local/bin:/usr/bin:/bin" }),
     ],
-    ...API_THREADS(),
-    devices: { dev_laptop: device("dev_laptop", "old-laptop", 12) },
+    places: {
+      p_oldlaptop: place(
+        "p_oldlaptop",
+        "old-laptop",
+        12,
+        { platform: "linux", os: "Ubuntu 24.04", shape: { cpu: 4, memMb: 8192 }, diskFreeBytes: 61 * 1024 ** 3, login: { HOME: "/home/dev", USER: "dev", PATH: "/usr/bin" }, wsp: ["/home/dev/.wsp/bin/wsp"] },
+        "ws_laptop",
+      ),
+    },
   });
 
-/** This computer and a server of the person's own running Docker, with one fork made there. */
+/** This computer and a server of the person's own running Docker: the server is a place, and the workspace on it
+ * stands there rather than at a provider. A fork at a cloud named "vps-build" was read as a rented machine wearing
+ * the word for her own box. */
 const macAndVps = () =>
   store({
     workspaces: [
       workspace("ws_api", "api", { projects: [project("spoo", 48_200_000, 60 * 20)] }),
-      fork("ws_build", "vps-build", "fk_vps_1", { projects: [project("wsp", 133_000_000, 60 * 3)] }),
+      onPlace("ws_build", "build", "p_vps", { cpu: 2, memMb: 4096 }),
     ],
-    ...API_THREADS(),
-    goldens: sealed(),
+    places: {
+      p_vps: place(
+        "p_vps",
+        "vps",
+        2,
+        { platform: "linux", os: "Debian GNU/Linux 12", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 44 * 1024 ** 3, docker: true, login: { HOME: "/root", USER: "root", PATH: "/usr/bin" }, wsp: ["/root/.wsp/bin/wsp"] },
+        "ws_build",
+      ),
+    },
   });
 
-/** Forks on Box by ASCII and nothing else: no workspace on this computer at all. */
+/** Forks on Box by ASCII and nothing else: no workspace on this computer at all, and no thread on either fork,
+ * since this person has run nothing yet. */
 const asciiOnly = () =>
   store({
     workspaces: [
       fork("ws_api", "api", "fk_ascii_1", { projects: [project("spoo", 48_200_000, 60 * 20)] }),
       fork("ws_web", "web", "fk_ascii_2", { projects: [project("landing", 9_400_000, 60 * 9)] }),
     ],
-    ...API_THREADS(),
     goldens: sealed(),
+    meters: Object.fromEntries([meter("ws_api", { rateUsdPerHour: FORK_RATE, hours: 8 }), meter("ws_web", { rateUsdPerHour: FORK_RATE, hours: 6 })]),
   });
 
 /** Forks on Solari and nothing else, one of them napping, which is where most of a fleet sits. */
@@ -355,20 +421,22 @@ const solariOnly = () =>
       fork("ws_api", "api", "fk_slr_1", { projects: [project("spoo", 48_200_000, 60 * 20)] }),
       fork("ws_web", "web", "fk_slr_2.paused", { phase: "napping", vaultedAt: new Date(ago(90)).toISOString() }),
     ],
-    ...API_THREADS(),
     goldens: sealed(),
+    meters: Object.fromEntries([meter("ws_api", { rateUsdPerHour: FORK_RATE, hours: 8 }), meter("ws_web", { rateUsdPerHour: FORK_RATE, hours: 3, phase: "napping" })]),
   });
 
-/** Machines in both clouds and one on this computer: the sidebar a person who moved between providers has. */
+/** Machines at a cloud and one on this computer: the sidebar a person who has moved between providers has. Both
+ * forks wear the cloud this host is wired to, because a host forks at one provider and every row reads that one
+ * word; a record that names its own provider is what a second cloud in one sidebar waits on. */
 const bothProviders = () =>
   store({
     workspaces: [
       workspace("ws_here", THIS_COMPUTER, { projects: [project("wsp", 133_000_000, 60 * 5)] }),
-      fork("ws_api", "api", "fk_ascii_1", { projects: [project("spoo", 48_200_000, 60 * 20)] }),
+      fork("ws_api", "api", "fk_slr_1", { projects: [project("spoo", 48_200_000, 60 * 20)] }),
       fork("ws_web", "web", "fk_slr_2.paused", { phase: "napping" }),
     ],
-    ...API_THREADS(),
     goldens: sealed(),
+    meters: Object.fromEntries([meter("ws_api", { rateUsdPerHour: FORK_RATE, hours: 8 }), meter("ws_web", { rateUsdPerHour: FORK_RATE, hours: 4, phase: "napping" })]),
   });
 
 /** The hash the record and every copy built from it carry; a copy built from an older record carries the other one,
@@ -433,11 +501,23 @@ const copyAt = (place, minutes, extra = {}) => [
   },
 ];
 
+/** The third child's thread. The root's reply says a thread stands on each of the three machines, and the docs one
+ * had none: a tester counted the rows, found two, and read the reply as the product lying to him. */
+const DOCS_READ = {
+  id: "docs-move",
+  prompt: "check what the docs site does with the old queue",
+  title: "Docs only read from the queue",
+  thought: "If the docs never publish, there is nothing to move here and the machine can go back to sleep.",
+  tool: { name: "Grep", input: '{"pattern":"queue","path":"apps/docs"}', result: "apps/docs/src/status.mdx:14" },
+  reply: "The docs only read the queue's status page, so there is nothing to move. I have left the page as it is and stopped.",
+  costUsd: 0.09,
+};
+
 /** A person who drives agents with agents: this computer with spawning on, three forks a root thread made, and a
  * thread on each hanging under that root. */
 const orchestrator = () => {
   const root = { ...MIGRATE };
-  const tree = { parentThreadId: "th_migrate", rootThreadId: "th_migrate" };
+  const tree = { parentThreadId: threadId("migrate"), rootThreadId: threadId("migrate") };
   return store({
     workspaces: [
       workspace("ws_here", THIS_COMPUTER, { agents: { spawn: true, maxMachines: 3, maxDepth: 1 }, projects: [project("wsp", 133_000_000, 60 * 5)] }),
@@ -449,8 +529,14 @@ const orchestrator = () => {
       threadsOn("ws_here", [[root, 120]]),
       threadsOn("ws_api", [[spawned("api-move", REDIRECT, "migrate", "migrate"), 100]]),
       threadsOn("ws_web", [[spawned("web-move", CHART, "migrate", "migrate"), 90]]),
+      threadsOn("ws_docs", [[spawned("docs-move", DOCS_READ, "migrate", "migrate"), 85]]),
     ),
     goldens: sealed(),
+    meters: Object.fromEntries([
+      meter("ws_api", { rateUsdPerHour: FORK_RATE, hours: 2 }),
+      meter("ws_web", { rateUsdPerHour: FORK_RATE, hours: 2 }),
+      meter("ws_docs", { rateUsdPerHour: FORK_RATE, hours: 1, phase: "napping" }),
+    ]),
   });
 };
 
@@ -476,33 +562,53 @@ const imageBuilt = () =>
       workspace("ws_api", "api", { projects: [project("spoo", 48_200_000, 60 * 20)] }),
       workspace("ws_web", "web", { projects: [project("landing", 9_400_000, 60 * 9)] }),
     ],
-    ...API_THREADS(),
     goldens: Object.fromEntries([copyAt("hetzner", 90), copyAt("ascii", 60, { imageHash: OLDER_HASH })]),
     images: imageRecord(),
   });
 
-/** Every setup a lab can serve, by the word `--fixture` takes. One row per kind of person: adding one is a row
- * here and its builder above. */
+/** Every setup a lab can serve, by the word `--fixture` takes. One row per kind of person: what builds its store,
+ * and the cloud its machines are meant to be at, which the stand-in provider then wears as its own word. Without
+ * that word every fork in a fixture reads "fake" on the row where a person reads which cloud they are paying.
+ * Adding a fixture is a row here and its builder above. */
 const FIXTURES = {
-  "mac-in-use": macInUse,
-  "mac-only": thisComputer,
-  "mac-and-laptop": macAndLaptop,
-  "mac-and-vps": macAndVps,
-  "ascii-only": asciiOnly,
-  "solari-only": solariOnly,
-  "both-providers": bothProviders,
-  "no-sign-in": thisComputer,
-  "mac-and-boxes": macAndBoxes,
-  orchestrator,
-  "image-built": imageBuilt,
+  "mac-in-use": { build: macInUse },
+  "mac-only": { build: thisComputer },
+  "mac-and-laptop": { build: macAndLaptop },
+  "mac-and-vps": { build: macAndVps },
+  "ascii-only": { build: asciiOnly, cloud: "box" },
+  "solari-only": { build: solariOnly, cloud: "solari" },
+  "both-providers": { build: bothProviders, cloud: "solari" },
+  "no-sign-in": { build: thisComputer },
+  "mac-and-boxes": { build: macAndBoxes },
+  orchestrator: { build: orchestrator, cloud: "box" },
+  "image-built": { build: imageBuilt },
 };
 
 export const FIXTURE_NAMES = Object.keys(FIXTURES);
 
-/** The whole store one fixture serves. The default is this computer with work on it, which is what the screenshot
- * run photographs. */
-export function fixtureState(name = "mac-in-use") {
-  const build = FIXTURES[name];
-  if (build === undefined) throw new Error(`no fixture is called ${name}; there is ${FIXTURE_NAMES.join(", ")}`);
-  return build();
+const fixtureRow = name => {
+  const row = FIXTURES[name];
+  if (row === undefined) throw new Error(`no fixture is called ${name}; there is ${FIXTURE_NAMES.join(", ")}`);
+  return row;
+};
+
+/** The whole store one fixture serves, with every folder in it under the home the host will run in: a lab passes
+ * its own, so nothing a tester's agent opens is the person's. The default is this computer's home, which is what
+ * the screenshot run photographs; a lab that took it would put a tester's turn in the person's own repository. */
+export function fixtureState(name = "mac-in-use", { home = homedir() } = {}) {
+  HOME = resolve(home);
+  return fixtureRow(name).build();
+}
+
+/** Every folder a fixture expects to exist, so whoever serves it can make them: the projects imported into its
+ * workspaces, which is where a turn on one of them starts. */
+export function fixtureFolders(state) {
+  return Object.values(state.workspaces ?? {}).flatMap(w => (w.projects ?? []).map(p => p.dest));
+}
+
+/** The cloud a fixture's machines are meant to be at, by the id that provider's own module carries; nothing for a
+ * fixture with no cloud machine in it. The host serves every fork through the stand-in whichever this says, and
+ * the word only decides what the rows call the place those machines live. */
+export function fixtureCloud(name = "mac-in-use") {
+  return fixtureRow(name).cloud;
 }
