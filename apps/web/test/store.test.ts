@@ -2,7 +2,7 @@
 // The store's session folding: rows come from the sessions.list op, the
 // session.* events decide when to refetch and what to patch in between.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLOUD_SETUP_WORDS, DEFAULT_THEME, type GoldenManifest, type InitJob, type PlaceView, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, DEFAULT_THEME, HOSTNAME_KEPT, type GoldenManifest, type InitJob, type PlaceView, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api, type ProtocolEvent } from "../src/protocol/client.js";
 import { LAST_WORKSPACE_KEY } from "../src/protocol/lastWorkspace.js";
 import { useStore } from "../src/protocol/store.js";
@@ -260,7 +260,7 @@ describe("store creations", () => {
     workspaceId: "ws_new",
     name: "beta",
     stage: "fork-requested",
-    message: "Fork of the golden image requested.",
+    message: "starting beta on ascii",
     elapsedMs: 0,
     ...over,
   });
@@ -322,11 +322,15 @@ describe("store creations", () => {
 
     emit(stage());
     emit(stage({ stage: "machine-booting", message: "Machine m1 is booting.", elapsedMs: 1_500, notice: "Stopped the builder kept from golden v1 to make room at the machine cap." }));
+    // What the machine answered a step with rides the line as its own field: it is written on the line's title and
+    // never drawn as a second sentence, so it cannot be confused with a notice.
+    emit(stage({ stage: "hostname-set", message: HOSTNAME_KEPT, elapsedMs: 2_100, detail: "hostname beta on m1 failed: hostname: sethostname: Operation not permitted" }));
     const logged = useStore.getState().creations[0]!;
     expect(logged.workspaceId).toBe("ws_new");
-    expect(logged.lines.map(l => [l.stage, l.message, l.elapsedMs, l.notice])).toEqual([
-      ["fork-requested", "Fork of the golden image requested.", 0, undefined],
-      ["machine-booting", "Machine m1 is booting.", 1_500, "Stopped the builder kept from golden v1 to make room at the machine cap."],
+    expect(logged.lines.map(l => [l.stage, l.message, l.elapsedMs, l.notice, l.detail])).toEqual([
+      ["fork-requested", "starting beta on ascii", 0, undefined, undefined],
+      ["machine-booting", "Machine m1 is booting.", 1_500, "Stopped the builder kept from golden v1 to make room at the machine cap.", undefined],
+      ["hostname-set", HOSTNAME_KEPT, 2_100, undefined, "hostname beta on m1 failed: hostname: sethostname: Operation not permitted"],
     ]);
     expect(logged.lines.every(l => !Number.isNaN(Date.parse(l.at)))).toBe(true);
 

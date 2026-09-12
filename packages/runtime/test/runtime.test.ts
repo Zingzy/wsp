@@ -13,7 +13,7 @@ import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
 import { harnessCatalog } from "../src/harness-catalog.js";
-import { copyKey, CATALOG_TTL_MS, DAEMON_REVIVE_AGAIN_MS, GRACE_MS, GUEST_LOGIN_ENV, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type GoldenExec, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions } from "../src/runtime.js";
+import { copyKey, CATALOG_TTL_MS, DAEMON_REVIVE_AGAIN_MS, GRACE_MS, GUEST_LOGIN_ENV, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, wiredPlace, type GoldenExec, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions } from "../src/runtime.js";
 import { POLL_INTERVAL_MS } from "../src/status.js";
 import { machineExecStream } from "../src/machine-exec.js";
 import { serveRuntime } from "../src/serve.js";
@@ -3391,7 +3391,7 @@ describe("runtime create stages", () => {
       const stages = creating(events);
       expect(stages.map(e => e.stage)).toEqual(["fork-requested", "machine-booting", "hostname-set", "preview-route", "daemon-answering", "ready"]);
       expect(stages.map(e => e.message)).toEqual([
-        "Fork of the golden image requested.",
+        "starting task-1 on default",
         "Machine m1 is booting.",
         "Hostname set to task-1.",
         "Preview route to the daemon minted.",
@@ -3405,6 +3405,28 @@ describe("runtime create stages", () => {
       const ready = events.findIndex(e => e.type === "workspace.creating" && e.stage === "ready");
       expect(events.findIndex(e => e.type === "workspace.created")).toBe(ready + 1);
     });
+  });
+
+  it("a guest that refuses the hostname gets a verdict in the log, its own words on the line alone, and the create goes on", async () => {
+    const backend = stubBackend();
+    // The refusal a Linux guest's hostname step answers with where the kernel will not have it.
+    backend.execImpl = (m, cmd) => (cmd.startsWith("hostname ") ? { exitCode: 1, stdout: "", stderr: "hostname: sethostname: Operation not permitted\n" } : tokenGuest(m, cmd));
+    const rt = createRuntime({ backend, places: wiredPlace("ascii", backend), store: memoryStore(), adapters: {} });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "clone-test" });
+    warn.mockRestore();
+    const stages = creating(events);
+    expect(stages[0]!.message).toBe("starting clone-test on ascii");
+    const named = stages.find(e => e.stage === "hostname-set")!;
+    expect(named.message).toBe("hostname not set; the workspace keeps the machine's own name");
+    // The guest's own words are evidence on the line's title, never a second sentence at a person, and never a
+    // notice, which every surface draws as a line of its own.
+    expect(named.detail).toBe("hostname clone-test on m1 failed: hostname: sethostname: Operation not permitted");
+    expect(named).not.toHaveProperty("notice");
+    for (const e of stages) expect(e.message).not.toContain("sethostname");
+    expect((await rt.workspaces.get(ws.id)).name).toBe("clone-test");
   });
 
   it("a fork whose daemon never answers still becomes a workspace: the stage says so, with the backend's daemon budget in the fault", async () => {
@@ -3750,7 +3772,7 @@ describe("runtime verified wake", () => {
     }
   });
 
-  it("every nap replaces the stashed vault; one over the cap is refused with a warning, the previous stays, the napping status says so once and the record keeps saying it", async () => {
+  it("every nap replaces the stashed vault; one over the cap is refused with a warning, the previous stays, the record keeps saying it and no status line carries the reason", async () => {
     const { backend, tars, setTgzBytes } = guestBackend();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
@@ -3783,8 +3805,10 @@ describe("runtime verified wake", () => {
       expect(await store.getBlob("vaults", ws.id)).toEqual(Buffer.from("tarbytes"));
       expect(vaultWarnings()).toEqual([`nap vault for ${ws.id} not stored, previous kept: the export was 6 KB, over the 5 KB cap`]);
       expect((await rt.workspaces.get(ws.id)).phase).toBe("napping");
-      expect(napReason()).toBe("the nap kept what was saved before it; the export was 6 KB, over the 5 KB cap");
-      // The status says it once; the record says it until a nap stores one, which is what the row and the tab read.
+      // No status line for it at all: the record says it until a nap stores one, and the pane's own backup line is
+      // where a person reads the verdict. A status reason would have taken the row's third line from the spend.
+      expect(napReason()).toBeUndefined();
+      // The record says it until a nap stores one, which is what the row and the tab read.
       const refused = await rt.workspaces.get(ws.id);
       expect(refused.vaultRefused).toBe("the export was 6 KB, over the 5 KB cap");
       expect(refused.vaultedAt).toBe(stored);
@@ -4077,7 +4101,7 @@ describe("nap vault against the stub backend", () => {
     }
   });
 
-  it("warns once, keeps the previous vault and says so on the napping status when the download URL cannot be fetched", async () => {
+  it("warns once, keeps the previous vault and leaves the napping status clean when the download URL cannot be fetched", async () => {
     const backend = stubBackend();
     const store = memoryStore();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -4095,7 +4119,12 @@ describe("nap vault against the stub backend", () => {
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn.mock.calls[0]![0]).toBe(`nap vault for ${ws.id} not stored, previous kept: fetch failed`);
       expect(await store.getBlob("vaults", ws.id)).toEqual(first);
-      expect((events.filter(e => e.type === "workspace.status").at(-1) as { status: { phase: string; reason?: string } }).status).toMatchObject({ phase: "napping", reason: "the nap kept what was saved before it; fetch failed" });
+      // What the fetch answered stays on the record and off every status: a sentence here would have taken the
+      // row's third line from the spend for a note about a step already taken.
+      const last = (events.filter(e => e.type === "workspace.status").at(-1) as { status: { phase: string; reason?: string } }).status;
+      expect(last).toMatchObject({ phase: "napping" });
+      expect(last.reason).toBeUndefined();
+      expect((await rt.workspaces.get(ws.id)).vaultRefused).toBe("fetch failed");
     } finally {
       warn.mockRestore();
     }
@@ -5486,7 +5515,7 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(stages[0]).not.toHaveProperty("notice");
     expect(stages[1]).toMatchObject({
       workspaceId: ws.id,
-      message: "Fork of the golden image requested again.",
+      message: "starting one on default again",
       notice: "Stopped the builder kept from golden v1 to make room at the machine cap.",
     });
     expect(stages.map(e => (e.type === "workspace.creating" ? e.name : ""))).toEqual(Array<string>(5).fill("one"));

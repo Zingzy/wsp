@@ -12,7 +12,7 @@ const count = Number(params.get("lines") ?? "2");
 document.documentElement.classList.toggle("dark", params.get("theme") !== "light");
 
 const MESSAGES = [
-  "Fork of the golden image requested.",
+  "starting beta on ascii",
   "Machine m1 is booting.",
   "Hostname set to beta.",
   "Waiting for the daemon to answer on its port.",

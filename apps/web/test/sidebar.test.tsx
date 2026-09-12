@@ -5,7 +5,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DROP_A_FOLDER_LINE, FREE_WORD, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, exportFromLine, harmonyDots, importIntoLine, registerRequest, registeredLine, type PlaceView, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceTheme, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DROP_A_FOLDER_LINE, FREE_WORD, HOSTNAME_KEPT, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, exportFromLine, harmonyDots, importIntoLine, registerRequest, registeredLine, type PlaceView, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceTheme, type WorkspaceView } from "@wsp/protocol";
 import { WORKSPACE_WORDS } from "../src/actions/format.js";
 import { onOpenCommandPalette } from "../src/commandPaletteBus.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
@@ -1091,12 +1091,17 @@ describe("new workspace dialog", () => {
     expect(row.getAttribute("data-active")).toBe("true");
     expect(useStore.getState().selectedId).toMatch(/^creating:/);
     const stage = { type: "workspace.creating" as const, workspaceId: "ws_beta", name: "beta", elapsedMs: 0 };
-    act(() => useStore.getState().applyEvent({ ...stage, stage: "fork-requested", message: "Fork of the golden image requested." }));
+    act(() => useStore.getState().applyEvent({ ...stage, stage: "fork-requested", message: "starting beta on ascii" }));
     act(() => useStore.getState().applyEvent({ ...stage, stage: "machine-booting", message: "Machine m7 is booting.", elapsedMs: 4_200 }));
     const line = within(rowOf("beta")).getByText("Machine m7 is booting.");
     expect(line.className).toContain("whitespace-normal");
     expect(line.className).not.toContain("truncate");
-    expect(within(rowOf("beta")).queryByText("Fork of the golden image requested.")).toBeNull();
+    expect(within(rowOf("beta")).queryByText("starting beta on ascii")).toBeNull();
+    // A verdict on a step already taken belongs to the log: the row holds the step the create is waiting on.
+    act(() => useStore.getState().applyEvent({ ...stage, stage: "hostname-set", message: HOSTNAME_KEPT, elapsedMs: 5_000, detail: "hostname beta on m7 failed: hostname: sethostname: Operation not permitted" }));
+    expect(within(rowOf("beta")).getByText("Machine m7 is booting.")).toBeDefined();
+    expect(rowOf("beta").textContent).not.toContain(HOSTNAME_KEPT);
+    expect(rowOf("beta").textContent).not.toContain("sethostname");
     const created = view("ws_beta", "beta");
     act(() => useStore.getState().applyEvent({ type: "workspace.created", workspace: created }));
     await waitFor(() => expect(rowOf("beta").getAttribute("aria-busy")).toBeNull());
@@ -1831,9 +1836,14 @@ describe("the row's third line", () => {
     expect(line().textContent!.length).toBeLessThanOrEqual(30);
     expect(line().getAttribute("title")).toBe(note);
     // A line inside the room is left whole, and its title is the same words.
+    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { daemonNote: "updating the helper" }) }));
+    await waitFor(() => expect(line().textContent).toBe("updating the helper"));
+    expect(line().getAttribute("title")).toBe("updating the helper");
+    // A nap that saved no backup never takes this line: it is a note on a step already taken, and this slot is the
+    // workspace's state and its spend. The verdict reads on the pane's own backup line.
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { vaultedAt: "2026-09-08T07:10:04.444Z", vaultRefused: "the export was 646 MB, over the 200 MB cap" }) }));
-    await waitFor(() => expect(line().textContent).toBe("no backup since 2026-09-08"));
-    expect(line().getAttribute("title")).toBe("no backup since 2026-09-08");
+    await waitFor(() => expect(line().textContent).not.toBe("updating the helper"));
+    expect(rowOf("api").textContent).not.toContain("backup");
   });
 });
 

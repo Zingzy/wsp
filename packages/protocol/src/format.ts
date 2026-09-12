@@ -1285,10 +1285,19 @@ export function storeUnreadLine(store: string, why: string): string {
   return `could not read ${store} on the machine, so nothing from it travelled: ${why}`;
 }
 
-/** The napping status's line when the nap could not store a fresh vault and the previous one stands: a wake that has
- * to rebuild the machine restores older files than the person left, so they are told at the nap, not at the wake. */
-export function vaultKeptLine(why: string): string {
-  return `the nap kept what was saved before it; ${why}`;
+/** The verdict when a nap could not store a fresh backup and the previous one stands: a wake that has to rebuild
+ * the machine restores older files than the person left, so they are told at the nap, not at the wake. Said once,
+ * with whatever the machine answered on the line's title: the machine's own words name folders and commands
+ * nobody asked for, and a person reading this needs to know what was kept, not what a shell printed. */
+export const VAULT_KEPT = "the nap saved no backup; what was saved before is kept";
+
+/** The verdict when a guest refused the hostname the fork asked for. Naming a fork is cosmetic, so the create goes
+ * on and the workspace answers to the name the machine booted with; the guest's own refusal rides the title. */
+export const HOSTNAME_KEPT = "hostname not set; the workspace keeps the machine's own name";
+
+/** The creation log's line for the fork itself, in the words the app says a workspace and a computer in. */
+export function startingLine(name: string, where: string): string {
+  return `starting ${name} on ${where}`;
 }
 
 /** The day of a stamp in UTC, which is as far as this fact goes: the vault that stands can be days old, and the

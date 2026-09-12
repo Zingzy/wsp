@@ -12,6 +12,7 @@ import {
   formatShortTimestamp,
   getRelativeTimeState,
   getTimestampFormatOptions,
+  localZoneLabel,
   resolveTimestampLocale,
 } from "./timestampFormat";
 
@@ -72,6 +73,17 @@ describe("resolveTimestampLocale", () => {
 
     expect(formatAt1544("en-GB")).toBe("15:44");
     expect(formatAt1544("en-US")).toBe("3:44 PM");
+  });
+});
+
+describe("localZoneLabel", () => {
+  it("names the zone this window's clocks are in, for the instant asked about", () => {
+    const at = Date.UTC(2026, 8, 12, 19, 34, 1);
+    const said = new Intl.DateTimeFormat(APP_LOCALE, { timeZoneName: "short" }).formatToParts(new Date(at)).find(part => part.type === "timeZoneName")!.value;
+    expect(localZoneLabel(at)).toBe(said);
+    expect(localZoneLabel(at)).not.toBe("");
+    // The same clock the app prints a stamp on, so a log line and this label cannot name two different zones.
+    expect(new Date(at).toLocaleTimeString(APP_LOCALE, { hourCycle: "h23", hour: "2-digit", minute: "2-digit", timeZoneName: "short" })).toContain(localZoneLabel(at));
   });
 });
 

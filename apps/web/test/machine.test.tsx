@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, DAEMON_VERSION, FREE_WORD, LINEAGE_MARKS, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, NO_LINGER_LINE, NOT_ON_THIS_KIND, absentComputer, fmtBytes, fmtSize, imageKeptLine, kindWords, machineLacksShort, placeMachineId, servesReading, workspaceKind } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, DAEMON_VERSION, FREE_WORD, LINEAGE_MARKS, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, NO_LINGER_LINE, NOT_ON_THIS_KIND, VAULT_KEPT, absentComputer, fmtBytes, fmtSize, imageKeptLine, kindWords, machineLacksShort, placeMachineId, servesReading, workspaceKind } from "@wsp/protocol";
 import type {
   Capabilities,
   EventUnion,
@@ -216,7 +216,7 @@ describe("machine facts", () => {
     }
   });
 
-  it("a nap whose vault was refused reads as a muted word in the facts with the cap under them; a machine whose vault stands has no such row", async () => {
+  it("a nap that saved no backup reads as a muted word in the facts with one verdict under them; a machine whose backup stands has no such row", async () => {
     const w = { ...view("ws_a", "api", "napping"), vaultedAt: "2026-09-08T07:10:04.444Z", vaultRefused: "the export was 646 MB, over the 200 MB cap" };
     const api = await mount([w]);
     expect(fact("vault")).toBe("no backup since 2026-09-08");
@@ -225,7 +225,10 @@ describe("machine facts", () => {
     expect(cell.className).toContain("font-mono");
     expect(cell.querySelector("span")!.className).toContain("text-muted-foreground");
     expect(document.querySelector('[data-slot="badge"]')).toBeNull();
-    expect(fact("vault-refused")).toBe("the export was 646 MB, over the 200 MB cap");
+    // The verdict, once, in words about this workspace; what the machine answered rides the line's title.
+    expect(fact("vault-refused")).toBe(VAULT_KEPT);
+    expect(document.querySelector('[data-k="vault-refused"]')!.getAttribute("title")).toBe("the export was 646 MB, over the 200 MB cap");
+    expect(document.body.textContent).not.toContain("the export was 646 MB");
     // A nap that stores one clears both: the row goes, and nothing about backups is said.
     act(() => api.emit({ type: "workspace.status", status: { ...status(w), vaultedAt: "2026-09-09T08:00:00.000Z", vaultRefused: undefined } }));
     await waitFor(() => expect(document.querySelector('[data-k="vault"]')).toBeNull());

@@ -4,7 +4,8 @@
 // workspace. Nothing stands between the header and the thread.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { EventUnion, GoldenManifest, WorkspaceView } from "@wsp/protocol";
+import { HOSTNAME_KEPT, type EventUnion, type GoldenManifest, type WorkspaceView } from "@wsp/protocol";
+import { localZoneLabel } from "../src/lib/timestampFormat.js";
 import { Shell } from "../src/App.js";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -104,7 +105,7 @@ describe("workspace creation view", () => {
     workspaceId: "ws_beta",
     name: "beta",
     stage: "fork-requested",
-    message: "Fork of the golden image requested.",
+    message: "starting beta on ascii",
     elapsedMs: 0,
     ...over,
   });
@@ -131,13 +132,18 @@ describe("workspace creation view", () => {
 
     emit(stage({}));
     emit(stage({ stage: "machine-booting", message: "Machine m1 is booting.", elapsedMs: 3_400 }));
-    emit(stage({ stage: "hostname-set", message: "Hostname set to beta.", elapsedMs: 5_100, notice: "hostname beta on m1 failed: read-only" }));
+    emit(stage({ stage: "hostname-set", message: HOSTNAME_KEPT, elapsedMs: 5_100, detail: "hostname beta on m1 failed: read-only" }));
     const lines = within(log).getAllByRole("listitem");
     expect(lines.map(l => l.textContent)).toEqual([
-      expect.stringMatching(/^\d\d:\d\d:\d\dFork of the golden image requested\.0\.0s$/),
+      expect.stringMatching(/^\d\d:\d\d:\d\dstarting beta on ascii0\.0s$/),
       expect.stringMatching(/^\d\d:\d\d:\d\dMachine m1 is booting\.3\.4s$/),
-      expect.stringMatching(/^\d\d:\d\d:\d\dHostname set to beta\.hostname beta on m1 failed: read-only5\.1s$/),
+      expect.stringMatching(new RegExp(`^\\d\\d:\\d\\d:\\d\\d${HOSTNAME_KEPT}5\\.1s$`)),
     ]);
+    // The guest's own words stand on the line's title and nowhere a person reads a sentence.
+    expect(lines[2]!.querySelector("span")!.getAttribute("title")).toBe("hostname beta on m1 failed: read-only");
+    expect(view.textContent).not.toContain("read-only");
+    // Which clock the log is on, said once, in the zone this window is in.
+    expect(within(view).getByTestId("creation-clock").textContent).toBe(`clock in ${localZoneLabel()}`);
     expect(lines.map(l => l.querySelector("time")!.getAttribute("datetime")).every(iso => !Number.isNaN(Date.parse(iso!)))).toBe(true);
     expect(lines[2]!.className).toContain("text-foreground");
     expect(lines[0]!.className).toContain("text-muted-foreground");

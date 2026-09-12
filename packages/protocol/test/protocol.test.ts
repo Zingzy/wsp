@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  creationAwaits,
   WORKSPACE_GLYPHS,
   lookWord,
   Recipe,
@@ -323,6 +324,24 @@ describe("protocol event union", () => {
     expect(SessionEvent.parse(plain)).toEqual(plain);
     expect(() => SessionEvent.parse({ ...steered, prompt: undefined })).toThrow();
     expect(() => SessionEvent.parse({ ...steered, prompt: 7 })).toThrow();
+  });
+});
+
+describe("a create's stage lines on the wire", () => {
+  const stage = { type: "workspace.creating", workspaceId: "ws_1", name: "clone-test", stage: "hostname-set", elapsedMs: 4_100 } as const;
+
+  it("a step's own detail rides the event beside its message, and is not a notice", () => {
+    const said = { ...stage, message: "hostname not set; the workspace keeps the machine's own name", detail: "hostname clone-test on fk_0b77 failed: hostname: sethostname: Operation not permitted" };
+    expect(EventUnion.parse(said)).toEqual(said);
+    expect(EventUnion.parse({ ...stage, message: "ready" })).toEqual({ ...stage, message: "ready" });
+    expect(() => EventUnion.parse({ ...stage, message: "ready", detail: 7 })).toThrow();
+  });
+
+  it("the hostname's verdict is a note on a step taken; every other line is the step the create waits on", () => {
+    expect(creationAwaits("hostname-set")).toBe(false);
+    for (const word of ["fork-requested", "machine-booting", "preview-route", "daemon-answering", "ready", "failed", "image"]) {
+      expect(creationAwaits(word)).toBe(true);
+    }
   });
 });
 

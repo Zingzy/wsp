@@ -4,7 +4,7 @@
 // but for the one hook beside the where word, which reads that word off the
 // store for the surfaces that hold a workspace's id and no snapshot.
 import { agentName } from "@wsp/catalog";
-import { FREE_WORD, fmtCost, fmtSize, isBilling, isLocalWorkspace, kindWords, machineLacksShort, outOfMemoryRowLine, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspaceStateOf, type AbsentComputer, type MemoryReading, type ReachState, type SessionOrigin, type PlaceView, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
+import { FREE_WORD, fmtCost, fmtSize, isBilling, isLocalWorkspace, kindWords, machineLacksShort, outOfMemoryRowLine, wakeAskingAgainLine, workspaceKind, workspaceStateOf, type AbsentComputer, type MemoryReading, type ReachState, type SessionOrigin, type PlaceView, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
 import { PLACE_KIND_WORDS, THIS_COMPUTER_WORD, placeName, placeOf } from "../settings/places.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
@@ -59,10 +59,10 @@ export function daemonGoneLine(reach: ReachState | null, kind: WorkspaceKindWord
 /** The sentences a meta line can carry in place of its counts, in the order a surface draws them: the
  * computer that is not answering first, since nothing else on the row is known while it is, then a thread of this
  * workspace stopped on a question, then what the runtime is doing to the machine's daemon, then a drop with
- * memory near full, then a daemon that is not there at all, then a nap whose vault was refused. Written once
- * because two surfaces draw them and both have to tell them from a figure: prose takes the ink that reads at AA,
- * the counts beside it keep the whisper. The vault comes last of them: the others are what a person is waiting on
- * now, and this one holds until the next nap. */
+ * memory near full, then a daemon that is not there at all. Written once because two surfaces draw them and both
+ * have to tell them from a figure: prose takes the ink that reads at AA, the counts beside it keep the whisper.
+ * Every one of them is something a person is waiting on now; a note on a step already taken (a nap that saved no
+ * backup) is not here, since this slot is the row's state and its spend. */
 export function metaSentences({ project, absent, outOfMemory }: Pick<WorkspaceMetaInput, "project" | "absent" | "outOfMemory">): string[] {
   return [
     absent?.line,
@@ -70,7 +70,6 @@ export function metaSentences({ project, absent, outOfMemory }: Pick<WorkspaceMe
     daemonNote(project),
     outOfMemory === undefined ? undefined : outOfMemoryRowLine(outOfMemory),
     daemonGoneLine(project.reach, kindWords(workspaceKind(project.workspace)), (project.status ?? project.workspace).daemonRefusedAt?.why),
-    vaultStaleLine(project.status ?? project.workspace) ?? undefined,
   ].filter((line): line is string => line !== undefined);
 }
 
