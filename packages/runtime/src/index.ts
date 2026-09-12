@@ -6,8 +6,10 @@ export * from "./store.js";
 export * from "./machine-exec.js";
 export * from "./local-exec.js";
 export * from "./reach.js";
+export * from "./daemon-channel.js";
 export * from "./daemon-token.js";
 export * from "./devices.js";
+export * from "./places.js";
 export * from "./harness-catalog.js";
 export * from "./adapters.js";
 // Re-exported so clients (wspx) can wire a backend without importing the

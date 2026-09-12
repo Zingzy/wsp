@@ -9,6 +9,7 @@ import { Shell } from "../src/App.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { caps } from "./caps.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 const manifest: GoldenManifest = {
   head: 1,
@@ -31,7 +32,7 @@ function fakeApi(opts: { golden?: GoldenManifest; workspaces?: WorkspaceView[] }
     rebuild: vi.fn(async () => first),
     capabilities: vi.fn(async () => CAPS),
     portReach: vi.fn(async (_id: string, port: number) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 })),
-    daemonReach: vi.fn(async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 })),
+    daemon: noDaemonApi,
     startSession: vi.fn(async () => ({ id: "s1", workspaceId: "ws_first", harness: "claude", status: "running" as const })),
     listSessions: vi.fn(async () => []),
     sessionHistory: vi.fn(async () => []),

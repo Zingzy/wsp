@@ -45,7 +45,7 @@ export function lostTerminals(tabs: readonly PtyTabView[]): ReadonlySet<string> 
 
 /** The pane's state from the workspace's one vocabulary plus this link's socket and its last memory reading, the
  * lines under it, and the wake every pane offers. */
-export function useTerminalPane(workspaceId: string, socket: DaemonLinkStatus): { pane: TerminalPaneState; hints: string[]; onWake: () => void } {
+export function useTerminalPane(workspaceId: string, socket: DaemonLinkStatus, refusal: string | null = null): { pane: TerminalPaneState; hints: string[]; onWake: () => void } {
   const workspace = useWorkspace(workspaceId);
   const status = useStatus(workspaceId);
   const capabilities = useCapabilities();
@@ -54,7 +54,7 @@ export function useTerminalPane(workspaceId: string, socket: DaemonLinkStatus): 
   const reach = status?.reach.state ?? null;
   const state = useWorkspaceState(workspaceId) ?? "running";
   const outOfMemory = useOutOfMemoryReading(workspaceId, phase);
-  const pane = useMemo(() => terminalPaneState({ state, reach, socket, outOfMemory }), [state, reach, socket, outOfMemory]);
+  const pane = useMemo(() => terminalPaneState({ state, reach, socket, outOfMemory, refusal }), [state, reach, socket, outOfMemory, refusal]);
   const size = status?.size ?? null;
   const sizes = capabilities?.sizes ?? null;
   const hints = useMemo(() => terminalPaneHints(pane, size, sizes), [pane, size, sizes]);
@@ -72,11 +72,12 @@ export function WorkspaceTerminalDrawer({ workspaceId }: { workspaceId: string }
 function LinkedDrawer({ terms, workspaceId, ui }: { terms: WorkspaceTerminals; workspaceId: string; ui: TerminalUiState }) {
   const tabs = useSyncExternalStore(fn => terms.onTabs(fn), () => terms.tabs());
   const status = useSyncExternalStore(fn => terms.onStatus(fn), () => terms.status());
+  const refusal = useSyncExternalStore(fn => terms.onStatus(fn), () => terms.refusal());
   const panelIds = useRightPanelStore(useShallow(s => selectPanelTerminalIds(s.byWorkspaceId, workspaceId)));
   const ids = useMemo(() => tabs.map(t => t.ptyId).filter(id => !panelIds.includes(id)), [tabs, panelIds]);
   const labels = useMemo(() => terminalLabels(tabs), [tabs]);
   const lost = useMemo(() => lostTerminals(tabs), [tabs]);
-  const { pane, hints, onWake } = useTerminalPane(workspaceId, status);
+  const { pane, hints, onWake } = useTerminalPane(workspaceId, status, refusal);
   const terminalIo = useCallback((id: string) => terms.io(id), [terms]);
   const terminalConfig = useTerminalViewportConfig(workspaceId);
   const store = useTerminalDrawerStore;

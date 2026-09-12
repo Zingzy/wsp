@@ -1,12 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createServer } from "node:http";
 import { HOST_STOPPING_CLOSE, type AdapterEvent, type ForwardEvent, type InitJob, type PortForward, type TurnResult } from "@wsp/protocol";
-import { DAEMON_TOKEN_SET } from "../src/daemon-token.js";
-import { createRuntime, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions, type InitDoor } from "../src/runtime.js";
+import { copyKey, createRuntime, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions, type InitDoor } from "../src/runtime.js";
 import { serveRuntime, type ForwardsSource, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
 import { WsClient } from "./ws-client.js";
-import { abortedCall, stubBackend, type StubBackend } from "./stub-backend.js";
+import { abortedCall, stubBackend, tokenGuest, type StubBackend } from "./stub-backend.js";
 import { fakeClock } from "./fake-clock.js";
 import { until } from "./until.js";
 
@@ -21,8 +20,6 @@ function rt() {
 }
 
 const DAEMON_TOKEN = "cafef00d".repeat(3);
-/** A guest with a daemon: the runtime's token write lands, everything else is silently fine. */
-const tokenGuest = (_m: unknown, cmd: string) => (cmd.includes("/root/.wsp-daemon-token") ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
 
 describe("serveRuntime auth", () => {
   it("closes 4401 on a wrong auth token", async () => {
@@ -329,23 +326,6 @@ describe("serveRuntime session interrupt", () => {
   });
 });
 
-describe("serveRuntime daemon reach", () => {
-  it("workspaces.daemonReach returns the view a browser dials the daemon with", async () => {
-    const backend = stubBackend();
-    backend.execImpl = tokenGuest;
-    const runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: DAEMON_TOKEN });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
-    const c = await WsClient.connect(srv.port, { token: "secret" });
-    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
-    const id = (created["workspace"] as { id: string }).id;
-    backend.machines[0]!.previewUrl = async port => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, token: "e", expiresAt: 1_800_000_000_000 });
-    const res = await c.request("workspaces.daemonReach", { workspaceId: id });
-    expect(res.ok).toBe(true);
-    expect(res["reach"]).toEqual({ url: "https://m1-7070.preview.example/?pt_token=e", expiresAt: 1_800_000_000_000, daemonToken: DAEMON_TOKEN });
-    c.close();
-  });
-});
-
 describe("serveRuntime port reach", () => {
   it("workspaces.portReach returns the route a browser frames, without the daemon token; an unknown workspace is refused", async () => {
     const backend = stubBackend();
@@ -447,7 +427,7 @@ describe("serveRuntime golden wizard ops", () => {
     c.close();
   });
 
-  it("golden.prepare defaults to a sandbox with no screen, and golden.builderReach hands back its daemon route", async () => {
+  it("golden.prepare defaults to a sandbox with no screen, and the builder's daemon route stays inside this host", async () => {
     const backend = stubBackend();
     backend.execImpl = tokenGuest;
     const runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe, daemonToken: DAEMON_TOKEN });
@@ -460,11 +440,9 @@ describe("serveRuntime golden wizard ops", () => {
     expect(backend.machines[0]!.spec).toMatchObject({ kind: "sandbox", template: "base" });
 
     backend.machines[0]!.previewUrl = async port => ({ url: `https://m1-${port}.preview.example/?pt_token=edge`, token: "edge", expiresAt: Date.now() + 3_600_000 });
-    const reach = await c.request("golden.builderReach", { builderId: "m1" });
-    expect(reach.ok).toBe(true);
-    expect(reach["reach"]).toEqual({ url: "https://m1-7070.preview.example/?pt_token=edge", expiresAt: expect.any(Number), daemonToken: DAEMON_TOKEN });
-    const missing = await c.request("golden.builderReach", { builderId: "m9" });
-    expect(missing).toMatchObject({ ok: false, error: expect.stringMatching(/no such builder/) });
+    // The route and the token a builder's daemon is opened with are the host's own; no op hands either one out.
+    expect(await runtime.golden.builderReach("m1")).toEqual({ url: "https://m1-7070.preview.example/?pt_token=edge", expiresAt: expect.any(Number), daemonToken: DAEMON_TOKEN });
+    expect(await c.request("golden.builderReach", { builderId: "m1" })).toMatchObject({ ok: false, error: expect.stringMatching(/Invalid discriminator value/) });
     c.close();
   });
 
@@ -509,7 +487,7 @@ describe("serveRuntime snapshot lineage", () => {
 
   it("snapshots.list is the manifest with head; rollback moves head, says existing workspaces are untouched, persists", async () => {
     const store = memoryStore();
-    await store.put("goldens", "default", { head: 2, versions: [version(1), version(2)] });
+    await store.put("goldens", copyKey("default", "default"), { head: 2, versions: [version(1), version(2)] });
     srv = await serveRuntime(createRuntime({ backend: stubBackend(), store, adapters: {} }), { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
 
@@ -530,7 +508,7 @@ describe("serveRuntime snapshot lineage", () => {
 
   it("snapshots.rollback to a version outside the manifest is a typed refusal that changes nothing", async () => {
     const store = memoryStore();
-    await store.put("goldens", "default", { head: 1, versions: [version(1)] });
+    await store.put("goldens", copyKey("default", "default"), { head: 1, versions: [version(1)] });
     srv = await serveRuntime(createRuntime({ backend: stubBackend(), store, adapters: {} }), { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
     const refused = await c.request("snapshots.rollback", { version: 9 });

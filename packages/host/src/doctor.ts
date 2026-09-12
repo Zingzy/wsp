@@ -646,7 +646,7 @@ export function removeDaemonScript(place: DaemonPlace): string {
     `${systemctl} disable --now ${DAEMON_UNIT} 2>/dev/null || true`,
     `rm -f ${sh(place, place.unitPath)}`,
     `${systemctl} daemon-reload 2>/dev/null || true`,
-    `rm -rf ${wspOwn(place).map(path => sh(place, path)).join(" ")}`,
+    `rm -rf ${daemonOwnedPaths(place).map(path => sh(place, path)).join(" ")}`,
     `rm -f ${sh(place, place.openShim)} ${sh(place, `${place.binDir}/xdg-open`)}`,
     ...(place.profileSource === undefined
       ? []
@@ -667,7 +667,7 @@ export function removeDaemonScript(place: DaemonPlace): string {
 /** Everything wsp put on the machine, off the place that named each one: nothing is guessed and no path is
  * written twice. wsp's own folder under somebody's home is not swept whole, since other roads of wsp keep things
  * beside the daemon in it. */
-function wspOwn(place: DaemonPlace): string[] {
+export function daemonOwnedPaths(place: DaemonPlace): string[] {
   return [
     place.dir,
     place.bundle,

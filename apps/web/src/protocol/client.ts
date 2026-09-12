@@ -15,7 +15,10 @@ import {
   SessionRenameResult,
   SessionSteerOutcome,
   type Capabilities,
-  type DaemonReachView,
+  type DaemonChannelEvent,
+  type DaemonFrame,
+  type DaemonOpenReply,
+  type DaemonResponse,
   type EventUnion,
   goldenHead,
   type GoldenManifest,
@@ -106,6 +109,14 @@ export class ProtocolClient {
   #seq = 0;
   #pending = new Map<number, Pending>();
   #listeners = new Set<(e: ProtocolEvent) => void>();
+  /** Per-channel listeners for the frames the host relays from a daemon. Kept off #listeners on purpose: a pty
+   * chunk is not history, and the store folds everything that reaches an event listener. */
+  #channels = new Map<string, Set<(e: DaemonChannelEvent) => void>>();
+  /** Frames that arrived for a channel nobody listens to yet. The host writes the open reply and the daemon's hello
+   * back to back, and two frames in one read are dispatched before the microtask that resolves the open can run, so
+   * a caller that subscribes the moment it learns its channel id would still miss the hello. Bounded by the socket:
+   * a channel dies with the socket that opened it, so a redial starts this empty. */
+  #unclaimed = new Map<string, DaemonChannelEvent[]>();
   #opts: ProtocolClientOptions;
   #Ctor: typeof WebSocket;
   #backoff: (attempt: number) => number;
@@ -143,6 +154,22 @@ export class ProtocolClient {
       this.#pending.set(id, { resolve: v => resolve(v as T), reject });
       this.#raw({ id, op, ...params });
     });
+  }
+
+  /** Frames the host pushes for one channel, in order; stops when the unsubscribe runs. */
+  onDaemonFrame(channel: string, fn: (e: DaemonChannelEvent) => void): () => void {
+    let fns = this.#channels.get(channel);
+    if (!fns) {
+      fns = new Set();
+      this.#channels.set(channel, fns);
+    }
+    fns.add(fn);
+    for (const e of this.#unclaimed.get(channel) ?? []) fn(e);
+    this.#unclaimed.delete(channel);
+    return () => {
+      fns.delete(fn);
+      if (fns.size === 0) this.#channels.delete(channel);
+    };
   }
 
   subscribe(fn: (e: ProtocolEvent) => void): () => void {
@@ -190,6 +217,7 @@ export class ProtocolClient {
     ws.onclose = ev => {
       if (this.#ws !== ws) return;
       this.#ws = null;
+      this.#unclaimed.clear();
       this.#failAll(new DisconnectedError("lost"));
       // 4401 is the runtime refusing the token; redialling cannot fix that.
       if (ev.code === 4401) this.#die("unauthorized");
@@ -225,6 +253,7 @@ export class ProtocolClient {
     const ws = this.#ws;
     this.#ws = null;
     ws?.close();
+    this.#unclaimed.clear();
     this.#failAll(new DisconnectedError(reason));
     this.#setStatus("closed");
     const first = this.#firstLive;
@@ -239,6 +268,18 @@ export class ProtocolClient {
     let msg: Record<string, unknown>;
     try { msg = JSON.parse(data); } catch { return; }
     if (typeof msg.type === "string" && !("ok" in msg)) { // server-push event
+      if (msg.type.startsWith("daemon.")) {
+        if (typeof msg.channel !== "string") return;
+        const fns = this.#channels.get(msg.channel);
+        if (fns === undefined) {
+          const held = this.#unclaimed.get(msg.channel) ?? [];
+          held.push(msg as unknown as DaemonChannelEvent);
+          this.#unclaimed.set(msg.channel, held);
+          return;
+        }
+        for (const fn of fns) fn(msg as unknown as DaemonChannelEvent);
+        return;
+      }
       if (typeof msg.seq === "number") this.#cursor = msg.seq;
       for (const fn of this.#listeners) fn(msg as unknown as ProtocolEvent);
       return;
@@ -298,8 +339,8 @@ export interface Api {
   listForwards?(): Promise<PortForward[]>;
   stopForward?(workspaceId: string, port: number): Promise<void>;
   capabilities(): Promise<Capabilities>;
-  /** How to dial the workspace's daemon right now; ask again per dial, the edge token expires hourly. */
-  daemonReach(id: string): Promise<DaemonReachView>;
+  /** The road to every workspace's daemon: the host holds the socket and relays the frames. */
+  daemon: DaemonApi;
   /** The public route to one guest port, for an iframe; the runtime remints near the hourly expiry, so ask again before expiresAt. */
   portReach(id: string, port: number): Promise<PortReachView>;
   /** What the host saw fetching that route once; the pane explains a refusal from it, since the frame cannot read its own
@@ -404,6 +445,17 @@ export interface Api {
   listProjectGoldens?(): Promise<ProjectGolden[]>;
 }
 
+/** The page's one transport to a daemon. The route the machine answers on and the token that opens it never leave
+ * the host: a page names a workspace and the host dials the road that workspace's kind answers with. */
+export interface DaemonApi {
+  open(workspaceId: string): Promise<DaemonOpenReply>;
+  /** Resolves with the daemon's own answer, ok or not; rejects only when the host could not carry the frame. */
+  send(channel: string, frame: DaemonFrame): Promise<DaemonResponse>;
+  close(channel: string): Promise<void>;
+  /** Frames the host pushes for one channel, in order; stops when the unsubscribe runs. */
+  onFrame(channel: string, fn: (e: DaemonChannelEvent) => void): () => void;
+}
+
 export interface WorkspaceSizeSpec {
   cpu?: number;
   memMb?: number;
@@ -496,7 +548,12 @@ export function makeApi(c: ProtocolClient): Api {
     listForwards: async () => PortForward.array().parse((await c.request<{ forwards?: unknown }>("forwards.list")).forwards),
     stopForward: async (workspaceId, port) => void (await c.request("forwards.stop", { workspaceId, port })),
     capabilities: async () => (await c.request<{ capabilities: Capabilities }>("capabilities.get")).capabilities,
-    daemonReach: async id => (await c.request<{ reach: DaemonReachView }>("workspaces.daemonReach", { workspaceId: id })).reach,
+    daemon: {
+      open: async workspaceId => ({ channel: (await c.request<{ channel: string }>("daemon.open", { workspaceId })).channel }),
+      send: async (channel, frame) => (await c.request<{ reply: DaemonResponse }>("daemon.send", { channel, frame })).reply,
+      close: async channel => void (await c.request("daemon.close", { channel })),
+      onFrame: (channel, fn) => c.onDaemonFrame(channel, fn),
+    },
     portReach: async (id, port) => (await c.request<{ reach: PortReachView }>("workspaces.portReach", { workspaceId: id, port })).reach,
     portProbe: async (id, port) => (await c.request<{ probe: PortProbeView }>("workspaces.portProbe", { workspaceId: id, port })).probe,
     startSession: async opts => (await c.request<{ session: SessionView }>("sessions.start", { ...opts })).session,

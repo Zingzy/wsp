@@ -199,7 +199,7 @@ describe("what a workspace's kind changes about its words", () => {
   });
 
   it("every kind has a row in the table, so adding one is a row here and nothing else", () => {
-    expect(Object.keys(WORKSPACE_KIND_WORDS).sort()).toEqual(["cloud", "local", "ssh"]);
+    expect(Object.keys(WORKSPACE_KIND_WORDS).sort()).toEqual(["cloud", "local", "place", "ssh"]);
   });
 
   it("the delete sentence says what the delete does to this kind's machine, the ssh sweep included", () => {

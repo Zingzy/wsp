@@ -5,7 +5,7 @@ import { gunzipSync } from "node:zlib";
 import { tarOf } from "@wsp/engine";
 import type { GoldenManifest, ProjectGolden, ProjectPlan } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { createRuntime, type PackedProject, type ProjectBundler, type Runtime } from "../src/runtime.js";
+import { copyKey, createRuntime, type PackedProject, type ProjectBundler, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
@@ -46,7 +46,7 @@ function bundler(): ProjectBundler {
 
 async function setup(store: Store = memoryStore()): Promise<{ rt: Runtime; backend: StubBackend; store: Store; advance: (ms: number) => void }> {
   const backend = stubBackend();
-  await store.put("goldens", "default", MANIFEST);
+  await store.put("goldens", copyKey("default", "default"), MANIFEST);
   const { clock, advance } = fakeClock(T0);
   const rt = createRuntime({ backend, store, adapters: {}, clock, hostId: HOST });
   return { rt, backend, store, advance };
