@@ -295,7 +295,7 @@ describe("the agent contract on the command line and the tool door", () => {
     const said: string[] = [];
     err.on("data", (c: Buffer) => said.push(c.toString()));
     expect(await cli(["doctor", "--state", join(dir, "other.json")], jsonCliIO(err))).toBe(EXIT_CODES.auth);
-    expect(said.join("")).toBe("Solari API key: --json asks nothing; set it in the environment, ./.env, or ~/.wsp/.env.\n");
+    expect(said.join("")).toBe("Solari API key: --json asks nothing; set SOLARI_API_KEY in the environment, ./.env, or ~/.wsp/.env.\n");
   });
 
   it("the tool door answers a failure as a tool error whose structured content is the same object with the same class", async () => {

@@ -19,7 +19,7 @@ import { RUNGS } from "@wsp/collect";
 import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, KEY_REFUSED, KEY_UNCHECKED, forksNoMachines, NEVER_REACHED, NO_FIRST_WORKSPACE, STOP_LEFT_MACHINE_LINE, shellQuote, SIGN_IN_NEVER_REACHED, LoginState, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobOver, MACHINE_ROW_LABEL, initNeedWhat, initRowOver, initSignInOutcome, initStageCount, initStoppedAt, initStoppedLine, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type McpServerSpec, type TurnResult } from "@wsp/protocol";
 import { harnessCatalog, smallestModel, type GoldenRecipe, type InitDoor, type Runtime, type SessionHandle } from "@wsp/runtime";
 import type { AgentHere } from "./agents-here.js";
-import { SOLARI_KEY, agentKeysIn, keysOf, type Keys } from "./env-keys.js";
+import { agentKeysIn, keyIn } from "./env-keys.js";
 import { firstWorkspaceName, folderOf } from "./init-first.js";
 import { wspToolsAgent, wspToolsItems } from "./init-pick.js";
 import { RUNG_TITLE, agentName, recipeWithAnswers } from "./init-recipe.js";
@@ -43,11 +43,15 @@ export interface InitJobDeps {
   saved(): Readonly<Record<string, string>>;
   /** Writes the keys given into the wsp home's .env, the one writer every road uses. */
   saveKeys(set: Record<string, string>): void;
-  /** Wires the provider module the keys name into the runtime, so a host that started with none forks after the seal. */
-  provider(keys: Keys): void;
-  /** Whether the provider takes these keys, asked before they are saved: the provider module the keys name makes one
-   * cheap authenticated call, and a refusal is the person's to fix on the step that typed the key. */
-  checkKey(keys: Keys): Promise<KeyCheck>;
+  /** Wires the provider module the keys saved here name into the runtime, so a host that started with none forks
+   * after the seal. */
+  provider(saved: Readonly<Record<string, string>>): void;
+  /** The variable this host's provider reads its key from, the one the keys step reads, writes and names; nothing
+   * where the provider it is wired to reads no key at all. */
+  keyEnv(): string | undefined;
+  /** Whether the provider takes this key, asked before it is saved: the provider module this host is wired to makes
+   * one cheap authenticated call, and a refusal is the person's to fix on the step that typed the key. */
+  checkKey(key: string): Promise<KeyCheck>;
   /** What the machine the build boots costs; the provider's own table, which needs no key to read. */
   pricing(): BackendPricing;
   agents(): Promise<AgentHere[]>;
@@ -216,9 +220,11 @@ export class InitJobs implements InitDoor {
     }
   }
 
-  /** Whether the host holds the provider key; read off the home's file once per ask, never on a view. */
+  /** Whether the host holds its provider's key, under the variable that provider's own row declares; read off the
+   * home's file once per ask, never on a view. */
   private held(): InitJob["keys"] {
-    return { solari: keysOf(this.deps.saved()).solari !== undefined };
+    const name = this.deps.keyEnv();
+    return { solari: name !== undefined && keyIn(this.deps.saved(), name) !== undefined };
   }
 
   view(): InitJob | null {
@@ -276,12 +282,14 @@ export class InitJobs implements InitDoor {
    * refused key is not. */
   async keys(k: { solari?: string; rows?: Record<string, string> }): Promise<InitSetup> {
     const set: Record<string, string> = {};
-    const solari = k.solari?.trim();
-    if (solari !== undefined && solari !== "") {
-      const check = await this.deps.checkKey({ solari });
+    const key = k.solari?.trim();
+    if (key !== undefined && key !== "") {
+      const name = this.deps.keyEnv();
+      if (name === undefined) throw new Error("this host forks machines on a provider that reads no API key, so there is none to save");
+      const check = await this.deps.checkKey(key);
       const line = keyCheckLine(check);
       if (line !== undefined) throw Object.assign(new Error(line), { kind: check.state === "refused" ? KEY_REFUSED : KEY_UNCHECKED });
-      set[SOLARI_KEY] = solari;
+      set[name] = key;
     }
     for (const [row, value] of Object.entries(k.rows ?? {})) {
       const typed = value.trim();
@@ -292,7 +300,7 @@ export class InitJobs implements InitDoor {
     }
     if (Object.keys(set).length > 0) {
       this.deps.saveKeys(set);
-      this.deps.provider(keysOf(this.deps.saved()));
+      this.deps.provider(this.deps.saved());
       const s = this.state;
       if (s !== undefined) {
         s.keys = this.held();
