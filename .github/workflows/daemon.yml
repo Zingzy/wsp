@@ -56,5 +56,8 @@ jobs:
         run: cargo test
       - name: Release build
         run: cargo build --release
+      - name: C compiler for the musl target
+        # ring carries C, and its build looks for x86_64-linux-musl-gcc, which musl-tools provides.
+        run: sudo apt-get install -y --no-install-recommends musl-tools
       - name: Static musl build
         run: cargo build --release --target x86_64-unknown-linux-musl
