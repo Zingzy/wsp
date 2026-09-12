@@ -76,6 +76,9 @@ pub enum DaemonEvent {
         command: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         exited: Option<bool>,
+        /// When the close was seen, as the node daemon stamps it: an ISO date, never a number.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<String>,
     },
     #[serde(rename = "inbox.file")]
     InboxFile { path: String, bytes: u64 },

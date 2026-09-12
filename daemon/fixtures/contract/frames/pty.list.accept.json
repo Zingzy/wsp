@@ -2,5 +2,9 @@
   {
     "id": 1,
     "op": "pty.list"
+  },
+  {
+    "id": "x",
+    "op": "pty.list"
   }
 ]

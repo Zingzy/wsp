@@ -5,7 +5,10 @@
 
 mod auth;
 mod door;
+mod fs;
+mod git;
 mod ops;
+mod paths;
 
 use std::io;
 use std::net::SocketAddr;
@@ -97,6 +100,14 @@ pub(crate) struct Ctx {
     pub(crate) auth_deadline: Duration,
 }
 
+impl Ctx {
+    pub(crate) fn new(options: Options) -> Ctx {
+        let root = resolved_root(options.root.as_deref());
+        let auth_deadline = Duration::from_millis(options.auth_deadline_ms.unwrap_or(numbers::AUTH_DEADLINE_MS));
+        Ctx { options, root, auth_deadline }
+    }
+}
+
 /// A bound daemon: the listener is open and the address is known, nothing is accepted until run.
 pub struct Daemon {
     listener: TcpListener,
@@ -110,9 +121,7 @@ impl Daemon {
             return Err(io::Error::other(wsp_frames::words::NO_TOKEN_AT_START));
         }
         let listener = TcpListener::bind((options.host.as_str(), options.port)).await?;
-        let root = resolved_root(options.root.as_deref());
-        let auth_deadline = Duration::from_millis(options.auth_deadline_ms.unwrap_or(numbers::AUTH_DEADLINE_MS));
-        Ok(Daemon { listener, ctx: Arc::new(Ctx { options, root, auth_deadline }) })
+        Ok(Daemon { listener, ctx: Arc::new(Ctx::new(options)) })
     }
 
     pub fn local_addr(&self) -> SocketAddr {
@@ -129,22 +138,11 @@ impl Daemon {
     }
 }
 
-/// The root the hello announces: the --root given, else HOME, made absolute against the working directory and
-/// normalised lexically, as node's path.resolve does.
+/// The root the hello announces: the --root given, else HOME, made absolute and normalised as node's path.resolve
+/// does.
 fn resolved_root(root: Option<&Path>) -> String {
     let given = root.map(Path::to_path_buf).or_else(|| std::env::var_os("HOME").map(PathBuf::from)).unwrap_or_else(|| PathBuf::from("/"));
-    let absolute = if given.is_absolute() { given } else { std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")).join(given) };
-    let mut out = PathBuf::from("/");
-    for part in absolute.components() {
-        match part {
-            std::path::Component::Normal(p) => out.push(p),
-            std::path::Component::ParentDir => {
-                out.pop();
-            }
-            _ => {}
-        }
-    }
-    out.to_string_lossy().into_owned()
+    paths::absolute(&given).to_string_lossy().into_owned()
 }
 
 #[cfg(test)]

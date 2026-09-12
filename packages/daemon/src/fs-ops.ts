@@ -2,11 +2,9 @@
 import { lstat, open, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
+import { FS_LIST_CAP_ENTRIES, FS_READ_CAP_BYTES } from "@wsp/protocol";
 import { runGit } from "./git-ops.js";
 import { OpError } from "./workspace-paths.js";
-
-export const FS_READ_CAP_BYTES = 2 * 1024 * 1024;
-export const FS_LIST_CAP_ENTRIES = 10_000;
 
 export type FsEntryType = "file" | "dir" | "symlink";
 

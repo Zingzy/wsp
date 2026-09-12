@@ -11,9 +11,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { cpus, freemem, platform, tmpdir, totalmem, userInfo } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { kindWords, servesReading, WorkspaceKind, type ProcEntry } from "@wsp/protocol";
+import { kindWords, PROC_CMDLINE_BYTES, servesReading, WorkspaceKind, type ProcEntry } from "@wsp/protocol";
 import { LocalProcSource, parsePs, parsePsNames } from "../src/proc-local.js";
-import { CMDLINE_BYTES } from "../src/proc.js";
 import { KIND_READINGS, readingsFor } from "../src/readings.js";
 import { availableFromVmStat, cpuTimesOf, hostSysSource, memorySourceFor, parseDf } from "../src/sys-local.js";
 import { OpError } from "../src/workspace-paths.js";
@@ -164,12 +163,12 @@ describe("this computer's processes module", () => {
 
   it("truncates a command line by bytes, the same budget the guest's road reads out of /proc", () => {
     const row = (args: string) => parsePs(`      7       1 S root      100 00:00:01 Mon Sep  7 08:07:19 2026 ${args}\n`)[0]!;
-    expect(row("x".repeat(300)).cmdline.length).toBe(CMDLINE_BYTES);
+    expect(row("x".repeat(300)).cmdline.length).toBe(PROC_CMDLINE_BYTES);
     // Two bytes to the character, so the same budget holds half as many of them: the cut is by bytes, not letters.
     // A character the cut lands inside decodes to one replacement, as it does on the guest's road.
     const wide = row(`node ${"\u00e9".repeat(300)}`).cmdline;
-    expect(wide.length).toBeLessThan(CMDLINE_BYTES);
-    expect(Buffer.byteLength(wide, "utf8")).toBeLessThanOrEqual(CMDLINE_BYTES + 2);
+    expect(wide.length).toBeLessThan(PROC_CMDLINE_BYTES);
+    expect(Buffer.byteLength(wide, "utf8")).toBeLessThanOrEqual(PROC_CMDLINE_BYTES + 2);
   });
 
   it("lists this computer's own processes, this test among them, named and with the daemon's ptys marked", async () => {

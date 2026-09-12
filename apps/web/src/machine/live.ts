@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Per-workspace utilisation that outlives any mounted pane. Samples arrive
-// over the workspace's own daemon link (terminal/wiring.ts asks with sys.watch
-// on every live transition and feeds the pushes here); the link's status says
-// whether the newest sample is current or the last one before the socket went.
+// Per-workspace utilisation that outlives any mounted pane. Where the samples
+// come from is the kind table's to say: a machine reads its own and pushes
+// them over the workspace's daemon link (terminal/wiring.ts asks with
+// sys.watch on every live transition), and the computer this host runs on is
+// read by the host itself and pushed on the page's own socket (hostLive.ts).
+// The reach says whether the newest sample is current or the last one before
+// whichever road carries them went down.
 // A daemon that refuses sys.watch leaves its reason here, so the rows can say
 // the stream is unavailable instead of waiting for it.
 import { useCallback, useRef, useSyncExternalStore } from "react";
@@ -29,7 +32,12 @@ export class WorkspaceLive {
   }
 
   feedStatus(s: DaemonLinkStatus): void {
-    const reach = s === "live" ? "live" : "unreachable";
+    this.feedReach(s === "live" ? "live" : "unreachable");
+  }
+
+  /** Whether the readings are arriving, for the workspace whose figures take no daemon link: the one this host runs
+   * on, whose samples ride the host's own socket. */
+  feedReach(reach: LiveState["reach"]): void {
     if (reach !== this.#state.reach) this.#set({ ...this.#state, reach });
   }
 

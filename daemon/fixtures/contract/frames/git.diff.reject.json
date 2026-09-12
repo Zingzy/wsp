@@ -2,19 +2,19 @@
   {
     "id": 1,
     "op": "git.diff",
-    "cwd": "/root/app"
+    "cwd": "repo"
   },
   {
     "id": 1,
     "op": "git.diff",
-    "cwd": "/root/app",
+    "cwd": "repo",
     "scope": "all"
   },
   {
     "id": 1,
     "op": "git.diff",
-    "cwd": "/root/app",
-    "scope": "branch",
+    "cwd": "repo",
+    "scope": "unstaged",
     "path": 3
   }
 ]

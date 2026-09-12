@@ -7,14 +7,20 @@
 // the view mounted; a view pinned to an older thread unpins first, since the
 // new thread opens as the workspace's latest. A send from a thread that never
 // started runs as that thread's first turn, so the pin stays where it is.
+// Under the transcript stand the threads this one's agent opened, one row each
+// with the workspace it runs on and a link to it, and the footer weighs the
+// turn's own cost against what those threads spent.
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import type { LegendListRef } from "@legendapp/list/react";
 import { turnSettledParts } from "@wsp/protocol";
+import { threadLink } from "../../actions/threadActions";
+import { deriveSidebarProjects } from "../../adapt";
 import { useStatus, useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { cn } from "../../lib/utils";
 import { DEFAULT_TIMESTAMP_FORMAT, pausedLine, turnWait, type TimestampFormat, type TurnSummary } from "./adapt";
-import { whereWord } from "../../sidebar/workspaceRows";
+import { threadsOpenedBy, type ThreadOnWorkspace } from "../../sidebar/threadTree";
+import { useWhereWord, whereWord } from "../../sidebar/workspaceRows";
 import { TimelineRuleLine } from "./TimelineRuleLine";
 import { MessagesTimeline, type MachineWait } from "./MessagesTimeline";
 import { useNewThreadRequests } from "./newThreadRequests";
@@ -39,10 +45,18 @@ export function ChatView({
 }) {
   const workspace = useWorkspace(workspaceId);
   const wake = useStore(s => s.wake);
+  const select = useStore(s => s.select);
   const newThread = useStore(s => s.newThread);
   const readingThread = useStore(s => s.readingThread);
   const freshThread = useStore(s => s.freshThread && s.selectedId === workspaceId);
   const thread = useChatThread(workspaceId, threadId, freshThread);
+  // Every workspace's threads, not this one's: a thread this one's agent opened may run anywhere, and nothing in
+  // the transcript itself records that a turn opened one.
+  const workspaces = useStore(s => s.workspaces);
+  const statuses = useStore(s => s.statuses);
+  const sessions = useStore(s => s.sessions);
+  const projects = useMemo(() => deriveSidebarProjects({ workspaces, statuses, sessions }), [workspaces, statuses, sessions]);
+  const opened = useMemo(() => threadsOpenedBy(projects, thread.threadKey), [projects, thread.threadKey]);
   const openFile = useRightPanelStore(s => s.openFile);
   const api = useStore(s => s.api);
   const listRef = useRef<LegendListRef | null>(null);
@@ -62,10 +76,8 @@ export function ChatView({
   // naming the workspace and, while it wakes, where it runs, since that is what the send is waiting on.
   const state = useWorkspaceState(workspaceId);
   const status = useStatus(workspaceId);
-  const runs = useMemo(
-    () => ({ name: workspace?.name ?? workspaceId, where: workspace === null ? workspaceId : whereWord({ workspace, status }) }),
-    [workspace, workspaceId, status],
-  );
+  const where = useWhereWord(workspaceId);
+  const runs = useMemo(() => ({ name: workspace?.name ?? workspaceId, where }), [workspace, workspaceId, where]);
   const machineWait = useMemo<MachineWait | null>(() => {
     if (state === null || !view.running) return null;
     const wait = turnWait(state, runs);
@@ -123,7 +135,12 @@ export function ChatView({
           />
         )}
       </div>
-      {thread.hydrated && view.settled !== null ? <SettledFooter turn={view.settled} /> : null}
+      {thread.hydrated && opened.length > 0 ? (
+        <div className="mx-auto w-full max-w-5xl px-4">
+          <OpenedThreadRows opened={opened} onOpen={select} />
+        </div>
+      ) : null}
+      {thread.hydrated && view.settled !== null ? <SettledFooter turn={view.settled} openedCostUsd={openedSpend(opened)} /> : null}
       {thread.hydrated && paused !== null ? (
         <div className="mx-auto w-full max-w-5xl px-4 pb-1">
           <TimelineRuleLine data-workspace-paused line={paused} />
@@ -145,6 +162,44 @@ function EmptyThread({ workspaceName }: { workspaceName: string }) {
   );
 }
 
+/** What the threads this one opened have spent between them, as each thread's own rows add up; zero where none of
+ * them reported a figure, which the footer then says nothing about. */
+function openedSpend(opened: ReadonlyArray<ThreadOnWorkspace>): number {
+  return opened.reduce((sum, { thread }) => sum + (thread.costUsd ?? 0), 0);
+}
+
+/** One row per thread this thread's agent opened, wherever each runs: what it is called, the workspace it runs on
+ * with where that runs, how it stands, and the page's own address for it, so a person reading the opener can reach
+ * every thread it started without hunting the sidebar for it. */
+function OpenedThreadRows({ opened, onOpen }: { opened: ReadonlyArray<ThreadOnWorkspace>; onOpen: (workspaceId: string, threadId: string | null) => void }) {
+  return (
+    <>
+      {opened.map(({ thread, runs }) => (
+        <TimelineRuleLine key={thread.id} data-opened-thread line="opened">
+          {/* A thread the runtime stamped no id on has no address, the reading that refuses its copy-link action too. */}
+          {thread.threadId === null ? (
+            <span className="min-w-0 truncate text-foreground">{thread.title}</span>
+          ) : (
+            <a
+              href={threadLink(thread, thread.threadId)}
+              className="min-w-0 truncate text-foreground underline-offset-2 hover:underline"
+              onClick={event => {
+                event.preventDefault();
+                onOpen(thread.workspaceId, thread.threadId);
+              }}
+            >
+              {thread.title}
+            </a>
+          )}
+          <span className="shrink-0 whitespace-nowrap">
+            {` · ${[runs.displayName, whereWord(runs), ...(thread.indicator === null ? [] : [thread.indicator.label])].join(" · ")}`}
+          </span>
+        </TimelineRuleLine>
+      ))}
+    </>
+  );
+}
+
 const TURN_STATUS: Record<TurnSummary["state"], string> = {
   running: "running",
   completed: "completed",
@@ -152,21 +207,25 @@ const TURN_STATUS: Record<TurnSummary["state"], string> = {
   error: "failed",
 };
 
-/** Duration and cost of the turn that just settled; its error, when it has one, is already a row in the thread. */
-function SettledFooter({ turn }: { turn: TurnSummary }) {
+/** Duration and cost of the turn that just settled, with what the threads it opened spent beside its own figure;
+ * its error, when it has one, is already a row in the thread. The line carries facts and a state word, so it wears
+ * the type ladder's 11 px mono, the size the rule lines above it and the row meta in the sidebar read at. A narrow
+ * window breaks the line between facts and never inside one: a duration or a price split over two lines is a
+ * figure a person has to reassemble before they can read it. */
+function SettledFooter({ turn, openedCostUsd }: { turn: TurnSummary; openedCostUsd: number }) {
   const failed = turn.state !== "completed";
-  const parts = turnSettledParts(turn);
+  const parts = turnSettledParts(turn, openedCostUsd);
   return (
     <div
       data-testid="settled-footer"
       className={cn(
-        "mx-auto flex w-full max-w-3xl items-center gap-2 px-4 py-2 text-xs tabular-nums sm:px-6",
+        "mx-auto flex w-full max-w-3xl flex-wrap items-center gap-x-2 px-4 py-2 font-mono text-[11px] tabular-nums sm:px-6",
         failed ? "text-destructive" : "text-muted-foreground",
       )}
     >
-      <span>{TURN_STATUS[turn.state]}</span>
+      <span className="whitespace-nowrap">{TURN_STATUS[turn.state]}</span>
       {parts.map(part => (
-        <span key={part}>
+        <span key={part} className="whitespace-nowrap">
           <span aria-hidden className="pe-2">·</span>
           {part}
         </span>
