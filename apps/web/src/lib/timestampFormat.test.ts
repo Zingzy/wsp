@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  APP_LOCALE,
   formatDayAwareTimestamp,
   formatElapsedDurationLabel,
   formatExpiresInLabel,
@@ -126,7 +127,9 @@ describe("formatDayAwareTimestamp", () => {
 
   it("prefixes older same-year messages with the numeric date", () => {
     const messageAt = iso(2026, 7, 12, 12, 34);
-    const datePart = new Intl.DateTimeFormat(undefined, {
+    // The app's own locale, not the shell's: the date a stamp carries is the app's shape wherever the run started,
+    // and an expectation built from the runtime's locale passes on one computer and fails on the next.
+    const datePart = new Intl.DateTimeFormat(APP_LOCALE, {
       month: "numeric",
       day: "numeric",
     }).format(new Date(messageAt));
@@ -137,7 +140,7 @@ describe("formatDayAwareTimestamp", () => {
 
   it("includes the year once the calendar year differs", () => {
     const messageAt = iso(2025, 11, 31, 18, 0);
-    const datePart = new Intl.DateTimeFormat(undefined, {
+    const datePart = new Intl.DateTimeFormat(APP_LOCALE, {
       month: "numeric",
       day: "numeric",
       year: "numeric",

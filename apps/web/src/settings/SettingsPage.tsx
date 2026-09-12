@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The settings page in the centre: one column of sections in the app's
-// grammar, a caps mono zone label over each, then one hairline-separated row
-// per pick with its label at the left and its control at the right edge. The
-// control's own label is the explanation: no sentence under any pick. Every
-// pick goes to the host's preferences record and paints at once, so a browser
-// tab on the same host follows. About is the one section that takes no pick:
-// it names the release each half of the app is on.
+// The settings page in the centre: one column of sections in the grammar
+// rows.tsx holds, a caps mono zone label over each, then one hairline-separated
+// row per pick with its label at the left and its control at the right edge.
+// The control's own label is the explanation: no sentence under any pick,
+// though a section may put one sentence of its own in a row of the same shape.
+// Every pick goes to the host's preferences record and paints at once, so a
+// browser tab on the same host follows. Image, Where agents run and About take
+// no pick: they say what this computer has sealed, where its agents run, and
+// the release each half of the app is on.
 import { PLACES_WORDS, SidebarMode, TerminalSizeSource, ThemePreference, fmtPx, type TerminalConfig } from "@wsp/protocol";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { SIDEBAR_MODE_WORDS } from "../actions/format.js";
 import { Button } from "../components/ui/button.js";
 import { NumberField, NumberFieldDecrement, NumberFieldGroup, NumberFieldIncrement, NumberFieldInput } from "../components/ui/number-field.js";
@@ -19,8 +21,10 @@ import { SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "../
 import { appTerminalFontSize } from "../terminal/ghostty/surface.js";
 import { appScheme } from "../terminal/ghosttyConfig.js";
 import { shellVersions } from "../shell/shellVersion.js";
-import { FACT, SETTINGS_WORDS, TERMINAL_SIZE_FACT, TERMINAL_SIZE_WORDS, THEME_WORDS, ZONE_LABEL, versionFact } from "./format.js";
+import { FACT, SETTINGS_WORDS, TERMINAL_SIZE_FACT, TERMINAL_SIZE_WORDS, THEME_WORDS, versionFact } from "./format.js";
 import { AddComputerSheet } from "./AddComputerSheet.js";
+import { ImageSection } from "./ImageSection.js";
+import { Row, Section } from "./rows.js";
 import { WhereAgentsRun } from "./WhereAgentsRun.js";
 
 
@@ -53,7 +57,7 @@ export function SettingsPage() {
   const width = preferences.sidebarWidth ?? SIDEBAR_DEFAULT_WIDTH;
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <div data-settings-page className="mx-auto flex w-full max-w-xl flex-col gap-8 px-6 py-6">
+      <div data-settings-page className="mx-auto flex w-full max-w-[672px] flex-col gap-8 px-6 py-6">
         {labs ? (
         <Section id="settings-appearance" title={SETTINGS_WORDS.appearance}>
           <Row id="settings-theme" label={SETTINGS_WORDS.theme}>
@@ -103,6 +107,7 @@ export function SettingsPage() {
           </Row>
         </Section>
         ) : null}
+        <ImageSection />
         <Section id="settings-where" title={PLACES_WORDS.section}>
           <WhereAgentsRun />
         </Section>
@@ -117,30 +122,5 @@ export function SettingsPage() {
       </div>
       {addComputer ? <AddComputerSheet onClose={closeAddComputer} /> : null}
     </ScrollArea>
-  );
-}
-
-function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
-  return (
-    <section aria-labelledby={id} className="flex flex-col gap-2">
-      <h2 id={id} className={ZONE_LABEL}>
-        {title}
-      </h2>
-      <div className="flex flex-col">{children}</div>
-    </section>
-  );
-}
-
-/** One pick: its label at the left, its control and the fact beside it at the right edge, a hairline under it. The
- * row is one height by the control's; in a column too narrow for both the control drops under the label, still at
- * the right edge, so the page never scrolls sideways and no word is cut. */
-function Row({ id, label, children }: { id: string; label: string; children: ReactNode }) {
-  return (
-    <div className="flex min-h-11 flex-wrap items-center justify-end gap-x-3 gap-y-1 border-b border-border/60 py-2 last:border-transparent" data-settings-row>
-      <span id={id} className="flex-1 text-sm text-foreground">
-        {label}
-      </span>
-      <div className="flex shrink-0 items-center gap-3">{children}</div>
-    </div>
   );
 }

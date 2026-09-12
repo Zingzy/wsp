@@ -85,7 +85,7 @@ import {
 
 import * as wire from "../src/index.js";
 
-import { copyIsCurrent, type SealedImage, type SealedImageCopy } from "../src/index.js";
+import { COPY_CURRENT, COPY_STALE, copyIsCurrent, copyStanding, sealedCopyLine, type SealedImage, type SealedImageCopy } from "../src/index.js";
 
 describe("a copy of the image beside the record", () => {
   const image: SealedImage = { name: "default", version: 2, hash: "a".repeat(64), recipeHash: "rh", logins: [], sealedAt: "t", sealedFrom: "h1" };
@@ -97,6 +97,17 @@ describe("a copy of the image beside the record", () => {
     expect(copyIsCurrent(image, copy({ version: 9, hash: image.hash }))).toBe(true);
     expect(copyIsCurrent(image, copy({ version: 2, hash: "b".repeat(64) }))).toBe(false);
     expect(copyIsCurrent(image, copy({ version: 2 }))).toBe(false);
+  });
+
+  it("says how it stands in one word, and says nothing where the record holds no vault to judge it by", () => {
+    const sealed = { ...image, vault: { sha256: "c".repeat(64), bytes: 10, paths: 2, takenAt: "t" } };
+    expect(copyStanding(sealed, copy({ hash: image.hash }))).toBe(COPY_CURRENT);
+    expect(copyStanding(sealed, copy({ hash: "b".repeat(64) }))).toBe(COPY_STALE);
+    expect(copyStanding(sealed, copy({}))).toBe(COPY_STALE);
+    expect(copyStanding(image, copy({ hash: image.hash }))).toBeUndefined();
+    // The line a person reads on the command line is the same rule spelled once: what it says is what the word says.
+    expect(sealedCopyLine(sealed, copy({ hash: image.hash }))).toBe(`solari · v1 · ${COPY_CURRENT}`);
+    expect(sealedCopyLine(image, copy({ hash: image.hash }))).toBe("solari · v1");
   });
 });
 
