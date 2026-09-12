@@ -25,6 +25,18 @@ const clickOf = (template: MenuItemConstructorOptions[], label: string) => templ
 const fakeClick = (): [MenuItem: import("electron").MenuItem, window: undefined, event: import("electron").KeyboardEvent] => [{} as import("electron").MenuItem, undefined, {} as import("electron").KeyboardEvent];
 
 describe("contextMenuTemplate", () => {
+  it("gives a row that can run its hint as the hover text, and a dimmed row's reason still wins the slot", () => {
+    const rows: ContextMenuItem[] = [
+      { id: "awake", label: "Stay awake while joined", group: "place", enabled: true, checked: false, hint: "while the lid is open and it is plugged in" },
+      { id: "rebuild", label: "Rebuild machine", group: "place", enabled: false, refusal: "this one answers", hint: "never read" },
+    ];
+    const template = contextMenuTemplate(rows, vi.fn());
+    expect(template[0]).toMatchObject({ enabled: true, toolTip: "while the lid is open and it is plugged in" });
+    expect(template[1]).toMatchObject({ enabled: false, toolTip: "this one answers" });
+    expect(parseContextMenuItems(rows)).toEqual(rows);
+    expect(() => parseContextMenuItems([{ id: "x", label: "x", group: "g", enabled: true, hint: 3 }])).toThrow("menu:context: not a list of items");
+  });
+
   it("keeps the page's order, parts the groups with separators, dims a refused row with its refusal as hover text and carries the accelerator", () => {
     const choose = vi.fn();
     const template = contextMenuTemplate(ITEMS, choose);
