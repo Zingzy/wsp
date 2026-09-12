@@ -1009,6 +1009,7 @@ describe("daemon files and diff ops", () => {
       tokenPath: "/home/maya/.wsp/daemon-token",
       portFile: "/home/maya/.wsp/daemon.port",
       runDir: "/home/maya/.wsp/run",
+      putDir: "/home/maya/.wsp/put",
       openSocket: "/home/maya/.wsp/open.sock",
       manifestPath: "/home/maya/.wsp/manifest.json",
       profileFile: "/home/maya/.wsp/profile.sh",

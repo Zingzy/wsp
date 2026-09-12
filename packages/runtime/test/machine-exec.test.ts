@@ -189,6 +189,39 @@ describe("machineExecStream", () => {
     expect(await read()).toContain("remote launch failed");
   });
 
+  it("a launch the machine answered nothing to names the handshake that never came, and never a bare exit 0", async () => {
+    const { backend, machine } = await makeMachine();
+    // The exec landed and the guest printed neither the handshake nor a reason. Exit 0 is success on every other
+    // road, so the code on its own reads as a run that started and left the reader polling a log nobody writes.
+    backend.execImpl = async () => ({ exitCode: 0, stdout: "", stderr: "" });
+    const stream = machineExecStream(machine, { pollMs: 5 })("true", { env: {} });
+    const message = await (async () => {
+      try {
+        for await (const _ of stream.lines) void _;
+        return "streamed it";
+      } catch (e) {
+        return e instanceof Error ? e.message : String(e);
+      }
+    })();
+    expect(message).toBe(`remote launch failed on ${machine.id}: nothing came back saying WSP_LAUNCHED, the word the guest prints once the run is up; it printed nothing and exited 0`);
+    expect(message).not.toMatch(/exit 0:\s*$/);
+  });
+
+  it("a launch the machine refused carries what the machine said beside the code", async () => {
+    const { backend, machine } = await makeMachine();
+    backend.execImpl = async () => ({ exitCode: 1, stdout: "", stderr: "no run folder on this machine: /tmp/wsp-run/ab12cd34ef56.d\n" });
+    const stream = machineExecStream(machine, { pollMs: 5 })("true", { env: {} });
+    const message = await (async () => {
+      try {
+        for await (const _ of stream.lines) void _;
+        return "streamed it";
+      } catch (e) {
+        return e instanceof Error ? e.message : String(e);
+      }
+    })();
+    expect(message).toBe(`remote launch failed on ${machine.id}: nothing came back saying WSP_LAUNCHED, the word the guest prints once the run is up; it exited 1 and said: no run folder on this machine: /tmp/wsp-run/ab12cd34ef56.d`);
+  });
+
   it("when the poll sees the exit code the run's process group gets TERM then KILL after the log tail is read, and its files go", async () => {
     const { backend, machine } = await makeMachine();
     const guest = scriptGuest(backend, [{ append: "almost" }, { append: " done\n", exit: 0 }, {}]);
