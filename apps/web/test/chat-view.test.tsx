@@ -835,6 +835,31 @@ describe("the threads a thread opened", () => {
     }
   });
 
+  it("a send whose turn dies before it announces itself draws the words above the line that answered them", async () => {
+    const settled = settledTurn(WS, "add a health route", "Added GET /health.");
+    const { api, emit } = fixtureApi([workspace], { [WS]: settled });
+    const handle: { current: ChatThreadHandle | null } = { current: null };
+    useStore.getState().bind(api);
+    await waitFor(() => expect(useStore.getState().workspaces.length).toBeGreaterThan(0));
+    render(<ChatView workspaceId={WS}>{thread => { handle.current = thread; return null; }}</ChatView>);
+    await screen.findByText("Added GET /health.");
+    sendFrom(handle.current, "have another look");
+    await screen.findByText("have another look");
+    // The harness launched, answered nothing and exited: a reply and a plain end, under a turn no start opened. The
+    // words this view stood in with are already on screen, so the line lands above them unless the row is placed.
+    const dead = { workspaceId: WS, sessionId: `sess_${WS}`, turnId: "turn_dead" };
+    emit({ type: "session.done", ...dead, at: T0 + 120_000, result: { status: "failed", error: "claude answered with no output and no usage after 48ms", durationMs: 48, costUsd: 0 } });
+    emit({ type: "session.end", ...dead, at: T0 + 120_050, exitCode: 1, sawResult: true });
+    // The row draws the sentence with its first letter raised, as the shipped runtime error rows do.
+    const line = await screen.findByText(/answered with no output and no usage after 48ms/i);
+    const words = screen.getByText("have another look");
+    const rows = [...document.querySelectorAll("[data-timeline-row-id]")];
+    const at = (node: Element) => rows.findIndex(row => row.contains(node));
+    expect(at(words)).toBeGreaterThanOrEqual(0);
+    expect(at(words)).toBe(at(line) - 1);
+    expect(screen.getAllByText("have another look")).toHaveLength(1);
+  });
+
   it("says nothing about a total on a thread that opened none, and leaves its own figure unqualified", async () => {
     const { api } = fixtureApi([workspace], { [WS]: lead });
     await setup(api);
