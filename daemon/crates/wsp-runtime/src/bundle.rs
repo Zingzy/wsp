@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::profile;
+use crate::store::Chain;
 
 /// Every path the runtime writes under its root.
 pub struct Layout {
@@ -101,14 +102,19 @@ pub struct Init {
     pub boot_id: String,
 }
 
-/// What the ops keep about one workspace: the spec as it was built, when, and the init that runs it.
+/// What the ops keep about one workspace: the spec as it was built, the chain it boots from, when, and the init
+/// that runs it. The chain is the record's own copy: a wake mounts it whatever became of the name it was resolved
+/// from, and the sweep keeps its layers while the record stands.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Workspace {
     pub id: String,
     pub hostname: String,
     pub image: String,
+    pub chain: Chain,
     pub labels: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub envs: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cpu: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -360,7 +366,9 @@ mod tests {
             id: "wsp-a".into(),
             hostname: "wsp-a".into(),
             image: "ubuntu:24.04".into(),
+            chain: Chain { config: crate::fetch::Digest::of(b"c"), layers: vec![crate::fetch::Digest::of(b"l")] },
             labels: BTreeMap::from([("wsp".to_owned(), "1".to_owned())]),
+            envs: BTreeMap::from([("WSP_TOKEN".to_owned(), "t".to_owned())]),
             cpu: Some(2.0),
             mem_mb: None,
             created_at: "2026-09-12T00:00:00.000Z".into(),

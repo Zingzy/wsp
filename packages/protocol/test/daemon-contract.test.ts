@@ -50,9 +50,14 @@ import {
   MachineExecReply,
   MachineHandleReply,
   MachineListReply,
+  MachinePromoteReply,
   MachineReachReply,
   MachineShapeReply,
+  MachineSnapshotReply,
+  MachineSnapshotsReply,
   MachineStateReply,
+  MachineTemplateReply,
+  MachineTemplatesReply,
   NO_PLACE_FILE_LINE,
   NOT_ON_THIS_KIND,
   NOT_ON_THIS_ROAD,
@@ -335,6 +340,33 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
   MachineShapeReply: { schema: MachineShapeReply, samples: [{ shape: { cpu: 2, memMb: 1024, diskGb: 20, createdAt: "2026-09-12T13:00:00.000Z" } }, { shape: {} }] },
   MachineAnswersReply: { schema: MachineAnswersReply, samples: [{ answers: true }, { answers: false }] },
   MachineReachReply: { schema: MachineReachReply, samples: [{ reach: { url: "http://127.0.0.1:41234", token: "", expiresAt: 9007199254740991 } }] },
+  MachineSnapshotReply: { schema: MachineSnapshotReply, samples: [{ snapshotId: "sha256:1ac97f8d7ea55cc4f6a4f8f2f0e4f3b6ce9dc0c9a3a4e2a9dbb7dcd8c3e5f0a1" }] },
+  MachineSnapshotsReply: {
+    schema: MachineSnapshotsReply,
+    samples: [
+      {
+        snapshots: [
+          { id: "sha256:1ac97f8d7ea55cc4f6a4f8f2f0e4f3b6ce9dc0c9a3a4e2a9dbb7dcd8c3e5f0a1", name: "v1", sizeBytes: 378880, createdAt: "2026-09-12T18:00:00.000Z", parent: null },
+          { id: "sha256:2bd08e9f8fb66dd5a7b5a9a3a1f5a4c7df0ed1d0b4b5f3b0ecc8ede9d4f6a1b2", name: "v2", sizeBytes: 1024, createdAt: "2026-09-12T18:05:00.000Z", parent: "sha256:1ac97f8d7ea55cc4f6a4f8f2f0e4f3b6ce9dc0c9a3a4e2a9dbb7dcd8c3e5f0a1" },
+          { id: "sha256:3ce19fa09fc77ee6b8c6bab4b2a6b5d8ea1fe2e1c5c6a4c1fdd9fefae5a7b2c3", sizeBytes: 0 },
+        ],
+      },
+      { snapshots: [] },
+    ],
+  },
+  MachinePromoteReply: { schema: MachinePromoteReply, samples: [{ templateId: "wsp/dev:template" }] },
+  MachineTemplateReply: {
+    schema: MachineTemplateReply,
+    samples: [
+      { template: { id: "wsp/dev:template", name: "dev", status: "ready", createdAt: "2026-09-12T18:00:00.000Z" } },
+      { template: { id: "wsp/dev:template", name: "dev", status: "failed", error: "the build exited 1" } },
+      { template: { id: "ubuntu:24.04", name: "ubuntu:24.04", status: "building" } },
+    ],
+  },
+  MachineTemplatesReply: {
+    schema: MachineTemplatesReply,
+    samples: [{ templates: [{ id: "wsp/dev:template", name: "dev", status: "ready", createdAt: "2026-09-12T18:00:00.000Z" }] }, { templates: [] }],
+  },
   DaemonErrorResponse: {
     schema: DaemonErrorResponse,
     samples: [

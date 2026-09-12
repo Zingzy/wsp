@@ -76,7 +76,7 @@ describe("deriveSidebarProjects", () => {
     return out;
   };
 
-  it("live run 1: two machines, the one created later and still quiet above the one whose thread ended before it existed, each a remote project with its machine as the environment label", () => {
+  it("live run 1: two machines in the order they were made, the older one with its two threads first, each a remote project with its machine as the environment label", () => {
     const projects = deriveSidebarProjects({
       workspaces: [LIVE_WORKSPACE_2, LIVE_WORKSPACE_1],
       statuses: statusesFrom(LIVE_RUN_1),
@@ -88,11 +88,11 @@ describe("deriveSidebarProjects", () => {
       },
     });
     expect(projects.map(p => [p.displayName, p.indicator.label, p.remoteEnvironmentLabels, p.threads.length])).toEqual([
-      ["yolo", "Running", ["machine-2"], 0],
       ["first", "Running", ["machine-1"], 2],
+      ["yolo", "Running", ["machine-2"], 0],
     ]);
-    expect(projects[1]).toMatchObject({ projectKey: LIVE_WS, environmentPresence: "remote-only", groupedProjectCount: 1, allRemoteMembersAreDesktopLocal: false, machineState: "running", reach: "reachable", state: "running" });
-    expect(projects[1]?.threads).toEqual([
+    expect(projects[0]).toMatchObject({ projectKey: LIVE_WS, environmentPresence: "remote-only", groupedProjectCount: 1, allRemoteMembersAreDesktopLocal: false, machineState: "running", reach: "reachable", state: "running" });
+    expect(projects[0]?.threads).toEqual([
       { id: "s1", threadId: null, sessionId: "s1", workspaceId: LIVE_WS, title: "hello", status: "completed", ran: true, startedAt: "2026-09-02T17:19:35.668Z", endedAt: "2026-09-02T17:19:37.768Z", indicator: { label: "Idle", tone: "neutral", pulse: false }, harness: "claude", startedBy: "person", project: null, parentThreadId: null, asking: null, costUsd: null },
       { id: "s0", threadId: null, sessionId: "s0", workspaceId: LIVE_WS, title: "59094224", status: "running", ran: true, startedAt: null, endedAt: null, indicator: { label: "Working", tone: "neutral", pulse: true }, harness: "claude", startedBy: "person", project: null, parentThreadId: null, asking: null, costUsd: null },
     ]);
@@ -150,54 +150,58 @@ describe("deriveSidebarProjects", () => {
       id, workspaceId, harness: "claude", status: endedAgoMs === undefined ? "running" : "completed", prompt: id,
       startedAt: T - startedAgoMs, ...(endedAgoMs === undefined ? {} : { endedAt: T - endedAgoMs }),
     });
-    const runningOld = ws("running-old", "running", 72 * HOUR);
-    const runningMid = ws("running-mid", "running", 24 * HOUR);
-    const unreachableNew = ws("unreachable-new", "running", 10 * 60_000);
-    const pausedOld = ws("paused-old", "napping", 48 * HOUR);
-    const pausedNew = ws("paused-new", "napping", 30 * 60_000);
-    const goneNew = ws("gone-new", "running", 60_000);
+    const first = ws("first", "running", 72 * HOUR);
+    const second = ws("second", "napping", 48 * HOUR);
+    const third = ws("third", "running", 24 * HOUR);
+    const fourth = ws("fourth", "napping", 30 * 60_000);
+    const fifth = ws("fifth", "running", 10 * 60_000);
+    const sixth = ws("sixth", "running", 60_000);
+    // The record hands them over in no order of its own, which is the whole reason the rows are sorted here at all.
     const fleet = {
-      workspaces: [runningOld, pausedOld, runningMid, goneNew, pausedNew, unreachableNew],
+      workspaces: [third, sixth, first, fifth, second, fourth],
       statuses: {
-        [runningOld.id]: at(runningOld, "running", "reachable"),
-        [runningMid.id]: at(runningMid, "running", "reachable"),
-        [unreachableNew.id]: at(unreachableNew, "running", "unreachable"),
-        [pausedOld.id]: at(pausedOld, "paused", "napping"),
-        [pausedNew.id]: at(pausedNew, "paused", "napping"),
-        [goneNew.id]: at(goneNew, "gone", "gone"),
+        [first.id]: at(first, "running", "reachable"),
+        [second.id]: at(second, "paused", "napping"),
+        [third.id]: at(third, "running", "reachable"),
+        [fourth.id]: at(fourth, "paused", "napping"),
+        [fifth.id]: at(fifth, "running", "unreachable"),
+        [sixth.id]: at(sixth, "gone", "gone"),
       },
       sessions: {
-        [runningOld.id]: [turn("s1", runningOld.id, 5 * 60_000)],
-        [pausedOld.id]: [turn("s2", pausedOld.id, 2 * HOUR, HOUR)],
+        [first.id]: [turn("s1", first.id, 5 * 60_000)],
+        [second.id]: [turn("s2", second.id, 2 * HOUR, HOUR)],
       },
     };
+    const ROWS = ["first", "second", "third", "fourth", "fifth", "sixth"];
     const order = (input: SidebarInput) => deriveSidebarProjects(input).map(p => p.id);
 
-    it("workspaces whose machine is up lead however old, then the paused, then the gone; inside a group the latest turn or creation is on top", () => {
-      expect(order(fleet)).toEqual(["running-old", "unreachable-new", "running-mid", "paused-new", "paused-old", "gone-new"]);
+    it("rows stand in the order the workspaces were made, oldest at the top, whatever each machine is doing", () => {
+      // first is the oldest and the busiest, sixth is the newest and gone, and neither fact is what puts them there.
+      expect(order(fleet)).toEqual(ROWS);
     });
 
-    it("a status tick that leaves the state alone leaves the order alone; a state change or a new turn moves the row", () => {
-      const ticked = {
+    it("a state word arriving and a turn starting both leave every row where it was", () => {
+      // What Sam watched: a paused workspace was woken, came back unreachable and took a turn, and the list it was
+      // the fourth row of stayed a list it is the fourth row of.
+      const woken = {
         ...fleet,
-        statuses: {
-          ...fleet.statuses,
-          [runningOld.id]: at(runningOld, "running", "slow", { idleAt: T + 9 * 60_000 }),
-          [runningMid.id]: at(runningMid, "running", "reachable", { idleAt: T + 3 * 60_000 }),
-        },
+        statuses: { ...fleet.statuses, [fourth.id]: at({ ...fourth, phase: "running" }, "running", "unreachable") },
+        sessions: { ...fleet.sessions, [fourth.id]: [turn("s3", fourth.id, 60_000)] },
       };
-      expect(order(ticked)).toEqual(order(fleet));
-      const woke = { ...fleet, statuses: { ...fleet.statuses, [pausedNew.id]: at({ ...pausedNew, phase: "running" }, "running", "reachable") } };
-      expect(order(woke)).toEqual(["running-old", "unreachable-new", "paused-new", "running-mid", "paused-old", "gone-new"]);
-      const spoke = { ...fleet, sessions: { ...fleet.sessions, [runningMid.id]: [turn("s3", runningMid.id, 60_000)] } };
-      expect(order(spoke)).toEqual(["running-mid", "running-old", "unreachable-new", "paused-new", "paused-old", "gone-new"]);
+      expect(order(woken)).toEqual(ROWS);
+      // And the other way: the oldest row goes gone and stays at the top, where a person left it.
+      expect(order({ ...fleet, statuses: { ...fleet.statuses, [first.id]: at(first, "gone", "gone") } })).toEqual(ROWS);
     });
 
-    it("a workspace just created, still waking, sits at the top of the up group with no thread yet", () => {
+    it("a workspace made now lands at the foot, so no row a person is reaching for moves", () => {
       const fresh = ws("fresh", "running", 0);
-      expect(order({ ...fleet, workspaces: [...fleet.workspaces, fresh], statuses: { ...fleet.statuses, [fresh.id]: at(fresh, "starting", "unreachable") } })).toEqual([
-        "fresh", "running-old", "unreachable-new", "running-mid", "paused-new", "paused-old", "gone-new",
-      ]);
+      expect(order({ ...fleet, workspaces: [fresh, ...fleet.workspaces], statuses: { ...fleet.statuses, [fresh.id]: at(fresh, "starting", "unreachable") } })).toEqual([...ROWS, "fresh"]);
+    });
+
+    it("two workspaces stamped the same moment fall to their ids, so the list cannot differ between two readings", () => {
+      const twin = ws("first-twin", "running", 72 * HOUR);
+      expect(order({ ...fleet, workspaces: [twin, ...fleet.workspaces] })).toEqual(["first", "first-twin", ...ROWS.slice(1)]);
+      expect(order({ ...fleet, workspaces: [...fleet.workspaces, twin] })).toEqual(["first", "first-twin", ...ROWS.slice(1)]);
     });
   });
 

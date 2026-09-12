@@ -170,6 +170,7 @@ describe("the surfaces list this repo ships", () => {
       "spawned-thread",
       "threads-across-workspaces",
       "opener-transcript",
+      "spawned-thread-header",
       "host-asleep",
       "composer-folder",
       "composer-folder-refused",
@@ -195,7 +196,7 @@ describe("the surfaces list this repo ships", () => {
     // Those served from a state of their own: an image that is built cannot stand in the same state file as one
     // that never was, a thread whose agent opened threads elsewhere needs the workspaces those threads run on, and
     // a person with nowhere to put a workspace has neither computer nor provider.
-    expect(read.surfaces.filter(s => s.fixture !== undefined).map(s => s.fixture)).toEqual(["orchestrator", "orchestrator", "image-built", "image-built", "mac-and-boxes", "mac-only", "mac-and-boxes"]);
+    expect(read.surfaces.filter(s => s.fixture !== undefined).map(s => s.fixture)).toEqual(["orchestrator", "orchestrator", "orchestrator", "image-built", "image-built", "mac-and-boxes", "mac-only", "mac-and-boxes"]);
     // Four are shot at the two widths a design reading is held to; the rest take every width the list shoots.
     const narrowed = read.surfaces.filter(s => s.widths.length < read.widths.length);
     expect(narrowed.map(s => s.name)).toEqual(["new-workspace", "new-workspace-nowhere", "creating-workspace", "workspace-projects"]);

@@ -23,10 +23,12 @@ describe("the provider that answers out of memory", () => {
     for (const jargon of ["out of memory", "no guest", "capability", "landsBytes"]) expect(FAKE_NO_GUEST).not.toContain(jargon);
   });
 
-  it("still answers for a machine a fixture names, in the state its id says, since the record has to load", async () => {
+  it("still answers for a machine a fixture names, since the record has to load, and reads its state off the records", async () => {
+    // Running unless the records say otherwise: the id used to carry a suffix for the word asleep, which is a
+    // second place one fact lived and which printed in the MACHINE column of the table wsp draws.
     const backend = new FakeBackend();
     expect(await (await backend.get("fk_c0ffee")).state()).toBe("running");
-    expect(await (await backend.get("fk_c0ffee.paused")).state()).toBe("paused");
+    expect(await (await backend.get("fk_c0ffee.paused")).state()).toBe("running");
   });
 });
 

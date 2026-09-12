@@ -320,6 +320,64 @@ async function firstThere(guesses) {
   return undefined;
 }
 
+/** Every guess a tester's word is looked up through, in order. The last one is the loose one, and several things
+ * reading it is the page drawing a line inside another line rather than two things to choose between; every guess
+ * above it names one control, so two of them is a word the driver cannot choose by. */
+const GUESSES = [
+  (page, word) => page.getByRole("button", { name: word, exact: true }),
+  (page, word) => page.getByRole("tab", { name: word, exact: true }),
+  (page, word) => page.getByRole("link", { name: word, exact: true }),
+  (page, word) => page.getByLabel(word, { exact: true }),
+  (page, word) => page.getByText(word, { exact: true }),
+  (page, word) => page.getByText(word),
+];
+const LOOSE = GUESSES.length - 1;
+
+/** Which guess a word lands on and how many things read it there; nothing when none of them reads it. Only what a
+ * tester can see counts: a word by role is already read off the tree a screen reader walks, which hidden elements
+ * are not in, but a word by text matches an element the page has laid nowhere, so a word drawn once on the screen
+ * and once under a closed panel would be refused as two things while the page read lists one. */
+async function whereItLands(page, word) {
+  for (const [at, guessing] of GUESSES.entries()) {
+    const guess = guessing(page, word).filter({ visible: true });
+    const count = await guess.count();
+    if (count > 0) return { guess, count, at };
+  }
+  return undefined;
+}
+
+/** What a click is told when the word it was given reads on more than one control, or nothing when it reads on
+ * one. The driver used to take the first of them, and a tester whose word read both the Remove in a row's menu
+ * and the Remove in the row's own detail watched the click time out with nothing on the screen to explain it. */
+export const SEVERAL_READ = (word, count) =>
+  `${count} things on the page read ${JSON.stringify(word)}; say which: run text and click one of the attributes it lists, as click attr=<name>. If one of them is under a menu an earlier command left open, press Escape first.`;
+
+/** That refusal for one word on one page, or nothing when the word aims at one thing. */
+export async function whyNotOne(page, word) {
+  if (attrWord(word) !== undefined) return undefined;
+  const landed = await whereItLands(page, word);
+  return landed === undefined || landed.count < 2 || landed.at === LOOSE ? undefined : SEVERAL_READ(word, landed.count);
+}
+
+/** What a click is told when the thing it aimed at is there and would not take the click: the page keeps whatever
+ * the last command left open, which is what puts a menu over the next target. */
+export const UNDER_AN_OPEN_MENU = word => `${JSON.stringify(word)} is on the page and would not take the click: a menu an earlier command left open is over it. Escape first: press Escape then click ${JSON.stringify(word)}`;
+
+/** What stands open over a page: a menu or a picker the last command left behind. A dialog is not one of them, and
+ * neither is anything else: a tester clicking inside a dialog is clicking the thing they opened, and telling them
+ * to close it would be telling them to leave. */
+export const OPEN_OVER_THE_PAGE = '[role="menu"], [role="listbox"]';
+
+/** Whether one of those is standing open. */
+export const openMenu = async page => (await page.locator(OPEN_OVER_THE_PAGE).count()) > 0;
+
+/** What a click that would not land is told, or nothing when the page has no answer for it: a target that is there
+ * and will not take a click with a menu standing open is under that menu. Anything else is the driver's own
+ * failure and travels whole, since a sentence guessed at one would send a tester chasing a menu nobody opened. */
+export async function whyNotClicked(page, word) {
+  return (await openMenu(page)) ? UNDER_AN_OPEN_MENU(word) : undefined;
+}
+
 /** Opens an address and waits until the page has words on it: the app draws itself after the document is there, so
  * a page read the moment it loads reads nothing. The wait is for words rather than for a selector, since this
  * drives whatever a tester was given the address of. */
@@ -339,14 +397,7 @@ async function open(page, url) {
 export async function findByWords(page, word) {
   const selector = attrWord(word);
   if (selector !== undefined) return page.locator(selector).first();
-  return firstThere([
-    page.getByRole("button", { name: word, exact: true }),
-    page.getByRole("tab", { name: word, exact: true }),
-    page.getByRole("link", { name: word, exact: true }),
-    page.getByLabel(word, { exact: true }),
-    page.getByText(word, { exact: true }),
-    page.getByText(word),
-  ]);
+  return (await whereItLands(page, word))?.guess.first();
 }
 
 /** What a click is told when the only thing reading its words is a field's ghost: the words are an example, not
@@ -387,7 +438,15 @@ async function act({ verb, words, width, focus }, page) {
       if (word === undefined) die("click takes the words on the thing to click, or attr=<name>");
       const found = await findByWords(page, word);
       if (found === undefined) missed(word, (await page.getByPlaceholder(word, { exact: true }).count()) > 0 ? GHOST_IS_NOT_A_CONTROL(word) : undefined);
-      await found.click({ timeout: WAIT_MS });
+      const several = await whyNotOne(page, word);
+      if (several !== undefined) missed(word, several);
+      try {
+        await found.click({ timeout: WAIT_MS });
+      } catch (e) {
+        const covered = await whyNotClicked(page, word);
+        if (covered !== undefined) missed(word, covered);
+        throw e;
+      }
       return {};
     }
     case "type": {

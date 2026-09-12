@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The usage chart's arithmetic: the span a range names, the accrued total
-// and rate at any instant of a folded cost series, the axis ticks and the
-// smooth path through the points. No DOM here so the rules test in node.
-import type { WorkspaceCostEvent } from "@wsp/protocol";
+// The usage chart's arithmetic: the span a range names, the axis ticks and the
+// smooth path through the points. What a series says at one instant is the
+// protocol's (accruedAt, rateAt, monthStart), read by the host's own month
+// total too. No DOM here so the rules test in node.
+import { accruedAt, monthStart, offlineFor, spentSince, spentThisMonth, type WorkspaceCostEvent } from "@wsp/protocol";
+import { APP_LOCALE } from "../../lib/timestampFormat.js";
 
-export type UsageRange = "hour" | "day" | "all";
-export const USAGE_RANGES: readonly UsageRange[] = ["hour", "day", "all"];
+export type UsageRange = "hour" | "day" | "month" | "all";
+export const USAGE_RANGES: readonly UsageRange[] = ["hour", "day", "month", "all"];
 
-const RANGE_MS: Record<Exclude<UsageRange, "all">, number> = { hour: 3_600_000, day: 86_400_000 };
+const RANGE_MS: Record<"hour" | "day", number> = { hour: 3_600_000, day: 86_400_000 };
 /** A series younger than this still gets a readable axis instead of a span collapsed to a point. */
 const MIN_SPAN_MS = 60_000;
 
@@ -16,45 +18,54 @@ export interface Span {
   end: number;
 }
 
-/** The span a range names, ending at the newest tick: the last hour or day, or the whole series. */
+/** When a range asks the chart to begin, whatever the series has: a fixed stretch back from the newest tick, and
+ * for the month the first of it, which is the instant the places list totals a month from. */
+function rangeStart(range: Exclude<UsageRange, "all">, end: number): number {
+  return range === "month" ? monthStart(end) : end - RANGE_MS[range];
+}
+
+/** The span a range draws, ending at the newest tick and never beginning before the first: a workspace tracked for
+ * forty minutes draws forty minutes under every range rather than a day of nothing with a spike at its edge. The
+ * minimum width keeps a series of one tick from collapsing to a point. */
 export function usageSpan(points: readonly WorkspaceCostEvent[], range: UsageRange): Span | null {
   const first = points[0];
   const last = points[points.length - 1];
   if (first === undefined || last === undefined) return null;
   const end = Date.parse(last.at);
-  if (range !== "all") return { start: end - RANGE_MS[range], end };
-  return { start: Math.min(Date.parse(first.at), end - MIN_SPAN_MS), end };
+  const from = Date.parse(first.at);
+  return { start: Math.min(Math.max(range === "all" ? from : rangeStart(range, end), from), end - MIN_SPAN_MS), end };
 }
 
-/** The tick at or before t and the one after it, when t falls inside the series. */
-function around(points: readonly WorkspaceCostEvent[], t: number): { before: WorkspaceCostEvent; after: WorkspaceCostEvent | undefined } | null {
+/** Whether a range reaches back past the first tick there is, which is a range the chart cannot fill: the picker
+ * holds those rather than drawing an empty stretch as a measurement. */
+export function rangeHeld(points: readonly WorkspaceCostEvent[], range: UsageRange): boolean {
   const first = points[0];
-  if (first === undefined || t < Date.parse(first.at)) return null;
-  let lo = 0;
-  let hi = points.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >> 1;
-    if (Date.parse(points[mid]!.at) <= t) lo = mid;
-    else hi = mid - 1;
-  }
-  return { before: points[lo]!, after: points[lo + 1] };
+  const last = points[points.length - 1];
+  if (first === undefined || last === undefined || range === "all") return false;
+  return rangeStart(range, Date.parse(last.at)) < Date.parse(first.at);
 }
 
-/** The total accrued at t: linear between the ticks around it, flat past the newest, unknown before the first. */
-export function accruedAt(points: readonly WorkspaceCostEvent[], t: number): number | null {
-  const near = around(points, t);
-  if (near === null) return null;
-  const { before, after } = near;
-  if (after === undefined) return before.accruedUsd;
-  const t0 = Date.parse(before.at);
-  const t1 = Date.parse(after.at);
-  if (t1 <= t0) return after.accruedUsd;
-  return before.accruedUsd + ((after.accruedUsd - before.accruedUsd) * (t - t0)) / (t1 - t0);
+/** What the chart says under it about the series itself: when the first tick landed, and how long that is once a
+ * range asks for more than this workspace has been tracked. The held ranges carry the same sentence as their
+ * reason, so the readout and the picker say one thing. */
+export function trackedLine(points: readonly WorkspaceCostEvent[]): string | null {
+  const first = points[0];
+  const last = points[points.length - 1];
+  if (first === undefined || last === undefined) return null;
+  const life = { start: Date.parse(first.at), end: Date.parse(last.at) };
+  const tracked = `tracked since ${timeLabel(life.start, life)}`;
+  return USAGE_RANGES.some(range => rangeHeld(points, range)) ? `${tracked} · ${offlineFor(life.end - life.start)}` : tracked;
 }
 
-/** The burn rate at t: the rate of the tick at or before it, which holds until the next tick. */
-export function rateAt(points: readonly WorkspaceCostEvent[], t: number): number | null {
-  return around(points, t)?.before.rateUsdPerHour ?? null;
+/** What the readout under the chart says while nothing is hovered: on the month range, what this workspace has
+ * cost since the first of the month, which is the figure the places list totals from the same instant and which
+ * the running line the chart draws is not. Every other range says how long the workspace has been tracked, and so
+ * does the month range where the workspace has not lived a month, since there is no month of it to name. */
+export function usageReadout(points: readonly WorkspaceCostEvent[], range: UsageRange): string | null {
+  const tracked = trackedLine(points);
+  const last = points[points.length - 1];
+  if (range !== "month" || last === undefined || USAGE_RANGES.some(r => rangeHeld(points, r))) return tracked;
+  return spentThisMonth(spentSince(points, monthStart(Date.parse(last.at))));
 }
 
 export interface PlotPoint {
@@ -112,11 +123,14 @@ function toTheSecond(span: Span): boolean {
   return (span.end - span.start) / (tickCount(span) - 1) < 60_000;
 }
 
-/** An axis instant in the person's zone: the clock, with the day in front once the span is longer than a day. */
+/** An axis instant in the person's zone: the clock, with the day in front once the span is longer than a day. The
+ * shape is the app's own tag, never the machine's locale, which is the rule every stamp in the app follows
+ * (APP_LOCALE): left to the runtime, one instant read `12:26 AM` on one Mac and `12:26 am` on the same Mac under
+ * another shell, and a chart a design review measures cannot be two shapes. The zone stays the person's. */
 export function timeLabel(t: number, span: Span): string {
   const d = new Date(t);
-  const clock = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", ...(toTheSecond(span) ? { second: "2-digit" } : {}) });
-  return span.end - span.start > RANGE_MS.day ? `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${clock}` : clock;
+  const clock = d.toLocaleTimeString(APP_LOCALE, { hour: "2-digit", minute: "2-digit", ...(toTheSecond(span) ? { second: "2-digit" } : {}) });
+  return span.end - span.start > RANGE_MS.day ? `${d.toLocaleDateString(APP_LOCALE, { month: "short", day: "numeric" })} ${clock}` : clock;
 }
 
 interface Xy {

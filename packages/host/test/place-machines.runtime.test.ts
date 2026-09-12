@@ -4,8 +4,10 @@
 // a throwaway root, answering the same frames from the kernel instead of a
 // Docker daemon. One daemon serves every case here, so the file holds its own
 // lifecycle instead of the Docker file's per-case sweep. Root, cgroup v2 and a
-// registry are what it needs, so it runs under WSP_RUNTIME_LIVE=1 alone. The last case deploys the daemon onto a
-// workspace and reads its hello back through the forward, which takes apt, nodejs.org and npm from inside.
+// registry are what it needs, so it runs under WSP_RUNTIME_LIVE=1 alone. The deploy case puts the daemon onto a
+// workspace and reads its hello back through the forward, which takes apt, nodejs.org and npm from inside. The
+// snapshot and pause cases are the store's: a fork from a snapshot, a template, and the nap that stops a workspace
+// and the wake that boots its saved layer on the same address and forward.
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
@@ -133,8 +135,8 @@ describe.skipIf(!RUNTIME_LIVE)("the whole road, over a daemon link a place prove
     expect((await machine.exec("sleep 30; echo late", { timeoutMs: 300 })).exitCode).toBe(124);
   }, 60_000);
 
-  it("pauses and resumes with the freezer", async () => {
-    const machine = await create({ kind: "sandbox", memMb: 512 });
+  it("pauses and resumes with the freezer, where the workspace is labelled to keep what it holds", async () => {
+    const machine = await create({ kind: "sandbox", memMb: 512, labels: { "wsp.idle": "freeze" } });
     await machine.pause();
     expect(await machine.state()).toBe("paused");
     expect(readFileSync(join(cgroupOf(machine.id), "cgroup.events"), "utf8")).toContain("frozen 1");
@@ -250,6 +252,85 @@ describe.skipIf(!RUNTIME_LIVE)("the whole road, over a daemon link a place prove
       link.close();
     }
   }, 900_000);
+
+  it("commits a snapshot under the name, boots a fork from it with the deleted file still deleted, and lists it with its own bytes", async () => {
+    const machine = await create({ kind: "sandbox" });
+    expect(await exec(machine, "echo taken > /root/marker && rm /usr/bin/passwd && rm -rf /home && mkdir /home && touch /home/only")).toMatchObject({ exitCode: 0 });
+    const started = Date.now();
+    const snapshotId = await machine.snapshot(`live-665-${process.pid}-v1`, { firstLife: true });
+    times["snapshot"] = Date.now() - started;
+    expect(snapshotId).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(await machine.state()).toBe("running");
+    const forking = Date.now();
+    const fork = await create({ kind: "sandbox", fromSnapshot: snapshotId });
+    times["fork from a snapshot to ready"] = Date.now() - forking;
+    expect(await exec(fork, "cat /root/marker; test -e /usr/bin/passwd && echo passwd-stays || echo passwd-gone; ls /home")).toMatchObject({ exitCode: 0, stdout: "taken\npasswd-gone\nonly\n" });
+    expect(await exec(fork, "echo small > /root/small")).toMatchObject({ exitCode: 0 });
+    const second = await fork.snapshot(`live-665-${process.pid}-v2`, { firstLife: true });
+    const rows = await backend.listSnapshots!();
+    const first = rows.find(row => row.id === snapshotId);
+    const child = rows.find(row => row.id === second);
+    expect(first).toMatchObject({ name: `live-665-${process.pid}-v1`, parent: null });
+    expect(first!.sizeBytes).toBeGreaterThan(0);
+    expect(first!.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T.*Z$/);
+    expect(child).toMatchObject({ name: `live-665-${process.pid}-v2`, parent: snapshotId });
+    expect(child!.sizeBytes).toBeLessThan(first!.sizeBytes);
+    times["snapshot bytes v1"] = first!.sizeBytes;
+    times["snapshot bytes v2"] = child!.sizeBytes;
+    await backend.deleteSnapshot(second);
+    await backend.deleteSnapshot(snapshotId);
+    await expect(backend.deleteSnapshot(snapshotId)).rejects.toMatchObject({ kind: "missing", status: 404 });
+    expect((await backend.listSnapshots!()).map(row => row.id)).not.toContain(snapshotId);
+  }, 120_000);
+
+  it("promotes a snapshot to a template forks boot from, and a commit after a thaw takes the life it is handed", async () => {
+    const machine = await create({ kind: "sandbox", labels: { "wsp.idle": "freeze" } });
+    await machine.pause();
+    await machine.resume();
+    expect(await exec(machine, "echo second life > /root/after-thaw")).toMatchObject({ exitCode: 0 });
+    const snapshotId = await machine.snapshot(`live-665-${process.pid}-thawed`, { firstLife: false });
+    const templateId = await backend.promoteSnapshot!(snapshotId, `live-665-${process.pid}-dev`);
+    expect(templateId).toBe(`wsp/live-665-${process.pid}-dev:template`);
+    expect(await backend.getTemplate!(templateId)).toMatchObject({ id: templateId, name: `live-665-${process.pid}-dev`, status: "ready" });
+    expect((await backend.listTemplates!()).map(row => row.id)).toContain(templateId);
+    const fork = await create({ kind: "sandbox", template: templateId });
+    expect(await exec(fork, "cat /root/after-thaw")).toMatchObject({ exitCode: 0, stdout: "second life\n" });
+    await backend.deleteSnapshot(snapshotId);
+    await backend.deleteTemplate!(templateId);
+    await expect(backend.getTemplate!(templateId)).rejects.toMatchObject({ kind: "missing", status: 404 });
+    expect(await exec(fork, "cat /root/after-thaw")).toMatchObject({ stdout: "second life\n" });
+  }, 120_000);
+
+  it("naps by stopping, and the wake boots the saved layer with the same id, address and forward, under 200 ms", async () => {
+    const machine = await create({ kind: "sandbox", memMb: 512 });
+    expect(await exec(machine, ANSWER_ON_7070)).toMatchObject({ exitCode: 0, stderr: "" });
+    const reach = await machine.previewUrl!(7070);
+    const port = Number(new URL(reach.url).port);
+    expect(await readLine(port)).toBe("hello from inside");
+    expect(await exec(machine, "echo kept > /root/saved; hostname -I")).toMatchObject({ exitCode: 0 });
+    const address = (await exec(machine, "hostname -I")).stdout.trim();
+    const roomBefore = (await backend.capacity()).memRoomMb;
+    await machine.pause();
+    expect(await machine.state()).toBe("paused");
+    expect(existsSync(cgroupOf(machine.id))).toBe(false);
+    expect(readFileSync("/proc/self/mountinfo", "utf8")).not.toContain(join(root, "run", machine.id));
+    await expect(readLine(port)).rejects.toThrow(/ECONNREFUSED/);
+    const capacity = await backend.capacity();
+    expect(capacity.machines.paused).toBe(1);
+    // Other cases' workspaces still run and may hold the whole share; the stopped one at least gives its cap back.
+    expect(capacity.memRoomMb).toBeGreaterThanOrEqual(roomBefore);
+    expect((await backend.list({ [OWNER_LABEL]: LIVE_OWNER })).find(row => row.id === machine.id)?.state).toBe("paused");
+    await expect(exec(machine, "true")).rejects.toThrow(/is stopped/);
+    const started = Date.now();
+    await machine.resume();
+    times["wake from the saved layer"] = Date.now() - started;
+    expect(await machine.state()).toBe("running");
+    expect(times["wake from the saved layer"]).toBeLessThan(200);
+    expect(await exec(machine, "cat /root/saved; hostname -I")).toMatchObject({ exitCode: 0, stdout: `kept\n${address} \n` });
+    expect((await machine.previewUrl!(7070)).url).toBe(reach.url);
+    expect(await exec(machine, ANSWER_ON_7070)).toMatchObject({ exitCode: 0, stderr: "" });
+    expect(await readLine(port)).toBe("hello from inside");
+  }, 120_000);
 
   it("holds a memory cap: 700 MB touched under a 512 MB cap exits 137", async () => {
     const machine = await create({ kind: "sandbox", memMb: 512 });
