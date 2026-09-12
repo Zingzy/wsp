@@ -6,6 +6,8 @@
 // name the fixture it is served from, since one state file cannot hold both a
 // person whose image is built and one whose image never was.
 
+import { threadId } from "./fixture-state.mjs";
+
 /** The widths every list is shot at when it names none: a desktop window and a phone. */
 const DEFAULT_WIDTHS = [1440, 390];
 /** The window height each width gets, so a shot is a window rather than a full-page scroll. The desktop app opens
@@ -34,7 +36,7 @@ const fail = message => {
   throw new Error(`surfaces list: ${message}`);
 };
 
-/** The CSS selector a data attribute word means. `row-id=thread:th_a` is that attribute at that value,
+/** The CSS selector a data attribute word means. `row-id=ws:ws_api` is that attribute at that value,
  * `cloud-setup-row` is the attribute being there at all; nothing here reaches past a data attribute, so a
  * list cannot point the harness at a class name the next restyle moves. */
 export function selectorFor(word) {
@@ -46,6 +48,11 @@ export function selectorFor(word) {
   return `[data-${attr}="${word.slice(split + 1).replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"]`;
 }
 
+/** A thread of a fixture, as a list names it: the word the fixture calls that thread, turned into the id the
+ * fixture mints for it. The ids are UUIDs, since the harness refuses a session id of any other shape, so a list
+ * written with the ids themselves in it would be rewritten every time one is minted. */
+const withThreadId = word => (typeof word === "string" ? word.replace(/thread:([a-z][a-z0-9-]*)$/, (_, name) => `thread:${threadId(name)}`) : word);
+
 /** A step as the driver takes it: a click on a data attribute or a key press, and the width it belongs to
  * where the word named one. The narrow window keeps the sidebar behind a toggle and the wide one does not,
  * so the step that opens it is a step for one width rather than a second surface with its own file names. */
@@ -56,7 +63,7 @@ export function stepFor(word, widths) {
   const bare = kept === null ? word : kept[2];
   const key = KEY.exec(typeof bare === "string" ? bare : "");
   const typed = TYPE.exec(typeof bare === "string" ? bare : "");
-  const step = bare === OFFLINE ? { offline: true } : typed !== null ? { type: typed[1] } : key === null ? { click: selectorFor(bare) } : { key: key[1] };
+  const step = bare === OFFLINE ? { offline: true } : typed !== null ? { type: typed[1] } : key === null ? { click: selectorFor(withThreadId(bare)) } : { key: key[1] };
   return width === undefined ? step : { width, ...step };
 }
 
@@ -79,7 +86,7 @@ const surfaceFrom = (raw, index, widths) => {
     name,
     at,
     steps: (steps ?? []).map(word => stepFor(word, widths)),
-    ...(wait !== undefined ? { wait: selectorFor(wait) } : {}),
+    ...(wait !== undefined ? { wait: selectorFor(withThreadId(wait)) } : {}),
     ...(fixture !== undefined ? { fixture } : {}),
     settleMs: settleMs ?? DEFAULT_SETTLE_MS,
     widths: own ?? widths,
