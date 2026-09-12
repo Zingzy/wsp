@@ -1,0 +1,17 @@
+[
+  {
+    "id": 1,
+    "op": "pty.create"
+  },
+  {
+    "id": 2,
+    "op": "pty.create",
+    "cols": 80,
+    "rows": 24,
+    "shell": "bash",
+    "cwd": "/root",
+    "env": {
+      "TERM": "xterm-256color"
+    }
+  }
+]

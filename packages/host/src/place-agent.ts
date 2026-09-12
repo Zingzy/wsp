@@ -11,9 +11,8 @@
 
 import { randomBytes } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { platform } from "node:os";
 import { homedir } from "node:os";
-import { PlaceLink, portSourceFor, startDaemon, type DaemonHandle } from "@wsp/daemon";
+import { PlaceLink, startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { LOOPBACK, placeDaemonPaths, workFolderIn } from "@wsp/protocol";
 import { placeReport, stopPlaceService, sweepPlace } from "./place-report.js";
 import { type RunningWsp } from "./mcp-install.js";
@@ -59,7 +58,6 @@ export async function startPlaceAgent(opts: PlaceAgentOptions): Promise<PlaceAge
     inboxDir: at.inbox,
     rootsPath: at.rootsPath,
     manifest: { path: at.manifestPath },
-    portsSource: portSourceFor(platform()),
     link: {
       file: opts.file,
       report: async () => placeReport({ name: opts.name, home, ...(opts.run !== undefined ? { run: opts.run } : {}) }),

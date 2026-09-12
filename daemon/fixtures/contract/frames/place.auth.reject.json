@@ -1,0 +1,19 @@
+[
+  {
+    "id": 1,
+    "op": "place.auth",
+    "placeId": "p_ab12cd34"
+  },
+  {
+    "id": 1,
+    "op": "place.auth",
+    "placeId": "p_ab12cd34",
+    "nonce": "short"
+  },
+  {
+    "id": 1,
+    "op": "place.auth",
+    "placeId": "ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+    "nonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  }
+]

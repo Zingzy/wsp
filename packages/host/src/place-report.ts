@@ -12,20 +12,17 @@ import { homedir, arch as osArch, platform, release, type as osType, userInfo } 
 import type { PlaceSelfReport } from "@wsp/daemon";
 import { PLACE_FILE_MODE, parsePlaceFile, placeFileText, type PlaceFile } from "@wsp/protocol";
 import { LOGIN_READ, SSH_STORE_VARS, isPlainPath, localShape, plainPath, readValues } from "@wsp/engine";
-import { DAEMON_VERSION, placeDaemonPaths, workFolderIn } from "@wsp/protocol";
+import { DAEMON_VERSION, placeDaemonPaths, placeOwnedPaths, workFolderIn } from "@wsp/protocol";
 import { dirname } from "node:path";
-import { daemonOwnedPaths, sshDaemonPlace } from "./doctor.js";
 import { mcpServerCommand, onPath, runningWsp, type RunningWsp } from "./mcp-install.js";
 import { serviceManagerFor, systemRunner, type ServiceAddress, type ServiceManager, type ServiceRunner } from "./service.js";
 
-/** Where a place keeps the file naming the wsp it belongs to, and the private key it proves itself with. Both sit
- * in wsp's own folder under the person's home, beside the daemon's own files, so a leave takes one folder's worth. */
-export const placeFilePath = (home: string): string => `${placeDaemonPaths(home).wsp}/place.json`;
-export const placeKeyPath = (home: string): string => `${placeDaemonPaths(home).wsp}/place-key.pem`;
-
-/** Where the agent's output goes, since nobody is watching a terminal: wsp's own folder under the person's home,
- * beside everything else the agent keeps, so the sweep takes it with the rest. */
-export const placeLogPath = (home: string): string => `${placeDaemonPaths(home).wsp}/place.log`;
+/** Where a place keeps the file naming the wsp it belongs to, the private key it proves itself with, and the
+ * agent's log, since nobody is watching a terminal. All three sit in wsp's own folder under the person's home,
+ * beside the daemon's own files, so a leave takes one folder's worth; the protocol names them for both sides. */
+export const placeFilePath = (home: string): string => placeDaemonPaths(home).placeFile;
+export const placeKeyPath = (home: string): string => placeDaemonPaths(home).placeKey;
+export const placeLogPath = (home: string): string => placeDaemonPaths(home).placeLog;
 
 /** The place file as it stands, or nothing when this computer is no place. The shape, the parse and the mode are
  * the protocol's; this is the read on the host's side of the wire.
@@ -173,7 +170,6 @@ const placeService = (home: string, uid?: number): ServiceAddress => ({ role: "p
 export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSweep> {
   const home = opts.home ?? homedir();
   const manager = opts.manager === undefined ? serviceManagerFor(platform()) : opts.manager;
-  const at = placeDaemonPaths(home);
   const removed: string[] = [];
   if (manager !== undefined) {
     const address = placeService(home, opts.uid);
@@ -187,18 +183,10 @@ export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSwe
       removed.push(`${manager.words} ${unit.name}`);
     }
   }
-  // The daemon on this computer is this process, so there is no second unit of its own; the paths below are the
-  // ones the daemon writes and the ones an installer over ssh put there, which on a computer that was joined by
-  // hand simply are not present.
-  const owned = [
-    placeFilePath(home),
-    placeKeyPath(home),
-    placeLogPath(home),
-    ...daemonOwnedPaths(sshDaemonPlace({ home, path: "" })),
-    `${at.binDir}/wsp-open`,
-    `${at.binDir}/xdg-open`,
-  ];
-  for (const path of owned) {
+  // The daemon on this computer is this process, so there is no second unit of its own; the paths are the ones
+  // the daemon writes and the ones an installer over ssh put there, which on a computer that was joined by hand
+  // simply are not present.
+  for (const path of placeOwnedPaths(home)) {
     if (!existsSync(path)) continue;
     rmSync(path, { recursive: true, force: true });
     removed.push(path);

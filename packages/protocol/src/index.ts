@@ -2371,6 +2371,7 @@ const DAEMON_CONTENTS = [
   "6875c912371aadfb9947191e4d887b9fb6576ed57d0268de91811a6d3ac4f4cd",
   "4c81908db0c4d29e74f00ddd5513e94137f01afeb39b9afbed242368be6097c6",
   "0ad3a1c3e98d5b75bf94d610b9e166a7ad1bb5e79ee7ab4905d6b738fb5eded9",
+  "c002e99d0667b088ae404d8233f0bc5f785a5f1c467067107e31708b394461ff",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -2405,7 +2406,10 @@ const DAEMON_CONTENTS = [
  * at the join, and then serves that socket exactly as it serves an inbound one, so every command the host already
  * sends a machine rides one frame on the link and no runtime road learns a second transport. It also loads its
  * native pty module at the first terminal rather than at its own import, so a machine where nothing built that
- * module serves every other op instead of refusing to start. */
+ * module serves every other op instead of refusing to start. Version 18 takes every option as a flag, one per
+ * option, reads its ports, load, processes and pty modes off one /proc root, logs its samplers' starts and stops,
+ * and builds a place's report and sweep off the home it is pointed at, so a test suite drives it as a binary and
+ * the words and numbers it answers with are the protocol's, held in one fixture set. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the daemon's sources, the dependency
@@ -3383,7 +3387,8 @@ export {
   type Rgb,
   type ThemePreset,
 } from "./workspace-look.js";
-export { placeDaemonPaths, rootsPathIn, sshDaemonPaths, underProject, workFolderIn } from "./project-path.js";
+export { placeDaemonPaths, placeOwnedPaths, rootsPathIn, sshDaemonPaths, underProject, workFolderIn } from "./project-path.js";
+export * from "./daemon-contract.js";
 export * from "./projects.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importDest, importRequest, registerRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";

@@ -1,0 +1,21 @@
+[
+  {
+    "id": 1,
+    "op": "git.diff",
+    "cwd": "repo",
+    "scope": "unstaged"
+  },
+  {
+    "id": 1,
+    "op": "git.diff",
+    "cwd": "repo",
+    "scope": "branch",
+    "path": "src/a.ts"
+  },
+  {
+    "id": 1,
+    "op": "git.diff",
+    "cwd": "repo",
+    "scope": "staged"
+  }
+]

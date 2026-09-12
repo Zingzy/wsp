@@ -1,0 +1,10 @@
+[
+  {
+    "type": "inbox.file",
+    "path": "/root/inbox/upload.bin"
+  },
+  {
+    "type": "inbox.file",
+    "bytes": 64
+  }
+]

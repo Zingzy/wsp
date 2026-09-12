@@ -1,0 +1,117 @@
+[
+  {
+    "id": 2,
+    "op": "place.prove",
+    "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+  },
+  {
+    "id": 2,
+    "op": "place.prove",
+    "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "report": {
+      "name": "old-macbook",
+      "platform": "linux",
+      "arch": "x64",
+      "os": "Linux 6.8.0",
+      "shape": {
+        "cpu": 4,
+        "memMb": 4096
+      },
+      "diskFreeBytes": 1024,
+      "login": {
+        "HOME": "/home/maya",
+        "USER": "maya",
+        "PATH": "/usr/bin"
+      },
+      "docker": true,
+      "daemonVersion": 17,
+      "daemonPort": 41234,
+      "wsp": [
+        "/usr/bin/wsp"
+      ],
+      "dialed": "http://192.168.1.20:4400"
+    }
+  },
+  {
+    "id": 2,
+    "op": "place.prove",
+    "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+    "report": {
+      "name": "old-macbook",
+      "platform": "windows",
+      "arch": "x64",
+      "os": "Linux 6.8.0",
+      "shape": {
+        "cpu": 4,
+        "memMb": 4096
+      },
+      "diskFreeBytes": 1024,
+      "login": {
+        "HOME": "/home/maya",
+        "USER": "maya",
+        "PATH": "/usr/bin"
+      },
+      "docker": true,
+      "daemonVersion": 17,
+      "daemonPort": 41234,
+      "wsp": [
+        "/usr/bin/wsp"
+      ],
+      "dialed": "http://192.168.1.20:4400"
+    }
+  },
+  {
+    "id": 2,
+    "op": "place.prove",
+    "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+    "report": {
+      "name": "old-macbook",
+      "platform": "linux",
+      "arch": "x64",
+      "os": "Linux 6.8.0",
+      "shape": {
+        "cpu": 4,
+        "memMb": 4096
+      },
+      "diskFreeBytes": 1024,
+      "login": {
+        "HOME": "/home/maya",
+        "USER": "maya",
+        "PATH": "/usr/bin"
+      },
+      "docker": true,
+      "daemonVersion": 17,
+      "daemonPort": 41234,
+      "wsp": [],
+      "dialed": "http://192.168.1.20:4400"
+    }
+  },
+  {
+    "id": 2,
+    "op": "place.prove",
+    "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+    "report": {
+      "name": "old-macbook",
+      "platform": "linux",
+      "arch": "x64",
+      "os": "Linux 6.8.0",
+      "shape": {
+        "cpu": 4,
+        "memMb": 4096
+      },
+      "diskFreeBytes": 1024,
+      "login": {
+        "HOME": "/home/maya",
+        "USER": "maya",
+        "PATH": "/usr/bin"
+      },
+      "docker": true,
+      "daemonVersion": 17,
+      "daemonPort": 41234,
+      "wsp": [
+        "/usr/bin/wsp"
+      ],
+      "dialed": "ftp://x"
+    }
+  }
+]

@@ -51,6 +51,10 @@ export function placeDaemonPaths(home: string): {
   unitDir: string;
   binDir: string;
   rootsPath: string;
+  /** The file naming the wsp this computer joined as a place, the key it proves itself with, and the agent's log. */
+  placeFile: string;
+  placeKey: string;
+  placeLog: string;
 } {
   const at = home.replace(/\/+$/, "");
   const wsp = `${at}/.wsp`;
@@ -69,7 +73,19 @@ export function placeDaemonPaths(home: string): {
     unitDir: `${at}/.config/systemd/user`,
     binDir: `${at}/.local/bin`,
     rootsPath: rootsPathIn(at),
+    placeFile: `${wsp}/place.json`,
+    placeKey: `${wsp}/place-key.pem`,
+    placeLog: `${wsp}/place.log`,
   };
+}
+
+/** Every path a leave takes off a computer joined as a place, in the order they go: the place file, its key and the
+ * agent's log, then everything the daemon and an installer over ssh put under wsp's own folder, then the browser
+ * shim and its xdg-open name. The work folder is not here: what the person's threads wrote there is theirs. The
+ * daemon sweeps by this list when its host asks over the link and wsp leave sweeps by it at the terminal. */
+export function placeOwnedPaths(home: string): string[] {
+  const at = placeDaemonPaths(home);
+  return [at.placeFile, at.placeKey, at.placeLog, at.dir, at.bundle, at.inbox, at.tokenPath, at.rootsPath, at.nodeDir, at.profileFile, at.openSocket, at.runDir, `${at.wsp}/wsp-npm.log`, at.portFile, `${at.binDir}/wsp-open`, `${at.binDir}/xdg-open`];
 }
 
 /** The same paths under the name the ssh road has always called them. One function, two names, so nothing keeps a

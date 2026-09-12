@@ -142,7 +142,7 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
     expect(start).toContain('host: "127.0.0.1"');
     expect(start).toContain("port: 0");
     expect(start).toContain('kind: "ssh"');
-    expect(start).toContain('writeFileSync("/home/maya/.wsp/daemon.port", String(d.port))');
+    expect(start).toContain('portFile: "/home/maya/.wsp/daemon.port"');
     expect(start).not.toContain("0.0.0.0");
     const s = script();
     // The old port file goes before the restart, so the wait cannot read the port of the daemon just replaced.
@@ -351,7 +351,7 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
       writeFileSync(join(daemonDir, "package.json"), JSON.stringify({ dependencies: { ws: "^8" } }));
       // A stand-in daemon that reports what start.mjs asked of it, so the options the machine gets are read and
       // not only the text of the file.
-      writeFileSync(join(daemonDir, "dist", "index.js"), 'export const OPEN_SOCKET_PATH = "/root/.wsp/open.sock";\nexport async function startDaemon(o) { console.log(JSON.stringify(o)); return { port: 41234 }; }\n');
+      writeFileSync(join(daemonDir, "dist", "index.js"), 'export const OPEN_SOCKET_PATH = "/root/.wsp/open.sock";\n' + "export const daemonListeningLine = (host, port) => `wsp-daemon listening on ${host}:${port}`;\n" + 'export async function startDaemon(o) { console.log(JSON.stringify(o)); return { port: 41234 }; }\n');
       // Run under a home on this computer, so the start script's own writes land somewhere this test owns.
       const home = join(dir, "home");
       const at = sshDaemonPaths(home);
@@ -370,10 +370,10 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
         inboxDir: at.inbox,
         manifest: { path: at.manifestPath },
         openSocketPath: at.openSocket,
+        // The daemon writes the port it bound there itself: the one thing the host cannot know beforehand.
+        portFile: at.portFile,
       });
       expect(stdout).toContain("wsp-daemon listening on 127.0.0.1:41234");
-      // The port it bound is written where the host reads it: the one thing the host cannot know beforehand.
-      expect(readFileSync(at.portFile, "utf8")).toBe("41234");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

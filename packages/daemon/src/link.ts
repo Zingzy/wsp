@@ -10,10 +10,19 @@ import { createPublicKey, createPrivateKey, randomBytes, sign as signBytes, veri
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import {
+  NO_PLACE_FILE_LINE,
   PLACE_FILE_MODE,
   PLACE_LINK_NONCE_BYTES,
   PlaceAuthReply,
+  authUnreadableLine,
+  dialFailedLine,
+  dialTimedOutLine,
+  dialUnansweredLine,
   hostKeyRefusal,
+  hostQuietLine,
+  hostRefusedLine,
+  linkedLine,
+  notAFrameLine,
   parsePlaceFile,
   placeFileText,
   placeLinkTranscript,
@@ -175,7 +184,7 @@ export class PlaceLink {
     this.attempt++;
     const file = readPlaceFile(this.opts.file);
     if (file === undefined) {
-      this.log("no place file here, so there is no host to dial; wsp join <address> --code <code> makes this computer a place");
+      this.log(NO_PLACE_FILE_LINE);
       this.schedule(this.wait(REFUSED_RETRY_MS));
       return;
     }
@@ -206,7 +215,7 @@ export class PlaceLink {
       try {
         ws = (this.opts.dial ?? ((at: string) => new WebSocket(wsUrlOf(at))))(url);
       } catch (e) {
-        this.log(`${url} could not be dialled: ${e instanceof Error ? e.message : String(e)}`);
+        this.log(dialFailedLine(url, e instanceof Error ? e.message : String(e)));
         done("skipped");
         return;
       }
@@ -214,7 +223,7 @@ export class PlaceLink {
       let refusalLine: string | undefined;
       const nonce = randomBytes(PLACE_LINK_NONCE_BYTES).toString("base64");
       const deadline = setTimeout(() => {
-        this.log(`${url} did not answer in ${Math.round(connectMs / 1000)}s`);
+        this.log(dialTimedOutLine(url, Math.round(connectMs / 1000)));
         finish("skipped", true);
       }, connectMs);
       const finish = (outcome: "linked" | "skipped" | "refused", cut: boolean): void => {
@@ -230,7 +239,7 @@ export class PlaceLink {
         try {
           frame = JSON.parse(String(raw)) as Record<string, unknown>;
         } catch {
-          this.log(`${url} sent something that is not a frame`);
+          this.log(notAFrameLine(url));
           finish("skipped", true);
           return;
         }
@@ -238,14 +247,14 @@ export class PlaceLink {
           // The host answered the handshake with a refusal: this place is not one it holds, or its key moved. The
           // sentence is the host's own and the 4401 that follows carries it too.
           refusalLine = String(frame["error"] ?? "the host refused this place");
-          this.log(`${url}: ${refusalLine}`);
+          this.log(hostRefusedLine(url, refusalLine));
           finish("refused", true);
           return;
         }
         if (frame["id"] === 1) {
           const reply = PlaceAuthReply.safeParse(frame);
           if (!reply.success) {
-            this.log(`${url} answered place.auth with something this computer cannot read: ${reply.error.message}`);
+            this.log(authUnreadableLine(url, reply.error.message));
             finish("skipped", true);
             return;
           }
@@ -265,7 +274,7 @@ export class PlaceLink {
               // daemon frame cannot arrive before the listener that answers it is on.
             },
             (e: unknown) => {
-              this.log(`${url}: ${e instanceof Error ? e.message : String(e)}`);
+              this.log(hostRefusedLine(url, e instanceof Error ? e.message : String(e)));
               finish("skipped", true);
             },
           );
@@ -286,7 +295,7 @@ export class PlaceLink {
         }
         // Logged here rather than only at the deadline: an address that refuses the connect answers at once, and an
         // attempt that says nothing about it leaves a person reading one address in a log of two.
-        if (!settled) this.log(`${url} did not answer the dial`);
+        if (!settled) this.log(dialUnansweredLine(url));
         finish("skipped", false);
       });
       ws.once("open", () => {
@@ -312,12 +321,12 @@ export class PlaceLink {
     this.state = "linked";
     this.socket = ws;
     this.linkedAt = (this.opts.now ?? Date.now)();
-    this.log(`linked to the host at ${url}`);
+    this.log(linkedLine(url));
     const quietMs = this.opts.quietMs ?? QUIET_MS;
     const quiet = (): void => {
       if (this.quietTimer !== undefined) clearTimeout(this.quietTimer);
       this.quietTimer = setTimeout(() => {
-        this.log(`the host at ${url} sent nothing for ${Math.round(quietMs / 1000)}s; cutting the link and dialling again`);
+        this.log(hostQuietLine(url, Math.round(quietMs / 1000)));
         ws.close(1000, "the host went quiet");
       }, quietMs);
     };
