@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { FREE_WORD, NO_LINGER_LINE, NO_NODE_LINE, OVER_SSH, THIS_COMPUTER, THREAD_ARCHIVE_MS, absentComputer, awayMsOf, kindWords, machineLacksShort, wakeAskingAgainLine, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../src/adapt/index.js";
 import { RequestError } from "../src/protocol/client.js";
-import { threadTree, threadsOpenedBy, workspaceOf } from "../src/sidebar/threadTree.js";
+import { openedBy, threadTree, threadsOpenedBy, workspaceOf } from "../src/sidebar/threadTree.js";
 import { explainCreateRefusal } from "../src/protocol/store.js";
 import {
   foldArchivedThreads,
@@ -544,6 +544,16 @@ describe("the tree a thread's own threads make", () => {
     expect(threadsOpenedBy([mac, bench], "other")).toEqual([]);
     expect(workspaceOf([mac, bench], { workspaceId: "bench" })?.id).toBe("bench");
     expect(workspaceOf([mac, bench], { workspaceId: "nowhere" })).toBeUndefined();
+  });
+
+  it("answers the thread that opened one, with the workspace that one runs on, and nothing where there is none to reach", () => {
+    const mac = project("mac", [thread("lead", "mac", null)]);
+    const bench = project("bench", [thread("far", "bench", "lead")]);
+    const opener = openedBy([mac, bench], { parentThreadId: "lead" });
+    expect([opener?.thread.id, opener?.runs.id]).toEqual(["lead", "mac"]);
+    expect(openedBy([mac, bench], { parentThreadId: null })).toBeUndefined();
+    // An opener on a workspace this window was never given is one no click could reach, so it is not named either.
+    expect(openedBy([bench], { parentThreadId: "lead" })).toBeUndefined();
   });
 });
 

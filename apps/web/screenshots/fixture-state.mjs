@@ -535,11 +535,13 @@ const orchestrator = () => {
   const root = { ...MIGRATE };
   const tree = { parentThreadId: threadId("migrate"), rootThreadId: threadId("migrate") };
   return store({
+    // Three forks made one after another, minutes apart, because the sidebar draws its rows in the order the
+    // workspaces were made and a fixture where all three claim one minute says nothing about that order.
     workspaces: [
       workspace("ws_here", THIS_COMPUTER, { agents: { spawn: true, maxMachines: 3, maxDepth: 1 }, projects: [project("wsp", 133_000_000, 60 * 5)] }),
-      fork("ws_api", "api", "fk_run_1", tree),
-      fork("ws_web", "web", "fk_run_2", tree),
-      fork("ws_docs", "docs", "fk_run_3.paused", { ...tree, phase: "napping" }),
+      fork("ws_api", "api", "fk_run_1", { ...tree, createdAt: new Date(ago(60 * 8)).toISOString() }),
+      fork("ws_web", "web", "fk_run_2", { ...tree, createdAt: new Date(ago(60 * 8 - 2)).toISOString() }),
+      fork("ws_docs", "docs", "fk_run_3.paused", { ...tree, phase: "napping", createdAt: new Date(ago(60 * 8 - 4)).toISOString() }),
     ],
     ...merge(
       threadsOn("ws_here", [[root, 120]]),

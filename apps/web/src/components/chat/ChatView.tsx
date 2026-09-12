@@ -13,9 +13,8 @@
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import type { LegendListRef } from "@legendapp/list/react";
 import { turnSettledParts } from "@wsp/protocol";
-import { threadLink } from "../../actions/threadActions";
-import { deriveSidebarProjects } from "../../adapt";
-import { useStatus, useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
+import { useSidebarProjects, useStatus, useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
+import { ThreadLink } from "../ThreadLink.js";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { cn } from "../../lib/utils";
 import { DEFAULT_TIMESTAMP_FORMAT, pausedLine, turnWait, type TimestampFormat, type TurnSummary } from "./adapt";
@@ -46,17 +45,13 @@ export function ChatView({
 }) {
   const workspace = useWorkspace(workspaceId);
   const wake = useStore(s => s.wake);
-  const select = useStore(s => s.select);
   const newThread = useStore(s => s.newThread);
   const readingThread = useStore(s => s.readingThread);
   const freshThread = useStore(s => s.freshThread && s.selectedId === workspaceId);
   const thread = useChatThread(workspaceId, threadId, freshThread);
   // Every workspace's threads, not this one's: a thread this one's agent opened may run anywhere, and nothing in
   // the transcript itself records that a turn opened one.
-  const workspaces = useStore(s => s.workspaces);
-  const statuses = useStore(s => s.statuses);
-  const sessions = useStore(s => s.sessions);
-  const projects = useMemo(() => deriveSidebarProjects({ workspaces, statuses, sessions }), [workspaces, statuses, sessions]);
+  const projects = useSidebarProjects();
   const opened = useMemo(() => threadsOpenedBy(projects, thread.threadKey), [projects, thread.threadKey]);
   const openFile = useRightPanelStore(s => s.openFile);
   const api = useStore(s => s.api);
@@ -138,7 +133,7 @@ export function ChatView({
       </div>
       {thread.hydrated && opened.length > 0 ? (
         <div className="mx-auto w-full max-w-5xl px-4">
-          <OpenedThreadRows opened={opened} onOpen={select} />
+          <OpenedThreadRows opened={opened} />
         </div>
       ) : null}
       {thread.hydrated && view.settled !== null ? <SettledFooter turn={view.settled} openedCostUsd={openedSpend(opened)} /> : null}
@@ -172,26 +167,12 @@ function openedSpend(opened: ReadonlyArray<ThreadOnWorkspace>): number {
 /** One row per thread this thread's agent opened, wherever each runs: what it is called, the workspace it runs on
  * with where that runs, how it stands, and the page's own address for it, so a person reading the opener can reach
  * every thread it started without hunting the sidebar for it. */
-function OpenedThreadRows({ opened, onOpen }: { opened: ReadonlyArray<ThreadOnWorkspace>; onOpen: (workspaceId: string, threadId: string | null) => void }) {
+function OpenedThreadRows({ opened }: { opened: ReadonlyArray<ThreadOnWorkspace> }) {
   return (
     <>
       {opened.map(({ thread, runs }) => (
         <TimelineRuleLine key={thread.id} data-opened-thread line="opened">
-          {/* A thread the runtime stamped no id on has no address, the reading that refuses its copy-link action too. */}
-          {thread.threadId === null ? (
-            <span className="min-w-0 truncate text-foreground">{thread.title}</span>
-          ) : (
-            <a
-              href={threadLink(thread, thread.threadId)}
-              className="min-w-0 truncate text-foreground underline-offset-2 hover:underline"
-              onClick={event => {
-                event.preventDefault();
-                onOpen(thread.workspaceId, thread.threadId);
-              }}
-            >
-              {thread.title}
-            </a>
-          )}
+          <ThreadLink thread={thread} className="min-w-0 truncate text-foreground" />
           <span className="shrink-0 whitespace-nowrap">
             {` · ${[runs.displayName, whereWord(runs), ...(thread.indicator === null ? [] : [thread.indicator.label])].join(" · ")}`}
           </span>
