@@ -1,5 +1,6 @@
 {
-  "widths": [1440, 390],
+  "widths": [1440, 1280, 390],
+  "heights": { "1280": 800 },
   "surfaces": [
     {
       "name": "sidebar",
@@ -29,6 +30,29 @@
       "name": "cloud-setup",
       "at": "/",
       "steps": ["390:key:Escape", "390:sidebar=trigger", "cloud-setup-row"],
+      "wait": "k=choice",
+      "settleMs": 700
+    },
+    {
+      "name": "settings-image-fresh",
+      "at": "/",
+      "steps": ["390:key:Escape", "key:Meta+Comma"],
+      "wait": "k=image-facts",
+      "settleMs": 700
+    },
+    {
+      "name": "settings-image-built",
+      "at": "/",
+      "fixture": "image-built",
+      "steps": ["390:key:Escape", "key:Meta+Comma"],
+      "wait": "k=image-copies",
+      "settleMs": 700
+    },
+    {
+      "name": "settings-image-sheet",
+      "at": "/",
+      "fixture": "image-built",
+      "steps": ["390:key:Escape", "key:Meta+Comma", "k=edit-image"],
       "wait": "k=choice",
       "settleMs": 700
     }

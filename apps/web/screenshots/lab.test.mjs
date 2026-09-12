@@ -9,7 +9,7 @@ import { providerFor } from "./host.mjs";
 
 describe("the fixtures a lab serves", () => {
   it("has one per kind of person the testers play", () => {
-    expect(FIXTURE_NAMES).toEqual(["mac-only", "mac-and-laptop", "mac-and-vps", "ascii-only", "solari-only", "both-providers", "no-sign-in", "orchestrator"]);
+    expect(FIXTURE_NAMES).toEqual(["mac-only", "mac-and-laptop", "mac-and-vps", "ascii-only", "solari-only", "both-providers", "no-sign-in", "orchestrator", "image-built"]);
   });
 
   it("builds every one with workspaces the runtime can load", () => {
@@ -72,6 +72,7 @@ describe("the provider a fixture's host runs under", () => {
       "both-providers": "fake",
       "no-sign-in": "none",
       orchestrator: "fake",
+      "image-built": "fake",
     });
   });
 

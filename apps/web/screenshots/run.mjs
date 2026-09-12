@@ -8,10 +8,17 @@
 // current-home pointer out of it.
 //
 // Themes are emulated as the computer's colour scheme rather than written onto
-// the root: with labs off the app's theme preference is `system`, so the scheme
-// is the only thing that flips the `dark` class the stylesheet reads. Every shot
-// checks the class once the app is up, so a theme that stopped following the
-// scheme fails the run instead of shipping two identical files.
+// the root: the preference record a fixture serves names no side, so `system`
+// stands and the scheme is the only thing that flips the `dark` class the
+// stylesheet reads. Every shot checks the class once the app is up, so a theme
+// that stopped following the scheme fails the run instead of shipping two
+// identical files.
+//
+// The host is served with labs on, since the settings page is a labs surface
+// and a run photographing it would otherwise open a window with no road to it.
+// A surface that names a fixture of its own is served by a second host on the
+// same run: one state file cannot hold both a person whose image is built and
+// one whose image never was.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -98,14 +105,25 @@ async function main() {
   let browser;
   const written = [];
   const failures = [];
+  // One host per fixture a surface names, started the first time a shot asks for it and stopped with the rest.
+  const others = new Map();
+  const served = async fixture => {
+    if (fixture === undefined) return host;
+    const held = others.get(fixture);
+    if (held !== undefined) return held;
+    const own = mkdtempSync(join(tmpdir(), "wsp-shots-"));
+    const started = await startHost({ home: own, state: fixtureState(fixture), port: await freePort(), wsPort: await freePort(), labs: true });
+    others.set(fixture, { ...started, home: own });
+    return others.get(fixture);
+  };
   try {
-    host = await startHost({ home, state: fixtureState(), port: await freePort(), wsPort: await freePort() });
+    host = await startHost({ home, state: fixtureState(), port: await freePort(), wsPort: await freePort(), labs: true });
     browser = await chromium.launch({ args: BROWSER_ARGS });
     for (const shot of shotPlan(list)) {
       let context;
       try {
         context = await browser.newContext({ viewport: { width: shot.width, height: shot.height }, colorScheme: shot.theme, deviceScaleFactor: 2, reducedMotion: "reduce" });
-        await shoot(context, shot, host.base, args.out);
+        await shoot(context, shot, (await served(shot.fixture)).base, args.out);
         written.push(shot.file);
         console.log(`wrote ${shot.file}`);
       } catch (e) {
@@ -120,6 +138,10 @@ async function main() {
     await browser?.close().catch(() => {});
     await stopHost(host);
     rmSync(home, { recursive: true, force: true });
+    for (const other of others.values()) {
+      await stopHost(other);
+      rmSync(other.home, { recursive: true, force: true });
+    }
   }
 
   const facts = treeFacts();

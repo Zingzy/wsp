@@ -4,8 +4,9 @@
 // the terminal text size as segmented controls, the sidebar width as a mono
 // number field with a stepper and a reset offered only off the default, the
 // resolved size in mono beside the text size pick, the release each half is on
-// the about row, no sentence under any pick, and the page in the shell's centre
-// with its name in the breadcrumb until a workspace is picked.
+// the about row, no sentence under any pick, the Image section's own sentence
+// while nothing is sealed, and the page in the shell's centre with its name in
+// the breadcrumb until a workspace is picked.
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES, applyPreferencesPatch, type BootPayload, type Preferences, type PreferencesPatch, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
@@ -13,6 +14,7 @@ import { Shell } from "../src/App.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
+import { IMAGE_WORDS } from "../src/settings/image.js";
 import { SettingsPage } from "../src/settings/SettingsPage.js";
 import { SIDEBAR_DEFAULT_WIDTH } from "../src/shell/sidebarWidth.js";
 import { appTerminalFontSize } from "../src/terminal/ghostty/surface.js";
@@ -90,7 +92,7 @@ describe("the settings page", () => {
     useStore.getState().bind(api);
     await flush();
     render(<SettingsPage />);
-    expect(screen.getAllByRole("region").map(s => s.getAttribute("aria-labelledby"))).toEqual(["settings-appearance", "settings-terminal", "settings-about"]);
+    expect(screen.getAllByRole("region").map(s => s.getAttribute("aria-labelledby"))).toEqual(["settings-appearance", "settings-terminal", "settings-image", "settings-about"]);
     expect(screen.getByText("Appearance").tagName).toBe("H2");
     expect(screen.getByText("Terminal").tagName).toBe("H2");
     expect(screen.getByText("About").tagName).toBe("H2");
@@ -102,10 +104,11 @@ describe("the settings page", () => {
     expect(checked("Text size")).toEqual(["false", "true"]);
     expect(widthField().value).toBe("312");
     expect(widthField().className).toContain("font-mono");
-    // Five rows, each one hairline under it, the label at the left and nothing else in the label's slot: no
-    // sentence under any pick, no radio, no chip.
+    // One hairline under every row, the label at the left and nothing else in the label's slot: no radio, no chip.
+    // A section may put one sentence of its own in a row of the same shape, which the Image section does while
+    // nothing is sealed; a pick still never carries one.
     const rows = Array.from(document.querySelectorAll<HTMLElement>("[data-settings-row]"));
-    expect(rows.map(row => row.firstElementChild?.textContent)).toEqual(["Theme", "Sidebar", "Sidebar width", "Text size", "Version"]);
+    expect(rows.map(row => row.firstElementChild?.textContent)).toEqual(["Theme", "Sidebar", "Sidebar width", "Text size", "Image", IMAGE_WORDS.firstBuild, "Version"]);
     for (const row of rows) {
       expect(row.className).toContain("border-b");
       expect(row.querySelector("[data-slot=badge], .truncate + span span")).toBeNull();
