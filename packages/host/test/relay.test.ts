@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { OPEN_SHIM_SCRIPT as DAEMON_SHIM_SCRIPT, OPEN_SHIM_PATH as DAEMON_SHIM_PATH, startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { BROWSER_SHIM_PATH, type GoldenManifest, type Machine } from "@wsp/engine";
 import type { ForwardEvent } from "@wsp/protocol";
-import { DAEMON_TOKEN_SET, createRuntime, memoryStore, type Clock, type GoldenRecipe, type Runtime } from "@wsp/runtime";
+import { copyKey, DAEMON_TOKEN_SET, createRuntime, memoryStore, type Clock, type GoldenRecipe, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { CLOUD_PLACE, DAEMON_CONNECT_TIMEOUT_MS, OPEN_SHIM_PATH, connectDaemonSocket, openShimScript, type ConnectOptions, type DaemonSocket } from "../src/doctor.js";
 import { CALLBACK_HOLD_MAX_BYTES, CALLBACK_HOLD_MAX_CONNS, CALLBACK_HOLD_MS, FORWARD_IDLE_MS, FORWARD_MAX_PER_TARGET, REDIAL_CEILING_MS, RELAY_CAP_MS, RELAY_MIN_PORT, RELAY_WINDOW_MS, startCallbackRelay, type CallbackRelay } from "../src/relay.js";
@@ -121,7 +121,7 @@ function relayRuntime(guestUrl: string, goldenRecipe?: GoldenRecipe): { rt: Runt
     return m;
   };
   const store = memoryStore();
-  void store.put("goldens", "default", GOLDEN);
+  void store.put("goldens", copyKey("default", "default"), GOLDEN);
   // A wake pings the daemon through the preview route; nothing answers on guest.test, so the wait is kept short.
   backend.lifecycle.budgets.daemonAnswersMs = 100;
   return { rt: createRuntime({ backend, store, adapters: {}, daemonToken: TOKEN, ...(goldenRecipe !== undefined ? { goldenRecipe } : {}) }), backend };

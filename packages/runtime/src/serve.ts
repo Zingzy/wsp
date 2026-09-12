@@ -28,6 +28,8 @@ import {
   threadOpRefusal,
   type DeviceView,
   type ExecEvent,
+  type SealedImage,
+  type SealedImageExport,
   type ForwardEvent,
   type PortForward,
   type Caller,
@@ -36,7 +38,7 @@ import {
   type WorkspaceView,
 } from "@wsp/protocol";
 import { NO_DEVICE_DOOR, safeEqual, type DeviceDoor } from "./devices.js";
-import type { HostFolders, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
+import type { GoldenRecipe, HostFolders, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
 
 /** The port forwards a host holds, as the app lists and stops them. The
  * runtime keeps none itself: the host that owns the daemon links supplies this. */
@@ -77,7 +79,16 @@ export interface ServeOptions {
   terminalConfig?: HostTerminalConfig;
   /** The init job the host runs on this computer, for the init.* ops and the init.job events; without it the ops are refused. */
   init?: InitDoor;
+  /** How an export of the image is sealed and written on this computer; without it image.export is refused. The
+   * runtime hands over the record and the vault's bytes and never touches a file or a passphrase itself. */
+  imageExport?: ImageExporter;
+  /** The recipe a copy at a place builds from, composed by the host from the record with every login set to skip;
+   * without it image.build is refused, since the runtime writes no recipe of its own. */
+  copyRecipe?: (image: SealedImage) => GoldenRecipe;
 }
+
+/** Seals the vault to the passphrase and writes it at `dest` on the computer the host runs on. */
+export type ImageExporter = (o: { image: SealedImage; tar: Buffer; dest: string; passphrase: string }) => Promise<SealedImageExport>;
 
 /** Who a token names: this host's own process, or one paired computer. Every road in reads it from one function, so
  * a road cannot be opened wider than the others by accident. */
@@ -123,6 +134,20 @@ function foldersFrom(opts: ServeOptions): () => HostFolders {
   };
 }
 
+function imageExportFrom(opts: ServeOptions): () => ImageExporter {
+  return () => {
+    if (opts.imageExport === undefined) throw new Error("this runtime cannot write an export on this computer");
+    return opts.imageExport;
+  };
+}
+
+function copyRecipeFrom(opts: ServeOptions): (image: SealedImage) => GoldenRecipe {
+  return image => {
+    if (opts.copyRecipe === undefined) throw new Error("this runtime cannot compose the recipe a copy builds from; the host that serves the app wires one");
+    return opts.copyRecipe(image);
+  };
+}
+
 function initFrom(opts: ServeOptions): () => InitDoor {
   return () => {
     if (opts.init === undefined) throw new Error("this runtime has no init job; the host that serves the app wires one");
@@ -148,6 +173,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
   const folders = foldersFrom(opts);
   const terminalConfig = terminalConfigFrom(opts);
   const init = initFrom(opts);
+  const imageExport = imageExportFrom(opts);
+  const copyRecipe = copyRecipeFrom(opts);
   if (!opts.authToken) throw new Error("serveRuntime refuses to start without an auth token");
   const now = opts.now ?? Date.now;
   const ticketTtlMs = opts.ticketTtlMs ?? 300_000;
@@ -558,6 +585,21 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 lineage: { name, head: manifest.head, versions: manifest.versions },
                 existingWorkspaces: "untouched",
               });
+              return;
+            }
+            case "image.get":
+              send({ id: msg.id, ok: true, view: await rt.image.get(msg.name) });
+              return;
+            case "image.build": {
+              // The record is read here only to compose the recipe from it; every refusal is the runtime's own.
+              const { image } = await rt.image.get(msg.name);
+              if (image === null) throw new Error("this host owns no image yet; wsp init seals one");
+              send({ id: msg.id, ok: true, copy: await rt.image.build({ place: msg.place, ...(msg.name !== undefined ? { name: msg.name } : {}), ...(msg.force !== undefined ? { force: msg.force } : {}), recipe: copyRecipe(image) }) });
+              return;
+            }
+            case "image.export": {
+              const { image, tar } = await rt.image.vault(msg.name);
+              send({ id: msg.id, ok: true, exported: await imageExport()({ image, tar, dest: msg.dest, passphrase: msg.passphrase }) });
               return;
             }
             case "golden.builderReach":
