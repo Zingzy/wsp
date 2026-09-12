@@ -51,6 +51,7 @@ import {
   sealedProjectLine,
   type SealedImageExport,
   ProjectImportResult,
+  PlaceView,
   ProjectPlan,
   RECIPE_TICKS,
   RecipeTick,
@@ -389,6 +390,24 @@ function formatter(io: CliIO, json: boolean): Out {
       if (!json) io.stream?.(text);
     },
   };
+}
+
+/** The rows wsp places prints. Every fact is what the place last reported; a provider row carries its rate and no
+ * shape, since nothing about a machine exists there until one is forked. */
+export function placeLines(places: readonly PlaceView[]): string[] {
+  if (places.length === 0) return ["This host holds no place. wsp add prints the join line for a computer you are sitting at."];
+  const rows = places.map(p => [
+    p.name,
+    p.kind,
+    p.shape === undefined ? "" : String(p.shape.cpu),
+    p.shape === undefined ? "" : fmtBytes(p.shape.memMb * 1024 * 1024),
+    p.diskFreeBytes === undefined ? "" : fmtBytes(p.diskFreeBytes),
+    p.docker === undefined ? "" : p.docker ? "yes" : "no",
+    p.kind === "provider" ? `$${(p.rateUsdPerHour ?? 0).toFixed(3)}/h` : p.present === true ? "yes" : "no",
+    p.kind === "provider" ? "" : (p.lastSeenAt ?? ""),
+    p.default ? "default" : "",
+  ]);
+  return table([["PLACE", "KIND", "CORES", "MEMORY", "DISK FREE", "DOCKER", "PRESENT", "LAST SEEN", "DEFAULT"], ...rows]);
 }
 
 /** Columns padded to their widest cell, two spaces apart; the last column is never padded. */
@@ -1822,6 +1841,25 @@ function folderLines(listing: HostFolderListing): string[] {
 }
 
 export const VERBS: readonly Verb[] = [
+  {
+    name: "places",
+    usage: "wsp places",
+    about: "every place this host holds: this computer, the computers joined to it and the provider it forks on, with what each has and whether it is connected",
+    options: {},
+    run: async ctx => {
+      if (ctx.args.length !== 0) throw usageRefusal("wsp places takes no positional arguments");
+      const places = (await (await ctx.client()).request<{ places: PlaceView[] }>("places.list")).places;
+      ctx.out.emit({ places }, placeLines(places).join("\n"));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Every place this host holds, which is the whole of where work can run: this computer, each computer joined to it as a place, and the provider it forks on. A computer's row carries what it last reported (cores, memory, free disk, whether it has Docker) and whether it is connected right now; a provider's row carries its hourly rate. Exactly one row is the default, which is the last place added. A place is not a workspace: a workspace on a place is what threads run in, and wsp workspaces lists those.",
+      input: {},
+      output: { places: z.array(PlaceView) },
+      call: async (_args, deps) => asJson({ places: (await (await deps.client()).request<{ places: PlaceView[] }>("places.list")).places }),
+    }),
+  },
   {
     name: "workspaces",
     usage: "wsp workspaces",

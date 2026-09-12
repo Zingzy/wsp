@@ -7,14 +7,15 @@
 
 import { randomBytes } from "node:crypto";
 import { posix } from "node:path";
-import { EXEC_BODY_MAX, EXEC_CHUNK_BYTES, shellQuote } from "@wsp/protocol";
+import { EXEC_BODY_MAX, EXEC_CHUNK_BYTES, EXEC_DEADLINE_EXIT, shellQuote } from "@wsp/protocol";
 import type { ExecResult, Machine, RunOptions } from "./machine.js";
 
 /** The longest one plain exec may take. The provider cuts any exec still running at about 29 s with a 502
  * (measured 2026-09-05), whatever its timeoutMs says; anything that can run longer goes through run(). */
 export const INLINE_EXEC_MS = 20_000;
-/** What a run past its deadline exits with, the same code the guest-side guard uses for its own timeout. */
-export const DEADLINE_EXIT = 124;
+/** What a run past its deadline exits with, the same code the guest-side guard uses for its own timeout, and the
+ * one the exec op on a place answers with, read off the protocol so the two roads cannot say different numbers. */
+export const DEADLINE_EXIT = EXEC_DEADLINE_EXIT;
 
 /** The folder a machine wsp made keeps wsp's own working files in. The whole disk there is wsp's, so the shared
  * temporary folder is wsp's too; a machine somebody else owns names its own, since a folder every account on it

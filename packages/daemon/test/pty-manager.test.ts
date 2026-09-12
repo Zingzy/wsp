@@ -30,7 +30,7 @@ async function until(read: () => string, marker: string, budgetMs = 10_000): Pro
 
 describe("PtyManager", () => {
   it("keeps a session alive across client detach and replays scrollback", async () => {
-    const s = manager().create({ cols: 80, rows: 24, shell: "bash" });
+    const s = await manager().create({ cols: 80, rows: 24, shell: "bash" });
     const got: string[] = [];
     const un1 = s.attach(d => got.push(d));
     s.write("echo HELLO-$((1+1))\n");
@@ -80,7 +80,7 @@ describe("ptyEnv", () => {
 
   it("a shell it spawns sees HOME even when the daemon has none", async () => {
     delete process.env["HOME"];
-    const s = manager().create({ cols: 80, rows: 24, shell: "bash", cwd: tmpdir() });
+    const s = await manager().create({ cols: 80, rows: 24, shell: "bash", cwd: tmpdir() });
     const got: string[] = [];
     s.attach(d => got.push(d));
     s.write("echo HOME=$HOME USER=$USER\n");
@@ -129,7 +129,7 @@ describe("ptyLaunch", () => {
     for (const rc of [".profile", ".bash_profile", ".zprofile"]) writeFileSync(join(home, rc), "echo WSP-LOGIN-PROFILE\n");
     mkdirSync(join(home, ".config", "fish"), { recursive: true });
     writeFileSync(join(home, ".config", "fish", "config.fish"), "status is-login; and echo WSP-LOGIN-PROFILE\n");
-    const s = manager().create({ cols: 80, rows: 24, cwd: home, env: { HOME: home, ZDOTDIR: home, XDG_CONFIG_HOME: join(home, ".config") } });
+    const s = await manager().create({ cols: 80, rows: 24, cwd: home, env: { HOME: home, ZDOTDIR: home, XDG_CONFIG_HOME: join(home, ".config") } });
     const got: string[] = [];
     s.attach(d => got.push(d));
     await until(() => got.join(""), "WSP-LOGIN-PROFILE");
@@ -139,7 +139,7 @@ describe("ptyLaunch", () => {
 
 describe("PtySession cwd", () => {
   async function pwdOf(opts: { cwd?: string }, expected: string): Promise<string> {
-    const s = manager().create({ cols: 80, rows: 24, shell: "bash", ...opts });
+    const s = await manager().create({ cols: 80, rows: 24, shell: "bash", ...opts });
     const got: string[] = [];
     s.attach(d => got.push(d));
     s.write("echo CWD=$PWD\n");

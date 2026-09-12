@@ -20,12 +20,20 @@ export function rootsPathIn(home: string): string {
   return `${home.replace(/\/+$/, "")}/.wsp/roots`;
 }
 
-/** Everywhere the daemon on a machine reached over ssh keeps something. A machine wsp forked is root's and lays
- * everything under /root; a machine somebody already owns is reached under their own login, so every path sits in
- * one folder of wsp's own under their home and nothing needs root to write. The host's deploy builds the machine
- * side of this and the runtime reads the token and the port back off it, which is why the rule is here and in
- * neither of them. */
-export function sshDaemonPaths(home: string): {
+/** The folder every turn and every exec starts in on a computer somebody owns, wsp's own under their home. Not the
+ * home itself: a turn that starts there is one `cd` from the checkouts they work in themselves, and the first build
+ * thread run on a local workspace committed inside the person's own repo from there (measured 2026-09-08). One rule
+ * for this computer and for a computer joined as a place, since both are somebody's own. */
+export function workFolderIn(home: string): string {
+  return `${home.replace(/\/+$/, "")}/wsp-work`;
+}
+
+/** Everywhere the daemon on a computer the person owns keeps something, whether wsp put it there over ssh or the
+ * computer dialled in as a place. A machine wsp forked is root's and lays everything under /root; a computer
+ * somebody already owns is reached under their own login, so every path sits in one folder of wsp's own under
+ * their home and nothing needs root to write. The host's deploy builds the machine side of this and the runtime
+ * reads the token and the port back off it, which is why the rule is here and in neither of them. */
+export function placeDaemonPaths(home: string): {
   wsp: string;
   dir: string;
   bundle: string;
@@ -63,3 +71,7 @@ export function sshDaemonPaths(home: string): {
     rootsPath: rootsPathIn(at),
   };
 }
+
+/** The same paths under the name the ssh road has always called them. One function, two names, so nothing keeps a
+ * second copy of where a daemon on somebody's own computer puts its token, its port file and its run folder. */
+export const sshDaemonPaths = placeDaemonPaths;

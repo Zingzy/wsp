@@ -18,6 +18,9 @@ import {
   PAIR_CODE_REFUSAL,
   PAIR_CODE_TTL_MS,
   PAIR_ISSUE_REFUSAL,
+  PLACES_TICKET_REFUSAL,
+  PLACE_CODE_REFUSAL,
+  PLACE_UNKNOWN_REFUSAL,
   RELAY_TICKET_REFUSAL,
   RuntimeRequest,
   THREAD_OPS,
@@ -38,6 +41,7 @@ import {
   type WorkspaceView,
 } from "@wsp/protocol";
 import { NO_DEVICE_DOOR, safeEqual, type DeviceDoor } from "./devices.js";
+import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
 import type { GoldenRecipe, HostFolders, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
 
 /** The port forwards a host holds, as the app lists and stops them. The
@@ -184,6 +188,10 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     if (opts.devices === undefined) throw new Error(NO_DEVICE_DOOR);
     return opts.devices;
   };
+  const places = (): PlaceDoor => {
+    if (rt.places === undefined) throw new Error(NO_PLACE_DOOR);
+    return rt.places;
+  };
 
   /** Who a token names. The one reading: the auth frame, a socket that just redeemed a code and the HTTP routes the
    * host guards all come through here, so no road can be widened without widening every road. */
@@ -246,6 +254,13 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     const ownRoad = (): boolean => stamped === undefined;
     /** Set while an unauthed socket's first frame is being decided, so a second frame cannot race past the door. */
     let deciding = false;
+    /** Set between a place's first frame and its prove: which place answered, and the bytes its signature must
+     * cover. While it is set the only frame this socket may send is that prove. */
+    let proving: { placeId: string; expect: Uint8Array } | undefined;
+    /** Set once a place proved and this socket became its link. The listener goes with it, and this is read before
+     * anything else besides: it is the one place a mistake would let a runtime frame from a place be read as a
+     * client's, so the door both stops listening and refuses to read. */
+    let handedOver = false;
 
     const detaches: (() => void)[] = [];
     let bound: { deviceId: string; cut: () => void } | undefined;
@@ -266,7 +281,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
       if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(payload));
     };
 
-    ws.on("message", raw => {
+    const onMessage = (raw: unknown): void => {
+      if (handedOver) return;
       void (async () => {
         let parsed: unknown;
         try {
@@ -298,8 +314,46 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             send({ id: msg.id, ok: false, error, kind: "auth" });
             ws.close(4401, "unauthorized");
           };
+          // The second frame of a place's handshake, and the only frame this socket may send once its first one was
+          // answered: anything else is a socket asking for a second identity.
+          if (proving !== undefined) {
+            if (msg.op !== "place.prove") return refuse("unauthorized");
+            const { placeId, expect } = proving;
+            proving = undefined;
+            // The door reads the signature and the report this frame carries, and answers the report it will take
+            // or the one sentence to refuse with: this door holds neither rule of its own.
+            const proved = await places()
+              .prove(placeId, msg.signature, expect, msg.report)
+              .catch((e: unknown) => ({ refusal: e instanceof Error ? e.message : String(e) }));
+            if ("refusal" in proved) return refuse(proved.refusal);
+            // From here no frame from this socket is read as a client's request: the listener goes before the reply,
+            // and the reply goes before the place door sends anything, so the place has its own serve on by then.
+            handedOver = true;
+            ws.off("message", onMessage);
+            send({ id: msg.id, ok: true });
+            await places().attach(placeId, ws, proved.report, now());
+            return;
+          }
           if (deciding) return refuse("unauthorized");
           deciding = true;
+          if (msg.op === "place.join" || msg.op === "place.auth") {
+            // A computer joining or dialling back in. The door answers its challenge and says which bytes the next
+            // frame must sign; a key or a report this host cannot work with refuses in the door's own words.
+            let opened: { reply: Record<string, unknown>; expect: Uint8Array; notice?: string } | undefined;
+            try {
+              opened = msg.op === "place.join" ? await places().join(msg, now()) : await places().auth(msg, now());
+            } catch (e) {
+              return refuse(e instanceof Error ? e.message : String(e));
+            }
+            if (opened === undefined) return refuse(msg.op === "place.join" ? PLACE_CODE_REFUSAL : PLACE_UNKNOWN_REFUSAL);
+            const placeId = msg.op === "place.join" ? String(opened.reply["placeId"]) : msg.placeId;
+            proving = { placeId, expect: opened.expect };
+            // The gate opens for exactly one more frame, which the branch above holds to place.prove.
+            deciding = false;
+            send({ id: msg.id, ok: true, ...opened.reply, ...(opened.notice !== undefined ? { notice: opened.notice } : {}) });
+            return;
+          }
+          if (msg.op === "place.prove") return refuse("unauthorized");
           if (msg.op === "pair.redeem") {
             // A runtime with no device door, and a store that failed, both read as a code this host is not
             // holding: the caller is unauthenticated, so one refusal for every reason tells it nothing.
@@ -358,6 +412,28 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               // The door above spends a code; a socket already through it is asking for a second identity.
               send({ id: msg.id, ok: false, error: PAIR_CODE_REFUSAL });
               return;
+            case "place.join":
+            case "place.auth":
+            case "place.prove":
+              // The door above is where a place proves itself; a socket already through it is asking for a second
+              // identity, and this host holds one identity per socket.
+              send({ id: msg.id, ok: false, error: PLACE_UNKNOWN_REFUSAL });
+              return;
+            case "places.list":
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                return;
+              }
+              send({ id: msg.id, ok: true, places: await places().list(now()) });
+              return;
+            case "places.remove": {
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                return;
+              }
+              send({ id: msg.id, ok: true, ...(await places().remove(msg.placeId)) });
+              return;
+            }
             case "devices.list":
               if (!ownRoad()) {
                 send({ id: msg.id, ok: false, error: DEVICES_TICKET_REFUSAL });
@@ -716,7 +792,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
           });
         }
       })();
-    });
+    };
+    ws.on("message", onMessage);
   };
 
   wss.on("connection", onConnection);

@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { z } from "zod";
 import { cli, jsonCliIO, serve } from "../src/cli.js";
+import { placeWiring } from "../src/places.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import { mcpServer } from "../src/mcp.js";
 import type { HostHandle } from "../src/server.js";
@@ -53,7 +54,7 @@ describe("the agent contract on the command line and the tool door", () => {
     const claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`), () => ({ kind: "written" }));
     // The confirming read a gone verdict waits for runs on the same tick: this backend's 404 is the whole truth, so
     // the wait only buys the contract a five second pause on the road to a rebuild.
-    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter }, goneConfirmMs: 0 });
+    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter }, goneConfirmMs: 0, placeLinks: placeWiring(statePath, {}, {}) });
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
     vi.stubEnv("SOLARI_API_KEY", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "");
@@ -105,6 +106,7 @@ describe("the agent contract on the command line and the tool door", () => {
     });
     await last("workspaces agents", "workspaces", "agents", "alpha", "--spawn", "off");
     await last("threads", "threads");
+    await last("places", "places");
     await last("setup", "setup");
     // One level of this computer's own folders: the home folder this test stubbed, with a folder inside it to list.
     mkdirSync(join(dir, "user", "code"), { recursive: true });

@@ -22,6 +22,17 @@ export const LOOPBACK = "127.0.0.1";
  * the page and the protocol, which is all an ssh forward or a tunnel hostname can carry. */
 export const WS_PATH = "/ws";
 
+/** The WebSocket address of a host at this address: the same authority over ws or wss, with the runtime's path on
+ * the end of whatever path the address already carries, which is what a tunnel hostname under a prefix needs. It
+ * sits beside WS_PATH because both the command line and a place's own agent turn an address into this one, and a
+ * second copy of the rule would let one of them dial a path the runtime does not answer on. */
+export function wsUrlOf(url: string): string {
+  const parsed = new URL(url);
+  const scheme = parsed.protocol === "https:" || parsed.protocol === "wss:" ? "wss:" : "ws:";
+  const path = parsed.pathname.replace(/\/+$/, "");
+  return `${scheme}//${parsed.host}${path}${WS_PATH}`;
+}
+
 /** Whether an address a host bound reaches no further than the computer it runs on. This decides whether the page
  * is served with the host token inlined and whether the JSON routes ask for a device token, so it is read once here
  * and nowhere else: two readings would let one road stay open while the other closed. */
