@@ -2,10 +2,10 @@
 // The one decision the page makes before the app exists: whether it holds a
 // token for this host. A page served on loopback carries the host's own and
 // goes straight through; one served beyond it asks the desktop shell, which
-// holds the device token of the host it moved the window to, then this
-// browser's own store, and pairs when neither has one. A token this host no
-// longer honours sends the page back to the code screen rather than leaving
-// it dialling something that will never answer.
+// holds a token for whichever host the window is on, then this browser's own
+// store, and pairs when neither has one. A token this host no longer honours
+// sends the page back to the code screen rather than leaving it dialling
+// something that will never answer.
 import { useCallback, useEffect, useState } from "react";
 import type { BootPayload } from "@wsp/protocol";
 import { AppRoot } from "./AppRoot.js";

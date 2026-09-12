@@ -164,7 +164,7 @@ import {
 } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
 import { gitRootOf } from "./repo-root.js";
-import { dialAddress, hostTokenPath, servingHost } from "./host-lock.js";
+import { dialAddress, hostTokenFor, hostTokenPath, servingHost } from "./host-lock.js";
 import { addressNotPairedLine, aimAddress, aimName, aimedHost, deviceRefusedLine, dialWindowMs, noAnswerRefusal, noAnswerWithin, stateIgnoredLine, wsUrlOf, type HostAim, type HostPick } from "./hosts.js";
 import { colourDepth, isTTY, wrap } from "./init-layout.js";
 import { RecipeAnswer, RecipeScan, recipePrintout, scanPrintout } from "./recipe-answer.js";
@@ -220,13 +220,8 @@ export function hostAddress(statePath: string, pick: HostPick & { aim?: HostAim 
   if (aim.kind === "alias") return { url: wsUrlOf(aim.record.url), token: aim.record.deviceToken };
   const lock = servingHost(statePath);
   if (lock === undefined) throw new Error(`no wsp host is serving ${statePath}; run wsp up first`);
-  const tokenPath = hostTokenPath(statePath);
-  let token: string;
-  try {
-    token = readFileSync(tokenPath, "utf8").trim();
-  } catch {
-    throw authRefusal(`the host's token file is missing: ${tokenPath}`);
-  }
+  const token = hostTokenFor(statePath);
+  if (token === undefined) throw authRefusal(`the host's token file is missing: ${hostTokenPath(statePath)}`);
   return { url: `ws://${authority(dialAddress(lock), lock.wsPort)}`, token };
 }
 

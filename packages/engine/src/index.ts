@@ -12,6 +12,7 @@ export * from "./ssh-backend.js";
 export * from "./ssh-forward.js";
 export * from "./child-exec.js";
 export * from "./no-provider-backend.js";
+export * from "./fake-backend.js";
 export * from "./lifecycle.js";
 export * from "./golden.js";
 export * from "./golden-base.js";
