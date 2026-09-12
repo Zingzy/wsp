@@ -148,5 +148,13 @@ export async function linkPoll(ctx: Ctx): Promise<Response> {
     await insertClient(ctx.env, { id: subject, account_id: row.account_id!, name: row.name, created_at: new Date(ctx.deps.now()).toISOString() });
   }
   const token = await mintToken(ctx.env.RELAY_SIGNING_KEY, { kind: row.kind, subject: subject!, account: row.account_id!, issuedAt: ctx.deps.now() });
-  return Response.json({ state: "approved", token, name: row.name, ...(row.host_id !== null ? { hostId: row.host_id } : {}) });
+  // Who approved it, so the box can say whose account it is on without holding a token that reads this relay back.
+  const account = await accountOf(ctx.env, row.account_id!);
+  return Response.json({
+    state: "approved",
+    token,
+    name: row.name,
+    ...(account === undefined ? {} : { login: account.login }),
+    ...(row.host_id !== null ? { hostId: row.host_id } : {}),
+  });
 }

@@ -14,6 +14,7 @@ import { Shell } from "../src/App.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
+import { ACCOUNT_WORDS, AGENTS_WORDS } from "../src/settings/format.js";
 import { IMAGE_WORDS } from "../src/settings/image.js";
 import { SettingsPage } from "../src/settings/SettingsPage.js";
 import { SIDEBAR_DEFAULT_WIDTH } from "../src/shell/sidebarWidth.js";
@@ -87,14 +88,27 @@ afterEach(() => {
 });
 
 describe("the settings page", () => {
-  it("has Appearance, Terminal and About, one hairline row per pick with its label left and its control right, segments for the picks, and the record's values checked", async () => {
+  it("has the spec's seven sections in order, one hairline row per pick with its label left and its control right, segments for the picks, and the record's values checked", async () => {
     const { api } = fakeApi({ ...DEFAULT_PREFERENCES, labs: true, theme: "light", sidebarMode: "spaces", sidebarWidth: 312, terminalSize: "file", terminalZoom: {} });
     useStore.getState().bind(api);
     await flush();
     render(<SettingsPage />);
-    expect(screen.getAllByRole("region").map(s => s.getAttribute("aria-labelledby"))).toEqual(["settings-appearance", "settings-terminal", "settings-image", "settings-where", "settings-about"]);
+    expect(screen.getAllByRole("region").map(s => s.getAttribute("aria-labelledby"))).toEqual([
+      "settings-appearance",
+      "settings-terminal",
+      "settings-image",
+      "settings-where",
+      "settings-account",
+      "settings-agents",
+      "settings-about",
+    ]);
+    // Sections and nothing else down the column: what a sign-in buys is the Account section's own sentence, and
+    // the spec lets no line about the account stand outside it.
+    expect([...document.querySelector("[data-settings-page]")!.children].map(el => el.tagName)).toEqual(Array(7).fill("SECTION"));
     expect(screen.getByText("Appearance").tagName).toBe("H2");
     expect(screen.getByText("Terminal").tagName).toBe("H2");
+    expect(screen.getByText(ACCOUNT_WORDS.title).tagName).toBe("H2");
+    expect(screen.getByText(AGENTS_WORDS.title).tagName).toBe("H2");
     expect(screen.getByText("About").tagName).toBe("H2");
     expect(segments("Theme")).toEqual(["System", "Light", "Dark"]);
     expect(checked("Theme")).toEqual(["false", "true", "false"]);
@@ -108,7 +122,18 @@ describe("the settings page", () => {
     // A section may put one sentence of its own in a row of the same shape, which the Image section does while
     // nothing is sealed; a pick still never carries one.
     const rows = Array.from(document.querySelectorAll<HTMLElement>("[data-settings-row]"));
-    expect(rows.map(row => row.firstElementChild?.textContent)).toEqual(["Theme", "Sidebar", "Sidebar width", "Text size", "Image", IMAGE_WORDS.firstBuild, "Version"]);
+    expect(rows.map(row => row.firstElementChild?.textContent)).toEqual([
+      "Theme",
+      "Sidebar",
+      "Sidebar width",
+      "Text size",
+      "Image",
+      IMAGE_WORDS.firstBuild,
+      ACCOUNT_WORDS.github,
+      ACCOUNT_WORDS.reach,
+      AGENTS_WORDS.none,
+      "Version",
+    ]);
     for (const row of rows) {
       expect(row.className).toContain("border-b");
       expect(row.querySelector("[data-slot=badge], .truncate + span span")).toBeNull();

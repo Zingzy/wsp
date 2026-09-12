@@ -6,7 +6,9 @@
 // token; the store re-runs its standing fetches when the status comes back
 // to live.
 import {
+  AccountView,
   CLOUD_SETUP_WORDS,
+  DeviceView,
   HarnessCatalog,
   PortForward,
   SessionAccessOutcome,
@@ -457,6 +459,11 @@ export interface Api {
   placesDoor?(): Promise<PlaceDoorView>;
   /** A fresh code for a computer to join with, and when it stops being one. */
   pairIssue?(): Promise<{ code: string; expiresAt: number }>;
+  /** Who this wsp is signed in to, as the host reads it off this computer. Optional so a fixture with no Settings
+   * page need not fake it; without it the Account row says nothing rather than guessing. */
+  account?(): Promise<AccountView>;
+  /** Every device paired with this wsp, which is what the Account section lists once there is a sign-in. */
+  devicesList?(): Promise<DeviceView[]>;
   /** The person's view preferences as the host keeps them, one record every client on this host shares. Optional so
    * fixtures without a settings page need not fake it; without it the defaults stand and nothing is kept. */
   preferences?(): Promise<Preferences>;
@@ -686,6 +693,8 @@ export function makeApi(c: ProtocolClient): Api {
     placesList: async () => PlaceView.array().parse((await c.request<{ places?: unknown }>("places.list")).places),
     placesDoor: async () => PlaceDoorView.parse((await c.request<{ door?: unknown }>("places.door")).door),
     pairIssue: async () => await c.request<{ code: string; expiresAt: number }>("pair.issue"),
+    account: async () => AccountView.parse((await c.request<{ account?: unknown }>("account.get")).account),
+    devicesList: async () => DeviceView.array().parse((await c.request<{ devices?: unknown }>("devices.list")).devices),
     // Parsed, not trusted: the page paints its theme and sizes only from values the wire type vouches for.
     preferences: async () => Preferences.parse((await c.request<{ preferences?: unknown }>("preferences.get")).preferences),
     setPreferences: async patch => Preferences.parse((await c.request<{ preferences?: unknown }>("preferences.set", { patch })).preferences),
