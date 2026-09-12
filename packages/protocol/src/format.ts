@@ -289,12 +289,27 @@ export function waitTimedOutLine(threadIds: readonly string[], ms: number): stri
   return `${who} still running after ${fmtDuration(ms)}`;
 }
 
-/** What a settled turn says beside its outcome word, in the order every client shows it: how long it worked, then
- * what it cost. The app's chat footer and the command line's last line read from this one list. */
-export function turnSettledParts(turn: { durationMs?: number | null; costUsd?: number | null }): string[] {
+/** What the threads a thread opened have spent, said as its own fact: this is their whole life, and the turn's own
+ * figure counts none of their work. */
+export function openedSpendPart(costUsd: number): string {
+  return `${fmtCost(costUsd)} in threads it opened`;
+}
+
+/** The turn's own cost where a second figure stands beside it. The two count different things, one turn against
+ * whole threads, so where both are shown each says which spend it is and neither can be read as the other. */
+export function turnSpendPart(costUsd: number): string {
+  return `${fmtCost(costUsd)} this turn`;
+}
+
+/** What a settled turn says beside its outcome word, in the order every client shows it: how long it worked, what
+ * it cost, and what the threads it opened cost where it opened any. The app's chat footer and the command line's
+ * last line read from this one list. */
+export function turnSettledParts(turn: { durationMs?: number | null; costUsd?: number | null }, openedCostUsd?: number | null): string[] {
+  const opened = typeof openedCostUsd === "number" && openedCostUsd > 0;
   const parts: string[] = [];
   if (typeof turn.durationMs === "number") parts.push(`Worked for ${fmtDuration(turn.durationMs)}`);
-  if (typeof turn.costUsd === "number") parts.push(fmtCost(turn.costUsd));
+  if (typeof turn.costUsd === "number") parts.push(opened ? turnSpendPart(turn.costUsd) : fmtCost(turn.costUsd));
+  if (opened) parts.push(openedSpendPart(openedCostUsd));
   return parts;
 }
 

@@ -1738,6 +1738,45 @@ describe("a thread another thread's agent opened", () => {
   });
 });
 
+describe("a thread an agent opened on another workspace", () => {
+  // The orchestrator's own workspace is this computer and the builder it opened runs on a fork at a provider; the
+  // sidebar files each thread under the workspace its session belongs to, which is what used to part the two.
+  const MAC = { ...view("ws_mac", "zingzy's Mac"), kind: "local" as const };
+  const BENCH = view("ws_bench", "spoo-bench");
+
+  const opened = async () =>
+    mount(
+      fakeApi(
+        [MAC, BENCH],
+        [status(MAC), status(BENCH, { machineId: "sb_9f2c1d8a", provider: "ascii" })],
+        [
+          session("s1", "ws_mac", { prompt: "run the migration across the fleet", startedBy: "person", threadId: "th_lead", startedAt: iso(-60_000) }),
+          session("s2", "ws_bench", { prompt: "benchmark the new index", startedBy: "agent", threadId: "th_bench", parentThreadId: "th_lead", startedAt: iso(-600_000) }),
+        ],
+      ),
+      "zingzy's Mac",
+    );
+
+  it("is drawn one step in under the thread that opened it, not under the workspace its session is filed against", async () => {
+    await opened();
+    await waitFor(() => expect(screen.getByText("benchmark the new index")).toBeDefined());
+    expect(rowIds()).toEqual(["ws:ws_mac", "thread:th_lead", "thread:th_bench", "ws:ws_bench"]);
+    expect(rowOf("benchmark the new index").className).toContain("pl-5");
+  });
+
+  it("names the workspace it runs in and then where that workspace runs, the two facts the row above it does not carry", async () => {
+    await opened();
+    await waitFor(() => expect(screen.getByText("benchmark the new index")).toBeDefined());
+    const meta = (title: string): HTMLElement => rowOf(title).querySelector<HTMLElement>("[data-thread-meta]")!;
+    expect(meta("benchmark the new index").textContent).toBe("··spoo-bench·ascii");
+    // The dot alone says it works on a spawned row, and the opener word is dropped: the indent already says it.
+    expect(meta("benchmark the new index").textContent).not.toContain("Working");
+    expect(meta("benchmark the new index").textContent).not.toContain("agent");
+    expect(meta("run the migration across the fleet").textContent).toBe("Working··you");
+    expect(rowOf("benchmark the new index").querySelector("[data-thread-provenance]")!.getAttribute("aria-label")).toBe("Claude Code · spoo-bench · ascii");
+  });
+});
+
 describe("the row's third line", () => {
   it("is cut at the sidebar's cap with the whole sentence on the row's hover text", async () => {
     // A sentence the runtime writes, longer than the row's room: the cut is what keeps the half a person can act

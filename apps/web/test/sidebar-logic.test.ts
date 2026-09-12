@@ -4,7 +4,9 @@
 // new-workspace helpers.
 import { describe, expect, it } from "vitest";
 import { FREE_WORD, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, OVER_SSH, THIS_COMPUTER, THREAD_ARCHIVE_MS, kindWords, machineLacksShort, wakeAskingAgainLine, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../src/adapt/index.js";
 import { RequestError } from "../src/protocol/client.js";
+import { threadTree, threadsOpenedBy, workspaceOf } from "../src/sidebar/threadTree.js";
 import { explainCreateRefusal } from "../src/protocol/store.js";
 import {
   foldArchivedThreads,
@@ -422,6 +424,70 @@ describe("what a space walks", () => {
     expect(spaceWorkspaceId(ids, null)).toBe("ws_a");
     expect(spaceWorkspaceId(ids, "creating:1")).toBe("ws_a");
     expect(spaceWorkspaceId([], "ws_a")).toBeNull();
+  });
+});
+
+describe("the tree a thread's own threads make", () => {
+  const thread = (id: string, workspaceId: string, parentThreadId: string | null): SidebarThreadSnapshot => ({
+    id,
+    threadId: id,
+    sessionId: `s_${id}`,
+    workspaceId,
+    title: id,
+    status: "running",
+    ran: true,
+    startedAt: "2026-09-01T00:00:00Z",
+    endedAt: null,
+    indicator: { label: "Working", tone: "neutral", pulse: true },
+    harness: "claude",
+    startedBy: parentThreadId === null ? "person" : "agent",
+    project: null,
+    parentThreadId,
+    costUsd: null,
+  });
+  const project = (id: string, threads: SidebarThreadSnapshot[]): SidebarProjectSnapshot =>
+    ({ id, displayName: id, threads }) as unknown as SidebarProjectSnapshot;
+  const drawn = (projects: SidebarProjectSnapshot[]) => threadTree(projects).map(group => [group.project.id, group.threads.map(t => t.id)]);
+
+  it("puts a thread an agent opened on another workspace among its opener's rows, and takes it off the workspace it runs on", () => {
+    const mac = project("mac", [thread("lead", "mac", null)]);
+    const bench = project("bench", [thread("builder", "bench", "lead")]);
+    expect(drawn([mac, bench])).toEqual([
+      ["mac", ["lead", "builder"]],
+      ["bench", []],
+    ]);
+  });
+
+  it("follows the chain to the thread a person opened, however many workspaces it crosses", () => {
+    const mac = project("mac", [thread("lead", "mac", null)]);
+    const bench = project("bench", [thread("builder", "bench", "lead")]);
+    const web = project("web", [thread("helper", "web", "builder")]);
+    expect(drawn([mac, bench, web])).toEqual([
+      ["mac", ["lead", "builder", "helper"]],
+      ["bench", []],
+      ["web", []],
+    ]);
+  });
+
+  it("leaves a thread whose opener this window does not hold where it runs, and never loses one to a circle", () => {
+    const mac = project("mac", [thread("orphan", "mac", "gone")]);
+    const bench = project("bench", [thread("a", "bench", "b"), thread("b", "bench", "a")]);
+    expect(drawn([mac, bench])).toEqual([
+      ["mac", ["orphan"]],
+      ["bench", ["a", "b"]],
+    ]);
+  });
+
+  it("answers the threads one thread opened with the workspace each runs on, whichever workspace that is", () => {
+    const mac = project("mac", [thread("lead", "mac", null), thread("near", "mac", "lead")]);
+    const bench = project("bench", [thread("far", "bench", "lead"), thread("other", "bench", null)]);
+    expect(threadsOpenedBy([mac, bench], "lead").map(({ thread: t, runs }) => [t.id, runs.id])).toEqual([
+      ["near", "mac"],
+      ["far", "bench"],
+    ]);
+    expect(threadsOpenedBy([mac, bench], "other")).toEqual([]);
+    expect(workspaceOf([mac, bench], { workspaceId: "bench" })?.id).toBe("bench");
+    expect(workspaceOf([mac, bench], { workspaceId: "nowhere" })).toBeUndefined();
   });
 });
 
