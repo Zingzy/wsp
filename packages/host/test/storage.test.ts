@@ -2,7 +2,7 @@
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { SNAPSHOT_STORAGE } from "@wsp/engine";
-import { createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
+import { copyKey, createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { describe, expect, it } from "vitest";
 import { describeOrphanOffer, describeOrphans, describeRetention, describeStorage, retentionOffer } from "../src/storage.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
@@ -108,7 +108,7 @@ describe("the retention offer over the stub backend", () => {
   async function golden(): Promise<{ rt: Runtime; backend: StubBackend; store: Store; input: PassThrough; output: PassThrough; text: () => string; press: (k: string) => Promise<void> }> {
     const store = memoryStore();
     const backend = stubBackend();
-    await store.put("goldens", "default", { head: 4, versions: [1, 2, 3, 4].map(n => version(n, n > 1 ? n - 1 : undefined)) });
+    await store.put("goldens", copyKey("default", "default"), { head: 4, versions: [1, 2, 3, 4].map(n => version(n, n > 1 ? n - 1 : undefined)) });
     for (const n of [1, 2, 3, 4]) backend.snapshots.push({ id: `snap_golden-v${n}`, sizeBytes: (7 + n) * GB });
     const rt = createRuntime({ backend, store, adapters: {} });
     const input = new PassThrough();
@@ -154,7 +154,7 @@ describe("the retention offer over the stub backend", () => {
     // An update seals v5 from v2; the manifest is written as the runtime records it.
     const sealed = async (h: { rt: Runtime; backend: StubBackend; store: Store }): Promise<void> => {
       const manifest = (await h.rt.golden.get())!;
-      await h.store.put("goldens", "default", { head: 5, versions: [...manifest.versions, version(5, 2)] });
+      await h.store.put("goldens", copyKey("default", "default"), { head: 5, versions: [...manifest.versions, version(5, 2)] });
       h.backend.snapshots.push({ id: "snap_golden-v5", sizeBytes: 12 * GB });
     };
     await sealed(g);

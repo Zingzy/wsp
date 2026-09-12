@@ -284,8 +284,10 @@ function clientWords(text: string): string {
 export const SSH_STORE_VARS: readonly string[] = CATALOG_AGENTS.map(a => a.stateHomeEnv).filter((name): name is string => name !== undefined && /^[A-Z_][A-Z0-9_]*$/.test(name));
 
 /** The one login shell the read opens: the PATH a turn runs under, and the store variable each harness reads, so a
- * machine whose person points their harness at another folder is signed in for a turn the way it is for them. */
-const LOGIN_READ = ["printf \"path %s\\n\" \"$PATH\"", ...SSH_STORE_VARS.map(name => `printf "store:${name} %s\\n" "$${name}"`)].join("; ");
+ * machine whose person points their harness at another folder is signed in for a turn the way it is for them. It is
+ * exported because a computer somebody joined reads its own login by this same rule, in a shell of its own: a turn
+ * there runs the tools their own shell finds, and the shell that happened to type wsp join is not that shell. */
+export const LOGIN_READ = ["printf \"path %s\\n\" \"$PATH\"", ...SSH_STORE_VARS.map(name => `printf "store:${name} %s\\n" "$${name}"`)].join("; ");
 
 /** What one dial reads off a machine before its record exists: its login environment and the size the row shows.
  * The PATH and the stores come from a login shell, asked for on purpose and once: on the person's own machine the

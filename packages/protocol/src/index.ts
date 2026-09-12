@@ -294,7 +294,7 @@ export type WorkspaceProject = z.infer<typeof WorkspaceProject>;
  * machine of the person's own that wsp only reaches. A missing kind reads cloud, since every record written before
  * local workspaces existed was one. The one fact every road that varies by machine kind reads; nothing switches on
  * it outside the backend registry. */
-export const WorkspaceKind = z.enum(["cloud", "local", "ssh"]);
+export const WorkspaceKind = z.enum(["cloud", "local", "ssh", "place"]);
 export type WorkspaceKind = z.infer<typeof WorkspaceKind>;
 
 /** Where a request to a workspace verb came from: here, this computer's own app, CLI or MCP, or relayed from a
@@ -1692,6 +1692,11 @@ export const GoldenVersion = z.object({
    * sealed before the manifest existed and on one built from no recipe; a fork of such a version upgrades under the
    * old rule, its whole home landing over the new image. */
   owned: z.array(RecipeOwnedFile).optional(),
+  /** The builder's disk in use when the snapshot was taken, bytes; absent on versions sealed before it was recorded. */
+  usedBytes: z.number().int().nonnegative().optional(),
+  /** The image record's hash this copy of the version was built at; absent on a version sealed before records
+   * existed, which no record matches. A manifest is one place's copies, so this is the copy's hash. */
+  imageHash: z.string().length(64).optional(),
 });
 export type GoldenVersion = z.infer<typeof GoldenVersion>;
 
@@ -1910,8 +1915,84 @@ export const GoldenStageEvent = z.object({
   /** The machines this stage made and could not remove, because the provider could not be reached: they bill until
    * something takes them, so a client that can retry the kill retries it rather than reading the stage as over. */
   left: z.array(z.string()).optional(),
+  /** The place a copy is being built at, when the stage is a copy's and not the wired provider's. */
+  place: z.string().optional(),
 });
 export type GoldenStageEvent = z.infer<typeof GoldenStageEvent>;
+// --- the image: the record the host owns, its vault and the copies built from it ---
+
+/** What the sign-in stages left on the builder, archived at the seal: never the bytes on the wire, only their hash
+ * and size. */
+export const SealedVault = z.object({
+  sha256: z.string().length(64),
+  bytes: z.number().int().nonnegative(),
+  /** How many guest paths the archive names; zero means the seal had nothing to hold and the copy will ask for sign-ins again. */
+  paths: z.number().int().nonnegative(),
+  takenAt: z.string(),
+});
+export type SealedVault = z.infer<typeof SealedVault>;
+
+/** The image the host owns: what every copy is built from. One per golden name. */
+export const SealedImage = z.object({
+  name: z.string(),
+  version: z.number().int().positive(),
+  /** sha256 over the recipe hash and the vault's sha256; two copies with this hash were built from the same thing. */
+  hash: z.string().length(64),
+  recipeHash: z.string(),
+  /** The small recipe as it stood at the seal, so a later edit of recipe.json changes no copy until the next
+   * version. Absent on a record backfilled from a golden sealed before records existed, and on one sealed by a
+   * road that carried no small recipe: a copy of such a record is refused, since there is nothing to build from. */
+  recipe: Recipe.optional(),
+  logins: z.array(GoldenLogin),
+  sealedAt: z.string(),
+  /** This computer's name at the seal, for the screen's "sealed from". */
+  sealedFrom: z.string(),
+  /** Absent on a record backfilled from a golden sealed before vaults existed: its copies ask for sign-ins again. */
+  vault: SealedVault.optional(),
+  /** The builder's disk in use at the snapshot, in bytes; absent on a version sealed before it was read. */
+  usedBytes: z.number().int().nonnegative().optional(),
+});
+export type SealedImage = z.infer<typeof SealedImage>;
+
+/** One place's built copy of one version: the provider's artifact and when it was made. */
+export const SealedImageCopy = z.object({
+  place: z.string(),
+  /** The version this place's own manifest gave the copy. Each place numbers its own, so a second place's first
+   * copy is its v1 whatever version of the record it was built from; the hash is what says which record that was. */
+  version: z.number().int().positive(),
+  /** The record's hash when this copy was built; absent on a copy sealed before hashes, which no record matches. */
+  hash: z.string().length(64).optional(),
+  snapshotId: z.string(),
+  templateId: z.string().optional(),
+  builtAt: z.string(),
+  /** From the provider's snapshot listing where it has one; absent elsewhere, never guessed. */
+  sizeBytes: z.number().int().nonnegative().optional(),
+});
+export type SealedImageCopy = z.infer<typeof SealedImageCopy>;
+
+/** What an export wrote on this computer. */
+export const SealedImageExport = z.object({ path: z.string(), bytes: z.number().int().nonnegative(), hash: z.string().length(64) });
+export type SealedImageExport = z.infer<typeof SealedImageExport>;
+
+/** The shortest passphrase an export is sealed to; a shorter one is refused before anything is read. */
+export const IMAGE_PASSPHRASE_MIN = 12;
+
+/** A sealed vault's header, one line of JSON a reader parses before anything else: it says how the bytes behind it
+ * are keyed and carries the record in the plain, so an import can show what a file holds before asking for the
+ * passphrase. The header's own bytes are the cipher's additional data, so an edited header fails to open. */
+export const SealedVaultHeader = z.object({
+  format: z.literal("wsp-vault-1"),
+  cipher: z.literal("aes-256-gcm"),
+  to: z.enum(["passphrase", "key"]),
+  /** scrypt salt (passphrase) or HKDF salt (key), base64. */
+  salt: z.string(),
+  nonce: z.string(),
+  /** The sender's ephemeral X25519 public key, base64, on `to: "key"` only. */
+  ephemeral: z.string().optional(),
+  image: SealedImage,
+});
+export type SealedVaultHeader = z.infer<typeof SealedVaultHeader>;
+
 /** The detail a golden.stage frame carries for a step the builder already holds; a reader closes the step at once and charges it no time. */
 export const ALREADY_APPLIED = "already applied";
 /** Recipe rows under the agents rung that are MCP servers, not agents: `agents/mcp/<agent>/<name>`. The collector writes them, the engine's import reads them. */
@@ -2099,6 +2180,41 @@ export const ProcInspectReply = z.object({
 });
 export type ProcInspectReply = z.infer<typeof ProcInspectReply>;
 
+/** How much of a command's output one exec op carries back, stdout and stderr together. Past it the reply says
+ * truncated and the rest is dropped: the road is a WebSocket frame and a turn that cats a log would otherwise put
+ * the machine's whole disk through it. */
+export const EXEC_OUTPUT_MAX = 2 * 1024 * 1024;
+
+/** How long an exec frame that named no deadline of its own gets. Every caller on the host's side names one; this
+ * is what bounds a frame that did not, so nothing runs without end on a computer somebody owns. */
+export const EXEC_TIMEOUT_DEFAULT_MS = 20_000;
+
+/** The exit code a command killed at its deadline answers with, on every road wsp runs one: the shell's own word
+ * for it, so a caller reads one number whether the command was launched detached on a guest or run by an exec op
+ * on a place. One home, since the two roads' guards are compared against each other in tests. */
+export const EXEC_DEADLINE_EXIT = 124;
+
+/** One command on this machine, for a host driving it over a link it did not open: `bash -c`, in the daemon's own
+ * root and environment, with the bytes for its stdin where the caller has any. The byte road a daemon token, a
+ * roots file and a project part take on a machine whose backend mints no signed URL. */
+export const DaemonExecRequest = z.object({
+  id: reqId,
+  op: z.literal("exec"),
+  cmd: z.string().max(EXEC_BODY_MAX),
+  timeoutMs: z.number().int().positive().max(600_000).optional(),
+  /** Bytes for the command's stdin, base64; absent closes stdin at once. */
+  stdin: z.string().optional(),
+});
+export type DaemonExecRequest = z.infer<typeof DaemonExecRequest>;
+
+export const DaemonExecReply = z.object({ exitCode: z.number().int(), stdout: z.string(), stderr: z.string(), truncated: z.boolean() });
+export type DaemonExecReply = z.infer<typeof DaemonExecReply>;
+
+/** The refusal `place.leave` gets on a socket that is not the link this computer opened to its host. The op takes
+ * this computer out of a wsp, so only the road it dialled out on may ask for it: an inbound socket holding the
+ * daemon token is a client on this machine, and a client on this machine does not un-join it. */
+export const PLACE_LEAVE_ROAD_REFUSAL = "place.leave is answered only on the link this computer opened to its host; run wsp leave here to take this computer out of a wsp";
+
 export const DaemonRequest = z.discriminatedUnion("op", [
   z.object({
     id: reqId,
@@ -2165,6 +2281,10 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("tunnel.open"), tunnelId: z.string(), port: z.number().int().min(1).max(65535) }),
   z.object({ id: reqId, op: z.literal("tunnel.write"), tunnelId: z.string(), data: z.string() }),
   z.object({ id: reqId, op: z.literal("tunnel.close"), tunnelId: z.string() }),
+  DaemonExecRequest,
+  /** Sweeps wsp off this computer and answers what it took, then the agent exits: the one op whose handler belongs
+   * to the link a place opened and not to the daemon's own switch. */
+  z.object({ id: reqId, op: z.literal("place.leave") }),
 ]);
 export type DaemonRequest = z.infer<typeof DaemonRequest>;
 
@@ -2239,6 +2359,7 @@ const DAEMON_CONTENTS = [
   "206d96d53b9734c3dce0e84bf11d5455e210b2419b6c9572748ebf69861afca5",
   "6875c912371aadfb9947191e4d887b9fb6576ed57d0268de91811a6d3ac4f4cd",
   "4c81908db0c4d29e74f00ddd5513e94137f01afeb39b9afbed242368be6097c6",
+  "0ad3a1c3e98d5b75bf94d610b9e166a7ad1bb5e79ee7ab4905d6b738fb5eded9",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -2268,7 +2389,12 @@ const DAEMON_CONTENTS = [
  * them instead of leaving the rest to run. Version 16 starts by the node the deploy compiled its native modules
  * under, kept in the daemon's own folder, rather than by whatever a PATH the machine owns names at the moment of
  * the start: a machine restored onto another one names a different node there, or none, and none is a start that
- * fails every second for the life of the machine. */
+ * fails every second for the life of the machine. Version 17 answers an exec op and can dial a host of its own: a
+ * computer somebody joined as a place opens the socket outward, proves itself on the ed25519 key that host learned
+ * at the join, and then serves that socket exactly as it serves an inbound one, so every command the host already
+ * sends a machine rides one frame on the link and no runtime road learns a second transport. It also loads its
+ * native pty module at the first terminal rather than at its own import, so a machine where nothing built that
+ * module serves every other op instead of refusing to start. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the daemon's sources, the dependency
@@ -2409,6 +2535,188 @@ export const DEVICE_REVOKE_REFUSAL = "a paired device may only revoke itself; ru
  * device token. */
 export const API_UNAUTHORIZED = "this host listens beyond the computer it runs on, so this route needs a paired device token in an Authorization header; run wsp pair on the host";
 
+// --- places: a computer you own, joined by dialling this host ---------------
+
+/** How many bytes each side's challenge is. Thirty-two: a nonce is what keeps a signature from being replayed, and
+ * a birthday collision on it has to be out of reach for the life of a key, not for the life of one link. */
+export const PLACE_LINK_NONCE_BYTES = 32;
+
+/** The decoded byte length of a base64 string, worked out from the string itself: this package is bundled into the
+ * browser, so nothing here decodes through Buffer. */
+function base64Bytes(text: string): number {
+  const pad = text.endsWith("==") ? 2 : text.endsWith("=") ? 1 : 0;
+  return (text.length / 4) * 3 - pad;
+}
+
+const base64 = (bytes: number) =>
+  z
+    .string()
+    .max(4 * Math.ceil((bytes + 2) / 3))
+    .regex(/^[A-Za-z0-9+/]+={0,2}$/)
+    .refine(text => text.length % 4 === 0 && base64Bytes(text) === bytes, `must be ${bytes} bytes, base64`);
+
+export const PlaceNonce = base64(PLACE_LINK_NONCE_BYTES);
+/** An ed25519 public key as SPKI DER, base64: 44 bytes. */
+export const PlacePublicKey = base64(44);
+/** An ed25519 signature, base64: 64 bytes. */
+export const PlaceSignature = base64(64);
+
+/** What a place says about itself on every link, and once at join. Read by the host into the place record and the
+ * workspace recorded on it; nothing here is trusted for paths until isPlainPath has read it. */
+export const PlaceReport = z.object({
+  name: z.string().min(1).max(200),
+  platform: z.enum(["darwin", "linux"]),
+  arch: z.string().max(32),
+  os: z.string().max(200),
+  shape: WorkspaceSize,
+  diskFreeBytes: z.number().int().nonnegative().optional(),
+  /** HOME, USER, PATH and each harness's store variable, as the ssh read records them. */
+  login: z.record(z.string()),
+  docker: z.boolean(),
+  daemonVersion: z.number().int().nonnegative(),
+  /** The loopback port the place's own daemon bound, for the forward the panes ride. */
+  daemonPort: z.number().int().min(1).max(65535).optional(),
+  /** The line that runs wsp on this place, word by word, for the tools a turn's agent is given later. */
+  wsp: z.array(z.string()).min(1),
+  /** Which of the host's addresses this link reached; the address a turn on the place is told to dial back. */
+  dialed: z.string().refine(isHttpUrl, "http or https URL"),
+});
+export type PlaceReport = z.infer<typeof PlaceReport>;
+
+/** The first frame of a joining place: spends a join code (the pairing code road) for a place record that holds
+ * this key. Answered with PlaceJoinReply; the socket then continues with place.prove as an auth would. */
+export const PlaceJoinRequest = z.object({ id: reqId, op: z.literal("place.join"), code: z.string().max(64), publicKey: PlacePublicKey, nonce: PlaceNonce, report: PlaceReport });
+export type PlaceJoinRequest = z.infer<typeof PlaceJoinRequest>;
+export const PlaceJoinReply = z.object({ placeId: z.string(), hostPublicKey: PlacePublicKey, nonce: PlaceNonce, signature: PlaceSignature });
+export type PlaceJoinReply = z.infer<typeof PlaceJoinReply>;
+
+/** The first frame of a place that already joined: names itself and challenges the host. */
+export const PlaceAuthRequest = z.object({ id: reqId, op: z.literal("place.auth"), placeId: z.string().max(64), nonce: PlaceNonce });
+export type PlaceAuthRequest = z.infer<typeof PlaceAuthRequest>;
+export const PlaceAuthReply = z.object({ nonce: PlaceNonce, hostPublicKey: PlacePublicKey, signature: PlaceSignature });
+export type PlaceAuthReply = z.infer<typeof PlaceAuthReply>;
+
+/** The second frame: the place's answer to the host's nonce, and its report as it stands now. After this the socket
+ * is the place link and carries daemon frames only. */
+export const PlaceProveRequest = z.object({ id: reqId, op: z.literal("place.prove"), signature: PlaceSignature, report: PlaceReport });
+export type PlaceProveRequest = z.infer<typeof PlaceProveRequest>;
+
+/** What both sides sign, built by one function so they cannot drift: the role of the signer, the place id and the
+ * two nonces, the challenged party's nonce first. The host signs the transcript the place challenged it with and
+ * the place signs the host's, so neither side's signature can be replayed back at it as the other's. */
+export function placeLinkTranscript(role: "host" | "place", placeId: string, challenge: string, answer: string): Uint8Array {
+  return new TextEncoder().encode(`wsp place link v1\n${role}\n${placeId}\n${challenge}\n${answer}\n`);
+}
+
+export const PlaceKind = z.enum(["computer", "provider"]);
+export type PlaceKind = z.infer<typeof PlaceKind>;
+
+/** One row of wsp places: a computer of the person's own, this computer itself, or the provider this host forks on. */
+export const PlaceView = z.object({
+  id: z.string(),
+  kind: PlaceKind,
+  name: z.string(),
+  default: z.boolean(),
+  /** A computer: what it reported last. */
+  os: z.string().optional(),
+  shape: WorkspaceSize.optional(),
+  diskFreeBytes: z.number().int().optional(),
+  docker: z.boolean().optional(),
+  present: z.boolean().optional(),
+  joinedAt: z.string().optional(),
+  lastSeenAt: z.string().optional(),
+  daemonVersion: z.number().int().optional(),
+  /** The workspace recorded on this computer, when the join could record one. */
+  workspaceId: z.string().optional(),
+  /** A provider: its hourly rate for the default size. */
+  rateUsdPerHour: z.number().optional(),
+});
+export type PlaceView = z.infer<typeof PlaceView>;
+
+/** The refusal a join whose code this host is not holding gets. Spent, expired and never minted read the same, so
+ * guessing tells a caller nothing about which; the words differ from a pairing code's only in naming the verb that
+ * mints this one, since a person joining a computer never typed wsp pair. */
+export const PLACE_CODE_REFUSAL = "that join code is not one this host is waiting for; run wsp add on the host for a fresh one";
+
+/** The refusal a place gets for proving itself with a key the host does not hold for it. A key that moved is a
+ * computer re-joined somewhere else or a place file copied off it, and neither is this place. */
+export const PLACE_KEY_REFUSAL = "that place's key does not match the one this host learned at join; wsp remove it here and join it again";
+
+/** The refusal a place that names an id this host holds none of gets: removed here, or a state file that is not
+ * the one it joined. */
+export const PLACE_UNKNOWN_REFUSAL = "this host holds no place by that id; join it with a code from wsp add";
+
+/** The refusal a joining computer prints when the host at that address could not prove the key this computer
+ * learned at join, so nothing of this computer's went to it. */
+export const hostKeyRefusal = (url: string): string => `the host at ${url} did not prove the key this computer learned at join; nothing was sent to it`;
+
+/** What a row says about a place that is not holding its link right now. Nothing is wrong: the computer dials on
+ * its own whenever it is on and can reach this host. */
+export const placeAbsentLine = (name: string): string => `${name} is not connected right now; it dials this host on its own when it is on and can reach it`;
+
+/** What a remove says about a place that was not linked when it ran: the records here are gone and the agent on
+ * that computer is not, since nothing could reach it to sweep. */
+export const placeStillInstalledLine = (name: string): string => `${name} is off this host, but the agent on it is still installed; run wsp leave on that computer when it is back`;
+
+/** What a remove says about each workspace that stood on the place it took out: the record and its threads leave
+ * this host, and the computer keeps its own files, since wsp never made them. */
+export const placeWorkspaceGoneLine = (name: string, id: string): string => `workspace ${name} (${id}) and its threads are gone from this host; its files on that computer are the person's own and stay`;
+
+/** What a pane on a place is refused with while nothing carries the daemon's own socket to this computer: the link
+ * carries the frames the host sends, and a pane needs an address on this computer of its own. */
+export const placeNoPaneRoadLine = (name: string): string => `${name} is connected, and its terminal, files and ports wait on a road from this computer to the daemon on it; wsp drives it over the link meanwhile`;
+
+/** The refusal a socket that was let in on a single-use ticket gets for reaching the place ops: which computers a
+ * person's wsp runs on, and taking one back out, is handed out and taken away at the terminal of the computer the
+ * host runs on and nowhere else. */
+export const PLACES_TICKET_REFUSAL = "a socket let in on a ticket cannot see or change the places this host holds; run wsp places on the computer the host runs on";
+
+/** What a computer joined as a place keeps about the wsp it belongs to, in the file the join writes and the agent
+ * reads on every attempt: the id its host knows it by, the addresses to dial in order, the host's public key pinned
+ * at that join, and where its own private key is. The shape and the two readings of it live here because the join
+ * writes it on one side of the wire and the agent reads it on the other. */
+export interface PlaceFile {
+  placeId: string;
+  name: string;
+  /** LAN address first, the host's tunnel hostname after it; dialled in this order on every attempt. */
+  hostUrls: string[];
+  hostPublicKey: string;
+  keyPath: string;
+  joinedAt: string;
+}
+
+/** The mode the place file and the private key beside it are kept at: the person's own and nobody else's. A key any
+ * account on that computer could read is a key that joins their wsp for them. */
+export const PLACE_FILE_MODE = 0o600;
+
+/** The place file a text holds, or nothing when that text is not one. A file that is there and is not one reads the
+ * same as none: the one road that writes it is wsp join, and anything else there is not a place to dial with. */
+export function parsePlaceFile(text: string): PlaceFile | undefined {
+  let held: unknown;
+  try {
+    held = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  const f = held as PlaceFile | undefined;
+  const ok =
+    typeof f === "object" &&
+    f !== null &&
+    typeof f.placeId === "string" &&
+    typeof f.name === "string" &&
+    Array.isArray(f.hostUrls) &&
+    f.hostUrls.every(u => typeof u === "string") &&
+    typeof f.hostPublicKey === "string" &&
+    typeof f.keyPath === "string";
+  return ok ? f : undefined;
+}
+
+/** The text the file holds, which parsePlaceFile reads back. */
+export const placeFileText = (file: PlaceFile): string => `${JSON.stringify(file, null, 2)}\n`;
+
+/** The refusal a second join on one computer gets: a place file is the one wsp this computer belongs to. */
+export const ALREADY_JOINED_LINE = "this computer is already a place in a wsp; wsp leave first";
+
 const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("auth"), token: z.string() }),
   z.object({ id: reqId, op: z.literal("ticket.issue"), purpose: TicketPurpose }),
@@ -2423,6 +2731,19 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Takes a device's token away and cuts the sockets holding it. A device may name only itself; the host token
    * names any. */
   z.object({ id: reqId, op: z.literal("devices.revoke"), deviceId: z.string() }),
+  /** The first frame of a computer joining as a place: spends a join code for a record holding its key. Answered
+   * with a PlaceJoinReply, and the socket then sends place.prove as an authed one would. */
+  PlaceJoinRequest,
+  /** The first frame of a place that already joined, answered with a PlaceAuthReply. */
+  PlaceAuthRequest,
+  /** The second frame of either road: once it verifies, this socket stops being a client's and is the place link. */
+  PlaceProveRequest,
+  /** Every place this host holds: this computer, the computers joined to it, and the provider it forks on.
+   * Answers `{ places: PlaceView[] }`. */
+  z.object({ id: reqId, op: z.literal("places.list") }),
+  /** Takes a place back out: sweeps wsp off that computer over its link, drops the workspaces standing on it and
+   * the place record. Answers `{ removed, swept, note? }`. */
+  z.object({ id: reqId, op: z.literal("places.remove"), placeId: z.string() }),
   /** Replies with an EventsSubscribeReply, then pushes events on this socket. With `after`, the seq of the last event
    * this client saw, every retained event past it is pushed first, oldest first, before anything live; `stream` is
    * the id that came with that seq, so a runtime that is not the one that issued it answers gap instead. */
@@ -2713,6 +3034,16 @@ const RuntimeOp = z.discriminatedUnion("op", [
     replace: z.boolean().optional(),
     agents: z.array(z.string()).optional(),
   }),
+  /** Replies with { view: SealedImageView }. */
+  z.object({ id: reqId, op: z.literal("image.get"), name: z.string().optional() }),
+  /** Builds this host's image at `place` from the record: prepare there, import the vault, seal. Replies with
+   * { copy: SealedImageCopy }; progress rides golden.stage frames carrying `place`. Refused (kind "conflict") when
+   * the place already holds a copy with the record's hash, when no record exists, and when the record holds no
+   * vault and `force` is not set. */
+  z.object({ id: reqId, op: z.literal("image.build"), place: z.string().min(1), name: z.string().optional(), force: z.boolean().optional() }),
+  /** Writes the record and the vault, sealed to the passphrase, to `dest` on this computer. Replies with
+   * { exported: SealedImageExport }. The passphrase is never logged and never kept. */
+  z.object({ id: reqId, op: z.literal("image.export"), dest: z.string().min(1), passphrase: z.string().min(IMAGE_PASSPHRASE_MIN).max(256), name: z.string().optional() }),
 ]);
 
 /** Every request carries where it reached the host from: here, this computer's own app, CLI or MCP, or relayed from
@@ -2904,8 +3235,19 @@ export const ProjectGolden = z.object({
   workspaceId: z.string(),
   workspaceName: z.string(),
   createdAt: z.string(),
+  /** The place whose provider holds the snapshot; absent on one taken before places, which is the wired provider's. */
+  place: z.string().optional(),
 });
 export type ProjectGolden = z.infer<typeof ProjectGolden>;
+
+/** What Settings > Image and `wsp image` draw: the record, every copy at every place, the project goldens under it.
+ * Beside ProjectGolden because it carries them; the rest of the image shapes sit with the golden ones above. */
+export const SealedImageView = z.object({
+  image: SealedImage.nullable(),
+  copies: z.array(SealedImageCopy),
+  projects: z.array(ProjectGolden),
+});
+export type SealedImageView = z.infer<typeof SealedImageView>;
 
 /** One part of the listing: how many snapshots and what they hold. */
 export const SnapshotGroup = z.object({ count: z.number(), bytes: z.number() });
@@ -2994,7 +3336,7 @@ export {
   type Rgb,
   type ThemePreset,
 } from "./workspace-look.js";
-export { rootsPathIn, sshDaemonPaths, underProject } from "./project-path.js";
+export { placeDaemonPaths, rootsPathIn, sshDaemonPaths, underProject, workFolderIn } from "./project-path.js";
 export * from "./projects.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importDest, importRequest, registerRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";

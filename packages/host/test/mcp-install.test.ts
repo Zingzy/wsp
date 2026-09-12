@@ -219,7 +219,7 @@ describe("installing the MCP server for a local agent", () => {
   it("--agent belongs to mcp install alone, a command with no JSON to print refuses --json, and mcp --help says its own usage", async () => {
     // Which shared-parse commands print JSON is the command table's fact: init prints each sign-in hand-off as one
     // object per line and takes the flag; recipe parses its own flags and prints its table as one object.
-    expect(PROSE_COMMANDS).toEqual(["up", "down", "status", "pair", "devices", "connect", "relay", "hosts", "disconnect", "doctor"]);
+    expect(PROSE_COMMANDS).toEqual(["up", "down", "status", "pair", "devices", "connect", "relay", "hosts", "disconnect", "add", "remove", "join", "leave", "doctor"]);
     expect(JSON_COMMANDS).toEqual(["init"]);
     for (const cmd of PROSE_COMMANDS) {
       const out = io();

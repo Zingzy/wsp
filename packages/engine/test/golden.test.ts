@@ -137,6 +137,11 @@ function recordingBackend(
 /** What the provider's snapshot call answers when it refuses: the 502 the backend maps, with the reply's request id. */
 const refusedSnapshot = (requestId: string): Error => Object.assign(new Error("Failed to snapshot sandbox"), { kind: "snapshotUnavailable", status: 502, requestId });
 
+/** What the recording backend's guest tar leaves behind, and the signed-URL road that brings it down: the backend
+ * answers every download with these bytes, since only one archive is ever asked for in a seal. */
+const VAULT_TGZ = Buffer.from("sealed-vault-bytes");
+const vaultFetch = (): typeof globalThis.fetch => (async () => new Response(new Uint8Array(VAULT_TGZ), { status: 200 })) as typeof globalThis.fetch;
+
 const FAST_KILL = { graceMs: 20, pollMs: 1 };
 /** What a machine that still serves answers the reach check with. */
 const REACH_OK: ExecResult = { exitCode: 0, stdout: "ok\n", stderr: "" };
@@ -353,6 +358,63 @@ describe("interactive golden: prepare then seal", () => {
     const without = recordingBackend({}, { exec: cmd => (cmd === "test -x /usr/local/bin/wsp-open" ? { exitCode: 1, stdout: "", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" }) });
     const b2 = await prepareBuilder({ backend: without.backend, setup: "true" });
     expect((await sealGolden(b2, { backend: without.backend, hostId: "h1", smoke: "true" })).version.browserShim).toBe(false);
+  });
+
+  it("seal reads the vault off the builder before it asks for the snapshot, and hands it back with the version", async () => {
+    const paths = ["/root/.codex/auth.json", "/etc/profile.d/wsp-secrets.sh"];
+    const order: string[] = [];
+    const { backend, timeline } = recordingBackend({}, {
+      exec: cmd => {
+        if (cmd.startsWith("for p in ")) {
+          order.push("vault");
+          return { exitCode: 0, stdout: `${paths.join("\n")}\n`, stderr: "" };
+        }
+        return { exitCode: 0, stdout: "", stderr: "" };
+      },
+      snapshot: () => order.push("snapshot"),
+    });
+    const b = await prepareBuilder({ backend, setup: "true" });
+    const sealed = await sealGolden(b, { backend, hostId: "h1", smoke: "true", vaultPaths: paths, fetch: vaultFetch() });
+    expect(order).toEqual(["vault", "snapshot"]);
+    expect(timeline.indexOf("snapshot m1")).toBeGreaterThan(-1);
+    expect(sealed.vault).toMatchObject({ paths: 2, sha256: createHash("sha256").update(VAULT_TGZ).digest("hex") });
+    expect(sealed.vault!.tar.equals(VAULT_TGZ)).toBe(true);
+  });
+
+  it("a seal that names no vault paths takes none and asks the builder nothing about them", async () => {
+    const asked: string[] = [];
+    const { backend } = recordingBackend({}, { exec: cmd => (asked.push(cmd), { exitCode: 0, stdout: "", stderr: "" }) });
+    const b = await prepareBuilder({ backend, setup: "true" });
+    const sealed = await sealGolden(b, { backend, hostId: "h1", smoke: "true" });
+    expect(sealed.vault).toBeUndefined();
+    expect(asked.some(c => c.startsWith("for p in "))).toBe(false);
+  });
+
+  it("a vault the builder would not hand over leaves it alive and unsnapshotted, as a refused snapshot does", async () => {
+    const { backend, timeline, killed } = recordingBackend({}, {
+      exec: cmd => (cmd.startsWith("tar czf") ? { exitCode: 2, stdout: "", stderr: "tar: cannot read" } : { exitCode: 0, stdout: "/root/.codex/auth.json\n", stderr: "" }),
+    });
+    const b = await prepareBuilder({ backend, setup: "true" });
+    await expect(sealGolden(b, { backend, hostId: "h1", smoke: "true", vaultPaths: ["/root/.codex/auth.json"], fetch: vaultFetch() })).rejects.toThrow(/vault export tar failed/);
+    expect(timeline).toEqual(["create m1"]);
+    expect(killed).toEqual([]);
+  });
+
+  it("a builder that will not say which vault paths it holds stops the seal, rather than sealing an image with no sign-ins in it", async () => {
+    const { backend, timeline, killed } = recordingBackend({}, {
+      exec: cmd => (cmd.startsWith("for p in ") ? { exitCode: 127, stdout: "", stderr: "bash: for: command not found" } : { exitCode: 0, stdout: "", stderr: "" }),
+    });
+    const b = await prepareBuilder({ backend, setup: "true" });
+    await expect(sealGolden(b, { backend, hostId: "h1", smoke: "true", vaultPaths: ["/root/.codex/auth.json"], fetch: vaultFetch() })).rejects.toThrow(/would not say which/);
+    expect(timeline).toEqual(["create m1"]);
+    expect(killed).toEqual([]);
+  });
+
+  it("seal records the disk the snapshot took, read once for the stage line and the version", async () => {
+    const { backend } = recordingBackend({ [USED_KB_CMD]: { exitCode: 0, stdout: "13631488\n", stderr: "" } });
+    const b = await prepareBuilder({ backend, setup: "true" });
+    const { version } = await sealGolden(b, { backend, hostId: "h1", smoke: "true" });
+    expect(version.usedBytes).toBe(13631488 * 1024);
   });
 
   it("seal stamps the logins it is given onto the version, name and state only", async () => {

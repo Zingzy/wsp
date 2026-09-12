@@ -3,7 +3,7 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { ContextMenuItem, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, SessionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
+import type { ContextMenuItem, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectGolden, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SessionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
 import { DEFAULT_PORT } from "./app-ports.js";
 import { compareVersions } from "./semver.mjs";
@@ -500,6 +500,59 @@ export function toolResultLine(text: string, isError = false): string | undefine
  * its caller. */
 export function plural(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+
+// --- the image and its copies, as `wsp image` and Settings > Image read them ---
+
+/** What a record with no vault says: its copies ask for every sign-in again until the next version holds them. */
+export const IMAGE_NO_VAULT = "no sign-ins held; cut the next version to hold them";
+/** Where a run with nobody at its terminal reads the passphrase an export is sealed to; never a flag, since every
+ * process on a computer can read another's command line. */
+export const IMAGE_PASSPHRASE_ENV = "WSP_IMAGE_PASSPHRASE";
+/** What a host that has sealed nothing says. Named apart from the attachment lines beside it: those are pictures. */
+export const NO_SEALED_IMAGE = "no image yet; run wsp init to build one";
+
+/** Whether a copy stands on the record as it is now: built at the record's hash, which is the whole of it. The
+ * version is the place's own manifest number and says nothing about which record the copy came from, so a second
+ * place's v1 built from the record's v2 is current. A copy with no hash was built before hashes were recorded and
+ * no record matches it. The one rule: the refusal that will not rebuild a current copy reads it too. */
+export function copyIsCurrent(image: Pick<SealedImage, "hash">, copy: Pick<SealedImageCopy, "hash">): boolean {
+  return copy.hash === image.hash;
+}
+
+/** The states a login ends in with something of it on the machine, which is what the vault then carries: signed in
+ * there, copied from this computer, or there with no status command to prove it. The rest left nothing behind. */
+const LOGIN_ON_MACHINE: readonly LoginState[] = ["signed-in", "copied", "not-verified"];
+
+/** How many of this image's logins ended with something on the machine for the vault to hold. */
+export function sealedLoginsHeld(image: Pick<SealedImage, "logins">): number {
+  return image.logins.filter(l => LOGIN_ON_MACHINE.includes(l.state)).length;
+}
+
+/** The record in one line: the version, its hash, how many sign-ins it holds and what its disk came to. */
+export function sealedImageLine(image: SealedImage): string {
+  const held = image.vault === undefined ? IMAGE_NO_VAULT : `${plural(sealedLoginsHeld(image), "sign-in")} held, ${plural(image.vault.paths, "path")}`;
+  const size = image.usedBytes === undefined ? [] : [fmtBytes(image.usedBytes)];
+  return [`${image.name} v${image.version}`, image.hash, held, ...size, `sealed on ${image.sealedFrom}`].join(" · ");
+}
+
+/** One place's copy in one line: the place, the version it holds, its size where the provider reports one, and
+ * whether it stands on the record as it is now. A record with no vault was read back off its own copies rather
+ * than written at a seal, so it has nothing to judge them by and the word is left off. */
+export function sealedCopyLine(image: SealedImage, copy: SealedImageCopy): string {
+  const size = copy.sizeBytes === undefined ? [] : [fmtBytes(copy.sizeBytes)];
+  const standing = image.vault === undefined ? [] : [copyIsCurrent(image, copy) ? "current" : "stale"];
+  return [copy.place, `v${copy.version}`, ...size, ...standing].join(" · ");
+}
+
+/** One project image under the image, as a line: the workspace it was taken off, the projects on that disk and when. */
+export function sealedProjectLine(project: ProjectGolden): string {
+  return [`project ${project.workspaceName}`, project.projects.map(p => p.name).join(", "), project.createdAt].join(" · ");
+}
+
+/** What an export wrote, as the line a person reads after it. */
+export function sealedExportLine(exported: SealedImageExport): string {
+  return `${exported.path} · ${fmtBytes(exported.bytes)} · opens with the passphrase you typed and nothing else`;
 }
 
 /** One name inside a comma-joined list of names: quoted when the name carries that comma itself, so a free-text
@@ -1592,6 +1645,10 @@ export const thisComputerLine = (name: string, id: string): string => `Workspace
 /** What an ssh workspace's machine is, in every sentence and every row that names it: a machine of the person's own
  * that wsp reaches and never runs. */
 export const OVER_SSH = "a machine over ssh";
+
+/** What a place's machine is, in every sentence and every row that names it: a computer of the person's own that
+ * dialled this host and holds the link, so wsp drives it with the daemon protocol and never made it. */
+export const JOINED_COMPUTER = "a computer you joined";
 
 /** What a cloud workspace's machine is in a sentence that names it: a machine wsp forked at a provider and pays for,
  * whether the provider runs virtual machines or containers. A refusal on one says this rather than borrowing this

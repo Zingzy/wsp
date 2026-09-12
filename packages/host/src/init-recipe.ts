@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { LOGIN_CHOICES, parseManifest, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
-import { CATALOG_AGENTS, catalogEntry, catalogToolFor, guestEnv, hasLogin, loginIdOf, loginRow } from "@wsp/catalog";
+import { CATALOG_AGENTS, catalogEntry, catalogToolFor, guestEnv, hasLogin, loginIdOf, loginRow, loginStatePaths } from "@wsp/catalog";
 import { CATALOG_PREFIX, agentOwning, diffRecipes, isMcpRow, isTap, neverCopied, packageOf, parseMcpId, rowRoad, type BrewTable, type RecipeDigest } from "@wsp/engine";
 import { Recipe, type LoginChoice, type RecipeRow } from "@wsp/protocol";
 import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
@@ -14,6 +14,7 @@ import type { Keys } from "./cli.js";
 import { GUEST_ENVS } from "./doctor.js";
 import { SIGN_IN_WORDS } from "./signin-words.js";
 import { outsideRow, pinsOf } from "./recipe-file.js";
+import { FISH_FILE, SH_FILE } from "./init-secrets.js";
 export { loadRecipe, outsideCatalog, outsideRowsOf, pinsOf, saveSmallRecipe, smallRecipePath, withPins, withTicksOf } from "./recipe-file.js";
 
 export const RUNG_TITLE: Record<Rung, string> = {
@@ -358,7 +359,7 @@ export function recipeChanges(from: RecipeDigest, to: RecipeDigest, manifest: Ma
 export function goldenRecipeFor(
   bring: readonly ManifestEntry[],
   loaded: Readonly<Record<string, string>>,
-  hooks: { deployDaemon?: (machine: Machine) => Promise<void | string>; import?: GoldenImport } = {},
+  hooks: { deployDaemon?: (machine: Machine) => Promise<void | string>; import?: GoldenImport; source?: Recipe } = {},
 ): GoldenRecipe {
   const envs: Record<string, string> = { ...GUEST_ENVS };
   for (const e of bring) {
@@ -371,7 +372,20 @@ export function goldenRecipeFor(
     setup: "true",
     smoke: "true",
     envs,
+    vaultPaths: vaultPathsFor(bring),
+    ...(hooks.source !== undefined ? { source: hooks.source } : {}),
     ...(hooks.deployDaemon !== undefined ? { deployDaemon: hooks.deployDaemon } : {}),
     ...(hooks.import !== undefined ? { import: hooks.import } : {}),
   };
+}
+
+/** What the seal archives off the builder as the image vault: where each row that can sign in keeps its login on the
+ * machine, whether the sign-in was copied here or run there, and the two files the secrets step writes. Each path
+ * once, in the order the rows come. */
+export function vaultPathsFor(bring: readonly ManifestEntry[]): string[] {
+  const entries = bring.flatMap(e => {
+    const row = loginRow(agentName(e));
+    return row === undefined ? [] : [row.entry];
+  });
+  return [...new Set([...entries.flatMap(loginStatePaths), SH_FILE, FISH_FILE])];
 }

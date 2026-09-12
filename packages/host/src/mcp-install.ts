@@ -36,7 +36,7 @@ export interface RunningWsp {
 export const runningWsp = (): RunningWsp => ({ execPath: process.execPath, execArgv: process.execArgv, argv: process.argv, version: VERSION, PATH: process.env.PATH });
 
 /** The command a shell would run from PATH: the first folder that holds one. */
-function onPath(bin: string, PATH: string | undefined): string | undefined {
+export function onPath(bin: string, PATH: string | undefined): string | undefined {
   return (PATH ?? "")
     .split(delimiter)
     .filter(dir => dir !== "")
