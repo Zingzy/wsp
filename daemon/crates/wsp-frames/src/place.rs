@@ -157,3 +157,77 @@ impl PlaceProveRequest {
         PlaceProveRequest { id, op: PlaceProveTag::PlaceProve, signature, report }
     }
 }
+
+/// Which side signs: the host answers the place's challenge, the place answers the host's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkRole {
+    Host,
+    Place,
+}
+
+impl LinkRole {
+    fn word(self) -> &'static str {
+        match self {
+            LinkRole::Host => "host",
+            LinkRole::Place => "place",
+        }
+    }
+}
+
+/// The bytes both sides sign, as the protocol's placeLinkTranscript builds them: the role of the signer, the place
+/// id and the two nonces, the challenged party's nonce first, each on its own line.
+pub fn place_link_transcript(role: LinkRole, place_id: &str, challenge: &str, answer: &str) -> Vec<u8> {
+    format!("wsp place link v1\n{}\n{place_id}\n{challenge}\n{answer}\n", role.word()).into_bytes()
+}
+
+/// What a computer joined as a place keeps about the wsp it belongs to, as wsp join writes it and the agent reads
+/// it on every attempt. Fields the protocol's parse does not check are optional here for the same reason.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaceFile {
+    pub place_id: String,
+    pub name: String,
+    pub host_name: String,
+    /// Dialled in this order on every attempt.
+    pub host_urls: Vec<String>,
+    /// SPKI DER in base64, compared as text against what the host sends.
+    pub host_public_key: String,
+    pub key_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub joined_at: Option<String>,
+    pub awake: bool,
+}
+
+impl PlaceFile {
+    /// The place file a text holds, or nothing when that text is not one, as the protocol's parsePlaceFile reads it.
+    pub fn parse(text: &str) -> Option<PlaceFile> {
+        serde_json::from_str(text).ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_transcript_is_the_protocols_five_lines() {
+        assert_eq!(place_link_transcript(LinkRole::Host, "p_1", "AAA=", "BBB="), b"wsp place link v1\nhost\np_1\nAAA=\nBBB=\n");
+        assert_eq!(place_link_transcript(LinkRole::Place, "p_1", "BBB=", "AAA="), b"wsp place link v1\nplace\np_1\nBBB=\nAAA=\n");
+    }
+
+    #[test]
+    fn a_place_file_reads_as_the_protocol_parses_one_and_anything_else_is_none() {
+        let text = r#"{"placeId":"p_ab12cd34","name":"old-macbook","hostName":"zingzy-mbp","hostUrls":["http://192.168.1.20:4400"],"hostPublicKey":"MCow","keyPath":"/h/.wsp/place-key.pem","joinedAt":"1970-01-01T00:00:00.000Z","awake":false}"#;
+        let file = PlaceFile::parse(text).unwrap();
+        assert_eq!((file.place_id.as_str(), file.name.as_str(), file.awake), ("p_ab12cd34", "old-macbook", false));
+        assert_eq!(file.host_urls, vec!["http://192.168.1.20:4400"]);
+        assert!(PlaceFile::parse("not a place file").is_none());
+        assert!(PlaceFile::parse(r#"{"placeId":"p","name":"n","hostUrls":[],"hostPublicKey":"k","keyPath":"p","awake":false}"#).is_none());
+        assert!(PlaceFile::parse(
+            r#"{"placeId":"p","name":"n","hostName":"h","hostUrls":[1],"hostPublicKey":"k","keyPath":"p","awake":false}"#
+        )
+        .is_none());
+        let without_joined_at = text.replace(r#""joinedAt":"1970-01-01T00:00:00.000Z","#, "");
+        assert!(PlaceFile::parse(&without_joined_at).is_some());
+    }
+}
