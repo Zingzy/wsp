@@ -125,6 +125,18 @@
       "wait": "opened-thread"
     },
     {
+      "name": "spawned-thread-header",
+      "at": "/",
+      "fixture": "orchestrator",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:api-move",
+        "390:key:Escape"
+      ],
+      "wait": "breadcrumb-opener"
+    },
+    {
       "name": "host-asleep",
       "at": "/",
       "remote": true,

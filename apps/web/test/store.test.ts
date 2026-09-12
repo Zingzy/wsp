@@ -128,8 +128,8 @@ describe("the workspace the address opens on", () => {
     expect(await refreshed([view("ws_a"), view("ws_b")])).toBe("ws_a");
   });
 
-  // The rows the sidebar draws: two running workspaces, the later one on top since its creation is the latest activity.
-  const rows = () => [view("ws_a"), { ...view("ws_b"), createdAt: "2026-09-02T00:00:00Z" }];
+  // The rows the sidebar draws: two workspaces, the older one on top, which is not the order the runtime lists them in.
+  const rows = () => [{ ...view("ws_a"), createdAt: "2026-09-02T00:00:00Z" }, view("ws_b")];
 
   it("with no address it opens on the first row in sidebar order, not the first of the runtime's list", async () => {
     hash("");

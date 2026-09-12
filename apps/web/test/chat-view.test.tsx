@@ -802,6 +802,9 @@ describe("the threads a thread opened", () => {
     const link = opened[0]!.querySelector<HTMLAnchorElement>("a")!;
     expect(link.textContent).toBe("benchmark the new index");
     expect(link.getAttribute("href")).toBe(`${window.location.origin}${window.location.pathname}#w/ws_bench/t/thr_bench`);
+    // Clicking it walks down the tree the same way the child's own header walks up it.
+    fireEvent.click(link);
+    await waitFor(() => expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_bench", "thr_bench"]));
   });
 
   it("leaves the transcript alone on a thread that opened none", async () => {
