@@ -1,0 +1,11 @@
+[
+  {
+    "id": 1,
+    "op": "pty.attach"
+  },
+  {
+    "id": 1,
+    "op": "pty.attach",
+    "ptyId": 1
+  }
+]

@@ -1,0 +1,13 @@
+[
+  {
+    "id": 1,
+    "op": "pty.write",
+    "ptyId": "pty_1"
+  },
+  {
+    "id": 1,
+    "op": "pty.write",
+    "ptyId": "pty_1",
+    "data": 5
+  }
+]
