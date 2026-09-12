@@ -64,7 +64,7 @@ export function canPickFolder(thread: ChatThreadHandle): boolean {
 const labelClass = "inline-flex h-7 min-w-0 items-center gap-1 px-2 text-sm text-muted-foreground/70 sm:h-6 sm:text-xs";
 
 const LOCKED_FOLDER_NOTE = "The folder this thread's harness runs in. A cd inside the agent's shell does not move it; start a new thread to work from another folder.";
-const BRANCH_NOTE = "The folder's branch as the machine reports it. Nothing here switches it; check out another branch from the terminal.";
+const BRANCH_NOTE = "The folder's branch as the workspace reports it. Nothing here switches it; check out another branch from the terminal.";
 /** The branch slot keeps the label's height while empty, so the row does not move when a branch arrives. */
 const branchSlotClass = cn(labelClass, "shrink-0 font-mono");
 

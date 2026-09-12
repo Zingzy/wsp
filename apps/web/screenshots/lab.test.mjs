@@ -2,7 +2,7 @@
 // What a lab is made of, checked without a host, a build or a browser: the
 // fixtures a tester picks between, the provider and the environment each one
 // needs, the lines a lab prints, and the rules the driver reads a page with.
-import { PERSON_HOME_ENV, SEND_BLOCK_WORDS } from "@wsp/protocol";
+import { HOST_ASLEEP_SEND, PERSON_HOME_ENV, SEND_BLOCK_WORDS } from "@wsp/protocol";
 import { COMPOSER_STATE_WORDS } from "../src/composer-state-words.js";
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
@@ -180,6 +180,7 @@ describe("what the driver reads and aims at", () => {
       COMPOSER_STATE_WORDS.connecting,
       COMPOSER_STATE_WORDS.preparingWorktree,
       ...Object.values(SEND_BLOCK_WORDS),
+      HOST_ASLEEP_SEND,
     ]);
     // The one a tester really meets first: the socket is still dialling and the button says so in the protocol's
     // words, not the composer's.

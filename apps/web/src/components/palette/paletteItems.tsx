@@ -90,7 +90,7 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
       searchTerms: ["new workspace", "create workspace"],
       icon: <PlusIcon className={ITEM_ICON_CLASS} />,
       title: "New workspace",
-      description: input.canCreate ? "A fresh machine forked from your golden image" : "Not connected to the runtime",
+      description: input.canCreate ? "A copy of your image where you pick" : "Not connected to the runtime",
       disabled: !input.canCreate,
       run: sync(handlers.newWorkspace),
     },

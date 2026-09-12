@@ -34,15 +34,15 @@ describe("terminalPaneState", () => {
     expect(terminalInputRefusal({ kind: "live" })).toBeNull();
     expect(terminalPaneTitle({ kind: "paused", pausing: false })).toBe("Paused. The shell is kept; wake the workspace to continue");
     expect(terminalPaneTitle({ kind: "paused", pausing: true })).toBe("Pausing. The shell is kept; wake the workspace to continue");
-    expect(terminalPaneTitle({ kind: "reconnecting" })).toBe("Reconnecting to the machine");
-    expect(terminalPaneTitle({ kind: "not-answering" })).toBe("The machine is not answering");
-    expect(terminalPaneTitle({ kind: "reauth" })).toBe("The machine refused a stale daemon token; reconnecting with the one wsp holds now");
-    expect(terminalEmptyLine({ kind: "reauth" })).toBe("The machine refused a stale daemon token; terminals open once the link carries the current one");
-    expect(terminalInputRefusal({ kind: "reauth" })).toBe("Typing is refused until the machine takes the current daemon token");
+    expect(terminalPaneTitle({ kind: "reconnecting" })).toBe("Reconnecting to the workspace");
+    expect(terminalPaneTitle({ kind: "not-answering" })).toBe("The workspace is not answering");
+    expect(terminalPaneTitle({ kind: "reauth" })).toBe("The workspace refused a stale daemon token; reconnecting with the one wsp holds now");
+    expect(terminalEmptyLine({ kind: "reauth" })).toBe("The workspace refused a stale daemon token; terminals open once the link carries the current one");
+    expect(terminalInputRefusal({ kind: "reauth" })).toBe("Typing is refused until the workspace takes the current daemon token");
     expect(terminalEmptyLine({ kind: "reconnecting" })).toBe("The daemon link is reconnecting; terminals open when it is back");
     expect(terminalEmptyLine({ kind: "paused", pausing: false })).toBe("Workspace is paused; wake it to open a terminal");
     expect(terminalInputRefusal({ kind: "paused", pausing: false })).toBe("Typing is refused: the workspace is paused");
-    expect(terminalInputRefusal({ kind: "reconnecting" })).toBe("Typing is refused while the machine is reconnecting");
+    expect(terminalInputRefusal({ kind: "reconnecting" })).toBe("Typing is refused while the workspace is reconnecting");
     for (const kind of ["reconnecting", "not-answering", "waking", "gone"] as const) {
       expect(terminalPaneTitle({ kind })).toBeTruthy();
       expect(terminalEmptyLine({ kind })).toBeTruthy();
@@ -54,14 +54,14 @@ describe("terminalPaneState", () => {
 describe("a drop with memory near full", () => {
   const GiB = 1024 ** 3;
   const oom = { used: 3.59 * GiB, total: 3.94 * GiB, load1: 6.4 };
-  const OOM_LINE = "Out of memory (3.6 GB of 3.9 GB used, load 6.4) when the machine last answered; the work on it took the memory, not a fault of the machine";
+  const OOM_LINE = "Out of memory (3.6 GB of 3.9 GB used, load 6.4) when the workspace last answered; the work on it took the memory, not a fault of the computer it runs on";
   const size = { cpu: 2, memMb: 4096 };
   const sizes = [
     { cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 },
     { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 },
   ];
   const SIZE_LINE = "A workspace on 2 vCPU · 8 GB ($0.15/hr) fits more; pick it when you make the next one";
-  const REBUILD = "Rebuild it from the Machine panel";
+  const REBUILD = "Rebuild it from the Workspace panel";
 
   it("rides the reconnecting and not-answering panes and no other", () => {
     expect(terminalPaneState({ state: "unreachable", reach: "unreachable", socket: "connecting", outOfMemory: oom })).toEqual({ kind: "reconnecting", outOfMemory: oom });
@@ -74,7 +74,7 @@ describe("a drop with memory near full", () => {
 
   it("once the runtime gave up, the title says out of memory instead of not answering; while reconnecting the title keeps its clock and the line goes under it", () => {
     expect(terminalPaneTitle({ kind: "not-answering", outOfMemory: oom })).toBe(OOM_LINE);
-    expect(terminalPaneTitle({ kind: "reconnecting", outOfMemory: oom })).toBe("Reconnecting to the machine");
+    expect(terminalPaneTitle({ kind: "reconnecting", outOfMemory: oom })).toBe("Reconnecting to the workspace");
     expect(terminalPaneHints({ kind: "reconnecting", outOfMemory: oom }, size, sizes)).toEqual([OOM_LINE, SIZE_LINE]);
   });
 
@@ -94,9 +94,9 @@ describe("a drop with memory near full", () => {
     // The runtime's own word for a machine it has no daemon road to; nothing is reconnecting.
     const pane = terminalPaneState({ state: "running", reach: "unsupported", socket: "connecting" });
     expect(pane).toEqual({ kind: "no-daemon" });
-    expect(terminalPaneTitle(pane)).toBe("There is no daemon on this machine");
-    expect(terminalEmptyLine(pane)).toBe("There is no daemon on this machine, so no terminal opens here");
-    expect(terminalInputRefusal(pane)).toBe("Typing is refused: there is no daemon on this machine");
+    expect(terminalPaneTitle(pane)).toBe("There is no daemon on this workspace");
+    expect(terminalEmptyLine(pane)).toBe("There is no daemon on this workspace, so no terminal opens here");
+    expect(terminalInputRefusal(pane)).toBe("Typing is refused: there is no daemon on this workspace");
     expect(terminalPaneHints(pane, size, sizes)).toEqual([]);
     // Nothing about it promises a return, which is what the reconnecting copy did for a kind that had no daemon.
     for (const line of [terminalPaneTitle(pane), terminalEmptyLine(pane)]) {

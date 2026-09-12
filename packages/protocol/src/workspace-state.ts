@@ -30,6 +30,10 @@ export interface WorkspaceKindWords {
   rowReadsMachine: boolean;
   /** What this kind calls one of its cpus in that size line: a provider's are virtual, a machine that exists has cores. */
   cpu: CpuWord;
+  /** What a row calls where a workspace of this kind runs, in the lowercase a row's mono reads it. Null where the
+   * kind holds no such word: a fork names the provider its own record carries, since this host may be wired to any
+   * of them, and every other kind falls back to the name wsp has for the machine itself. */
+  where: string | null;
   /** Whether wsp forks this machine, pauses it, wakes it, resizes it and pays for it by the hour, or it is a machine
    * that already exists and simply runs while the host does. The state word beside the name, the state dot, the
    * spend, the rate, the nap countdown, the usage chart and the pause and upgrade buttons all ride this. */
@@ -80,9 +84,9 @@ export const MACHINE_LEFT = "machine is left as it is";
  * file on it, and a delete takes exactly those off again; the machine is theirs and stays. */
 const SSH_SWEPT = "daemon, its unit and its login line come off the machine, which is otherwise left as it is";
 
-/** What deleting a place's workspace leaves: the computer is still a place in this wsp, holding its link and ready
- * for another workspace, and the one road that takes wsp off it is the remove that drops the place itself. */
-const PLACE_KEPT = "computer stays joined as a place; wsp remove takes the agent off it";
+/** What deleting a joined computer's workspace leaves: the computer is still joined to this wsp, holding its link
+ * and ready for another workspace, and the one road that takes wsp off it is the remove that drops it. */
+const PLACE_KEPT = "computer stays joined to this wsp; wsp remove takes the agent off it";
 
 /** The two readings a pane waits on. Each is one module per kind: the cloud kind and a machine over ssh read
  * that machine's own /proc through the daemon on it, and this computer reads its own host. */
@@ -91,10 +95,10 @@ export type KindReading = "metrics" | "processes";
 /** The words per kind, the one table every client reads instead of comparing a kind itself. Adding a kind (an ssh
  * machine) is a row here. */
 export const WORKSPACE_KIND_WORDS: Record<WorkspaceKind, WorkspaceKindWords> = {
-  cloud: { machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", driven: true, daemon: true, metrics: true, processes: true, imports: "copies", importsAt: "same path", agents: true, onDelete: { asked: "machine is deleted at the provider", done: machineId => `machine ${machineId} is gone at the provider` } },
-  local: { machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", driven: false, daemon: true, metrics: true, processes: true, imports: "registers", importsAt: "same path", agents: false, onDelete: { asked: MACHINE_LEFT, done: () => `its ${MACHINE_LEFT}` } },
-  ssh: { machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", driven: false, daemon: true, metrics: true, processes: true, imports: "copies", importsAt: "under home", agents: false, onDelete: { asked: SSH_SWEPT, done: () => `its ${SSH_SWEPT}` } },
-  place: { machine: JOINED_COMPUTER, rowReadsMachine: true, cpu: "cores", driven: false, daemon: true, metrics: true, processes: true, imports: "copies", importsAt: "under home", agents: false, onDelete: { asked: PLACE_KEPT, done: () => `its ${PLACE_KEPT}` } },
+  cloud: { machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: null, driven: true, daemon: true, metrics: true, processes: true, imports: "copies", importsAt: "same path", agents: true, onDelete: { asked: "machine is deleted at the provider", done: machineId => `machine ${machineId} is gone at the provider` } },
+  local: { machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: true, processes: true, imports: "registers", importsAt: "same path", agents: false, onDelete: { asked: MACHINE_LEFT, done: () => `its ${MACHINE_LEFT}` } },
+  ssh: { machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: true, processes: true, imports: "copies", importsAt: "under home", agents: false, onDelete: { asked: SSH_SWEPT, done: () => `its ${SSH_SWEPT}` } },
+  place: { machine: JOINED_COMPUTER, rowReadsMachine: true, cpu: "cores", where: JOINED_COMPUTER, driven: false, daemon: true, metrics: true, processes: true, imports: "copies", importsAt: "under home", agents: false, onDelete: { asked: PLACE_KEPT, done: () => `its ${PLACE_KEPT}` } },
 };
 
 export function kindWords(kind: WorkspaceKind): WorkspaceKindWords {
@@ -243,11 +247,11 @@ const CONTROL_WORDS: Record<Exclude<ScreenControl, "sign-in">, string> = {
   docs: "wsp's docs are at wsp.apidocumentation.com",
 };
 
-/** How the person signs this workspace's agent in, in one place: the sign-in is the machine's, so the Machine tab
- * signs a machine in and this computer is signed in from its own terminal. Both the composer's line for a sign-in
+/** How the person signs this workspace's agent in, in one place: the sign-in is the workspace's, so the Workspace
+ * panel signs one in and this computer is signed in from its own terminal. Both the composer's line for a sign-in
  * command and a turn the agent refused for want of a sign-in read this rule, so the two never send a person two ways. */
 export function signInRoad(view: Pick<WorkspaceView, "kind">): string {
-  return isLocalWorkspace(view) ? `sign in from a terminal on ${THIS_COMPUTER}` : "sign this machine in from the Machine tab";
+  return isLocalWorkspace(view) ? `sign in from a terminal on ${THIS_COMPUTER}` : "sign this workspace in from the Workspace panel";
 }
 
 /** wsp's half of a turn the agent refused for want of a sign-in: the road above, and that the turn is the person's

@@ -16,17 +16,18 @@
 // The last list is the other side of the same coin. The words a tester types
 // come straight back at them in three places, and a wait satisfied by one of
 // those returns while the turn is still working.
-import { SEND_BLOCK_WORDS } from "@wsp/protocol";
+import { HOST_ASLEEP_SEND, SEND_BLOCK_WORDS } from "@wsp/protocol";
 import { COMPOSER_STATE_WORDS } from "../src/composer-state-words.js";
 
 /** The centre column, drawn once the store has rendered. */
 export const APP_UP = "[data-shell-center]";
 
 /** The states the send button is not ready in that are the composer's own, named by the key each word lives under;
- * every other one is a block, and the protocol holds one word per block for the app and for this alike. */
+ * every other one is a block, and the protocol holds one word per block for the app and for this alike, with the
+ * sentence a sleeping computer puts in a block's place beside them. */
 const NOT_READY_STATES = ["workspaceUnavailable", "connecting", "preparingWorktree"];
 
-export const NOT_READY_NAMES = [...NOT_READY_STATES.map(state => COMPOSER_STATE_WORDS[state]), ...Object.values(SEND_BLOCK_WORDS)];
+export const NOT_READY_NAMES = [...NOT_READY_STATES.map(state => COMPOSER_STATE_WORDS[state]), ...Object.values(SEND_BLOCK_WORDS), HOST_ASLEEP_SEND];
 
 /** Where the words of the task a tester just sent come back at them: the draft still in the composer, the name the
  * app gives the new thread in the sidebar and in the header, and their own message in the transcript. A word

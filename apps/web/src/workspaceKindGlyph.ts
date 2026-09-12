@@ -24,7 +24,7 @@ export function workspaceKindGlyph(kind: WorkspaceKind): LucideIcon {
 const NEW_TITLES: Record<WorkspaceKind, string> = {
   cloud: "New workspace",
   local: "This computer",
-  ssh: "A machine over ssh",
+  ssh: "A computer over ssh",
   place: "A computer you joined",
 };
 

@@ -723,7 +723,7 @@ describe("wsp verbs over the host", () => {
     const kept = await answer("no", "forget", "alpha");
     expect(kept.code).toBe(1);
     expect(kept.io.errors).toEqual(["alpha kept"]);
-    expect(asked).toEqual(["Forget alpha?\nIts record and 1 thread leave this computer; the machine is already gone."]);
+    expect(asked).toEqual(["Forget alpha?\nIts record and 1 thread leave this computer; the computer it ran on is already gone."]);
     expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "beta"]);
 
     const forgot = await answer("yes", "forget", alpha.id);
@@ -2596,7 +2596,7 @@ describe("wsp verbs over the host", () => {
       expect(off.io.lines[0]!.split("\n")[1]).not.toContain("machines");
       const on = await run("workspaces", "agents", "alpha", "--spawn", "on", "--max-machines", "2");
       expect(on.code).toBe(0);
-      expect(on.io.lines).toEqual(["alpha: agents may spawn: up to 2 machines"]);
+      expect(on.io.lines).toEqual(["alpha: agents may spawn: up to 2 workspaces"]);
       expect((await rt.workspaces.list())[0]!.agents).toEqual({ spawn: true, maxMachines: 2, maxDepth: 1 });
       expect((await run("workspaces")).io.lines[0]!).toContain("2 machines");
       const back = await run("workspaces", "agents", "alpha", "--spawn", "off");

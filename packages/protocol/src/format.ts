@@ -593,7 +593,7 @@ export function fmtThreads(n: number): string {
 
 /** What forgetting a workspace takes off this computer, the one sentence every client's confirmation shows. */
 export function forgetNotice(threads: number): string {
-  return `Its record and ${fmtThreads(threads)} leave this computer; the machine is already gone.`;
+  return `Its record and ${fmtThreads(threads)} leave this computer; the computer it ran on is already gone.`;
 }
 
 /** Text cut to one line: its first non-empty line with the whitespace collapsed, so a multi-paragraph brief is one
@@ -612,14 +612,21 @@ const ELLIPSIS = "\u2026";
  * the breadcrumb, the switcher card or the CLI's table with its whole opening words. */
 export function openingTitle(text: string): string {
   const line = titleLine(text);
-  const sentence = /^.*?[.!?](?=\s|$)/.exec(line)?.[0] ?? line;
-  if (sentence.length <= OPENING_TITLE_MAX) return sentence;
-  const room = OPENING_TITLE_MAX - ELLIPSIS.length;
-  return `${wordsWithin(sentence, room) ?? sentence.slice(0, room).replace(SEPARATOR_TAIL, "")}${ELLIPSIS}`;
+  return cutLine(/^.*?[.!?](?=\s|$)/.exec(line)?.[0] ?? line, OPENING_TITLE_MAX);
 }
 
-/** What a cut leaves dangling at its edge: the space it broke on and the punctuation that hung off the word before. */
-const SEPARATOR_TAIL = /[\s,;:]+$/;
+/** Text cut to at most room characters, at a word boundary where one fits, with the ellipsis counted inside the
+ * room and drawn only where something was taken off. One rule for every line a surface cuts itself: a thread's
+ * title from its opening turn, a sidebar row's third line. */
+export function cutLine(text: string, room: number): string {
+  if (text.length <= room) return text;
+  const head = room - ELLIPSIS.length;
+  return `${wordsWithin(text, head) ?? text.slice(0, head).replace(SEPARATOR_TAIL, "")}${ELLIPSIS}`;
+}
+
+/** What a cut leaves dangling at its edge: the space it broke on, the punctuation that hung off the word before,
+ * and the middle dot a row's line parts its facts with. */
+const SEPARATOR_TAIL = /[\s,;:·]+$/;
 
 /** The whole words of a line that fit in the room, the separator they ended on taken off; nothing when the line's
  * first word alone overruns it. A word that ends exactly at the room's edge is kept whole. */
@@ -797,10 +804,26 @@ export function backgroundTasksLine(running: number): string {
   return `ended with ${plural(running, "background task")} running`;
 }
 
+/** The reason a status carries when the runtime's idle policy napped a workspace, with the one reading of it back
+ * beside it: the runtime stamps the nap through `of` and the app's paused line takes the window out through
+ * `windowIn`, so the words and their parse are one thing and a rewording moves both at once. */
+export const IDLE_REASON = {
+  of: (windowMs: number): string => `idle ${Math.round(windowMs / 60_000)} min`,
+  /** The window inside that reason, as its own words (`20 min`); nothing for a reason of any other shape, which is
+   * every reason a nap the person asked for or a wake wrote. */
+  windowIn: (reason: string | undefined): string | undefined => (reason === undefined ? undefined : (/^idle (\d+ min)$/.exec(reason)?.[1] ?? undefined)),
+} as const;
+
 /** The one line the sidebar puts above the rows while the probes fail before leaving this computer; the rows keep
  * their last word. It names what could not be reached, not the computer: the road out was up and every other name
  * resolved while this one did not (measured 2026-09-07). */
 export const PROVIDER_UNREACHED_LINE = "Solari cannot be reached from this computer";
+
+/** What a window on another computer says while the wsp it shows has gone quiet: the computer that host runs on is
+ * asleep or off, and the workspaces on every other computer keep working. It reads as a fact in the sidebar's own
+ * prose line and as the send's reason, never as an alert: nothing is broken and nothing is lost. */
+export const HOST_ASLEEP_LINE = "your Mac is asleep · threads on your other computers keep running";
+export const HOST_ASLEEP_SEND = "your Mac is asleep; new turns start when it wakes";
 
 /** One line per retry of a provider call that never left this computer: which call, the system error the road gave,
  * and which try of how many is about to go, so a run that still fails carries the whole flap in its log. */
@@ -926,7 +949,7 @@ export function memoryNearFull(mem: { used: number; total: number }): boolean {
 /** The line every pane and row shows when a machine stopped answering with its memory near full: the last figures
  * the daemon sent, and that the work took the memory, so nobody rebuilds a machine that is fine. */
 export function outOfMemoryLine(r: MemoryReading): string {
-  return `Out of memory (${fmtBytes(r.used)} of ${fmtBytes(r.total)} used, load ${r.load1.toFixed(1)}) when the machine last answered; the work on it took the memory, not a fault of the machine`;
+  return `Out of memory (${fmtBytes(r.used)} of ${fmtBytes(r.total)} used, load ${r.load1.toFixed(1)}) when the workspace last answered; the work on it took the memory, not a fault of the computer it runs on`;
 }
 
 /** Two byte counts against each other with the unit said once when they share it: "3.6 of 3.9 GB", "900.0 MB of 3.9 GB". */
@@ -947,7 +970,7 @@ export function outOfMemoryRowLine(r: MemoryReading): string {
  * this machine, with its rate, for the next workspace. With none in the table, less at once is the only road. */
 export function biggerSizeLine(current: WorkspaceSize, offers: readonly MachineSizeOffer[]): string {
   const bigger = offers.filter(o => o.memMb > current.memMb).sort((a, b) => a.memMb - b.memMb)[0];
-  if (bigger === undefined) return "No size with more memory is offered; run less on the machine at once";
+  if (bigger === undefined) return "No size with more memory is offered; run less in the workspace at once";
   return `A workspace on ${fmtSize(bigger)} (${fmtRate(bigger.rateUsdPerHour)}) fits more; pick it when you make the next one`;
 }
 
@@ -1008,7 +1031,7 @@ export function vaultStaleLine(w: Pick<WorkspaceView, "vaultedAt" | "vaultRefuse
  * image; an archive carries no deletion, so a file the person took out of a folder the image writes into comes back
  * with it; nothing installed outside the home travels at all, and the machine it all runs on is replaced. */
 export const IMAGE_MOVE_CONFIRM =
-  "Your home folder moves to the new machine, minus the files the image itself wrote and you never changed, which come from the new image; a file you deleted from a folder the image writes into comes back with it. Anything installed outside your home comes from the new image, and everything running on this machine stops with it.";
+  "Your home folder moves to the new copy, minus the files the image itself wrote and you never changed, which come from the new image; a file you deleted from a folder the image writes into comes back with it. Anything installed outside your home comes from the new image, and everything running in this workspace stops with it.";
 
 /** What a move found nothing to do: the workspace already stands on the newest version, so no machine was replaced
  * and no file was judged. Said in place of the kept line, which would otherwise claim files came across. */
@@ -1092,7 +1115,7 @@ export const CLOUD_SETUP_WORDS = {
   title: "Cloud machines",
   choice: {
     headline: "Set up cloud machines",
-    top: "Your setup goes on one machine image, built once and forked for every thread",
+    top: "Your setup goes on one image, built once and copied for every workspace",
     manual: "Choose what goes on the image",
     agent: "Let an agent choose from your usage",
     agentWith: "with",
@@ -1104,7 +1127,7 @@ export const CLOUD_SETUP_WORDS = {
   },
   keys: {
     headline: "Your Solari key",
-    top: "Solari runs the machines",
+    top: "Solari runs the computers your workspaces sit on",
     solari: "API key",
     /** The empty field's ghost: the start every Solari key has, and no more. */
     placeholder: "slr_live_...",
@@ -1143,7 +1166,7 @@ export const CLOUD_SETUP_WORDS = {
   },
   ask: {
     headline: "Your first cloud workspace",
-    top: "Forked from the image as soon as the build finishes",
+    top: "A copy of the image as soon as the build finishes",
     name: "Name",
     folder: "Project folder",
     optional: "optional",
@@ -1154,12 +1177,12 @@ export const CLOUD_SETUP_WORDS = {
   },
   build: {
     headline: "Building your image",
-    top: "The machine boots, installs what you ticked and is saved as the image every thread forks",
+    top: "The computer starts, installs what you ticked and is saved as the image every workspace starts from",
     /** The one stage row the sign-ins fold into, its sub-rows one per sign-in. */
-    signingIn: "Signing in on the machine",
+    signingIn: "Signing in on the computer",
     /** The slide the build becomes while that stage runs: room to act on each sign-in. */
-    slideHeadline: "Sign in on the machine",
-    slideTop: "Each one opens a page on this computer, and the machine keeps the sign-in",
+    slideHeadline: "Sign in on the computer",
+    slideTop: "Each one opens a page on this computer, and the image keeps the sign-in",
     open: "Open sign-in",
     retry: "Retry",
     codeAsk: "Paste the code from the page",
@@ -1169,11 +1192,11 @@ export const CLOUD_SETUP_WORDS = {
     /** Why the cancel link is disabled while the seal runs: the host's refusal and the app's tooltip, one sentence. */
     cannotStop: "The image is being saved. The snapshot and the save cannot be stopped.",
     cancelSure: "Stop the build",
-    cancelWhy: "The machine is thrown away and nothing is saved",
+    cancelWhy: "The computer it was building on is thrown away and nothing is saved",
     cancelKeep: "Keep building",
-    done: "Cloud machines are ready",
+    done: "Your image is ready",
     /** The sentence under that title: the running one would say the machine is still being saved. */
-    doneTop: "The image is sealed; every thread forks it",
+    doneTop: "Your image is built; every workspace starts from it",
     failed: "The build stopped",
     /** The headline of a build the person stopped, so the screen never reads as the machine's doing. */
     stopped: "You stopped the build",
@@ -1610,7 +1633,7 @@ export const SAVED_KEY_STOPPED_LINE = "Save a key Solari takes and run wsp init 
 
 /** What the machine the build boots costs, said once under the key screen's title from the backend's own rate. */
 export function initCostLine(size: WorkspaceSize, rateUsdPerHour: number): string {
-  return `A ${fmtSize(size)} machine costs about $${rateUsdPerHour.toFixed(2)} an hour while it runs and naps when idle`;
+  return `A ${fmtSize(size)} workspace costs about $${rateUsdPerHour.toFixed(2)} an hour while it runs and naps when idle`;
 }
 
 /** The cloud setup as wsp setup prints it: which keys are held, the agents here with their tools, the price, and the
@@ -1662,9 +1685,9 @@ export const THIS_COMPUTER = "this computer";
  * state with nothing in it both say it, so this computer is named the same way whichever road wrote the record. */
 export const thisComputerLine = (name: string, id: string): string => `Workspace ${name} (${id}) is ${THIS_COMPUTER}; its threads run here, under your own sign-ins.`;
 
-/** What an ssh workspace's machine is, in every sentence and every row that names it: a machine of the person's own
- * that wsp reaches and never runs. */
-export const OVER_SSH = "a machine over ssh";
+/** What an ssh workspace's computer is, in every sentence and every row that names it: a computer of the person's
+ * own that wsp reaches and never runs. The sidebar row prints it on line two, so it is a person's words. */
+export const OVER_SSH = "a computer over ssh";
 
 /** What a place's machine is, in every sentence and every row that names it: a computer of the person's own that
  * dialled this host and holds the link, so wsp drives it with the daemon protocol and never made it. */
@@ -1759,7 +1782,7 @@ export function agentsWord(agents: { spawn: boolean; maxMachines: number } | und
 
 /** What a listing and the workspace card say about a workspace's switch, one line either way. */
 export function agentsLine(agents: { spawn: boolean; maxMachines: number; maxDepth: number } | undefined): string {
-  return agents?.spawn !== true ? "agents may not spawn" : `agents may spawn: up to ${agents.maxMachines} ${agents.maxMachines === 1 ? "machine" : "machines"}`;
+  return agents?.spawn !== true ? "agents may not spawn" : `agents may spawn: up to ${agents.maxMachines} ${agents.maxMachines === 1 ? "workspace" : "workspaces"}`;
 }
 
 /** What a first dial says about the machine it reached: the host key it answered with, for the person to compare
@@ -1938,7 +1961,7 @@ export function alreadyRecorded(machine: string, name: string): string {
  * fork have no meaning on either; `machine` is the kind's own word for what it is and `action` is the verb as the
  * person typed it. The capability behind each is false, so the road that reads the capability says this. */
 export function undrivenRefusal(name: string, machine: string, action: string): string {
-  return `${name} is ${machine}, not a machine wsp runs; it cannot ${action}`;
+  return `${name} is ${machine}, which wsp does not run; it cannot ${action}`;
 }
 
 /** The one sentence a workspace on a machine wsp does run refuses a verb with when the provider under it has no
@@ -2081,7 +2104,7 @@ export function behindGoldenLine(on: number, head: number): string {
 
 /** The states a lineage row can be in, each as the muted mono word the row's marks column shows: state is text there,
  * never a badge, and a missing tool's outcome indexes this table as it is. */
-export const LINEAGE_MARKS = { now: "now", head: "head", fork: "this fork", failed: "failed", skipped: "skipped", volatile: "volatile" } as const;
+export const LINEAGE_MARKS = { now: "now", head: "head", fork: "this one", failed: "failed", skipped: "skipped", volatile: "volatile" } as const;
 export type LineageMark = keyof typeof LINEAGE_MARKS;
 
 /** What is said for each folder git named no branch for, by door: the word the composer's branch slot and the diff
@@ -2092,7 +2115,7 @@ export type LineageMark = keyof typeof LINEAGE_MARKS;
 export const REPO_STATE_WORDS = {
   unknown: { word: "", note: "", pane: "" },
   none: { word: "", note: "", pane: "This folder is not inside a git repository, so there is nothing to diff." },
-  refused: { word: "git unread", note: "The machine could not read this folder's git state, so no branch is shown.", pane: "" },
+  refused: { word: "git unread", note: "The workspace could not read this folder's git state, so no branch is shown.", pane: "" },
 } as const;
 export type RepoStateWord = keyof typeof REPO_STATE_WORDS;
 
@@ -2252,7 +2275,7 @@ export function exportFromLine(workspaceName: string): string {
 }
 
 /** What the ticks on the export dialog's agent rows do. */
-export const EXPORT_SESSIONS_NOTE = "Ticked agents' sessions come home with the folder. The rest stay on the machine.";
+export const EXPORT_SESSIONS_NOTE = "Ticked agents' sessions come home with the folder. The rest stay in the workspace.";
 
 /** The export dialog's agent section when the workspace has no threads to make rows of. */
 export const NO_THREADS_NOTE = "No threads here. Every agent's sessions for the folder come home with it.";
