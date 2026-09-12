@@ -216,7 +216,7 @@ describe("deriveSession: streaming states", () => {
     expect(m.messages.map(x => [x.turnId, x.role])).toEqual([["turn_x", "assistant"], ["turn_y", "user"]]);
   });
 
-  it("a session.end with no turn of its own is a wake for whoever waits on the thread, not a turn: the settled turn stays the latest and the timeline gains nothing", () => {
+  it("a session.end with no turn of its own opens no turn: the settled turn stays the latest, and the reason it carries is the one row it leaves", () => {
     const scoped = { ...scope, turnId: "turn_1" };
     const m = deriveSession([
       { type: "session.start", ...scoped, prompt: "build it" },
@@ -228,7 +228,8 @@ describe("deriveSession: streaming states", () => {
     expect(m.turns.map(t => [t.turnId, t.state])).toEqual([["turn_1", "completed"]]);
     expect(m.latestTurn?.turnId).toBe("turn_1");
     expect(m.running).toBe(false);
-    expect(m.timeline.map(e => e.kind)).toEqual(["message", "message"]);
+    expect(m.timeline.map(e => e.kind)).toEqual(["message", "message", "work"]);
+    expect(m.workEntries.map(w => [w.turnId, w.label])).toEqual([["turn_2", "the harness would not launch"]]);
   });
 
   it("a fence-only tool result carries no detail", () => {
@@ -570,5 +571,65 @@ describe("deriveSession: a permission prompt relayed into the chat", () => {
     const model = deriveSession([...opening, ask, closed()]);
     const rows = deriveMessagesTimelineRows({ timelineEntries: model.timeline, turns: model.turns, isWorking: false, activeTurnStartedAt: null });
     expect(rows.filter(r => r.kind === "permission").map(r => r.id)).toEqual(["permission:ask_1"]);
+  });
+});
+
+describe("deriveSession: a turn refused before it reached a machine", () => {
+  const first = { ...scope, turnId: "turn_1" };
+  // The runtime's own frame for a send whose turn never opened: a session.end on the bus alone, carrying the
+  // sentence the start road refused with, the turn id it had minted and the row id, never a harness session id.
+  const refused: SessionEvent = {
+    type: "session.end", workspaceId: scope.workspaceId, sessionId: "turn_2", turnId: "turn_2",
+    at: 70_000, exitCode: null, sawResult: false, reason: "the harness would not launch",
+  };
+  // The turn before it: its reply is in but its process has not exited, so the thread still reads as working.
+  const working: SessionEvent[] = [
+    { type: "session.start", ...first, at: 1_000, prompt: "fan out five agents" },
+    { type: "session.delta", ...first, at: 2_000, line: 1, kind: "text", text: "Five agents are running." },
+    { type: "session.done", ...first, at: 66_000, result: { status: "failed", error: "Ended with 5 background tasks running", durationMs: 66_000, costUsd: 0.51 } },
+  ];
+
+  it("says why in the transcript, as one line carrying the turn that was refused", () => {
+    const m = deriveSession([...working, refused]);
+    expect(m.workEntries.map(w => [w.turnId, w.label, w.tone])).toEqual([
+      ["turn_1", "Ended with 5 background tasks running", "error"],
+      ["turn_2", "the harness would not launch", "error"],
+    ]);
+  });
+
+  it("ends the turn it interrupted: a thread runs one turn at a time, so a newer turn's end says the one before it is over", () => {
+    const m = deriveSession([...working, refused]);
+    expect(m.running).toBe(false);
+    expect(m.turns.map(t => [t.turnId, t.state])).toEqual([["turn_1", "error"]]);
+  });
+
+  it("opens no turn of its own: the footer still reads the turn that ran", () => {
+    const m = deriveSession([...working, refused]);
+    expect(m.latestTurn?.turnId).toBe("turn_1");
+    expect(m.latestTurn?.durationMs).toBe(66_000);
+  });
+
+  it("an end that says nothing stays a wake for whoever waits on the thread and puts no line in the transcript", () => {
+    const quiet: SessionEvent = { ...refused, reason: undefined };
+    const m = deriveSession([...working, { type: "session.end", ...first, at: 67_000, exitCode: 0, sawResult: true }, quiet]);
+    expect(m.workEntries.map(w => w.label)).toEqual(["Ended with 5 background tasks running"]);
+    expect(m.turns.map(t => t.turnId)).toEqual(["turn_1"]);
+  });
+
+  // The other road to a turn with no start: the harness ran, answered nothing and exited, so its reply is recorded
+  // and its end is a plain one. That turn is a turn, and its reason is the reply's error.
+  it("a reply with no start behind it opens its turn and that turn's own rows carry it", () => {
+    const second = { ...scope, turnId: "turn_2" };
+    const m = deriveSession([
+      ...working,
+      { type: "session.done", ...second, at: 70_000, result: { status: "failed", error: "claude answered with no output and no usage after 48ms", durationMs: 48, costUsd: 0 } },
+      { type: "session.end", ...second, at: 70_050, exitCode: 1, sawResult: true },
+    ]);
+    expect(m.running).toBe(false);
+    expect(m.turns.map(t => [t.turnId, t.state])).toEqual([["turn_1", "error"], ["turn_2", "error"]]);
+    expect(m.workEntries.map(w => [w.turnId, w.label])).toEqual([
+      ["turn_1", "Ended with 5 background tasks running"],
+      ["turn_2", "claude answered with no output and no usage after 48ms"],
+    ]);
   });
 });

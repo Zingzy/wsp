@@ -19,7 +19,7 @@ import { isSessionEvent } from "@wsp/protocol";
 import type { ImageRecord, SessionEvent, SessionHarness, SessionView } from "@wsp/protocol";
 import { useProtocolEvents, useStore } from "../../protocol/store";
 import type { ProtocolEvent } from "../../protocol/client";
-import { deriveSession, type TimelineEntry, type TurnSummary } from "./adapt";
+import { deriveSession, entryTurnId, type TimelineEntry, type TurnSummary } from "./adapt";
 
 export interface ChatThreadView {
   readonly entries: ReadonlyArray<TimelineEntry>;
@@ -78,10 +78,17 @@ export interface Sent {
   readonly requestId: string;
 }
 
+/** A send this view holds the words of: when it was made, what rode with it, and, once a turn refused it, which turn. */
+export interface Kept extends Sent {
+  readonly at: string;
+  readonly attachments?: ReadonlyArray<ImageRecord>;
+  readonly turnId?: string;
+}
+
 export interface ThreadState {
   readonly events: ReadonlyArray<SessionEvent>;
   readonly arrivals: ReadonlyArray<string>;
-  readonly pendingPrompt: (Sent & { readonly at: string; readonly attachments?: ReadonlyArray<ImageRecord> }) | null;
+  readonly pendingPrompt: Kept | null;
   readonly localErrors: ReadonlyArray<{ message: string; at: string }>;
   readonly fresh: boolean;
   /** A send in flight, with the turn that had settled when it began, until its session.start lands or a reload rebuilds this. */
@@ -92,9 +99,14 @@ export interface ThreadState {
   readonly named: NamedStart | null;
   /** A send from a view without a start, left in flight by a view change: the key its rows wait under (the pin, or the workspace id from the latest view), the thread the view showed, which its start comes under (none from an empty view, whose start opens a thread the view never knew), and the send itself, whose start still names those rows from whichever view sees it. */
   readonly stray: (Sent & { readonly key: string; readonly thread?: string }) | null;
+  /** The sends of this view that ended without a turn of their own, each under the turn whose end refused it. The
+   * runtime writes a row for a send only once its harness announces itself, so a turn that died before that leaves
+   * the person's words nowhere: this view is their only home, and it keeps them rather than letting the next send
+   * write over the slot they sat in. */
+  readonly refused: ReadonlyArray<Kept>;
 }
 
-const EMPTY: ThreadState = { events: [], arrivals: [], pendingPrompt: null, localErrors: [], fresh: false, sending: null, known: [], named: null, stray: null };
+const EMPTY: ThreadState = { events: [], arrivals: [], pendingPrompt: null, localErrors: [], fresh: false, sending: null, known: [], named: null, stray: null, refused: [] };
 const now = () => new Date().toISOString();
 
 /** One row as the view holds it: the event and when this client saw it, which stamps a row the wire left unstamped. */
@@ -201,6 +213,7 @@ function append(state: ThreadState, e: SessionEvent, at: string): ThreadState {
     events: [...state.events.slice(0, index), e, ...state.events.slice(index)],
     arrivals: [...state.arrivals.slice(0, index), at, ...state.arrivals.slice(index)],
     pendingPrompt: starts ? null : state.pendingPrompt,
+    refused: starts ? replaced(state.refused, [e]) : state.refused,
     fresh: starts ? false : state.fresh,
   };
 }
@@ -213,6 +226,23 @@ function threadIds(events: ReadonlyArray<SessionEvent>): string[] {
 function knowing(known: ReadonlyArray<string>, events: ReadonlyArray<SessionEvent>): ReadonlyArray<string> {
   const more = threadIds(events).filter(id => !known.includes(id));
   return more.length === 0 ? known : [...known, ...more];
+}
+
+/**
+ * The kept sends a start among these events replaces. A start carrying a send's request id is the runtime's own row
+ * for that send, and the words this view stood in with are the runtime's to draw from there: two clients racing on
+ * one thread can land another turn's end inside a send's launch window, which keeps its words before its own start
+ * has come.
+ */
+function replaced(refused: ReadonlyArray<Kept>, events: ReadonlyArray<SessionEvent>): ReadonlyArray<Kept> {
+  const kept = refused.filter(sent => !events.some(e => startOf(sent, e)));
+  return kept.length === refused.length ? refused : kept;
+}
+
+/** A send settling at an end wrote no start, since a start settles it first: its words go under the turn that end names. */
+function keeping(state: ThreadState, turnId?: string): Pick<ThreadState, "pendingPrompt" | "refused"> {
+  const sent = state.pendingPrompt;
+  return sent === null ? { pendingPrompt: null, refused: state.refused } : { pendingPrompt: null, refused: [...state.refused, { ...sent, ...(turnId === undefined ? {} : { turnId }) }] };
 }
 
 /**
@@ -237,7 +267,7 @@ export function reloadTranscript(s: ThreadState, events: ReadonlyArray<SessionEv
     const held = own === null ? [] : heldRows(s).filter(r => r.event.threadId === chosen);
     const rows = foldIn(held, thread.map(event => ({ event, at })));
     const send = replaySend(s, thread, threadId);
-    return { ...EMPTY, ...withRows(rows), known, stray: s.stray, pendingPrompt: send.sending === null ? null : s.pendingPrompt, ...send, ...strayed };
+    return { ...EMPTY, ...withRows(rows), known, stray: s.stray, ...send, refused: replaced(send.refused, thread), ...strayed };
   }
   return { ...s, known, ...strayed };
 }
@@ -260,14 +290,21 @@ function openedThread(s: ThreadState, events: ReadonlyArray<SessionEvent>): stri
   return threadIds(events).findLast(id => !s.known.includes(id) && !events.some(e => e.type === "session.start" && e.threadId === id));
 }
 
-/** What a replayed thread did with the send in flight, read the way live events would settle it: the events past the turn that had settled when it began. */
-function replaySend(s: ThreadState, thread: ReadonlyArray<SessionEvent>, pinned: string | null): Pick<ThreadState, "sending" | "named"> {
-  if (s.sending === null) return { sending: null, named: null };
+/**
+ * What a replayed thread did with the send in flight, read the way live events would settle it: the events past the
+ * turn that had settled when it began. A start among them is the send's own row and the prompt goes with it; an end
+ * with no start before it is a turn that died before it wrote anything, and the words stay under that turn.
+ */
+function replaySend(s: ThreadState, thread: ReadonlyArray<SessionEvent>, pinned: string | null): Pick<ThreadState, "sending" | "named" | "pendingPrompt" | "refused"> {
+  const settled = { sending: null, named: null, pendingPrompt: null, refused: s.refused };
+  if (s.sending === null) return settled;
   const { after } = s.sending;
   const since = thread.slice(thread.findLastIndex(e => e.turnId === after) + 1);
   const start = since.find(e => e.type === "session.start" && (shownThread(s, pinned) !== undefined || startsSend(s, e)));
-  if (start !== undefined) return { sending: null, named: nameOf(heldThreadId(s) ?? pinned ?? start.workspaceId, start) };
-  return since.some(e => e.type === "session.end") ? { sending: null, named: null } : { sending: s.sending, named: null };
+  if (start !== undefined) return { ...settled, named: nameOf(heldThreadId(s) ?? pinned ?? start.workspaceId, start) };
+  const ended = since.find(e => e.type === "session.end");
+  if (ended === undefined) return { sending: s.sending, named: null, pendingPrompt: s.pendingPrompt, refused: s.refused };
+  return { sending: null, named: null, ...keeping(s, ended.turnId) };
 }
 
 /** What a reply did with a send a view change left in flight, read the way the dropped live events would have settled it. */
@@ -378,7 +415,8 @@ export function reduceEvent(state: ThreadState, e: SessionEvent, at: string, pin
   const starts = e.type === "session.start";
   const settles = starts || (e.type === "session.end" && e.turnId !== state.sending.after);
   const named = starts ? nameOf(heldThreadId(state) ?? pinned ?? e.workspaceId, e) : state.named;
-  return settles ? { ...next, sending: null, named } : next;
+  if (!settles) return next;
+  return { ...next, sending: null, named, ...(starts ? {} : keeping(next, e.turnId)) };
 }
 
 function shallowEqual(a: object, b: object): boolean {
@@ -413,20 +451,31 @@ export function stabilizeEntries(next: ReadonlyArray<TimelineEntry>, previous: R
   });
 }
 
+/** The person's own row for one send, from the click until the runtime's own row replaces it: one id the whole way,
+ * since a row that changes identity under the list is torn down and built again where the person was reading. The
+ * records and the request id ride it, so their thumbnails are there at the click rather than a roundtrip later. */
+function sentEntry(sent: Kept): TimelineEntry {
+  const { text, at, requestId, attachments } = sent;
+  const id = `sent-user:${requestId}`;
+  return {
+    id,
+    kind: "message",
+    createdAt: at,
+    message: { id, role: "user", text, turnId: null, streaming: false, createdAt: at, updatedAt: at, requestId, ...(attachments !== undefined ? { attachments } : {}) },
+  };
+}
+
 export function deriveChatThread(state: ThreadState, previous: ReadonlyArray<TimelineEntry> = []): ChatThreadView {
   const model = deriveSession(state.events, { at: (_e, index) => state.arrivals[index] });
   const entries: TimelineEntry[] = [...model.timeline];
-  if (state.pendingPrompt !== null) {
-    const { text, at, requestId, attachments } = state.pendingPrompt;
-    entries.push({
-      id: "pending-user",
-      kind: "message",
-      createdAt: at,
-      // The records and the request id ride the row the send makes, so the person's own thumbnails are there at the
-      // click rather than a roundtrip later, when the runtime echoes its session.start back.
-      message: { id: "pending-user", role: "user", text, turnId: null, streaming: false, createdAt: at, updatedAt: at, requestId, ...(attachments !== undefined ? { attachments } : {}) },
-    });
+  // A kept send sits above the first row its turn wrote, whatever that row is: a reply the harness managed before it
+  // died, or the line the runtime left in its place. A send still in flight has no turn yet and no rows under it, so
+  // it sits at the tail, and so does one whose turn left no row at all.
+  for (const one of state.refused) {
+    const first = one.turnId === undefined ? -1 : entries.findIndex(e => entryTurnId(e) === one.turnId);
+    entries.splice(first === -1 ? entries.length : first, 0, sentEntry(one));
   }
+  if (state.pendingPrompt !== null) entries.push(sentEntry(state.pendingPrompt));
   state.localErrors.forEach(({ message, at }, index) => {
     const id = `local-error:${index}`;
     entries.push({
