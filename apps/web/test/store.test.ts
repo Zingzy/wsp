@@ -178,7 +178,7 @@ describe("the workspace the address opens on", () => {
     hash("#w/ws_b/t/thr_nope");
     await useStore.getState().refresh();
     expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_b", null]);
-    expect(useStore.getState().toast).toBe("No thread thr_nope in this workspace; opened the workspace instead");
+    expect(useStore.getState().toast).toBe("That thread is not in this workspace; opened the workspace instead");
   });
 });
 

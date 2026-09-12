@@ -130,8 +130,10 @@ describe("chat tab: a turn whose process lives past its reply", () => {
   const thread = { ...scope, threadId: "thr_linger" };
   const noteText = () => document.querySelector("[data-composer-refusal]")?.textContent ?? null;
 
-  it("holds the composer with the runtime's words from the reply until the process exits, then opens", async () => {
-    const { api, emit } = fixtureApi([workspace]);
+  it("holds the composer with the runtime's words from the reply until the process exits, naming the thread by its title, then opens", async () => {
+    const { api, emit } = fixtureApi([workspace], {}, [
+      { id: "sess_linger", workspaceId: WS, harness: "claude", status: "running", threadId: "thr_linger", harnessTitle: "Serve the port list" },
+    ]);
     await setup(api);
     emit({ type: "session.start", ...thread });
     emit({ type: "session.delta", ...thread, kind: "text", text: "Server is live at :3000." });
@@ -142,7 +144,7 @@ describe("chat tab: a turn whose process lives past its reply", () => {
     emit({ type: "session.done", ...thread, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
     // The reply renders at once, but the process still runs: the row stays working, says so, and offers no send.
     expect(screen.getByText("Server is live at :3000.")).toBeDefined();
-    expect(noteText()).toBe(stillWorkingLine("thr_linger"));
+    expect(noteText()).toBe(stillWorkingLine("Serve the port list"));
     // The slot is centred with the queue and the box, not laid across the page.
     expect(document.querySelector("[data-composer-refusal]")?.className).toContain("max-w-3xl");
     expect(stopButton()).toBeDefined();

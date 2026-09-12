@@ -15,7 +15,7 @@ import { cn } from "../../lib/utils.js";
 import { SETTINGS_WORDS } from "../../settings/format.js";
 import { threadWalk } from "../../shell/shellCommands.js";
 import { searchSidebarThreadsByTitle } from "../../sidebar/Sidebar.logic.js";
-import { compactTimeLabel, dotClassForTone } from "../../sidebar/workspaceRows.js";
+import { compactTimeLabel, dotClassForTone, whereWord } from "../../sidebar/workspaceRows.js";
 import { type CommandPaletteActionItem, ITEM_ICON_CLASS, RECENT_THREAD_LIMIT } from "./CommandPalette.logic.js";
 
 export interface PaletteHandlers {
@@ -205,8 +205,9 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
 
 function workspaceItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
   return input.projects.map((project, index) => {
-    const machineId = project.status?.machineId ?? project.workspace.machineId;
-    const parts = [project.indicator.label, machineId];
+    // Where it runs, in the one word the sidebar row reads for it: a person picks a workspace by its state and the
+    // computer it is on, never by the id wsp holds the machine under.
+    const parts = [project.indicator.label, whereWord(project)];
     if (project.id === input.selectedId) parts.push("Current workspace");
     // The projects arrive in sidebar order, so a row's index is the slot its chord jumps to.
     const slot = WORKSPACE_SELECT_SLOTS[index];

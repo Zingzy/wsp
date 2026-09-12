@@ -200,7 +200,7 @@ function addressedThread(workspaceId: string | null, rows: readonly SessionView[
   const found = typeof window === "undefined" ? undefined : threadFromHash(window.location.hash);
   if (found === undefined || found.workspaceId !== workspaceId) return { threadId: null };
   if (rows.some(r => r.workspaceId === workspaceId && r.threadId === found.threadId)) return { threadId: found.threadId };
-  return { threadId: null, toast: noSuchThreadLine(found.threadId) };
+  return { threadId: null, toast: noSuchThreadLine() };
 }
 
 /** The workspace the person had open last, when the list still has it. */

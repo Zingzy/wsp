@@ -41,7 +41,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, ConsoleMessage, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { accessFromNextMessage, contrastRatio, DEFAULT_THEME, dotColour, effectiveOpacity, FREE_WORD, INK_FLOOR, PROVIDER_UNREACHED_LINE, sendRefusal, SIDE_INK, stillWorkingLine, THEME_PRESETS, themeInk, themeScheme, THIS_COMPUTER, type Rgb } from "@wsp/protocol";
+import { accessFromNextMessage, contrastRatio, DEFAULT_THEME, dotColour, effectiveOpacity, FREE_WORD, INK_FLOOR, NO_REBUILD_NEEDED, PROVIDER_UNREACHED_LINE, sendRefusal, SIDE_INK, stillWorkingLine, THEME_PRESETS, themeInk, themeScheme, THIS_COMPUTER, type Rgb } from "@wsp/protocol";
 import { WAKE_AND_SEND_LABEL } from "../src/components/chat/ComposerPrimaryActions";
 import { LOCKUP_OPTICAL_CENTRE } from "../src/brand/optical";
 import { SPACE_SLIDE_MS } from "../src/sidebar/SpaceSlide";
@@ -1459,7 +1459,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       expect(paused.box).toEqual(idle.box);
       expect(paused.shell).toEqual(idle.shell);
       expect(gone.text).toBe(sendRefusal("gone"));
-      expect(working.text).toBe(stillWorkingLine("thr_linger"));
+      expect(working.text).toBe(stillWorkingLine());
       for (const state of [gone, working]) {
         // The words in mono, painted on nothing: no fill, no border, no icon, no panel anywhere in the composer.
         expect(state.line).toEqual({ mono: true, background: "rgba(0, 0, 0, 0)", border: "0px 0px", icons: 0 });
@@ -1830,7 +1830,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       // The refusal rides the tooltip skin: hovering a dimmed row shows it.
       await page!.locator("[data-context-menu] [role=menuitem][aria-disabled=true]").first().hover();
       await page!.waitForSelector("[data-slot=tooltip-popup]");
-      expect(await page!.locator("[data-slot=tooltip-popup]").textContent()).toBe("Rebuild replaces a gone or zombie machine; this one answers");
+      expect(await page!.locator("[data-slot=tooltip-popup]").textContent()).toBe(NO_REBUILD_NEEDED);
       const tipPath = join(SHOTS_DIR, `sidebar-context-menu-refusal-${theme}.png`);
       await page!.screenshot({ path: tipPath, clip: { x: 0, y: 0, width: 640, height: 520 } });
       console.info(`sidebar context menu refusal screenshot: ${tipPath}`);

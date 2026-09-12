@@ -89,8 +89,8 @@ describe("promoteGoldens", () => {
     const { lines, io: cli } = io();
     expect(await promoteGoldens(rt, cli)).toBe("2 promoted");
     expect(lines).toEqual([
-      "golden default v1: template tpl_wsp-h1-default-v1 promoted and recorded; 1 other template carries its name",
-      "golden default v2: template tpl_wsp-h1-default-v2 promoted and recorded",
+      "image default v1: template tpl_wsp-h1-default-v1 promoted and recorded; 1 other template carries its name",
+      "image default v2: template tpl_wsp-h1-default-v2 promoted and recorded",
     ]);
     expect(backend.promoted).toEqual([{ snapshotId: "snap_golden-v1", name: "wsp-h1-default-v1" }, { snapshotId: "snap_golden-v2", name: "wsp-h1-default-v2" }]);
     expect(((await store.get("goldens", copyKey("default", "default"))) as { versions: { templateId?: string }[] }).versions.map(v => v.templateId)).toEqual(["tpl_wsp-h1-default-v1", "tpl_wsp-h1-default-v2", "tpl_three"]);
@@ -108,8 +108,8 @@ describe("promoteGoldens", () => {
     const { lines, io: cli } = io();
     await expect(promoteGoldens(rt, cli)).resolves.toBe("1 promoted, 1 not made durable");
     expect(lines).toEqual([
-      "golden default v1: no template recorded, its snapshot is gone at the provider",
-      "golden default v2: template tpl_wsp-h1-default-v2 promoted and recorded",
+      "image default v1: no template recorded, its snapshot is gone at the provider",
+      "image default v2: template tpl_wsp-h1-default-v2 promoted and recorded",
     ]);
     expect(((await store.get("goldens", copyKey("default", "default"))) as { versions: { templateId?: string }[] }).versions.map(v => v.templateId)).toEqual([undefined, "tpl_wsp-h1-default-v2"]);
 
@@ -119,7 +119,7 @@ describe("promoteGoldens", () => {
     backend.snapshots.push({ id: "snap_golden-v1", sizeBytes: 8e9 });
     const again = io();
     await expect(promoteGoldens(rt, again.io)).resolves.toBe("1 not made durable");
-    expect(again.lines).toEqual(["golden default v1: no template recorded, upstream unavailable"]);
+    expect(again.lines).toEqual(["image default v1: no template recorded, upstream unavailable"]);
 
     const broken = { golden: { promote: async () => Promise.reject(new Error("state file unreadable")) } } as unknown as Runtime;
     await expect(promoteGoldens(broken, again.io)).resolves.toBe("not made durable: state file unreadable");
@@ -138,7 +138,7 @@ describe("promoteGoldens", () => {
     const backend = stubBackend();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
     const { lines, io: cli } = io();
-    expect(await promoteGoldens(rt, cli)).toBe("this backend has no templates; goldens stay as snapshots");
+    expect(await promoteGoldens(rt, cli)).toBe("this backend has no templates; image versions stay as snapshots");
     expect(lines).toEqual([]);
     expect(backend.promoted).toEqual([]);
   });

@@ -44,7 +44,7 @@
 // every start, so a change mid-thread applies at the next turn.
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent } from "react";
 import { ImageIcon } from "lucide-react";
-import { HOST_ASLEEP_SEND, IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
+import { foldThreads, HOST_ASLEEP_SEND, IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { hostAsleep } from "../../boot";
 import { useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
@@ -170,6 +170,8 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const canAttach = readsImages(harnessCatalog);
 
   const runningTurn = thread.view.running ? thread.view.latestTurn : null;
+  // What the still-working line calls the thread: its own title, never the key wsp holds it under.
+  const workingTitle = useMemo(() => foldThreads(sessions ?? []).find(row => row.id === threadKey)?.title, [sessions, threadKey]);
   // The runtime keys sessions.interrupt by its own session id; the events carry the harness id, which differs after a
   // resume, so the row from sessions.list maps one to the other. Without a row the events' id goes, and the runtime answers.
   const stopTarget = useMemo(() => {
@@ -205,7 +207,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
           : screenLine !== null
             ? screenLine
             : runningTurn?.replied === true
-              ? stillWorkingLine(threadKey)
+              ? stillWorkingLine(workingTitle)
               : (accessPick.line ?? linkDown);
 
   const trigger = useMemo(() => detectComposerTrigger(draft.prompt, draft.cursor), [draft]);

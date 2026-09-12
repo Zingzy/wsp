@@ -581,7 +581,8 @@ describe("a new thread while another thread of the workspace works", () => {
     await screen.findByText("On it.");
     expect(screen.queryByRole("status")).toBeNull();
     emit({ type: "session.done", ...a, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
-    expectPlainLine(stillWorkingLine("thr_a"));
+    // No title has landed for this thread yet, so the line names it as the person looking at it would.
+    expectPlainLine(stillWorkingLine());
     expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
     // A new thread asked for now owes that turn nothing.
     act(() => requestNewThread({ workspaceId: WS }));

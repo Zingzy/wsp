@@ -473,7 +473,7 @@ describe("the MCP server over the host", () => {
   it("rebuild puts a new machine under a gone workspace and answers with it; one that still answers is a tool error in the row's own words", async () => {
     await call("new", { name: "alpha" });
     const [alpha] = await rt.workspaces.list();
-    expect(await call("rebuild", { workspace: "alpha" })).toEqual(failedWith("Rebuild replaces a machine wsp cannot get back; this one answers"));
+    expect(await call("rebuild", { workspace: "alpha" })).toEqual(failedWith("This one answers, so nothing needs rebuilding; the rebuild is offered when a workspace stops answering"));
     expect(backend.machines).toHaveLength(1);
 
     await handle!.close();

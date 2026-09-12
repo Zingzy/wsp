@@ -158,8 +158,10 @@ const PLAIN = { colorClass: "text-sidebar-whisper/70", dotClass: "bg-sidebar-whi
 /** The computer or the provider a workspace runs on, as a row names it: the provider the record itself carries,
  * else the kind's own word where it has one, else the name wsp holds for the machine, the live one once a status
  * has arrived. The provider leads because this host is wired to one of several and only the record knows which;
- * reading it off the kind would tell a person on Docker or Box that their workspace is at Solari. The one place a
- * surface asks where a workspace runs, so the day a computer carries the name its owner gave it is one edit here. */
+ * reading it off the kind would tell a person on Docker or Box that their workspace is at Solari. A fork whose
+ * record names no provider falls to the kind's word rather than to that machine's id, which names nothing to the
+ * person reading the row. The one place a surface asks where a workspace runs, so the day a computer carries the
+ * name its owner gave it is one edit here. */
 export function whereWord(project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string {
   const record = project.status ?? project.workspace;
   return record.provider ?? kindWords(workspaceKind(project.workspace)).where ?? record.machineId;
