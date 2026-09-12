@@ -19,6 +19,7 @@ import { SWIPE_GAP_MS } from "../src/sidebar/spaceSwipe.js";
 import { glyphStateClass, leadDimClass } from "../src/sidebar/workspaceRows.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 import { caps } from "./caps.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 // The triggers keep their elements, and no popup mounts: this file focuses and
 // clicks the search row, and Base UI's positioning against jsdom's zero-size
@@ -75,7 +76,7 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     capabilities: vi.fn(async () => (caps())),
     startSession: vi.fn(async (o: { workspaceId: string }) => session("s_x", o.workspaceId)),
     portReach: vi.fn(async (_id: string, port: number) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: NOW + 3_600_000 })),
-    daemonReach: vi.fn(async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 })),
+    daemon: noDaemonApi,
     sessionHistory: vi.fn(async () => []),
     listSnapshots: vi.fn(async () => ({ name: "default", head: null, versions: [] })),
     snapshotStorage: async () => null,

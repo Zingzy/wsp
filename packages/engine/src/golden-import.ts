@@ -325,6 +325,13 @@ const HELPERS: Record<string, { dest: string; command: (text: string | undefined
   [CLAUDE_SETTINGS_FILE]: { dest: `.claude/${CLAUDE_KEY_FILE}`, command: apiKeyHelperOf },
 };
 
+/** Where every login the pack copies lands on the guest, home-relative and before the pack's own rewrites: what the
+ * catalog's rows have to hold between them, so a new Keychain or helper reader cannot land a login the image vault
+ * never archives. */
+export function copiedLoginDests(): string[] {
+  return [...Object.values(KEYCHAIN).map(k => k.dest), ...Object.values(HELPERS).map(h => h.dest)];
+}
+
 export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOptions): FilesPlan {
   const rewrites = [...(opts.rewrites ?? []), ...(opts.platform === "darwin" ? MAC_REWRITES : [])];
   // A prefix rewrite also moves the directory itself when a row names it bare.

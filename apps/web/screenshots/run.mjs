@@ -12,25 +12,14 @@
 // is the only thing that flips the `dark` class the stylesheet reads. Every shot
 // checks the class once the app is up, so a theme that stopped following the
 // scheme fails the run instead of shipping two identical files.
-import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
 import { chromium } from "playwright";
 import { fixtureState } from "./fixture-state.mjs";
+import { BROWSER_ARGS, freePort, REPO, startHost, stopHost, WEB_DIR, whatIsNotBuilt } from "./host.mjs";
 import { indexMarkdown, readSurfaces, shotPlan } from "./plan.mjs";
-
-const WEB_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const REPO = resolve(WEB_DIR, "..", "..");
-const HOST_BIN = join(REPO, "packages", "host", "dist", "bin.js");
-const APP_PAGE = join(WEB_DIR, "dist", "index.html");
-
-// Chromium's shared memory files land on the root disk, and one uncapped render
-// filled it to ENOSPC under other work on this machine (measured 2026-09-08);
-// low-end device mode caps the tile and image budgets that grow them.
-const BROWSER_ARGS = ["--enable-low-end-device-mode"];
 
 function usage(why) {
   console.error(`${why}\n\nusage: pnpm --filter @wsp/web screenshots -- --out <folder> [--surfaces <file.json>]`);
@@ -54,17 +43,6 @@ function parseArgs(argv) {
   return args;
 }
 
-const freePort = () =>
-  new Promise((ok, no) => {
-    const probe = createServer();
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address();
-      probe.close(() => (typeof address === "object" && address !== null ? ok(address.port) : no(new Error("no port"))));
-    });
-  });
-
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-
 /** The repo's own word for where it stands, so the index says which tree a reviewer is looking at. */
 function treeFacts() {
   const git = args => execFileSync("git", args, { cwd: REPO, encoding: "utf8" }).trim();
@@ -72,45 +50,6 @@ function treeFacts() {
     return { sha: git(["rev-parse", "--short", "HEAD"]), branch: git(["rev-parse", "--abbrev-ref", "HEAD"]) };
   } catch {
     return { sha: "an unknown commit", branch: "an unknown branch" };
-  }
-}
-
-async function startHost(home, port, wsPort) {
-  const statePath = join(home, ".wsp", "state.json");
-  mkdirSync(dirname(statePath), { recursive: true });
-  writeFileSync(statePath, JSON.stringify(fixtureState(), null, 2));
-  // A bare environment, not this shell's: a Solari key or a WSP_PROVIDER word in the terminal would
-  // put the run on a real provider, and a stray WSP_HOME would take it to the person's own machines.
-  const child = spawn(process.execPath, [HOST_BIN, "up", "--state", statePath, "--port", String(port), "--ws-port", String(wsPort)], {
-    cwd: home,
-    env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin", HOME: home, WSP_HOME: join(home, ".wsp") },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  const log = [];
-  child.stdout.on("data", d => log.push(String(d)));
-  child.stderr.on("data", d => log.push(String(d)));
-  const base = `http://127.0.0.1:${port}`;
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`the host exited with ${child.exitCode} before it served:\n${log.join("")}`);
-    const served = await fetch(base).then(r => r.ok, () => false);
-    if (served) return { child, base, log };
-    await sleep(200);
-  }
-  child.kill("SIGTERM");
-  throw new Error(`the host did not serve ${base} in 30 s:\n${log.join("")}`);
-}
-
-/** SIGTERM to the pid this run started, and nothing else: four builders share this machine and a host
- * found by port or by name is as likely to be somebody else's. */
-async function stopHost(host) {
-  if (host === undefined || host.child.exitCode !== null) return;
-  const ended = new Promise(r => host.child.once("exit", r));
-  host.child.kill("SIGTERM");
-  const gaveUp = await Promise.race([ended.then(() => false), sleep(8_000).then(() => true)]);
-  if (gaveUp) {
-    host.child.kill("SIGKILL");
-    await ended;
   }
 }
 
@@ -206,12 +145,9 @@ async function shoot(context, shot, base, out, token) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const list = readSurfaces(JSON.parse(readFileSync(args.surfaces, "utf8")));
-  for (const [what, path, how] of [
-    ["the web app", APP_PAGE, "pnpm --filter @wsp/web build"],
-    ["the wsp command", HOST_BIN, "pnpm --filter @wsp/host build"],
-  ]) {
-    if (existsSync(path)) continue;
-    console.error(`${what} is not built: ${path} is missing. Run ${how} first, or use the coordinator's screenshots.sh, which builds.`);
+  const unbuilt = whatIsNotBuilt();
+  if (unbuilt !== undefined) {
+    console.error(unbuilt);
     process.exit(1);
   }
 
@@ -225,7 +161,7 @@ async function main() {
   const written = [];
   const failures = [];
   try {
-    host = await startHost(home, await freePort(), await freePort());
+    host = await startHost({ home, state: fixtureState(), port: await freePort(), wsPort: await freePort() });
     token = await bootToken(host.base);
     browser = await chromium.launch({ args: BROWSER_ARGS });
     for (const shot of shotPlan(list)) {

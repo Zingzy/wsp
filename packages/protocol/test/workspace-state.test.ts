@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { actionRefusal, agentsKindRefusal, agentsMayDrive, computerOffline, deleteNotice, importDest, screenCommandLine, screenCommandTyped, screenCommandsOf, goneRefusal, isBilling, isLocalWorkspace, kindWords, MACHINE_WSP_FORKS, machineWord, needsRebuild, NOT_ON_THIS_KIND, OVER_SSH, providerCannotRefusal, reachShown, relayedRefusal, sendRefusal, servesReading, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, workspaceStateOf, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
+import { actionRefusal, agentsKindRefusal, agentsMayDrive, computerOffline, deleteNotice, importDest, screenCommandLine, screenCommandTyped, screenCommandsOf, goneRefusal, isBilling, isLocalWorkspace, kindWords, MACHINE_WSP_FORKS, machineWord, needsRebuild, NOT_ON_THIS_KIND, OVER_SSH, providerCannotRefusal, reachShown, relayedRefusal, sendRefusal, servesReading, signInRefusalLine, signInRoad, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, workspaceStateOf, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
 
 describe("workspaceState", () => {
   it("phase alone: running, pausing, napping and waking each have one word", () => {
@@ -199,7 +199,7 @@ describe("what a workspace's kind changes about its words", () => {
   });
 
   it("every kind has a row in the table, so adding one is a row here and nothing else", () => {
-    expect(Object.keys(WORKSPACE_KIND_WORDS).sort()).toEqual(["cloud", "local", "ssh"]);
+    expect(Object.keys(WORKSPACE_KIND_WORDS).sort()).toEqual(["cloud", "local", "place", "ssh"]);
   });
 
   it("the delete sentence says what the delete does to this kind's machine, the ssh sweep included", () => {
@@ -271,16 +271,29 @@ describe("a slash command that works only in the CLI's own terminal", () => {
   it("the composer's line says the command is the CLI's own screen and names wsp's control for the same intent", () => {
     const cloud = { kind: "cloud" as const };
     const local = { kind: "local" as const };
-    expect(screenCommandLine(SCREEN[0]!, catalog, cloud)).toBe("/login works only in Claude Code's own terminal; sign this machine in from the Machine tab");
-    expect(screenCommandLine(SCREEN[1]!, catalog, cloud)).toBe("/logout works only in Claude Code's own terminal; sign this machine in from the Machine tab");
+    expect(screenCommandLine(SCREEN[0]!, catalog, cloud)).toBe("/login works only in Claude Code's own terminal; sign this workspace in from the Workspace panel");
+    expect(screenCommandLine(SCREEN[1]!, catalog, cloud)).toBe("/logout works only in Claude Code's own terminal; sign this workspace in from the Workspace panel");
     expect(screenCommandLine(SCREEN[0]!, catalog, local)).toBe(`/login works only in Claude Code's own terminal; sign in from a terminal on ${THIS_COMPUTER}`);
     expect(screenCommandLine(SCREEN[2]!, catalog, cloud)).toBe("/model works only in Claude Code's own terminal; pick the model in the row under the box");
     expect(screenCommandLine(SCREEN[3]!, catalog, local)).toBe("/permissions works only in Claude Code's own terminal; pick the access mode in the row under the box");
     expect(screenCommandLine(SCREEN[4]!, catalog, cloud)).toBe("/config works only in Claude Code's own terminal; wsp's settings open from the command palette");
     expect(screenCommandLine(SCREEN[5]!, catalog, cloud)).toBe("/help works only in Claude Code's own terminal; wsp's docs are at wsp.apidocumentation.com");
     // A record from before kinds existed is a provider fork, so it reads the machine's road.
-    expect(screenCommandLine(SCREEN[0]!, catalog, {})).toContain("Machine tab");
+    expect(screenCommandLine(SCREEN[0]!, catalog, {})).toContain("Workspace panel");
     // Every line is one sentence for the composer's slot: no line break, sentence case, nothing but words.
     for (const command of SCREEN) for (const view of [cloud, local]) expect(screenCommandLine(command, catalog, view)).toMatch(/^\/[a-z]+ works only in [^\n]+; [a-z][^\n]+[^.]$/);
+  });
+
+  it("the composer's sign-in line and a refused turn's half read one road rule, so the two never send a person two ways", () => {
+    const cloud = { kind: "cloud" as const };
+    const local = { kind: "local" as const };
+    expect(signInRoad(local)).toBe(`sign in from a terminal on ${THIS_COMPUTER}`);
+    expect(signInRoad(cloud)).toBe("sign this workspace in from the Workspace panel");
+    // A record from before kinds existed is a provider fork, so it reads the machine's road here too.
+    expect(signInRoad({})).toBe(signInRoad(cloud));
+    for (const view of [cloud, local, {}]) {
+      expect(signInRefusalLine(view)).toBe(`${signInRoad(view)}, then send again`);
+      expect(screenCommandLine(SCREEN[0]!, catalog, view)).toContain(signInRoad(view));
+    }
   });
 });

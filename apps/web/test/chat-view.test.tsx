@@ -16,6 +16,7 @@ import { requestNewThread } from "../src/shell/shellRequests.js";
 import { useWorkspacePreviews } from "../src/shell/workspacePreviews.js";
 import { getSyntaxHighlighterPromise } from "../src/lib/syntaxHighlighting.js";
 import { caps } from "./caps.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 let restoreLayout: () => void = () => {};
 // The fenced block's highlighter loads its wasm engine and grammar once per worker; cold, that load plus React's
@@ -53,7 +54,7 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
   const listeners = new Set<(e: ProtocolEvent) => void>();
   const api: Api = {
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
-    daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
+    daemon: noDaemonApi,
     sessionHistory: async id => history[id] ?? [],
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     snapshotStorage: async () => null,

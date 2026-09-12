@@ -13,7 +13,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG, THREAD_AGENTS } from "@wsp/catalog";
 import { EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, NO_SUCH_TURN, noProjectLine, noThreadTargetLine, ProjectGolden, Recipe, registeredLine, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, workspaceKind, WorkspaceView, type ExitClass } from "@wsp/protocol";
-import { createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
+import { copyKey, createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hostPlatform, localWiring, serve } from "../src/cli.js";
 import { dialer, mcpServer, serveMcp } from "../src/mcp.js";
@@ -86,7 +86,7 @@ describe("the MCP server over the host", () => {
     vi.stubEnv("WSP_HOME", join(dir, "home"));
     backend = stubBackend();
     store = memoryStore();
-    await store.put("goldens", "default", SEALED_GOLDEN);
+    await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
     claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`));
     codex = scriptedAgent(prompt => `codex: ${prompt}`);
     rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: codex.adapter }, local: localWiring(join(dir, "user")) });
@@ -139,7 +139,7 @@ describe("the MCP server over the host", () => {
   it("offers the verbs as tools, each described", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "folders", "forget", "fork", "image_move", "import", "new", "pause", "projects", "rebuild", "recipe", "recipe_scan", "rename", "send", "setup", "snapshot", "stop", "terminal_config", "thread_new", "thread_read", "thread_rename", "threads", "threads_wait", "wake", "workspaces", "workspaces_agents"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "folders", "forget", "fork", "image", "image_move", "import", "new", "pause", "places", "projects", "rebuild", "recipe", "recipe_scan", "rename", "send", "setup", "snapshot", "stop", "terminal_config", "thread_new", "thread_read", "thread_rename", "threads", "threads_wait", "wake", "workspaces", "workspaces_agents"]);
     expect(Object.keys((tools.find(t => t.name === "folders")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["folder", "hidden"]);
     expect(Object.keys((tools.find(t => t.name === "terminal_config")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["scheme"]);
     expect(Object.keys((tools.find(t => t.name === "import")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agents", "cut", "folder", "keep", "replace", "workspace", "yes"]);
@@ -299,7 +299,7 @@ describe("the MCP server over the host", () => {
   it("no tool promises or answers with a route the provider minted: no field ends in Url and nothing carries a provider token", async () => {
     // A version sealed from a desktop builder forks desktop machines, and only a desktop machine streams a display.
     const head = SEALED_GOLDEN.versions[0]!;
-    await store.put("goldens", "default", { ...SEALED_GOLDEN, versions: [{ ...head, kind: "desktop" as const }] });
+    await store.put("goldens", copyKey("default", "default"), { ...SEALED_GOLDEN, versions: [{ ...head, kind: "desktop" as const }] });
     const c = await connect();
     for (const t of (await c.listTools()).tools) expect(routeFields(t.outputSchema, t.name), t.name).toEqual([]);
 

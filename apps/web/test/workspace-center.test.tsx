@@ -12,6 +12,7 @@ import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { provideTerminals, WorkspaceTerminals } from "../src/terminal/link.js";
 import { installFakeLayout } from "./fake-layout.js";
 import { caps } from "./caps.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 const WS = "ws_center";
 const workspace: WorkspaceView = { id: WS, name: "api", machineId: "m_api", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
@@ -33,7 +34,7 @@ function fakeApi(workspaces: WorkspaceView[]): Api {
     capabilities: async () => (caps()),
     startSession: async o => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
-    daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
+    daemon: noDaemonApi,
     sessionHistory: async () => [],
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     snapshotStorage: async () => null,

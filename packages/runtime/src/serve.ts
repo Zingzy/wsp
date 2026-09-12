@@ -18,6 +18,9 @@ import {
   PAIR_CODE_REFUSAL,
   PAIR_CODE_TTL_MS,
   PAIR_ISSUE_REFUSAL,
+  PLACES_TICKET_REFUSAL,
+  PLACE_CODE_REFUSAL,
+  PLACE_UNKNOWN_REFUSAL,
   RELAY_TICKET_REFUSAL,
   RuntimeRequest,
   THREAD_OPS,
@@ -28,6 +31,8 @@ import {
   threadOpRefusal,
   type DeviceView,
   type ExecEvent,
+  type SealedImage,
+  type SealedImageExport,
   type ForwardEvent,
   type PortForward,
   type Caller,
@@ -35,8 +40,10 @@ import {
   type WorkspaceOrigin,
   type WorkspaceView,
 } from "@wsp/protocol";
+import { openDaemonChannel, type DaemonChannel } from "./daemon-channel.js";
 import { NO_DEVICE_DOOR, safeEqual, type DeviceDoor } from "./devices.js";
-import type { HostFolders, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
+import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
+import type { GoldenRecipe, HostFolders, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
 
 /** The port forwards a host holds, as the app lists and stops them. The
  * runtime keeps none itself: the host that owns the daemon links supplies this. */
@@ -77,7 +84,16 @@ export interface ServeOptions {
   terminalConfig?: HostTerminalConfig;
   /** The init job the host runs on this computer, for the init.* ops and the init.job events; without it the ops are refused. */
   init?: InitDoor;
+  /** How an export of the image is sealed and written on this computer; without it image.export is refused. The
+   * runtime hands over the record and the vault's bytes and never touches a file or a passphrase itself. */
+  imageExport?: ImageExporter;
+  /** The recipe a copy at a place builds from, composed by the host from the record with every login set to skip;
+   * without it image.build is refused, since the runtime writes no recipe of its own. */
+  copyRecipe?: (image: SealedImage) => GoldenRecipe;
 }
+
+/** Seals the vault to the passphrase and writes it at `dest` on the computer the host runs on. */
+export type ImageExporter = (o: { image: SealedImage; tar: Buffer; dest: string; passphrase: string }) => Promise<SealedImageExport>;
 
 /** Who a token names: this host's own process, or one paired computer. Every road in reads it from one function, so
  * a road cannot be opened wider than the others by accident. */
@@ -123,6 +139,20 @@ function foldersFrom(opts: ServeOptions): () => HostFolders {
   };
 }
 
+function imageExportFrom(opts: ServeOptions): () => ImageExporter {
+  return () => {
+    if (opts.imageExport === undefined) throw new Error("this runtime cannot write an export on this computer");
+    return opts.imageExport;
+  };
+}
+
+function copyRecipeFrom(opts: ServeOptions): (image: SealedImage) => GoldenRecipe {
+  return image => {
+    if (opts.copyRecipe === undefined) throw new Error("this runtime cannot compose the recipe a copy builds from; the host that serves the app wires one");
+    return opts.copyRecipe(image);
+  };
+}
+
 function initFrom(opts: ServeOptions): () => InitDoor {
   return () => {
     if (opts.init === undefined) throw new Error("this runtime has no init job; the host that serves the app wires one");
@@ -148,6 +178,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
   const folders = foldersFrom(opts);
   const terminalConfig = terminalConfigFrom(opts);
   const init = initFrom(opts);
+  const imageExport = imageExportFrom(opts);
+  const copyRecipe = copyRecipeFrom(opts);
   if (!opts.authToken) throw new Error("serveRuntime refuses to start without an auth token");
   const now = opts.now ?? Date.now;
   const ticketTtlMs = opts.ticketTtlMs ?? 300_000;
@@ -156,6 +188,10 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
   const devices = (): DeviceDoor => {
     if (opts.devices === undefined) throw new Error(NO_DEVICE_DOOR);
     return opts.devices;
+  };
+  const places = (): PlaceDoor => {
+    if (rt.places === undefined) throw new Error(NO_PLACE_DOOR);
+    return rt.places;
   };
 
   /** Who a token names. The one reading: the auth frame, a socket that just redeemed a code and the HTTP routes the
@@ -219,8 +255,22 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     const ownRoad = (): boolean => stamped === undefined;
     /** Set while an unauthed socket's first frame is being decided, so a second frame cannot race past the door. */
     let deciding = false;
+    /** Set between a place's first frame and its prove: which place answered, and the bytes its signature must
+     * cover. While it is set the only frame this socket may send is that prove. */
+    let proving: { placeId: string; expect: Uint8Array } | undefined;
+    /** Set once a place proved and this socket became its link. The listener goes with it, and this is read before
+     * anything else besides: it is the one place a mistake would let a runtime frame from a place be read as a
+     * client's, so the door both stops listening and refuses to read. */
+    let handedOver = false;
 
     const detaches: (() => void)[] = [];
+    /** The daemon links this socket holds open, by the id it was answered with. A channel is never reachable from
+     * another socket, so a page cannot drive a machine by guessing an id another page was given. */
+    const channels = new Map<string, DaemonChannel>();
+    detaches.push(() => {
+      for (const ch of channels.values()) ch.close();
+      channels.clear();
+    });
     let bound: { deviceId: string; cut: () => void } | undefined;
     ws.on("close", () => {
       for (const un of detaches) un();
@@ -239,7 +289,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
       if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(payload));
     };
 
-    ws.on("message", raw => {
+    const onMessage = (raw: unknown): void => {
+      if (handedOver) return;
       void (async () => {
         let parsed: unknown;
         try {
@@ -271,8 +322,46 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             send({ id: msg.id, ok: false, error, kind: "auth" });
             ws.close(4401, "unauthorized");
           };
+          // The second frame of a place's handshake, and the only frame this socket may send once its first one was
+          // answered: anything else is a socket asking for a second identity.
+          if (proving !== undefined) {
+            if (msg.op !== "place.prove") return refuse("unauthorized");
+            const { placeId, expect } = proving;
+            proving = undefined;
+            // The door reads the signature and the report this frame carries, and answers the report it will take
+            // or the one sentence to refuse with: this door holds neither rule of its own.
+            const proved = await places()
+              .prove(placeId, msg.signature, expect, msg.report)
+              .catch((e: unknown) => ({ refusal: e instanceof Error ? e.message : String(e) }));
+            if ("refusal" in proved) return refuse(proved.refusal);
+            // From here no frame from this socket is read as a client's request: the listener goes before the reply,
+            // and the reply goes before the place door sends anything, so the place has its own serve on by then.
+            handedOver = true;
+            ws.off("message", onMessage);
+            send({ id: msg.id, ok: true });
+            await places().attach(placeId, ws, proved.report, now());
+            return;
+          }
           if (deciding) return refuse("unauthorized");
           deciding = true;
+          if (msg.op === "place.join" || msg.op === "place.auth") {
+            // A computer joining or dialling back in. The door answers its challenge and says which bytes the next
+            // frame must sign; a key or a report this host cannot work with refuses in the door's own words.
+            let opened: { reply: Record<string, unknown>; expect: Uint8Array; notice?: string } | undefined;
+            try {
+              opened = msg.op === "place.join" ? await places().join(msg, now()) : await places().auth(msg, now());
+            } catch (e) {
+              return refuse(e instanceof Error ? e.message : String(e));
+            }
+            if (opened === undefined) return refuse(msg.op === "place.join" ? PLACE_CODE_REFUSAL : PLACE_UNKNOWN_REFUSAL);
+            const placeId = msg.op === "place.join" ? String(opened.reply["placeId"]) : msg.placeId;
+            proving = { placeId, expect: opened.expect };
+            // The gate opens for exactly one more frame, which the branch above holds to place.prove.
+            deciding = false;
+            send({ id: msg.id, ok: true, ...opened.reply, ...(opened.notice !== undefined ? { notice: opened.notice } : {}) });
+            return;
+          }
+          if (msg.op === "place.prove") return refuse("unauthorized");
           if (msg.op === "pair.redeem") {
             // A runtime with no device door, and a store that failed, both read as a code this host is not
             // holding: the caller is unauthenticated, so one refusal for every reason tells it nothing.
@@ -331,6 +420,28 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               // The door above spends a code; a socket already through it is asking for a second identity.
               send({ id: msg.id, ok: false, error: PAIR_CODE_REFUSAL });
               return;
+            case "place.join":
+            case "place.auth":
+            case "place.prove":
+              // The door above is where a place proves itself; a socket already through it is asking for a second
+              // identity, and this host holds one identity per socket.
+              send({ id: msg.id, ok: false, error: PLACE_UNKNOWN_REFUSAL });
+              return;
+            case "places.list":
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                return;
+              }
+              send({ id: msg.id, ok: true, places: await places().list(now()) });
+              return;
+            case "places.remove": {
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                return;
+              }
+              send({ id: msg.id, ok: true, ...(await places().remove(msg.placeId)) });
+              return;
+            }
             case "devices.list":
               if (!ownRoad()) {
                 send({ id: msg.id, ok: false, error: DEVICES_TICKET_REFUSAL });
@@ -418,6 +529,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "workspaces.list":
               send({ id: msg.id, ok: true, workspaces: (await rt.workspaces.list(origin)).map(handed) });
               return;
+            case "workspaces.resolve":
+              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.resolve(msg.ref, origin)) });
+              return;
             case "workspaces.get":
               send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.get(msg.workspaceId, origin)) });
               return;
@@ -472,9 +586,55 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               await rt.workspaces.touch(msg.workspaceId, origin);
               send({ id: msg.id, ok: true });
               return;
-            case "workspaces.daemonReach":
-              send({ id: msg.id, ok: true, reach: await rt.workspaces.daemonReach(msg.workspaceId, origin) });
+            case "daemon.open": {
+              // The same gate every workspace verb reads: a socket that may not drive this workspace is refused here.
+              const reach = await rt.workspaces.daemonReach(msg.workspaceId, origin);
+              if (reach.daemonToken === undefined) throw new Error("the machine has no daemon yet");
+              const channel = randomBytes(6).toString("hex");
+              // The daemon pushes its hello right after the auth reply, so frames that land before the open reply is
+              // written wait here and go out after it: a page hears a channel's id before anything arrives on it.
+              let queued: Record<string, unknown>[] | null = [];
+              const ch = await openDaemonChannel({
+                url: reach.url,
+                token: reach.daemonToken,
+                onEvent: event => {
+                  if (queued !== null) queued.push(event);
+                  else send({ type: "daemon.event", channel, event });
+                },
+              });
+              // The page left while the dial was in flight; the machine keeps no socket for a tab that is gone.
+              if (ws.readyState !== ws.OPEN) {
+                ch.close();
+                return;
+              }
+              channels.set(channel, ch);
+              void ch.closed.then(({ code, reason }) => {
+                // Still ours means the page did not ask for this close, so it is told; a close it asked for is silent.
+                if (channels.get(channel) !== ch) return;
+                channels.delete(channel);
+                send({ type: "daemon.closed", channel, code, reason });
+              });
+              send({ id: msg.id, ok: true, channel });
+              const held = queued;
+              queued = null;
+              for (const event of held) send({ type: "daemon.event", channel, event });
               return;
+            }
+            case "daemon.send": {
+              const ch = channels.get(msg.channel);
+              if (ch === undefined) throw new Error("no such daemon channel on this socket");
+              // The host reads none of the frame and none of the answer: the page validates what it asked for.
+              send({ id: msg.id, ok: true, reply: await ch.send(msg.frame) });
+              return;
+            }
+            case "daemon.close": {
+              const ch = channels.get(msg.channel);
+              if (ch === undefined) throw new Error("no such daemon channel on this socket");
+              channels.delete(msg.channel);
+              ch.close();
+              send({ id: msg.id, ok: true });
+              return;
+            }
             case "sessions.start": {
               const handle = await rt.sessions.start(msg.workspaceId, {
                 prompt: msg.prompt,
@@ -560,9 +720,21 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               });
               return;
             }
-            case "golden.builderReach":
-              send({ id: msg.id, ok: true, reach: await rt.golden.builderReach(msg.builderId) });
+            case "image.get":
+              send({ id: msg.id, ok: true, view: await rt.image.get(msg.name) });
               return;
+            case "image.build": {
+              // The record is read here only to compose the recipe from it; every refusal is the runtime's own.
+              const { image } = await rt.image.get(msg.name);
+              if (image === null) throw new Error("this host owns no image yet; wsp init seals one");
+              send({ id: msg.id, ok: true, copy: await rt.image.build({ place: msg.place, ...(msg.name !== undefined ? { name: msg.name } : {}), ...(msg.force !== undefined ? { force: msg.force } : {}), recipe: copyRecipe(image) }) });
+              return;
+            }
+            case "image.export": {
+              const { image, tar } = await rt.image.vault(msg.name);
+              send({ id: msg.id, ok: true, exported: await imageExport()({ image, tar, dest: msg.dest, passphrase: msg.passphrase }) });
+              return;
+            }
             case "workspaces.portReach":
               send({ id: msg.id, ok: true, reach: await rt.workspaces.portReach(msg.workspaceId, msg.port, origin) });
               return;
@@ -674,7 +846,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
           });
         }
       })();
-    });
+    };
+    ws.on("message", onMessage);
   };
 
   wss.on("connection", onConnection);

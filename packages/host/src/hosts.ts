@@ -172,14 +172,9 @@ export function setDefaultHost(home: string, alias: string): void {
   writeFileSync(defaultFile(home), `${checkedAlias(alias)}\n`, { mode: 0o600 });
 }
 
-/** The WebSocket address of a host at this address: the same authority over ws or wss, with the runtime's path on
- * the end of whatever path the address already carries, which is what a tunnel hostname under a prefix needs. */
-export function wsUrlOf(url: string): string {
-  const parsed = new URL(url);
-  const scheme = parsed.protocol === "https:" || parsed.protocol === "wss:" ? "wss:" : "ws:";
-  const path = parsed.pathname.replace(/\/+$/, "");
-  return `${scheme}//${parsed.host}${path}${WS_PATH}`;
-}
+// The rule now lives beside WS_PATH in the protocol, which a place's own agent reads too; the name stays here for
+// every caller that already had it from this module.
+export { wsUrlOf } from "@wsp/protocol";
 
 /** Which host a line runs against: the host on this computer, an alias this computer paired with, or an address
  * typed on the line, which carries no token and is only a road for wsp connect. */
@@ -249,6 +244,17 @@ export function dialWindowMs(aim: HostAim): number {
   // the protocol's own reading of an address cannot read is not loopback either, so it takes the longer window.
   const where = servedHostname(aimAddress(aim));
   return where !== undefined && isLoopback(where) ? NEAR_WINDOW_MS : FAR_WINDOW_MS;
+}
+
+/** Why a line that runs at the host's own terminal cannot be aimed anywhere else. Its own sentence per line, since
+ * what a person may not do from here differs: hand out access, or carry a vault off. */
+export const HOST_SIDE_ACCESS = "Handing out access is the one thing a paired computer cannot do from here.";
+
+/** What the person reads when a line that runs at the host's own terminal is aimed at one on another computer: the
+ * thing it does happens over there and nowhere else, so there is no road from here to there. Every way a line is
+ * aimed reads the same, whether a --host flag, WSP_HOST or the default alias wsp hosts marks did the aiming. */
+export function hostSideOnlyLine(word: string, where: string, why: string = HOST_SIDE_ACCESS): string {
+  return `wsp ${word} runs on the computer the host runs on, and this line is aimed at ${where}; run it in a terminal over there. ${why}`;
 }
 
 /** The note a line naming both --state and a host somewhere else gets: the state file is this computer's, and a

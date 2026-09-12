@@ -187,8 +187,10 @@ options:
                      port follows 10 above it
   --ws-port N        runtime websocket port on its own (default
                      4410); --port alone moves both
-  --state PATH       state file (default ~/.wsp/state.json, or ./.wsp/state.json
-                     when the current directory has a .env)
+  --state PATH       state file: this word first, else WSP_HOME's state.json,
+                     else ./.wsp/state.json when the current directory has a
+                     .env, else state.json in the home the running host serves,
+                     which is ~/.wsp unless current-home names another
   --yes              init: take every default and ask nothing (required off a
                      terminal); a login with a browser or device sign-in, or one
                      held in the Keychain, defaults to sign in on the machine
@@ -442,8 +444,10 @@ options:
                      port follows 10 above it
   --ws-port N        runtime websocket port on its own (default
                      4410); --port alone moves both
-  --state PATH       state file (default ~/.wsp/state.json, or ./.wsp/state.json
-                     when the current directory has a .env)
+  --state PATH       state file: this word first, else WSP_HOME's state.json,
+                     else ./.wsp/state.json when the current directory has a
+                     .env, else state.json in the home the running host serves,
+                     which is ~/.wsp unless current-home names another
   --yes              init: take every default and ask nothing (required off a
                      terminal); a login with a browser or device sign-in, or one
                      held in the Keychain, defaults to sign in on the machine
@@ -697,8 +701,10 @@ options:
                      port follows 10 above it
   --ws-port N        runtime websocket port on its own (default
                      4410); --port alone moves both
-  --state PATH       state file (default ~/.wsp/state.json, or ./.wsp/state.json
-                     when the current directory has a .env)
+  --state PATH       state file: this word first, else WSP_HOME's state.json,
+                     else ./.wsp/state.json when the current directory has a
+                     .env, else state.json in the home the running host serves,
+                     which is ~/.wsp unless current-home names another
   --yes              init: take every default and ask nothing (required off a
                      terminal); a login with a browser or device sign-in, or one
                      held in the Keychain, defaults to sign in on the machine
@@ -1089,8 +1095,10 @@ options:
                      port follows 10 above it
   --ws-port N        runtime websocket port on its own (default
                      4410); --port alone moves both
-  --state PATH       state file (default ~/.wsp/state.json, or ./.wsp/state.json
-                     when the current directory has a .env)
+  --state PATH       state file: this word first, else WSP_HOME's state.json,
+                     else ./.wsp/state.json when the current directory has a
+                     .env, else state.json in the home the running host serves,
+                     which is ~/.wsp unless current-home names another
   --yes              init: take every default and ask nothing (required off a
                      terminal); a login with a browser or device sign-in, or one
                      held in the Keychain, defaults to sign in on the machine
@@ -1411,8 +1419,10 @@ options:
                      port follows 10 above it
   --ws-port N        runtime websocket port on its own (default
                      4410); --port alone moves both
-  --state PATH       state file (default ~/.wsp/state.json, or ./.wsp/state.json
-                     when the current directory has a .env)
+  --state PATH       state file: this word first, else WSP_HOME's state.json,
+                     else ./.wsp/state.json when the current directory has a
+                     .env, else state.json in the home the running host serves,
+                     which is ~/.wsp unless current-home names another
   --yes              init: take every default and ask nothing (required off a
                      terminal); a login with a browser or device sign-in, or one
                      held in the Keychain, defaults to sign in on the machine

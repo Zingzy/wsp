@@ -30,11 +30,24 @@ export interface ModelPickerProps {
   onPickModel: (harness: string, model: string) => void;
 }
 
-/** Favourites first, then the catalog's order; a search narrows by label, slug and description. */
-export function listModels(catalog: HarnessCatalog, favourites: ReadonlyArray<string>, query: string): HarnessModel[] {
+/** The line under the model the composer names that this list has no row for: it may be the one the thread runs on
+ * or a pick the binary has since dropped, and this is true of both. */
+export const UNLISTED_MODEL_LINE = "Not in this workspace's list";
+
+/** One row of the model menu: the catalog's own, or the model the composer names that this list has no row for,
+ * marked once here so the row that draws it reads the mark rather than asking the catalog again. */
+export interface ModelRow extends HarnessModel {
+  readonly unlisted?: boolean;
+}
+
+/** Favourites first, then the catalog's order; a search narrows by label, slug and description. The model the
+ * composer names comes last under its own id where the list does not carry it, so the pick the button shows has a
+ * row to sit on and moving off it is a click on another model rather than the first send. */
+export function listModels(catalog: HarnessCatalog, favourites: ReadonlyArray<string>, query: string, current: HarnessModel | null): ModelRow[] {
   const q = normalizeSearchText(query);
-  const rows = catalog.models.filter(m => q === "" || normalizeSearchText(`${m.label} ${m.value} ${m.description ?? ""}`).includes(q));
-  const starred = (m: HarnessModel) => favourites.includes(favouriteKey(catalog.harness, m.value));
+  const unlisted: ModelRow[] = current !== null && !catalog.models.some(m => m.value === current.value) ? [{ ...current, description: UNLISTED_MODEL_LINE, unlisted: true }] : [];
+  const rows: ModelRow[] = [...catalog.models, ...unlisted].filter(m => q === "" || normalizeSearchText(`${m.label} ${m.value} ${m.description ?? ""}`).includes(q));
+  const starred = (m: ModelRow) => favourites.includes(favouriteKey(catalog.harness, m.value));
   return [...rows.filter(starred), ...rows.filter(m => !starred(m))];
 }
 
@@ -56,7 +69,7 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, onPickHa
   const inputRef = useRef<HTMLInputElement | null>(null);
   const favourites = useComposerFavouritesStore(s => s.keys);
   const toggle = useComposerFavouritesStore(s => s.toggle);
-  const rows = useMemo(() => listModels(catalog, favourites, query), [catalog, favourites, query]);
+  const rows = useMemo(() => listModels(catalog, favourites, query, model), [catalog, favourites, model, query]);
   const platform = typeof navigator === "undefined" ? "" : navigator.platform;
 
   useEffect(() => {
@@ -185,9 +198,9 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, onPickHa
                         model?.value === m.value && "bg-foreground/[0.08]",
                       )}
                     >
-                      <div className="min-w-0 flex-1">
+                      <div className="min-w-0 flex-1" {...(m.unlisted === true ? { "data-unlisted-model": "" } : {})}>
                         <div className="flex items-center gap-1.5">
-                          <span className="truncate text-xs font-medium">{m.label}</span>
+                          <span className={cn("truncate text-xs font-medium", m.unlisted === true && "text-muted-foreground")}>{m.label}</span>
                           {m.isDefault ? <span className="rounded border border-border/70 bg-muted/60 px-1 font-mono text-[10px] leading-4 text-muted-foreground">default</span> : null}
                         </div>
                         <div className="truncate font-mono text-[10px] text-muted-foreground/70">{m.description ?? m.value}</div>

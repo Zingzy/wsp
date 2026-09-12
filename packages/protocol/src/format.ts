@@ -3,7 +3,7 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { ContextMenuItem, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectSecret, SessionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
+import type { ContextMenuItem, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectGolden, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SessionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnRefusal, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
 import { DEFAULT_PORT } from "./app-ports.js";
 import { compareVersions } from "./semver.mjs";
@@ -287,6 +287,26 @@ export function turnEndLine(result: TurnResult): string {
   return failure === undefined ? turnSettledLine(result) : `${turnSettledLine(result)}: ${failure}`;
 }
 
+/** A turn the agent refused outright: it answered with an error line of its own and did none of the work. The word
+ * is failed whatever the harness's own subtype said, and the sentence is the agent's with wsp's half after it where
+ * the caller knows the road out. The reply is dropped, since a refusal is not a reply: every road reads a turn that
+ * did not complete by its error alone, so one shape here is what keeps the sentence from being printed twice.
+ * `cause` is what wsp classes the failure by; no door may read a cause out of the agent's words. */
+export function refusedTurn(result: TurnResult, refusal?: { road?: string; cause?: TurnRefusal }): TurnResult {
+  // The result's own text is the agent's sentence and the errors entry beside it is harness telemetry; a harness
+  // that sends both would say the same thing twice, so the sentence wins and the entry is dropped with the reply.
+  const said = (result.text ?? result.error ?? "").trim();
+  const sentence = [said, refusal?.road ?? ""].filter(part => part.length > 0).join("; ");
+  return {
+    status: "failed",
+    ...(result.durationMs !== undefined ? { durationMs: result.durationMs } : {}),
+    ...(result.costUsd !== undefined ? { costUsd: result.costUsd } : {}),
+    ...(result.usage !== undefined ? { usage: result.usage } : {}),
+    ...(sentence.length > 0 ? { error: sentence } : {}),
+    ...(refusal?.cause !== undefined ? { refusal: refusal.cause } : {}),
+  };
+}
+
 /** The clock a read prints beside a row, to the second, in the zone of the computer reading it, which is the
  * computer the app shows the same thread on; nothing for a row the runtime stamped no time on. */
 export function fmtClock(at: number | undefined): string {
@@ -502,6 +522,59 @@ export function plural(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? "" : "s"}`;
 }
 
+// --- the image and its copies, as `wsp image` and Settings > Image read them ---
+
+/** What a record with no vault says: its copies ask for every sign-in again until the next version holds them. */
+export const IMAGE_NO_VAULT = "no sign-ins held; cut the next version to hold them";
+/** Where a run with nobody at its terminal reads the passphrase an export is sealed to; never a flag, since every
+ * process on a computer can read another's command line. */
+export const IMAGE_PASSPHRASE_ENV = "WSP_IMAGE_PASSPHRASE";
+/** What a host that has sealed nothing says. Named apart from the attachment lines beside it: those are pictures. */
+export const NO_SEALED_IMAGE = "no image yet; run wsp init to build one";
+
+/** Whether a copy stands on the record as it is now: built at the record's hash, which is the whole of it. The
+ * version is the place's own manifest number and says nothing about which record the copy came from, so a second
+ * place's v1 built from the record's v2 is current. A copy with no hash was built before hashes were recorded and
+ * no record matches it. The one rule: the refusal that will not rebuild a current copy reads it too. */
+export function copyIsCurrent(image: Pick<SealedImage, "hash">, copy: Pick<SealedImageCopy, "hash">): boolean {
+  return copy.hash === image.hash;
+}
+
+/** The states a login ends in with something of it on the machine, which is what the vault then carries: signed in
+ * there, copied from this computer, or there with no status command to prove it. The rest left nothing behind. */
+const LOGIN_ON_MACHINE: readonly LoginState[] = ["signed-in", "copied", "not-verified"];
+
+/** How many of this image's logins ended with something on the machine for the vault to hold. */
+export function sealedLoginsHeld(image: Pick<SealedImage, "logins">): number {
+  return image.logins.filter(l => LOGIN_ON_MACHINE.includes(l.state)).length;
+}
+
+/** The record in one line: the version, its hash, how many sign-ins it holds and what its disk came to. */
+export function sealedImageLine(image: SealedImage): string {
+  const held = image.vault === undefined ? IMAGE_NO_VAULT : `${plural(sealedLoginsHeld(image), "sign-in")} held, ${plural(image.vault.paths, "path")}`;
+  const size = image.usedBytes === undefined ? [] : [fmtBytes(image.usedBytes)];
+  return [`${image.name} v${image.version}`, image.hash, held, ...size, `sealed on ${image.sealedFrom}`].join(" · ");
+}
+
+/** One place's copy in one line: the place, the version it holds, its size where the provider reports one, and
+ * whether it stands on the record as it is now. A record with no vault was read back off its own copies rather
+ * than written at a seal, so it has nothing to judge them by and the word is left off. */
+export function sealedCopyLine(image: SealedImage, copy: SealedImageCopy): string {
+  const size = copy.sizeBytes === undefined ? [] : [fmtBytes(copy.sizeBytes)];
+  const standing = image.vault === undefined ? [] : [copyIsCurrent(image, copy) ? "current" : "stale"];
+  return [copy.place, `v${copy.version}`, ...size, ...standing].join(" · ");
+}
+
+/** One project image under the image, as a line: the workspace it was taken off, the projects on that disk and when. */
+export function sealedProjectLine(project: ProjectGolden): string {
+  return [`project ${project.workspaceName}`, project.projects.map(p => p.name).join(", "), project.createdAt].join(" · ");
+}
+
+/** What an export wrote, as the line a person reads after it. */
+export function sealedExportLine(exported: SealedImageExport): string {
+  return `${exported.path} · ${fmtBytes(exported.bytes)} · opens with the passphrase you typed and nothing else`;
+}
+
 /** One name inside a comma-joined list of names: quoted when the name carries that comma itself, so a free-text
  * label an agent wrote reads as one entry and not as two nameless ones. */
 export function listedName(name: string): string {
@@ -677,6 +750,12 @@ export const RUN_GONE_LINE = "the machine no longer holds this turn's run, so no
 /** What a command waiting on a turn is told when the host it asked stops: the run is the machine's, not the host's,
  * so it goes on and its reply lands in the thread whether or not this command is still there to see it. */
 export const HOST_STOPPING_LINE = "the host is restarting; the turn goes on and its reply lands in the thread";
+
+/** What a machine is called when the provider reports it running and the road every command takes is dead: whose
+ * machine it is, which one, and the guest's own words, so the failure reads as the provider's and not as wsp's. */
+export function guestUnusableLine(provider: string, machineId: string, detail: string): string {
+  return `${provider} left ${machineId} running but nothing on it can run: ${detail}`;
+}
 
 /** The turn's error when nothing on the machine answered a launch from this computer for the whole reach window:
  * how many times it was tried and over how long. The fetch's own words name a Node error and the machine id,
@@ -1610,6 +1689,10 @@ export const thisComputerLine = (name: string, id: string): string => `Workspace
  * own that wsp reaches and never runs. The sidebar row prints it on line two, so it is a person's words. */
 export const OVER_SSH = "a computer over ssh";
 
+/** What a place's machine is, in every sentence and every row that names it: a computer of the person's own that
+ * dialled this host and holds the link, so wsp drives it with the daemon protocol and never made it. */
+export const JOINED_COMPUTER = "a computer you joined";
+
 /** What a cloud workspace's machine is in a sentence that names it: a machine wsp forked at a provider and pays for,
  * whether the provider runs virtual machines or containers. A refusal on one says this rather than borrowing this
  * computer's words, since what it cannot do is the provider's limit and not the machine being the person's own. */
@@ -1683,6 +1766,12 @@ export function spawnDepthRefusal(threadId: string, depth: number, cap: number):
 /** The one sentence a thread is refused with for reaching a workspace outside its own tree. */
 export function spawnReachRefusal(threadId: string, name: string): string {
   return `thread ${threadWord(threadId)} may drive the workspace it runs on and the ones it forked, and ${name} is neither`;
+}
+
+/** The one sentence a name no workspace of this host carries is refused with. Absence is the only thing it says: a
+ * workspace that exists and cannot be driven from here is refused by the rule that hides it, never as missing. */
+export function noWorkspaceRefusal(ref: string): string {
+  return `no workspace ${ref}`;
 }
 
 /** The workspace table's cell for the switch: empty where agents spawn nothing, which is nearly every row, so the

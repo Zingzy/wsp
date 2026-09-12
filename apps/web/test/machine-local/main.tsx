@@ -14,6 +14,7 @@ import type { Api } from "../../src/protocol/client";
 import { useStore } from "../../src/protocol/store";
 import "../../src/index.css";
 import { caps } from "../caps.js";
+import { noDaemonApi } from "../fake-daemon-api.js";
 
 document.documentElement.classList.toggle("dark", new URLSearchParams(window.location.search).get("theme") !== "light");
 
@@ -27,7 +28,7 @@ const api: Api = {
   upgrade: async () => workspace,
   capabilities: async () => (caps()),
   portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
-  daemonReach: async () => ({ url: "http://127.0.0.1:1", expiresAt: Number.MAX_SAFE_INTEGER }),
+  daemon: noDaemonApi,
   startSession: async o => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
   sessionHistory: async () => [],
   listSnapshots: async () => lineage,

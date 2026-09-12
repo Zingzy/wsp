@@ -7,6 +7,7 @@ import { DisconnectedError, RequestError, type Api, type ProtocolEvent } from ".
 import { LAST_WORKSPACE_KEY } from "../src/protocol/lastWorkspace.js";
 import { useStore } from "../src/protocol/store.js";
 import { caps } from "./caps.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 const view = (id: string): WorkspaceView => ({
   id,
@@ -46,7 +47,7 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
     capabilities: async () => CAPS,
     startSession: async o => ({ id: "s_new", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
-    daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
+    daemon: noDaemonApi,
     sessionHistory: async () => [],
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     snapshotStorage: async () => null,

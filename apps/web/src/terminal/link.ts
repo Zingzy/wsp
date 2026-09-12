@@ -58,6 +58,7 @@ export class WorkspaceTerminals {
   #order: string[] = [];
   #activeId: string | null = null;
   #status: DaemonLinkStatus = "connecting";
+  #refusal: string | null = null;
   #wasLive = false;
   /** Bumped on every status change; an attach ritual that outlives its transition stops at the next await. */
   #liveGen = 0;
@@ -74,8 +75,9 @@ export class WorkspaceTerminals {
 
   // --- fed by the transport owner -------------------------------------------
 
-  feedStatus(s: DaemonLinkStatus): void {
+  feedStatus(s: DaemonLinkStatus, refusal?: string): void {
     this.#liveGen += 1;
+    this.#refusal = s === "refused" ? (refusal ?? "") : null;
     if (s !== "live") {
       this.#status = s;
       for (const fn of this.#statusFns) fn();
@@ -112,6 +114,11 @@ export class WorkspaceTerminals {
 
   status(): DaemonLinkStatus {
     return this.#status;
+  }
+
+  /** The door's own sentence while the status reads refused, else null. */
+  refusal(): string | null {
+    return this.#refusal;
   }
 
   onStatus(fn: () => void): () => void {

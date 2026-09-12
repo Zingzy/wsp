@@ -155,6 +155,8 @@ describe("local workspace", () => {
     expect(ws.home).toBe(root);
     const listed = await rt.workspaces.list();
     expect(listed.map(w => ({ name: w.name, kind: w.kind }))).toEqual([{ name: "my-mac", kind: "local" }]);
+    // This computer is forked by nobody, so no provider rides its view and a row reads the kind's own words for it.
+    expect(listed.map(w => w.provider)).toEqual([undefined]);
   });
 
   it("there is one local workspace per host", async () => {

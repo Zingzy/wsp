@@ -1,9 +1,16 @@
 import { homedir, userInfo } from "node:os";
-import { spawn, type IPty } from "node-pty";
+import type { IPty, spawn as PtySpawn } from "node-pty";
 import { workArgv } from "@wsp/protocol";
 import { OPEN_SHIM_PATH } from "./relay.js";
 
 const SCROLLBACK_CAP_BYTES = 256 * 1024;
+
+/** node-pty dlopens its native module the moment it is imported, and it ships no prebuild for Linux: a daemon that
+ * imported it at load would refuse to start on every Linux where nothing built it, whether or not anyone ever opens
+ * a terminal. Every other op this daemon answers needs none of it, so it is loaded at the first pty and not before.
+ * The one import, awaited once and kept. */
+let loading: Promise<typeof PtySpawn> | undefined;
+const ptySpawn = (): Promise<typeof PtySpawn> => (loading ??= import("node-pty").then(m => m.spawn));
 
 export interface PtyCreateOpts {
   cols?: number;
@@ -29,7 +36,7 @@ export class PtySession {
   private listeners = new Set<DataListener>();
   private exitListeners = new Set<ExitListener>();
 
-  constructor(id: string, opts: PtyCreateOpts) {
+  constructor(id: string, opts: PtyCreateOpts, spawn: typeof PtySpawn) {
     this.id = id;
     this.cols = opts.cols ?? 80;
     this.rows = opts.rows ?? 24;
@@ -163,9 +170,11 @@ export class PtyManager {
   private sessions = new Map<string, PtySession>();
   private nextId = 1;
 
-  create(opts: PtyCreateOpts = {}): PtySession {
+  /** Awaits the native module on the first call and never again; every later pty opens as fast as it always did. */
+  async create(opts: PtyCreateOpts = {}): Promise<PtySession> {
+    const spawn = await ptySpawn();
     const id = `pty_${this.nextId++}`;
-    const s = new PtySession(id, opts);
+    const s = new PtySession(id, opts, spawn);
     this.sessions.set(id, s);
     return s;
   }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { GuestUnusableError } from "../src/errors.js";
 import { Workspace } from "../src/lifecycle.js";
 import type { Machine, MachineLife } from "../src/machine.js";
 
@@ -150,6 +151,27 @@ describe("Workspace verified wake", () => {
     expect(calls).toEqual({ pause: 1, resume: 1, kill: 1 });
     expect(ws.machineId).toBe("m2");
     expect(result).toEqual({ resurrected: true, reason: "attempt 1: daemon did not answer" });
+  });
+
+  it("a resume that ends with the guest unusable is a fault: no check runs, the fork replaces the machine, the vault comes back, and the reason carries the provider's words", async () => {
+    const { machine, calls } = counting({ resume: async () => { throw new GuestUnusableError("m1", "Box by ASCII", "Error 24", 200); } });
+    const restored: string[] = [];
+    const ws = new Workspace(machine, {
+      goldenSnapshot: "snap_g",
+      wakeAttempts: 2,
+      resurrect: async () => stubMachine({ id: "m2" }),
+      restoreVault: async m => { restored.push(m.id); },
+      wakeCheck: async () => { throw new Error("a machine nothing can run on is never checked"); },
+    });
+    await ws.nap();
+    const result = await ws.wake();
+    expect(result.resurrected).toBe(true);
+    expect(result.reason).toMatch(/Box by ASCII left m1 running but nothing on it can run: Error 24/);
+    expect(ws.machineId).toBe("m2");
+    expect(ws.currentPhase).toBe("running");
+    expect(restored).toEqual(["m2"]);
+    // The fault is the machine's, not the moment's: no second resume, no re-pause, and the old box is killed.
+    expect(calls).toEqual({ pause: 1, resume: 0, kill: 1 });
   });
 
   it("nap stashes the vault before the pause", async () => {

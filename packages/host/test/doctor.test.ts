@@ -11,8 +11,8 @@ import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { WebSocketServer } from "ws";
 import { GUEST_SUPERVISOR_PATH, GUEST_USER_ENV, TOOLS_PATH, DAEMON_ENV_FILE } from "@wsp/engine";
 import { assetDir, assetProof } from "../src/assets.js";
-import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, GUEST_DAEMON_DIR, GUEST_WSP_BIN, shellQuote, sshDaemonPaths, type HarnessCatalogAnswer } from "@wsp/protocol";
-import { createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
+import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, GUEST_DAEMON_DIR, GUEST_WSP_BIN, shellQuote, signInRefusalLine, sshDaemonPaths, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { copyKey, createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { isReserved, LocalBackend, NoProviderBackend } from "@wsp/engine";
 import {
@@ -81,7 +81,7 @@ describe("promoteGoldens", () => {
     const backend = stubBackend();
     backend.capabilities.templates = true;
     const store = memoryStore();
-    await store.put("goldens", "default", { head: 3, versions: [version(1), version(2), version(3, "tpl_three")] });
+    await store.put("goldens", copyKey("default", "default"), { head: 3, versions: [version(1), version(2), version(3, "tpl_three")] });
     for (const n of [1, 2, 3]) backend.snapshots.push({ id: `snap_golden-v${n}`, sizeBytes: 8e9 });
     // A template already under this version's own name, from a run that recorded nothing: counted, never adopted.
     backend.templates.set("tpl_stale", { id: "tpl_stale", name: "wsp-h1-default-v1", status: "ready", snapshotId: "snap_golden-v1" });
@@ -93,7 +93,7 @@ describe("promoteGoldens", () => {
       "golden default v2: template tpl_wsp-h1-default-v2 promoted and recorded",
     ]);
     expect(backend.promoted).toEqual([{ snapshotId: "snap_golden-v1", name: "wsp-h1-default-v1" }, { snapshotId: "snap_golden-v2", name: "wsp-h1-default-v2" }]);
-    expect(((await store.get("goldens", "default")) as { versions: { templateId?: string }[] }).versions.map(v => v.templateId)).toEqual(["tpl_wsp-h1-default-v1", "tpl_wsp-h1-default-v2", "tpl_three"]);
+    expect(((await store.get("goldens", copyKey("default", "default"))) as { versions: { templateId?: string }[] }).versions.map(v => v.templateId)).toEqual(["tpl_wsp-h1-default-v1", "tpl_wsp-h1-default-v2", "tpl_three"]);
     expect(await promoteGoldens(rt, cli)).toBe("every version already has a template");
   });
 
@@ -101,7 +101,7 @@ describe("promoteGoldens", () => {
     const backend = stubBackend();
     backend.capabilities.templates = true;
     const store = memoryStore();
-    await store.put("goldens", "default", { head: 2, versions: [version(1), version(2)] });
+    await store.put("goldens", copyKey("default", "default"), { head: 2, versions: [version(1), version(2)] });
     // v1's snapshot is not in the provider's listing: the vanish the ticket is about.
     backend.snapshots.push({ id: "snap_golden-v2", sizeBytes: 8e9 });
     const rt = createRuntime({ backend, store, adapters: {}, hostId: "h1" });
@@ -111,7 +111,7 @@ describe("promoteGoldens", () => {
       "golden default v1: no template recorded, its snapshot is gone at the provider",
       "golden default v2: template tpl_wsp-h1-default-v2 promoted and recorded",
     ]);
-    expect(((await store.get("goldens", "default")) as { versions: { templateId?: string }[] }).versions.map(v => v.templateId)).toEqual([undefined, "tpl_wsp-h1-default-v2"]);
+    expect(((await store.get("goldens", copyKey("default", "default"))) as { versions: { templateId?: string }[] }).versions.map(v => v.templateId)).toEqual([undefined, "tpl_wsp-h1-default-v2"]);
 
     backend.promoteSnapshot = async () => {
       throw Object.assign(new Error("upstream unavailable"), { kind: "unavailable", status: 502 });
@@ -160,7 +160,7 @@ describe("cleanOrphans", () => {
     const backend = stubBackend();
     backend.capabilities.templates = true;
     const store = memoryStore();
-    await store.put("goldens", "default", { head: 1, versions: [version(1, "tpl_wsp-h1-default-v1")] });
+    await store.put("goldens", copyKey("default", "default"), { head: 1, versions: [version(1, "tpl_wsp-h1-default-v1")] });
     backend.snapshots.push(
       { id: "snap_wsp-h1-default-v1", name: "wsp-h1-default-v1", sizeBytes: 12 * GB, createdAt: OLD },
       { id: "snap_orphan", name: "wsp-h1-default-v9", sizeBytes: 20 * GB, createdAt: OLD },
@@ -224,7 +224,7 @@ describe("cleanOrphans", () => {
     const backend = stubBackend();
     backend.capabilities.templates = true;
     const store = memoryStore();
-    await store.put("goldens", "default", { head: 1, versions: [version(1)] });
+    await store.put("goldens", copyKey("default", "default"), { head: 1, versions: [version(1)] });
     backend.snapshots.push({ id: "snap_wsp-h1-default-v1", name: "wsp-h1-default-v1", sizeBytes: 8 * GB });
     const rt = createRuntime({ backend, store, adapters: {}, hostId: "box:h1" });
     const { lines, io: cli } = io();
@@ -303,7 +303,7 @@ describe("verifyNoneLeft", () => {
   it("the fork this host makes wears the stamp the check counts by, so a workspace left behind still fails it", async () => {
     const backend = stubBackend();
     const store = memoryStore();
-    await store.put("goldens", "default", SEALED_GOLDEN);
+    await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
     const rt = createRuntime({ backend, store, adapters: {} });
     const view = await rt.workspaces.create({ golden: SEALED_GOLDEN.versions[0]!.snapshotId, name: "doctor-fork" });
     expect(backend.machines[0]?.spec.labels?.["wsp-owner"]).toBe(await rt.owner());
@@ -1281,6 +1281,27 @@ describe("the doctor's local road", () => {
     const io = record();
     expect(await localDoctor(rt, io)).toBe(1);
     expect(io.lines.join("\n")).toContain('DOCTOR FAIL: the reply did not carry the word this run asked for: "sure thing"');
+    expect(await rt.workspaces.list()).toEqual([]);
+    await rt.close();
+  });
+
+  it("a turn the agent refused fails the run with the refusal's own sentence: it is the turn's error, and a refusal carries no reply to read", async () => {
+    const refused: HarnessAdapterFactory = () => ({
+      steers: false,
+      probeCatalog: async () => ({ version: "9.9.9", models: [], efforts: [], permissionModes: [] }),
+      start: ({ onEvent }) => {
+        const sessionId = "33333333-3333-4333-8333-333333333333";
+        const result = { status: "failed", error: `Not logged in · Please run /login; ${signInRefusalLine({ kind: "local" })}`, refusal: "sign-in" } as const;
+        onEvent({ type: "session.start", sessionId });
+        onEvent({ type: "turn.done", sessionId, result });
+        onEvent({ type: "session.end", sessionId, exitCode: 1, sawResult: true });
+        return { localId: sessionId, finished: Promise.resolve(result), interrupt: async () => {} };
+      },
+    });
+    const { rt } = localRuntime({ claude: refused });
+    const io = record();
+    expect(await localDoctor(rt, io)).toBe(1);
+    expect(io.lines.join("\n")).toContain(`DOCTOR FAIL: the turn ended failed: Not logged in · Please run /login; ${signInRefusalLine({ kind: "local" })}`);
     expect(await rt.workspaces.list()).toEqual([]);
     await rt.close();
   });

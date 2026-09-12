@@ -62,6 +62,7 @@ import {
   goneWords,
   harnessExitLine,
   isCodeSearchTool,
+  guestUnusableLine,
   kindWords,
   listedName,
   loginPathLine,
@@ -122,8 +123,11 @@ import {
   TURN_IDLE_MS,
   TURN_WALL_MS,
   turnCutLine,
+  turnEndLine,
   turnSettledLine,
   turnSettledParts,
+  refusedTurn,
+  signInRefusalLine,
   upgradeSealFailedGoneLine,
   upgradeSealFailedStaysLine,
   upgradeSealFailedUnreadLine,
@@ -714,6 +718,32 @@ describe("timedOutLine and stepRetryLine", () => {
   });
 });
 
+describe("refusedTurn", () => {
+  it("a refused turn reads failed and carries the agent's sentence with wsp's half, the cause it is classed by, and no reply of its own", () => {
+    const road = signInRefusalLine({ kind: "local" });
+    const refused = refusedTurn({ status: "completed", durationMs: 88, costUsd: 0, text: "Not logged in · Please run /login" }, { road, cause: "sign-in" });
+    expect(refused).toEqual({
+      status: "failed",
+      durationMs: 88,
+      costUsd: 0,
+      error: "Not logged in · Please run /login; sign in from a terminal on this computer, then send again",
+      refusal: "sign-in",
+    });
+    expect(turnEndLine(refused)).toBe(`failed · Worked for 88ms · $0.0000: ${refused.error!}`);
+    expect(notifyTail(refused)).toBe(refused.error);
+  });
+
+  it("a refusal wsp knows no road out of keeps the agent's sentence alone and is classed by nothing; one with neither sentence nor road says only failed", () => {
+    expect(refusedTurn({ status: "completed", text: "  Overloaded  ", usage: { input_tokens: 0 } }, { road: "" })).toEqual({ status: "failed", usage: { input_tokens: 0 }, error: "Overloaded" });
+    expect(refusedTurn({ status: "completed", error: "the provider refused" })).toEqual({ status: "failed", error: "the provider refused" });
+    expect(refusedTurn({ status: "completed" })).toEqual({ status: "failed" });
+  });
+
+  it("a result carrying both a reply and a harness error entry says the reply, once: the entry is the harness's telemetry beside the same sentence", () => {
+    expect(refusedTurn({ status: "completed", text: "Not logged in", error: "Not logged in" })).toEqual({ status: "failed", error: "Not logged in" });
+  });
+});
+
 describe("harnessExitLine", () => {
   it("exit 127 names the binary the shell could not find and the PATH it searched, never the bare code alone", () => {
     const path = "/root/.local/bin:/usr/bin:/bin";
@@ -735,6 +765,13 @@ describe("loginPathLine", () => {
   it("names why the login shell gave no PATH and says the one the launch handed the host stands", () => {
     expect(loginPathLine("/bin/zsh printed nothing")).toBe("login shell: no PATH read (/bin/zsh printed nothing); this host keeps the PATH it was started with");
     expect(loginPathLine("SHELL names no login shell")).toBe("login shell: no PATH read (SHELL names no login shell); this host keeps the PATH it was started with");
+  });
+});
+
+describe("guestUnusableLine", () => {
+  it("names the provider, the machine it left running and what the guest said when nothing on it would run", () => {
+    expect(guestUnusableLine("Box by ASCII", "bx_tumrjngm", "bash: error while loading shared libraries: libtinfo.so.6: cannot open shared object file: Error 24"))
+      .toBe("Box by ASCII left bx_tumrjngm running but nothing on it can run: bash: error while loading shared libraries: libtinfo.so.6: cannot open shared object file: Error 24");
   });
 });
 

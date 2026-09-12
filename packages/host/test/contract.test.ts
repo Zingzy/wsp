@@ -14,15 +14,16 @@ import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { EXIT_CODES, VerbFailure } from "@wsp/protocol";
-import { createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
+import { copyKey, createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { z } from "zod";
 import { cli, jsonCliIO, serve } from "../src/cli.js";
+import { placeWiring } from "../src/places.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import { mcpServer } from "../src/mcp.js";
 import type { HostHandle } from "../src/server.js";
-import { CLI_VERBS } from "../src/verbs.js";
+import { CLI_VERBS, hasTool } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, scriptedAgent, type Captured } from "./verbs-fixture.js";
@@ -49,11 +50,11 @@ describe("the agent contract on the command line and the tool door", () => {
     vi.stubEnv("WSP_HOME", join(dir, "home"));
     backend = stubBackend();
     store = memoryStore();
-    await store.put("goldens", "default", SEALED_GOLDEN);
+    await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
     const claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`), () => ({ kind: "written" }));
     // The confirming read a gone verdict waits for runs on the same tick: this backend's 404 is the whole truth, so
     // the wait only buys the contract a five second pause on the road to a rebuild.
-    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter }, goneConfirmMs: 0 });
+    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter }, goneConfirmMs: 0, placeLinks: placeWiring(statePath, {}, {}) });
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
     vi.stubEnv("SOLARI_API_KEY", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "");
@@ -105,6 +106,7 @@ describe("the agent contract on the command line and the tool door", () => {
     });
     await last("workspaces agents", "workspaces", "agents", "alpha", "--spawn", "off");
     await last("threads", "threads");
+    await last("places", "places");
     await last("setup", "setup");
     // One level of this computer's own folders: the home folder this test stubbed, with a folder inside it to list.
     mkdirSync(join(dir, "user", "code"), { recursive: true });
@@ -129,6 +131,8 @@ describe("the agent contract on the command line and the tool door", () => {
     await last("wake", "wake", "alpha");
     // Already on the golden's head, so the move is the answer alone: the workspace untouched and nothing kept.
     expect(await last("image move", "image", "move", "alpha")).toEqual({ workspace: expect.objectContaining({ name: "alpha" }), moved: false, kept: [] });
+    // The seeded golden was sealed before records existed, so the record reads off its head and holds no sign-ins.
+    expect(await last("image", "image")).toMatchObject({ image: expect.objectContaining({ version: 1 }), copies: [expect.objectContaining({ place: "default" })], projects: expect.any(Array) });
     const opened = (await last("thread new", "thread", "new", "--in", "alpha", "hello")) as { threadId: string; text: string };
     expect(opened).toMatchObject({ threadId: expect.any(String), text: "re: hello", outcome: "started" });
     await last("send", "send", opened.threadId, "again");
@@ -172,16 +176,17 @@ describe("the agent contract on the command line and the tool door", () => {
     const rebuilt = (await last("rebuild", "rebuild", alpha)) as { workspace: { id: string; machineId: string } };
     expect(rebuilt.workspace.id).toBe(alpha);
     await last("delete", "delete", alpha, "--yes");
-    expect(CLI_VERBS.filter(v => v.tool.stream !== undefined).map(v => [v.name, v.tool.stream])).toEqual([["fork", ["workspace", "notice"]], ["exec", ["output"]], ["import", ["plan"]]]);
+    const served = CLI_VERBS.filter(hasTool);
+    expect(served.filter(v => v.tool.stream !== undefined).map(v => [v.name, v.tool.stream])).toEqual([["fork", ["workspace", "notice"]], ["exec", ["output"]], ["import", ["plan"]]]);
 
-    for (const verb of CLI_VERBS) {
+    for (const verb of served) {
       const value = covered.get(verb.name);
       expect(value, `no --json run of wsp ${verb.name} in this test`).toBeDefined();
       const shape = z.object(verb.tool.output);
       const parsed = shape.omit(Object.fromEntries((verb.tool.stream ?? []).map(field => [field, true]))).strict().safeParse(value);
       expect(parsed.success, `wsp ${verb.name} --json ends with ${JSON.stringify(value)}\n${parsed.success ? "" : parsed.error.message}`).toBe(true);
     }
-    expect([...covered.keys()].sort()).toEqual(CLI_VERBS.map(v => v.name).sort());
+    expect([...covered.keys()].sort()).toEqual(served.map(v => v.name).sort());
   });
 
   it("a usage refusal exits 3: the parser's, a verb's own before anything is dialled, and a confirmation nobody is there to give; under --json the one stderr line is the failure object", async () => {
