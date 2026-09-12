@@ -288,6 +288,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     /** The daemon links this socket holds open, by the id it was answered with. A channel is never reachable from
      * another socket, so a page cannot drive a machine by guessing an id another page was given. */
     const channels = new Map<string, DaemonChannel>();
+    /** The workspaces this socket already reads this computer's own figures for. */
+    const watchedSys = new Set<string>();
     detaches.push(() => {
       for (const ch of channels.values()) ch.close();
       channels.clear();
@@ -691,6 +693,28 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               if (ch === undefined) throw new Error("no such daemon channel on this socket");
               channels.delete(msg.channel);
               ch.close();
+              send({ id: msg.id, ok: true });
+              return;
+            }
+            case "sys.subscribe": {
+              // One subscription per workspace per socket: a person opening the pane a second time reads the same
+              // stream, and the sampler behind it stays the one thing reading this computer.
+              if (watchedSys.has(msg.workspaceId)) {
+                send({ id: msg.id, ok: true });
+                return;
+              }
+              const workspaceId = msg.workspaceId;
+              watchedSys.add(workspaceId);
+              const detach = await rt.workspaces.watchSys(workspaceId, sample => send({ type: "workspace.sys", workspaceId, sample }), origin).catch((e: unknown) => {
+                watchedSys.delete(workspaceId);
+                throw e;
+              });
+              // The page left while the first reading was in flight; nothing keeps sampling for a socket that is gone.
+              if (ws.readyState !== ws.OPEN) {
+                detach();
+                return;
+              }
+              detaches.push(detach);
               send({ id: msg.id, ok: true });
               return;
             }

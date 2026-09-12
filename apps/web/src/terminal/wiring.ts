@@ -6,7 +6,7 @@
 // re-attaches its ptys. The same link is the browser's only source of ports:
 // the daemon pushes port events only to sockets that asked with ports.watch,
 // and a subscription dies with the channel, so every live transition asks again.
-import { daemonVersionOf, type DaemonLinkStatus } from "@wsp/protocol";
+import { daemonVersionOf, readingRoad, workspaceKind, type DaemonLinkStatus } from "@wsp/protocol";
 import { getBrowser } from "../browser/model.js";
 import { provideDaemonHello, provideDaemonWire } from "../files/wire.js";
 import { errorText } from "../lib/utils.js";
@@ -66,6 +66,10 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
         provideDaemonWire(w.id, wire);
       }
       const { wt } = entry;
+      // Whose reading the Live rows wait on: this computer's own are read in the host and arrive on the page's
+      // socket (machine/hostLive.ts), so asking its daemon for the same stream would set a second sampler going on
+      // the same machine and put a link's health over figures that do not ride that link.
+      const sysFromDaemon = readingRoad(workspaceKind(w), "metrics") === "daemon";
       const up = w.phase === "running" && hostUp;
       if (up && !entry.link) {
         const browser = getBrowser(w.id);
@@ -88,14 +92,15 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
           onStatus: (s, refusal) => {
             if (s === "live") {
               link.request("ports.watch").then(r => browser.syncPorts(r["ports"]), () => {});
-              link.request("sys.watch").then(
-                () => getLive(w.id).feedUnavailable(null),
-                (e: unknown) => getLive(w.id).feedUnavailable(errorText(e)),
-              );
+              if (sysFromDaemon)
+                link.request("sys.watch").then(
+                  () => getLive(w.id).feedUnavailable(null),
+                  (e: unknown) => getLive(w.id).feedUnavailable(errorText(e)),
+                );
             }
             if (s !== "dead") {
               wt.feedStatus(s, refusal);
-              getLive(w.id).feedStatus(s);
+              if (sysFromDaemon) getLive(w.id).feedStatus(s);
               getProcs(w.id).feedStatus(s);
             }
           },
@@ -108,7 +113,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
         const parked: DaemonLinkStatus = wt.everLive() ? "connecting" : NOT_OPENED_YET;
         unlink(entry);
         wt.feedStatus(parked);
-        getLive(w.id).feedStatus(parked);
+        if (sysFromDaemon) getLive(w.id).feedStatus(parked);
         getProcs(w.id).feedStatus(parked);
       }
     }

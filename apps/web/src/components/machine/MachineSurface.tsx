@@ -14,7 +14,7 @@ import { CLIENT_CANNOT_REBUILD } from "../../actions/format.js";
 import { actionById, resolveActions, rowLabelOf } from "../../actions/registry.js";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { workspaceActions, workspaceTarget } from "../../actions/workspaceActions.js";
-import { FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, LINEAGE_MARKS, NOT_ON_THIS_KIND, agentsLine, behindGoldenLine, biggerSizeLine, diskTone, fmtBytes, fmtBytesOfTotal, fmtRate, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageKeptLine, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, resizesMachines, sizeWord, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspaceProjects, workspaceState, workspaceStateOf, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SizeTone, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, LINEAGE_MARKS, NOT_ON_THIS_KIND, agentsLine, behindGoldenLine, biggerSizeLine, diskTone, fmtBytes, fmtBytesOfTotal, fmtRate, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageKeptLine, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, resizesMachines, servesReading, sizeWord, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspaceProjects, workspaceState, workspaceStateOf, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SizeTone, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { isDesktopShell } from "../../lib/desktopShell.js";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, useOutOfMemoryReading, useWorkspaceLive } from "../../machine/live.js";
@@ -79,7 +79,7 @@ function Surface({ workspace, series }: { workspace: WorkspaceView; series: Work
       <ScrollArea className="min-h-0 flex-1">
         <Facts workspace={workspace} status={status} awakeMs={last ? last.awakeMs : null} pendingSize={pendingSize} kind={kind} />
         <Projects workspace={workspace} status={status} kind={kind} onTaken={goldens.add} />
-        <Live workspace={workspace} kind={kind} />
+        <Live workspace={workspace} />
         {kind.driven && <Usage workspace={workspace} status={status} series={series} />}
         {kind.driven && <GoldenLineage workspace={workspace} projects={goldens.list} />}
       </ScrollArea>
@@ -433,11 +433,11 @@ type Stale = "napping" | "unreachable" | null;
  * to serve them without anyone here asking: the machine's row says so while it does. A kind whose machines read no
  * metrics at all says so in the slots instead, rather than pending forever: no slot waits on a stream that will
  * never come. */
-function Live({ workspace, kind }: { workspace: WorkspaceView; kind: WorkspaceKindWords }) {
+function Live({ workspace }: { workspace: WorkspaceView }) {
   const live = useWorkspaceLive(workspace.id);
   const last = live.samples[live.samples.length - 1];
   const stale: Stale = workspace.phase === "napping" || workspace.phase === "pausing" ? "napping" : live.reach === "live" ? null : "unreachable";
-  const kindWord = kind.metrics ? null : NOT_ON_THIS_KIND;
+  const kindWord = servesReading(workspaceKind(workspace), "metrics") ? null : NOT_ON_THIS_KIND;
   const share = (m: { used: number; total: number }): number => (m.total > 0 ? (m.used / m.total) * 100 : 0);
   const row = { kindWord, stale, unavailable: live.unavailable, samples: live.samples };
   return (

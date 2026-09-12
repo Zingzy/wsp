@@ -53,7 +53,9 @@ import { askFirst } from "./init-first.js";
 import { buildBesideHost } from "./init-beside.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 import { addressLines, dialAddress, hostLogPath, hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
-import type { LocalDaemon } from "./local-daemon.js";
+import type { LocalDaemon, LocalDaemonOptions } from "./local-daemon.js";
+import { localSysSamples } from "./local-readings.js";
+import { startOnce } from "./start-once.js";
 import {
   hostThereLines,
   httpProbe,
@@ -588,33 +590,41 @@ function statePathFrom(flag?: string, env: Readonly<Record<string, string | unde
  * folders stay reachable, as they are to any shell they open, but nothing starts a turn in one. */
 export const localWorkFolder = (home: string): string => join(home, "wsp-work");
 
+/** How this host starts the daemon for its local workspace. Behind a parameter so a test can hand one that refuses
+ * to start; the default loads the daemon module on the first dial, so a host nobody opens a pane on loads none of it. */
+export type LocalDaemonStart = (opts: LocalDaemonOptions) => Promise<LocalDaemon>;
+
 /** This computer as a workspace: the local backend, a real child process per turn under the turn's limits, each
  * harness's own store (the one their store variable names, else the default under the person's home), and the
  * person's own login environment for every turn, the same one wsp exec runs under, so the keys and tools a terminal
  * gives an agent reach it here too. The adapters strip their own agent-session variables from it, as they do on a
  * fork. The person's home and the folder work starts in are two facts: the stores are theirs, so a sign-in they
  * made is the one a turn uses, and the work folder is the workspace's own. */
-export function localWiring(home = homedir(), env: Readonly<Record<string, string | undefined>> = process.env): LocalWiring {
+export function localWiring(home = homedir(), env: Readonly<Record<string, string | undefined>> = process.env, startDaemon: LocalDaemonStart = opts => import("./local-daemon.js").then(m => m.LocalDaemon.start(opts))): LocalWiring {
   const root = localWorkFolder(home);
   // The person whose sign-ins a turn here reads. Their login home, except under a harness serving a fixture out of
   // a home of its own: that home holds this host's files, and a turn started under it finds no sign-in at all.
   const person = homeNamed(env[PERSON_HOME_ENV]) ?? home;
-  // Started on the first dial and kept: a host nobody opens a pane on never binds a port on this computer, and
-  // never dlopens the native module @wsp/daemon's import of node-pty loads. The desktop package ships that module
-  // beside its bundle, so the deferred edge is about the port and the load, not about a missing file.
-  let daemon: Promise<LocalDaemon> | undefined;
   let shutting = false;
   const backend = new LocalBackend({ root, env });
+  // Started on the first dial and kept: a host nobody opens a pane on binds no port on this computer and writes
+  // none of the daemon's own files under the person's home. The native module a pty takes is loaded at the first
+  // pty and not by this import, so the deferred edge is the port and those files, nothing else.
+  const daemon = startOnce(
+    () => startDaemon({ root: home, workFolder: backend.workFolder() }),
+    why => `the daemon for this computer's workspace did not start, so its terminal, files and processes have nothing to dial: ${why}`,
+  );
   return {
     backend,
     execStream: o => localExecStream({ root: backend.workFolder(), ...o }),
     home: id => agentHome(person, id, env),
     homeDir: home,
     env: () => ({ ...Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined)), HOME: person }),
+    sysSamples: localSysSamples({ root: home, workFolder: () => backend.workFolder() }),
     daemonRoad: async () => {
       // The panes stay on the person's home: the files and terminal tabs are theirs to look around in, where a
       // turn's own folder is the workspace's.
-      const started = await (daemon ??= import("./local-daemon.js").then(m => m.LocalDaemon.start({ root: home, workFolder: backend.workFolder() })));
+      const started = await daemon.get();
       // A dial that lands while the host is closing must leave no socket behind: a listening one keeps this process up.
       if (shutting) {
         await started.close().catch(() => {});
@@ -624,8 +634,8 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
     },
     close: async () => {
       shutting = true;
-      const started = daemon;
-      daemon = undefined;
+      const started = daemon.held();
+      daemon.forget();
       // A turn here leads a process group of its own, so it no longer goes with the terminal's Ctrl-C: this host is
       // the only thing that knows where its turns are, and nothing can re-open one once it is gone.
       await endLocalRuns();
