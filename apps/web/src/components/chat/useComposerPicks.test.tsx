@@ -77,8 +77,8 @@ const read = (model: string | null, threadKey = "t1") => {
 /** Picks an access the way the picker does, through the hook the composer hands the access menu. */
 function pickAccess(mode: string, threadKey: string): void {
   function Access() {
-    const access = useAccessPick(WORKSPACE, null, threadKey);
-    return <button type="button" onClick={() => access.pick(mode, mode)} />;
+    const access = useAccessPick(WORKSPACE, null, threadKey, true);
+    return <button type="button" onClick={() => access.pick(mode)} />;
   }
   const view = render(<Access />);
   act(() => view.getByRole("button").click());

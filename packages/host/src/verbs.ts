@@ -2845,10 +2845,10 @@ export const VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "The folders directly inside one folder on the person's own computer, one level at a time, as the app's import dialog browses them in a browser tab: each folder's absolute path, whether git tracks it, and how many dot-named ones the level holds. Browse this to name a folder for import instead of guessing a path. The roots are the person's home folder and every folder already imported into a workspace; a path outside those is refused, and folder absent lists the first root. Folders only: no file is named and nothing is read.",
+        "The folders directly inside one folder on the person's own computer, one level at a time, as the app's import dialog browses them in a browser tab: each folder's absolute path, whether git tracks it, and how many hidden ones the level holds. Browse this to name a folder for import instead of guessing a path. The roots are the person's home folder and every folder already imported into a workspace; a path outside those is refused, and folder absent lists the first root. Folders only: no file is named and nothing is read.",
       input: {
         folder: z.string().optional().describe("the folder to list, absolute and inside the roots; absent lists the home folder"),
-        hidden: z.boolean().optional().describe("true lists the dot-named folders too, which are otherwise only counted"),
+        hidden: z.boolean().optional().describe("true lists the hidden folders too, which are otherwise only counted"),
       },
       output: HostFolderListing.shape,
       call: async ({ folder, hidden }, deps) => {

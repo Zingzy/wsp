@@ -11,7 +11,7 @@ import { z } from "zod";
 import { DEFAULT_PLACE_PORT } from "./app-ports.js";
 import { HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
-import { openingTitle, threadWord, titleLine } from "./format.js";
+import { openingTitle, PLACE_LEAVE_LINE, threadWord, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
 import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
@@ -453,6 +453,14 @@ export type WorkspaceView = z.infer<typeof WorkspaceView>;
 export const MachineFacts = z.object({ os: z.string(), uptimeMs: z.number(), folder: z.string() });
 export type MachineFacts = z.infer<typeof MachineFacts>;
 
+/** Whether the machine that reported this system name is a Mac: the name its maker gives it, and the kernel's own
+ * word where the machine answered nothing better, which is what a machine on this computer falls back to. The
+ * folder browsers read it beside the home to know whether that home keeps a Library. Absent is not a Mac: what
+ * reads this hides a folder, and a machine that said nothing has said nothing to hide. */
+export function isMacMachine(osName: string | null | undefined): boolean {
+  return /^(?:macOS|Darwin)\b/.test(osName ?? "");
+}
+
 /** WorkspaceView enriched with what the rail and meta panel render live. */
 export const WorkspaceStatus = WorkspaceView.extend({
   machineState: MachineState,
@@ -739,6 +747,10 @@ export const HarnessCatalog = z.object({
    * mcpServers this is the adapter's own declaration and no binary's, so a table row is the answer and a client reads
    * it before any machine exists; absent is none. The composer lists none of them and sends nothing for one. */
   screenCommands: z.array(ScreenCommand).optional(),
+  /** Whether an access picked while a turn of this harness runs reaches that turn. The adapter in this host declares
+   * it, as with mcpServers, so the picker says what a pick does to the turn in front of the person before the pick
+   * rather than under the box after it. Read it through movesRunningAccess: absent is a no. */
+  movesAccess: z.boolean().optional(),
   /** Set on the harness a start without one runs, so a client can pick its list without the catalog package. */
   isDefault: z.boolean().optional(),
   /** Why the binary described nothing, in its own adapter's words, when it ran and refused for a reason it can name
@@ -822,6 +834,13 @@ export function readsImages(catalog: HarnessCatalog | null | undefined): boolean
  * machine exists. Absent is a no, which is a catalog from before the field was declared. */
 export function takesMcpServers(catalog: Pick<HarnessCatalog, "mcpServers"> | null | undefined): boolean {
   return catalog?.mcpServers === true;
+}
+
+/** Whether an access picked while a turn runs reaches that turn on this harness. The adapter's own declaration, like
+ * takesMcpServers; absent is a no, which is a catalog from before the field was declared, and a pick then waits for
+ * the person's next message. */
+export function movesRunningAccess(catalog: Pick<HarnessCatalog, "movesAccess"> | null | undefined): boolean {
+  return catalog?.movesAccess === true;
 }
 
 /** Whatever carries a harness's screen-only commands: the catalog itself, or a caller that holds the list alone. */
@@ -2151,6 +2170,21 @@ export const PLACE_ADD_WORDS: Record<PlaceAddStep, string> = {
   join: "waiting for it to connect to this computer",
 };
 
+/** Where the app's sheet says a step differently from the line a terminal prints. The sheet's road is a Linux box
+ * and its own description names this Mac; the same install from a terminal reaches a Mac too, on a host that need
+ * not be one, so the words above stay as they are. `done` is read once a step is finished, where a line under a
+ * check would otherwise say the wait it was in rather than the state it reached. */
+export const PLACE_ADD_SHEET_WORDS: Partial<Record<PlaceAddStep, { word: string; done?: string }>> = {
+  service: { word: "starting the agent under systemd" },
+  join: { word: "waiting for it to connect to this Mac", done: "connected to this Mac" },
+};
+
+/** The word the app's sheet draws for a step in the state it is in. */
+export function placeAddSheetWord(step: PlaceAddStep, state: "running" | "done"): string {
+  const said = PLACE_ADD_SHEET_WORDS[step];
+  return (state === "done" ? said?.done : undefined) ?? said?.word ?? PLACE_ADD_WORDS[step];
+}
+
 /** How far the install on one computer has got, keyed by the id the request was answered with, so two installs at
  * once are two lists. A step that is running is the one with a spinner; one that is done carries its note. */
 export const PlaceStageEvent = z.object({
@@ -3186,7 +3220,7 @@ export const placeAbsentLine = (name: string): string => `${name} is not connect
 
 /** What a remove says about a place that was not linked when it ran: the records here are gone and the agent on
  * that computer is not, since nothing could reach it to sweep. */
-export const placeStillInstalledLine = (name: string): string => `${name} is off this host, but the agent on it is still installed; run wsp leave on that computer when it is back`;
+export const placeStillInstalledLine = (name: string): string => `${name} is off this host, but the agent on it is still installed; run ${PLACE_LEAVE_LINE} on that computer when it is back`;
 
 /** What a remove says about each workspace that stood on the place it took out: the record and its threads leave
  * this host, and the computer keeps its own files, since wsp never made them. */
@@ -3309,7 +3343,7 @@ export function parsePlaceFile(text: string): PlaceFile | undefined {
 export const placeFileText = (file: PlaceFile): string => `${JSON.stringify(file, null, 2)}\n`;
 
 /** The refusal a second join on one computer gets: a place file is the one wsp this computer belongs to. */
-export const ALREADY_JOINED_LINE = "this computer is already a place in a wsp; wsp leave first";
+export const ALREADY_JOINED_LINE = `this computer is already a place in a wsp; ${PLACE_LEAVE_LINE} first`;
 
 const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("auth"), token: z.string() }),
@@ -3593,7 +3627,7 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("workspaces.exec"), workspaceId: z.string(), argv: z.array(z.string()).min(1), cwd: z.string().optional() }),
   /** Replies with { listing: HostFolderListing }: one level of this computer's own folders, for the picker a browser
    * tab has instead of the desktop shell's dialog. `dir` absent lists the first root and a folder inside the roots
-   * that is gone does the same; a path outside them is refused. `hidden` lists the dot-named folders too, which are
+   * that is gone does the same; a path outside them is refused. `hidden` lists the hidden folders too, which are
    * otherwise only counted. */
   z.object({ id: reqId, op: z.literal("host.folders"), dir: z.string().optional(), hidden: z.boolean().optional() }),
   /** Replies with { config: TerminalConfig }: the person's Ghostty config on the computer running the host, read
@@ -3803,11 +3837,12 @@ export type SessionSteerResult = z.infer<typeof SessionSteerResult>;
 
 // --- session access (what a pick made while a turn runs gets back) ---------------------
 
-/** set: the harness took the mode and this turn's next tool call runs at it. unsupported: the harness takes no
- * access change on a turn already under way (Claude Code's bypass, which is a launch flag on that CLI), so the pick
- * waits for the person's next message. not-running: the turn ended, or its process is gone, before the pick reached
- * it. not-found: this runtime holds no such session. None is an error reply, as a mode the harness's own list does
- * not carry is. */
+/** set: the turn is at the mode, from its next tool call and on the prompt it was stopped on where that mode
+ * answers one; a harness whose CLI takes the change only at launch is set too, where its adapter stands in for it
+ * by answering that turn's prompts itself. unsupported: the harness takes no access change on a turn already under
+ * way and nothing could stand in for it, so the pick is kept and the person's next message carries it.
+ * not-running: the turn ended, or its process is gone, before the pick reached it. not-found: this runtime holds no
+ * such session. None is an error reply, as a mode the harness's own list does not carry is. */
 export const SessionAccessOutcome = z.enum(["set", "not-running", "unsupported", "not-found"]);
 export type SessionAccessOutcome = z.infer<typeof SessionAccessOutcome>;
 export const SessionAccessResult = z.object({ outcome: SessionAccessOutcome });
@@ -3976,7 +4011,7 @@ export {
   type Rgb,
   type ThemePreset,
 } from "./workspace-look.js";
-export { folderName, parentFolderName, placeDaemonPaths, placeOwnedPaths, rootsPathIn, sshDaemonPaths, underProject, workFolderIn } from "./project-path.js";
+export { folderName, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, rootsPathIn, sshDaemonPaths, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importDest, importRequest, registerRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";

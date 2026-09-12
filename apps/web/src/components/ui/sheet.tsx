@@ -89,6 +89,9 @@ function SheetPopup({
               "col-start-2 w-[calc(100%-(--spacing(12)))] max-w-md border-s data-ending-style:translate-x-8 data-starting-style:translate-x-8",
             variant === "inset" &&
               "before:hidden sm:rounded-2xl sm:border sm:before:rounded-[calc(var(--radius-2xl)-1px)] sm:**:data-[slot=sheet-footer]:rounded-b-[calc(var(--radius-2xl)-1px)]",
+            // An inset sheet at a side is as tall as what it holds: it stands at the top of the padded viewport and
+            // grows downward, and max-h-full caps it at the window less that padding, past which its panel scrolls.
+            variant === "inset" && (side === "right" || side === "left") && "self-start",
             className,
           )}
           data-slot="sheet-popup"
@@ -171,7 +174,11 @@ function SheetPanel({
   ...props
 }: React.ComponentProps<"div"> & { scrollFade?: boolean }) {
   return (
-    <ScrollArea scrollFade={scrollFade}>
+    // The body takes what the header and the footer leave and shrinks below its content: a sheet stands at its
+    // content's height until the popup's cap, and past it this is the box that scrolls, so the footer stays in
+    // view. The column is what makes the scroller itself shrink: its height is a percentage of a box the flex
+    // layout sized, which resolves to the content's height, and the sheet would clip rather than scroll.
+    <ScrollArea className="flex min-h-0 flex-1 flex-col" scrollFade={scrollFade}>
       <div
         className={cn(
           "p-6 in-[[data-slot=sheet-popup]:has([data-slot=sheet-header])]:pt-1 in-[[data-slot=sheet-popup]:has([data-slot=sheet-footer]:not(.border-t))]:pb-1",

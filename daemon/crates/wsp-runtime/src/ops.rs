@@ -2,7 +2,7 @@
 //! Every machine op on the link, answered as the Docker backend on a place answers them, so the host's link
 //! backend needs no change: the same handles, rows and results, and every refusal as `{ ok: false, error, kind,
 //! status }` with `kind: missing` for a workspace nothing here knows. A workspace is a record under the run
-//! directory, a container youki made from the store's layers, and its cgroup.
+//! directory, a container youki made from the store's layers, its cgroup, and its network.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -19,14 +19,15 @@ use tokio::sync::Mutex;
 use wsp_frames::{
     BackendFacts, BackendPricing, BaseTemplates, Capabilities, DaemonErrorResponse, DaemonSupervisor, ExecResult, Lifecycle,
     LifecycleBudgets, MachineAnswersReply, MachineCounts, MachineErrorKind, MachineExecReply, MachineHandle, MachineHandleReply,
-    MachineKind, MachineLinkRequest, MachineListReply, MachineListRow, MachineOp, MachineRoads, MachineSeen, MachineShape,
-    MachineShapeReply, MachineSizeOffer, MachineSpec, MachineState, MachineStateReply, PauseMode, PlaceCapacity, PlaceImage, Reply,
-    RequestId, SnapshotStoragePricing, WorkspaceSize,
+    MachineKind, MachineLinkRequest, MachineListReply, MachineListRow, MachineOp, MachineReachReply, MachineRoads, MachineSeen,
+    MachineShape, MachineShapeReply, MachineSizeOffer, MachineSpec, MachineState, MachineStateReply, PauseMode, PlaceCapacity, PlaceImage,
+    PreviewReach, Reply, RequestId, SnapshotStoragePricing, WorkspaceSize,
 };
 
 use crate::bundle::{self, Config, Init, Layout, Workspace};
 use crate::fetch::{self, Client, Reference};
 use crate::freeze;
+use crate::net::{self, Net};
 use crate::profile;
 use crate::runtime::{self, Runtime, Status};
 use crate::store::{self, Store, Swept};
@@ -111,6 +112,12 @@ impl From<io::Error> for OpError {
     }
 }
 
+impl From<net::Error> for OpError {
+    fn from(e: net::Error) -> OpError {
+        OpError::plain(e.to_string())
+    }
+}
+
 /// A name the store lacks and no registry answers is missing, as the Docker daemon says of an image it has not got.
 impl From<store::Error> for OpError {
     fn from(e: store::Error) -> OpError {
@@ -152,18 +159,21 @@ pub struct Ops {
     layout: Layout,
     store: Arc<Store>,
     runtime: Runtime,
+    net: Net,
     /// One pull at a time: two creates of one image would append to the same partial blob.
     pulls: Mutex<()>,
     facts: BoxFacts,
     swept: Swept,
     stopped: Vec<String>,
+    net_swept: net::Swept,
 }
 
 impl Ops {
-    /// Opens the store under the root, sweeps what nothing names, reads the box, and marks every workspace whose
-    /// init is gone as stopped: a reboot, or a daemon that was not there when the init died, leaves its record,
-    /// its upper directory and youki's state behind, and youki reads any process on the old pid as the container.
-    /// `exe` is this binary.
+    /// Opens the store under the root, sweeps what nothing names, reads the box, marks every workspace whose init
+    /// is gone as stopped (a reboot, or a daemon that was not there when the init died, leaves its record, its upper
+    /// directory and youki's state behind, and youki reads any process on the old pid as the container), and sweeps
+    /// the network of every workspace that is not running. `exe` is this binary. The forwards of the workspaces
+    /// still running come back with `restore`, which wants the runtime the listeners live on.
     pub fn open(root: &Path, exe: PathBuf) -> Result<Ops, store::Error> {
         let layout = Layout::new(root);
         let store = Store::open(root)?;
@@ -171,36 +181,17 @@ impl Ops {
         for dir in [layout.run(), layout.state()] {
             fs::create_dir_all(&dir).map_err(|source| store::Error::Io { path: dir.clone(), source })?;
         }
-        let mut ops = Ops {
-            layout,
-            store: Arc::new(store),
-            runtime: Runtime::new(root, exe),
-            pulls: Mutex::new(()),
-            facts: BoxFacts::read(),
-            swept,
-            stopped: Vec::new(),
-        };
-        ops.stopped = ops.mark_stopped().map_err(|e| store::Error::Record { path: ops.layout.run(), detail: e.message })?;
-        Ok(ops)
+        let runtime = Runtime::new(root, exe);
+        let stopped = mark_stopped(&layout).map_err(|e| store::Error::Record { path: layout.run(), detail: e.message })?;
+        let running = running_ids(&layout).map_err(|e| store::Error::Record { path: layout.run(), detail: e.message })?;
+        let (net, net_swept) = Net::open(Layout::new(root), &running)
+            .map_err(|e| store::Error::Io { path: root.to_path_buf(), source: io::Error::other(e.to_string()) })?;
+        Ok(Ops { layout, store: Arc::new(store), runtime, net, pulls: Mutex::new(()), facts: BoxFacts::read(), swept, stopped, net_swept })
     }
 
-    /// Every record whose init is not the process it named any more: its overlay is detached and youki's state
-    /// removed, so no read goes through the stale pid; the run directory with its upper stays for the kill, or for
-    /// the boot from it once that exists.
-    fn mark_stopped(&self) -> Result<Vec<String>, OpError> {
-        let mut stopped = Vec::new();
-        for record in self.records()? {
-            if runtime::alive(&record.init) {
-                continue;
-            }
-            bundle::unmount(&self.layout.rootfs(&record.id))?;
-            let state = self.layout.state_of(&record.id);
-            if state.exists() {
-                fs::remove_dir_all(&state).map_err(|e| OpError::plain(format!("{}: {e}", state.display())))?;
-            }
-            stopped.push(record.id);
-        }
-        Ok(stopped)
+    /// The published ports of every running workspace, listening again where their records say.
+    pub async fn restore(&self) -> Result<(), OpError> {
+        Ok(self.net.restore(&running_ids(&self.layout)?).await?)
     }
 
     /// What the sweep at open removed.
@@ -211,6 +202,11 @@ impl Ops {
     /// The workspaces found stopped at open, their init gone.
     pub fn stopped_at_open(&self) -> &[String] {
         &self.stopped
+    }
+
+    /// What the network sweep at open removed.
+    pub fn net_swept_at_open(&self) -> &net::Swept {
+        &self.net_swept
     }
 
     pub fn facts(&self) -> BoxFacts {
@@ -309,9 +305,16 @@ impl Ops {
                 self.record(&machine_id)?;
                 Err(OpError::plain(no_backend_refusal("facts")))
             }
-            MachineOp::PreviewUrl { machine_id, .. } => {
-                self.record(&machine_id)?;
-                Err(OpError::plain(no_backend_refusal("previewUrl")))
+            MachineOp::PreviewUrl { machine_id, port } => {
+                let record = self.record(&machine_id)?;
+                let box_port = self.net.publish(&record.id, port.get()).await?;
+                body(MachineReachReply {
+                    reach: PreviewReach {
+                        url: format!("http://127.0.0.1:{box_port}"),
+                        token: String::new(),
+                        expires_at: PreviewReach::NEVER,
+                    },
+                })
             }
             MachineOp::DownloadUrl { machine_id, .. } => {
                 self.record(&machine_id)?;
@@ -364,8 +367,8 @@ impl Ops {
     }
 
     /// Whether this computer can run a workspace at all: cgroup v2 with the controllers a cap needs, an overlay
-    /// mount, and a cgroup of our own. Each refusal is one sentence for the doctor. Off the runtime thread, since
-    /// it mounts.
+    /// mount, a cgroup of our own, and the kernel's nftables and veth for its network. Each refusal is one
+    /// sentence for the doctor. Off the runtime thread, since it mounts and speaks netlink.
     pub async fn self_check(&self) -> Result<(), String> {
         let root = self.layout.root().to_path_buf();
         tokio::task::spawn_blocking(move || Self::self_check_on(&Layout::new(&root))).await.map_err(|e| e.to_string())?
@@ -394,7 +397,7 @@ impl Ops {
         let cgroup = Path::new(freeze::CGROUP_ROOT).join("wsp").join(format!("check-{}", std::process::id()));
         fs::create_dir_all(&cgroup).map_err(|e| format!("this computer refuses a cgroup under {}/wsp: {e}", freeze::CGROUP_ROOT))?;
         let _ = fs::remove_dir(&cgroup);
-        Ok(())
+        net::check()
     }
 
     pub fn capacity(&self) -> Result<PlaceCapacity, OpError> {
@@ -468,7 +471,7 @@ impl Ops {
         for dir in [self.layout.upper(id), self.layout.work(id), self.layout.rootfs(id)] {
             fs::create_dir_all(&dir).map_err(|e| OpError::plain(format!("{}: {e}", dir.display())))?;
         }
-        bundle::write_etc(&self.layout.etc(id), &hostname)?;
+        bundle::write_etc(&self.layout.etc(id), &hostname, None)?;
         bundle::mount_rootfs(&lowers, &self.layout.upper(id), &self.layout.work(id), &self.layout.rootfs(id))?;
         let mut args = vec![profile::INIT_PATH.to_owned(), "runtime".to_owned(), "init".to_owned(), "--".to_owned()];
         args.extend(boot_cmd());
@@ -492,6 +495,9 @@ impl Ops {
         let init = runtime::identity_of(pid)?;
         let record = Workspace { id: id.to_owned(), hostname, image: image.to_owned(), labels, cpu, mem_mb, created_at: now_iso(), init };
         bundle::write_json(&self.layout.record(id), &record)?;
+        let network = self.net.up(id, pid).await?;
+        // The same inode the container has bound, so the line lands inside.
+        bundle::write_etc(&self.layout.etc(id), &record.hostname, Some(network.gateway))?;
         freeze::forbid_swap(&self.layout.cgroup_dir(id))?;
         self.runtime.start(id).await?;
         Ok(record)
@@ -571,9 +577,10 @@ impl Ops {
         Ok(())
     }
 
-    /// Kills, deletes, unmounts and removes every trace of the workspace under the root.
+    /// Kills, deletes, takes the network down, unmounts and removes every trace of the workspace under the root.
     async fn remove(&self, id: &str, init: Option<&Init>) -> Result<(), OpError> {
         self.runtime.kill(id, init).await?;
+        self.net.down(id).await?;
         bundle::unmount(&self.layout.rootfs(id))?;
         let dir = self.layout.workspace(id);
         if dir.exists() {
@@ -591,7 +598,7 @@ impl Ops {
             seen,
             replayed,
             daemon_supervisor: Some(DaemonSupervisor::Entrypoint),
-            roads: MachineRoads { preview_url: false, daemon_answers: true, put_bytes: true, describe: true, facts: false, metrics: true },
+            roads: MachineRoads { preview_url: true, daemon_answers: true, put_bytes: true, describe: true, facts: false, metrics: true },
         }
     }
 
@@ -600,7 +607,13 @@ impl Ops {
     }
 
     fn records(&self) -> Result<Vec<Workspace>, OpError> {
-        let run = self.layout.run();
+        records_under(&self.layout)
+    }
+}
+
+fn records_under(layout: &Layout) -> Result<Vec<Workspace>, OpError> {
+    {
+        let run = layout.run();
         let mut out = Vec::new();
         let entries = match fs::read_dir(&run) {
             Ok(entries) => entries,
@@ -616,7 +629,33 @@ impl Ops {
         out.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)));
         Ok(out)
     }
+}
 
+/// Every record whose init is not the process it named any more: its overlay is detached and youki's state
+/// removed, so no read goes through the stale pid; the run directory with its upper stays for the kill, or for the
+/// boot from it once that exists.
+fn mark_stopped(layout: &Layout) -> Result<Vec<String>, OpError> {
+    let mut stopped = Vec::new();
+    for record in records_under(layout)? {
+        if runtime::alive(&record.init) {
+            continue;
+        }
+        bundle::unmount(&layout.rootfs(&record.id))?;
+        let state = layout.state_of(&record.id);
+        if state.exists() {
+            fs::remove_dir_all(&state).map_err(|e| OpError::plain(format!("{}: {e}", state.display())))?;
+        }
+        stopped.push(record.id);
+    }
+    Ok(stopped)
+}
+
+/// The workspaces whose init is still the process their record names: created, running or frozen.
+fn running_ids(layout: &Layout) -> Result<Vec<String>, OpError> {
+    Ok(records_under(layout)?.into_iter().filter(|record| runtime::alive(&record.init)).map(|record| record.id).collect())
+}
+
+impl Ops {
     fn list(&self, labels: Option<&BTreeMap<String, String>>) -> Result<Vec<MachineListRow>, OpError> {
         Ok(self
             .records()?
@@ -807,9 +846,14 @@ mod tests {
             "machine.metrics",
             "machine.daemonAnswers",
             "machine.facts",
+            "machine.previewUrl",
         ] {
             let reply: Value = serde_json::from_str(
-                &ops.answer(Some(RequestId::from(1)), &serde_json::json!({ "id": 1, "op": op, "machineId": "gone", "cmd": "true" })).await,
+                &ops.answer(
+                    Some(RequestId::from(1)),
+                    &serde_json::json!({ "id": 1, "op": op, "machineId": "gone", "cmd": "true", "port": 7070 }),
+                )
+                .await,
             )
             .unwrap();
             assert_eq!(
@@ -832,6 +876,19 @@ mod tests {
         )
         .unwrap();
         assert_eq!(later["error"], "this computer's backend has no machine.listSnapshots");
+    }
+
+    #[test]
+    fn a_record_that_does_not_read_refuses_the_open_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let broken = dir.path().join("run").join("wsp-broken");
+        fs::create_dir_all(&broken).unwrap();
+        fs::write(broken.join("workspace.json"), "{ not json").unwrap();
+        let refused = match Ops::open(dir.path(), PathBuf::from("/bin/true")) {
+            Ok(_) => panic!("a record that does not read opened"),
+            Err(e) => e.to_string(),
+        };
+        assert!(refused.contains("wsp-broken"), "{refused}");
     }
 
     #[test]

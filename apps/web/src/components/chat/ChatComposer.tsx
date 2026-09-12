@@ -53,7 +53,7 @@
 // every start, so a change mid-thread applies at the next turn.
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent } from "react";
 import { ImageIcon } from "lucide-react";
-import { foldThreads, HOST_ASLEEP_SEND, IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
+import { foldThreads, HOST_ASLEEP_SEND, IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { hostAsleep } from "../../boot";
 import { useHarnessCatalogs, useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
@@ -205,7 +205,9 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     () => (stopTarget !== null && runningTurn !== null ? { sessionId: stopTarget, turnId: runningTurn.turnId } : null),
     [runningTurn, stopTarget],
   );
-  const accessPick = useAccessPick(workspaceId, pickTarget, thread.threadKey);
+  // The harness's own row decides whether the pick is put to the running turn at all, and it is the same row the
+  // menu reads to say so before the pick.
+  const accessPick = useAccessPick(workspaceId, pickTarget, thread.threadKey, movesRunningAccess(harnessCatalog));
   const stopAttempt = stop !== null && runningTurn !== null && stop.turnId === runningTurn.turnId ? stop : null;
   const steerAttempt = steered !== null && runningTurn !== null && steered.turnId === runningTurn.turnId ? steered : null;
   const canStop = runningTurn !== null && api?.interruptSession !== undefined;
@@ -215,7 +217,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   // composer could make, so while it can make none the block is the one true thing to say and the slot, the button's
   // name and an Enter all read it. Under it: the newest failure, then the screen command Enter refused, then the turn
   // that replied but still runs, in the runtime's own words, since a message sent now waits for that process and runs
-  // as the next turn, then an access pick the running turn's harness would not take mid-turn, then the workspace's
+  // as the next turn, then an access pick the running turn refused after its harness said it takes one, then the workspace's
   // link being down, which blocks no send and so comes after everything a person is being stopped by.
   const line =
     sendHeld !== null
