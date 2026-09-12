@@ -56,13 +56,14 @@ describe("workspaceState", () => {
     expect(sendRefusal("gone")).toBe("Workspace machine is gone; rebuild it to send");
   });
 
-  it("sendRefusal is one table over everything that refuses a send: the socket, the lookup, the transcript, the thread, then the states", () => {
+  it("sendRefusal is one table over everything that refuses a send: the socket, the lookup, the transcript, the agents, the thread, then the states", () => {
     const blocks: Record<SendBlock, string> = {
       connecting: "Connecting to wsp",
       reconnecting: "wsp is not running, reconnecting",
       closed: "wsp is not running",
       "not-found": "Workspace not found",
       loading: "Loading transcript",
+      "no-agents": "the agents here have not answered yet",
     };
     for (const [kind, words] of Object.entries(blocks)) expect(sendRefusal(kind as SendBlock)).toBe(words);
     expect(stillWorkingLine("thr_0001")).toBe("thread thr_0001 replied, still working; the message runs as its next turn once that process exits");

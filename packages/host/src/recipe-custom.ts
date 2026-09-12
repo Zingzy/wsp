@@ -14,7 +14,7 @@ export function parsePair(flag: string, spec: string): { id: string; value: stri
   const at = spec.indexOf("=");
   const id = at < 0 ? "" : spec.slice(0, at).trim();
   const value = at < 0 ? "" : spec.slice(at + 1).trim();
-  if (id === "" || value === "") throw usageRefusal(`${flag} takes <id>=<command>, not ${JSON.stringify(spec)}`);
+  if (id === "" || value === "") throw usageRefusal(`${flag} takes <id>=<command>, and got ${JSON.stringify(spec)}.`, `Write it as ${flag} <id>="<command>", the id first and the command it runs behind the equals sign.`);
   return { id, value };
 }
 
@@ -39,7 +39,7 @@ export function customFromFlags(flags: AddFlags): RecipeCustomRow[] {
     const { id, value } = parsePair("--add", spec);
     rows.set(id, { kind: "custom", id, name: id, install: [value], check: checks.get(id) ?? commandCheck(id), why: flags.why ?? ADDED_BY_AGENT });
   }
-  for (const id of checks.keys()) if (!rows.has(id)) throw usageRefusal(`--add-check ${id}: nothing was added under that id`);
+  for (const id of checks.keys()) if (!rows.has(id)) throw usageRefusal(`--add-check ${id}: nothing was added under that id.`, `Add the row first with --add ${id}="<command>", or name a row this line already adds.`);
   return [...rows.values()];
 }
 

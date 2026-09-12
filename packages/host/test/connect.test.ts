@@ -185,7 +185,7 @@ describe("wsp connect", () => {
     // computer after it reached the URL parser and threw a TypeError nobody could act on.
     for (const word of ["http://", "https://", "ws://x", "wss://x:4410", "http:/box", "box", "box:4400"]) {
       await expect(connectCommand(io(), { statePath: STATE, home }, { code: "ABCD1234" }, [word], never)).rejects.toThrow(
-        `wsp connect takes the address the host is served at, starting http:// or https:// and naming the computer it runs on, got ${JSON.stringify(word)}`,
+        `wsp connect takes the address the host is served at, and got ${JSON.stringify(word)}. An address starts http:// or https:// and names the computer it runs on.`,
       );
     }
     expect(readHost(home, "x")).toBeUndefined();
