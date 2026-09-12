@@ -183,6 +183,10 @@ export interface StatusRecord extends WorkspaceView {
   /** What a machine that already existed says about itself; absent on a fork wsp made. */
   facts?: () => Promise<MachineFacts>;
   exec: (cmd: string, opts?: { timeoutMs?: number }) => Promise<ExecResult>;
+  /** Why nothing about this machine can be asked at all right now, in the words the person reads: the computer it
+   * lives on is not connected. The row says so and the provider is asked nothing, since the road to the provider
+   * is that computer. Absent on every machine that can be asked. */
+  away?: string;
 }
 
 export interface StatusTrackerOptions {
@@ -511,7 +515,8 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
 
     return Promise.all(
       records.map(async (r): Promise<WorkspaceStatus> => {
-        const { size, idleAt, daemonReach, daemonAnswers, providerState, metrics, facts, exec, generation, ...view } = r;
+        const { size, idleAt, daemonReach, daemonAnswers, providerState, metrics, facts, exec, generation, away, ...view } = r;
+        void away;
         void providerState;
         void metrics;
         void exec;
@@ -527,6 +532,17 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
         if (view.phase === "gone") {
           suspects.delete(r.id);
           return gone(view.gone);
+        }
+        // The computer this machine lives on is not connected: nothing is asked of it, the row says why, and the
+        // machine keeps the word it was left with until that computer dials in again.
+        if (r.away !== undefined) {
+          suspects.delete(r.id);
+          return {
+            ...base,
+            machineState: view.phase === "running" ? "running" : "paused",
+            reach: { state: view.phase === "running" ? "unreachable" : "napping" },
+            reason: r.away,
+          };
         }
         // Measured: the reach goes dark only while paused and works again on wake.
         if (view.phase !== "running") {

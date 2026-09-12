@@ -4,7 +4,7 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { addAlreadyHereLine, type Recipe } from "@wsp/protocol";
+import { addAlreadyHereFix, addAlreadyHereLine, type Recipe } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { cli, type CliIO } from "../src/cli.js";
 import { ADDED_GROUP } from "../src/init-table.js";
@@ -35,7 +35,7 @@ describe("wsp recipe --add", () => {
   });
 
   it("refuses a spec that is not <id>=<command>, naming what it was given", () => {
-    expect(() => customFromFlags({ add: ["just"] })).toThrow('--add takes <id>=<command>, not "just"');
+    expect(() => customFromFlags({ add: ["just"] })).toThrow('--add takes <id>=<command>, and got "just".');
     expect(() => customFromFlags({ add: ["=brew install just"] })).toThrow("--add takes <id>=<command>");
     expect(() => customFromFlags({ add: ["just="] })).toThrow("--add takes <id>=<command>");
   });
@@ -117,7 +117,7 @@ describe("the recipe verb's flags", () => {
     const lines: string[] = [];
     const errors: string[] = [];
     expect(await cli(["recipe", "--out", join(dir, "recipe.json"), "--add", "just"], io(lines, errors))).toBe(3);
-    expect(errors[0]).toBe('wsp recipe: --add takes <id>=<command>, not "just"');
+    expect(errors[0]).toBe('wsp recipe: --add takes <id>=<command>, and got "just". Write it as --add <id>="<command>", the id first and the command it runs behind the equals sign.');
     expect(lines).toEqual([]);
   });
 
@@ -146,13 +146,13 @@ describe("the recipe verb's flags", () => {
     expect(file().custom ?? []).toEqual([]);
     const refusal: string[] = [];
     expect(await onCli(["--out", out, "--add", `${DISKBLOOM.id}=${DISKBLOOM.install}`], [], refusal, dir, [DISKBLOOM])).toBe(3);
-    expect(refusal[0]).toBe(`wsp recipe: ${addAlreadyHereLine(HERE_PLATFORM, DISKBLOOM.id, DISKBLOOM.id)}`);
+    expect(refusal[0]).toBe(`wsp recipe: ${addAlreadyHereLine(HERE_PLATFORM, DISKBLOOM.id)} ${addAlreadyHereFix(DISKBLOOM.id)}`);
     expect(file().custom ?? []).toEqual([]);
     // An id that is no catalog row, no row of the file and no scanned package is a usage refusal, in the words of the
     // one place that resolves a --set target; the scanned id above is not one, so no check ahead of it may refuse it.
     const unknown: string[] = [];
     expect(await onCli(["--out", out, "--set", "nope=on"], [], unknown, dir, [DISKBLOOM])).toBe(3);
-    expect(unknown[0]).toBe(`wsp recipe: --set nope=on: "nope" is no catalog row and no row of ${out} outside the catalog, and no package a manager on ${HERE} has that id`);
+    expect(unknown[0]).toBe(`wsp recipe: --set nope=on: "nope" is no catalog row and no row of ${out} outside the catalog, and no package a manager on ${HERE} has that id. Run wsp recipe scan to read the rows this computer offers.`);
     expect(file().rows.find(r => r.id === TAP_ROW)).toMatchObject({ on: true });
   });
 });

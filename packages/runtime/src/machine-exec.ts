@@ -34,7 +34,7 @@
 // every claim on the machine that the caller did not name.
 
 import { randomBytes } from "node:crypto";
-import { INLINE_EXEC_MS, MachineUnreached, RUN_DIR, execFits, putFiles, realRetryClock, untilReached, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
+import { HANDSHAKE, INLINE_EXEC_MS, MachineUnreached, RUN_DIR, execFits, machineAnswer, putFiles, realRetryClock, untilReached, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
 import { EXEC_CHUNK_BYTES, RUN_STOP_MS, TURN_IDLE_MS, TURN_WALL_MS, TURN_WORK_TICKS_PER_S, shellQuote, turnCutLine, workScoreLine } from "@wsp/protocol";
 import type { ExecStream, ExecStreamFactory, TurnCutRule } from "@wsp/protocol";
 
@@ -312,12 +312,12 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         // The guest knows the command ended the moment its exit file exists, up to a poll before this side does,
         // and a reap in flight has taken the claim with the rest of the run.
         const res = await putFiles(machine, [{ path: `${base}.in`, text: `${line}\n`, append: true }], {
-          before: [`{ [ -e ${q(base)}.exit ] || [ ! -d ${q(claim(base))} ]; } && { echo WSP_GONE; exit 0; }`],
-          after: ["echo WSP_OK"],
+          before: [`{ [ -e ${q(base)}.exit ] || [ ! -d ${q(claim(base))} ]; } && { echo ${HANDSHAKE.gone}; exit 0; }`],
+          after: [`echo ${HANDSHAKE.written}`],
           timeoutMs: execTimeoutMs,
         });
-        if (res.stdout.includes("WSP_GONE")) return "gone";
-        if (res.exitCode !== 0 || !res.stdout.includes("WSP_OK")) throw new Error(`remote write failed on ${machine.id}: exit ${res.exitCode}: ${res.stderr}`);
+        if (res.stdout.includes(HANDSHAKE.gone)) return "gone";
+        if (res.exitCode !== 0 || !res.stdout.includes(HANDSHAKE.written)) throw new Error(`remote write failed on ${machine.id}: nothing came back saying ${HANDSHAKE.written}, the word the guest prints once the message landed; ${machineAnswer(res)}`);
         // The person just acted, so the turn gets its idle time over.
         activity.touch(now());
         return "written";
@@ -360,15 +360,15 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
           // exec honours no idempotency key and a launch whose answer was lost is retried; the claim makes the second
           // a no-op. A mkdir that fails for any other reason (a run folder another login on the machine owns) fails
           // the launch: read as a replay it would answer launched and leave the reader polling a log nobody writes.
-          before: [`mkdir ${q(claim(base))} 2>/dev/null || { [ -d ${q(claim(base))} ] && { echo WSP_LAUNCHED; exit 0; }; echo ${q(`no run folder on this machine: ${claim(base)}`)} >&2; exit 1; }`],
-          after: [...(input === undefined ? [] : [`mkfifo ${q(base)}.fifo`]), `setsid bash ${q(base)}.sh > ${q(base)}.log 2>&1 & echo $! > ${q(base)}.pid; echo WSP_LAUNCHED`],
+          before: [`mkdir ${q(claim(base))} 2>/dev/null || { [ -d ${q(claim(base))} ] && { echo ${HANDSHAKE.launched}; exit 0; }; echo ${q(`no run folder on this machine: ${claim(base)}`)} >&2; exit 1; }`],
+          after: [...(input === undefined ? [] : [`mkfifo ${q(base)}.fifo`]), `setsid bash ${q(base)}.sh > ${q(base)}.log 2>&1 & echo $! > ${q(base)}.pid; echo ${HANDSHAKE.launched}`],
           timeoutMs: execTimeoutMs,
         }),
       { now, sleep },
     );
     const opened = posted.then(
       res => {
-        if (res.exitCode !== 0 || !res.stdout.includes("WSP_LAUNCHED")) throw new Error(`remote launch failed on ${machine.id}: exit ${res.exitCode}: ${res.stderr}`);
+        if (res.exitCode !== 0 || !res.stdout.includes(HANDSHAKE.launched)) throw new Error(`remote launch failed on ${machine.id}: nothing came back saying ${HANDSHAKE.launched}, the word the guest prints once the run is up; ${machineAnswer(res)}`);
       },
       (e: unknown) => {
         if (e instanceof MachineUnreached) throw e;
@@ -380,13 +380,13 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
 
   factory.attach = async (run, { input }) => {
     if (!minted(run)) throw new Error(`${run} is not a run this host could have launched`);
-    const res = await untilReached(() => machine.exec(`[ -d ${q(claim(run))} ] && echo WSP_RUN || echo WSP_GONE`, { timeoutMs: execTimeoutMs }), { now, sleep });
+    const res = await untilReached(() => machine.exec(`[ -d ${q(claim(run))} ] && echo ${HANDSHAKE.run} || echo ${HANDSHAKE.gone}`, { timeoutMs: execTimeoutMs }), { now, sleep });
     // Only these two answers say anything about the run. Anything else is the machine failing to answer the
     // question, which is the unreached road, not a run to end: the reader is built and the run swept on WSP_GONE
     // alone, so nothing here can take a live turn's process group with it.
-    if (res.stdout.includes("WSP_RUN")) return open(run, input, Promise.resolve());
-    if (res.stdout.includes("WSP_GONE")) return "gone";
-    throw new Error(`the machine did not answer whether it still holds ${run}: exit ${res.exitCode}: ${res.stderr}`);
+    if (res.stdout.includes(HANDSHAKE.run)) return open(run, input, Promise.resolve());
+    if (res.stdout.includes(HANDSHAKE.gone)) return "gone";
+    throw new Error(`the machine did not answer whether it still holds ${run}; ${machineAnswer(res)}`);
   };
 
   factory.sweep = async keep => {

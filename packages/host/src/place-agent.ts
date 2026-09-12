@@ -17,6 +17,8 @@ import { PlaceLink, portSourceFor, startDaemon, type DaemonHandle } from "@wsp/d
 import { LOOPBACK, placeDaemonPaths, workFolderIn } from "@wsp/protocol";
 import { holdWhileJoined } from "./awake.js";
 import { placeReport, stopPlaceService, sweepPlace } from "./place-report.js";
+import { machineOps } from "./place-machines.js";
+import { offeredBackend } from "./place-offers.js";
 import { type RunningWsp } from "./mcp-install.js";
 
 export interface PlaceAgentOptions {
@@ -48,6 +50,9 @@ export async function startPlaceAgent(opts: PlaceAgentOptions): Promise<PlaceAge
   mkdirSync(at.inbox, { recursive: true, mode: 0o700 });
   mkdirSync(work, { recursive: true });
   const awake = holdWhileJoined({ file: opts.file, ...(opts.log !== undefined ? { log: opts.log } : {}), ...(opts.watchEveryMs !== undefined ? { intervalMs: opts.watchEveryMs } : {}) });
+  // Read once, before the first dial: the report says what this computer can fork with, and the ops the link
+  // answers are that same backend's, so the host is never told of a road nothing here serves.
+  const offer = await offeredBackend();
   const token = randomBytes(24).toString("hex");
   mkdirSync(at.wsp, { recursive: true, mode: 0o700 });
   writeFileSync(at.tokenPath, `${token}\n`, { mode: 0o600 });
@@ -66,7 +71,8 @@ export async function startPlaceAgent(opts: PlaceAgentOptions): Promise<PlaceAge
     portsSource: portSourceFor(platform()),
     link: {
       file: opts.file,
-      report: async () => placeReport({ name: opts.name, home, ...(opts.run !== undefined ? { run: opts.run } : {}) }),
+      report: async () => placeReport({ name: opts.name, home, docker: offer !== undefined, ...(opts.run !== undefined ? { run: opts.run } : {}) }),
+      ...(offer === undefined ? {} : { ops: machineOps(offer.id, offer.backend, at.putDir) }),
       // The files and the unit file go here; the manager is asked to let this process go only after the reply is on
       // the wire, since the thing it stops is this process.
       onLeave: async () => {

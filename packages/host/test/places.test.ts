@@ -251,6 +251,16 @@ describe("the table wsp places prints", () => {
   it("says how to get one when the host holds none", () => {
     expect(placeLines([]).join("")).toContain("wsp add prints the join line");
   });
+
+  it("says how many forks a place holds of how many it takes, and nothing there for one that forks nowhere", () => {
+    const printed = placeLines([
+      { ...rows[1]!, forks: { running: 1, room: 2 } },
+      { ...rows[0]!, id: "p_2", name: "laptop", docker: false },
+    ]);
+    expect(printed[0]).toContain("FORKS");
+    expect(printed[1]).toContain("1 of 3");
+    expect(printed[2]).not.toContain("of");
+  });
 });
 
 describe("what a remove prints", () => {

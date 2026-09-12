@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
-import { EXEC_DEADLINE_EXIT } from "@wsp/protocol";
+import { EXEC_DEADLINE_EXIT, NOT_ON_THIS_ROAD } from "@wsp/protocol";
 import { runExec } from "../src/exec.js";
 import { startDaemon, type DaemonHandle } from "../src/main.js";
 
@@ -129,7 +129,8 @@ describe("the exec op over the wire", () => {
       const res = await client.request("place.leave");
       expect(res.ok).toBe(false);
       expect(res["code"]).toBe("forbidden");
-      expect(String(res["error"])).toContain("wsp leave");
+      // One sentence for one rule: the leave op and the machine ops are the link's, and no other socket takes them.
+      expect(res["error"]).toBe(NOT_ON_THIS_ROAD);
     } finally {
       client.close();
     }
