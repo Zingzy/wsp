@@ -13,7 +13,7 @@ import type { CliIO } from "../src/cli.js";
 import { connectCommand } from "../src/connect.js";
 import { dialWindowMs, readHost } from "../src/hosts.js";
 import { startConnector, type Connector } from "../src/connector.js";
-import { publicHostname, readRelayClient, readRelayRecord, relayCommand, relayHostUrl, relayRecordPath, startRelay, type RelayDeps } from "../src/relay-link.js";
+import { accountHere, publicHostname, readRelayClient, readRelayRecord, relayCommand, relayHostUrl, relayRecordPath, startRelay, type RelayDeps } from "../src/relay-link.js";
 import { CLOUDFLARED } from "../src/connector.js";
 import type { DialOpts, HostClient } from "../src/verbs.js";
 
@@ -56,6 +56,8 @@ interface FakeRelay {
   pending: number;
   /** What the tunnel route answers; a hostname of null is a relay with no zone. */
   tunnel: { tunnelToken: string | null; hostname: string | null; why?: string };
+  /** What the approval says about who approved it; empty for a relay from before it named one. */
+  login: { login?: string };
   hosts: { id: string; name: string; hostname: string | null }[];
   clients: { id: string; name: string; thisOne: boolean }[];
   /** Called as each request arrives, for a test that cares what was already true by then. */
@@ -68,7 +70,7 @@ interface FakeRelay {
 const isQuickTunnel = (name: string): boolean => /^[a-z0-9-]+\.trycloudflare\.com$/i.test(name);
 
 async function fakeRelay(): Promise<FakeRelay> {
-  const state: FakeRelay = { url: "", calls: [], pending: 1, tunnel: { tunnelToken: null, hostname: null, why: "this relay has no zone" }, hosts: [], clients: [] };
+  const state: FakeRelay = { url: "", calls: [], pending: 1, login: { login: "zingzy" }, tunnel: { tunnelToken: null, hostname: null, why: "this relay has no zone" }, hosts: [], clients: [] };
   const server = createServer((req, res) => {
     void (async () => {
       const chunks: Buffer[] = [];
@@ -96,7 +98,7 @@ async function fakeRelay(): Promise<FakeRelay> {
         const started = state.calls.filter(c => c.line === "POST /link/start").at(-1);
         const kind = started?.body["kind"];
         const name = String(started?.body["name"] ?? "");
-        return send(200, kind === "client" ? { state: "approved", token: "client-token", name } : { state: "approved", token: "host-token", hostId: "hbox1", name });
+        return send(200, kind === "client" ? { state: "approved", token: "client-token", name, ...state.login } : { state: "approved", token: "host-token", hostId: "hbox1", name, ...state.login });
       }
       if (line === "POST /hosts/hbox1/tunnel") return send(200, state.tunnel);
       if (line === "POST /hosts/hbox1/heartbeat") {
@@ -579,5 +581,39 @@ describe("wsp connect --relay", () => {
         window: dialWindowMs,
       }),
     ).rejects.toThrow(/--relay/);
+  });
+});
+
+describe("who this wsp is signed in to", () => {
+  it("reads as no sign-in while neither record is on this computer, and on a host serving no state file", () => {
+    const { statePath, home } = box();
+    expect(accountHere(statePath, home)).toEqual({ signedIn: false });
+    // A bare path must not send the read at whatever relay.json the working folder holds.
+    expect(accountHere(undefined, home)).toEqual({ signedIn: false });
+    expect(accountHere("", home)).toEqual({ signedIn: false });
+  });
+
+  it("names the account the box was linked under", async () => {
+    const relay = await fakeRelay();
+    const { statePath, home, dir } = box();
+    await relayCommand(io(), { statePath, home }, ["link", relay.url], {}, deps(dir));
+    expect(accountHere(statePath, home)).toEqual({ signedIn: true, login: "zingzy" });
+  });
+
+  it("names the account this computer signed in under, a wsp home apart from the box's state", async () => {
+    const relay = await fakeRelay();
+    const { statePath, home, dir } = box();
+    await relayCommand(io(), { statePath, home }, ["hosts", relay.url], {}, deps(dir));
+    expect(accountHere(statePath, home)).toEqual({ signedIn: true, login: "zingzy" });
+  });
+
+  it("says signed in with no name against a relay whose approval names no account", async () => {
+    // A relay from before the approval carried a login: the record is a sign-in all the same, and the row says so
+    // rather than reading as signed out.
+    const relay = await fakeRelay();
+    relay.login = {};
+    const { statePath, home, dir } = box();
+    await relayCommand(io(), { statePath, home }, ["link", relay.url], {}, deps(dir));
+    expect(accountHere(statePath, home)).toEqual({ signedIn: true });
   });
 });

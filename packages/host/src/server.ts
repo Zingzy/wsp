@@ -8,7 +8,8 @@ import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes } from
 import { API_UNAUTHORIZED, DEFAULT_PORT, DEFAULT_WS_PORT, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, doorPortHeldLine, isLoopback, recordRestoredLine, relayUrlOf, type BootPayload, type Caller, type PlaceDoorView, type SealedImage, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
 import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenRecipe, type GoldenVersion, type InitDoor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { reachAddresses } from "./pairing.js";
-import { publicHostname } from "./relay-link.js";
+import { accountHere, publicHostname } from "./relay-link.js";
+import { wspHome } from "./hosts.js";
 import { nodeHost, readGhosttyConfig } from "@wsp/collect";
 import { closeStandInGuests } from "./fake-guest.js";
 import { hostFolders } from "./host-folders.js";
@@ -440,6 +441,9 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       ...(opts.copyRecipe !== undefined ? { copyRecipe: opts.copyRecipe } : {}),
       folders: hostFolders(() => rt.workspaces.list()),
       terminalConfig: { read: scheme => readGhosttyConfig(nodeHost(), scheme) },
+      // Read at every ask rather than once at start: a sign-in taken at the terminal while the app stands open is
+      // on the next read, and the read is two small files on this computer.
+      account: { read: async () => accountHere(opts.statePath, wspHome()) },
       ...(opts.init !== undefined ? { init: opts.init } : {}),
     });
   } catch (e) {

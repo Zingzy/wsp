@@ -174,6 +174,7 @@ describe("the surfaces list this repo ships", () => {
       "composer-folder",
       "composer-folder-refused",
       "settings-where",
+      "settings-account",
       "add-computer",
       "settings-image-fresh",
       "settings-image-built",

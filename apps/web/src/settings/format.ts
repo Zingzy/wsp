@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The words the settings page and its palette row say, one place, keyed by the
 // preference value where a value has words of its own.
-import { fmtPx, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, fmtPx, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
 
 /** The caps mono label over a section, and the muted mono a fact wears in a row's slot. Two class strings the page,
  * the table and the sheet all draw with, so one type ladder holds across the three files. */
@@ -139,3 +139,33 @@ export const TERMINAL_SIZE_FACT: Record<TerminalSizeSource, (appPx: number, file
   app: appPx => fmtPx(appPx),
   file: (appPx, filePx) => fmtPx(filePx ?? appPx),
 };
+
+/** Settings > Account: the one row that says who this wsp is signed in to, the one sentence that says what a
+ * sign-in buys, and the devices row that stands under it once there is one. Nothing about the account is said
+ * anywhere else in the window. */
+export const ACCOUNT_WORDS = {
+  title: "Account",
+  github: "GitHub",
+  notSignedIn: "not signed in",
+  /** The fact for a sign-in the relay named no account for, where signed in is all this computer knows. */
+  signedIn: "signed in",
+  signIn: "Sign in with GitHub",
+  signOut: "Sign out",
+  reach: "Sign in to reach this wsp from another device outside your network.",
+  devices: "Devices",
+  /** The devices fact for an account nothing has paired with this wsp yet. */
+  noDevices: "none",
+} as const;
+
+/** Settings > Agents: one row per agent this computer has, saying whether its config names the wsp tools, and the
+ * one row that stands in its place when it has none. */
+export const AGENTS_WORDS = {
+  title: "Agents",
+  /** An agent whose own config already names the wsp tools. */
+  added: "wsp tools added",
+  add: "Add the wsp tools",
+  /** An agent wsp cannot hand the tools to at launch: its state, and no action beside it. The picker on the init
+   * screens says the same of the same agent, so the word has one home. */
+  noTools: CLOUD_SETUP_WORDS.choice.noTools,
+  none: "No agents found on this Mac.",
+} as const;
