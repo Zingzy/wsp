@@ -32,7 +32,7 @@ export { runBin } from "./entry.js";
 export { shimPath } from "./shim.js";
 export { agentHistories, agentsHere, type AgentHere, type AgentSessions } from "./agents-here.js";
 export { installEach, mcpServerSpec, runningWsp, type InstallReport, type RunningWsp } from "./mcp-install.js";
-export { dialAddress, servingHost, type HostLock } from "./host-lock.js";
+export { dialAddress, hostTokenFor, servingHost, type HostLock } from "./host-lock.js";
 export { SERVING_HOME_SH, currentHome, currentHomePointer, defaultHomeIn, homeNamed, servingHome } from "./serving-home.js";
 export { aliasFrom, defaultHost, isUrl, listHosts, noSuchHostLine, readHost, removeHost, writeHost, type HostEntry, type HostRecord, type SshLogin } from "./hosts.js";
 export { connectCommand, disconnectCommand, type ConnectOpts } from "./connect.js";
