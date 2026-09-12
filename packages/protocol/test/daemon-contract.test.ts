@@ -50,6 +50,7 @@ import {
   MachineExecReply,
   MachineHandleReply,
   MachineListReply,
+  MachineReachReply,
   MachineShapeReply,
   MachineStateReply,
   NO_PLACE_FILE_LINE,
@@ -333,6 +334,7 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
   MachineStateReply: { schema: MachineStateReply, samples: [{ state: "starting" }, { state: "running" }, { state: "paused" }, { state: "gone" }] },
   MachineShapeReply: { schema: MachineShapeReply, samples: [{ shape: { cpu: 2, memMb: 1024, diskGb: 20, createdAt: "2026-09-12T13:00:00.000Z" } }, { shape: {} }] },
   MachineAnswersReply: { schema: MachineAnswersReply, samples: [{ answers: true }, { answers: false }] },
+  MachineReachReply: { schema: MachineReachReply, samples: [{ reach: { url: "http://127.0.0.1:41234", token: "", expiresAt: 9007199254740991 } }] },
   DaemonErrorResponse: {
     schema: DaemonErrorResponse,
     samples: [
