@@ -562,12 +562,16 @@ export const ThreadView = z.object({
 });
 export type ThreadView = z.infer<typeof ThreadView>;
 
+/** The thread a turn's row belongs to: the runtime's thread id, else the row's own, since a row the runtime stamped
+ * no thread on is a thread of one turn. The one rule for grouping rows by thread. */
+export const threadKeyOf = (session: SessionView): string => session.threadId ?? session.id;
+
 /** Folds the session index into threads, in the order each thread's first turn appears. The one place a row from
  * before provenance was recorded is read as a person's; clients print the answer and never decide it. */
 export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] {
   const byThread = new Map<string, SessionView[]>();
   for (const session of sessions) {
-    const key = session.threadId ?? session.id;
+    const key = threadKeyOf(session);
     const turns = byThread.get(key);
     if (turns === undefined) byThread.set(key, [session]);
     else turns.push(session);

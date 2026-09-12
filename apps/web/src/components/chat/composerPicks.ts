@@ -5,17 +5,15 @@
 // last start recorded. A pick wins, then the thread's value, then the
 // default marked for that pick, which for an effort is the picked model's own
 // where its binary names one; a pick the resolved model cannot take shows as
-// nothing and is not sent. The model, and the window that rides inside it,
-// are the picks a thread that has run takes only from its own picker, each
-// read against the thread it was picked on, since the picks are one record
-// per workspace and a thread keeps the model it was opened on; effort and
-// access do not read those threads yet. Picks ride the
-// wire, and with them the model the thread is on, so a send that touched no
-// picker keeps that thread where it is: the runtime runs a NEW thread on the
-// model and the effort the catalog marks when neither is picked, the same
-// ones the pickers show, and an untouched access leaves the CLI's own default
-// in place; a context window rides as a suffix on the model, so it brings the
-// model along.
+// nothing and is not sent. The model, the window that rides inside it, the
+// effort and the access are the picks a thread that has run takes only from
+// its own picker, each read against the thread it was picked on, since the
+// picks are one record per workspace and a thread keeps what it was opened
+// on. Picks ride the wire, and with them the values the thread already runs
+// at, so a send that touched no picker keeps that thread where it is: the
+// runtime runs a NEW thread on the model and the effort the catalog marks
+// when neither is picked, the same ones the pickers show; a context window
+// rides as a suffix on the model, so it brings the model along.
 import { contextWindowsFor, effortsFor, listedPick, markedDefault, modelOf, type HarnessCatalog, type HarnessModel, type HarnessOption, type SessionView, type StartPicks } from "@wsp/protocol";
 import { THREAD_SCOPED_PICKS, type ComposerOptions, type PickThreads } from "./composerOptionsStore";
 
@@ -37,34 +35,64 @@ export function resolveModel(catalog: HarnessCatalog, input: { picked: string | 
   return modelOf(catalog, input.picked ?? input.thread ?? markedDefault(catalog.models)?.value);
 }
 
-/** The running session's values, from the runtime's row for it; the CLI announces the model with its own 1M suffix. */
+/** The model a start or a row names, with the window it runs at: the CLI announces the model with its own 1M suffix,
+ * and a row that names a window of its own says it outright. The two are read together wherever either is read,
+ * since on claude's wire the window rides inside the model string. */
+function modelPicks(model: string, contextWindow?: string): ComposerOptions {
+  const window = contextWindow ?? (ONE_M.test(model) ? "1m" : undefined);
+  return { model: model.replace(ONE_M, ""), ...(window !== undefined ? { contextWindow: window } : {}) };
+}
+
+/** How each pick is read off one turn's row, one entry per pick, so a pick the thread keeps for itself is an entry
+ * here rather than a rule of its own; the model and the window it ran at come from the same row, never two. */
+const ROW_READERS: ReadonlyArray<(row: SessionView) => ComposerOptions | null> = [
+  row => (row.model === undefined ? null : modelPicks(row.model, row.contextWindow)),
+  row => (row.effort === undefined ? null : { effort: row.effort }),
+  row => (row.permissionMode === undefined ? null : { permissionMode: row.permissionMode }),
+];
+
+/** What a thread has already run with, from the rows the runtime holds for its turns: for each pick, the last turn
+ * that named one. A resume records only what its send carried, so an untouched picker leaves that turn's row silent
+ * about it and the turn that opened the thread, where the runtime fills the catalog's marks in, is what still
+ * stands. */
+export function recordedPicks(rows: ReadonlyArray<SessionView>): ComposerOptions {
+  const picks: ComposerOptions = {};
+  for (const read of ROW_READERS) {
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const named = read(rows[i]!);
+      if (named !== null) {
+        Object.assign(picks, named);
+        break;
+      }
+    }
+  }
+  return picks;
+}
+
+/** The running session's values, from the runtime's row for it, read by the same rule as every other row. */
 export function runningPicks(session: SessionView | null, running: boolean): ComposerOptions {
-  if (!running || session === null || session.status !== "running") return {};
-  const contextWindow = session.contextWindow ?? (session.model !== undefined && ONE_M.test(session.model) ? "1m" : undefined);
-  return {
-    ...(session.model !== undefined ? { model: session.model.replace(ONE_M, "") } : {}),
-    ...(contextWindow !== undefined ? { contextWindow } : {}),
-    ...(session.effort !== undefined ? { effort: session.effort } : {}),
-    ...(session.permissionMode !== undefined ? { permissionMode: session.permissionMode } : {}),
-  };
+  return recordedPicks(running && session !== null && session.status === "running" ? [session] : []);
 }
 
-/** What the next send inherits from the thread it lands in: a running turn's own values, and between turns the model
- * the thread's last start recorded, read with the same 1M suffix rule. A thread keeps running on the model it was
- * opened with, so that model, and not the catalog's default, is what the pickers show once the turn is over and what
- * the send carries: a default filled in here moves the thread to another model without anyone asking for it. */
-export function threadPicks(session: SessionView | null, thread: { running: boolean; model: string | null }): ComposerOptions {
-  const live = runningPicks(session, thread.running);
+/** What the next send inherits from the thread it lands in: a running turn's own values, and between turns what the
+ * thread's own turns recorded, the model coming from its last start as the transcript shows it. Every one of them is
+ * read off this thread's own rows, the running turn included, or a second thread running in the same workspace would
+ * paint this one's pickers with its model, effort and access. A thread keeps running on the model, the effort and
+ * the access it was opened with, so those, and not the catalog's defaults, are what the pickers show once the turn
+ * is over and what the send carries: a default filled in here moves the thread somewhere nobody asked for. */
+export function threadPicks(thread: { running: boolean; model: string | null }, rows: ReadonlyArray<SessionView>): ComposerOptions {
+  const live = runningPicks(rows.at(-1) ?? null, thread.running);
   if (live.model !== undefined || thread.model === null) return live;
-  return { model: thread.model.replace(ONE_M, ""), ...(ONE_M.test(thread.model) ? { contextWindow: "1m" } : {}), ...live };
+  return { ...recordedPicks(rows), ...modelPicks(thread.model), ...live };
 }
 
-/** The picks that apply to the thread in front of the person. The model, and the window that rides inside it on the
- * wire, are kept per workspace while a thread keeps the model it was opened on, so each is dropped here unless it was
- * made on this thread: otherwise it paints this one's button and moves it on the next send. They apply to a thread
- * that has not run, which is what the pick was made for, and each to the thread it was made on, which is someone
- * changing that thread on purpose. Each is read against its own thread and not the pair against one, or picking a
- * window here would carry in a model picked somewhere else. */
+/** The picks that apply to the thread in front of the person. Every pick a thread keeps for itself, the model and the
+ * window that rides inside it on the wire, the effort and the access, is remembered per workspace while the thread
+ * goes on running at the one it was opened at, so each is dropped here unless it was made on this thread: otherwise
+ * it paints this one's button and moves it on the next send. They apply to a thread that has not run, which is what
+ * the pick was made for, and each to the thread it was made on, which is someone changing that thread on purpose.
+ * Each is read against its own thread and not several against one, or picking a window here would carry in a model
+ * picked somewhere else. */
 export function pickedFor(picked: ComposerOptions, thread: { model: string | null }, pickedOn: PickThreads, threadKey: string): ComposerOptions {
   if (thread.model === null) return picked;
   const applies: ComposerOptions = { ...picked };
@@ -91,14 +119,16 @@ export function effectivePicks(catalog: HarnessCatalog, input: { picked: Compose
 
 export function startOptionsFrom(catalog: HarnessCatalog, picked: ComposerOptions, thread: ComposerOptions = {}): ComposerStart {
   const model = resolveModel(catalog, { picked: picked.model, thread: thread.model });
-  const effort = listedPick(effortsFor(catalog, model), picked.effort);
+  const effort = listedPick(effortsFor(catalog, model), picked.effort ?? thread.effort);
   const window = listedPick(contextWindowsFor(catalog, model), picked.contextWindow ?? thread.contextWindow);
-  const permissionMode = listedPick(catalog.permissionModes, picked.permissionMode);
+  const permissionMode = listedPick(catalog.permissionModes, picked.permissionMode ?? thread.permissionMode);
   // The thread's own model rides only where this list carries it. Nobody named it on this send, and sessions.start
   // refuses a model the list does not carry, so an inherited one the binary has since dropped would turn every send
   // into a refusal. Unsent, a claude resume keeps the harness session's own model, which is that same model
   // (measured on 2.1.257, 2026-09-12); on a harness whose resume does not, the turn runs on that CLI's own default,
-  // which is the price of a send that lands over one that is refused.
+  // which is the price of a send that lands over one that is refused. An effort and an access the list carries ride
+  // rather than being left out: absent, every adapter here leaves its CLI's own default in place, which is neither
+  // what the thread ran at nor what the pickers show.
   const modelValue = picked.model ?? listedPick(catalog.models, thread.model) ?? (window !== undefined ? listedPick(catalog.models, model?.value) : undefined);
   // A window rides on the model, never alone: claude builds "<model>[1m]" and refuses a window with no model to
   // ride on, so a frame carrying one without the other fails at the adapter.
