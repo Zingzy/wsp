@@ -98,7 +98,7 @@ describe("local exec stream", () => {
 
   it("a child stopped on a question only a person can answer is not cut at the idle limit", async () => {
     let waiting = true;
-    const factory = localExecStream({ root, idleMs: 120, deadlineMs: 60_000, pollMs: 10, waiting: () => waiting });
+    const factory = localExecStream({ root, idleMs: 120, deadlineMs: 60_000, pollMs: 10 }, () => waiting);
     const stream = factory("sleep 1.2; echo answered; sleep 20", { env: {} });
     const first = stream.lines[Symbol.asyncIterator]().next();
     const late = new Promise<string>(resolve => setTimeout(() => resolve("the turn was cut while it waited"), 4_000));

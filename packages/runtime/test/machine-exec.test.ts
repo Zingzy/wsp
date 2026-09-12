@@ -458,7 +458,7 @@ describe("machineExecStream", () => {
     const guest = scriptGuest(backend, []);
     let now = 0;
     let waiting = true;
-    const stream = machineExecStream(machine, { pollMs: 1, idleMs: 1000, now: () => now, waiting: () => waiting })("claude", { env: {}, input: ["first"] });
+    const stream = machineExecStream(machine, { pollMs: 1, idleMs: 1000, now: () => now }, () => waiting)("claude", { env: {}, input: ["first"] });
     const first = stream.lines[Symbol.asyncIterator]().next();
     now = 9000;
     await new Promise(r => setTimeout(r, 20));

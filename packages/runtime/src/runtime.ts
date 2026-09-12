@@ -194,7 +194,7 @@ import type {
 import { GUEST_WSP_BIN, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct } from "@wsp/protocol";
 import { DAEMON_TOKEN_PATH, mcpServersBlocked, actionRefusal, copyIsCurrent, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState, placeAbsentLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeWorkspaceGoneLine, workFolderIn } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
-import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
+import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { PlaceAbsentError, PlaceBackend, isPlaceAbsent, parsePlaceMachineId, placeMachineId } from "@wsp/engine";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -710,8 +710,9 @@ export interface LocalWiring {
    * the machine directly cannot land in two different folders. */
   backend: MachineBackend & { readonly folder: string };
   /** The launch factory for a turn on this computer, under the limits the registry hands every turn (the turn's own
-   * by default, none for the exec verb), so a local turn is cut the way a cloud turn is. */
-  execStream: (opts?: MachineExecOptions) => ExecStreamFactory;
+   * by default, none for the exec verb), so a local turn is cut the way a cloud turn is. `waiting` rides beside them
+   * and is not one: it says the run is stopped on a question only a person can answer, which holds the idle clock. */
+  execStream: (opts?: MachineExecOptions, waiting?: TurnWaiting) => ExecStreamFactory;
   home: (agentId: string) => string;
   /** The person's own home: where this computer's daemon browses from and keeps its roots file, and what a path
    * under it is shortened against. */
@@ -1663,7 +1664,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
      * its kind: everything else a fork meets is the same either way, since the two are the same interface. */
     backend: (record: WorkspaceRecord) => MachineBackend;
     /** How a turn's process is launched on this workspace's machine, under the limits the registry hands every turn. */
-    execStream: (entry: LiveWorkspace, opts?: MachineExecOptions) => ExecStreamFactory;
+    execStream: (entry: LiveWorkspace, opts?: MachineExecOptions, waiting?: TurnWaiting) => ExecStreamFactory;
     /** The folder a turn and a command start in on this kind when the caller names none; undefined leaves it to the
      * machine's own road, which for a guest is the home the login shell lands in. A reading of the record, since on
      * a computer somebody owns the folder sits under the home that computer answered with. */
@@ -1881,7 +1882,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (at === undefined) throw new Error(placeForksNowhereLine(placeDoorOf().nameOf(record.place)));
         return at;
       },
-      execStream: (entry, o) => machineExecStream(entry.machine, o),
+      execStream: (entry, o, waiting) => machineExecStream(entry.machine, o, waiting),
       folder: () => undefined,
       home: (_entry, id) => cloudHome(id),
       homeDir: () => GUEST_HOME,
@@ -1912,7 +1913,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ? undefined
         : {
             backend: () => local.backend,
-            execStream: (_entry, o) => local.execStream(o),
+            execStream: (_entry, o, waiting) => local.execStream(o, waiting),
             folder: () => local.backend.folder,
             home: (_entry, id) => local.home(id),
             homeDir: () => local.homeDir,
@@ -1940,7 +1941,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // The run's script, log and exit code live in wsp's own folder under the machine's home, not a folder
             // every login on it shares: on the person's own machine another account's /tmp folder is theirs, and a
             // turn that cannot write in it would launch nothing.
-            execStream: (entry, o) => machineExecStream(entry.machine, { ...o, runDir: sshDaemonPaths(sshHomeDir(entry)).runDir }),
+            execStream: (entry, o, waiting) => machineExecStream(entry.machine, { ...o, runDir: sshDaemonPaths(sshHomeDir(entry)).runDir }, waiting),
             // A turn lands where the person's own login lands. wsp makes no folder on a machine it only reaches, so
             // there is none of its own to start in, and a thread that wants another says so in its own cwd.
             folder: () => undefined,
@@ -2004,7 +2005,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             backend: () => placeBackend,
             // The run's script, log and exit code live in wsp's own folder under the place's home, not a folder
             // every login on it shares: on the person's own computer another account's temporary folder is theirs.
-            execStream: (entry, o) => machineExecStream(entry.machine, { ...o, runDir: placeDaemonPaths(placeHomeDir(entry)).runDir }),
+            execStream: (entry, o, waiting) => machineExecStream(entry.machine, { ...o, runDir: placeDaemonPaths(placeHomeDir(entry)).runDir }, waiting),
             // A turn starts in wsp's own work folder under their home, the same rule this computer's own workspace
             // reads: a turn that started in the home itself committed inside the person's own repo once.
             folder: record => {
@@ -2051,7 +2052,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (lifecycle === undefined) throw new Error(`${entry.record.kind} machines declare no lifecycle`);
     return lifecycle;
   };
-  const execFactoryFor = (entry: LiveWorkspace, o?: MachineExecOptions): ExecStreamFactory => moduleOf(entry.record.kind).execStream(entry, o);
+  const execFactoryFor = (entry: LiveWorkspace, o?: MachineExecOptions, waiting?: TurnWaiting): ExecStreamFactory => moduleOf(entry.record.kind).execStream(entry, o, waiting);
   /** The folder a turn or a command starts in, the one rule every road reads: the folder the caller named, else the
    * project named, else the project a thread last landed in on this workspace, else its only project, else the
    * kind's own folder, where a kind that names none leaves the shell in the machine's home. Both roads that launch a
@@ -4717,8 +4718,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * what only a turn's own launch carries, laid over the machine's login environment: every kind answers with that
    * environment through its one module, so a variable put on here reaches a launch on every kind of machine and is
    * written nowhere else. `waiting` is the turn's own reading of whether it is blocked on a person, which its
-   * stream's idle limit reads; absent on every road that is not a turn. */
-  const adapterFor = (entry: LiveWorkspace, named?: string, turnEnv?: Readonly<Record<string, string>>, waiting?: () => boolean): { harness: string; adapter: HarnessAdapter } => {
+   * stream's idle clock reads; absent on every road that is not a turn. It is handed beside the limits and never as
+   * one, so the turn road goes on handing the factory none and runs under the turn's own. */
+  const adapterFor = (entry: LiveWorkspace, named?: string, turnEnv?: Readonly<Record<string, string>>, waiting?: TurnWaiting): { harness: string; adapter: HarnessAdapter } => {
     const harness = named ?? DEFAULT_AGENT.id;
     const factory = adapters[harness];
     if (!factory) throw new Error(noAdapterLine(harness, Object.keys(adapters)));
@@ -4728,7 +4730,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       adapter: factory({
         machine: entry.machine,
         workspaceId: entry.record.id,
-        execStream: execFactoryFor(entry, waiting !== undefined ? { waiting } : undefined),
+        execStream: execFactoryFor(entry, undefined, waiting),
         home: id => kind.home(entry, id),
         env: { ...kind.env(entry, harness), ...turnEnv },
         signInRefusal: signInRefusalLine({ kind: entry.record.kind }),

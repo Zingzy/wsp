@@ -50,10 +50,6 @@ export interface MachineExecOptions {
   execTimeoutMs?: number;
   /** Directory inside the guest for script/log/pid/exit files. */
   runDir?: string;
-  /** Whether the turn is stopped on a question only a person can answer. A harness blocked on a permission prompt
-   * prints nothing and burns nothing, so the idle limit would cut the very turn the question is waiting for; the
-   * idle clock does not run while this answers true. */
-  waiting?: () => boolean;
   /** The clock both limits read. */
   now?: () => number;
   /** What every wait runs on, the poll's and the launch retry's; tests hand in one that moves the clock. */
@@ -141,10 +137,17 @@ const GRACE_POLL_MS = 200;
 /** That grace as the shell's own counter, since a guest has no seq to lean on. */
 const GRACE_CHECKS = Array.from({ length: Math.round(RUN_STOP_MS / GRACE_POLL_MS) }, (_, i) => String(i + 1)).join(" ");
 
-export function machineExecStream(machine: Machine, opts: MachineExecOptions = {}): ExecStreamFactory {
+/** Whether the run is stopped on a question only a person can answer. A harness blocked on a permission prompt
+ * prints nothing and burns nothing, so the idle limit would cut the very turn the question is waiting for; the idle
+ * clock does not run while this answers true. It rides beside the options rather than in them because it is a fact
+ * about one turn and not a limit: the registry hands the turn road no limits, so that road stays the one that runs
+ * under the turn's own. */
+export type TurnWaiting = () => boolean;
+
+export function machineExecStream(machine: Machine, opts: MachineExecOptions = {}, isWaiting?: TurnWaiting): ExecStreamFactory {
   const pollMs = opts.pollMs ?? 1500;
   const idleMs = opts.idleMs ?? TURN_IDLE_MS;
-  const waiting = opts.waiting ?? (() => false);
+  const waiting = isWaiting ?? (() => false);
   const deadlineMs = opts.deadlineMs ?? TURN_WALL_MS;
   const execTimeoutMs = opts.execTimeoutMs ?? INLINE_EXEC_MS;
   const runDir = opts.runDir ?? RUN_DIR;

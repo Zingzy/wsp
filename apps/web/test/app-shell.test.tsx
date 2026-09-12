@@ -383,6 +383,8 @@ describe("the header row", () => {
     });
     act(() => useStore.setState({ sessions: rows() }));
     await collapse();
+    // The crumb names the thread the centre is on, so the thread is opened before its state is read off the header.
+    act(() => useStore.getState().select("ws_a", "thr_1"));
     const crumb = () => banner().querySelector("[data-thread-breadcrumb]")!;
     expect(crumb().textContent).toBe("api/add a health route");
     act(() => useStore.setState({ sessions: rows("Run: wsp --version") }));

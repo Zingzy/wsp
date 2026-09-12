@@ -29,9 +29,9 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { psCpuSeconds, RUN_STOP_MS, TURN_IDLE_MS, TURN_WALL_MS } from "@wsp/protocol";
 import type { ExecStream, ExecStreamFactory } from "@wsp/protocol";
-import { readsWork, turnActivity, turnCut, type MachineExecOptions } from "./machine-exec.js";
+import { readsWork, turnActivity, turnCut, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 
-export interface LocalExecOptions extends Pick<MachineExecOptions, "idleMs" | "deadlineMs" | "now" | "pollMs" | "waiting"> {
+export interface LocalExecOptions extends Pick<MachineExecOptions, "idleMs" | "deadlineMs" | "now" | "pollMs"> {
   /** The folder the child starts in; the command may cd elsewhere, as a harness turn's does. */
   root: string;
 }
@@ -164,9 +164,9 @@ class Lines {
   }
 }
 
-export function localExecStream(opts: LocalExecOptions): ExecStreamFactory {
+export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting): ExecStreamFactory {
   const limits = { idleMs: opts.idleMs ?? TURN_IDLE_MS, deadlineMs: opts.deadlineMs ?? TURN_WALL_MS };
-  const waiting = opts.waiting ?? (() => false);
+  const waiting = isWaiting ?? (() => false);
   const now = opts.now ?? Date.now;
   const checkMs = opts.pollMs ?? CHECK_MS;
   const factory: ExecStreamFactory = (command, { env, input }) => {
