@@ -6,12 +6,11 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { rootsPathIn } from "@wsp/protocol";
+import { FS_READ_CAP_BYTES, GIT_DIFF_CAP_BYTES, rootsPathIn } from "@wsp/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
-import { FS_READ_CAP_BYTES, listDir } from "../src/fs-ops.js";
-import { GIT_DIFF_CAP_BYTES } from "../src/git-ops.js";
-import { startDaemon, type DaemonHandle } from "../src/main.js";
+import { listDir } from "../src/fs-ops.js";
+import { daemonUnderTest, type DaemonUnderTest } from "./harness.js";
 
 const TOKEN = "fs-token";
 const root = mkdtempSync(join(tmpdir(), "wsp-fsgit-root-"));
@@ -116,12 +115,12 @@ async function connect(port: number): Promise<{
   };
 }
 
-let daemon: DaemonHandle;
+let daemon: DaemonUnderTest;
 let c: Awaited<ReturnType<typeof connect>>;
 
 beforeAll(async () => {
   buildRepo();
-  daemon = await startDaemon({ port: 0, token: TOKEN, root, rootsPath, portsSource: async () => [] });
+  daemon = await daemonUnderTest({ port: 0, token: TOKEN, root, rootsPath });
   c = await connect(daemon.port);
 });
 
@@ -371,7 +370,7 @@ describe("roots beyond home", () => {
     writeFileSync(join(project, "README.md"), "# proj\n");
     mkdirSync(join(root, ".wsp"), { recursive: true });
     writeFileSync(rootsPath, `${project}\n`);
-    const d = await startDaemon({ port: 0, token: TOKEN, root, rootsPath, portsSource: async () => [] });
+    const d = await daemonUnderTest({ port: 0, token: TOKEN, root, rootsPath });
     const c2 = await connect(d.port);
     try {
       expect(names(await c2.request("fs.list", { path: project }))).toEqual(["README.md"]);

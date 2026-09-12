@@ -8,10 +8,13 @@
 // pinned once the thread has a turn. Base UI's menu and popover never settle
 // under jsdom (see composer-checkout.test), so both are stood in by a plain
 // open/closed context.
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, accessFromNextMessage, applyPreferencesPatch, keptAccess, THIS_COMPUTER, type HarnessCatalog, type PreferencesPatch, type SessionAccessOutcome, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, accessFromNextMessage, applyPreferencesPatch, codexNotSignedInLine, keptAccess, THIS_COMPUTER, type HarnessCatalog, type PreferencesPatch, type SessionAccessOutcome, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../src/components/ui/menu.js", () => {
   const Ctx = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
@@ -237,6 +240,22 @@ const openModelMenu = async () => {
   return modelMenu()!;
 };
 
+const HERE = dirname(fileURLToPath(import.meta.url));
+const APPS = join(HERE, "..", "..");
+/** The dev shell's fixture catalog, the one file allowed to repeat the table's sentences: the test below pins it to
+ * the table's current words, so a screenshot of the shell is never a menu the table stopped saying. */
+const SHELL_FIXTURE = join(HERE, "shell", "main.tsx");
+/** Every source file of the web and desktop apps, where a second copy of a person's words could hide. */
+function appSources(dir: string, out: Array<readonly [string, string]> = []): Array<readonly [string, string]> {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, e.name);
+    if (e.name === "node_modules" || e.name === "dist" || e.name.startsWith(".") || path === SHELL_FIXTURE) continue;
+    if (e.isDirectory()) appSources(path, out);
+    else if (/\.tsx?$/.test(e.name)) out.push([path, readFileSync(path, "utf8")] as const);
+  }
+  return out;
+}
+
 describe("composer pickers", () => {
   it("sit inside the composer box with the machine's catalog, read the defaults, and picks ride the next start", async () => {
     const { api, started, listed } = fixtureApi({ table: [TABLE, CODEX], machine: [CLAUDE, CODEX] });
@@ -263,7 +282,7 @@ describe("composer pickers", () => {
     await waitFor(() => expect(within(menu).getAllByRole("option").map(el => el.dataset["composerOption"])).toEqual(["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"]));
     expect(within(menu).getByText("Best for everyday, complex tasks")).toBeTruthy();
     expect(within(menu).getAllByRole("option")[0]?.textContent).toMatch(/⌘1|Ctrl\+1/);
-    expect(menu.querySelector("[data-composer-catalog-source]")?.textContent).toBe("Claude Code 2.1.257 on this machine");
+    expect(menu.querySelector("[data-composer-catalog-source]")?.textContent).toBe("Claude Code 2.1.257 on m1");
     fireEvent.change(within(menu).getByLabelText("Search models"), { target: { value: "son" } });
     await waitFor(() => expect(within(menu).getAllByRole("option")).toHaveLength(1));
     fireEvent.click(option("claude-sonnet-5")!);
@@ -333,8 +352,37 @@ describe("composer pickers", () => {
     await waitFor(() => expect(source()).toBe("claude table · --help 2.1.257, 2026-09-05"));
   });
 
+  it("the foot says a turn runs on the agent's own sign-in on this computer and costs this wsp nothing", async () => {
+    const { api } = fixtureApi({ table: [CLAUDE], workspace: { ...BARE, kind: "local" } });
+    await setup(api);
+    await waitFor(() => expect(picker("model")).not.toBeNull());
+    const menu = await openModelMenu();
+    const foot = menu.querySelector<HTMLElement>("[data-composer-model-foot]")!;
+    expect([...foot.children].map(el => el.textContent)).toEqual([
+      "Claude Code 2.1.257 on this computer",
+      "Threads run on Claude Code's own sign-in on this computer, which costs this wsp nothing.",
+      "The prices are its list prices, not a bill.",
+    ]);
+    expect(foot.textContent).not.toMatch(/machine/i);
+  });
+
+  it("the foot on a workspace somewhere else names that place, in the same sentences", async () => {
+    const { api } = fixtureApi({ table: [CLAUDE], workspace: { ...BARE, kind: "cloud", provider: "hetzner" } });
+    await setup(api);
+    await waitFor(() => expect(picker("model")).not.toBeNull());
+    const menu = await openModelMenu();
+    const foot = menu.querySelector<HTMLElement>("[data-composer-model-foot]")!;
+    expect([...foot.children].map(el => el.textContent)).toEqual([
+      "Claude Code 2.1.257 on hetzner",
+      "Threads run on Claude Code's own sign-in on hetzner, which costs this wsp nothing.",
+      "The prices are its list prices, not a bill.",
+    ]);
+    expect(foot.textContent).not.toContain(THIS_COMPUTER);
+    expect(foot.textContent).not.toMatch(/machine/i);
+  });
+
   it("a binary that answered and named a sign-in as why says that in the footer, with its own pin behind it", async () => {
-    const refused = { ...CODEX_TABLE, refusal: "Codex is not signed in on this machine; run codex login --device-auth there" };
+    const refused = { ...CODEX_TABLE, refusal: codexNotSignedInLine("codex login --device-auth") };
     const { api } = fixtureApi({ table: [CLAUDE_TABLE, refused], machine: [CLAUDE_TABLE, refused] });
     await setup(api);
     await waitFor(() => expect(picker("model")).not.toBeNull());
@@ -342,7 +390,7 @@ describe("composer pickers", () => {
     fireEvent.click(modelMenu()!.querySelector<HTMLElement>('[data-composer-harness="codex"]')!);
     await waitFor(() =>
       expect(modelMenu()!.querySelector("[data-composer-catalog-source]")?.textContent).toBe(
-        "Codex is not signed in on this machine; run codex login --device-auth there · app-server 0.153.0, 2026-09-07",
+        "Codex is not signed in where this workspace runs; run codex login --device-auth there · app-server 0.153.0, 2026-09-07",
       ),
     );
     expect(within(modelMenu()!).getAllByRole("option").length).toBe(CODEX_TABLE.models.length);
@@ -659,6 +707,25 @@ describe("composer pickers", () => {
     await waitFor(() => expect(started).toHaveLength(1));
     expect(started[0]).toMatchObject({ cwd: "/root/app" });
     expect(started[0]?.project).toBeUndefined();
+  });
+
+  it("reads each access mode's sentence off the runtime's table, so the app spells none of them itself", async () => {
+    const { api } = fixtureApi({ table: [CLAUDE_TABLE] });
+    await setup(api);
+    await waitFor(() => expect(picker("permissionMode")).not.toBeNull());
+    fireEvent.click(picker("permissionMode")!);
+    const modes = CLAUDE_TABLE.permissionModes;
+    expect(modes).toHaveLength(7);
+    for (const mode of modes) expect(option(mode.value)?.textContent, mode.value).toContain(mode.description!);
+    // The sentences have one home. A copy in the app would go on saying what the table no longer says, which is how
+    // this menu came to explain itself in the binary's own words; the dev shell's fixture is pinned to them instead.
+    const app = appSources(APPS);
+    expect(app.length).toBeGreaterThan(100);
+    for (const mode of modes) {
+      expect(app.filter(([, body]) => body.includes(mode.description!)).map(([f]) => f), mode.value).toEqual([]);
+    }
+    const shell = readFileSync(SHELL_FIXTURE, "utf8");
+    for (const mode of modes.filter(o => shell.includes(`value: "${o.value}"`))) expect(shell, mode.value).toContain(mode.description!);
   });
 
   it("shows nothing at all when the runtime serves no catalog for the harness", async () => {

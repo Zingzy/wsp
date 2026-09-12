@@ -175,6 +175,7 @@ import type {
   TurnImage,
   TurnResult,
   TurnStatus,
+  SysSample,
   UpgradeResult,
   WorkspaceCostEvent,
   WorkspaceCreateStage,
@@ -191,13 +192,13 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { GUEST_WSP_BIN, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct } from "@wsp/protocol";
-import { mcpServersBlocked, actionRefusal, copyIsCurrent, forksNoMachines, IDLE_REASON, kindWords, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState, placeAbsentLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeWorkspaceGoneLine, workFolderIn } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, mcpServersBlocked, actionRefusal, copyIsCurrent, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState, placeAbsentLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeWorkspaceGoneLine, workFolderIn } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
 import { PlaceAbsentError, PlaceBackend, isPlaceAbsent, parsePlaceMachineId, placeMachineId } from "@wsp/engine";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
-import { DAEMON_TOKEN_PATH, assertTokenShape, rotateDaemonToken } from "./daemon-token.js";
+import { assertTokenShape, rotateDaemonToken } from "./daemon-token.js";
 import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy } from "./idle.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import { POLL_INTERVAL_MS, createStatusTracker, machineStateOf, phaseLeavingGone, providerSaid, type StatusApi, type StatusListOptions, type StatusWatchOptions } from "./status.js";
@@ -727,6 +728,11 @@ export interface LocalWiring {
    * arrives in, so the panes and the status probe read one view. The host starts that daemon on the first call and
    * closes it in close(); a host that wires none leaves the local workspace's panes with nothing to dial. */
   daemonRoad?: () => Promise<DaemonReachView>;
+  /** This computer's own cpu, memory and disk, pushed to the listener every poll tick until the returned detach
+   * runs. Read in the host process, so the Live rows of the workspace that is this computer stand whether or not
+   * its daemon is up: a port, a token and a pty have nothing to do with what `os`, `df` and the memory road read.
+   * One sampler however many listeners there are; it starts with the first and stops with the last. */
+  sysSamples?: (fn: (s: SysSample) => void) => Promise<() => void>;
   /** Frees whatever the wiring holds open on this computer when the runtime closes. */
   close?: () => Promise<void>;
 }
@@ -1125,6 +1131,10 @@ export interface Runtime {
     execStream(id: string, argv: ReadonlyArray<string>, cwd?: string, origin?: Caller): Promise<RunningExec>;
     /** How a browser dials this workspace's daemon; throws on backends without preview URLs. */
     daemonReach(id: string, origin?: Caller): Promise<DaemonReachView>;
+    /** This workspace's own utilisation, pushed to the listener every poll tick until the returned detach runs.
+     * Refused for a kind whose Live rows are read off its machine's daemon, which a pane asks over its own link:
+     * the kind table says which is which, so neither side decides it for itself. */
+    watchSys(id: string, fn: (s: SysSample) => void, origin?: Caller): Promise<() => void>;
     /** The public route to one guest port, for a browser to frame; same caching and refusal as daemonReach. */
     portReach(id: string, port: number, origin?: Caller): Promise<PortReachView>;
     /** One fetch of that route from here, as the frame would see it, redirects unfollowed; rejects when nothing answers at
@@ -3851,7 +3861,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     };
     // Only an asked size is checked: the golden's own is what it was built at, whatever the provider offers today.
     if (namesSize(o) && !offeredSize(at.capabilities.sizes, record.size)) {
-      throw Object.assign(new Error(sizeRefusal(sizeWord(record.size), at.capabilities.sizes)), { kind: "invalid" });
+      throw Object.assign(new Error(refusalLine(sizeRefusal(sizeWord(record.size), at.capabilities.sizes), SIZE_PICK_FIX)), { kind: "invalid" });
     }
     const bind = (m: Machine): void => {
       record.machineId = m.id;
@@ -4458,6 +4468,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async daemonReach(id, origin) {
       const entry = await entryOf(id, origin);
       return moduleOf(entry.record.kind).daemonRoad(entry);
+    },
+
+    async watchSys(id, fn, origin) {
+      const entry = await entryOf(id, origin);
+      const kind = entry.record.kind;
+      if (readingRoad(kind, "metrics") !== "host") throw new Error(`${machineWord(kind)} reads its own load over its daemon link, not from this host`);
+      if (local?.sysSamples === undefined) throw new Error("this host reads nothing of the computer it runs on");
+      return local.sysSamples(fn);
     },
 
     async portReach(id, port, origin) {

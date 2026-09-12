@@ -158,17 +158,30 @@ export function offeredSize(sizes: readonly WorkspaceSize[], size: WorkspaceSize
   return sizes.some(s => s.cpu === size.cpu && s.memMb === size.memMb);
 }
 
-/** An awake rate in dollars an hour, to the cent. */
+/** An awake rate in dollars an hour, at the fewest places that do not round the price: cents where cents are the
+ * whole of it, three places where they are not, since a workspace at $0.018 an hour reads as $0.02 to the cent and
+ * that is a fifth of the price. A third place that says nothing is not added: $0.09 is $0.09, not $0.090.
+ *
+ * Which it is, is read off the rounded thousandth and never off the number itself: a provider computes its rate
+ * (Solari charges per vCPU-hour plus per GB-hour), so a real one arrives as 0.09000000000000001, and any test of
+ * the float against its own cent form calls that noise a third place. The one rate rule, read by the size refusal,
+ * the places table, the size pickers and the provider rows alike. */
 export function fmtRate(usdPerHour: number): string {
-  return `$${usdPerHour.toFixed(2)}/hr`;
+  const mils = usdPerHour.toFixed(3);
+  return `$${mils.endsWith("0") ? usdPerHour.toFixed(2) : mils}/hr`;
 }
 
 /** The one refusal every road gives a size the provider does not offer, malformed or merely absent: the word as it
- * was given, then every size that is offered with its rate. */
+ * was given, then every size that is offered with its rate. What happened, alone: each road joins its own fix to it
+ * through refusalLine, since what to do about it is the road's (a flag at a terminal, a pick in the app). */
 export function sizeRefusal(word: string, sizes: readonly MachineSizeOffer[]): string {
   const offered = sizes.map(s => `${sizeWord(s)} (${fmtRate(s.rateUsdPerHour)})`).join(", ");
   return `${word} is not a size this provider offers; the sizes are ${offered}`;
 }
+
+/** What to do about such a size on a road with no flag to name: the app's picker and the wire both ask for one of
+ * the sizes the half above just listed. The command line names its own flag instead. */
+export const SIZE_PICK_FIX = "Ask for one of those instead.";
 
 /** The one refusal a create or a fork gives when the provider is at its machine cap and no builder was left to stop
  * for room: the machines this host knows hold the slots, and the two moves that free one. The provider's own
@@ -945,9 +958,11 @@ export const EMPTY_TASK_LINE = "the task is empty; say what the thread is to do"
 export const EMPTY_TITLE_LINE = "the name is empty; say what the thread is called";
 
 /** The one line a codex turn fails with when its provider wants an OpenAI login the machine has not got: the CLI
- * itself only retries the 401 and dies. `login` is the catalog's command for signing in on a machine. */
+ * itself only retries the 401 and dies. `login` is the catalog's command for signing in on a machine. It is also
+ * what the composer's model menu shows in place of its footer's source line, which is why it names the workspace
+ * rather than the machine it runs on. */
 export function codexNotSignedInLine(login: string): string {
-  return `Codex is not signed in on this machine; run ${login} there`;
+  return `Codex is not signed in where this workspace runs; run ${login} there`;
 }
 
 /** The line when codex's provider reads its key from an environment variable the machine does not set. */
@@ -957,13 +972,26 @@ export function codexMissingEnvLine(name: string): string {
 
 /** The one line under the composer's model lists: the binary that filled them, else whose table stood in and what it
  * was pinned from, or the adapter's own words for why the binary gave nothing. Every word comes from the catalog being
- * shown, so a tab never borrows another agent's binary, reason or pin. The slot is one line at the popup's width, 290px
- * of the 10px mono it draws in, so the agent is named once and the pin's own words carry the rest. */
-export function catalogSourceLine(catalog: HarnessCatalog): string {
+ * shown, so a tab never borrows another agent's binary, reason or pin. `where` is the word for where the turn runs,
+ * which the caller reads off the workspace: the binary the line names is the one on that computer and on no other.
+ * The slot is one line at the popup's width, 290px of the 10px mono it draws in, so the agent is named once and the
+ * pin's own words carry the rest. */
+export function catalogSourceLine(catalog: HarnessCatalog, where: string): string {
   const version = catalog.version;
-  if (catalog.source === "harness") return `${catalog.label}${version === null ? "" : ` ${version}`} on this machine`;
+  if (catalog.source === "harness") return `${catalog.label}${version === null ? "" : ` ${version}`} on ${where}`;
   const why = catalog.refusal ?? `${catalog.harness} table`;
   return version === null ? why : `${why} · ${version}`;
+}
+
+/** What the foot of the composer's model menu says after that line, and the only place it is said. The rows above it
+ * carry the agent's own dollar prices per million tokens, which a person with no account anywhere read as a bill from
+ * wsp: so the foot names whose sign-in the turn runs on and where that sign-in is, and says the prices are the agent's
+ * own. Both sentences hold on every workspace and only the word for where the turn runs changes, so a person who moves
+ * a thread to another computer reads the same two sentences with one word swapped. The prices sentence is dropped
+ * where the menu lists no model, since there is then no price on the screen for it to be about. */
+export function whoPaysLines(catalog: HarnessCatalog, where: string): string[] {
+  const runs = `Threads run on ${catalog.label}'s own sign-in on ${where}, which costs this wsp nothing.`;
+  return catalog.models.length === 0 ? [runs] : [runs, "The prices are its list prices, not a bill."];
 }
 
 /** The one line in place of the model rows: what the binary reported, or what the table holds, and never a count the
@@ -1152,6 +1180,15 @@ export const NO_PROVIDER_LINE = "no machine provider is set up on this computer,
 
 /** Where a Solari key comes from, spelled once for the terminal's ask, the modal's guide and its link. */
 export const SOLARI_CONSOLE = "console.getsolari.com";
+
+/** What a person calls a provider's key and where they get one, keyed by the word WSP_PROVIDER holds. The host's
+ * provider registry reads its keyName and keyConsole from here and the app's provider rows read the same, so the
+ * screen that asks for a key and the terminal that asks for it say one thing. A provider that takes no key has no
+ * row. */
+export const PROVIDER_KEY_WORDS: Record<string, { keyName: string; keyConsole?: string }> = {
+  box: { keyName: "Box API key", keyConsole: "ascii.dev" },
+  solari: { keyName: "Solari API key", keyConsole: SOLARI_CONSOLE },
+};
 
 /** The quiet row at the sidebar's bottom while no golden is sealed, and every word of the modal it opens: the init
  * job drawn in the app. Micro-labels are the caps mono words over a screen, headlines the one sentence under them,
@@ -2548,7 +2585,7 @@ export const HOST_WORDS = {
 } as const;
 
 /** How long a computer has been away, coarse on purpose: the figure is read once in a table, not watched. */
-function offlineFor(ms: number): string {
+export function offlineFor(ms: number): string {
   const minutes = Math.max(0, Math.floor(ms / 60_000));
   if (minutes < 60) return `${minutes} min`;
   const hours = Math.floor(minutes / 60);

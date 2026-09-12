@@ -53,6 +53,7 @@ import {
   type WorkspaceSize,
   WorkspaceCostEvent,
   type WorkspaceStatus,
+  WorkspaceSysEvent,
   type WorkspaceView,
 } from "@wsp/protocol";
 
@@ -120,6 +121,9 @@ export class ProtocolClient {
    * a caller that subscribes the moment it learns its channel id would still miss the hello. Bounded by the socket:
    * a channel dies with the socket that opened it, so a redial starts this empty. */
   #unclaimed = new Map<string, DaemonChannelEvent[]>();
+  /** Listeners for this computer's own readings, which the host pushes on this socket. Kept off #listeners for the
+   * reason the daemon's frames are: a figure ticking twice a minute is not history for the store to fold. */
+  #sys = new Set<(e: WorkspaceSysEvent) => void>();
   #opts: ProtocolClientOptions;
   #Ctor: typeof WebSocket;
   #backoff: (attempt: number) => number;
@@ -173,6 +177,12 @@ export class ProtocolClient {
       fns.delete(fn);
       if (fns.size === 0) this.#channels.delete(channel);
     };
+  }
+
+  /** Readings of the computer this host runs on, pushed for every workspace this socket asked about. */
+  onSysSample(fn: (e: WorkspaceSysEvent) => void): () => void {
+    this.#sys.add(fn);
+    return () => this.#sys.delete(fn);
   }
 
   subscribe(fn: (e: ProtocolEvent) => void): () => void {
@@ -283,6 +293,12 @@ export class ProtocolClient {
         for (const fn of fns) fn(msg as unknown as DaemonChannelEvent);
         return;
       }
+      if (msg.type === "workspace.sys") {
+        // Parsed, not trusted: a row paints only figures the wire type vouches for, as a daemon's own samples are.
+        const reading = WorkspaceSysEvent.safeParse(msg);
+        if (reading.success) for (const fn of this.#sys) fn(reading.data);
+        return;
+      }
       if (typeof msg.seq === "number") this.#cursor = msg.seq;
       for (const fn of this.#listeners) fn(msg as unknown as ProtocolEvent);
       return;
@@ -299,6 +315,30 @@ export class ProtocolClient {
   }
 
   #failAll(e: Error): void { for (const p of this.#pending.values()) p.reject(e); this.#pending.clear(); }
+}
+
+/** What a remove took: whether a computer of that id was there, what the sweep took off it, what its workspaces
+ * said as they went, and the one line for a computer that was not connected to sweep. */
+export interface PlaceRemoved {
+  removed: boolean;
+  swept: string[];
+  dropped: string[];
+  note?: string;
+}
+
+/** The ssh road of Add a computer: the login as a person's terminal would take it. No key rides here; the host
+ * logs in through the ssh agent and config as they stand, which is what the note under the fields promises. */
+export interface SshLogin {
+  address: string;
+  port?: number;
+}
+
+/** One line of the installer's progress as the sheet draws it: the words, whether it is running, and the figure at
+ * its right end where the stage carries one. */
+export interface InstallStage {
+  word: string;
+  state: "running" | "done";
+  fact?: string;
 }
 
 export interface Api {
@@ -341,6 +381,14 @@ export interface Api {
   /** The guest ports the host forwards to this computer's loopback; forward.open and forward.close keep the list current. Optional so fixtures without forwards need not fake it. */
   listForwards?(): Promise<PortForward[]>;
   stopForward?(workspaceId: string, port: number): Promise<void>;
+  /** Takes a computer or a provider back out: the host sweeps wsp off it over its link where it is connected, drops
+   * the workspaces standing on it and the record. */
+  removePlace?(placeId: string): Promise<PlaceRemoved>;
+  /** The ssh road of Add a computer: the host logs in as the person's terminal would, installs wsp on the box and
+   * waits for the box to dial back, calling `onStage` with each stage as the installer reaches it. Resolves with the
+   * computer once it has joined. This is the one seam the sheet's ssh road calls; no op on the wire carries the
+   * installer yet, so a host without it holds the road's Add rather than pretending to run one. */
+  addComputerOverSsh?(login: SshLogin, onStage: (stage: InstallStage) => void): Promise<PlaceView>;
   capabilities(): Promise<Capabilities>;
   /** The road to every workspace's daemon: the host holds the socket and relays the frames. */
   daemon: DaemonApi;
@@ -449,6 +497,13 @@ export interface Api {
   listSnapshots(name?: string): Promise<SnapshotLineage>;
   /** Every snapshot on the account by count, size and monthly cost; null when the provider cannot list them. */
   snapshotStorage(): Promise<SnapshotStorage | null>;
+  /** Asks the host to push this workspace's own readings on this socket, one per poll tick, until the socket goes.
+   * The road for the workspace that is this computer, whose figures the host reads in its own process; every other
+   * kind's ride its daemon link. Asked again on every live transition, as the daemon link's own watches are: a
+   * subscription dies with the socket that made it. Optional so a fixture with no host behind it need not fake it. */
+  watchSys?(workspaceId: string): Promise<void>;
+  /** The readings those asks push, for every workspace this socket asked about. */
+  onSysSample?(fn: (e: WorkspaceSysEvent) => void): () => void;
   /** The workspace's cost ticks since the runtime began metering it, folded to the rate changes and the newest. Optional
    * so fixtures without a usage chart need not fake it; without it the chart starts with the next tick. */
   costHistory?(workspaceId: string): Promise<WorkspaceCostEvent[]>;
@@ -459,8 +514,9 @@ export interface Api {
   snapshotWorkspace?(id: string): Promise<ProjectGolden>;
   /** Every project golden the runtime took; the Lineage section lists each under the version it stands on. */
   listProjectGoldens?(): Promise<ProjectGolden[]>;
-  /** The image this host owns and the copy each place holds of it, as Settings > Image reads them. Optional so a
-   * fixture that shows no image section need not fake it. */
+  /** The image this host owns and the copy each place holds of it, as Settings > Image reads them and as the
+   * Remove dialog reads a copy's size to say what comes off that computer. Optional so a fixture that shows no
+   * image section need not fake it. */
   image?(name?: string): Promise<SealedImageView>;
 }
 
@@ -573,6 +629,8 @@ export function makeApi(c: ProtocolClient): Api {
       close: async channel => void (await c.request("daemon.close", { channel })),
       onFrame: (channel, fn) => c.onDaemonFrame(channel, fn),
     },
+    watchSys: async workspaceId => void (await c.request("sys.subscribe", { workspaceId })),
+    onSysSample: fn => c.onSysSample(fn),
     portReach: async (id, port) => (await c.request<{ reach: PortReachView }>("workspaces.portReach", { workspaceId: id, port })).reach,
     portProbe: async (id, port) => (await c.request<{ probe: PortProbeView }>("workspaces.portProbe", { workspaceId: id, port })).probe,
     startSession: async opts => (await c.request<{ session: SessionView }>("sessions.start", { ...opts })).session,
@@ -620,6 +678,7 @@ export function makeApi(c: ProtocolClient): Api {
     initBuild: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.build", { ...o })).job),
     initSignInCode: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.signInCode", { ...o })).job),
     initCancel: async () => InitJob.parse((await c.request<{ job?: unknown }>("init.cancel")).job),
+    removePlace: async placeId => await c.request<PlaceRemoved>("places.remove", { placeId }),
     subscribe: fn => c.subscribe(fn),
     getGolden: async (name = "default") => (await c.request<{ manifest?: GoldenManifest }>("golden.get", { name })).manifest,
     listSnapshots: async name =>

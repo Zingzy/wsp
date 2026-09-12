@@ -2,13 +2,13 @@
   {
     "id": 1,
     "op": "proc.kill",
-    "pid": 4242,
+    "pid": 50,
     "signal": "TERM"
   },
   {
-    "id": 2,
+    "id": 1,
     "op": "proc.kill",
-    "pid": 4242,
+    "pid": 50,
     "signal": "KILL"
   }
 ]

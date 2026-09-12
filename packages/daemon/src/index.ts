@@ -1,8 +1,7 @@
 export { PtyManager, PtySession, ptyEnv, type PtyCreateOpts, type DataListener, type ExitListener } from "./pty-manager.js";
+// The guest's start script and the host read these off this package's dist, so they stay on its face.
+export { OPEN_SHIM_PATH, OPEN_SOCKET_PATH, XDG_OPEN_PATH, daemonListeningLine } from "@wsp/protocol";
 export {
-  OPEN_SHIM_PATH,
-  XDG_OPEN_PATH,
-  OPEN_SOCKET_PATH,
   OPEN_SHIM_SCRIPT,
   OPEN_URL_RE,
   OPEN_URL_MAX,
@@ -15,16 +14,9 @@ export {
   type OpenSocket,
   type SpotterOptions,
 } from "./relay.js";
-export {
-  startDaemon,
-  DEFAULT_HOST,
-  DEFAULT_PORT,
-  DEFAULT_TOKEN_PATH,
-  DEFAULT_INBOX_DIR,
-  DEFAULT_MANIFEST_PATH,
-  type DaemonOptions,
-  type DaemonHandle,
-} from "./main.js";
+export { startDaemon, type DaemonOptions, type DaemonHandle } from "./main.js";
+export { DAEMON_USAGE, daemonArgv, daemonOptions, parseDaemonArgs, type DaemonArgs, type DaemonSeams } from "./args.js";
+export { placeSelfReport, sweepPlaceHome, type PlaceSelfReportInput } from "./place.js";
 export {
   parseProcNetTcp,
   parseLsofListeners,
@@ -69,8 +61,6 @@ export {
 export {
   listDir,
   readFileBounded,
-  FS_READ_CAP_BYTES,
-  FS_LIST_CAP_ENTRIES,
   type FsEntry,
   type FsListing,
   type FsRead,
@@ -80,7 +70,6 @@ export {
   gitStatus,
   gitDiff,
   parsePorcelainV2,
-  GIT_DIFF_CAP_BYTES,
   type GitStatus,
   type GitBranch,
   type GitStatusEntry,
@@ -89,7 +78,7 @@ export {
   type GitDiffScope,
 } from "./git-ops.js";
 export { localhostPortOf, localhostPortsIn, settledLocalPorts } from "./local-urls.js";
-export { CMDLINE_BYTES, killProcess, parseProcPidStat, PROC_CAP, ProcFsSource, ProcSampler, type ProcFsOptions, type ProcSamplerOptions, type ProcScan, type ProcScanInput, type ProcSource, type ProcStat } from "./proc.js";
+export { killProcess, parseProcPidStat, ProcFsSource, ProcSampler, type ProcFsOptions, type ProcSamplerOptions, type ProcScan, type ProcScanInput, type ProcSource, type ProcStat } from "./proc.js";
 export { LocalProcSource, parsePs, parsePsNames, type LocalProcOptions, type PsRow } from "./proc-local.js";
 export { cLocale } from "./host-command.js";
 export { availableFromVmStat, cpuTimesOf, hostSysSource, memorySourceFor, parseDf, type MemorySource } from "./sys-local.js";

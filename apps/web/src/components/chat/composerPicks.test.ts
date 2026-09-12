@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import { contextWindowsFor, type HarnessCatalog, type SessionView } from "@wsp/protocol";
-import { effectivePicks, pickedFor, resolveModel, runningPicks, startOptionsFrom, threadPicks } from "./composerPicks";
+import { effectivePicks, pickedFor, recordedPicks, resolveModel, runningPicks, startOptionsFrom, threadPicks } from "./composerPicks";
 
 const CLAUDE: HarnessCatalog = {
   harness: "claude",
@@ -54,23 +54,48 @@ describe("runningPicks", () => {
   });
 });
 
+describe("recordedPicks", () => {
+  const row = (id: string, picks: Partial<SessionView>): SessionView => ({ id, workspaceId: "w", harness: "claude", status: "completed", threadId: "t1", ...picks });
+
+  it("takes each pick from the last turn that named one, since a resume records only what its send carried", () => {
+    // The turn that opened the thread carries the marks the runtime filled in; the resume after it named an effort
+    // and nothing else, so the access and the model the thread was opened at are still what it runs.
+    const rows = [row("s1", { model: "claude-opus-5", effort: "high", permissionMode: "plan" }), row("s2", { effort: "low" })];
+    expect(recordedPicks(rows)).toEqual({ model: "claude-opus-5", effort: "low", permissionMode: "plan" });
+    expect(recordedPicks([])).toEqual({});
+  });
+
+  it("reads the model and the window it ran at off one row, never two, since the window rides inside the model", () => {
+    expect(recordedPicks([row("s1", { model: "claude-opus-5[1m]" })])).toEqual({ model: "claude-opus-5", contextWindow: "1m" });
+    expect(recordedPicks([row("s1", { model: "claude-opus-5", contextWindow: "200k" })])).toEqual({ model: "claude-opus-5", contextWindow: "200k" });
+    // The later turn ran a model of its own at the window that model came with, so the earlier turn's 1M is gone
+    // with the model it rode inside.
+    const moved = [row("s1", { model: "claude-opus-5[1m]" }), row("s2", { model: "claude-sonnet-5" })];
+    expect(recordedPicks(moved)).toEqual({ model: "claude-sonnet-5" });
+  });
+});
+
 describe("threadPicks", () => {
   const opened: SessionView = { id: "s1", workspaceId: "w", harness: "claude", status: "completed", model: "claude-opus-5[1m]", effort: "high", permissionMode: "plan" };
 
   it("keeps the model the thread's last start recorded once no turn runs, even one this list does not carry", () => {
-    expect(threadPicks(opened, { running: false, model: "claude-fable-5-1" })).toEqual({ model: "claude-fable-5-1" });
-    expect(threadPicks(null, { running: false, model: "claude-opus-5[1m]" })).toEqual({ model: "claude-opus-5", contextWindow: "1m" });
-    expect(threadPicks(null, { running: false, model: null })).toEqual({});
+    expect(threadPicks({ running: false, model: "claude-fable-5-1" }, [])).toEqual({ model: "claude-fable-5-1" });
+    expect(threadPicks({ running: false, model: "claude-opus-5[1m]" }, [])).toEqual({ model: "claude-opus-5", contextWindow: "1m" });
+    expect(threadPicks({ running: false, model: null }, [])).toEqual({});
   });
 
   it("the running turn's own values win, since a turn on the machine is what the pickers stand for while it streams", () => {
     const running: SessionView = { ...opened, status: "running" };
-    expect(threadPicks(running, { running: true, model: "claude-fable-5-1" })).toEqual({ model: "claude-opus-5", contextWindow: "1m", effort: "high", permissionMode: "plan" });
-    expect(threadPicks({ ...running, model: undefined }, { running: true, model: "claude-fable-5-1" })).toEqual({ model: "claude-fable-5-1", effort: "high", permissionMode: "plan" });
+    // The running turn is read off this thread's own rows, the last of them, so the turn in front of the person is
+    // the one the pickers stand for and no other row of the workspace can be it.
+    const earlier: SessionView = { ...opened, id: "s0", model: "claude-sonnet-5", effort: "low", permissionMode: "bypassPermissions" };
+    expect(threadPicks({ running: true, model: "claude-sonnet-5" }, [earlier, running])).toEqual({ model: "claude-opus-5", contextWindow: "1m", effort: "high", permissionMode: "plan" });
+    expect(threadPicks({ running: true, model: "claude-fable-5-1" }, [running])).toEqual({ model: "claude-opus-5", contextWindow: "1m", effort: "high", permissionMode: "plan" });
+    expect(threadPicks({ running: true, model: "claude-fable-5-1" }, [{ ...running, model: undefined }])).toEqual({ model: "claude-fable-5-1", effort: "high", permissionMode: "plan" });
   });
 
   it("the pick shows that model and a send with no pick change carries it, never the catalog's default", () => {
-    const thread = threadPicks(opened, { running: false, model: "claude-sonnet-5" });
+    const thread = threadPicks({ running: false, model: "claude-sonnet-5" }, []);
     expect(effectivePicks(CLAUDE, { picked: {}, thread }).model).toBe("claude-sonnet-5");
     expect(startOptionsFrom(CLAUDE, {}, thread)).toEqual({ model: "claude-sonnet-5" });
     // A picked model still wins, and a thread on the 1M window keeps it rather than resuming at 200k.
@@ -80,8 +105,24 @@ describe("threadPicks", () => {
     expect(startOptionsFrom(CLAUDE, {}, {})).toEqual({});
   });
 
+  it("between turns the effort and the access come off the thread's own rows, and the send carries them", () => {
+    // The turn that opened this thread ran at high and plan; nothing has been picked anywhere, so those, and not the
+    // catalog's marks, are what the pickers read and what the next send carries.
+    const thread = threadPicks({ running: false, model: "claude-opus-5" }, [opened]);
+    expect(thread).toEqual({ model: "claude-opus-5", contextWindow: "1m", effort: "high", permissionMode: "plan" });
+    expect(effectivePicks(CLAUDE, { picked: {}, thread })).toEqual({ model: "claude-opus-5", effort: "high", contextWindow: "1m", permissionMode: "plan" });
+    expect(startOptionsFrom(CLAUDE, {}, thread)).toEqual({ model: "claude-opus-5", contextWindow: "1m", effort: "high", permissionMode: "plan" });
+    // A pick on this thread still wins over what it ran at.
+    expect(startOptionsFrom(CLAUDE, { effort: "low", permissionMode: "bypassPermissions" }, thread)).toMatchObject({ effort: "low", permissionMode: "bypassPermissions" });
+    // A value this harness's lists do not carry rides nothing, the same rule a model off the list is read by.
+    const foreign = threadPicks({ running: false, model: "claude-opus-5" }, [{ ...opened, effort: "ultra", permissionMode: "read-only" }]);
+    expect(startOptionsFrom(CLAUDE, {}, foreign)).toEqual({ model: "claude-opus-5", contextWindow: "1m" });
+    // A thread with no turn behind it reads nothing off anyone else's rows.
+    expect(threadPicks({ running: false, model: null }, [opened])).toEqual({});
+  });
+
   it("a thread model this list does not carry is shown but not sent, since sessions.start would refuse it", () => {
-    const thread = threadPicks(opened, { running: false, model: "claude-fable-5-1" });
+    const thread = threadPicks({ running: false, model: "claude-fable-5-1" }, []);
     expect(effectivePicks(CLAUDE, { picked: {}, thread }).model).toBe("claude-fable-5-1");
     expect(resolveModel(CLAUDE, { picked: undefined, thread: thread.model })).toEqual({ value: "claude-fable-5-1", label: "claude-fable-5-1" });
     // Nothing rides, so the resume keeps the harness session on that model rather than the send being refused.
@@ -101,21 +142,46 @@ describe("pickedFor", () => {
 
   it("drops a model picked on another thread of this workspace, since a thread keeps the model it runs on", () => {
     // The picks are one record per workspace, so without this every thread here shows the last model picked on any
-    // of them, and a send moves each of them onto it.
-    expect(pickedFor({ model: "claude-fable-5-1", effort: "low" }, ran, { model: "t9" }, "t1")).toEqual({ effort: "low" });
-    expect(pickedFor({ model: "claude-fable-5-1", effort: "low" }, ran, {}, "t1")).toEqual({ effort: "low" });
+    // of them, and a send moves each of them onto it. An effort picked on this thread stands beside it.
+    expect(pickedFor({ model: "claude-fable-5-1", effort: "low" }, ran, { model: "t9", effort: "t1" }, "t1")).toEqual({ effort: "low" });
+    expect(pickedFor({ model: "claude-fable-5-1", effort: "low" }, ran, {}, "t1")).toEqual({});
   });
 
   it("keeps it for a thread that has not run and for the thread the pick was made on", () => {
     expect(pickedFor({ model: "claude-fable-5-1" }, unrun, { model: "t9" }, "t1")).toEqual({ model: "claude-fable-5-1" });
     expect(pickedFor({ model: "claude-fable-5-1" }, ran, { model: "t1" }, "t1")).toEqual({ model: "claude-fable-5-1" });
-    expect(pickedFor({ effort: "low" }, ran, { model: "t9" }, "t1")).toEqual({ effort: "low" });
+    expect(pickedFor({ effort: "low" }, ran, { effort: "t1" }, "t1")).toEqual({ effort: "low" });
+  });
+
+  it("drops an effort picked on another thread, since it would move this thread's reasoning on the next send", () => {
+    // A thread that opened at high, with low picked on another thread of this workspace: unscoped, its button would
+    // read low and its next send would run it at low without anyone touching its picker.
+    const thread = threadPicks({ running: false, model: "claude-opus-5" }, [{ id: "s1", workspaceId: "w", harness: "claude", status: "completed", effort: "high" }]);
+    const picked = pickedFor({ effort: "low" }, ran, { effort: "t9" }, "t1");
+    expect(picked).toEqual({});
+    expect(effectivePicks(CLAUDE, { picked, thread }).effort).toBe("high");
+    expect(startOptionsFrom(CLAUDE, picked, thread)).toEqual({ model: "claude-opus-5", effort: "high" });
+    // On the thread it was picked on, and on one that has not run, it stands.
+    expect(pickedFor({ effort: "low" }, ran, { effort: "t1" }, "t1")).toEqual({ effort: "low" });
+    expect(pickedFor({ effort: "low" }, unrun, { effort: "t9" }, "t1")).toEqual({ effort: "low" });
+  });
+
+  it("drops an access picked on another thread, since it would move this thread's permissions on the next send", () => {
+    // The access is remembered on the host's record, one per workspace, so without this a mode picked on one thread
+    // rides the next send of every other thread here.
+    const thread = threadPicks({ running: false, model: "claude-opus-5" }, [{ id: "s1", workspaceId: "w", harness: "claude", status: "completed", permissionMode: "plan" }]);
+    const picked = pickedFor({ permissionMode: "bypassPermissions" }, ran, { permissionMode: "t9" }, "t1");
+    expect(picked).toEqual({});
+    expect(effectivePicks(CLAUDE, { picked, thread }).permissionMode).toBe("plan");
+    expect(startOptionsFrom(CLAUDE, picked, thread)).toEqual({ model: "claude-opus-5", permissionMode: "plan" });
+    expect(pickedFor({ permissionMode: "bypassPermissions" }, ran, { permissionMode: "t1" }, "t1")).toEqual({ permissionMode: "bypassPermissions" });
+    expect(pickedFor({ permissionMode: "bypassPermissions" }, unrun, { permissionMode: "t9" }, "t1")).toEqual({ permissionMode: "bypassPermissions" });
   });
 
   it("drops a window picked on another thread, since it would drop this thread's own window on the next send", () => {
     // A thread that ran on opus at 1M, with 200k picked on another thread of this workspace: unscoped, its next send
     // would carry claude-opus-5 at 200k and drop this thread's context window without anyone touching its picker.
-    const onOneM = threadPicks(null, { running: false, model: "claude-opus-5[1m]" });
+    const onOneM = threadPicks({ running: false, model: "claude-opus-5[1m]" }, []);
     const picked = pickedFor({ contextWindow: "200k" }, ran, { contextWindow: "t9" }, "t1");
     expect(picked).toEqual({});
     expect(startOptionsFrom(CLAUDE, picked, onOneM)).toEqual({ model: "claude-opus-5", contextWindow: "1m" });
@@ -125,17 +191,22 @@ describe("pickedFor", () => {
     expect(pickedFor({ contextWindow: "200k" }, unrun, { contextWindow: "t9" }, "t1")).toEqual({ contextWindow: "200k" });
   });
 
-  it("reads each of the two on its own thread, so neither pick carries the other onto this one", () => {
+  it("reads each pick on its own thread, so no pick carries another onto this one", () => {
     // The window picked here and the model picked on another thread: the window stands and the model is dropped, or
     // picking a window here would move this thread onto a model nobody picked on it.
     expect(pickedFor({ model: "claude-fable-5-1", contextWindow: "200k" }, ran, { model: "t9", contextWindow: "t1" }, "t1")).toEqual({ contextWindow: "200k" });
     expect(pickedFor({ model: "claude-fable-5-1", contextWindow: "200k" }, ran, { model: "t1", contextWindow: "t9" }, "t1")).toEqual({ model: "claude-fable-5-1" });
     expect(pickedFor({ model: "claude-fable-5-1", contextWindow: "200k" }, ran, { model: "t1", contextWindow: "t1" }, "t1")).toEqual({ model: "claude-fable-5-1", contextWindow: "200k" });
+    // The four together: each stands or falls on the thread it was picked on, and the harness, which is not a thread's
+    // to keep, stands whichever thread it was picked on.
+    const all = { harness: "claude", model: "claude-fable-5-1", contextWindow: "200k", effort: "low", permissionMode: "plan" };
+    expect(pickedFor(all, ran, { model: "t1", contextWindow: "t9", effort: "t1", permissionMode: "t9" }, "t1")).toEqual({ harness: "claude", model: "claude-fable-5-1", effort: "low" });
+    expect(pickedFor(all, ran, {}, "t1")).toEqual({ harness: "claude" });
   });
 
   it("the thread's own model is what the pickers show and what the send carries", () => {
     const picked = pickedFor({ model: "claude-fable-5-1" }, ran, { model: "t9" }, "t1");
-    const thread = threadPicks(null, { running: false, model: "claude-opus-5" });
+    const thread = threadPicks({ running: false, model: "claude-opus-5" }, []);
     expect(effectivePicks(CLAUDE, { picked, thread }).model).toBe("claude-opus-5");
     expect(startOptionsFrom(CLAUDE, picked, thread)).toEqual({ model: "claude-opus-5" });
   });

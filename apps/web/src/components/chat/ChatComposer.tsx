@@ -190,7 +190,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     () => (stopTarget !== null && runningTurn !== null ? { sessionId: stopTarget, turnId: runningTurn.turnId } : null),
     [runningTurn, stopTarget],
   );
-  const accessPick = useAccessPick(workspaceId, pickTarget);
+  const accessPick = useAccessPick(workspaceId, pickTarget, thread.threadKey);
   const stopAttempt = stop !== null && runningTurn !== null && stop.turnId === runningTurn.turnId ? stop : null;
   const steerAttempt = steered !== null && runningTurn !== null && steered.turnId === runningTurn.turnId ? steered : null;
   const canStop = runningTurn !== null && api?.interruptSession !== undefined;

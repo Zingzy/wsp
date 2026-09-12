@@ -1,26 +1,26 @@
 [
   {
     "type": "proc.snapshot",
-    "at": 1,
-    "daemon": 1200,
-    "total": 1
+    "at": 1757000000000,
+    "daemon": 42,
+    "total": 3
+  },
+  {
+    "type": "proc.snapshot",
+    "at": 1757000000000,
+    "daemon": 42.5,
+    "total": 3,
+    "procs": []
   },
   {
     "type": "proc.snapshot",
     "at": 1,
-    "daemon": 1200,
-    "total": 1,
+    "daemon": 42,
+    "total": 3,
     "procs": [
       {
-        "pid": 1
+        "pid": 50
       }
     ]
-  },
-  {
-    "type": "proc.snapshot",
-    "at": 1,
-    "daemon": 1.5,
-    "total": 1,
-    "procs": []
   }
 ]

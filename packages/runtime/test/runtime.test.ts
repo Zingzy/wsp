@@ -9,7 +9,8 @@ import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe } from "@wsp/adapter-claude";
 import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, type AdapterEvent, type EventUnion, type RecipeDigest, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, GuestUnusableError, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
-import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_PATH, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
+import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
+import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
 import { harnessCatalog } from "../src/harness-catalog.js";
 import { copyKey, CATALOG_TTL_MS, DAEMON_REVIVE_AGAIN_MS, GRACE_MS, GUEST_LOGIN_ENV, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, type GoldenExec, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions } from "../src/runtime.js";
@@ -52,7 +53,7 @@ describe("runtime", () => {
 
     await expect(rt.workspaces.create({ golden: "snap_g", name: "odd", cpu: 8, memMb: 16384 })).rejects.toMatchObject({
       kind: "invalid",
-      message: "8x16 is not a size this provider offers; the sizes are 2x2 ($0.09/hr), 2x4 ($0.11/hr), 2x8 ($0.15/hr), 4x8 ($0.22/hr)",
+      message: "8x16 is not a size this provider offers; the sizes are 2x2 ($0.09/hr), 2x4 ($0.11/hr), 2x8 ($0.15/hr), 4x8 ($0.22/hr). Ask for one of those instead.",
     });
     expect(backend.machines).toHaveLength(1);
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["big"]);
@@ -716,7 +717,7 @@ describe("runtime session history", () => {
       expect(codex.isDefault).toBeUndefined();
       expect(codex.models).toEqual([{ value: "gpt-5-codex", label: "Codex", isDefault: true, efforts: ["high"], contextWindows: [] }]);
       // The table lends the words for values the binary only names.
-      expect(codex.permissionModes).toEqual([{ value: "read-only", label: "Read only", description: "No edits, no commands that write" }]);
+      expect(codex.permissionModes).toEqual([{ value: "read-only", label: "Read only", description: "Reads only; edits no files and runs no command that writes" }]);
       expect(probes(backend)).toHaveLength(1);
       expect(codexProbes(backend)).toHaveLength(1);
       await rt.close();
@@ -736,11 +737,11 @@ describe("runtime session history", () => {
     it("a binary that named why it described nothing keeps that harness's table and lends the footer its words", async () => {
       const backend = stubBackend();
       backend.execImpl = () => ({ exitCode: 0, stdout: "", stderr: "" });
-      const refusing: HarnessAdapterFactory = ctx => ({ ...threaded()(ctx), probeCatalog: exec => exec("codex --describe").then(() => ({ refused: "Codex is not signed in on this machine; run codex login there" })) });
+      const refusing: HarnessAdapterFactory = ctx => ({ ...threaded()(ctx), probeCatalog: exec => exec("codex --describe").then(() => ({ refused: "Codex is not signed in where this workspace runs; run codex login there" })) });
       const rt = createRuntime({ backend, store: memoryStore(), adapters: { codex: refusing } });
       const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
       const codex = (await rt.harnesses.list(ws.id)).find(c => c.harness === "codex")!;
-      expect(codex).toMatchObject({ source: "table", version: harnessCatalog("codex")!.version, refusal: "Codex is not signed in on this machine; run codex login there" });
+      expect(codex).toMatchObject({ source: "table", version: harnessCatalog("codex")!.version, refusal: "Codex is not signed in where this workspace runs; run codex login there" });
       expect(codex.models.map(m => m.value)).toEqual(harnessCatalog("codex")!.models.map(m => m.value));
       expect(codex.models.length).toBeGreaterThan(0);
       await rt.close();
