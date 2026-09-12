@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { execFile, spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { join, relative } from "node:path";
 import { promisify } from "node:util";
 import { gunzipSync } from "node:zlib";
-import { CURL_NET } from "@wsp/catalog";
 import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { WebSocketServer } from "ws";
 import { GUEST_SUPERVISOR_PATH, GUEST_USER_ENV, TOOLS_PATH, DAEMON_ENV_FILE } from "@wsp/engine";
-import { assetDir, assetProof } from "../src/assets.js";
-import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, GUEST_DAEMON_DIR, GUEST_WSP_BIN, shellQuote, signInRefusalLine, sshDaemonPaths, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { assetDir, assetProof, daemonBinaryHere } from "../src/assets.js";
+import { bundledDaemonName, DAEMON_TARGETS, daemonBinaryIn, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
+import { DAEMON_MEMORY_MAX_PERCENT, GUEST_DAEMON_DIR, GUEST_WSP_BIN, signInRefusalLine, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { copyKey, createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { isReserved, LocalBackend, NoProviderBackend } from "@wsp/engine";
@@ -20,10 +20,11 @@ import {
   DAEMON_UNIT,
   DAEMON_UNIT_PATH,
   daemonLogCommand,
+  daemonExecLine,
+  daemonFlags,
   daemonUnit,
   daemonSupervisorScript,
   DAEMON_LOG_PATH,
-  daemonNodePath,
   daemonPidPath,
   supervisorPidPath,
   deployDaemon,
@@ -32,12 +33,10 @@ import {
   previewHostSuffix,
   VITE_ALLOWED_HOSTS_ENV,
   GUEST_ENVS,
-  GUEST_NODE,
   claudeEnvs,
   CLOUD_PLACE,
   CONTAINER_PLACE,
   openShimScript,
-  startMjs,
   packBundle,
   cleanOrphans,
   doctor,
@@ -327,6 +326,16 @@ function fakeCliDir(root: string): string {
   return cli;
 }
 
+/** A daemon asset folder holding a stand-in binary per target, each saying which one it is. */
+function fakeDaemonDir(root: string, triples: readonly string[] = DAEMON_TARGETS.map(t => t.triple)): string {
+  const daemon = join(root, "daemon");
+  for (const triple of triples) {
+    mkdirSync(join(daemon, triple), { recursive: true });
+    writeFileSync(daemonBinaryIn(daemon, triple), `#!/bin/sh\necho ${triple}\n`, { mode: 0o755 });
+  }
+  return daemon;
+}
+
 describe("stageDaemonBundle", () => {
   let dir: string | undefined;
   afterEach(() => {
@@ -334,42 +343,29 @@ describe("stageDaemonBundle", () => {
     dir = undefined;
   });
 
-  it("stages dist, a 0.0.0.0 start script, and an installable package.json", async () => {
+  it("stages one static binary per chip a guest can be, the wsp command and the browser shim, and nothing built on the machine", async () => {
     dir = tmp("wsp-doctor-");
-    const daemonDir = join(dir, "daemon");
-    mkdirSync(join(daemonDir, "dist"), { recursive: true });
-    writeFileSync(
-      join(daemonDir, "package.json"),
-      JSON.stringify({ name: "@wsp/daemon", dependencies: { "node-pty": "^1.1.0", ws: "^8.21.3" } }),
-    );
-    writeFileSync(join(daemonDir, "dist", "index.js"), "export const x = 1;");
-
     const stage = join(dir, "stage");
-    await stageDaemonBundle(stage, CLOUD_PLACE, daemonDir, fakeCliDir(dir));
-
-    const pkg = JSON.parse(readFileSync(join(stage, "package.json"), "utf8")) as {
-      type: string;
-      dependencies: Record<string, string>;
-    };
-    expect(pkg.type).toBe("module");
-    // node-pty ships no linux prebuilds; the guest npm install compiles it,
-    // so the bundle's dependency pins must mirror the daemon's.
-    expect(pkg.dependencies).toEqual({ "node-pty": "^1.1.0", ws: "^8.21.3" });
-    expect(readFileSync(join(stage, "dist", "index.js"), "utf8")).toContain("x = 1");
-    // The one deploy gotcha: loopback binds are unreachable through the edge.
-    expect(readFileSync(join(stage, "start.mjs"), "utf8")).toContain('host: "0.0.0.0"');
-    // The browser shim rides along and the daemon opens the socket it posts to.
-    expect(readFileSync(join(stage, "start.mjs"), "utf8")).toContain("openSocketPath: OPEN_SOCKET_PATH");
+    await stageDaemonBundle(stage, CLOUD_PLACE, fakeDaemonDir(dir), fakeCliDir(dir));
+    // Exactly these: no dist, no start script, no package.json, nothing for an npm install to read.
+    expect(readdirSync(stage).sort()).toEqual(["wsp", ...GUEST_DAEMON_TARGETS.map(bundledDaemonName), "wsp-open"].sort());
+    for (const target of GUEST_DAEMON_TARGETS) {
+      const bin = join(stage, bundledDaemonName(target));
+      expect(statSync(bin).mode & 0o111).toBe(0o111);
+      // The right binary under each chip's name: the deploy's case reads the name off uname and keeps that file.
+      expect(execFileSync(bin, { encoding: "utf8" }).trim()).toBe(target.triple);
+    }
+    // The darwin binaries stay behind: a guest is Linux, and a bundle carries what a guest can be.
+    expect(readdirSync(stage).some(name => name.includes("darwin") || name.endsWith("-arm64"))).toBe(false);
+    // The browser shim rides along and posts to the socket the daemon's flags name.
     expect(readFileSync(join(stage, "wsp-open"), "utf8")).toBe(openShimScript(CLOUD_PLACE));
     expect(statSync(join(stage, "wsp-open")).mode & 0o111).toBe(0o111);
+    expect(daemonFlags(CLOUD_PLACE)).toContain(CLOUD_PLACE.openSocket);
   });
 
   it("carries the wsp command beside the daemon, whole, at the path a turn's tools are launched from", async () => {
     dir = tmp("wsp-bundle-cli-");
-    const daemonDir = join(dir, "daemon");
-    mkdirSync(join(daemonDir, "dist"), { recursive: true });
-    writeFileSync(join(daemonDir, "package.json"), JSON.stringify({ name: "@wsp/daemon", dependencies: {} }));
-    writeFileSync(join(daemonDir, "dist", "index.js"), "export const x = 1;");
+    const daemonDir = fakeDaemonDir(dir);
     // The published build is split across chunk files bin.js imports by name, so the folder travels whole.
     const cliDir = fakeCliDir(dir);
 
@@ -393,10 +389,7 @@ describe("stageDaemonBundle", () => {
 
   it("the wsp command in the bundle answers an MCP handshake with its version, run from where the bundle puts it", async () => {
     dir = tmp("wsp-bundle-mcp-");
-    const daemonDir = join(dir, "daemon");
-    mkdirSync(join(daemonDir, "dist"), { recursive: true });
-    writeFileSync(join(daemonDir, "package.json"), JSON.stringify({ name: "@wsp/daemon", dependencies: {} }));
-    writeFileSync(join(daemonDir, "dist", "index.js"), "export const x = 1;");
+    const daemonDir = fakeDaemonDir(dir);
     const stage = join(dir, "stage");
     // The real command bundle on purpose, since the bug was in the built bin's own reading of its version: it needs
     // packages/wspx built, which the gate does before any test runs; the fork's path is the protocol's, under the stage.
@@ -422,47 +415,15 @@ describe("stageDaemonBundle", () => {
 
   it("names an asset folder that was never built rather than failing halfway through a copy", async () => {
     dir = tmp("wsp-bundle-unbuilt-");
-    const daemonDir = join(dir, "daemon");
-    mkdirSync(join(daemonDir, "dist"), { recursive: true });
-    writeFileSync(join(daemonDir, "package.json"), JSON.stringify({ name: "@wsp/daemon", dependencies: {} }));
-    writeFileSync(join(daemonDir, "dist", "index.js"), "export const x = 1;");
     const empty = join(dir, "never-built");
     mkdirSync(empty, { recursive: true });
-    await expect(stageDaemonBundle(join(dir, "stage"), CLOUD_PLACE, daemonDir, empty)).rejects.toThrow(`wsp command bundle missing: ${join(empty, assetProof("cli"))}`);
+    await expect(stageDaemonBundle(join(dir, "stage"), CLOUD_PLACE, fakeDaemonDir(dir), empty)).rejects.toThrow(`wsp command bundle missing: ${join(empty, assetProof("cli"))}`);
     expect(existsSync(join(dir, "stage"))).toBe(false);
-  });
-
-  it("start.mjs sets the golden's PATH before the daemon loads, so a relaunch from a bare environment runs agents with it", async () => {
-    dir = tmp("wsp-start-mjs-");
-    const daemonDir = join(dir, "daemon");
-    mkdirSync(join(daemonDir, "dist"), { recursive: true });
-    writeFileSync(join(daemonDir, "package.json"), JSON.stringify({ name: "@wsp/daemon", dependencies: {} }));
-    // A stand-in daemon that reports the environment it was started with and what start.mjs asked of it.
-    writeFileSync(
-      join(daemonDir, "dist", "index.js"),
-      'export const OPEN_SOCKET_PATH = "/root/.wsp/open.sock";\n' + "export const daemonListeningLine = (host, port) => `wsp-daemon listening on ${host}:${port}`;\n" + 'export async function startDaemon(o) { console.log(JSON.stringify({ path: process.env.PATH, ...o })); return { port: 7070 }; }\n',
-    );
-    const stage = join(dir, "stage");
-    await stageDaemonBundle(stage, CLOUD_PLACE, daemonDir, fakeCliDir(dir));
-
-    const { stdout, stderr } = await promisify(execFile)(process.execPath, [join(stage, "start.mjs")], { env: { PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" } });
-    const started = JSON.parse(stdout.split("\n")[0]!) as { path: string; host: string; openSocketPath: string };
-    expect(started).toEqual({ path: TOOLS_PATH, host: "0.0.0.0", openSocketPath: "/root/.wsp/open.sock" });
-    expect(stdout).toContain("wsp-daemon listening on 0.0.0.0:7070");
-    // Both writes are best-effort: they land as root on a Linux /proc and fail anywhere else, so the run may warn
-    // about either, says nothing else, and starts the daemon with the golden's PATH regardless.
-    expect(stderr.split("\n").filter(l => l.length > 0 && !/^(oom_score_adj|priority) not set: /.test(l))).toEqual([]);
-  });
-
-  it("start.mjs writes the daemon's own memory-killer score and nice value before the daemon loads, so every relaunch road gives them", () => {
-    const write = startMjs(CLOUD_PLACE).indexOf(`writeFileSync("/proc/self/oom_score_adj", "${DAEMON_OOM_SCORE_ADJ}")`);
-    const nice = startMjs(CLOUD_PLACE).indexOf(`setPriority(${DAEMON_NICE})`);
-    const load = startMjs(CLOUD_PLACE).indexOf('await import("./dist/index.js")');
-    expect(write).toBeGreaterThan(-1);
-    expect(nice).toBeGreaterThan(-1);
-    expect(Math.max(write, nice)).toBeLessThan(load);
-    expect(DAEMON_OOM_SCORE_ADJ).toBe(-999);
-    expect(DAEMON_NICE).toBe(-10);
+    // A daemon folder with one chip's binary and not the other is refused by the missing file's own path, before
+    // a byte is staged: a bundle short of one chip would deploy to half the guests.
+    const half = fakeDaemonDir(join(dir, "half"), [GUEST_DAEMON_TARGETS[0]!.triple]);
+    await expect(stageDaemonBundle(join(dir, "stage"), CLOUD_PLACE, half, fakeCliDir(dir))).rejects.toThrow(`wsp-daemon binary missing: ${daemonBinaryIn(half, GUEST_DAEMON_TARGETS[1]!.triple)}`);
+    expect(existsSync(join(dir, "stage"))).toBe(false);
   });
 });
 
@@ -555,123 +516,65 @@ describe("deployScript", () => {
     expect(redact(rotateDaemonTokenScript(token))).not.toContain(token);
   });
 
-  it("bootstraps a pinned, sha256-checked Node into /usr/local only when the guest has none, and compiles against a /usr/local Node's own headers", () => {
+  it("keeps the binary for the chip the guest says it is and drops the other, by the one word uname prints", () => {
     const script = deployScript(CLOUD_PLACE, "aabbcc");
-    const bootstrap = script.indexOf("if ! command -v node");
-    expect(script).not.toContain("node_major");
-    const npm = script.indexOf("npm install");
-    expect(bootstrap).toBeGreaterThan(-1);
-    expect(bootstrap).toBeLessThan(npm);
-    const nodedir = script.indexOf(`if [ "$(command -v node)" = /usr/local/bin/node ] && grep -qx "#define NODE_MAJOR_VERSION $(node -p 'process.versions.node.split(".")[0]' 2>/dev/null)" /usr/local/include/node/node_version.h 2>/dev/null; then export npm_config_nodedir=/usr/local; fi`);
-    expect(nodedir).toBeGreaterThan(bootstrap);
-    expect(nodedir).toBeLessThan(npm);
-    expect(script).toContain(`https://nodejs.org/dist/v${GUEST_NODE.version}/`);
-    expect(script).toContain(`node-v${GUEST_NODE.version}-linux-x64.tar.gz sha=${GUEST_NODE.sha256.x86_64}`);
-    expect(script).toContain(`node-v${GUEST_NODE.version}-linux-arm64.tar.gz sha=${GUEST_NODE.sha256.aarch64}`);
-    expect(script).toContain("sha256sum -c");
-    expect(script).toContain("-C /usr/local --strip-components=1");
-    // The download goes through the catalog's one curl function, defined ahead of it, and types no flags of its own.
-    expect(script.indexOf(CURL_NET)).toBeGreaterThan(-1);
-    expect(script.indexOf(CURL_NET)).toBeLessThan(script.indexOf("curl -o"));
-    expect(script).not.toMatch(/\bcurl +-[A-Za-z]*[fsSL]\b/);
+    const lines = script.split("\n");
+    const unpack = lines.indexOf("tar -xzf /root/wsp-daemon.tgz -C /root/wsp-daemon");
+    expect(unpack).toBeGreaterThan(-1);
+    expect(lines[unpack + 1]).toBe('case "$(uname -m)" in');
+    expect(lines).toContain("  x86_64) mv -f /root/wsp-daemon/wsp-daemon-x86_64 /root/wsp-daemon/wsp-daemon; rm -f /root/wsp-daemon/wsp-daemon-aarch64 ;;");
+    expect(lines).toContain("  aarch64) mv -f /root/wsp-daemon/wsp-daemon-aarch64 /root/wsp-daemon/wsp-daemon; rm -f /root/wsp-daemon/wsp-daemon-x86_64 ;;");
+    expect(lines).toContain('  *) echo "unsupported arch: $(uname -m)" >&2; exit 1 ;;');
+    // Nothing is fetched, compiled or installed: the binary is the whole of the daemon.
+    for (const word of ["npm install", "node_pin", "nodejs.org", "curl", "NODE_VERSION", "cc make"]) expect(script, word).not.toContain(word);
     expect(script).not.toMatch(/apt|nvm|\| *sh\b|\| *bash\b/);
-    expect(GUEST_NODE.sha256.x86_64).toMatch(/^[0-9a-f]{64}$/);
-    expect(GUEST_NODE.sha256.aarch64).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it("drops the foreign prebuilds out of its own bundle and touches no cache of the machine's owner", () => {
-    const script = deployScript(CLOUD_PLACE, "aabbcc");
-    // Headers ship inside the node tarball; pointing node-gyp at them skips a 65MB download.
-    expect(script).toContain("export npm_config_nodedir=/usr/local");
-    const cleanup = script.indexOf("rm -rf /root/wsp-daemon/node_modules/node-pty/prebuilds");
-    expect(cleanup).toBeGreaterThan(script.indexOf("npm install"));
-    expect(cleanup).toBeLessThan(script.indexOf("systemctl restart"));
-    // The deploy also runs as the update of a live workspace; its owner's npm and node-gyp caches are the golden
-    // build's sweep to take, not this script's.
-    expect(script).not.toMatch(/rm -rf[^\n]*\/root\/\.(npm|cache)/);
-  });
-
-  /** The rule that points node-gyp at a Node's own headers is decided on the machine and not in the script's text,
-   * so each of its cases is run here under bash with a folder standing in for the place's own node prefix. */
-  describe("the npm_config_nodedir rule", () => {
-    const homes: string[] = [];
-    afterEach(() => {
-      for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
-    });
-
-    /** What the node the machine already carries answers, and what the prefix's own node answers wherever a case
-     * is not about them disagreeing: a rule missing the half that asks which node will run is one these headers
-     * satisfy, so the case standing for that half cannot pass without it. */
-    const MACHINE_MAJOR = 22;
-    /** A node stands in for its own major: the rule asks a node which one it is, and a script that answers is as
-     * much of a node as the rule reads. */
-    const nodeSaying = (major: number): string => `#!/bin/sh\necho ${major}\n`;
-    /** A node that is in the prefix and cannot say what it is: a tarball half unpacked, a binary for another
-     * architecture, a wrapper whose own interpreter is gone. */
-    const MUTE_NODE = "#!/bin/sh\nexit 1\n";
-
-    async function evaluateRule(has: { node: number | false | "mute"; headers: number | false }): Promise<{ nodeDir: string; out: string }> {
-      const home = tmp("wsp-nodedir-");
-      homes.push(home);
-      const at = sshDaemonPaths(home);
-      // The node a machine already carries, which the deploy's own PATH line leaves behind the place's prefix.
-      const elsewhere = join(home, "elsewhere");
-      mkdirSync(elsewhere, { recursive: true });
-      writeFileSync(join(elsewhere, "node"), nodeSaying(MACHINE_MAJOR), { mode: 0o755 });
-      if (has.node !== false) {
-        mkdirSync(join(at.nodeDir, "bin"), { recursive: true });
-        writeFileSync(join(at.nodeDir, "bin", "node"), has.node === "mute" ? MUTE_NODE : nodeSaying(has.node), { mode: 0o755 });
-      }
-      if (has.headers !== false) {
-        mkdirSync(join(at.nodeDir, "include", "node"), { recursive: true });
-        // The define as a real header writes it, one space and nothing after the number: the line the rule matches
-        // whole, and the line a pattern ending in a space is a prefix of.
-        writeFileSync(join(at.nodeDir, "include", "node", "node_version.h"), `#define NODE_MAJOR_VERSION ${has.headers}\n`);
-      }
+  /** The case as the deploy runs it, under a stand-in uname, against a folder holding both chips' binaries. */
+  function pickedFor(unameSays: string): { status: number | null; said: string; left: string[]; kept: string | undefined } {
+    const home = tmp("wsp-deploy-chip-");
+    try {
       const place = sshDaemonPlace({ home, path: "/usr/bin:/bin" });
-      const rule = deployScript(place, "aabbcc").split("\n").filter(line => line.includes("npm_config_nodedir"));
-      expect(rule).toHaveLength(1);
-      // The whole environment, so a node on the runner's own PATH or an npm_config_nodedir from somebody's .npmrc
-      // cannot answer for the machine here: the planted node comes first and the system paths are there for the
-      // grep and the shell alone. The deploy's own PATH line then puts the place's prefix ahead of all of it.
-      const { stdout } = await promisify(execFile)("/bin/bash", ["-ec", [
-        `export PATH=${shellQuote(join(at.nodeDir, "bin"))}:"$PATH"`,
-        ...rule,
-        "printf 'NODEDIR[%s] SURVIVED' \"${npm_config_nodedir-}\"",
-      ].join("\n")], { env: { PATH: `${elsewhere}:/usr/bin:/bin` } });
-      return { nodeDir: at.nodeDir, out: stdout };
+      mkdirSync(place.dir, { recursive: true });
+      for (const target of GUEST_DAEMON_TARGETS) writeFileSync(join(place.dir, bundledDaemonName(target)), `${target.triple}\n`);
+      const bin = join(home, "bin");
+      mkdirSync(bin);
+      writeFileSync(join(bin, "uname"), `#!/bin/sh\necho ${unameSays}\n`, { mode: 0o755 });
+      const lines = deployScript(place, "aabbcc").split("\n");
+      const from = lines.indexOf('case "$(uname -m)" in');
+      const to = lines.indexOf("esac");
+      expect(from).toBeGreaterThan(-1);
+      const ran = spawnSync("/bin/bash", ["-ec", [...lines.slice(from, to + 1), "echo WENT_ON"].join("\n")], { encoding: "utf8", env: { PATH: `${bin}:/usr/bin:/bin` } });
+      const left = readdirSync(place.dir).sort();
+      const kept = existsSync(join(place.dir, "wsp-daemon")) ? readFileSync(join(place.dir, "wsp-daemon"), "utf8").trim() : undefined;
+      return { status: ran.status, said: `${ran.stdout}${ran.stderr}`, left, kept };
+    } finally {
+      rmSync(home, { recursive: true, force: true });
     }
+  }
 
-    it("points node-gyp at the prefix when the node there carries its headers", async () => {
-      const { nodeDir, out } = await evaluateRule({ node: MACHINE_MAJOR, headers: MACHINE_MAJOR });
-      expect(out).toBe(`NODEDIR[${nodeDir}] SURVIVED`);
-    });
+  it("on each chip the case leaves one binary under the daemon's name, the one built for that chip", () => {
+    for (const target of GUEST_DAEMON_TARGETS) {
+      const picked = pickedFor(target.uname);
+      expect(picked.status).toBe(0);
+      expect(picked.left).toEqual(["wsp-daemon"]);
+      expect(picked.kept).toBe(target.triple);
+      expect(picked.said).toContain("WENT_ON");
+    }
+  });
 
-    it("points node-gyp nowhere when an installer symlinked a foreign node into the prefix, leaving no headers", async () => {
-      const { out } = await evaluateRule({ node: MACHINE_MAJOR, headers: false });
-      expect(out).toBe("NODEDIR[] SURVIVED");
-    });
-
-    it("points node-gyp nowhere when the node that will run is not the prefix's own", async () => {
-      const { out } = await evaluateRule({ node: false, headers: MACHINE_MAJOR });
-      expect(out).toBe("NODEDIR[] SURVIVED");
-    });
-
-    it("points node-gyp nowhere when the headers left in the prefix are another major's than the node beside them", async () => {
-      const { out } = await evaluateRule({ node: MACHINE_MAJOR, headers: MACHINE_MAJOR - 2 });
-      expect(out).toBe("NODEDIR[] SURVIVED");
-    });
-
-    it("points node-gyp nowhere when the node in the prefix cannot say which major it is", async () => {
-      const { out } = await evaluateRule({ node: "mute", headers: MACHINE_MAJOR });
-      expect(out).toBe("NODEDIR[] SURVIVED");
-    });
+  it("a chip wsp builds no daemon for stops the deploy there, the case's own exit and not the shell's", () => {
+    const picked = pickedFor("riscv64");
+    expect(picked.status).toBe(1);
+    expect(picked.said).toContain("unsupported arch: riscv64");
+    expect(picked.said).not.toContain("WENT_ON");
+    expect(picked.kept).toBeUndefined();
   });
 
   it("stops the daemon holding the port before starting the new one, so an update replaces a running daemon instead of reading it as up", () => {
     const script = deployScript(CLOUD_PLACE, "aabbcc");
     const stop = script.indexOf(stopDaemonScript());
-    expect(stop).toBeGreaterThan(script.indexOf("npm install"));
+    expect(stop).toBeGreaterThan(script.indexOf("esac"));
     expect(stop).toBeGreaterThan(script.indexOf("umask 077"));
     expect(stop).toBeLessThan(script.indexOf("systemctl restart"));
     // The pid is read off the socket table for the daemon's port, never matched by name.
@@ -736,29 +639,6 @@ describe("deployScript", () => {
     }
   });
 
-  it("an npm install that fails stops the deploy there, its last lines and the marker read out", () => {
-    // A machine's own place, since a fork's npm log sits in the shared /tmp and two runs of this on one machine
-    // would take turns writing it; the line the guard rides is the same one for every place.
-    const home = tmp("wsp-deploy-npm-");
-    try {
-      const lines = deployScript(sshDaemonPlace({ home, path: "/usr/bin:/bin" }), "aabbcc").split("\n");
-      const make = lines.find(line => line.startsWith("mkdir -p"))!;
-      const install = lines.find(line => line.includes("npm install"))!;
-      const bin = join(home, "bin");
-      mkdirSync(bin, { recursive: true });
-      writeFileSync(join(bin, "npm"), "#!/bin/sh\necho 'npm ERR! gyp ERR! not ok' >&2\nexit 1\n", { mode: 0o755 });
-      for (const fragment of [["set -e", make, install], [make, install]]) {
-        const ran = guardRuns(fragment, `${bin}:/usr/bin:/bin`);
-        expect(ran.stdout).toContain("npm ERR! gyp ERR! not ok");
-        expect(ran.stdout).toContain("NPM_FAIL");
-        expect(ran.stdout).not.toContain("WENT_ON");
-        expect(ran.status).toBe(1);
-      }
-    } finally {
-      rmSync(home, { recursive: true, force: true });
-    }
-  });
-
   /** The supervisor as the deploy writes it into the guest, out of the heredoc it rides in. */
   const supervisorScriptOf = (script: string): string => script.split("WSP_SUPERVISOR")[1] ?? "";
 
@@ -785,7 +665,7 @@ describe("deployScript", () => {
     expect(daemonPidPath(CONTAINER_PLACE).startsWith(`${CONTAINER_PLACE.dir}/`)).toBe(true);
     expect(supervisorPidPath(CONTAINER_PLACE).startsWith(`${CONTAINER_PLACE.dir}/`)).toBe(true);
     const supervisor = daemonSupervisorScript();
-    expect(supervisor).toContain("node /root/wsp-daemon/start.mjs");
+    expect(supervisor).toContain(`  ${daemonExecLine(CONTAINER_PLACE)} >> ${DAEMON_LOG_PATH} 2>&1 &`);
     // The loop is the whole point: a daemon the kernel's memory killer took comes back on its own.
     expect(supervisor).toContain("while :; do");
     expect(supervisor).toContain(`export PATH=${TOOLS_PATH}`);
@@ -809,7 +689,7 @@ describe("deployScript", () => {
     expect(DAEMON_MEMORY_MAX_PERCENT).toBe(80);
     // Enabled with an install section, so a machine that reboots or comes back from a snapshot has its daemon.
     expect(unit).toContain("WantedBy=multi-user.target");
-    expect(unit).toContain("ExecStart=/bin/sh -c 'exec /root/wsp-daemon/node /root/wsp-daemon/start.mjs'");
+    expect(unit).toContain("ExecStart=/root/wsp-daemon/wsp-daemon --host 0.0.0.0 --port 7070 --token-path /root/.wsp-daemon-token --root /root --roots-path /root/.wsp/roots --kind cloud --inbox /root/inbox --manifest /root/.wsp/manifest.json --open-socket /root/.wsp/open.sock");
     // The journal, which rotates itself: nothing else on the guest bounds a log, and restarts here have no limit.
     expect(unit).toContain("StandardOutput=journal");
     expect(unit).toContain("StandardError=journal");
@@ -819,102 +699,27 @@ describe("deployScript", () => {
     expect(deployScript(CLOUD_PLACE, "aabbcc")).not.toContain("/root/daemon.log");
   });
 
-  it("every road starts the daemon by the node the deploy pinned, and the deploy pins it before writing the unit", () => {
-    // Neither road leaves the word node for a PATH to answer: a machine restored onto another one answers it
-    // differently, and a start that resolves nothing exits 127 into a restart every second forever.
-    expect(daemonUnit()).toContain(`exec ${daemonNodePath(CLOUD_PLACE)} ${GUEST_DAEMON_DIR}/start.mjs'`);
-    expect(daemonUnit()).not.toContain("exec node ");
-    const supervisor = daemonSupervisorScript(CONTAINER_PLACE);
-    expect(supervisor).toContain(`  ${daemonNodePath(CONTAINER_PLACE)} ${CONTAINER_PLACE.dir}/start.mjs >>`);
-    expect(supervisor).not.toMatch(/^ +node /m);
-    // A login's own place quotes both paths, since a home may carry a space.
+  it("every road starts the binary the bundle left in the place's own folder, with one set of flags, and never the word node", () => {
+    // The unit and the supervisor read one line: the binary by its path, then the flags the place answers.
+    expect(daemonUnit()).toContain(`ExecStart=${daemonExecLine(CLOUD_PLACE)}`);
+    expect(daemonExecLine(CLOUD_PLACE)).toBe(`${GUEST_DAEMON_DIR}/wsp-daemon ${daemonFlags(CLOUD_PLACE).join(" ")}`);
+    expect(daemonSupervisorScript(CONTAINER_PLACE)).toContain(`  ${daemonExecLine(CONTAINER_PLACE)} >>`);
+    for (const text of [daemonUnit(), daemonSupervisorScript(CONTAINER_PLACE), deployScript(CLOUD_PLACE, "aabbcc")]) expect(text).not.toMatch(/\bnode\b/);
+    // The flags name every file the daemon reads or writes, so nothing is left to a default the guest may not have.
+    expect(daemonFlags(CLOUD_PLACE)).toEqual(["--host", "0.0.0.0", "--port", "7070", "--token-path", "/root/.wsp-daemon-token", "--root", "/root", "--roots-path", "/root/.wsp/roots", "--kind", "cloud", "--inbox", "/root/inbox", "--manifest", "/root/.wsp/manifest.json", "--open-socket", "/root/.wsp/open.sock"]);
+    // A login's own place quotes each path, since a home may carry a space; the flags and the words stay bare.
     const login = sshDaemonPlace({ home: "/home/maya doe", path: "/usr/bin:/bin" });
-    expect(daemonUnit(login)).toContain(`ExecStart=/bin/sh -c 'exec "${daemonNodePath(login)}" "${login.dir}/start.mjs"'`);
-    // The link is made from the node the deploy resolved, before the modules are built under it and before the
-    // unit that reads it exists.
-    const lines = deployScript(CLOUD_PLACE, "aabbcc").split("\n");
-    // The node itself says where it is, rather than a name being read through: a name may be a symlink, which
-    // GNU's ln hard-links as another symlink, or a version manager's shim, which reading through only names.
-    expect(lines).toContain(`node_pin="$(node -p 'process.execPath')"`);
-    const pin = lines.findIndex(line => line.startsWith(`ln -f "$node_pin" ${daemonNodePath(CLOUD_PLACE)} `));
-    expect(pin).toBeGreaterThan(-1);
-    expect(pin).toBeLessThan(lines.findIndex(line => line.includes("npm install")));
-    expect(pin).toBeLessThan(lines.findIndex(line => line.includes("ExecStart=")));
+    expect(daemonUnit(login)).toContain(
+      `ExecStart="/home/maya doe/.wsp/daemon/wsp-daemon" --host 127.0.0.1 --port 0 --token-path "/home/maya doe/.wsp/daemon-token" --root "/home/maya doe" --roots-path "/home/maya doe/.wsp/roots" --kind ssh --inbox "/home/maya doe/.wsp/inbox" --manifest "/home/maya doe/.wsp/manifest.json" --open-socket "/home/maya doe/.wsp/open.sock" --port-file "/home/maya doe/.wsp/daemon.port"`,
+    );
   });
 
-  /** The pin is decided on the machine and not in the script's text, so the generated lines are run here against
-   * a stand-in node reached the two ways a machine offers one: the symlink an image keeps for it, and the shim a
-   * version manager writes. The stand-in answers `-p process.execPath` with its own path, as a node does, and
-   * says a word otherwise, so what the unit's own ExecStart runs at the end can be read. */
-  function nodeAt(dir: string): string {
-    mkdirSync(dir, { recursive: true });
-    const at = join(dir, "node");
-    writeFileSync(at, `#!/bin/sh\n[ "$1" = -p ] && echo ${at} && exit 0\necho the node the deploy read\n`, { mode: 0o755 });
-    return at;
-  }
-
-  for (const [shape, put] of [
-    ["a symlink", (real: string, at: string): void => symlinkSync(real, at)],
-    ["a shim", (real: string, at: string): void => writeFileSync(at, `#!/bin/sh\nexec ${real} "$@"\n`, { mode: 0o755 })],
-  ] as const) {
-    it(`the pin holds the binary the deploy read through ${shape}, and the unit's command runs it once the name is gone`, async () => {
-      const home = tmp("wsp-node-pin-");
-      try {
-        const place = sshDaemonPlace({ home, path: "/usr/bin:/bin" });
-        const real = nodeAt(join(home, "image-node"));
-        const onPath = join(home, "elsewhere");
-        mkdirSync(onPath, { recursive: true });
-        put(real, join(onPath, "node"));
-        mkdirSync(place.dir, { recursive: true });
-        const pin = deployScript(place, "aabbcc").split("\n").filter(line => line.includes("node_pin"));
-        expect(pin).toHaveLength(2);
-        const exec = /ExecStart=\/bin\/sh -c '(.*)'$/m.exec(daemonUnit(place))?.[1];
-        expect(exec).toBeDefined();
-        const { stdout } = await promisify(execFile)("/bin/bash", ["-ec", [
-          ...pin,
-          // What the machine called node, and what that name led to, are both gone: a pin that kept either would
-          // start nothing here, and a start that resolves nothing is a unit restarting every second forever.
-          `rm -rf ${shellQuote(onPath)} ${shellQuote(dirname(real))}`,
-          "export PATH=/usr/bin:/bin",
-          `test -f ${shellQuote(join(place.dir, "node"))} && test ! -L ${shellQuote(join(place.dir, "node"))}`,
-          `${exec!.replace(`"${place.dir}/start.mjs"`, "--- ignored")}`,
-        ].join("\n")], { env: { PATH: `${onPath}:/usr/bin:/bin` } });
-        expect(stdout.trim()).toBe("the node the deploy read");
-      } finally {
-        rmSync(home, { recursive: true, force: true });
-      }
-    });
-  }
-
-  it("the pin is laid again on a machine being deployed a second time, by both of its roads", async () => {
-    const home = tmp("wsp-node-repin-");
-    try {
-      const place = sshDaemonPlace({ home, path: "/usr/bin:/bin" });
-      const onPath = dirname(nodeAt(join(home, "image-node")));
-      mkdirSync(place.dir, { recursive: true });
-      const pin = deployScript(place, "aabbcc").split("\n").filter(line => line.includes("node_pin"));
-      const at = shellQuote(join(place.dir, "node"));
-      // The link road, twice over: the second deploy of a machine finds the pin already there and the daemon
-      // running it, and every line of a deploy has to be re-runnable or set -e ends it where it stands.
-      const { stdout: twice } = await promisify(execFile)("/bin/bash", ["-ec", [
-        ...pin, ...pin, `${at} --- && echo LAID TWICE`,
-      ].join("\n")], { env: { PATH: `${onPath}:/usr/bin:/bin` } });
-      expect(twice.trim().endsWith("LAID TWICE")).toBe(true);
-      // The copy road, which is the one that cannot write over what it finds: a destination whose open fails in
-      // place stands in for the running binary a second deploy meets (ETXTBSY on a machine, measured on Ubuntu
-      // 24.04). The fallback is taken out of the generated line rather than written again here.
-      const fallback = pin[1]!.split("|| ")[1]!;
-      expect(fallback).toContain("rm -f ");
-      const { stdout: copied } = await promisify(execFile)("/bin/bash", ["-ec", [
-        pin[0]!,
-        `ln -sfn ${shellQuote(join(home, "no-such-folder", "node"))} ${at}`,
-        fallback,
-        `${at} --- && echo COPIED OVER`,
-      ].join("\n")], { env: { PATH: `${onPath}:/usr/bin:/bin` } });
-      expect(copied.trim().endsWith("COPIED OVER")).toBe(true);
-    } finally {
-      rmSync(home, { recursive: true, force: true });
-    }
+  it("every flag the unit writes is one the binary takes, read off the binary's own usage line", () => {
+    // The binary built in this checkout, placed where the host reads it: what the unit spells has to be what it parses.
+    const usage = execFileSync(daemonBinaryHere(), ["--help"], { encoding: "utf8" });
+    const flags = daemonFlags(sshDaemonPlace({ home: "/home/maya", path: "/usr/bin" })).filter(word => word.startsWith("--"));
+    expect(flags.length).toBeGreaterThan(5);
+    for (const flag of flags) expect(usage, flag).toContain(`${flag} `);
   });
 
   it("the unit states the environment the daemon hands to every pty, since a restart inherits none of the deploy's", () => {
@@ -930,10 +735,6 @@ describe("deployScript", () => {
     expect(daemonUnit(sshDaemonPlace({ home: "/home/maya", path: "/usr/bin:/bin" }))).not.toContain("EnvironmentFile");
   });
 
-  it("names the node version on stdout before installing, so the deploy log can carry it", () => {
-    const script = deployScript(CLOUD_PLACE, "aabbcc");
-    expect(script.indexOf("NODE_VERSION $(node --version)")).toBeLessThan(script.indexOf("npm install"));
-  });
 });
 
 describe("tarPackCommand", () => {
@@ -976,7 +777,7 @@ describe("packBundle", () => {
 });
 
 describe("deployDaemon", () => {
-  it("uploads the bundle, runs the deploy script, and reports the guest's node version", async () => {
+  it("uploads the bundle, runs the deploy script, and answers the token the daemon started with", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-deploy-"));
     const uploads: Buffer[] = [];
     const server = createServer((req, res) => {
@@ -989,13 +790,10 @@ describe("deployDaemon", () => {
     });
     await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
     try {
-      const daemonDir = join(dir, "daemon");
-      mkdirSync(join(daemonDir, "dist"), { recursive: true });
-      writeFileSync(join(daemonDir, "package.json"), JSON.stringify({ dependencies: { ws: "^8" } }));
-      writeFileSync(join(daemonDir, "dist", "index.js"), "export {};");
+      const daemonDir = fakeDaemonDir(dir);
 
       const backend = stubBackend();
-      backend.execImpl = () => ({ exitCode: 0, stdout: "NODE_VERSION v22.23.2\nDAEMON_UP\n", stderr: "" });
+      backend.execImpl = () => ({ exitCode: 0, stdout: "DAEMON_UP\n", stderr: "" });
       const machine = await backend.create({ kind: "sandbox" });
       const stub = backend.machines[0]!;
       const port = (server.address() as { port: number }).port;
@@ -1003,14 +801,16 @@ describe("deployDaemon", () => {
 
       const cliDir = fakeCliDir(dir);
       const out = await deployDaemon(machine, { token: "abc123", daemonDir, cliDir });
-      expect(out).toEqual({ token: "abc123", node: "v22.23.2" });
+      expect(out).toEqual({ token: "abc123" });
       expect(stub.execLog).toEqual([deployScript(CLOUD_PLACE, "abc123")]);
-      // npm install on the guest can run past what one exec is allowed, so the deploy is a run.
+      // The deploy waits for the daemon to bind, past what one exec is allowed, so it is a run.
       expect(stub.runLog).toEqual([deployScript(CLOUD_PLACE, "abc123")]);
       // The same deploy is the daemon update on a person's live workspace: nothing of theirs is removed.
       expect(stub.execLog.join("\n")).not.toMatch(/rm -rf[^\n]*\/root\/\.(npm|cache)/);
       expect(uploads).toHaveLength(1);
-      expect(gunzipSync(uploads[0]!).toString("latin1")).toContain("start.mjs");
+      const bundle = gunzipSync(uploads[0]!).toString("latin1");
+      for (const target of GUEST_DAEMON_TARGETS) expect(bundle).toContain(bundledDaemonName(target));
+      expect(bundle).not.toContain("start.mjs");
 
       // On a backend with a preview edge the script carries the edge's host suffix, read off this machine's URL.
       const edged = await backend.create({ kind: "sandbox" });

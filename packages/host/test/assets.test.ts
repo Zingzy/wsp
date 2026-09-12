@@ -86,7 +86,10 @@ describe("workspace assets", () => {
   it("names the package that builds each one in this checkout", () => {
     expect(workspaceAsset("web").endsWith(join("web", "dist"))).toBe(true);
     expect(existsSync(join(workspaceAsset("web"), ".."))).toBe(true);
-    expect(existsSync(join(workspaceAsset("daemon"), "package.json"))).toBe(true);
+    // The binaries sit in a folder of the command line package's, filled by its daemon-binary script; nothing builds
+    // them in a node build, so the folder is what is named, not a build output.
+    expect(workspaceAsset("daemon").endsWith(join("wspx", "daemon"))).toBe(true);
+    expect(existsSync(join(workspaceAsset("daemon"), "..", "package.json"))).toBe(true);
   });
 });
 

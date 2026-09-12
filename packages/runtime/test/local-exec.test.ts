@@ -31,6 +31,15 @@ describe("local exec stream", () => {
     expect(code).toBe(5);
   });
 
+  it("names the process it leads, which is the group every process of the turn is in", async () => {
+    const factory = localExecStream({ root });
+    // The shell prints its own pid and its group; both are the leader's, and the pid the stream reports is that one.
+    const stream = factory("echo $$; ps -o pgid= -p $$", { env: {} });
+    const [lines] = await Promise.all([collect(stream.lines), stream.exited]);
+    expect(stream.pid).toBe(Number(lines[0]));
+    expect(Number(lines[1]!.trim())).toBe(stream.pid);
+  });
+
   it("runs in the workspace folder", async () => {
     const factory = localExecStream({ root });
     const stream = factory("pwd", { env: {} });

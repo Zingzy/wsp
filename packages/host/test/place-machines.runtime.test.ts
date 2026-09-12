@@ -226,8 +226,8 @@ describe.skipIf(!RUNTIME_LIVE)("the whole road, over a daemon link a place prove
 
   it("carries a daemon deployed onto a workspace back through the forward, and connectDaemon reads its hello", async () => {
     const machine = await create({ kind: "sandbox", cpu: 2, memMb: 2048 });
-    // What the deploy needs on a plain ubuntu: curl for the node tarball, a toolchain for node-pty. All of it comes
-    // in over the workspace's own outbound road.
+    // The deploy itself needs nothing installed now that the daemon is one static binary; what a bare image lacks
+    // for the turns after it comes in over the workspace's own outbound road.
     const started = Date.now();
     const apt = await machine.exec(
       "export DEBIAN_FRONTEND=noninteractive; apt-get update -qq > /tmp/apt.log 2>&1 && apt-get install -y -qq curl ca-certificates python3 make g++ >> /tmp/apt.log 2>&1; echo apt $?; tail -c 300 /tmp/apt.log",
@@ -236,9 +236,8 @@ describe.skipIf(!RUNTIME_LIVE)("the whole road, over a daemon link a place prove
     expect(apt.stdout, apt.stdout).toContain("apt 0");
     times["apt install curl ca-certificates python3 make g++"] = Date.now() - started;
     const deploying = Date.now();
-    const { token, node } = await deployDaemon(machine, { token: randomBytes(24).toString("hex") });
+    const { token } = await deployDaemon(machine, { token: randomBytes(24).toString("hex") });
     times["deployDaemon"] = Date.now() - deploying;
-    expect(node).toMatch(/^v\d+/);
     expect(await machine.daemonAnswers!({ timeoutMs: 10_000 })).toBe(true);
     const reach = await machine.previewUrl!(7070);
     const events: DaemonEvent[] = [];

@@ -14,7 +14,7 @@ import { SolariBackend, diffRecipes, isReserved, killUntilGone, type GoldenStage
 import { createRuntime, jsonFileStore, type GoldenImport, type Runtime } from "@wsp/runtime";
 import { afterAll, describe, expect, it } from "vitest";
 import { LIVE, liveEnv } from "../../engine/test/live.js";
-import { deployDaemon } from "../src/doctor.js";
+import { DAEMON_DEPLOYED_LINE, deployDaemon } from "../src/doctor.js";
 import { importFor } from "../src/init-import.js";
 import { goldenRecipeFor } from "../src/init-recipe.js";
 import { deltaFor } from "../src/init-upgrade.js";
@@ -78,7 +78,7 @@ describe.runIf(LIVE)("golden update (live: v1, v2 by fork, v3 on the kept builde
       backend,
       store: jsonFileStore(statePath),
       adapters: {},
-      goldenRecipe: goldenRecipeFor(rows, { ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY }, { import: imp, deployDaemon: async m => `node ${(await deployDaemon(m)).node}` }),
+      goldenRecipe: goldenRecipeFor(rows, { ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY }, { import: imp, deployDaemon: async m => deployDaemon(m).then(() => DAEMON_DEPLOYED_LINE) }),
       hostId: "golden-update-live",
     });
     rt.events.on("golden.stage", e => {
