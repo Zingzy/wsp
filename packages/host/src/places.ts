@@ -20,6 +20,7 @@ import {
   JOIN_ADDRESS_LINE,
   LOOPBACK,
   PLACE_CODE_REFUSAL,
+  fmtRate,
   PLACE_DOOR_UNSERVED,
   PLACE_FILE_MODE,
   PLACE_ADD_WORDS,
@@ -161,7 +162,7 @@ export function addableProviders(): string[] {
 }
 
 /** What a provider that just became a place reads as. */
-export const providerPlaceLine = (id: string, rateUsdPerHour: number): string => `place ${id} · $${rateUsdPerHour.toFixed(3)}/h · forks your image`;
+export const providerPlaceLine = (id: string, rateUsdPerHour: number): string => `place ${id} · ${fmtRate(rateUsdPerHour)} · forks your image`;
 
 /** The refusal for a word that is neither a provider wsp holds a key for nor an ssh address, naming all three roads. */
 export function addRefusal(word: string): string {
@@ -323,7 +324,8 @@ function aimHere(word: string, opts: PlaceOpts): HostAim {
   const aim = aimedHost(opts.statePath, opts);
   if (aim.kind !== "here") {
     throw usageRefusal(
-      `wsp ${word} runs on the computer the host runs on, and this line is aimed at ${aimName(aim)}; run it in a terminal over there. Which computers a wsp runs on is handed out and taken away at that host's own terminal.`,
+      `wsp ${word} runs on the computer the host runs on, and this line is aimed at ${aimName(aim)}.`,
+      "Run it in a terminal over there. Which computers a wsp runs on is handed out and taken away at that host's own terminal.",
     );
   }
   return aim;
@@ -331,7 +333,7 @@ function aimHere(word: string, opts: PlaceOpts): HostAim {
 
 export async function addCommand(io: CliIO, opts: PlaceOpts, args: readonly string[], flags: AddFlags = {}, deps: PlaceDeps = systemDeps): Promise<number> {
   const [word] = args;
-  if (args.length > 1) throw usageRefusal("usage: wsp add\n       wsp add <provider>\n       wsp add user@host [--name <name>] [--ssh-port <port>] [--ssh-key <path>]");
+  if (args.length > 1) throw usageRefusal("wsp add takes one provider or one address, or nothing at all.", "usage: wsp add\n       wsp add <provider>\n       wsp add user@host [--name <name>] [--ssh-port <port>] [--ssh-key <path>]");
   const aim = aimHere("add", opts);
   const named = flags.name !== undefined || flags.sshPort !== undefined || flags.keyPath !== undefined;
   if (word !== undefined && word.includes("@")) return addOverSsh(io, opts, aim, word, flags, deps);
@@ -450,7 +452,7 @@ async function addProvider(io: CliIO, opts: PlaceOpts, id: string, deps: PlaceDe
 
 export async function removeCommand(io: CliIO, opts: PlaceOpts, args: readonly string[], deps: PlaceDeps = systemDeps): Promise<number> {
   const [ref] = args;
-  if (ref === undefined || args.length !== 1) throw usageRefusal("usage: wsp remove <place>");
+  if (ref === undefined || args.length !== 1) throw usageRefusal("wsp remove takes one place.", "usage: wsp remove <place>");
   const aim = aimHere("remove", opts);
   const client = await deps.dial(opts.statePath, { aim });
   try {
@@ -541,13 +543,13 @@ const joinDeps = (): JoinDeps => ({
 /** The join code, off the flag or off the file the installer landed it in, which is deleted before the dial: a code
  * left on a computer's disk is a code somebody else could spend. */
 function joinCode(flags: JoinFlags): string {
-  if (flags.code !== undefined && flags.codeFile !== undefined) throw usageRefusal("wsp join takes --code or --code-file, not both");
+  if (flags.code !== undefined && flags.codeFile !== undefined) throw usageRefusal("wsp join takes --code or --code-file, not both.", "Drop one of them.");
   if (flags.code !== undefined) return sentPairCode(flags.code.trim());
-  if (flags.codeFile === undefined) throw usageRefusal(JOIN_USAGE);
+  if (flags.codeFile === undefined) throw usageRefusal("wsp join needs the code the host printed.", JOIN_USAGE);
   const path = resolve(flags.codeFile);
   const code = sentPairCode(readFileSync(path, "utf8").trim());
   rmSync(path, { force: true });
-  if (code === "") throw usageRefusal(`${path} held no join code`);
+  if (code === "") throw usageRefusal(`${path} held no join code.`, "Run wsp add on the host again and write the code it prints into that file.");
   return code;
 }
 
@@ -575,7 +577,7 @@ async function handshakeAt(
       if (urls.length > 1) io.error(e.message);
     }
   }
-  throw last ?? usageRefusal("wsp join needs an address to dial");
+  throw last ?? usageRefusal("wsp join needs an address to dial.", JOIN_USAGE);
 }
 
 /** One dial that joins this computer to a wsp: the key is made here, the host's own key is trusted on this first use
@@ -793,7 +795,7 @@ export async function joinCommand(io: CliIO, args: readonly string[], flags: Joi
   if (home === "") throw new Error("wsp join needs this login's home folder, and this process has none");
   const file = placeFilePath(home);
   if (flags.serve === true) {
-    if (args.length !== 0) throw usageRefusal("wsp join --serve takes no address");
+    if (args.length !== 0) throw usageRefusal("wsp join --serve takes no address.", "The address is the one the join already recorded; run wsp join --serve on its own.");
     const held = readPlaceFile(file);
     if (held === undefined) {
       io.error(NOT_A_PLACE_LINE);
@@ -806,7 +808,7 @@ export async function joinCommand(io: CliIO, args: readonly string[], flags: Joi
     await new Promise<void>(() => {});
     return 0;
   }
-  if (args.length === 0) throw usageRefusal(JOIN_USAGE);
+  if (args.length === 0) throw usageRefusal("wsp join takes one address or more.", JOIN_USAGE);
   // One host answers on several addresses, and the one an installer picked may be the one this computer cannot
   // route to: every word is read, and the join tries them in the order they were given.
   const addresses = args.map(typed => {
@@ -835,7 +837,7 @@ export async function joinCommand(io: CliIO, args: readonly string[], flags: Joi
 }
 
 export async function leaveCommand(io: CliIO, args: readonly string[], deps: { home: string; run: ServiceRunner; platform: string } = { home: process.env["HOME"] ?? "", run: systemRunner, platform: platform() }): Promise<number> {
-  if (args.length !== 0) throw usageRefusal("wsp leave takes no positional arguments");
+  if (args.length !== 0) throw usageRefusal("wsp leave takes no positional arguments.", "Run wsp leave on its own; it takes wsp off the computer you are sitting at.");
   const home = deps.home;
   if (home === "") throw new Error("wsp leave needs this login's home folder, and this process has none");
   const held = readPlaceFile(placeFilePath(home));

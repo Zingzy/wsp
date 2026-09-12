@@ -581,6 +581,10 @@ export const ThreadView = z.object({
 });
 export type ThreadView = z.infer<typeof ThreadView>;
 
+/** The thread a turn's row belongs to: the runtime's thread id, else the row's own, since a row the runtime stamped
+ * no thread on is a thread of one turn. The one rule for grouping rows by thread. */
+export const threadKeyOf = (session: SessionView): string => session.threadId ?? session.id;
+
 /** Whether a turn of these rows ever did any work: one is still working, or one announced a harness session and
  * ended for something other than a refusal. Announcing is not enough on its own, since both CLIs announce their
  * session before they learn they have no sign-in, and a refused turn did none of the work it was asked for. A
@@ -594,7 +598,7 @@ export function threadRan(turns: ReadonlyArray<Pick<SessionView, "claudeSessionI
 export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] {
   const byThread = new Map<string, SessionView[]>();
   for (const session of sessions) {
-    const key = session.threadId ?? session.id;
+    const key = threadKeyOf(session);
     const turns = byThread.get(key);
     if (turns === undefined) byThread.set(key, [session]);
     else turns.push(session);

@@ -317,6 +317,30 @@ export class ProtocolClient {
   #failAll(e: Error): void { for (const p of this.#pending.values()) p.reject(e); this.#pending.clear(); }
 }
 
+/** What a remove took: whether a computer of that id was there, what the sweep took off it, what its workspaces
+ * said as they went, and the one line for a computer that was not connected to sweep. */
+export interface PlaceRemoved {
+  removed: boolean;
+  swept: string[];
+  dropped: string[];
+  note?: string;
+}
+
+/** The ssh road of Add a computer: the login as a person's terminal would take it. No key rides here; the host
+ * logs in through the ssh agent and config as they stand, which is what the note under the fields promises. */
+export interface SshLogin {
+  address: string;
+  port?: number;
+}
+
+/** One line of the installer's progress as the sheet draws it: the words, whether it is running, and the figure at
+ * its right end where the stage carries one. */
+export interface InstallStage {
+  word: string;
+  state: "running" | "done";
+  fact?: string;
+}
+
 export interface Api {
   listWorkspaces(): Promise<WorkspaceView[]>;
   getWorkspace(id: string): Promise<WorkspaceView>;
@@ -357,6 +381,14 @@ export interface Api {
   /** The guest ports the host forwards to this computer's loopback; forward.open and forward.close keep the list current. Optional so fixtures without forwards need not fake it. */
   listForwards?(): Promise<PortForward[]>;
   stopForward?(workspaceId: string, port: number): Promise<void>;
+  /** Takes a computer or a provider back out: the host sweeps wsp off it over its link where it is connected, drops
+   * the workspaces standing on it and the record. */
+  removePlace?(placeId: string): Promise<PlaceRemoved>;
+  /** The ssh road of Add a computer: the host logs in as the person's terminal would, installs wsp on the box and
+   * waits for the box to dial back, calling `onStage` with each stage as the installer reaches it. Resolves with the
+   * computer once it has joined. This is the one seam the sheet's ssh road calls; no op on the wire carries the
+   * installer yet, so a host without it holds the road's Add rather than pretending to run one. */
+  addComputerOverSsh?(login: SshLogin, onStage: (stage: InstallStage) => void): Promise<PlaceView>;
   capabilities(): Promise<Capabilities>;
   /** The road to every workspace's daemon: the host holds the socket and relays the frames. */
   daemon: DaemonApi;
@@ -398,9 +430,10 @@ export interface Api {
    * host refuses one whose turn reached its agent. Optional so fixtures that never forget one need not fake it; a
    * client without it offers no forget. */
   forgetThread?(threadId: string): Promise<void>;
-  /** What each harness's CLI takes at launch; the composer's pickers render from it. With a workspace the runtime
-   * asks the binaries on its machine, else its table answers. Optional so fixtures without pickers need not fake it;
-   * without it the composer shows none. */
+  /** What each harness's CLI takes at launch; the composer's pickers render from it, and every start rides the model,
+   * effort, context window and access resolved out of it. With a workspace the runtime asks the binaries on its
+   * machine, else its table answers. Optional so fixtures without pickers need not fake it; without it the composer
+   * has no agent to send to and is held with that reason. */
   listHarnesses?(workspaceId?: string): Promise<HarnessCatalog[]>;
   /** One level of the folders on the computer running the host, for the picker a browser tab has instead of the
    * desktop shell's dialog. `dir` absent, or a folder inside the roots that is gone, answers with the first root; a
@@ -481,8 +514,9 @@ export interface Api {
   snapshotWorkspace?(id: string): Promise<ProjectGolden>;
   /** Every project golden the runtime took; the Lineage section lists each under the version it stands on. */
   listProjectGoldens?(): Promise<ProjectGolden[]>;
-  /** The image this host owns and the copy each place holds of it, as Settings > Image reads them. Optional so a
-   * fixture that shows no image section need not fake it. */
+  /** The image this host owns and the copy each place holds of it, as Settings > Image reads them and as the
+   * Remove dialog reads a copy's size to say what comes off that computer. Optional so a fixture that shows no
+   * image section need not fake it. */
   image?(name?: string): Promise<SealedImageView>;
 }
 
@@ -644,6 +678,7 @@ export function makeApi(c: ProtocolClient): Api {
     initBuild: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.build", { ...o })).job),
     initSignInCode: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.signInCode", { ...o })).job),
     initCancel: async () => InitJob.parse((await c.request<{ job?: unknown }>("init.cancel")).job),
+    removePlace: async placeId => await c.request<PlaceRemoved>("places.remove", { placeId }),
     subscribe: fn => c.subscribe(fn),
     getGolden: async (name = "default") => (await c.request<{ manifest?: GoldenManifest }>("golden.get", { name })).manifest,
     listSnapshots: async name =>

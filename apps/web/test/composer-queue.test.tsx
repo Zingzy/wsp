@@ -8,6 +8,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { EventUnion, HarnessCatalog, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
+import { TABLE_CATALOG, whenAgentsAnswered } from "./agents.js";
 import { composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
@@ -54,11 +55,11 @@ function fixtureApi(history: Record<string, SessionEvent[]> = {}, rows: SessionV
   const hooks: { onInterrupt: () => void; onSteer: (prompt: string, requestId: string) => "accepted" | "not-running" | "unsupported" | "not-found" } = { onInterrupt: () => {}, onSteer: () => "accepted" };
   const api: Api = {
     interruptSession: async id => { interrupted.push(id); hooks.onInterrupt(); return "accepted"; },
+    // The table row answers when the case names no catalog, since a composer with no agent to send to is held and
+    // queues nothing; steering stays with the case, which is what says whether this harness takes a mid-turn message.
+    listHarnesses: async () => harnesses ?? [TABLE_CATALOG],
     ...(harnesses !== undefined
-      ? {
-          listHarnesses: async () => harnesses,
-          steerSession: async (sessionId, prompt, requestId) => { steered.push({ sessionId, prompt, requestId }); return hooks.onSteer(prompt, requestId); },
-        }
+      ? { steerSession: async (sessionId, prompt, requestId) => { steered.push({ sessionId, prompt, requestId }); return hooks.onSteer(prompt, requestId); } }
       : {}),
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
     daemon: noDaemonApi,
@@ -91,6 +92,7 @@ async function setup(api: Api) {
   useStore.getState().bind(api);
   useStore.getState().setConn("live");
   await waitFor(() => expect(useStore.getState().workspaces.length).toBeGreaterThan(0));
+  await whenAgentsAnswered();
   const view = render(<WorkspaceThread workspaceId={WS} />);
   await waitFor(() => expect(screen.queryByText("loading transcript")).toBeNull());
   return view;
