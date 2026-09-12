@@ -3,9 +3,8 @@
 //! the host forwards; a plain local URL names a port the host forwards to the laptop's loopback. Escapes are
 //! stripped first, and a typed line readline wrapped at the pty width is joined back into one before matching.
 
-#[cfg(test)]
 use wsp_frames::is_http_url;
-use wsp_frames::RelayPort;
+use wsp_frames::{numbers, RelayPort};
 
 /// Hosts a sign-in's redirect comes back to on the machine itself.
 const LOOPBACK_HOSTS: [&str; 3] = ["localhost", "127.0.0.1", "[::1]"];
@@ -120,14 +119,28 @@ pub(crate) fn callback_port_of(url: &str) -> Option<u16> {
 }
 
 /// The port a plain local URL names: http or https, a local host and an explicit port. The open socket's road reads
-/// it for a URL a tool asked to open; until that road is built it is pinned by its tests alone.
-#[cfg(test)]
+/// it for a URL a tool asked to open.
 pub(crate) fn localhost_port_of(url: &str) -> Option<u16> {
     let parsed = parse_url(url)?;
     if !is_http_url(url) || !LOCAL_HOSTS.contains(&parsed.hostname.as_str()) {
         return None;
     }
     valid_port(u32::from(parsed.port?))
+}
+
+/// A host the WHATWG parser behind node's URL would refuse: empty, or carrying a code point no host may (a percent
+/// sign, an angle bracket, a backslash, a caret, a bar, a control character).
+fn host_ok(hostname: &str) -> bool {
+    !hostname.is_empty() && !hostname.chars().any(|c| matches!(c, '%' | '<' | '>' | '\\' | '^' | '|') || c.is_control())
+}
+
+/// The protocol's isHttpUrl as the open socket applies it: http or https with nothing unprintable, at most
+/// OPEN_URL_MAX characters as a JavaScript string counts them, and a URL the parser can read a host out of.
+pub(crate) fn is_open_url(url: &str) -> bool {
+    if url.encode_utf16().count() > numbers::OPEN_URL_MAX || !is_http_url(url) {
+        return false;
+    }
+    parse_url(url).is_some_and(|u| host_ok(u.hostname.trim_start_matches('[').trim_end_matches(']')))
 }
 
 /// The end of an OSC, DCS or APC string started at `from`: the body runs to the first BEL or ESC; a BEL ends it,
@@ -410,6 +423,8 @@ mod tests {
     const HOSTED_CALLBACK: &str = "https://accounts.example/oauth/authorize?code=true&client_id=9d1c250a&response_type=code&redirect_uri=https%3A%2F%2Fplatform.example%2Foauth%2Fcode%2Fcallback&scope=user%3Ainference&code_challenge=C&code_challenge_method=S256&state=S";
     const MCP_REMOTE: &str = "https://mcp.linear.app/authorize?response_type=code&client_id=X&code_challenge=C&code_challenge_method=S256&redirect_uri=http%3A%2F%2Flocalhost%3A22227%2Foauth%2Fcallback&state=S&scope=read+write&resource=https%3A%2F%2Fmcp.linear.app%2Fmcp";
 
+    const GH_DEVICE: &str = "https://github.com/login/device";
+
     fn callback(text: &str) -> Vec<u16> {
         callback_ports_in(text, None)
     }
@@ -661,5 +676,31 @@ mod tests {
         let mut s = TerminalUrlScanner::new(settled_local_ports);
         assert_eq!(s.feed("  Local:   http://localhost:5173/\n  Network: http://192.168.1.5:5173/\n", None), [5173]);
         assert!(s.feed("  Network: http://10.0.0.7:4000/\n", None).is_empty());
+    }
+    #[test]
+    fn callback_port_of_names_no_port_on_a_hosted_redirect_even_when_it_carries_one() {
+        assert_eq!(callback_port_of(WRANGLER), Some(8976));
+        assert_eq!(callback_port_of("https://a.test/x?redirect_uri=https%3A%2F%2Fplatform.example%3A8443%2Fcb"), None);
+        assert_eq!(callback_port_of("https://a.test/x?redirect_uri=http%3A%2F%2Flocalhost%3A631%2Fcb"), None);
+    }
+
+    #[test]
+    fn is_open_url_is_the_protocols_rule_with_the_parse_check_behind_it() {
+        for url in [WRANGLER, GH_DEVICE, "HTTPS://X.TEST/A", "https://[::1]:8976/cb", "http://localhost:8123/"] {
+            assert!(is_open_url(url), "{url}");
+        }
+        let long = format!("https://x.test/{}", "a".repeat(numbers::OPEN_URL_MAX));
+        for url in [
+            "https://%",
+            "https://[::1",
+            "https://exa%mple.com/x",
+            "https://x.test/a b",
+            "file:///etc/passwd",
+            "http://",
+            "http://:8080/",
+            &long,
+        ] {
+            assert!(!is_open_url(url), "{url}");
+        }
     }
 }

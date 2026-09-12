@@ -5,21 +5,27 @@
 
 mod auth;
 mod awake;
+mod clock;
 mod door;
 mod exec;
 mod fs;
 mod git;
+mod inbox;
 mod link;
+mod manifest;
 mod mode;
 mod ops;
 mod paths;
 mod place;
+mod ports;
 mod proc;
 mod proc_local;
 mod pty;
 mod readings;
+mod relay;
 mod sys;
 mod sys_local;
+mod tunnel;
 mod urls;
 
 pub use link::place_backoff_ms;
@@ -32,7 +38,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, UnixListener};
 use tokio::sync::mpsc;
 use wsp_frames::{numbers, DaemonEvent};
 
@@ -176,6 +182,10 @@ pub(crate) struct Ctx {
     pub(crate) auth_deadline: Duration,
     pub(crate) ptys: Mutex<pty::PtyManager>,
     pub(crate) modes: Arc<mode::ModeWatcher>,
+    pub(crate) manifest: Mutex<manifest::ProcessManifest>,
+    pub(crate) spotter: Mutex<relay::CallbackSpotter>,
+    pub(crate) ports: ports::PortWatch,
+    pub(crate) inbox: inbox::InboxWatch,
     /// Where the daemon's lines go: stderr in the binary, a test's own list otherwise.
     log: SharedLog,
     /// The two samplers, built on the first watch so a daemon nobody asks reads nothing; one each for the daemon.
@@ -188,25 +198,35 @@ pub(crate) struct Ctx {
 }
 
 impl Ctx {
-    pub(crate) fn new(options: Options, log: Log) -> Ctx {
+    /// Reads the manifest file once; a manifest that is there but cannot be read refuses the start, as it does for
+    /// the node daemon.
+    pub(crate) fn new(options: Options, log: Log) -> io::Result<Ctx> {
         let root = resolved_root(options.root.as_deref());
         let auth_deadline = Duration::from_millis(options.auth_deadline_ms.unwrap_or(numbers::AUTH_DEADLINE_MS));
         let proc_root = options.proc_root.clone().unwrap_or_else(|| PathBuf::from("/proc"));
         let interval = options.mode_interval_ms.map_or(mode::DEFAULT_INTERVAL, Duration::from_millis);
         let modes = Arc::new(mode::ModeWatcher::new(mode::linux_mode_probe(&proc_root), interval));
-        Ctx {
+        let manifest_path = options.manifest_path.clone().unwrap_or_else(|| PathBuf::from(numbers::DEFAULT_MANIFEST_PATH));
+        let manifest = manifest::ProcessManifest::load(Some(manifest_path), options.run_dir.as_deref(), options.log_dir.as_deref())?;
+        let interval = options.ports_interval_ms.map_or(ports::DEFAULT_INTERVAL, Duration::from_millis);
+        let ports = ports::PortWatch::new(ports::source_for(options.proc_root.as_deref()), interval);
+        Ok(Ctx {
             options,
             root,
             auth_deadline,
             ptys: Mutex::new(pty::PtyManager::default()),
             modes,
+            manifest: Mutex::new(manifest),
+            spotter: Mutex::new(relay::CallbackSpotter::new()),
+            ports,
+            inbox: inbox::InboxWatch::default(),
             log: Arc::from(log),
             sys: Mutex::new(None),
             procs: Mutex::new(None),
             stop: tokio::sync::Notify::new(),
             authed: Mutex::new(HashMap::new()),
             keys: AtomicU64::new(1),
-        }
+        })
     }
 
     pub(crate) fn log(&self, line: &str) {
@@ -288,12 +308,14 @@ impl Ctx {
 /// A bound daemon: the listener is open and the address is known, nothing is accepted until run.
 pub struct Daemon {
     listener: TcpListener,
+    open_socket: Option<UnixListener>,
     ctx: Arc<Ctx>,
 }
 
 impl Daemon {
-    /// Binds the address and reads the token file once, so a daemon with no token to check against never starts.
-    /// Lines go to stderr.
+    /// Binds the address and reads the token file once, so a daemon with no token to check against never starts;
+    /// binds the open socket too when one is named, so a shim that cannot be heard is a start that failed. Lines go
+    /// to stderr.
     pub async fn bind(options: Options) -> io::Result<Daemon> {
         Daemon::bind_with(options, Box::new(|line| eprintln!("{line}"))).await
     }
@@ -304,7 +326,11 @@ impl Daemon {
             return Err(io::Error::other(wsp_frames::words::NO_TOKEN_AT_START));
         }
         let listener = TcpListener::bind((options.host.as_str(), options.port)).await?;
-        Ok(Daemon { listener, ctx: Arc::new(Ctx::new(options, log)) })
+        let open_socket = match &options.open_socket_path {
+            Some(path) => Some(relay::listen_open_socket(path)?),
+            None => None,
+        };
+        Ok(Daemon { listener, open_socket, ctx: Arc::new(Ctx::new(options, log)?) })
     }
 
     pub fn local_addr(&self) -> SocketAddr {
@@ -318,6 +344,9 @@ impl Daemon {
             let port = self.local_addr().port();
             tokio::spawn(link::run(Arc::clone(&self.ctx), port));
             tokio::spawn(awake::hold_while_joined(Arc::clone(&self.ctx), file));
+        }
+        if let Some(open_socket) = self.open_socket {
+            tokio::spawn(relay::serve_open_socket(open_socket, Arc::clone(&self.ctx)));
         }
         loop {
             let accepted = tokio::select! {
