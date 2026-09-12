@@ -13,7 +13,7 @@
 // stages off the installer as it reports them.
 import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useState, type KeyboardEvent } from "react";
-import { CODE_EXPIRED_LINE, CODE_GOOD_LINE, PLACES_WORDS, PLACE_ADD_WORDS, PlaceAddStep, joinAddressWord, shownPairCode, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
+import { CODE_EXPIRED_LINE, CODE_GOOD_LINE, PLACES_WORDS, PlaceAddStep, joinAddressWord, placeAddSheetWord, shownPairCode, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../components/ui/collapsible.js";
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "../components/ui/input-group.js";
@@ -37,23 +37,21 @@ const ROADS = [
 ] as const;
 type Road = (typeof ROADS)[number]["value"];
 
-/** What a step of the plan carries in its fact slot before it has run: where the install puts wsp on the box and
- * what it starts the agent under, the two things the step's own words leave out. A step that is running or done
- * carries what the installer answered there instead. */
-const PLAN_FACTS: Partial<Record<PlaceAddStep, string>> = {
-  wsp: ADD_COMPUTER_WORDS.ssh.folder,
-  service: ADD_COMPUTER_WORDS.ssh.service,
-};
+/** What a step of the plan carries in its fact slot before it has run: where the install puts wsp on the box,
+ * which the step's own words leave out. A step that is running or done carries what the installer answered there
+ * instead. Nothing else needs one: the sheet's words say what the agent is started under. */
+const PLAN_FACTS: Partial<Record<PlaceAddStep, string>> = { wsp: ADD_COMPUTER_WORDS.ssh.folder };
 
 /** The ssh road's five lines, one per step of the installer: the stage reported for that step where one has
- * arrived, and the step's own waiting line where none has. One list for the plan a person reads before Add and
- * for the run after it, so pressing Add fills the lines in rather than taking them away. */
+ * arrived, and the step's own line, in the words the sheet gives it, where none has. One list for the plan a
+ * person reads before Add and for the run after it, so pressing Add fills the lines in rather than taking them
+ * away, and a line's words are the step's in both. */
 function planLines(stages: readonly InstallStage[]): RoadLine[] {
   return PlaceAddStep.options.map(step => {
     const reported = stages.find(stage => stage.step === step);
     const fact = reported === undefined ? PLAN_FACTS[step] : reported.fact;
     return {
-      word: reported?.word ?? PLACE_ADD_WORDS[step],
+      word: reported?.word ?? placeAddSheetWord(step, "running"),
       state: reported?.state ?? "waiting",
       ...(fact === undefined ? {} : { fact }),
     };
