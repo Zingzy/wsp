@@ -11,7 +11,7 @@ import { createClaudeAdapter } from "@wsp/adapter-claude";
 import { createCodexAdapter } from "@wsp/adapter-codex";
 import { THREAD_AGENTS, type ThreadAgent } from "@wsp/catalog";
 import type { Machine } from "@wsp/engine";
-import { EMPTY_TITLE_LINE, foldThreads, keepsRename, type AdapterEvent, type TitleTurn, type TurnResult } from "@wsp/protocol";
+import { EMPTY_TITLE_LINE, foldThreads, keepsRename, signInRefusalLine, type AdapterEvent, type TitleTurn, type TurnResult } from "@wsp/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { HARNESS_ADAPTERS } from "../src/adapters.js";
 import { machineExecStream } from "../src/machine-exec.js";
@@ -627,7 +627,7 @@ describe("the agents whose store keeps a name", () => {
     expect(rows.map(c => c.harness).sort()).toEqual([...THREAD_AGENTS].sort());
     const machine = { id: "m_1" } as unknown as Machine;
     for (const row of rows) {
-      const adapter = HARNESS_ADAPTERS[row.harness as ThreadAgent]({ machine, workspaceId: ws.id, execStream: machineExecStream(machine), home: () => "/root/.state", env: {} });
+      const adapter = HARNESS_ADAPTERS[row.harness as ThreadAgent]({ machine, workspaceId: ws.id, execStream: machineExecStream(machine), home: () => "/root/.state", env: {}, signInRefusal: signInRefusalLine({ kind: "cloud" }) });
       expect(row.renames, row.harness).toBe(adapter.renameSession !== undefined);
       expect(keepsRename(row), row.harness).toBe(true);
     }

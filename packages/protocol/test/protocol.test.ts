@@ -55,6 +55,7 @@ import {
   ProjectGolden,
   ProjectImportResult,
   ProjectPlan,
+  RUNTIME_OPS,
   RuntimeErrorResponse,
   RuntimeRequest,
   RuntimeResponse,
@@ -69,10 +70,12 @@ import {
   SnapshotLineage,
   SnapshotRollbackResult,
   SessionOrigin,
+  THREAD_OPS,
   SessionView,
   ThreadView,
   ExecEvent,
   foldThreads,
+  threadRan,
   NOTIFY_ME,
   WorkspaceListing,
   WorkspaceSize,
@@ -627,21 +630,26 @@ describe("runtime wire types", () => {
       { id: 13, op: "golden.get", name: "default" },
       { id: 14, op: "capabilities.get" },
       { id: 15, op: "sessions.history", workspaceId: "ws_1" },
-      { id: 16, op: "workspaces.daemonReach", workspaceId: "ws_1" },
+      { id: 16, op: "daemon.open", workspaceId: "ws_1" },
       { id: 17, op: "golden.prepare", name: "default" },
       { id: 18, op: "golden.prepare", name: "default", kind: "desktop" },
       { id: 19, op: "golden.seal", builderId: "m1" },
-      { id: 20, op: "golden.builderReach", builderId: "m1" },
+      { id: 20, op: "daemon.send", channel: "ch_1", frame: { op: "pty.write", ptyId: "p1", data: "ls\r" } },
       { id: 21, op: "sessions.interrupt", sessionId: "s1" },
       { id: 22, op: "workspaces.forget", workspaceId: "ws_1" },
       { id: 23, op: "workspaces.stopWake", workspaceId: "ws_1" },
+      { id: 24, op: "daemon.close", channel: "ch_1" },
     ];
     for (const r of reqs) expect(RuntimeRequest.parse(r)).toEqual(r);
     expect(() => RuntimeRequest.parse({ id: 21, op: "sessions.interrupt" })).toThrow(); // sessionId required
     expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.create" })).toThrow(); // golden+name required
     expect(() => RuntimeRequest.parse({ id: 1, op: "golden.prepare", name: "d", kind: "browser" })).toThrow();
     expect(() => RuntimeRequest.parse({ id: 1, op: "golden.seal" })).toThrow(); // builderId required
-    expect(() => RuntimeRequest.parse({ id: 1, op: "golden.builderReach" })).toThrow();
+    // The two roads that handed a daemon token out leave the wire with the relay: nothing outside the host dials a daemon.
+    expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.daemonReach", workspaceId: "ws_1" })).toThrow();
+    expect(() => RuntimeRequest.parse({ id: 1, op: "golden.builderReach", builderId: "m1" })).toThrow();
+    expect(RUNTIME_OPS).not.toContain("workspaces.daemonReach");
+    expect(RUNTIME_OPS).not.toContain("golden.builderReach");
     expect(RuntimeResponse.parse({ id: 4, ok: true, workspace: { id: "w" } })).toBeTruthy();
     expect(RuntimeResponse.parse({ id: 4, ok: false, error: "nope" })).toBeTruthy();
   });
@@ -657,6 +665,32 @@ describe("runtime wire types", () => {
     // A client on this computer names none, and nothing is added to what it sent.
     expect(RuntimeRequest.parse({ id: 5, op: "workspaces.list" })).toEqual({ id: 5, op: "workspaces.list" });
     expect(() => RuntimeRequest.parse({ id: 6, op: "workspaces.list", origin: "machine" })).toThrow();
+  });
+
+  it("the daemon channel ops carry a frame the host never authenticates for the page, and the panes' ops are not a thread's", () => {
+    const frame = { op: "fs.list", path: "/root", gitignore: true };
+    expect(wire.DaemonFrame.parse(frame)).toEqual(frame);
+    // The host sent the auth frame when it opened the channel; a page that could send one would pick the socket's identity.
+    expect(() => wire.DaemonFrame.parse({ op: "auth", token: "t" })).toThrow();
+    expect(() => wire.DaemonFrame.parse({ ptyId: "p1" })).toThrow();
+    expect(() => RuntimeRequest.parse({ id: 1, op: "daemon.send", channel: "ch_1", frame: { op: "auth", token: "t" } })).toThrow();
+    expect(() => RuntimeRequest.parse({ id: 1, op: "daemon.open" })).toThrow();
+    expect(() => RuntimeRequest.parse({ id: 1, op: "daemon.close" })).toThrow();
+
+    expect(wire.DaemonOpenReply.parse({ channel: "ch_1" })).toEqual({ channel: "ch_1" });
+    expect(wire.DaemonSendReply.parse({ reply: { id: 3, ok: true, ptyId: "p1" } })).toEqual({ reply: { id: 3, ok: true, ptyId: "p1" } });
+    expect(wire.DaemonSendReply.parse({ reply: { id: 3, ok: false, error: "no such pty", code: "not-found" } })).toBeTruthy();
+
+    const event = { type: "daemon.event", channel: "ch_1", event: { type: "pty.data", ptyId: "p1", data: "hi" } };
+    expect(wire.DaemonChannelEvent.parse(event)).toEqual(event);
+    // A daemon of another version may push a type this host does not know; the host carries it and the page validates it.
+    expect(wire.DaemonChannelEvent.parse({ type: "daemon.event", channel: "ch_1", event: { type: "future.thing" } })).toBeTruthy();
+    const closed = { type: "daemon.closed", channel: "ch_1", code: 4401, reason: "unauthorized" };
+    expect(wire.DaemonChannelEvent.parse(closed)).toEqual(closed);
+    expect(() => wire.DaemonChannelEvent.parse({ type: "daemon.closed", channel: "ch_1", code: "4401", reason: "x" })).toThrow();
+
+    // The panes are the person's: an agent inside a machine drives workspaces through the exec and session ops.
+    for (const op of ["daemon.open", "daemon.send", "daemon.close", "workspaces.daemonReach"]) expect(THREAD_OPS).not.toContain(op);
   });
 
   it("sessions.start carries the composer's model, effort and permission mode as the harness's own slugs", () => {
@@ -1011,7 +1045,7 @@ describe("daemon files and diff ops", () => {
       expect(machineLacksShort(line).length).toBeLessThanOrEqual(30);
       expect(line.length).toBeGreaterThan(machineLacksShort(line).length);
     }
-    expect(noImportRoadLine("box", OVER_SSH)).toBe("box is a machine over ssh, which lands no folder yet; import to a fork, or register the folder on this computer");
+    expect(noImportRoadLine("box", OVER_SSH)).toBe("box is a computer over ssh, which lands no folder yet; import to a fork, or register the folder on this computer");
   });
 });
 
@@ -1119,7 +1153,7 @@ describe("thread provenance", () => {
     expect(SessionEvent.parse(none)).toEqual(none);
   });
 
-  it("foldThreads groups turns by threadId, titles by the opening turn, reads state, row id and resume id from the latest, and keeps the opener's provenance", () => {
+  it("foldThreads groups turns by threadId, titles by the opening turn, reads state, row id and resume id from the latest, keeps the opener's provenance, and says whether a turn ever ran", () => {
     const threads = foldThreads([
       { ...row, id: "s1", threadId: "thr_a", startedBy: "cli", prompt: "make a server", claudeSessionId: "c1", startedAt: 1_000, endedAt: 2_000 },
       { ...row, id: "s2", threadId: "thr_b", prompt: "unrelated", startedAt: 3_000, endedAt: 4_000 },
@@ -1127,11 +1161,28 @@ describe("thread provenance", () => {
       { ...row, id: "s4", status: "failed", prompt: "before threads", startedAt: 6_000, endedAt: 7_000 },
     ]);
     expect(threads).toEqual([
-      { id: "thr_a", threadId: "thr_a", workspaceId: "ws_1", harness: "claude", startedBy: "cli", status: "running", title: "make a server", sessionId: "s3", claudeSessionId: "c2", startedAt: 5_000, turns: 2 },
-      { id: "thr_b", threadId: "thr_b", workspaceId: "ws_1", harness: "claude", startedBy: "person", status: "completed", title: "unrelated", sessionId: "s2", startedAt: 3_000, endedAt: 4_000, turns: 1 },
-      { id: "s4", workspaceId: "ws_1", harness: "claude", startedBy: "person", status: "failed", title: "before threads", sessionId: "s4", startedAt: 6_000, endedAt: 7_000, turns: 1 },
+      { id: "thr_a", threadId: "thr_a", workspaceId: "ws_1", harness: "claude", startedBy: "cli", status: "running", title: "make a server", sessionId: "s3", claudeSessionId: "c2", startedAt: 5_000, turns: 2, ran: true },
+      { id: "thr_b", threadId: "thr_b", workspaceId: "ws_1", harness: "claude", startedBy: "person", status: "completed", title: "unrelated", sessionId: "s2", startedAt: 3_000, endedAt: 4_000, turns: 1, ran: false },
+      { id: "s4", workspaceId: "ws_1", harness: "claude", startedBy: "person", status: "failed", title: "before threads", sessionId: "s4", startedAt: 6_000, endedAt: 7_000, turns: 1, ran: false },
     ]);
     for (const t of threads) expect(ThreadView.parse(t)).toEqual(t);
+  });
+
+  it("a thread reads as run once a turn of it did work: announcing a session is not enough, since both CLIs announce before they learn they have no sign-in", () => {
+    const [worked, neverAnnounced, working, refused] = foldThreads([
+      { ...row, id: "s1", threadId: "thr_a", status: "failed", claudeSessionId: "c1" },
+      { ...row, id: "s2", threadId: "thr_b", status: "failed" },
+      { ...row, id: "s3", threadId: "thr_c", status: "running" },
+      // The launch got as far as a session id and the agent then refused the whole task: no work behind it.
+      { ...row, id: "s4", threadId: "thr_d", status: "failed", claudeSessionId: "c2", refusal: "sign-in" },
+    ]);
+    // One turn of the thread did work, so the thread did, whatever a later turn came to.
+    const [signedInLater] = foldThreads([
+      { ...row, id: "s5", threadId: "thr_e", claudeSessionId: "c3", status: "failed", refusal: "sign-in" },
+      { ...row, id: "s6", threadId: "thr_e", claudeSessionId: "c3", status: "completed" },
+    ]);
+    expect([worked!.ran, neverAnnounced!.ran, working!.ran, refused!.ran, signedInLater!.ran]).toEqual([true, false, true, false, true]);
+    expect(threadRan([])).toBe(false);
   });
 
   it("foldThreads carries the latest turn's folder, so every director shows where the thread works; a row without one shows none", () => {

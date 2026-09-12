@@ -232,7 +232,7 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
     render: () => (
       <div className="flex flex-wrap items-center gap-2">
         <Button>Create</Button>
-        <Button variant="secondary">Fork</Button>
+        <Button variant="secondary">Copy</Button>
         <Button variant="outline">Pause</Button>
         <Button variant="ghost">Wake</Button>
         <Button variant="destructive">Delete</Button>
@@ -359,7 +359,7 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
         </Label>
         <RadioGroup defaultValue="fork" className="flex gap-4">
           <Label className="flex items-center gap-2">
-            <Radio value="fork" /> Fork
+            <Radio value="fork" /> Copy
           </Label>
           <Label className="flex items-center gap-2">
             <Radio value="fresh" /> Fresh
@@ -516,8 +516,8 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
           </SheetTrigger>
           <SheetPopup side="right">
             <SheetHeader>
-              <SheetTitle>Machine</SheetTitle>
-              <SheetDescription>fork, pause, wake, upgrade</SheetDescription>
+              <SheetTitle>Workspace</SheetTitle>
+              <SheetDescription>pause, wake, upgrade</SheetDescription>
             </SheetHeader>
             <SheetPanel>
               <p className="text-sm">Panel body.</p>
@@ -574,7 +574,7 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
           <TooltipTrigger render={<Button variant="outline" size="sm" />}>
             Tooltip
           </TooltipTrigger>
-          <TooltipPopup>Opens the machine panel</TooltipPopup>
+          <TooltipPopup>Opens the workspace panel</TooltipPopup>
         </Tooltip>
         <Button
           size="sm"

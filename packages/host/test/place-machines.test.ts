@@ -46,6 +46,7 @@ const report = async () => ({
   login: { HOME: "/home/maya", USER: "maya", PATH: "/usr/bin" },
   docker: true,
   daemonVersion: 17,
+  agents: [],
   wsp: ["/usr/bin/wsp"],
 });
 

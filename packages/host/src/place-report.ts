@@ -11,6 +11,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statfsSync, wri
 import { homedir, arch as osArch, platform, release, type as osType, userInfo } from "node:os";
 import type { PlaceSelfReport } from "@wsp/daemon";
 import { PLACE_FILE_MODE, parsePlaceFile, placeFileText, type PlaceFile } from "@wsp/protocol";
+import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LOGIN_READ, SSH_STORE_VARS, isPlainPath, localShape, plainPath, readValues } from "@wsp/engine";
 import { DAEMON_VERSION, placeDaemonPaths, workFolderIn } from "@wsp/protocol";
 import { dirname } from "node:path";
@@ -41,6 +42,10 @@ export function readPlaceFile(path: string): PlaceFile | undefined {
     return undefined;
   }
 }
+
+/** Whether this computer already belongs to a wsp. The one reading of it: the join refuses on it and a screen that
+ * has its own words for that reads the same thing rather than testing for the file a second time. */
+export const joinedAlready = (home: string): boolean => readPlaceFile(placeFilePath(home)) !== undefined;
 
 /** Writes it at the one mode it is ever kept at; the folder is made first, since a fresh computer has none. */
 export function writePlaceFile(path: string, file: PlaceFile): void {
@@ -128,6 +133,7 @@ export function placeReport(opts: PlaceReportOptions): PlaceSelfReport {
   const env = opts.env ?? process.env;
   const work = workFolderIn(home);
   const free = diskFree(existsSync(work) ? work : home);
+  const login = placeLogin(env, home);
   return {
     name: opts.name,
     platform: platform() === "darwin" ? "darwin" : "linux",
@@ -135,11 +141,14 @@ export function placeReport(opts: PlaceReportOptions): PlaceSelfReport {
     os: `${osType()} ${release()}`,
     shape: localShape(),
     ...(free !== undefined ? { diskFreeBytes: free } : {}),
-    login: placeLogin(env, home),
+    login,
     // Whether this computer can fork at all, which is the one thing the host cannot read from over the link.
     docker: opts.docker ?? onPath("docker", env.PATH) !== undefined,
     daemonVersion: DAEMON_VERSION,
     wsp: wspArgvOf(opts.run ?? runningWsp()),
+    // Off the login PATH rather than this process's: a service starts with almost none, and what the person can
+    // run here is what a turn on this computer will find.
+    agents: CATALOG_AGENTS.filter(a => onPath(a.bin, login["PATH"]) !== undefined).map(a => a.id),
   };
 }
 

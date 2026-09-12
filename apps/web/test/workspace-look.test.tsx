@@ -21,6 +21,7 @@ import { useStore } from "../src/protocol/store.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 import { statusOf } from "./workspace-status.js";
 import { caps } from "./caps.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 // The popover renders inline and records what it was anchored to: Base UI's positioning against jsdom's zero-size
 // rects costs seconds per open, and the anchor is the one fact of it this file reads.
@@ -59,7 +60,7 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     capabilities: async () => (caps()),
     startSession: async o => ({ id: "s_x", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: 0 }),
-    daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
+    daemon: noDaemonApi,
     sessionHistory: async () => [],
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     snapshotStorage: async () => null,

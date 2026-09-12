@@ -21,6 +21,7 @@ import {
   spawnActRefusal,
   spawnCapRefusal,
   spawnDepthRefusal,
+  noWorkspaceRefusal,
   spawnReachRefusal,
   threadWord,
   type Caller,
@@ -198,8 +199,14 @@ describe("agents spawning agents", () => {
     expect((await rt.workspaces.get(forked.id, asThread(scope))).name).toBe("ours");
     await expect(rt.sessions.start(theirs.id, { prompt: "hi" }, asThread(scope))).rejects.toThrow(spawnReachRefusal("t_root", "theirs"));
     await expect(rt.workspaces.get(theirs.id, asThread(scope))).rejects.toThrow(spawnReachRefusal("t_root", "theirs"));
-    // The listing leaves out what it may not drive rather than naming it.
+    // The listing leaves out what it may not drive rather than naming it, and the name is refused by the same rule:
+    // one reading behind the list and behind every verb that takes a workspace, so neither can deny what the other shows.
     expect((await rt.workspaces.list(asThread(scope))).map(w => w.name).sort()).toEqual(["mine", "ours"]);
+    expect((await rt.status.list(undefined, asThread(scope))).map(s => s.name).sort()).toEqual(["mine", "ours"]);
+    expect((await rt.workspaces.resolve("mine", asThread(scope))).id).toBe(mine.id);
+    await expect(rt.workspaces.resolve("theirs", asThread(scope))).rejects.toThrow(spawnReachRefusal("t_root", "theirs"));
+    await expect(rt.workspaces.resolve(theirs.id, asThread(scope))).rejects.toThrow(spawnReachRefusal("t_root", "theirs"));
+    await expect(rt.workspaces.resolve("nobody", asThread(scope))).rejects.toThrow(noWorkspaceRefusal("nobody"));
     await rt.close();
   });
 
@@ -535,6 +542,13 @@ describe("agents spawning agents", () => {
       // sibling's: that guard is the person's on the agent, and an agent moving it is the guard moving itself.
       expect(refused).toContain("sessions.access");
       expect(refused).toContain("sessions.answer");
+      // Dropping a thread from the person's own lists is the person's, not one thread's act on another.
+      expect(refused).toContain("sessions.forget");
+      // The panes a person types into are the person's: a thread drives its workspace through the exec and session
+      // ops, and the channel that carries a pty, a file read and a git status to a browser is shut to it by name.
+      expect(refused).toContain("daemon.open");
+      expect(refused).toContain("daemon.send");
+      expect(refused).toContain("daemon.close");
       // A client of the person's own reaches every one of them, so the gate is the token's and not the op's.
       const mine = await WsClient.connect(srv.port, { token: "secret" });
       expect((await mine.request("preferences.get", {}))["ok"]).toBe(true);

@@ -13,6 +13,7 @@ import { resetBrowserTabs, useBrowserTabs } from "../src/browser/tabs.js";
 import { RightPanel } from "../src/shell/RightPanel.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
 import { caps } from "./caps.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 const WS = "ws_browser01";
 const OTHER = "ws_other0002";
@@ -44,7 +45,7 @@ function fakeApi(workspaces: WorkspaceView[], portReach: Api["portReach"] = mint
     upgrade: async id => workspaces.find(w => w.id === id)!,
     capabilities: async () => (caps()),
     portReach,
-    daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
+    daemon: noDaemonApi,
     startSession: async o => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     sessionHistory: async () => [],
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),

@@ -3,6 +3,12 @@ import type { AddressInfo } from "node:net";
 import { gzipSync } from "node:zlib";
 import { NotFirstLifeError, SNAPSHOT_STORAGE } from "@wsp/engine";
 import type { ExecResult, Lifecycle, Machine, MachineBackend, MachineLife, MachineShape, MachineSpec, MachineState, RunOptions, SnapshotRow, TemplateRow } from "@wsp/engine";
+import { DAEMON_TOKEN_PATH, DAEMON_TOKEN_SET } from "../src/daemon-token.js";
+
+/** An execImpl for a guest that has a daemon: the runtime's token write lands and everything else is silently
+ * fine. Written once here, since a reach, a channel and a relay all need the same guest to exist. */
+export const tokenGuest = (_m: unknown, cmd: string): ExecResult =>
+  cmd.includes(DAEMON_TOKEN_PATH) ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" };
 
 export interface StubMachine extends Machine {
   spec: MachineSpec;

@@ -7,6 +7,7 @@ import { DisconnectedError, RequestError, type Api, type ProtocolEvent } from ".
 import { LAST_WORKSPACE_KEY } from "../src/protocol/lastWorkspace.js";
 import { useStore } from "../src/protocol/store.js";
 import { caps } from "./caps.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 const view = (id: string): WorkspaceView => ({
   id,
@@ -46,7 +47,7 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
     capabilities: async () => CAPS,
     startSession: async o => ({ id: "s_new", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
-    daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
+    daemon: noDaemonApi,
     sessionHistory: async () => [],
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     snapshotStorage: async () => null,
@@ -296,7 +297,7 @@ describe("store creations", () => {
     await flush();
     expect(await useStore.getState().createWorkspace("beta")).toBeNull();
     const failed = useStore.getState().creations[0]!;
-    expect(failed.failed?.title).toBe("The provider refused: machine cap reached");
+    expect(failed.failed?.title).toBe("The provider refused: no more workspaces can run there now");
     expect(failed.lines.map(l => l.stage)).toEqual(["fork-requested", "failed"]);
     expect(useStore.getState().selectedId).toBe(failed.key);
 
@@ -516,7 +517,7 @@ describe("store sessions", () => {
     listCalls.length = 0;
 
     expect(await useStore.getState().renameThread({ sessionId: "s1", workspaceId: "ws_a", harness: "claude", title: "the name" })).toBe(false);
-    expect(useStore.getState().toast).toBe("Claude Code on the machine has no session for this thread yet");
+    expect(useStore.getState().toast).toBe("Claude Code on the workspace has no session for this thread yet");
     expect(listCalls).toEqual([]);
   });
 

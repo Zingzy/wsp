@@ -7,6 +7,7 @@ import { SnapshotStorageLine, storageLine } from "../src/components/machine/Snap
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { caps } from "./caps.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 const GB = 1e9;
 const CAPS: Capabilities = caps();
@@ -28,7 +29,7 @@ function fakeApi(storage: SnapshotStorage | null) {
     wake: async () => WS,
     upgrade: async () => WS,
     capabilities: async () => CAPS,
-    daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
+    daemon: noDaemonApi,
     portReach: async (_id: string, port: number) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: 0 }),
     startSession: async o => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" as const }),
     listSessions: async () => [],

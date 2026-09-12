@@ -51,7 +51,7 @@ beforeEach(async () => {
   vi.stubEnv("WSP_HOME", join(dir, "home"));
   const store = memoryStore();
   await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
-  rt = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: placeWiring(statePath, {}, {}) });
+  rt = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: placeWiring(statePath, {}) });
   handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
 });
 

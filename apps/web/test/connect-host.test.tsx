@@ -9,7 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HOST_WORDS, PAIR_CODE_LENGTH, WS_PATH, type BootPayload, type ContextMenuItem, type DesktopBridge, type HostsView } from "@wsp/protocol";
 import { BootGate } from "../src/BootGate.js";
 import { PAIR_HEADING } from "../src/PairScreen.js";
-import { ConnectHostSheet, shownCode, sentCode } from "../src/hosts/ConnectHostSheet.js";
+import { ConnectHostSheet } from "../src/hosts/ConnectHostSheet.js";
+import { sentCode, shownCode } from "../src/hosts/pairingCode.js";
 import { HostFoot } from "../src/hosts/HostFoot.js";
 import { useStore } from "../src/protocol/store.js";
 

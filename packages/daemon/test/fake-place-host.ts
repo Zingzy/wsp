@@ -36,7 +36,7 @@ export function testPlaceFile(hostUrls: string[], hostPublicKey: string, keyPem:
   dirs.push(dir);
   const keyPath = join(dir, "place-key.pem");
   writeFileSync(keyPath, keyPem);
-  const file: PlaceFile = { placeId, name: "old-macbook", hostUrls, hostPublicKey, keyPath, joinedAt: new Date(0).toISOString() };
+  const file: PlaceFile = { placeId, name: "old-macbook", hostName: "zingzy-mbp", hostUrls, hostPublicKey, keyPath, joinedAt: new Date(0).toISOString(), awake: false };
   const path = join(dir, "place.json");
   writePlaceFile(path, file);
   return path;

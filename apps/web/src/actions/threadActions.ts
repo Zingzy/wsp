@@ -6,7 +6,7 @@
 import { LinkIcon, PencilIcon, SquareIcon, Trash2Icon } from "lucide-react";
 import { threadHash, type HarnessCatalog, type SessionStatus, type WorkspaceState } from "@wsp/protocol";
 import type { SidebarThreadSnapshot } from "../adapt/index.js";
-import { CLIENT_CANNOT_STOP, NO_THREAD_DELETE, THREAD_HAS_NO_ID, THREAD_NOT_RUNNING, THREAD_WORDS, threadRenameRefusal } from "./format.js";
+import { CLIENT_CANNOT_STOP, THREAD_HAS_NO_ID, THREAD_NOT_RUNNING, THREAD_WORDS, threadForgetRefusalFor, threadRenameRefusal } from "./format.js";
 import type { ActionEntry } from "./registry.js";
 
 export interface ThreadTarget {
@@ -21,6 +21,9 @@ export interface ThreadTarget {
   readonly harness: string;
   readonly title: string;
   readonly status: SessionStatus;
+  /** Whether a turn of this thread ever did work, as the protocol's fold reads the rows; a thread with none is
+   * the one a forget removes. */
+  readonly ran: boolean;
   /** That agent's catalog row on this workspace's machine, which says whether a name of a person's is kept there;
    * null while no catalog is known, which is no answer either way. */
   readonly catalog: HarnessCatalog | null;
@@ -41,6 +44,7 @@ export function threadTarget(thread: SidebarThreadSnapshot, machine: { catalog: 
     harness: thread.harness,
     title: thread.title,
     status: thread.status,
+    ran: thread.ran,
     catalog: machine.catalog,
     state: machine.state,
     ...(machine.goneWords !== undefined ? { goneWords: machine.goneWords } : {}),
@@ -53,6 +57,9 @@ export interface ThreadVerbs {
    * thread does not move; the surface that draws the rows puts its own opener here, and a surface with no row to
    * edit leaves it out. */
   readonly rename?: ((threadId: string) => void) | undefined;
+  /** Drops a thread no turn ever ran on through the host; the surface that draws the rows leaves it out when its
+   * client has no road to the op. */
+  readonly forget?: ((thread: { threadId: string; workspaceId: string }) => void) | undefined;
   readonly copyText: (text: string) => Promise<void>;
 }
 
@@ -86,12 +93,12 @@ export const threadActions: ReadonlyArray<ActionEntry<ThreadTarget, ThreadVerbs>
     run: (target, verbs) => (target.threadId === null ? undefined : verbs.copyText(threadLink(target, target.threadId))),
   },
   {
-    id: "delete",
+    id: "forget",
     group: "remove",
     icon: () => Trash2Icon,
     destructive: true,
-    title: () => THREAD_WORDS.delete,
-    refusal: () => NO_THREAD_DELETE,
-    run: () => {},
+    title: () => THREAD_WORDS.forget,
+    refusal: (target, verbs) => threadForgetRefusalFor(target, verbs.forget !== undefined),
+    run: (target, verbs) => (target.threadId === null ? undefined : verbs.forget?.({ threadId: target.threadId, workspaceId: target.workspaceId })),
   },
 ];

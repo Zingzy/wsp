@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { adoptLoginPath, agentHistories, agentsHere, assetDir, currentHome, installEach, mcpServerSpec, runningWsp, shimPath, wspHome, type CliIO } from "@wsp/host";
+import { adoptLoginPath, agentsHere, assetDir, currentHome, installEach, mcpServerSpec, runningWsp, shimPath, wspHome, type CliIO } from "@wsp/host";
 import { DEFAULT_PORT, DEFAULT_WS_PORT, HOST_WORDS, InitNeedsYou, ThemePreference, hereWord, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
 import type { Runtime } from "@wsp/runtime";
 import { BrowserWindow, Menu, Notification, app, dialog, ipcMain, nativeTheme, shell, type IpcMainInvokeEvent } from "electron";
@@ -11,6 +9,7 @@ import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./contex
 import { fontDirs, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { locateHost, openHost, statePathIn, type HostSession, type Launch, type Located } from "./host-lifecycle.js";
 import { hostSwitcher, parseConnectAsk, type HostSwitcher } from "./host-switch.js";
+import { joinWsp } from "./join.js";
 import { offerMove, type MoveGate } from "./move.js";
 import { sayNeedsYou, type Notifier } from "./needs-you.js";
 import { fromAppPage, fromOnboardingPage } from "./origin.js";
@@ -27,8 +26,6 @@ const PRELOAD = here("./preload.cjs");
 const ONBOARDING_PAGE = here("./onboarding.html");
 /** The wsp command the shim runs, bundled beside this main. */
 const CLI_SCRIPT = here("./cli.mjs");
-/** The agents' published marks, one svg per catalog id, copied from the web app by stage.mjs. */
-const AGENT_MARKS = here("./agents");
 
 const refuse = (q: string): Promise<string> => Promise.reject(new Error(`no terminal to ask: ${q}`));
 const io: CliIO = { log: l => console.log(l), error: l => console.error(l), ask: refuse, askSecret: refuse };
@@ -177,6 +174,9 @@ function refreshMenu(): void {
       win?.webContents.send("hosts:connect-open");
       return;
     }
+    // The two rows a computer that joined another wsp adds are the joining shell's; this menu drives the switch and
+    // the disconnect, and a window on a Mac that joined nothing is never shown them.
+    if (action.kind !== "switch" && action.kind !== "disconnect") return;
     const moved = action.kind === "switch" ? hostsHeld.to(action.alias) : hostsHeld.disconnect(action.alias);
     void moved.then(answer => {
       if (!answer.ok) io.error(answer.error);
@@ -200,9 +200,8 @@ function locate(): Promise<Located> {
 }
 
 /** A serving host is attached to with no gate; otherwise a host is started over the runtime the first launch just
- * recorded this computer on, or, with none, over the located home once the gate says it holds something to show. The
- * hash rides on the page's url for what the page opens on (#connect is the connect sheet). */
-async function showApp(located: Located, recorded?: Runtime, hash = ""): Promise<boolean> {
+ * recorded this computer on, or, with none, over the located home once the gate says it holds something to show. */
+async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
   const statePath = statePathIn(located.home, launch());
   if (located.session === undefined) {
     let runtime = recorded;
@@ -267,21 +266,21 @@ async function showApp(located: Located, recorded?: Runtime, hash = ""): Promise
     page.webContents.send("shell:chord", shellChordOf(input));
   });
   page.on("closed", () => terminalFocus.delete(contentsId));
-  await page.loadURL(`${session.url}${hash}`);
+  await page.loadURL(session.url);
   return true;
 }
 
-const ONBOARDING_CHANNELS = ["onboarding:agents", "onboarding:history", "onboarding:install", "onboarding:finish", "onboarding:connect"] as const;
+const ONBOARDING_CHANNELS = ["onboarding:agents", "onboarding:install", "onboarding:finish", "onboarding:join"] as const;
 
 /** The ids the page asked to install, as strings and nothing else; the catalog refuses an id it does not know. */
 function agentIds(raw: unknown): string[] {
   return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === "string") : [];
 }
 
-/** The first launch: the welcome, the agents on this computer with the MCP install per agent, then this computer
- * recorded as the workspace and the app opened on it. The onboarding page and the app window share the one preload;
- * only the onboarding page is answered here, and only while it is up. The host starts before the page's window
- * closes so the window count never hits zero. */
+/** The first launch: one screen naming the agents the scan found on this computer, the wsp tools into them, then
+ * this computer recorded as the workspace and the app opened on it. The onboarding page and the app window share the
+ * one preload; only the onboarding page is answered here, and only while it is up. The host starts before the page's
+ * window closes so the window count never hits zero. */
 async function showOnboarding(located: Located): Promise<void> {
   const statePath = statePathIn(located.home, launch());
   const shim = shimPath(wspHome());
@@ -289,13 +288,11 @@ async function showOnboarding(located: Located): Promise<void> {
   const gate = (event: IpcMainInvokeEvent, channel: string): void => {
     if (!fromOnboardingPage(event.senderFrame?.url, ONBOARDING_PAGE)) throw new Error(`${channel}: not the onboarding page`);
   };
-  ipcMain.handle("onboarding:agents", async event => {
+  // No version is asked for: the screen names what is here and nothing else, and a `--version` per catalog agent is
+  // the one slow thing between a launch and the first thing a person reads.
+  ipcMain.handle("onboarding:agents", event => {
     gate(event, "onboarding:agents");
-    return (await agentsHere()).map(a => ({ ...a, glyph: existsSync(join(AGENT_MARKS, `${a.id}.svg`)) }));
-  });
-  ipcMain.handle("onboarding:history", (event, raw: unknown) => {
-    gate(event, "onboarding:history");
-    return agentHistories(agentIds(raw), undefined, statePath);
+    return agentsHere(undefined, { versions: false });
   });
   ipcMain.handle("onboarding:install", (event, raw: unknown) => {
     gate(event, "onboarding:install");
@@ -303,23 +300,27 @@ async function showOnboarding(located: Located): Promise<void> {
     return installEach(agentIds(raw), mcpServerSpec(statePath, { ...runningWsp(), shim }), homedir());
   });
   let finishing: Promise<void> | undefined;
-  // Both ways out record this computer and open the app on it; the second opens the app on the connect sheet, for a
-  // person whose work is on a box, and the app's own host still serves the page the sheet is drawn in.
-  const finish = (hash: string): Promise<void> =>
+  // The one way out of both screens: this computer recorded and the app opened on it. A Mac that joined another wsp
+  // opens the app the same way, and the wsp it joined is reached from the window's own switcher.
+  const finish = (): Promise<void> =>
     (finishing ??= (async () => {
       const { runtime, workspace } = await recordThisComputer({ statePath });
       io.log(`${workspace.name} (${workspace.id}) is this computer`);
-      await showApp(located, runtime, hash);
+      await showApp(located, runtime);
       for (const channel of ONBOARDING_CHANNELS) ipcMain.removeHandler(channel);
       page.close();
     })());
   ipcMain.handle("onboarding:finish", event => {
     gate(event, "onboarding:finish");
-    return finish("");
+    return finish();
   });
-  ipcMain.handle("onboarding:connect", event => {
-    gate(event, "onboarding:connect");
-    return finish("#connect");
+  // The join runs here rather than in the page: it writes files under this login's home and installs a service, and
+  // the page is handed only what it draws.
+  ipcMain.handle("onboarding:join", (event, raw: unknown) => {
+    gate(event, "onboarding:join");
+    const ask = raw as { address?: unknown; code?: unknown } | null;
+    const word = (value: unknown): string => (typeof value === "string" ? value : "");
+    return joinWsp({ address: word(ask?.address), code: word(ask?.code) }, { home: homedir(), argv: [shim, "join", "--serve"] });
   });
   // The page follows the Mac's appearance: no preference record exists yet for it to read.
   nativeTheme.themeSource = "system";

@@ -87,6 +87,7 @@ import { provideDaemonHello, provideDaemonWire } from "../src/files/wire.js";
 import { DAEMON_HELLO, DAEMON_ROOT, fakeWire, imported, LISTING, PROJECT_DEST, resetSurfaces } from "./surface-harness.js";
 import { CHAT_STREAM, CHAT_WS } from "./fixtures/chat-stream.js";
 import { caps } from "./caps.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 let restoreLayout: () => void = () => {};
 beforeAll(() => { restoreLayout = installFakeLayout(); });
@@ -116,7 +117,7 @@ function fixtureApi(history: SessionEvent[] = [], rows: SessionView[] = [], ws: 
   const started: Array<{ workspaceId: string; prompt: string; resume?: string; cwd?: string; project?: string }> = [];
   const api: Api = {
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
-    daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
+    daemon: noDaemonApi,
     sessionHistory: async () => history,
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     snapshotStorage: async () => null,
@@ -155,7 +156,7 @@ const row = () => document.querySelector<HTMLElement>("[data-composer-checkout]"
 const folder = () => document.querySelector<HTMLElement>("[data-composer-folder]")?.dataset["composerFolder"];
 const branchSlot = () => document.querySelector<HTMLElement>("[data-composer-branch]");
 const branch = () => branchSlot()?.dataset["composerBranch"];
-const BRANCH_NOTE = "The folder's branch as the machine reports it. Nothing here switches it; check out another branch from the terminal.";
+const BRANCH_NOTE = "The folder's branch as the workspace reports it. Nothing here switches it; check out another branch from the terminal.";
 /** The height pair the folder label and the size-xs picker button carry; an empty slot with it keeps the row from moving. */
 const SLOT_HEIGHT = ["h-7", "sm:h-6"];
 const settle = () => act(() => new Promise<void>(resolve => setTimeout(resolve, 0)));
