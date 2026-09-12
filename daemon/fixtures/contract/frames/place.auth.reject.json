@@ -1,0 +1,25 @@
+[
+  {
+    "id": 1,
+    "op": "place.auth",
+    "placeId": "pl_7"
+  },
+  {
+    "id": 1,
+    "op": "place.auth",
+    "placeId": "pl_7",
+    "nonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  },
+  {
+    "id": 1,
+    "op": "place.auth",
+    "placeId": "pl_7",
+    "nonce": "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!="
+  },
+  {
+    "id": 1,
+    "op": "place.auth",
+    "placeId": "ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+    "nonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  }
+]

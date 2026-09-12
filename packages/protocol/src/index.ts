@@ -2212,12 +2212,16 @@ export type EventsSubscribeReply = z.infer<typeof EventsSubscribeReply>;
 
 // --- daemon wire protocol (ws://0.0.0.0:7070, auth frame first, 4401 on anything else) ---
 
-/** Client-side health of a daemon link. connecting: dialling, or waiting for a daemon that is not there yet.
- * reauth-needed: the daemon refused the token the host sent. A browser link holds no token of its own, so it opens
- * a channel again and the host dials with the one it holds now; the host's own link stops there. refused: the door
- * answered the upgrade with a status, so no retry at the usual pace opens anything; the link holds this until a
- * dial gets past the door, and retries at the ceiling. dead is terminal. */
-export const DaemonLinkStatus = z.enum(["connecting", "live", "reauth-needed", "refused", "dead"]);
+/** Client-side health of a daemon link. opening: a link that has never been open is being dialled, so nothing is
+ * coming back yet and nothing may be promised back. connecting: a link that was open once is being dialled again.
+ * unanswered: a link that has never been open and whose first-answer bound has passed, so what it dials is not
+ * answering and the person is owed what to do instead of a wait. reauth-needed: the daemon refused the token the
+ * host sent. A browser link holds no token of its own, so it opens a channel again and the host dials with the one
+ * it holds now; the host's own link stops there. refused: the door answered the upgrade with a status, so no retry
+ * at the usual pace opens anything; the link holds this until a dial gets past the door, and retries at the ceiling.
+ * dead is terminal. The host's own link reports neither opening nor unanswered, as it reports no refusal: no person
+ * reads its words. */
+export const DaemonLinkStatus = z.enum(["opening", "connecting", "live", "reauth-needed", "refused", "unanswered", "dead"]);
 export type DaemonLinkStatus = z.infer<typeof DaemonLinkStatus>;
 
 const reqId = z.union([z.string(), z.number()]);

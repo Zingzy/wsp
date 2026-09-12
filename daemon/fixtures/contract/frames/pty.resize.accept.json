@@ -1,0 +1,9 @@
+[
+  {
+    "id": 1,
+    "op": "pty.resize",
+    "ptyId": "pty_1",
+    "cols": 120,
+    "rows": 40
+  }
+]
