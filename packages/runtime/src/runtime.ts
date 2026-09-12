@@ -190,15 +190,15 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
-import { GUEST_WSP_BIN, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadWord, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct } from "@wsp/protocol";
-import { mcpServersBlocked, actionRefusal, copyIsCurrent, forksNoMachines, kindWords, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState, placeAbsentLine, placeDaemonPaths, placeNoPaneRoadLine, placeWorkspaceGoneLine, workFolderIn } from "@wsp/protocol";
+import { GUEST_WSP_BIN, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct } from "@wsp/protocol";
+import { mcpServersBlocked, actionRefusal, copyIsCurrent, forksNoMachines, IDLE_REASON, kindWords, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState, placeAbsentLine, placeDaemonPaths, placeNoPaneRoadLine, placeWorkspaceGoneLine, workFolderIn } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
 import { PlaceBackend, parsePlaceMachineId, placeMachineId } from "@wsp/engine";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
 import { DAEMON_TOKEN_PATH, assertTokenShape, rotateDaemonToken } from "./daemon-token.js";
-import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy, idleReason } from "./idle.js";
+import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy } from "./idle.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import { POLL_INTERVAL_MS, createStatusTracker, machineStateOf, phaseLeavingGone, providerSaid, type StatusApi, type StatusListOptions, type StatusWatchOptions } from "./status.js";
 import { makeDevices, type DeviceDoor } from "./devices.js";
@@ -1219,6 +1219,11 @@ export interface Runtime {
      * keeps the name on every row of the thread; a harness that keeps no name of a person's, a store without that
      * session and an unknown id answer. Refuses while the workspace cannot be reached, as a listing's read needs it. */
     rename(sessionId: string, title: string, origin?: Caller): Promise<SessionRenameResult>;
+    /** Drops a thread no turn ever ran on, the row a launch that never got going leaves: its rows and its
+     * transcript rows go and nothing is asked of the machine. Takes the runtime's thread id, not a session id.
+     * Refused (kind conflict) with threadForgetRefusal's sentence once a turn of it did work, which threadRan
+     * decides: a turn the agent refused did none, however far its launch got. */
+    forget(threadId: string, origin?: Caller): Promise<void>;
   };
   readonly harnesses: {
     /** What each harness with an adapter takes at launch; the composer's pickers render from this. With a running
@@ -2271,6 +2276,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         },
       },
     });
+    // The door's four events ride the one stream every other event rides, so the app follows a computer joining
+    // over the socket it already holds and no road subscribes to the door itself.
+    placeDoor.on(e => bus.emit(e));
   }
   /** The machines a root thread's forks are landing but have no record for yet, by root: a slot is taken before
    * the first await of a fork and handed back when it lands or fails, so the cap counts what is on its way too. */
@@ -2459,6 +2467,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return home !== undefined ? { home } : {};
   };
 
+  /** Which provider forked this workspace's machine, by the id the host's own registry gives the module it wired.
+   * One module is wired at a time, so that is the answer for every fork this host holds; a kind whose machine the
+   * person owns is forked by nobody and carries none. The day a record carries the provider its image came from,
+   * that record wins here. */
+  const providerOf = (r: WorkspaceRecord): string | undefined => (kindWords(r.kind).driven ? places.wired : undefined);
+
   const view = (r: WorkspaceRecord): WorkspaceView => ({
     ...((): { folder?: string } => {
       const folder = moduleOf(r.kind).folder(r);
@@ -2486,6 +2500,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     ...(agentsOf(r) !== undefined ? { agents: agentsOf(r)! } : {}),
     ...(r.parentThreadId !== undefined ? { parentThreadId: r.parentThreadId } : {}),
     ...(r.rootThreadId !== undefined ? { rootThreadId: r.rootThreadId } : {}),
+    ...(providerOf(r) !== undefined ? { provider: providerOf(r)! } : {}),
   });
 
   /** One fact of a workspace's look: a value sets it, null clears it back to none, and undefined leaves what the
@@ -3406,7 +3421,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
     onIdle: async (id, windowMs) => {
       try {
-        await napWith(id, idleReason(windowMs));
+        await napWith(id, IDLE_REASON.of(windowMs));
       } catch (e) {
         if (e instanceof MoveUnansweredError) throw e;
         // A machine the pause found gone settled its record on the way out; the gone event dropped this window.
@@ -4921,6 +4936,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           // keep working past its result, and a row read as completed here lets a send start a second agent in the
           // same worktree. The result is held and applied at the exit below.
           turnLive.reply = event.result.status;
+          // The cause rides the row too, since a refused turn did none of the work: what a thread is read as having
+          // run is decided off the rows, and the result itself lives only in the transcript.
+          if (event.result.refusal !== undefined) view.refusal = event.result.refusal;
           void persistSessions(workspaceId);
           if (notify !== undefined) notifyEnd({ view, turnId }, notify, event.result);
           record({ type: "session.done", workspaceId, sessionId, turnId, threadId, result: event.result });
@@ -5512,6 +5530,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
       await persistSessions(entry.record.id);
       return { outcome: "renamed" };
+    },
+
+    async forget(threadId, origin) {
+      await ready();
+      const held = [...sessions].filter(([, s]) => s.view.threadId === threadId);
+      const workspaceId = held[0]?.[1].view.workspaceId;
+      if (workspaceId === undefined) throw new Error(`no thread ${threadWord(threadId)}`);
+      await entryOf(workspaceId, origin);
+      if (threadRan(held.map(([, s]) => s.view))) throw Object.assign(new Error(threadForgetRefusal(threadId)), { kind: "conflict" });
+      for (const [id] of held) sessions.delete(id);
+      // Spliced rather than replaced: a turn of another thread on this workspace holds the array itself, and its
+      // rows would go to a copy nothing reads.
+      const events = transcripts.get(workspaceId) ?? [];
+      for (let i = events.length - 1; i >= 0; i--) if (events[i]!.threadId === threadId) events.splice(i, 1);
+      await persistSessions(workspaceId);
+      await flushTranscript(workspaceId);
     },
   };
 

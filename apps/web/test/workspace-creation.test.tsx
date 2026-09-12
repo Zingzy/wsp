@@ -28,7 +28,7 @@ function failed(count: number): Creation {
     name: "beta",
     workspaceId: "ws_beta",
     lines: lines(count),
-    failed: { title: "The provider refused: machine cap reached", detail: CAP_LINE },
+    failed: { title: "The provider refused: no more workspaces can run there now", detail: CAP_LINE },
   };
 }
 
@@ -51,7 +51,7 @@ describe("workspace creation layout", () => {
 
   it("keeps the refusal's lead red, says the failing line's words once, Retry tactile and Dismiss as text", async () => {
     const view = await mount(failed(2));
-    const lead = within(view).getByText("The provider refused: machine cap reached");
+    const lead = within(view).getByText("The provider refused: no more workspaces can run there now");
     expect(lead.className).toContain("text-destructive-foreground");
     expect(lead.nextElementSibling).toBeNull();
     expect(view.textContent!.split(CAP_LINE)).toHaveLength(2);
@@ -114,7 +114,7 @@ describe("workspace creation layout", () => {
     const view = await mount({ key: "k", name: "beta", workspaceId: null, lines: [], failed: null });
     expect(view.getAttribute("aria-busy")).toBe("true");
     expect(view.firstElementChild!.className).toContain("text-center");
-    expect(within(view).getByTestId("creation-log").textContent).toContain("Asking the runtime for a fork.");
+    expect(within(view).getByTestId("creation-log").textContent).toContain("Asking wsp to start it.");
     expect(within(view).getByRole("progressbar", { name: "Creating" })).toBeDefined();
     expect(within(view).queryByRole("button", { name: "Retry" })).toBeNull();
   });

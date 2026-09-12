@@ -20,6 +20,7 @@ import { chromium } from "playwright";
 import { fixtureState } from "./fixture-state.mjs";
 import { BROWSER_ARGS, freePort, REPO, startHost, stopHost, WEB_DIR, whatIsNotBuilt } from "./host.mjs";
 import { indexMarkdown, readSurfaces, shotPlan } from "./plan.mjs";
+import { APP_UP } from "./ready.mjs";
 
 function usage(why) {
   console.error(`${why}\n\nusage: pnpm --filter @wsp/web screenshots -- --out <folder> [--surfaces <file.json>]`);
@@ -53,25 +54,80 @@ function treeFacts() {
   }
 }
 
-/** The app is up once its centre column is on the page: the socket has answered and the store has
- * rendered. A step taken before that is a click at a shell that is not there yet, and at 390 the right
- * panel opens over the whole window part way through, which swallowed the first click of every narrow
- * shot until this gate went in. */
-const APP_UP = "[data-shell-center]";
+/** Where a paired browser keeps the token the host handed it, copied from `apps/web/src/protocol/pairing.ts`
+ * (DEVICE_TOKEN_KEY): this file is plain node beside the app rather than inside its build, so it cannot import the
+ * app's TypeScript, and a rename there is a rename here. */
+const DEVICE_TOKEN_KEY = "wsp:device-token";
+
+/** The host's own token, read out of the boot object it inlines into the page it serves. */
+async function bootToken(base) {
+  const html = await fetch(base).then(r => r.text());
+  const boot = /window\.__WSP__ = (\{.*?\});/.exec(html);
+  if (boot === null) throw new Error("the page the host served carries no boot object");
+  const token = JSON.parse(boot[1]).token;
+  if (typeof token !== "string") throw new Error("the host inlined no token, so no window can stand in for one on another computer");
+  return token;
+}
+
+/** A context that reads as a window on another computer: the boot object the page is handed loses the host's own
+ * token, which is what a page served beyond loopback carries, and the token is in this browser's store instead,
+ * where a paired device keeps it. The boot object is taken as the page's own inline script sets it rather than by
+ * rewriting the page: a fulfilled response puts the page in another address space and Chromium then blocks its
+ * socket to loopback outright (measured 2026-09-12). Nothing in the app is told which window this is; it reads the
+ * same boot object a real window on another computer reads. */
+async function asAnotherComputer(context, token) {
+  await context.addInitScript(
+    ([key, held]) => {
+      window.localStorage.setItem(key, held);
+      let boot;
+      Object.defineProperty(window, "__WSP__", {
+        configurable: true,
+        get: () => boot,
+        set: value => {
+          const { token: _own, ...rest } = value ?? {};
+          boot = rest;
+        },
+      });
+    },
+    [DEVICE_TOKEN_KEY, token],
+  );
+}
+
+/** The page's socket to the host, in this run's hands. It connects as it would until the function this returns is
+ * called, which shuts it and leaves every redial unanswered: that is what a window sees the moment the computer
+ * running wsp falls asleep, and it is not what Playwright's own offline mode does, which leaves an open socket
+ * alone. */
+async function holdSocket(page) {
+  const open = [];
+  let asleep = false;
+  await page.routeWebSocket(/.*/, ws => {
+    if (asleep) return ws.close();
+    open.push(ws.connectToServer());
+  });
+  return () => {
+    asleep = true;
+    for (const server of open) server.close();
+  };
+}
 
 /** One shot, in a browser that has never seen this app: the context is its own, so the sidebar width, the
  * chosen workspace and the right panel's last state are what a first launch has and not what the shot
  * before left behind. Sharing one context per width and theme is what hid the machine surface at 390,
  * where an earlier shot's remembered panel meant the launcher was never drawn. */
-async function shoot(context, shot, base, out) {
+async function shoot(context, shot, base, out, token) {
+  if (shot.remote) await asAnotherComputer(context, token);
   const page = await context.newPage();
+  const fallAsleep = shot.steps.some(step => step.offline === true) ? await holdSocket(page) : undefined;
   await page.goto(`${base}${shot.at}`, { waitUntil: "domcontentloaded" });
   await page.locator(APP_UP).first().waitFor({ state: "visible", timeout: 30_000 });
   const dark = await page.locator("html").evaluate(el => el.classList.contains("dark"));
   if (dark !== (shot.theme === "dark")) throw new Error(`the page drew the ${dark ? "dark" : "light"} side under an emulated ${shot.theme} scheme; the theme no longer follows the computer, so this file would be wrong`);
   await page.waitForTimeout(shot.settleMs);
   for (const step of shot.steps) {
-    if (step.key !== undefined) await page.keyboard.press(step.key);
+    // The socket going is the whole of "the computer running wsp fell asleep": nothing new arrives, nothing answers
+    // the redial, and the window keeps every row it was last told about.
+    if (step.offline === true) fallAsleep();
+    else if (step.key !== undefined) await page.keyboard.press(step.key);
     else await page.locator(step.click).first().click({ timeout: 15_000 });
   }
   if (shot.wait !== undefined) await page.locator(shot.wait).first().waitFor({ state: "visible", timeout: 15_000 });
@@ -96,16 +152,18 @@ async function main() {
   const home = mkdtempSync(join(tmpdir(), "wsp-shots-"));
   let host;
   let browser;
+  let token;
   const written = [];
   const failures = [];
   try {
     host = await startHost({ home, state: fixtureState(), port: await freePort(), wsPort: await freePort() });
+    token = await bootToken(host.base);
     browser = await chromium.launch({ args: BROWSER_ARGS });
     for (const shot of shotPlan(list)) {
       let context;
       try {
         context = await browser.newContext({ viewport: { width: shot.width, height: shot.height }, colorScheme: shot.theme, deviceScaleFactor: 2, reducedMotion: "reduce" });
-        await shoot(context, shot, host.base, args.out);
+        await shoot(context, shot, host.base, args.out, token);
         written.push(shot.file);
         console.log(`wrote ${shot.file}`);
       } catch (e) {

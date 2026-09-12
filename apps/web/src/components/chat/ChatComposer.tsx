@@ -31,24 +31,29 @@
 // turn it left behind: the runtime runs a workspace's threads side by side
 // and holds each to one turn, so the fresh composer opens at once. The slash
 // menu offers what the session's harness announced less the commands the
-// runtime catalog says run only in the CLI's own terminal, and Enter on one
-// of those sends nothing: the line names the wsp control that serves it and
-// goes with the next edit, and a block on the send outranks it. A slash
-// command nobody announced still goes as text, since the words may be meant.
+// runtime catalog says run only in the CLI's own terminal; with nothing left
+// to offer it does not open at all and the placeholder drops its half about
+// commands, since a menu that answers a typed slash with an empty state
+// promises what it cannot keep. Enter on a screen command sends nothing: the
+// line names the wsp control that serves it and goes with the next edit, and
+// a block on the send outranks it. A slash command nobody announced still
+// goes as text, since the words may be meant.
 // The checkout row under the composer picks the folder a fresh thread starts
 // in; a resumed one is started where its harness last said it was. The
 // model, effort, context window and access picks in the box's footer ride
 // every start, so a change mid-thread applies at the next turn.
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent } from "react";
 import { ImageIcon } from "lucide-react";
-import { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
+import { HOST_ASLEEP_SEND, IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
+import { hostAsleep } from "../../boot";
 import { useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { onComposerFocusRequest } from "../../shell/shellRequests";
 import { useThreadStart } from "../../files/root";
+import { useLinkDownLine } from "../../terminal/paneWords";
 import { composerSubmissionIntentForEnter, detectComposerTrigger, replaceTextRange } from "../../composer-logic";
 import { ComposerPromptEditor, type ComposerCommandKey, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
-import { catalogFromHarness } from "./adapt";
+import { catalogFromHarness, composerPlaceholder, offersSlashCommands } from "./adapt";
 import { canPickFolder, ComposerCheckoutRow } from "./ComposerCheckoutRow";
 import { ComposerCommandMenu, type ComposerCommandItem } from "./ComposerCommandMenu";
 import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
@@ -64,7 +69,6 @@ import { ComposerSurface } from "./ComposerSurface";
 import { Button } from "../ui/button";
 import type { ChatThreadHandle } from "./useChatThread";
 
-const PLACEHOLDER = "Ask anything, or / for commands";
 const noop = () => {};
 
 /** What blocks a send right now, or null; the refusal table gives its words. The socket comes first: with it down
@@ -151,11 +155,14 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const [highlightedSearchKey, setHighlightedSearchKey] = useState<string | null>(null);
   const [dismissedSearchKey, setDismissedSearchKey] = useState<string | null>(null);
 
+  const linkDown = useLinkDownLine(workspaceId);
   const blocked = composerSendBlock({ conn, hasApi: api !== null, state, hydrated: thread.hydrated });
   // A send wakes a paused machine by itself, so paused is not a refusal here: the box takes the words and the send
   // button says it wakes first.
   const wakesFirst = blocked === "paused";
-  const unavailable = blocked === null || wakesFirst ? null : sendRefusal(blocked);
+  // A window on another computer whose wsp has gone quiet says which computer is asleep, not that wsp is not
+  // running: nothing here is broken, and the turn starts when that computer wakes.
+  const unavailable = blocked === null || wakesFirst ? null : hostAsleep(conn) ? HOST_ASLEEP_SEND : sendRefusal(blocked);
   const sendDisabledReason = unavailable ?? (thread.busy ? TURN_IN_FLIGHT : null);
   const hasText = draft.prompt.trim().length > 0;
   // The catalog answers before the click; a row the runtime's table stood in for is no answer, so the picker is
@@ -184,7 +191,8 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   // One line in the slot above the box: the newest failure, else what blocks a send, else the screen command Enter
   // refused, since a box the block disabled has nothing to edit and the block is the one thing to say, else the turn
   // that replied but still runs, in the runtime's own words, since a message sent now waits for that process and runs
-  // as the next turn, else an access pick the running turn's harness would not take mid-turn.
+  // as the next turn, else an access pick the running turn's harness would not take mid-turn, else the workspace's
+  // link being down, which blocks no send and so comes after everything a person is being stopped by.
   const line =
     imageRefusal !== null
       ? imageRefusal
@@ -198,13 +206,13 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
             ? screenLine
             : runningTurn?.replied === true
               ? stillWorkingLine(threadKey)
-              : accessPick.line;
+              : (accessPick.line ?? linkDown);
 
   const trigger = useMemo(() => detectComposerTrigger(draft.prompt, draft.cursor), [draft]);
   const searchKey = trigger ? `${trigger.kind}:${trigger.query.trim().toLowerCase()}` : null;
-  const menuOpen = trigger !== null && trigger.rangeStart === 0 && dismissedSearchKey !== searchKey && unavailable === null;
   const { harness } = thread.view;
   const catalog = useMemo(() => catalogFromHarness({ id: harnessId, harness, screen: screenCommandsOf(harnessCatalog) }), [harness, harnessCatalog, harnessId]);
+  const menuOpen = offersSlashCommands(catalog) && trigger !== null && trigger.rangeStart === 0 && dismissedSearchKey !== searchKey && unavailable === null;
   const items = useMemo<ComposerCommandItem[]>(() => {
     if (!menuOpen || trigger === null) return [];
     const all = catalog.slashCommands.map(command => ({
@@ -528,7 +536,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
                       value={draft.prompt}
                       cursor={draft.cursor}
                       disabled={unavailable !== null}
-                      placeholder={PLACEHOLDER}
+                      placeholder={composerPlaceholder(catalog)}
                       onChange={onChange}
                       onCommandKeyDown={onCommandKeyDown}
                     />

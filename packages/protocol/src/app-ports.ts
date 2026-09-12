@@ -14,6 +14,11 @@ export const WS_PORT_OFFSET = 10;
 /** The WebSocket port of the default pair. */
 export const DEFAULT_WS_PORT = DEFAULT_PORT + WS_PORT_OFFSET;
 
+/** How far above the app port the door for computers you own sits, so `--port` alone moves all three. */
+export const PLACE_PORT_OFFSET = 20;
+/** The port that door answers on for the default pair. */
+export const DEFAULT_PLACE_PORT = DEFAULT_PORT + PLACE_PORT_OFFSET;
+
 /** The address every host socket binds when nobody names another: the page carries the host token, so nothing
  * listens beyond this computer. */
 export const LOOPBACK = "127.0.0.1";
@@ -39,6 +44,10 @@ export function wsUrlOf(url: string): string {
 export function isLoopback(address: string): boolean {
   return address === "localhost" || address === "::1" || address === "[::1]" || /^127\./.test(address);
 }
+
+/** The address that binds every address this computer answers on: what the door a computer you own dials is bound
+ * to, and what reachAddresses is asked to spell out. */
+export const WILDCARD = "0.0.0.0";
 
 /** Whether an address is the wildcard, which binds every address this computer answers on, loopback included. A
  * tool on the computer itself dials such a host at loopback; a host on one named address answers only there. */
@@ -66,6 +75,21 @@ export function servedHostname(word: string): string | undefined {
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return undefined;
   return parsed.hostname === "" ? undefined : parsed.hostname;
+}
+
+/** What a bare address a person types looks like: a name or an IPv4 address with a port, or an IPv6 literal in its
+ * brackets with one. The port is asked for because a wsp is reached at one and no default would be right for both
+ * the app's own and one moved by --port. */
+const BARE_ADDRESS = /^(\[[0-9a-fA-F:]+\]|[a-zA-Z0-9.-]+):\d{1,5}$/;
+
+/** The address typed on the join screen, as the road that dials it wants it: what a person reads off the other
+ * computer is an authority (`192.168.1.20:4400`), which becomes an http address; an address that already carries
+ * http or https is itself; anything else, a bare name with no port or a socket address, is nothing. One reading,
+ * so the field that refuses a word and the dial that follows it cannot disagree about what an address is. */
+export function joinAddressOf(typed: string): string | undefined {
+  const word = typed.trim();
+  if (/^https?:\/\//i.test(word)) return servedHostname(word) === undefined ? undefined : word;
+  return BARE_ADDRESS.test(word) ? `http://${word}` : undefined;
 }
 
 /** An address and a port as the authority of a URL: an IPv6 literal needs brackets and everything else is itself.

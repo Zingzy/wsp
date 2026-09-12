@@ -780,7 +780,7 @@ describe("result classification", () => {
     const onMachine = scriptedExec([init, refusal, result], { exitCode: 1 });
     const there = createClaudeAdapter({ exec: onMachine.factory, configDir: "/root/.claude-cfg", signInRefusal: signInRefusalLine({ kind: "cloud" }) });
     const away = await there.start({ prompt: "say hi", onEvent: () => {} }).finished;
-    expect(away).toMatchObject({ status: "failed", refusal: "sign-in", error: "Not logged in · Please run /login; sign this machine in from the Machine tab, then send again" });
+    expect(away).toMatchObject({ status: "failed", refusal: "sign-in", error: "Not logged in · Please run /login; sign this workspace in from the Workspace panel, then send again" });
 
     // A caller that handed no road leaves the CLI's own sentence to stand alone; the cause still classes the turn.
     const bare = scriptedExec([init, refusal, result], { exitCode: 1 });

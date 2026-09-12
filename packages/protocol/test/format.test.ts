@@ -25,6 +25,8 @@ import {
   TURN_IN_FLIGHT,
   foreignFlagLine,
   unknownAgentLine,
+  cutLine,
+  IDLE_REASON,
   LINEAGE_MARKS,
   NO_TEMPLATES_LINE,
   templateFailedLine,
@@ -53,6 +55,7 @@ import {
   fmtMemGb,
   fmtRate,
   fmtSize,
+  placeFactsLine,
   fmtThreads,
   fmtUptime,
   forgetNotice,
@@ -183,6 +186,17 @@ describe("fmtBytes and fmtMemGb", () => {
   });
 });
 
+describe("a computer of the person's own in one line", () => {
+  it("names its cores, its memory and the room left where its threads work, as one unbreakable phrase", () => {
+    const line = placeFactsLine({ cpu: 4, memMb: 8192 }, 97_710_505_984);
+    expect(line).toBe("4 cores · 8 GB · 91 GB free".replace(/ /g, "\u00a0"));
+    // A computer that would not say how much room it has says the rest.
+    expect(placeFactsLine({ cpu: 8, memMb: 16384 })).toBe("8 cores · 16 GB".replace(/ /g, "\u00a0"));
+    // Cores, never vCPU: a computer somebody owns has the cores it has.
+    expect(line).not.toContain("vCPU");
+  });
+});
+
 describe("a machine that stopped answering with its memory near full", () => {
   const GiB = 1024 ** 3;
   const offers = [
@@ -201,7 +215,7 @@ describe("a machine that stopped answering with its memory near full", () => {
 
   it("the line carries the last figures and says the work took the memory, never that the machine failed", () => {
     expect(outOfMemoryLine({ used: 3.59 * GiB, total: 3.94 * GiB, load1: 6.42 })).toBe(
-      "Out of memory (3.6 GB of 3.9 GB used, load 6.4) when the machine last answered; the work on it took the memory, not a fault of the machine",
+      "Out of memory (3.6 GB of 3.9 GB used, load 6.4) when the workspace last answered; the work on it took the memory, not a fault of the computer it runs on",
     );
   });
 
@@ -213,7 +227,7 @@ describe("a machine that stopped answering with its memory near full", () => {
   it("the size line names the smallest offer with more memory and its rate, or that there is none", () => {
     expect(biggerSizeLine({ cpu: 2, memMb: 4096 }, offers)).toBe("A workspace on 2 vCPU · 8 GB ($0.15/hr) fits more; pick it when you make the next one");
     expect(biggerSizeLine({ cpu: 2, memMb: 8192 }, offers)).toBe("A workspace on 4 vCPU · 16 GB ($0.30/hr) fits more; pick it when you make the next one");
-    expect(biggerSizeLine({ cpu: 4, memMb: 16384 }, offers)).toBe("No size with more memory is offered; run less on the machine at once");
+    expect(biggerSizeLine({ cpu: 4, memMb: 16384 }, offers)).toBe("No size with more memory is offered; run less in the workspace at once");
     // Order in the table does not pick the offer; memory does.
     expect(biggerSizeLine({ cpu: 2, memMb: 4096 }, [...offers].reverse())).toContain("2 vCPU · 8 GB");
   });
@@ -543,7 +557,7 @@ describe("plural, fmtThreads and forgetNotice", () => {
 
   it("counts threads with the noun, and names what a forget takes off this computer", () => {
     expect([0, 1, 2].map(fmtThreads)).toEqual(["0 threads", "1 thread", "2 threads"]);
-    expect(forgetNotice(1)).toBe("Its record and 1 thread leave this computer; the machine is already gone.");
+    expect(forgetNotice(1)).toBe("Its record and 1 thread leave this computer; the computer it ran on is already gone.");
   });
 });
 
@@ -587,19 +601,47 @@ describe("openingTitle", () => {
   });
 
   it("cuts a long first sentence at a word boundary to at most 48 characters with the ellipsis counted, and only then", () => {
-    expect(openingTitle(brief)).toBe("You are a builder for the wsp repo, which is at\u2026");
+    expect(openingTitle(brief)).toBe("You are a builder for the wsp repo, which is at…");
     expect(openingTitle(brief).length).toBeLessThanOrEqual(48);
     const exact = "Rename the thread by its opening words and stop.";
     expect(exact).toHaveLength(48);
     expect(openingTitle(exact)).toBe(exact);
-    expect(openingTitle(`${exact.slice(0, -1)} now.`)).toBe("Rename the thread by its opening words and stop\u2026");
-    expect(openingTitle("Ticket: wsp-map#408, four fixes in one round, the header glyph first.")).toBe("Ticket: wsp-map#408, four fixes in one round\u2026");
+    expect(openingTitle(`${exact.slice(0, -1)} now.`)).toBe("Rename the thread by its opening words and stop…");
+    expect(openingTitle("Ticket: wsp-map#408, four fixes in one round, the header glyph first.")).toBe("Ticket: wsp-map#408, four fixes in one round…");
   });
 
   it("cuts one word longer than the room inside it, and an empty turn is an empty title", () => {
     const token = "a".repeat(60);
-    expect(openingTitle(token)).toBe(`${"a".repeat(47)}\u2026`);
+    expect(openingTitle(token)).toBe(`${"a".repeat(47)}…`);
     expect(openingTitle("\n \n")).toBe("");
+  });
+});
+
+describe("cutLine", () => {
+  it("leaves a line inside the room whole and cuts a longer one at a word boundary, the ellipsis counted inside the room", () => {
+    expect(cutLine("no answer 2 h · threads go on", 30)).toBe("no answer 2 h · threads go on");
+    expect(cutLine("putting the helper back on this machine", 30)).toBe("putting the helper back on…");
+    expect(cutLine("putting the helper back on this machine", 30).length).toBeLessThanOrEqual(30);
+    // One word longer than the room is cut inside itself rather than dropped.
+    expect(cutLine("a".repeat(40), 10)).toBe(`${"a".repeat(9)}…`);
+  });
+
+  it("takes the separator the cut broke on off the edge, the middle dot a row's line parts its facts with included", () => {
+    expect(cutLine("$0.00 today · edge slow · naps in 14m", 30)).toBe("$0.00 today · edge slow…");
+    expect(cutLine("one, two, three, four, five, six", 20)).toBe("one, two, three…");
+    // A thread title cut on a middle dot reads the same rule, since both lines read this one cut.
+    expect(openingTitle("Ship the sidebar row and the composer line · then the word cut")).toBe("Ship the sidebar row and the composer line…");
+  });
+});
+
+describe("IDLE_REASON", () => {
+  it("writes the nap's reason and reads its window back, and reads nothing out of a reason of any other shape", () => {
+    expect(IDLE_REASON.of(20 * 60_000)).toBe("idle 20 min");
+    expect(IDLE_REASON.windowIn(IDLE_REASON.of(20 * 60_000))).toBe("20 min");
+    expect(IDLE_REASON.windowIn(IDLE_REASON.of(30 * 60_000))).toBe("30 min");
+    expect(IDLE_REASON.windowIn(undefined)).toBeUndefined();
+    expect(IDLE_REASON.windowIn("machine replaced")).toBeUndefined();
+    expect(IDLE_REASON.windowIn("idle")).toBeUndefined();
   });
 });
 
@@ -609,14 +651,14 @@ describe("titlePrompt", () => {
     expect(prompt).toContain("3 to 6 words");
     expect(prompt).toContain("The opening turn:");
     expect(prompt).not.toContain("The reply:");
-    expect(prompt).toContain(`${"a".repeat(600)}\u2026`);
+    expect(prompt).toContain(`${"a".repeat(600)}…`);
     expect(prompt).not.toContain("a".repeat(601));
   });
 
   it("carries the reply too when the caller has one, cut the same way", () => {
     const prompt = titlePrompt("a".repeat(900), "b".repeat(900));
     expect(prompt).toContain("The reply:");
-    expect(prompt).toContain(`${"b".repeat(600)}\u2026`);
+    expect(prompt).toContain(`${"b".repeat(600)}…`);
     expect(prompt).not.toContain("b".repeat(601));
   });
 });
@@ -961,10 +1003,10 @@ describe("the nap's words when its vault was not stored", () => {
 
 describe("what a move onto a newer image says about the files", () => {
   it("the confirm says what moves, what does not and what it costs, without naming a file", () => {
-    expect(IMAGE_MOVE_CONFIRM).toContain("Your home folder moves to the new machine");
+    expect(IMAGE_MOVE_CONFIRM).toContain("Your home folder moves to the new copy");
     expect(IMAGE_MOVE_CONFIRM).toContain("minus the files the image itself wrote and you never changed");
     expect(IMAGE_MOVE_CONFIRM).toContain("Anything installed outside your home comes from the new image");
-    expect(IMAGE_MOVE_CONFIRM).toContain("everything running on this machine stops with it");
+    expect(IMAGE_MOVE_CONFIRM).toContain("everything running in this workspace stops with it");
     // An archive carries no deletion, so a person is told before the move and not after.
     expect(IMAGE_MOVE_CONFIRM).toContain("a file you deleted from a folder the image writes into comes back with it");
   });
@@ -1061,7 +1103,7 @@ describe("REPO_STATE_WORDS", () => {
   });
 
   it("explains the word beside it in one dry sentence about the machine and this folder's git state", () => {
-    expect(REPO_STATE_WORDS.refused.note).toBe("The machine could not read this folder's git state, so no branch is shown.");
+    expect(REPO_STATE_WORDS.refused.note).toBe("The workspace could not read this folder's git state, so no branch is shown.");
     expect(REPO_STATE_WORDS.refused.note).toMatch(/^[^.]+\.$/);
   });
 
@@ -1076,7 +1118,7 @@ describe("LINEAGE_MARKS", () => {
   it("names every outcome a missing tool can carry and every state a lineage row shows, each as one short lowercase word or two", () => {
     const outcomes: GoldenMissingTool["outcome"][] = ["skipped", "failed"];
     for (const o of outcomes) expect(LINEAGE_MARKS[o]).toBe(o);
-    expect(LINEAGE_MARKS).toEqual({ now: "now", head: "head", fork: "this fork", failed: "failed", skipped: "skipped", volatile: "volatile" });
+    expect(LINEAGE_MARKS).toEqual({ now: "now", head: "head", fork: "this one", failed: "failed", skipped: "skipped", volatile: "volatile" });
     for (const word of Object.values(LINEAGE_MARKS)) {
       expect(word).toMatch(/^[a-z]+( [a-z]+)?$/);
       expect(word.length).toBeLessThanOrEqual(9);
@@ -1271,7 +1313,7 @@ describe("the export dialog's words", () => {
   });
 
   it("tells a stranger what the ticks on the agent rows do, what happens when the workspace has no threads, and why a row is empty before the export", () => {
-    expect(EXPORT_SESSIONS_NOTE).toBe("Ticked agents' sessions come home with the folder. The rest stay on the machine.");
+    expect(EXPORT_SESSIONS_NOTE).toBe("Ticked agents' sessions come home with the folder. The rest stay in the workspace.");
     expect(NO_THREADS_NOTE).toBe("No threads here. Every agent's sessions for the folder come home with it.");
     expect(NOT_LANDED_WORD).toBe("when it lands");
   });

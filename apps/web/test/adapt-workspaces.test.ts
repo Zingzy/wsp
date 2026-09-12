@@ -2,7 +2,7 @@
 // Workspaces and statuses into sidebar projects with status indicators.
 import { describe, expect, it } from "vitest";
 import type { MachineState, ReachState, SessionView, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
-import { deriveSidebarProjects, threadIndicator, turnWait, workspaceIndicator, type SidebarInput } from "../src/adapt/index.js";
+import { deriveSidebarProjects, pausedLine, threadIndicator, turnWait, workspaceIndicator, type SidebarInput } from "../src/adapt/index.js";
 import { LIVE_RUN_1, LIVE_RUN_1_RESTART, LIVE_WORKSPACE_1, LIVE_WORKSPACE_2, LIVE_WS } from "./fixtures/live-run-1.js";
 
 const status = (phase: WorkspacePhase, machineState: MachineState, reach: ReachState, id = "ws_a"): WorkspaceStatus => ({
@@ -42,13 +42,24 @@ describe("threadIndicator", () => {
 });
 
 describe("turnWait", () => {
-  it("names what a running turn waits for on a machine that is not running, and offers the wake only where one applies", () => {
-    expect(turnWait("running")).toBeNull();
-    expect(turnWait("pausing")).toEqual({ label: "Waiting for the machine to wake", wake: true });
-    expect(turnWait("paused")).toEqual({ label: "Waiting for the machine to wake", wake: true });
-    expect(turnWait("waking")).toEqual({ label: "Waking the machine", wake: false });
-    expect(turnWait("unreachable")).toEqual({ label: "Waiting for the machine to answer", wake: false });
-    expect(turnWait("gone")).toEqual({ label: "The machine is gone", wake: false });
+  const runs = { name: "profile", where: "ascii" };
+
+  it("names the workspace a running turn waits for, where it runs while it wakes, and offers the wake only where one applies", () => {
+    expect(turnWait("running", runs)).toBeNull();
+    expect(turnWait("pausing", runs)).toEqual({ label: "waiting for profile to wake", wake: true, elapsed: false });
+    expect(turnWait("paused", runs)).toEqual({ label: "waiting for profile to wake", wake: true, elapsed: false });
+    // The wake a send started is the one line that counts the seconds, since that is what the send is waiting on.
+    expect(turnWait("waking", runs)).toEqual({ label: "waking profile on ascii", wake: false, elapsed: true });
+    expect(turnWait("unreachable", runs)).toEqual({ label: "waiting for profile to answer", wake: false, elapsed: false });
+    expect(turnWait("gone", runs)).toEqual({ label: "profile is gone", wake: false, elapsed: false });
+  });
+
+  it("the paused line reads the idle window the runtime napped it after, and the state alone where no status carried one", () => {
+    expect(pausedLine("idle 30 min")).toBe("paused after 30 min idle");
+    expect(pausedLine("idle 20 min")).toBe("paused after 20 min idle");
+    expect(pausedLine(undefined)).toBe("paused");
+    // A reason of another shape is not a window: nothing is invented from it.
+    expect(pausedLine("machine replaced")).toBe("paused");
   });
 });
 
@@ -76,8 +87,8 @@ describe("deriveSidebarProjects", () => {
     ]);
     expect(projects[1]).toMatchObject({ projectKey: LIVE_WS, environmentPresence: "remote-only", groupedProjectCount: 1, allRemoteMembersAreDesktopLocal: false, machineState: "running", reach: "reachable", state: "running" });
     expect(projects[1]?.threads).toEqual([
-      { id: "s1", threadId: null, sessionId: "s1", workspaceId: LIVE_WS, title: "hello", status: "completed", startedAt: "2026-09-02T17:19:35.668Z", endedAt: "2026-09-02T17:19:37.768Z", indicator: { label: "Idle", tone: "neutral", pulse: false }, harness: "claude", startedBy: "person", project: null, parentThreadId: null },
-      { id: "s0", threadId: null, sessionId: "s0", workspaceId: LIVE_WS, title: "59094224", status: "running", startedAt: null, endedAt: null, indicator: { label: "Working", tone: "neutral", pulse: true }, harness: "claude", startedBy: "person", project: null, parentThreadId: null },
+      { id: "s1", threadId: null, sessionId: "s1", workspaceId: LIVE_WS, title: "hello", status: "completed", ran: true, startedAt: "2026-09-02T17:19:35.668Z", endedAt: "2026-09-02T17:19:37.768Z", indicator: { label: "Idle", tone: "neutral", pulse: false }, harness: "claude", startedBy: "person", project: null, parentThreadId: null },
+      { id: "s0", threadId: null, sessionId: "s0", workspaceId: LIVE_WS, title: "59094224", status: "running", ran: true, startedAt: null, endedAt: null, indicator: { label: "Working", tone: "neutral", pulse: true }, harness: "claude", startedBy: "person", project: null, parentThreadId: null },
     ]);
   });
 

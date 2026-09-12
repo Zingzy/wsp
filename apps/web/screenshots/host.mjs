@@ -4,9 +4,11 @@
 // command on two free ports, and the wait until it answers. The screenshot run
 // and the persona lab both take this road, so the environment a fixture is
 // served under is written once rather than once per harness.
+import { PERSON_HOME_ENV } from "@wsp/protocol";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -50,19 +52,38 @@ export const sleep = ms => new Promise(r => setTimeout(r, ms));
 export const providerFor = state => (Object.values(state.workspaces ?? {}).some(w => w.kind === "cloud") || state.goldens !== undefined ? "fake" : "none");
 
 /**
- * Starts the built wsp command on a throwaway home holding one fixture state, and answers once it serves.
+ * The whole environment a fixture's host is started with, and the only place it is written down, so the lab can
+ * print and record the same words the child was given.
  *
- * A bare environment, not this shell's: a Solari key or a WSP_PROVIDER word in the terminal would put the run on a
- * real provider, and a stray WSP_HOME would take it to the person's own machines.
+ * A bare one, not this shell's: a Solari key or a WSP_PROVIDER word in the terminal would put the run on a real
+ * provider, a stray WSP_HOME would take it to the person's own machines, and a thread's own variables would reach
+ * the wsp under test and shape what it lists. The path is the one thing carried over, since the agents a turn runs
+ * are found on it.
+ *
+ * The person's own home rides beside the throwaway one. A turn on this computer runs the agent the person signed
+ * in to, and that sign-in is keyed to the home they log in to: under any other home the turn answers "Not logged
+ * in" and a tester reads it as the product refusing them (measured 2026-09-12).
  */
-export async function startHost({ home, state, port, wsPort, logPath, detached = false }) {
+export function hostEnv({ home, state, personHome = homedir() }) {
+  return {
+    PATH: process.env["PATH"] ?? "/usr/bin:/bin",
+    HOME: home,
+    WSP_HOME: join(home, ".wsp"),
+    WSP_PROVIDER: providerFor(state),
+    [PERSON_HOME_ENV]: personHome,
+  };
+}
+
+/** Starts the built wsp command on a throwaway home holding one fixture state, and answers once it serves. */
+export async function startHost({ home, state, port, wsPort, logPath, detached = false, personHome }) {
   const statePath = join(home, ".wsp", "state.json");
   mkdirSync(dirname(statePath), { recursive: true });
   writeFileSync(statePath, JSON.stringify(state, null, 2));
   const out = logPath === undefined ? "pipe" : openSync(logPath, "a");
+  const env = hostEnv({ home, state, personHome });
   const child = spawn(process.execPath, [HOST_BIN, "up", "--state", statePath, "--port", String(port), "--ws-port", String(wsPort)], {
     cwd: home,
-    env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin", HOME: home, WSP_HOME: join(home, ".wsp"), WSP_PROVIDER: providerFor(state) },
+    env,
     stdio: ["ignore", out, out],
     detached,
   });
@@ -71,11 +92,12 @@ export async function startHost({ home, state, port, wsPort, logPath, detached =
   child.stderr?.on("data", d => log.push(String(d)));
   const said = () => (logPath === undefined ? log.join("") : `the host's log is at ${logPath}`);
   const base = `http://127.0.0.1:${port}`;
+  const answer = { child, base, log, env };
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error(`the host exited with ${child.exitCode} before it served:\n${said()}`);
     const served = await fetch(base).then(r => r.ok, () => false);
-    if (served) return { child, base, log };
+    if (served) return answer;
     await sleep(200);
   }
   child.kill("SIGTERM");

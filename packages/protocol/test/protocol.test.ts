@@ -75,6 +75,7 @@ import {
   ThreadView,
   ExecEvent,
   foldThreads,
+  threadRan,
   NOTIFY_ME,
   WorkspaceListing,
   WorkspaceSize,
@@ -1043,7 +1044,7 @@ describe("daemon files and diff ops", () => {
       expect(machineLacksShort(line).length).toBeLessThanOrEqual(30);
       expect(line.length).toBeGreaterThan(machineLacksShort(line).length);
     }
-    expect(noImportRoadLine("box", OVER_SSH)).toBe("box is a machine over ssh, which lands no folder yet; import to a fork, or register the folder on this computer");
+    expect(noImportRoadLine("box", OVER_SSH)).toBe("box is a computer over ssh, which lands no folder yet; import to a fork, or register the folder on this computer");
   });
 });
 
@@ -1151,7 +1152,7 @@ describe("thread provenance", () => {
     expect(SessionEvent.parse(none)).toEqual(none);
   });
 
-  it("foldThreads groups turns by threadId, titles by the opening turn, reads state, row id and resume id from the latest, and keeps the opener's provenance", () => {
+  it("foldThreads groups turns by threadId, titles by the opening turn, reads state, row id and resume id from the latest, keeps the opener's provenance, and says whether a turn ever ran", () => {
     const threads = foldThreads([
       { ...row, id: "s1", threadId: "thr_a", startedBy: "cli", prompt: "make a server", claudeSessionId: "c1", startedAt: 1_000, endedAt: 2_000 },
       { ...row, id: "s2", threadId: "thr_b", prompt: "unrelated", startedAt: 3_000, endedAt: 4_000 },
@@ -1159,11 +1160,28 @@ describe("thread provenance", () => {
       { ...row, id: "s4", status: "failed", prompt: "before threads", startedAt: 6_000, endedAt: 7_000 },
     ]);
     expect(threads).toEqual([
-      { id: "thr_a", threadId: "thr_a", workspaceId: "ws_1", harness: "claude", startedBy: "cli", status: "running", title: "make a server", sessionId: "s3", claudeSessionId: "c2", startedAt: 5_000, turns: 2 },
-      { id: "thr_b", threadId: "thr_b", workspaceId: "ws_1", harness: "claude", startedBy: "person", status: "completed", title: "unrelated", sessionId: "s2", startedAt: 3_000, endedAt: 4_000, turns: 1 },
-      { id: "s4", workspaceId: "ws_1", harness: "claude", startedBy: "person", status: "failed", title: "before threads", sessionId: "s4", startedAt: 6_000, endedAt: 7_000, turns: 1 },
+      { id: "thr_a", threadId: "thr_a", workspaceId: "ws_1", harness: "claude", startedBy: "cli", status: "running", title: "make a server", sessionId: "s3", claudeSessionId: "c2", startedAt: 5_000, turns: 2, ran: true },
+      { id: "thr_b", threadId: "thr_b", workspaceId: "ws_1", harness: "claude", startedBy: "person", status: "completed", title: "unrelated", sessionId: "s2", startedAt: 3_000, endedAt: 4_000, turns: 1, ran: false },
+      { id: "s4", workspaceId: "ws_1", harness: "claude", startedBy: "person", status: "failed", title: "before threads", sessionId: "s4", startedAt: 6_000, endedAt: 7_000, turns: 1, ran: false },
     ]);
     for (const t of threads) expect(ThreadView.parse(t)).toEqual(t);
+  });
+
+  it("a thread reads as run once a turn of it did work: announcing a session is not enough, since both CLIs announce before they learn they have no sign-in", () => {
+    const [worked, neverAnnounced, working, refused] = foldThreads([
+      { ...row, id: "s1", threadId: "thr_a", status: "failed", claudeSessionId: "c1" },
+      { ...row, id: "s2", threadId: "thr_b", status: "failed" },
+      { ...row, id: "s3", threadId: "thr_c", status: "running" },
+      // The launch got as far as a session id and the agent then refused the whole task: no work behind it.
+      { ...row, id: "s4", threadId: "thr_d", status: "failed", claudeSessionId: "c2", refusal: "sign-in" },
+    ]);
+    // One turn of the thread did work, so the thread did, whatever a later turn came to.
+    const [signedInLater] = foldThreads([
+      { ...row, id: "s5", threadId: "thr_e", claudeSessionId: "c3", status: "failed", refusal: "sign-in" },
+      { ...row, id: "s6", threadId: "thr_e", claudeSessionId: "c3", status: "completed" },
+    ]);
+    expect([worked!.ran, neverAnnounced!.ran, working!.ran, refused!.ran, signedInLater!.ran]).toEqual([true, false, true, false, true]);
+    expect(threadRan([])).toBe(false);
   });
 
   it("foldThreads carries the latest turn's folder, so every director shows where the thread works; a row without one shows none", () => {

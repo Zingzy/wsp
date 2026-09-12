@@ -83,7 +83,7 @@ const SURFACE_UNAVAILABLE_HINTS: Record<SurfaceKey, string> = {
   diff: "Review changes once the workspace is running.",
   machine: "Available when a workspace is selected.",
   processes: "Available while the workspace is running.",
-  screen: "Available when the machine has a display.",
+  screen: "Available when the workspace has a display.",
 };
 
 /** Overlays that must win over the launcher's letter shortcuts. */
@@ -238,8 +238,8 @@ function surfaceActions(
     },
     {
       key: "machine",
-      label: "Machine",
-      description: "Fork, pause, wake, upgrade, lineage and usage.",
+      label: "Workspace",
+      description: "Pause, wake, upgrade, lineage and usage.",
       icon: Cpu,
       shortcut: "M",
       available: props.machineAvailable,
@@ -249,7 +249,7 @@ function surfaceActions(
     {
       key: "processes",
       label: "Processes",
-      description: "What runs on the machine; inspect and kill.",
+      description: "What runs on the workspace; inspect and kill.",
       icon: Activity,
       shortcut: "P",
       available: props.processesAvailable,
@@ -259,7 +259,7 @@ function surfaceActions(
     {
       key: "screen",
       label: "Screen",
-      description: "Watch and drive the machine's display.",
+      description: "Watch and drive the workspace's display.",
       icon: MonitorPlay,
       shortcut: "S",
       available: props.screenAvailable,
@@ -270,11 +270,12 @@ function surfaceActions(
 }
 
 /**
- * Card launcher shown when the right panel has no surfaces. Keyboard-first
- * without palette chrome: a surface's letter opens it directly from anywhere
+ * Card launcher shown when the right panel has nothing open. Keyboard-first
+ * without palette chrome: a panel's letter opens it directly from anywhere
  * outside a typing context, and arrows plus Enter work while the launcher is
- * focused. The highlight only appears on hover or arrow use. Unavailable
- * surfaces stay visible with a one-line reason.
+ * focused. The highlight only appears on hover or arrow use. A panel that
+ * cannot open stays visible with a one-line reason. The person's word for one
+ * of these is panel; surface is ours and stays in the code.
  */
 function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
   const { actions } = props;
@@ -363,7 +364,7 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
       ref={focusOnMount}
       tabIndex={0}
       onKeyDown={handleKeyDown}
-      aria-label="Open a surface"
+      aria-label="Open a panel"
       data-surface-launcher-keys={availableActions.map((action) => action.shortcut).join("")}
       className={cn(
         "flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 pt-6 outline-none",
@@ -374,9 +375,9 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
     >
       <div className="relative w-full max-w-lg">
         <div className="absolute inset-x-0 bottom-full mb-5 text-center">
-          <h3 className="font-medium text-foreground text-sm">Open a surface</h3>
+          <h3 className="font-medium text-foreground text-sm">Open a panel</h3>
           <p className="mt-1 text-muted-foreground text-xs">
-            Choose what to show in the right panel.
+            A browser, a terminal, the files or the diff in this workspace, the workspace itself, or what runs on it.
           </p>
         </div>
         <div className="grid grid-cols-2 gap-2">
@@ -452,7 +453,7 @@ function surfaceTitle(
     case "terminal":
       return terminalLabelsById.get(surface.activeTerminalId) ?? "Terminal";
     case "machine":
-      return "Machine";
+      return "Workspace";
     case "processes":
       return "Processes";
     case "screen":
@@ -601,7 +602,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                 <MenuTrigger
                   render={
                     <Button
-                      aria-label="Add panel surface"
+                      aria-label="Add a panel"
                       className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
                       size="icon-xs"
                       variant="ghost"
