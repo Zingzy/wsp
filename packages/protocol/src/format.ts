@@ -744,6 +744,12 @@ export const RUN_GONE_LINE = "the machine no longer holds this turn's run, so no
  * so it goes on and its reply lands in the thread whether or not this command is still there to see it. */
 export const HOST_STOPPING_LINE = "the host is restarting; the turn goes on and its reply lands in the thread";
 
+/** What a machine is called when the provider reports it running and the road every command takes is dead: whose
+ * machine it is, which one, and the guest's own words, so the failure reads as the provider's and not as wsp's. */
+export function guestUnusableLine(provider: string, machineId: string, detail: string): string {
+  return `${provider} left ${machineId} running but nothing on it can run: ${detail}`;
+}
+
 /** The turn's error when nothing on the machine answered a launch from this computer for the whole reach window:
  * how many times it was tried and over how long. The fetch's own words name a Node error and the machine id,
  * neither of which a person can act on. */
