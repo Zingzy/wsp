@@ -11,7 +11,7 @@ import { z } from "zod";
 import { DEFAULT_PLACE_PORT } from "./app-ports.js";
 import { HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
-import { openingTitle, threadWord, titleLine } from "./format.js";
+import { openingTitle, PLACE_LEAVE_LINE, threadWord, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
 import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
@@ -2137,6 +2137,21 @@ export const PLACE_ADD_WORDS: Record<PlaceAddStep, string> = {
   join: "waiting for it to connect to this computer",
 };
 
+/** Where the app's sheet says a step differently from the line a terminal prints. The sheet's road is a Linux box
+ * and its own description names this Mac; the same install from a terminal reaches a Mac too, on a host that need
+ * not be one, so the words above stay as they are. `done` is read once a step is finished, where a line under a
+ * check would otherwise say the wait it was in rather than the state it reached. */
+export const PLACE_ADD_SHEET_WORDS: Partial<Record<PlaceAddStep, { word: string; done?: string }>> = {
+  service: { word: "starting the agent under systemd" },
+  join: { word: "waiting for it to connect to this Mac", done: "connected to this Mac" },
+};
+
+/** The word the app's sheet draws for a step in the state it is in. */
+export function placeAddSheetWord(step: PlaceAddStep, state: "running" | "done"): string {
+  const said = PLACE_ADD_SHEET_WORDS[step];
+  return (state === "done" ? said?.done : undefined) ?? said?.word ?? PLACE_ADD_WORDS[step];
+}
+
 /** How far the install on one computer has got, keyed by the id the request was answered with, so two installs at
  * once are two lists. A step that is running is the one with a spinner; one that is done carries its note. */
 export const PlaceStageEvent = z.object({
@@ -3170,7 +3185,7 @@ export const placeAbsentLine = (name: string): string => `${name} is not connect
 
 /** What a remove says about a place that was not linked when it ran: the records here are gone and the agent on
  * that computer is not, since nothing could reach it to sweep. */
-export const placeStillInstalledLine = (name: string): string => `${name} is off this host, but the agent on it is still installed; run wsp leave on that computer when it is back`;
+export const placeStillInstalledLine = (name: string): string => `${name} is off this host, but the agent on it is still installed; run ${PLACE_LEAVE_LINE} on that computer when it is back`;
 
 /** What a remove says about each workspace that stood on the place it took out: the record and its threads leave
  * this host, and the computer keeps its own files, since wsp never made them. */
@@ -3293,7 +3308,7 @@ export function parsePlaceFile(text: string): PlaceFile | undefined {
 export const placeFileText = (file: PlaceFile): string => `${JSON.stringify(file, null, 2)}\n`;
 
 /** The refusal a second join on one computer gets: a place file is the one wsp this computer belongs to. */
-export const ALREADY_JOINED_LINE = "this computer is already a place in a wsp; wsp leave first";
+export const ALREADY_JOINED_LINE = `this computer is already a place in a wsp; ${PLACE_LEAVE_LINE} first`;
 
 const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("auth"), token: z.string() }),

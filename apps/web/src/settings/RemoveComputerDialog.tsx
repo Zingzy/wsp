@@ -3,14 +3,18 @@
 // sentence is computed from what that computer holds right now, so a person
 // reads what leaves rather than a warning; the host's own refusal lands under
 // it in the muted line, as the forget dialog already does.
+//
+// A computer that is not answering cannot be swept from here, so the dialog
+// hands over the line that sweeps it on the computer itself.
 import { useState } from "react";
-import type { PlaceView } from "@wsp/protocol";
+import { PLACES_WORDS, type PlaceView } from "@wsp/protocol";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
 import { Button, WARN_BUTTON } from "../components/ui/button.js";
 import { errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
 import { WHERE_WORDS } from "./format.js";
-import { removeSentence, removeTitle, type PlaceHolding } from "./places.js";
+import { placeIsOffline, removeSentence, removeTitle, type PlaceHolding } from "./places.js";
+import { CopyRow } from "./sheetParts.js";
 
 /** What the app says when its own client carries no remove road: the same shape the forget dialog's refusal has. */
 export const CANNOT_REMOVE = "this wsp cannot take a computer back out from here";
@@ -54,6 +58,12 @@ export function RemoveComputerDialog({ place, holding, imageBytes, open, onOpenC
           <AlertDialogTitle data-k="remove-title">{removeTitle(place)}</AlertDialogTitle>
           <AlertDialogDescription data-k="remove-sentence">{removeSentence(place, holding, imageBytes)}</AlertDialogDescription>
         </AlertDialogHeader>
+        {placeIsOffline(place) ? (
+          <div className="flex flex-col gap-3 px-6 pt-1 pb-6">
+            <CopyRow k="leave-line" value={PLACES_WORDS.remove.leaveLine} />
+            <p className="text-[13px] text-muted-foreground">{PLACES_WORDS.remove.leaveTakes}</p>
+          </div>
+        ) : null}
         {refusal === null ? null : (
           <p className="text-[11px] text-muted-foreground" data-k="remove-refusal">
             {refusal}

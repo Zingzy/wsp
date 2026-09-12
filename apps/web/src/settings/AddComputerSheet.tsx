@@ -117,8 +117,9 @@ export function AddComputerSheet({ onClose, now = () => Date.now() }: { onClose:
     setStages([]);
     const typed = port.trim();
     api
-      // A stage sent again under the same words is that line moving on, so the list is keyed by them.
-      .addComputerOverSsh({ address: login.trim(), ...(typed === "" ? {} : { port: Number(typed) }) }, stage => setStages(held => [...(held ?? []).filter(s => s.word !== stage.word), stage]))
+      // A stage sent again for the same step is that line moving on, so the list is keyed by the step rather than
+      // by its words, which a step changes when it is done.
+      .addComputerOverSsh({ address: login.trim(), ...(typed === "" ? {} : { port: Number(typed) }) }, stage => setStages(held => [...(held ?? []).filter(s => s.step !== stage.step), stage]))
       .then(
         place => setInstalled(place),
         (e: unknown) => {
