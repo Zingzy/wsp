@@ -35,7 +35,7 @@ import { useLocalStorage, type Codec } from "../hooks/useLocalStorage.js";
 import { useNowMinute } from "../hooks/useNowMinute.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { cn, errorText } from "../lib/utils.js";
-import { catalogIn, useCapabilities, useLabs, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useStore, useWorkspace, type Creation } from "../protocol/store.js";
+import { catalogIn, useCapabilities, useLabs, useReady, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useStore, useWorkspace, type Creation } from "../protocol/store.js";
 import { hostAsleep } from "../boot.js";
 import { goToAdjacentWorkspace } from "../shell/shellCommands.js";
 import { useLinkDownLine } from "../terminal/paneWords.js";
@@ -130,6 +130,9 @@ export function WorkspaceSidebar() {
   const toastAction = useStore(s => (s.toastAction !== null && s.toastAction.for === s.toast ? s.toastAction : null));
   const select = useStore(s => s.select);
   const creations = useStore(s => s.creations);
+  // Until the first list lands an empty group is unknown rather than empty, and the design spec gives this group no
+  // waiting state of its own, so it holds nothing at all.
+  const ready = useReady();
   const createWorkspace = useStore(s => s.createWorkspace);
   const createLocal = useStore(s => s.createLocalWorkspace);
   // One local workspace per host: the section's road to this computer says whether a pick makes it or goes to it.
@@ -593,7 +596,7 @@ export function WorkspaceSidebar() {
                     {spacePane}
                   </SpaceSlide>
                 )}
-                {visible.length === 0 && creations.length === 0 ? (
+                {ready && visible.length === 0 && creations.length === 0 ? (
                   <Empty className="py-8">
                     <EmptyHeader>
                       <EmptyTitle>No workspaces yet</EmptyTitle>
