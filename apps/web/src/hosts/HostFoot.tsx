@@ -10,6 +10,7 @@ import { HOST_WORDS, hostMenuAction, hostsMenuItems, type HostOutcome, type Host
 import { ChevronsUpDownIcon } from "lucide-react";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { useStore } from "../protocol/store.js";
+import { FOOT_ROW_CLASS } from "../sidebar/rowGrammar.js";
 import { ConnectHostSheet } from "./ConnectHostSheet.js";
 
 /** The hash a page is loaded with to open on the connect sheet. */
@@ -46,7 +47,7 @@ export function HostFoot() {
     if (action === undefined) return;
     if (action.kind === "connect") openConnect();
     else if (action.kind === "switch") said((await bridge.switchHost?.(action.alias)) ?? { ok: true });
-    else said((await bridge.disconnectHost?.(action.alias)) ?? { ok: true });
+    else if (action.kind === "disconnect") said((await bridge.disconnectHost?.(action.alias)) ?? { ok: true });
     reload();
   };
   return (
@@ -55,7 +56,7 @@ export function HostFoot() {
         type="button"
         aria-label={HOST_WORDS.hosts}
         onClick={() => void openMenu()}
-        className="flex h-7 w-full items-center gap-1.5 rounded-md px-2 font-mono text-[11px] text-sidebar-muted-foreground transition-colors duration-150 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        className={FOOT_ROW_CLASS}
       >
         <span data-host-label className="min-w-0 flex-1 truncate text-left">
           {label}

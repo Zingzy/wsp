@@ -6,10 +6,11 @@
 // its login shell for the PATH a turn runs under; this report reads the
 // environment it was started with, which on a service unit is what the unit
 // stated.
-import { accessSync, constants, existsSync, rmSync, statfsSync } from "node:fs";
+import { accessSync, constants, existsSync, lstatSync, rmSync, statfsSync } from "node:fs";
 import { arch, cpus, hostname, platform, release, totalmem, type as osType, userInfo } from "node:os";
 import { delimiter, join } from "node:path";
 import { DAEMON_VERSION, placeOwnedPaths, workFolderIn } from "@wsp/protocol";
+import type { AgentBin } from "./args.js";
 import { readPlaceFile, type PlaceSelfReport } from "./link.js";
 
 export interface PlaceSelfReportInput {
@@ -18,6 +19,8 @@ export interface PlaceSelfReportInput {
   home: string;
   /** The line that runs wsp on this computer, word by word. */
   wspArgv: readonly string[];
+  /** The agents to look for, by catalog id and command name; only the list is fixed at join, PATH is read now. */
+  agents: readonly AgentBin[];
   env?: NodeJS.ProcessEnv;
 }
 
@@ -62,7 +65,19 @@ export function placeSelfReport(input: PlaceSelfReportInput): PlaceSelfReport {
     docker: onPath("docker", env["PATH"]),
     daemonVersion: DAEMON_VERSION,
     wsp: [...input.wspArgv],
+    agents: input.agents.filter(a => onPath(a.bin, env["PATH"])).map(a => a.id),
   };
+}
+
+/** Whether a path is there at all, link or file: the browser name is a symlink to the shim beside it, and once the
+ * shim has gone the link is dangling, which a read that follows it calls absent while the person still holds it. */
+function there(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Takes wsp off this computer, by the one list the protocol names, and answers what went. The work folder stays:
@@ -71,7 +86,7 @@ export function placeSelfReport(input: PlaceSelfReportInput): PlaceSelfReport {
 export function sweepPlaceHome(home: string): string[] {
   const removed: string[] = [];
   for (const path of placeOwnedPaths(home)) {
-    if (!existsSync(path)) continue;
+    if (!there(path)) continue;
     rmSync(path, { recursive: true, force: true });
     removed.push(path);
   }

@@ -30,6 +30,10 @@ const EVERY: DaemonArgs = {
   placeFile: "/home/maya/.wsp/place.json",
   home: "/home/maya",
   wspArgv: ["/usr/local/bin/node", "/opt/wsp/bin.js"],
+  agents: [
+    { id: "a1", bin: "agent-one" },
+    { id: "b2", bin: "agent-two" },
+  ],
   linkConnectMs: 500,
   linkQuietMs: 120,
   linkRefusedRetryMs: 600_000,
@@ -68,6 +72,14 @@ describe("wsp-daemon argv", () => {
     expect(() => parseDaemonArgs(["--sys-interval-ms", "2.5"])).toThrow(/--sys-interval-ms/);
     expect(() => parseDaemonArgs(["--token-path"])).toThrow(/--token-path/);
     expect(() => parseDaemonArgs(["--wat"])).toThrow(/--wat/);
+  });
+
+  it("reads --agents as id=command pairs and refuses a pair with either half missing", () => {
+    expect(parseDaemonArgs(["--agents", "a1=agent-one,b2=/opt/b/bin"])).toEqual({ agents: [{ id: "a1", bin: "agent-one" }, { id: "b2", bin: "/opt/b/bin" }] });
+    expect(daemonArgv({ agents: [{ id: "a1", bin: "agent-one" }] })).toEqual(["--agents", "a1=agent-one"]);
+    expect(() => parseDaemonArgs(["--agents", "a1"])).toThrow(/--agents/);
+    expect(() => parseDaemonArgs(["--agents", "=x"])).toThrow(/--agents/);
+    expect(() => parseDaemonArgs(["--agents", "a1="])).toThrow(/--agents/);
   });
 
   it("takes any word for --kind, since the daemon refuses a kind it lacks at the watch in the pane's words", () => {

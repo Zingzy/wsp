@@ -27,7 +27,7 @@ import {
   type SshWiring,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, portsAsked, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, usageRefusal, WS_PORT_OFFSET, type WorkspaceCreatingEvent } from "@wsp/protocol";
+import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portsAsked, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, usageRefusal, WS_PORT_OFFSET, type WorkspaceCreatingEvent } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, parseSshAddress, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshIdentity, sshMachineName, sshReachOf, type SshReach } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerModule, type ProviderEnv } from "./providers.js";
 import { assetDir } from "./assets.js";
@@ -80,7 +80,7 @@ import { publicHostname, readRelayRecord, relayCommand, relayOnLoopbackLine, sta
 import { aimAddress, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnoredLine, wspHome } from "./hosts.js";
 import { currentHome, currentHomePointer, homeNamed, servingHome } from "./serving-home.js";
 import { advertiseWord, devicesCommand, hostReach, pairCommand } from "./pairing.js";
-import { addCommand, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
+import { addCommand, addFlags, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, registeredLine, removeEach, removeLines, runningWsp, type RunningWsp } from "./mcp-install.js";
@@ -214,13 +214,19 @@ options:
                      join: the code wsp add printed on the host
   --code-file PATH   join: read the code off this file and delete the file
                      before dialing, so a code never sits on a disk
+  --awake            join: hold this computer out of idle sleep while it is
+                     joined, for as long as the agent runs
   --serve            join: hold the link open in this terminal, which is what
                      the service installed by a join runs
   --name ALIAS       connect: the name to call that host here (default what its
                      address calls it); relay link: the name the approval page
                      shows for this computer (default what it calls itself);
-                     join: the name the wsp calls the computer being joined
-                     (default its own name lowercased)
+                     add, join: the name the wsp calls the computer being
+                     joined (default its own name lowercased)
+  --ssh-port PORT    add, new --ssh: the port ssh dials that computer on
+                     (default 22)
+  --ssh-key PATH     add, new --ssh: the key file ssh logs in with (default
+                     whatever your own ssh config and agent already use)
   --relay HOST       connect: reach that host through your relay by the name it
                      has there, instead of giving an address. The code is still
                      the one wsp pair printed on it: the relay never carries one
@@ -590,6 +596,9 @@ export const localWorkFolder = (home: string): string => join(home, "wsp-work");
  * made is the one a turn uses, and the work folder is the workspace's own. */
 export function localWiring(home = homedir(), env: Readonly<Record<string, string | undefined>> = process.env): LocalWiring {
   const root = localWorkFolder(home);
+  // The person whose sign-ins a turn here reads. Their login home, except under a harness serving a fixture out of
+  // a home of its own: that home holds this host's files, and a turn started under it finds no sign-in at all.
+  const person = homeNamed(env[PERSON_HOME_ENV]) ?? home;
   // Started on the first dial and kept: a host nobody opens a pane on never binds a port on this computer, and
   // never dlopens the native module @wsp/daemon's import of node-pty loads. The desktop package ships that module
   // beside its bundle, so the deferred edge is about the port and the load, not about a missing file.
@@ -599,9 +608,9 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
   return {
     backend,
     execStream: o => localExecStream({ root: backend.workFolder(), ...o }),
-    home: id => agentHome(home, id, env),
+    home: id => agentHome(person, id, env),
     homeDir: home,
-    env: () => Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined)),
+    env: () => ({ ...Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined)), HOME: person }),
     daemonRoad: async () => {
       // The panes stay on the person's home: the files and terminal tabs are theirs to look around in, where a
       // turn's own folder is the workspace's.
@@ -1255,6 +1264,9 @@ async function hostFor(
   // alone and not the flag: a connector an earlier run left behind carries the tunnel to this same port whatever
   // this run was asked for, and --no-relay stops that one rather than serving a token past it.
   const linked = readRelayRecord(opts.statePath) !== undefined;
+  // A computer that already joined dials the port its place file names, so the door binds as this host starts
+  // rather than waiting for somebody to open the Add a computer sheet again.
+  const joined = (await rt.places?.list(Date.now()).catch(() => []))?.some(p => p.kind === "computer" && p.joinedAt !== undefined) === true;
   try {
     const handle = await startHost({
       runtime: rt,
@@ -1262,6 +1274,8 @@ async function hostFor(
       wsPort: opts.wsPort,
       listen: address,
       beyondThisComputer: linked,
+      door: joined ? "open" : "closed",
+      doorLine: line => io.log(line),
       webDir: opts.webDir ?? assetDir("web"),
       // Read at each fork, not once at start: the init job saves a key while this host serves.
       workspaceEnvs: golden => workspaceEnvsFor(keysFound()).workspaceEnvs?.(golden) ?? {},
@@ -1517,7 +1531,10 @@ interface SharedFlags {
   service?: boolean;
   code?: string;
   "code-file"?: string;
+  "ssh-port"?: string;
+  "ssh-key"?: string;
   serve?: boolean;
+  awake?: boolean;
   name?: string;
   relay?: string;
   host?: string;
@@ -1635,7 +1652,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     host: "hostSide",
     cliOnly: "hands out a code that lets another computer join this wsp, or takes a provider's key into this person's own files; both belong with the terminal the host runs at",
     run: (io, opts, values, args) =>
-      addCommand(io, { ...aimPick(opts, values), providerEnv: opts.providerEnv }, args, values.name !== undefined ? { name: values.name } : {}),
+      addCommand(io, { ...aimPick(opts, values), providerEnv: opts.providerEnv }, args, addFlags(values.name, values["ssh-port"], values["ssh-key"])),
   },
   remove: {
     json: false,
@@ -1653,6 +1670,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
         ...(values["code-file"] !== undefined ? { codeFile: values["code-file"] } : {}),
         ...(values.name !== undefined ? { name: values.name } : {}),
         ...(values.serve === true ? { serve: true } : {}),
+        ...(values.awake === true ? { awake: true } : {}),
       }),
   },
   leave: {
@@ -1804,7 +1822,10 @@ export const SHARED_OPTIONS: Options = {
   service: { type: "boolean" },
   code: { type: "string" },
   "code-file": { type: "string" },
+  "ssh-port": { type: "string" },
+  "ssh-key": { type: "string" },
   serve: { type: "boolean" },
+  awake: { type: "boolean" },
   name: { type: "string" },
   relay: { type: "string" },
   host: { type: "string" },

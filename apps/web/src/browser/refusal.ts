@@ -23,7 +23,7 @@ export function explainRefusal(probe: PortProbeView, at: { port: number; host: s
   if (probe.status === 401) {
     return {
       title: `:${at.port} answered 401 through the preview route`,
-      detail: `The route refused a fresh token too: the host reminted it after the first 401 and reloaded once. If the server on :${at.port} asks for its own sign-in, this is its page; otherwise the preview edge is refusing this machine.`,
+      detail: `The route refused a fresh token too: the host reminted it after the first 401 and reloaded once. If the server on :${at.port} asks for its own sign-in, this is its page; otherwise the preview edge is refusing this workspace.`,
       keepsFrame: true,
     };
   }
@@ -33,7 +33,7 @@ export function explainRefusal(probe: PortProbeView, at: { port: number; host: s
   if (VITE_BLOCKED.test(body)) {
     return {
       title: refused,
-      detail: `Vite blocked the request because ${at.host} is not in server.allowedHosts. Restart the dev server so it picks up the allowance this machine's environment already sets, or add the host to server.allowedHosts in vite.config.`,
+      detail: `Vite blocked the request because ${at.host} is not in server.allowedHosts. Restart the dev server so it picks up the allowance the workspace's environment already sets, or add the host to server.allowedHosts in vite.config.`,
       keepsFrame: false,
     };
   }

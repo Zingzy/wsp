@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+[package]
+name = "wsp-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "The workspace manager behind the machine ops on a place link; a stub that refuses every one until a backend exists"
+
+[dependencies]
+wsp-frames = { path = "../wsp-frames" }
+
+[dev-dependencies]
+serde_json.workspace = true

@@ -24,7 +24,11 @@
       "wsp": [
         "/usr/bin/wsp"
       ],
-      "dialed": "http://192.168.1.20:4400"
+      "dialed": "http://192.168.1.20:4400",
+      "agents": [
+        "a1",
+        "b2"
+      ]
     }
   },
   {
@@ -46,7 +50,8 @@
       "wsp": [
         "wsp"
       ],
-      "dialed": "https://relay.example.com"
+      "dialed": "https://relay.example.com",
+      "agents": []
     }
   }
 ]

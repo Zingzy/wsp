@@ -32,7 +32,7 @@ export interface ModelPickerProps {
 
 /** The line under the model the composer names that this list has no row for: it may be the one the thread runs on
  * or a pick the binary has since dropped, and this is true of both. */
-export const UNLISTED_MODEL_LINE = "Not in this machine's list";
+export const UNLISTED_MODEL_LINE = "Not in this workspace's list";
 
 /** One row of the model menu: the catalog's own, or the model the composer names that this list has no row for,
  * marked once here so the row that draws it reads the mark rather than asking the catalog again. */

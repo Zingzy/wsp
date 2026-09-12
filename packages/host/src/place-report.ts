@@ -7,13 +7,15 @@
 // side too, where the places list reads this computer's own row.
 
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statfsSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statfsSync, writeFileSync } from "node:fs";
 import { homedir, arch as osArch, platform, release, type as osType, userInfo } from "node:os";
 import type { PlaceSelfReport } from "@wsp/daemon";
 import { PLACE_FILE_MODE, parsePlaceFile, placeFileText, type PlaceFile } from "@wsp/protocol";
+import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LOGIN_READ, SSH_STORE_VARS, isPlainPath, localShape, plainPath, readValues } from "@wsp/engine";
 import { DAEMON_VERSION, placeDaemonPaths, placeOwnedPaths, workFolderIn } from "@wsp/protocol";
 import { dirname } from "node:path";
+import { profileSourceLine, sshDaemonPlace, type DaemonPlace } from "./doctor.js";
 import { mcpServerCommand, onPath, runningWsp, type RunningWsp } from "./mcp-install.js";
 import { serviceManagerFor, systemRunner, type ServiceAddress, type ServiceManager, type ServiceRunner } from "./service.js";
 
@@ -38,6 +40,10 @@ export function readPlaceFile(path: string): PlaceFile | undefined {
     return undefined;
   }
 }
+
+/** Whether this computer already belongs to a wsp. The one reading of it: the join refuses on it and a screen that
+ * has its own words for that reads the same thing rather than testing for the file a second time. */
+export const joinedAlready = (home: string): boolean => readPlaceFile(placeFilePath(home)) !== undefined;
 
 /** Writes it at the one mode it is ever kept at; the folder is made first, since a fresh computer has none. */
 export function writePlaceFile(path: string, file: PlaceFile): void {
@@ -119,6 +125,7 @@ export function placeReport(opts: PlaceReportOptions): PlaceSelfReport {
   const env = opts.env ?? process.env;
   const work = workFolderIn(home);
   const free = diskFree(existsSync(work) ? work : home);
+  const login = placeLogin(env, home);
   return {
     name: opts.name,
     platform: platform() === "darwin" ? "darwin" : "linux",
@@ -126,11 +133,14 @@ export function placeReport(opts: PlaceReportOptions): PlaceSelfReport {
     os: `${osType()} ${release()}`,
     shape: localShape(),
     ...(free !== undefined ? { diskFreeBytes: free } : {}),
-    login: placeLogin(env, home),
+    login,
     // Whether this computer can fork at all, which is the one thing the host cannot read from over the link.
     docker: onPath("docker", env.PATH) !== undefined,
     daemonVersion: DAEMON_VERSION,
     wsp: wspArgvOf(opts.run ?? runningWsp()),
+    // Off the login PATH rather than this process's: a service starts with almost none, and what the person can
+    // run here is what a turn on this computer will find.
+    agents: CATALOG_AGENTS.filter(a => onPath(a.bin, login["PATH"]) !== undefined).map(a => a.id),
   };
 }
 
@@ -187,11 +197,45 @@ export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSwe
   // the daemon writes and the ones an installer over ssh put there, which on a computer that was joined by hand
   // simply are not present.
   for (const path of placeOwnedPaths(home)) {
-    if (!existsSync(path)) continue;
+    // lstat, not exists: the browser name is a symlink to the shim beside it, and once the shim has gone the link
+    // is dangling, which every following-the-link read calls absent while the person is still left holding it.
+    if (!there(path)) continue;
     rmSync(path, { recursive: true, force: true });
     removed.push(path);
   }
+  const said = unsourced(sshDaemonPlace({ home, path: "" }));
+  if (said !== undefined) removed.push(said);
   return { removed, kept: [placeKeptLine(workFolderIn(home))] };
+}
+
+/** Whether a path is there at all, link or file. */
+function there(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Takes wsp's one line back out of the person's own login file, which would otherwise print an error at every
+ * login for a file that is gone. Their file, so it is opened only when wsp's own line is in it and written back
+ * through the same path rather than moved over: a .profile symlinked into a dotfiles checkout stays a symlink.
+ * Answers what it says it took, or nothing when the file never held it. */
+function unsourced(place: DaemonPlace): string | undefined {
+  const file = place.profileSource;
+  if (file === undefined || !there(file)) return undefined;
+  const line = profileSourceLine(place.profileFile);
+  let held: string;
+  try {
+    held = readFileSync(file, "utf8");
+  } catch {
+    return undefined;
+  }
+  const kept = held.split("\n").filter(row => row.trim() !== line);
+  if (kept.length === held.split("\n").length) return undefined;
+  writeFileSync(file, kept.join("\n"));
+  return `${line} (out of ${file})`;
 }
 
 /** Asks this computer's manager to stop the agent, once the caller has nothing left to say: on the host's own road

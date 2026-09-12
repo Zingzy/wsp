@@ -14,6 +14,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { PlaceLink, startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { LOOPBACK, placeDaemonPaths, workFolderIn } from "@wsp/protocol";
+import { holdWhileJoined } from "./awake.js";
 import { placeReport, stopPlaceService, sweepPlace } from "./place-report.js";
 import { type RunningWsp } from "./mcp-install.js";
 
@@ -25,6 +26,8 @@ export interface PlaceAgentOptions {
   home?: string;
   log?: (line: string) => void;
   run?: RunningWsp;
+  /** How often the place file is read again for the awake toggle; the app writes the file and nothing restarts. */
+  watchEveryMs?: number;
 }
 
 export interface PlaceAgent {
@@ -43,6 +46,7 @@ export async function startPlaceAgent(opts: PlaceAgentOptions): Promise<PlaceAge
   const work = workFolderIn(home);
   mkdirSync(at.inbox, { recursive: true, mode: 0o700 });
   mkdirSync(work, { recursive: true });
+  const awake = holdWhileJoined({ file: opts.file, ...(opts.log !== undefined ? { log: opts.log } : {}), ...(opts.watchEveryMs !== undefined ? { intervalMs: opts.watchEveryMs } : {}) });
   const token = randomBytes(24).toString("hex");
   mkdirSync(at.wsp, { recursive: true, mode: 0o700 });
   writeFileSync(at.tokenPath, `${token}\n`, { mode: 0o600 });
@@ -63,7 +67,12 @@ export async function startPlaceAgent(opts: PlaceAgentOptions): Promise<PlaceAge
       report: async () => placeReport({ name: opts.name, home, ...(opts.run !== undefined ? { run: opts.run } : {}) }),
       // The files and the unit file go here; the manager is asked to let this process go only after the reply is on
       // the wire, since the thing it stops is this process.
-      onLeave: async () => (await sweepPlace({ home })).removed,
+      onLeave: async () => {
+        // The hold goes with the place: a computer that has left runs nobody's threads, and the child would
+        // otherwise outlive the agent's own exit.
+        awake.stop();
+        return (await sweepPlace({ home })).removed;
+      },
       exit: () => void stopPlaceService({ home }).finally(() => process.exit(0)),
       ...(opts.log !== undefined ? { log: opts.log } : {}),
     },
@@ -72,5 +81,12 @@ export async function startPlaceAgent(opts: PlaceAgentOptions): Promise<PlaceAge
   // reads one file whichever road put the daemon there.
   writeFileSync(at.portFile, `${handle.port}\n`, { mode: 0o600 });
   if (handle.link === undefined) throw new Error("the place agent started without a link, so nothing would dial its host");
-  return { port: handle.port, link: handle.link, close: () => handle.close() };
+  return {
+    port: handle.port,
+    link: handle.link,
+    close: async () => {
+      awake.stop();
+      await handle.close();
+    },
+  };
 }

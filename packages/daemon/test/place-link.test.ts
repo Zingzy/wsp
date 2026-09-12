@@ -33,7 +33,7 @@ function placeFile(hostUrls: string[], hostPublicKey: string, keyPem: string): {
   const home = mkdtempSync(join(tmpdir(), "wsp-link-"));
   dirs.push(home);
   const at = placeDaemonPaths(home);
-  const file: PlaceFile = { placeId: "p_ab12cd34", name: "old-macbook", hostUrls, hostPublicKey, keyPath: at.placeKey, joinedAt: new Date(0).toISOString() };
+  const file: PlaceFile = { placeId: "p_ab12cd34", name: "old-macbook", hostName: "zingzy-mbp", hostUrls, hostPublicKey, keyPath: at.placeKey, joinedAt: new Date(0).toISOString(), awake: false };
   writePlaceFile(at.placeFile, file);
   writeFileSync(at.placeKey, keyPem);
   return { home, file: at.placeFile };
@@ -134,7 +134,7 @@ describe("the link a place dials", () => {
     const host = await fakeHost({ key });
     const place = placeFile([host.url], key.publicKey, pair().privateKeyPem);
     // The place's own key is not the host's; the file above pins the host's, which is what it verifies against.
-    const d = await placeDaemon(place, { wspArgv: ["/usr/local/bin/node", "/opt/wsp/bin.js"] });
+    const d = await placeDaemon(place, { wspArgv: ["/usr/local/bin/node", "/opt/wsp/bin.js"], agents: [{ id: "a1", bin: "sh" }, { id: "b2", bin: "no-such-agent-command" }] });
     await host.socket;
     await untilLogged(d, line => line === linkedLine(host.url));
     // The place asked nothing of the host; what the host saw after the handshake is the daemon's hello and no request.
@@ -142,7 +142,8 @@ describe("the link a place dials", () => {
     // The report is the daemon's own, off the home and the words it was started with, in the shape the host parses.
     const proof = PlaceProveRequest.parse(host.proofs[0]);
     const report = PlaceReport.parse(proof.report);
-    expect(report).toMatchObject({ name: "old-macbook", dialed: host.url, daemonPort: d.port, wsp: ["/usr/local/bin/node", "/opt/wsp/bin.js"], login: { HOME: place.home } });
+    // The agents are the ids off the list it was started with whose command is on PATH now: sh is, the other is not.
+    expect(report).toMatchObject({ name: "old-macbook", dialed: host.url, daemonPort: d.port, wsp: ["/usr/local/bin/node", "/opt/wsp/bin.js"], login: { HOME: place.home }, agents: ["a1"] });
     expect(report.shape.cpu).toBeGreaterThan(0);
   });
 

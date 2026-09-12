@@ -38,15 +38,24 @@ export interface DaemonArgs {
   home?: string;
   /** The line that runs wsp on this computer, one word per flag, reported to the host for the tools a turn is given. */
   wspArgv?: string[];
+  /** The agents to look for on this computer's PATH at every link, as catalog id and command name; the report
+   * names the ids whose command is there. */
+  agents?: AgentBin[];
   linkConnectMs?: number;
   linkQuietMs?: number;
   linkRefusedRetryMs?: number;
   linkBackoffMs?: number;
 }
 
-type Flag = { readonly flag: string; readonly key: keyof DaemonArgs; readonly takes: "word" | "int" | "words" };
+export interface AgentBin {
+  id: string;
+  bin: string;
+}
 
-/** Every flag, in the order daemonArgv writes them. A flag takes one word, one integer, or one word per use. */
+type Flag = { readonly flag: string; readonly key: keyof DaemonArgs; readonly takes: "word" | "int" | "words" | "pairs" };
+
+/** Every flag, in the order daemonArgv writes them. A flag takes one word, one integer, one word per use, or one
+ * comma-separated list of id=command pairs. */
 const FLAGS: readonly Flag[] = [
   { flag: "--host", key: "host", takes: "word" },
   { flag: "--port", key: "port", takes: "int" },
@@ -73,18 +82,32 @@ const FLAGS: readonly Flag[] = [
   { flag: "--place-file", key: "placeFile", takes: "word" },
   { flag: "--home", key: "home", takes: "word" },
   { flag: "--wsp-argv", key: "wspArgv", takes: "words" },
+  { flag: "--agents", key: "agents", takes: "pairs" },
   { flag: "--link-connect-ms", key: "linkConnectMs", takes: "int" },
   { flag: "--link-quiet-ms", key: "linkQuietMs", takes: "int" },
   { flag: "--link-refused-retry-ms", key: "linkRefusedRetryMs", takes: "int" },
   { flag: "--link-backoff-ms", key: "linkBackoffMs", takes: "int" },
 ];
 
-export const DAEMON_USAGE = `usage: wsp-daemon ${FLAGS.map(f => `[${f.flag} ${f.takes === "int" ? "<n>" : f.takes === "words" ? "<word>]..." : "<value>"}${f.takes === "words" ? "" : "]"}`).join(" ")}`;
+const usageOf = (f: Flag): string => {
+  switch (f.takes) {
+    case "int":
+      return `[${f.flag} <n>]`;
+    case "words":
+      return `[${f.flag} <word>]...`;
+    case "pairs":
+      return `[${f.flag} <id>=<command>,...]`;
+    case "word":
+      return `[${f.flag} <value>]`;
+  }
+};
+
+export const DAEMON_USAGE = `usage: wsp-daemon ${FLAGS.map(usageOf).join(" ")}`;
 
 /** argv into the options it names; a flag without its value, a non-integer where an integer is due, or a word no
  * flag is answers with the flag in the message so the usage line that follows it says what was meant. */
 export function parseDaemonArgs(argv: readonly string[]): DaemonArgs {
-  const out: Record<string, string | number | string[]> = {};
+  const out: Record<string, string | number | string[] | AgentBin[]> = {};
   for (let i = 0; i < argv.length; i++) {
     const word = argv[i]!;
     const found = FLAGS.find(f => f.flag === word);
@@ -98,7 +121,13 @@ export function parseDaemonArgs(argv: readonly string[]): DaemonArgs {
       out[found.key] = n;
     } else if (found.takes === "words") {
       const held = out[found.key];
-      out[found.key] = [...(Array.isArray(held) ? held : []), value];
+      out[found.key] = [...(Array.isArray(held) ? (held as string[]) : []), value];
+    } else if (found.takes === "pairs") {
+      out[found.key] = value.split(",").map(pair => {
+        const eq = pair.indexOf("=");
+        if (eq < 1 || eq === pair.length - 1) throw new Error(`${found.flag} takes id=command pairs separated by commas`);
+        return { id: pair.slice(0, eq), bin: pair.slice(eq + 1) };
+      });
     } else {
       out[found.key] = value;
     }
@@ -113,7 +142,8 @@ export function daemonArgv(args: DaemonArgs): string[] {
   for (const f of FLAGS) {
     const value = args[f.key];
     if (value === undefined) continue;
-    if (Array.isArray(value)) for (const word of value) argv.push(f.flag, word);
+    if (f.takes === "pairs") argv.push(f.flag, (value as AgentBin[]).map(a => `${a.id}=${a.bin}`).join(","));
+    else if (Array.isArray(value)) for (const word of value as string[]) argv.push(f.flag, word);
     else argv.push(f.flag, String(value));
   }
   return argv;
@@ -138,7 +168,7 @@ export function daemonOptions(args: DaemonArgs, seams: DaemonSeams = {}): Daemon
       ? undefined
       : defined({
           file: placeFile,
-          report: async () => placeSelfReport({ file: placeFile, home, wspArgv: args.wspArgv ?? ["wsp"] }),
+          report: async () => placeSelfReport({ file: placeFile, home, wspArgv: args.wspArgv ?? ["wsp"], agents: args.agents ?? [] }),
           onLeave: async () => sweepPlaceHome(home),
           exit: seams.exit,
           connectTimeoutMs: args.linkConnectMs,

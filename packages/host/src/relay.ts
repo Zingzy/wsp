@@ -11,7 +11,7 @@ import { spawn } from "node:child_process";
 import { createServer, type Server, type Socket } from "node:net";
 import { platform } from "node:os";
 import { DaemonEvent, LOOPBACK, hostOf, isHttpUrl, type DaemonReachView, type ForwardEvent, type GoldenBuilderView, type PortForward } from "@wsp/protocol";
-import { realClock, type Clock, type EventUnion, type Runtime } from "@wsp/runtime";
+import { plumbTunnel, realClock, tunnelFrame, type Clock, type EventUnion, type Runtime } from "@wsp/runtime";
 import { DAEMON_CONNECT_TIMEOUT_MS, connectDaemonSocket, type ConnectOptions, type DaemonSocket } from "./doctor.js";
 
 export type UrlOpener = (url: string) => Promise<boolean>;
@@ -302,28 +302,18 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     });
 
   const plumb = (f: Forward, sock: DaemonSocket, c: Socket): void => {
-    const tunnelId = `t${++seq}`;
-    f.conns.set(tunnelId, c);
-    touch(f);
-    c.pause();
-    c.on("error", () => {});
-    c.on("close", () => {
-      f.conns.delete(tunnelId);
-      sock.op("tunnel.close", { tunnelId }).catch(() => {});
-    });
-    sock.op("tunnel.open", { tunnelId, port: f.port }).then(
-      () => {
+    plumbTunnel((op, params) => sock.op(op, params), c, {
+      port: f.port,
+      conns: f.conns,
+      tunnelId: `t${++seq}`,
+      touched: () => touch(f),
+      opened: () => {
         f.unreachableLogged = false;
         f.unansweredLogged = false;
-        c.on("data", (d: Buffer) => {
-          touch(f);
-          sock.op("tunnel.write", { tunnelId, data: d.toString("base64") }).catch(() => c.destroy());
-        });
-        c.resume();
       },
-      () => {
+      refused: socket => {
         // The browser was redirected here, so it gets an answer it can show, not a reset.
-        c.end(refusedResponse(f));
+        socket.end(refusedResponse(f));
         // A tab left open retries every second: one line per stretch, not per connection.
         if (f.unansweredLogged) return;
         f.unansweredLogged = true;
@@ -333,7 +323,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
             : `${f.target.name}: the sign-in callback on port ${f.port} reached this computer but nothing on the workspace answered`,
         );
       },
-    );
+    });
   };
 
   /** A redirect that lands inside the redial wait would otherwise die with a 502; it waits for the link or the hold's end.
@@ -514,16 +504,10 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
         tryForward(link, e.port, "url");
         return;
       case "tunnel.data":
-        for (const fw of allForwards(link.target.id)) {
-          const c = fw.conns.get(e.tunnelId);
-          if (!c) continue;
-          touch(fw);
-          c.write(Buffer.from(e.data, "base64"));
-          return;
-        }
-        return;
       case "tunnel.end":
-        for (const fw of allForwards(link.target.id)) fw.conns.get(e.tunnelId)?.end();
+        // One counter mints every tunnel id here, so a frame belongs to at most one forward and the first that
+        // holds it is the one it is for.
+        for (const fw of allForwards(link.target.id)) if (tunnelFrame(fw.conns, e, () => touch(fw))) return;
         return;
       default:
         return;

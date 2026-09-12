@@ -51,7 +51,9 @@ export function placeDaemonPaths(home: string): {
   unitDir: string;
   binDir: string;
   rootsPath: string;
-  /** The file naming the wsp this computer joined as a place, the key it proves itself with, and the agent's log. */
+  /** What a computer joined as a place keeps beside the daemon's own files: the wsp it belongs to, the key it
+   * proves itself with, and what its agent has printed. They sit in the same folder as everything else wsp keeps
+   * there, so one sweep takes the lot. */
   placeFile: string;
   placeKey: string;
   placeLog: string;

@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { passphraseCipher } from "@wsp/engine";
-import { agentsKindRefusal, DEFAULT_PREFERENCES, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { agentsKindRefusal, DEFAULT_PREFERENCES, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { copyKey, createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -723,7 +723,7 @@ describe("wsp verbs over the host", () => {
     const kept = await answer("no", "forget", "alpha");
     expect(kept.code).toBe(1);
     expect(kept.io.errors).toEqual(["alpha kept"]);
-    expect(asked).toEqual(["Forget alpha?\nIts record and 1 thread leave this computer; the machine is already gone."]);
+    expect(asked).toEqual(["Forget alpha?\nIts record and 1 thread leave this computer; the computer it ran on is already gone."]);
     expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "beta"]);
 
     const forgot = await answer("yes", "forget", alpha.id);
@@ -980,6 +980,46 @@ describe("wsp verbs over the host", () => {
     const more = await run("send", row!.threadId!, "once more");
     expect(more.io.lines).toEqual(["re: once more"]);
     expect(agent.starts[2]!.resume).toBe(rows[1]!.claudeSessionId);
+  });
+
+  it("thread forget drops the row a launch that never got going left, and refuses a thread whose turn did work and a row from before threads", async () => {
+    const agent = bornDeadAgent(prompt => `re: ${prompt}`);
+    await restartHost({ claude: agent.adapter });
+    await run("new", "alpha");
+    const dead = await run("thread", "new", "--in", "alpha", "hello");
+    expect(dead.code).toBe(1);
+    expect(dead.io.errors).toEqual([`wsp thread new: ${UNREACHED_LINE}`]);
+    const junk = (await rt.sessions.list())[0]!.threadId!;
+    expect((await run("threads")).io.lines[0]).toContain(junk);
+
+    const forgot = await run("thread", "forget", junk.slice(0, 8));
+    expect(forgot.code).toBe(0);
+    expect(forgot.io.lines).toEqual([`forgot thread ${junk}: no turn ever ran on it, so nothing of its work is gone`]);
+    expect((await run("threads")).io.lines[0]).not.toContain(junk);
+    expect(await rt.sessions.list()).toEqual([]);
+
+    // The next launch works, so its thread is one a turn ran on: the runtime's own sentence comes back.
+    await run("thread", "new", "--in", "alpha", "build it");
+    const ran = (await rt.sessions.list())[0]!.threadId!;
+    const refused = await run("thread", "forget", ran);
+    expect(refused.code).toBe(1);
+    expect(refused.io.errors).toEqual([`wsp thread forget: ${threadForgetRefusal(ran)}`]);
+    expect((await rt.sessions.list()).map(r => r.threadId)).toEqual([ran]);
+
+    const missing = await run("thread", "forget", "nope");
+    expect(missing.code).toBe(1);
+    expect(missing.io.errors).toEqual(["wsp thread forget: no thread nope"]);
+    // A turn from before threads folds under its own id and no thread here answers to it; the verb says that
+    // rather than dialling for a thread nobody has, which is the guard the app's row makes.
+    const alpha = (await rt.workspaces.list())[0]!.id;
+    await store.put("sessions", alpha, { workspaceId: alpha, sessions: [{ id: "s_old", workspaceId: alpha, harness: "claude", status: "failed", prompt: "from before threads" }] });
+    await restartHost({ claude: agent.adapter });
+    const before = await run("thread", "forget", "s_old");
+    expect(before.code).toBe(1);
+    expect(before.io.errors).toEqual([`wsp thread forget: ${threadWithoutIdRefusal("s_old")}`]);
+    const none = await run("thread", "forget");
+    expect(none.code).toBe(3);
+    expect(none.io.errors).toEqual(["wsp thread forget: wsp thread forget takes one thread"]);
   });
 
   it("threads is the sidebar's data: one row per thread with agent, state, who opened it and its folder, filtered by --in", async () => {
@@ -2571,7 +2611,7 @@ describe("wsp verbs over the host", () => {
     expect(proto.io.errors[0]).not.toContain("belongs to");
     const half = await run("thread");
     expect(half.code).toBe(3);
-    expect(half.io.errors).toEqual(['usage: wsp thread new [--in <workspace>] [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, --title, --image <path>, --detach] "<task>"\nusage: wsp thread read <thread> [--last]\nusage: wsp thread rename <thread> "<title>"']);
+    expect(half.io.errors).toEqual(['usage: wsp thread new [--in <workspace>] [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, --title, --image <path>, --detach] "<task>"\nusage: wsp thread read <thread> [--last]\nusage: wsp thread rename <thread> "<title>"\nusage: wsp thread forget <thread>']);
   });
 
   it("without a host serving the state file every verb refuses in one line before dialling anything", async () => {
@@ -2596,7 +2636,7 @@ describe("wsp verbs over the host", () => {
       expect(off.io.lines[0]!.split("\n")[1]).not.toContain("machines");
       const on = await run("workspaces", "agents", "alpha", "--spawn", "on", "--max-machines", "2");
       expect(on.code).toBe(0);
-      expect(on.io.lines).toEqual(["alpha: agents may spawn: up to 2 machines"]);
+      expect(on.io.lines).toEqual(["alpha: agents may spawn: up to 2 workspaces"]);
       expect((await rt.workspaces.list())[0]!.agents).toEqual({ spawn: true, maxMachines: 2, maxDepth: 1 });
       expect((await run("workspaces")).io.lines[0]!).toContain("2 machines");
       const back = await run("workspaces", "agents", "alpha", "--spawn", "off");
@@ -2774,7 +2814,7 @@ describe("wsp verbs over the host", () => {
 });
 
 describe("messageTo", () => {
-  const row: ThreadView = { id: "row_1", workspaceId: "ws_1", harness: "claude", startedBy: "person", status: "failed", title: "hello", sessionId: "row_1", turns: 1 };
+  const row: ThreadView = { id: "row_1", workspaceId: "ws_1", harness: "claude", startedBy: "person", status: "failed", title: "hello", sessionId: "row_1", turns: 1, ran: false };
   it("names the thread when the row has one, resumes by session when it has only that, and refuses a row with neither instead of minting a thread in silence", () => {
     expect(messageTo({ ...row, threadId: "thr_1", claudeSessionId: "sess_1" }, "again")).toEqual({ workspaceId: "ws_1", prompt: "again", harness: "claude", thread: "thr_1" });
     expect(messageTo({ ...row, threadId: "thr_1" }, "again")).toEqual({ workspaceId: "ws_1", prompt: "again", harness: "claude", thread: "thr_1" });
