@@ -1,0 +1,33 @@
+[
+  {
+    "type": "proc.snapshot",
+    "at": 1757650000000,
+    "daemon": 1200,
+    "total": 143,
+    "procs": [
+      {
+        "pid": 1,
+        "ppid": 0,
+        "user": "root",
+        "state": "S",
+        "comm": "systemd",
+        "cmdline": "/sbin/init",
+        "cpu": 0,
+        "rss": 12582912,
+        "startedAt": 1757600000000
+      },
+      {
+        "pid": 4242,
+        "ppid": 1200,
+        "user": "root",
+        "state": "R",
+        "comm": "bash",
+        "cmdline": "bash",
+        "cpu": 1.5,
+        "rss": 4096000,
+        "startedAt": 1757649000000,
+        "pty": "pty_1"
+      }
+    ]
+  }
+]
