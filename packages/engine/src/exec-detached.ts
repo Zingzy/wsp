@@ -25,6 +25,20 @@ export const GUEST_TMP = "/tmp";
  * names its own under their home, since a folder every account on it shares is one another account could sit in
  * first; both roads read one rule rather than each spelling a path. */
 export const RUN_DIR = `${GUEST_TMP}/wsp-run`;
+
+/** What a guest prints back to say a step landed, and the only proof any of them gives: the exec that carried the
+ * step exits 0 whether or not the step happened, so the code on its own says nothing. One home for the words, read
+ * by the launch road here and by the streaming one above it. */
+export const HANDSHAKE = { piece: "WSP_PIECE", launched: "WSP_LAUNCHED", written: "WSP_OK", gone: "WSP_GONE", run: "WSP_RUN" } as const;
+
+/** What the machine said, for a sentence that would otherwise end in a colon with nothing behind it: its output if
+ * it printed any, else the plain fact that it printed none, with the code it exited beside it either way. A bare
+ * exit 0 reads as success on every other road a person knows. */
+export function machineAnswer(res: ExecResult): string {
+  const said = [res.stdout, res.stderr].map(text => text.trim()).filter(text => text !== "").join(" ");
+  return said === "" ? `it printed nothing and exited ${res.exitCode}` : `it exited ${res.exitCode} and said: ${said}`;
+}
+
 /** Where a backend that cannot hand a machine its environment at create writes it for the daemon's unit alone to
  * read, one KEY="value" line each, under /etc so it travels with the disk. The daemon's unit names it as an
  * EnvironmentFile it may lack; nothing else on the machine reads it. */
@@ -81,7 +95,7 @@ function uploadSequence(files: GuestWrite[], before: string[], after: string[]):
     return f.pieces === 0 ? [write] : [write, `rm -f ${names}`];
   };
   const last = (): string => [head, ...before, "set -o pipefail", ...plan.flatMap(land), ...after].join("\n");
-  const piece = (path: string, i: number, part: string): string => [head, `printf %s ${shellQuote(part)} > ${shellQuote(path)}.${i} || exit 1`, "echo WSP_PIECE"].join("\n");
+  const piece = (path: string, i: number, part: string): string => [head, `printf %s ${shellQuote(part)} > ${shellQuote(path)}.${i} || exit 1`, `echo ${HANDSHAKE.piece}`].join("\n");
   const execs: string[] = [];
   while (!execFits(last())) {
     const f = plan.filter(f => f.pieces === 0).sort((a, b) => b.b64.length - a.b64.length)[0];
@@ -101,8 +115,8 @@ export async function putFiles(machine: Machine, files: GuestWrite[], opts: PutF
   const execs = uploadSequence(files, opts.before ?? [], opts.after ?? []);
   for (const cmd of execs.slice(0, -1)) {
     const res = await machine.exec(cmd, { timeoutMs });
-    if (res.exitCode !== 0 || !res.stdout.includes("WSP_PIECE")) {
-      throw new Error(`a piece did not land on ${machine.id} (exit ${res.exitCode}): ${res.stderr.trim() || res.stdout.trim()}`);
+    if (res.exitCode !== 0 || !res.stdout.includes(HANDSHAKE.piece)) {
+      throw new Error(`a piece did not land on ${machine.id}: nothing came back saying ${HANDSHAKE.piece}, the word the guest prints once a piece is written; ${machineAnswer(res)}`);
     }
   }
   return machine.exec(execs.at(-1)!, { timeoutMs });
@@ -113,11 +127,11 @@ export async function putFiles(machine: Machine, files: GuestWrite[], opts: PutF
 function launch(machine: Machine, base: string, script: string): Promise<ExecResult> {
   return putFiles(machine, [{ path: `${base}.sh`, text: script }], {
     // exec honours no idempotency key and a launch whose answer was lost is retried; the claim makes the second a no-op.
-    before: [`b=${base}`, `mkdir "$b.d" 2>/dev/null || { echo WSP_LAUNCHED; exit 0; }`],
+    before: [`b=${base}`, `mkdir "$b.d" 2>/dev/null || { echo ${HANDSHAKE.launched}; exit 0; }`],
     after: [
       `setsid nohup bash -c 'bash "$0.sh" > "$0.out" 2> "$0.err" < /dev/null; echo $? > "$0.exit"' "$b" > /dev/null 2>&1 &`,
       'echo $! > "$b.pid"',
-      "echo WSP_LAUNCHED",
+      `echo ${HANDSHAKE.launched}`,
     ],
   });
 }
@@ -199,8 +213,8 @@ export async function execDetached(machine: Machine, script: string, opts: RunOp
   const exec = (cmd: string): Promise<ExecResult> => machine.exec(cmd, { timeoutMs: INLINE_EXEC_MS });
 
   const launched = await launch(machine, base, script);
-  if (launched.exitCode !== 0 || !launched.stdout.includes("WSP_LAUNCHED")) {
-    throw new Error(`launch failed on ${machine.id} (exit ${launched.exitCode}): ${launched.stderr.trim() || launched.stdout.trim()}`);
+  if (launched.exitCode !== 0 || !launched.stdout.includes(HANDSHAKE.launched)) {
+    throw new Error(`launch failed on ${machine.id}: nothing came back saying ${HANDSHAKE.launched}, the word the guest prints once the run is up; ${machineAnswer(launched)}`);
   }
 
   const out = new LineStream(opts.onLine);

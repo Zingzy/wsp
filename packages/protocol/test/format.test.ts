@@ -24,6 +24,10 @@ import {
   sendNowFailedLine,
   TURN_IN_FLIGHT,
   foreignFlagLine,
+  refusalLine,
+  runForTheList,
+  sayOnce,
+  unknownWordLine,
   unknownAgentLine,
   LINEAGE_MARKS,
   NO_TEMPLATES_LINE,
@@ -895,6 +899,34 @@ describe("stopFailedLine and sendNowFailedLine", () => {
 
   it("the send key's label while a turn runs is one constant", () => {
     expect(TURN_IN_FLIGHT).toBe("Turn in flight");
+  });
+});
+
+describe("the shape a refusal takes on a terminal", () => {
+  it("is two halves, what happened and then what to do, on one line", () => {
+    expect(refusalLine("wsp thread new takes one task; api reads as a second one.", "Name the workspace with --in api.")).toBe(
+      "wsp thread new takes one task; api reads as a second one. Name the workspace with --in api.",
+    );
+    expect(refusalLine("a.", "b.").split("\n")).toHaveLength(1);
+    // A first half written for the app too, where nothing follows it, closes itself here.
+    expect(refusalLine("no agent called codx; the catalog knows claude, codex", "Name one of those.")).toBe(
+      "no agent called codx; the catalog knows claude, codex. Name one of those.",
+    );
+    expect(refusalLine("wsp thread read takes one thread. ", "usage: wsp thread read <thread>")).toBe("wsp thread read takes one thread. usage: wsp thread read <thread>");
+  });
+
+  it("says the command's name once, whether or not the sentence opens with it", () => {
+    expect(sayOnce("wsp thread new: ", "wsp thread new takes one task")).toBe("wsp thread new takes one task");
+    expect(sayOnce("wsp delete: ", "no workspace nope")).toBe("wsp delete: no workspace nope");
+    expect(sayOnce("", "no workspace nope")).toBe("no workspace nope");
+    // The name is matched whole: a sentence that merely opens with the same letters keeps its prefix.
+    expect(sayOnce("wsp stop: ", "wsp stopped nothing")).toBe("wsp stop: wsp stopped nothing");
+    expect(sayOnce("wsp stop: ", "wsp stop")).toBe("wsp stop");
+  });
+
+  it("answers a word no command has with the word and where the list is, and never with the list itself", () => {
+    expect(refusalLine(unknownWordLine("ls"), runForTheList("wsp --help"))).toBe("unknown command: ls. Run wsp --help for the list.");
+    expect(refusalLine(unknownWordLine("ls"), runForTheList("wsp --help")).split("\n")).toHaveLength(1);
   });
 });
 

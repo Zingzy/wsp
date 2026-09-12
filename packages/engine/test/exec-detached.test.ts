@@ -6,9 +6,10 @@
 import { execFile } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { extname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { EXEC_BODY_MAX } from "@wsp/protocol";
+import { GuestUnusableError } from "../src/errors.js";
 import { DEADLINE_EXIT, INLINE_EXEC_MS, execDetached, putFiles } from "../src/exec-detached.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 import { EXEC_ENV } from "../src/golden-import.js";
@@ -20,6 +21,8 @@ interface Step {
   dead?: boolean;
   /** The poll fails as it does while the machine is paused. */
   nap?: boolean;
+  /** The backend reads the guest as dead: its shell will not start again for this poll or any other. */
+  unusable?: boolean;
 }
 
 interface Call {
@@ -107,6 +110,7 @@ function guest(steps: Step[]) {
         if (s !== undefined) {
           step++;
           if (s.nap) throw Object.assign(new Error("Bad Gateway"), { kind: "transient", status: 502 });
+          if (s.unusable) throw new GuestUnusableError("m1", "Box by ASCII", "Error 24", 200);
           if (s.out !== undefined) out = Buffer.concat([out, Buffer.from(s.out)]);
           if (s.err !== undefined) err = Buffer.concat([err, Buffer.from(s.err)]);
           if (s.exit !== undefined) exit = String(s.exit);
@@ -184,6 +188,14 @@ describe("execDetached over a scripted guest", () => {
     expect(g.calls.filter(c => c.cmd.includes("echo WSP_POLL"))).toHaveLength(4);
   });
 
+  it("a poll that meets a guest the backend calls unusable ends the run with that error at once", async () => {
+    const g = guest([{ out: "started\n" }, { unusable: true }]);
+    await expect(execDetached(g.machine, "sleep 999", { deadlineMs: 1_000, pollMs: 1 })).rejects.toBeInstanceOf(GuestUnusableError);
+    // Nothing is sent to a guest that cannot run anything: no kill, no cleanup, and no waiting out the deadline.
+    expect(g.kills).toEqual([]);
+    expect(g.cleaned()).toBe(0);
+  });
+
   it("a nap that outlasts the deadline still ends in 124, with the kill attempted", async () => {
     const g = guest(Array.from({ length: 200 }, () => ({ nap: true })));
     const res = await execDetached(g.machine, "true", { deadlineMs: 30, pollMs: 1 });
@@ -198,6 +210,14 @@ describe("execDetached over a scripted guest", () => {
     expect(res.stdout).toBe("partial");
     expect(res.stderr).toContain("ended without reporting an exit code");
     expect(lines).toEqual(["partial"]);
+  });
+
+  it("the launch sets the umask before the script is written, so no file of the run is ever readable by another account", async () => {
+    const g = guest([{ exit: 0 }]);
+    await execDetached(g.machine, "true", { deadlineMs: 10_000, pollMs: 1 });
+    const launch = launchCalls(g.calls).at(-1)!.cmd.split("\n");
+    expect(launch).toContain("umask 077");
+    expect(launch.indexOf("umask 077")).toBeLessThan(launch.findIndex(l => l.includes("base64 -d >")));
   });
 
   it("a script that fits one exec body goes up in one launch exec, as before", async () => {
@@ -241,6 +261,15 @@ describe("execDetached over a scripted guest", () => {
   it("a piece that does not confirm fails the run before the launch", async () => {
     const machine = { id: "m9", exec: async () => ({ exitCode: 1, stdout: "", stderr: "bash: printf: write error: No space left on device" }) } as unknown as Machine;
     await expect(execDetached(machine, BIG_SCRIPT, { deadlineMs: 1_000, pollMs: 1 })).rejects.toThrow(/a piece did not land on m9.*No space left/);
+  });
+
+  it("a launch the machine answered nothing to names the handshake that never came, and never a bare exit 0", async () => {
+    // The exec landed and the guest printed neither the handshake nor a reason. Exit 0 reads as success on every
+    // other road, so the code on its own would say the run started.
+    const machine = { id: "m9", exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }) } as unknown as Machine;
+    await expect(execDetached(machine, "true", { deadlineMs: 1_000, pollMs: 1 })).rejects.toThrow(
+      "launch failed on m9: nothing came back saying WSP_LAUNCHED, the word the guest prints once the run is up; it printed nothing and exited 0",
+    );
   });
 
   it("a launch that does not confirm fails the run before any poll", async () => {
@@ -340,7 +369,7 @@ describe("putFiles", () => {
   it("a piece that does not confirm fails before the last exec goes", async () => {
     const calls: string[] = [];
     const machine = { id: "m9", exec: async (cmd: string) => { calls.push(cmd); return { exitCode: 0, stdout: "", stderr: "" }; } } as unknown as Machine;
-    await expect(putFiles(machine, [{ path: "/tmp/wsp-run/t4.in", text: BIG_INPUT }])).rejects.toThrow(/a piece did not land on m9 \(exit 0\)/);
+    await expect(putFiles(machine, [{ path: "/tmp/wsp-run/t4.in", text: BIG_INPUT }])).rejects.toThrow(/a piece did not land on m9: nothing came back saying WSP_PIECE/);
     expect(calls).toHaveLength(1);
   });
 });
@@ -349,6 +378,22 @@ const dirs: string[] = [];
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
+
+/** A file's permission bits as three octal digits, read by this process rather than by a stat(1) whose flags differ
+ * between the BSD and GNU builds the gates run on. */
+const modeOf = (path: string): string => (statSync(path).mode & 0o777).toString(8);
+
+/** The modes of a run's own files, taken the first time the script writes a line. A run removes its files when it
+ * ends, so after execDetached answers there is nothing left on disk to read. */
+function runFileModes(runDir: string): { read: () => void; of: (suffix: string) => string | undefined } {
+  const seen = new Map<string, string>();
+  return {
+    read: () => {
+      for (const f of readdirSync(runDir)) if (!seen.has(extname(f))) seen.set(extname(f), modeOf(join(runDir, f)));
+    },
+    of: suffix => seen.get(suffix),
+  };
+}
 
 /** This machine's bash as the guest; setsid is perl's setpgrp where the OS has none and base64 loses -w0. */
 function localGuest(): { machine: Machine; runDir: string } {
@@ -389,6 +434,49 @@ describe("execDetached over this machine's bash", () => {
     expect(lines).toContain("warn");
     const left = await machine.exec(`ls ${runDir}`);
     expect(left.stdout).toBe("");
+  });
+
+  it("the script and the streams of a run are readable by nobody but their owner, from the moment they are made", async () => {
+    const { machine, runDir } = localGuest();
+    const seen = runFileModes(runDir);
+    const res = await execDetached(machine, "echo running", { deadlineMs: 20_000, pollMs: 50, onLine: seen.read }, runDir);
+    expect(res).toEqual({ exitCode: 0, stdout: "running\n", stderr: "" });
+    expect([seen.of(".sh"), seen.of(".out"), seen.of(".err")]).toEqual(["600", "600", "600"]);
+  });
+
+  it("a detached script creates files as its own shell would, while the run's own files stay unreadable to anyone else", async () => {
+    const { machine, runDir } = localGuest();
+    const seen = runFileModes(runDir);
+    // The script only makes things; every mode is read off the disk by this process, which says the same on any OS.
+    const script = ['d=$(dirname "$0")', 'touch "$d/made"', 'mkdir "$d/dir"', "echo running"].join("\n");
+    const res = await execDetached(machine, script, { deadlineMs: 20_000, pollMs: 50, onLine: seen.read }, runDir);
+    expect(res.exitCode).toBe(0);
+    const outside = await machine.exec(`cd ${runDir} && touch ref && mkdir refd`);
+    expect(outside.exitCode).toBe(0);
+    // What the script makes is what a command outside the run makes: the road lends it no mask of its own.
+    expect([modeOf(join(runDir, "made")), modeOf(join(runDir, "dir"))]).toEqual([modeOf(join(runDir, "ref")), modeOf(join(runDir, "refd"))]);
+    // The run's own script and streams are still nobody else's.
+    expect([seen.of(".sh"), seen.of(".out"), seen.of(".err")]).toEqual(["600", "600", "600"]);
+  });
+
+  it("a launch that lands its script and then fails to confirm leaves nothing of the run on the guest", async () => {
+    const { machine, runDir } = localGuest();
+    const sent: string[] = [];
+    const watched = {
+      id: "local",
+      exec: async (cmd: string, o?: { timeoutMs?: number }) => {
+        sent.push(cmd);
+        if (!cmd.includes("echo WSP_LAUNCHED")) return machine.exec(cmd, o);
+        // The script lands and the launch then fails before it confirms, the way a lost answer does: nothing starts,
+        // and the file holding the caller's text is on the guest with nobody coming back for it.
+        const landed = await machine.exec(cmd.split("\n").slice(0, cmd.split("\n").findIndex(l => l.startsWith("setsid"))).join("\n"), o);
+        expect(readdirSync(runDir).filter(f => f.endsWith(".sh"))).toHaveLength(1);
+        return { ...landed, stdout: "" };
+      },
+    } as unknown as Machine;
+    await expect(execDetached(watched, "true", { deadlineMs: 1_000, pollMs: 1 }, runDir)).rejects.toThrow(/launch failed/);
+    expect(sent.some(c => c.startsWith("rm -rf"))).toBe(true);
+    expect(readdirSync(runDir)).toEqual([]);
   });
 
   it("a launch posted twice under one base, as a retried exec does, starts the script once", async () => {
