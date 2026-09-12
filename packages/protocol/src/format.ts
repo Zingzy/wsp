@@ -1587,6 +1587,10 @@ export const thisComputerLine = (name: string, id: string): string => `Workspace
  * that wsp reaches and never runs. */
 export const OVER_SSH = "a machine over ssh";
 
+/** What a place's machine is, in every sentence and every row that names it: a computer of the person's own that
+ * dialled this host and holds the link, so wsp drives it with the daemon protocol and never made it. */
+export const JOINED_COMPUTER = "a computer you joined";
+
 /** What a cloud workspace's machine is in a sentence that names it: a machine wsp forked at a provider and pays for,
  * whether the provider runs virtual machines or containers. A refusal on one says this rather than borrowing this
  * computer's words, since what it cannot do is the provider's limit and not the machine being the person's own. */

@@ -5,9 +5,11 @@ import type { IncomingMessage } from "node:http";
 import { connect as connectTcp, type Socket } from "node:net";
 import { homedir, platform } from "node:os";
 import { resolve } from "node:path";
-import { DAEMON_ROOTS_PATH, DAEMON_VERSION, DaemonAuthRequest, callbackPortOf, type DaemonEvent, type WorkspaceKind } from "@wsp/protocol";
+import { DAEMON_ROOTS_PATH, DAEMON_VERSION, DaemonAuthRequest, EXEC_TIMEOUT_DEFAULT_MS, PLACE_LEAVE_ROAD_REFUSAL, callbackPortOf, type DaemonEvent, type WorkspaceKind } from "@wsp/protocol";
 import { WebSocketServer, type WebSocket } from "ws";
+import { runExec } from "./exec.js";
 import { listDir, readFileBounded, type FsReadEncoding } from "./fs-ops.js";
+import { PlaceLink, type LinkOps, type PlaceLinkOptions } from "./link.js";
 import { gitDiff, gitStatus, type GitDiffScope } from "./git-ops.js";
 import { InboxWatcher } from "./inbox.js";
 import { ProcessManifest, type ManifestOptions } from "./manifest.js";
@@ -65,11 +67,17 @@ export interface DaemonOptions {
   /** Unix socket the browser shim posts URLs to; absent means no shim socket (local and test daemons). */
   openSocketPath?: string;
   spotter?: CallbackSpotter;
+  /** The host this daemon dials instead of waiting to be dialled: a computer somebody joined as a place. The link
+   * opens one socket outward and hands it to the same serve every inbound socket gets, so a joined computer speaks
+   * what a fork speaks. Absent leaves the daemon inbound only, which is every other kind. */
+  link?: Omit<PlaceLinkOptions, "daemonPort">;
 }
 
 export interface DaemonHandle {
   port: number;
   ptys: PtyManager;
+  /** The link this daemon holds outward, on a place; absent on every other kind. */
+  link?: PlaceLink;
   close(): Promise<void>;
 }
 
@@ -114,6 +122,9 @@ interface Request {
 interface ConnState {
   detaches: (() => void)[];
   tunnels: Map<string, Socket>;
+  /** The ops the road that opened this socket answers itself; read before the switch, so an act that belongs to a
+   * road rather than to the daemon lives with that road. Only the outbound link registers any. */
+  ops?: LinkOps;
   /** Set when the auth frame named a port: only tunnel ops on it and ping are answered. */
   port?: number;
   /** This socket's proc.watch, so proc.unwatch can end it before the socket does. */
@@ -193,6 +204,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
     root,
     workFolder: opts.workFolder ?? root,
     ports: portsSource,
+    platform: platform(),
     ...(opts.procRoot !== undefined ? { procRoot: opts.procRoot } : {}),
     ...(opts.procPasswdPath !== undefined ? { passwdPath: opts.procPasswdPath } : {}),
   });
@@ -301,11 +313,11 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
     });
   });
 
-  const serve = (ws: WebSocket, port: number | undefined): void => {
+  const serve = (ws: WebSocket, port: number | undefined, ops?: LinkOps): void => {
     // A port-scoped socket is there to tunnel one port; the guest's pages and callback ports are not its business.
     if (port === undefined) authed.add(ws);
     push(ws, { type: "daemon.hello", root, version: DAEMON_VERSION });
-    const state: ConnState = { detaches: [], tunnels: new Map(), ...(port !== undefined ? { port } : {}) };
+    const state: ConnState = { detaches: [], tunnels: new Map(), ...(port !== undefined ? { port } : {}), ...(ops !== undefined ? { ops } : {}) };
     ws.on("close", () => {
       // Client is gone; ptys keep running. Only this socket's subscriptions and tunnels die.
       state.closed = true;
@@ -334,10 +346,16 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
   const addr = wss.address();
   const boundPort = typeof addr === "object" && addr !== null ? addr.port : (opts.port ?? DEFAULT_PORT);
 
+  // The port goes into the report here, since only this call knows it, and the socket the link proves is handed to
+  // the same serve an inbound one gets: a joined computer speaks what a fork speaks.
+  const link = opts.link === undefined ? undefined : new PlaceLink({ ...opts.link, daemonPort: boundPort }, (ws, ops) => serve(ws, undefined, ops));
+
   return {
     port: boundPort,
     ptys,
+    ...(link !== undefined ? { link } : {}),
     close: async () => {
+      await link?.close();
       portWatcher?.stop();
       inboxWatcher?.stop();
       sysSampler?.stop();
@@ -452,9 +470,16 @@ async function handle(ws: WebSocket, state: ConnState, ctx: Ctx, msg: Request): 
   if (state.port !== undefined && !inPortScope(state.port, msg)) {
     throw new OpError("forbidden", `this socket is scoped to port ${state.port}: only tunnel ops on it and ping are allowed`);
   }
+  // The road that opened this socket answers its own ops before the daemon's switch sees them, so an act that
+  // belongs to a road lives with that road and no other socket can reach it.
+  const own = typeof msg.op === "string" ? state.ops?.[msg.op] : undefined;
+  if (own !== undefined) {
+    reply(ws, msg.id, await own());
+    return;
+  }
   switch (msg.op) {
     case "pty.create": {
-      const s = ctx.ptys.create({
+      const s = await ctx.ptys.create({
         cols: msg["cols"] as number | undefined,
         rows: msg["rows"] as number | undefined,
         shell: msg["shell"] as string | undefined,
@@ -646,6 +671,25 @@ async function handle(ws: WebSocket, state: ConnState, ctx: Ctx, msg: Request): 
       reply(ws, msg.id, {});
       return;
     }
+    case "exec": {
+      const cmd = requireString(msg, "cmd");
+      const asked = msg["timeoutMs"];
+      if (asked !== undefined && (!Number.isInteger(asked) || (asked as number) < 1)) throw new OpError("bad-request", "timeoutMs must be a positive integer");
+      const stdin = msg["stdin"];
+      if (stdin !== undefined && typeof stdin !== "string") throw new OpError("bad-request", "stdin must be base64 bytes as a string");
+      reply(
+        ws,
+        msg.id,
+        await runExec(ctx.root, process.env, cmd, {
+          timeoutMs: (asked as number | undefined) ?? EXEC_TIMEOUT_DEFAULT_MS,
+          ...(stdin !== undefined ? { stdin: Buffer.from(stdin, "base64") } : {}),
+        }),
+      );
+      return;
+    }
+    case "place.leave":
+      // Only the link this computer opened registers a handler for it, and the check above would have answered it.
+      throw new OpError("forbidden", PLACE_LEAVE_ROAD_REFUSAL);
     case "ping": {
       // App-level heartbeat: the previewUrl edge sweeps idle connections and
       // browser clients cannot send protocol pings.

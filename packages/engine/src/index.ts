@@ -9,6 +9,10 @@ export * from "./box-backend.js";
 export * from "./land-bytes.js";
 export * from "./local-backend.js";
 export * from "./ssh-backend.js";
+export * from "./place-backend.js";
+// What a machine that already existed answers about itself, for the two kinds that ask it: read over a connection
+// on one, in a shell of its own on the other.
+export { HOME_READ, OS_READ, UPTIME_READ, osNameOf, readValues, uptimeMsOf } from "./machine-facts.js";
 export * from "./ssh-forward.js";
 export * from "./child-exec.js";
 export * from "./no-provider-backend.js";

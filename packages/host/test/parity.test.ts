@@ -291,6 +291,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       expect(row!.tools.find(t => t.name === tool.name)!.inputs, `${tool.name}'s inputs in the skill`).toEqual(tool.inputs);
     }
     expect(COMMAND_LINES.filter(c => "cliOnly" in c).map(c => c.words).sort()).toEqual([
+      "add",
       "connect",
       "devices",
       "devices revoke",
@@ -300,6 +301,8 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "hosts",
       "hosts default",
       "init",
+      "join",
+      "leave",
       "mcp",
       "mcp install",
       "pair",
@@ -309,6 +312,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "relay hosts",
       "relay link",
       "relay unlink",
+      "remove",
       "status",
       "up",
     ]);

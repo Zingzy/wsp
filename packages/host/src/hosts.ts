@@ -172,14 +172,9 @@ export function setDefaultHost(home: string, alias: string): void {
   writeFileSync(defaultFile(home), `${checkedAlias(alias)}\n`, { mode: 0o600 });
 }
 
-/** The WebSocket address of a host at this address: the same authority over ws or wss, with the runtime's path on
- * the end of whatever path the address already carries, which is what a tunnel hostname under a prefix needs. */
-export function wsUrlOf(url: string): string {
-  const parsed = new URL(url);
-  const scheme = parsed.protocol === "https:" || parsed.protocol === "wss:" ? "wss:" : "ws:";
-  const path = parsed.pathname.replace(/\/+$/, "");
-  return `${scheme}//${parsed.host}${path}${WS_PATH}`;
-}
+// The rule now lives beside WS_PATH in the protocol, which a place's own agent reads too; the name stays here for
+// every caller that already had it from this module.
+export { wsUrlOf } from "@wsp/protocol";
 
 /** Which host a line runs against: the host on this computer, an alias this computer paired with, or an address
  * typed on the line, which carries no token and is only a road for wsp connect. */

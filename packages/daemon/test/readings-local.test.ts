@@ -254,6 +254,11 @@ describe("this computer's processes module", () => {
 });
 
 describe("the kind table", () => {
+  const made: string[] = [];
+  afterEach(() => {
+    for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
   it("has a module for every kind whose machines carry a daemon and say they serve the reading", () => {
     for (const kind of WorkspaceKind.options) {
       if (!kindWords(kind).daemon) continue;
@@ -278,5 +283,23 @@ describe("the kind table", () => {
 
   it("gives a machine over ssh the same /proc modules a fork gets, since the daemon on it is the same daemon", () => {
     expect(readingsFor("ssh")).toBe(readingsFor("cloud"));
+  });
+
+  it("picks a place's two modules by the system it is on, which is the one platform switch there is", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-place-readings-"));
+    made.push(dir);
+    const opts = { root: dir, workFolder: dir, ports: async () => [], platform: "linux" };
+    const place = readingsFor("place");
+    // On Linux a place reads its own /proc, as a fork does; a fork's own modules are the same objects.
+    const procRoot = mkdtempSync(join(tmpdir(), "wsp-place-proc-"));
+    made.push(procRoot);
+    const onLinux = place.metrics({ ...opts, procRoot });
+    const forked = readingsFor("cloud").metrics({ ...opts, procRoot });
+    expect(onLinux.constructor).toBe(forked.constructor);
+    // Elsewhere it reads its own host with os, df and ps, which is what answers on a Mac: the /proc road reads
+    // nothing there and left both panes at pending.
+    const mine = place.processes({ ...opts, platform: "darwin" });
+    expect(mine).toBeInstanceOf(LocalProcSource);
+    expect(readingsFor("place").processes({ ...opts, platform: "linux", procRoot })).not.toBeInstanceOf(LocalProcSource);
   });
 });

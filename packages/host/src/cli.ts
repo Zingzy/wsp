@@ -33,7 +33,10 @@ import { assetDir } from "./assets.js";
 import { claudeEnvs, deployDaemon, doctor, localDoctor, removeDaemon, sshDaemonPlace } from "./doctor.js";
 import { agentsHere } from "./agents-here.js";
 import { InitJobs } from "./init-job.js";
-import { agentKeyEnvs, parseEnvFile, savedEnv, type Keys } from "./env-keys.js";
+import { agentKeyEnvs, parseEnvFile, savedEnv, writeEnvFile, type Keys } from "./env-keys.js";
+// The writer of the wsp home's .env now sits beside its reader; the name stays exported here for every caller
+// that already had it from this module.
+export { writeEnvFile } from "./env-keys.js";
 import { keychainReader } from "./init-import.js";
 import { adoptLoginPath } from "./login-path.js";
 import { CACHE_RULE } from "./project-bundle.js";
@@ -76,6 +79,7 @@ import { publicHostname, readRelayRecord, relayCommand, relayOnLoopbackLine, sta
 import { aimAddress, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnoredLine, wspHome } from "./hosts.js";
 import { currentHome, currentHomePointer, servingHome } from "./serving-home.js";
 import { advertiseWord, devicesCommand, hostReach, pairCommand } from "./pairing.js";
+import { addCommand, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, registeredLine, removeEach, removeLines, runningWsp, type RunningWsp } from "./mcp-install.js";
@@ -99,6 +103,19 @@ usage:
                      instead, which starts it now and again at every login
   wsp down           stop the service and take it away, so nothing brings the
                      host back at the next login
+  wsp add            a computer you own joins this wsp: with no argument it
+                     prints the wsp join line and the code to type on that
+                     computer, wsp add <provider> takes that provider's key,
+                     and wsp add user@host puts the agent on a box over ssh
+  wsp remove PLACE   takes a computer back out: the agent, its files and the
+                     workspaces standing on it go, and the computer is left
+                     as wsp found it
+  wsp join URL       on the computer you are sitting at: joins it to the wsp at
+                     that address with --code, then holds the link open under
+                     this computer's own service manager. wsp join --serve is
+                     what that service runs
+  wsp leave          on that computer: takes wsp off it, for a computer whose
+                     host is gone and cannot run wsp remove
   wsp pair           a one time code another computer redeems for a token of
                      its own, when the host listens beyond this computer
   wsp devices        the computers paired with this host; wsp devices revoke
@@ -190,12 +207,19 @@ options:
                      for this computer whatever alias wsp hosts marks, since it
                      is the question whether the host here is serving. The
                      lines that read this computer's own files refuse it, and
-                     wsp pair and wsp devices take it only to answer that they
-                     run at that host's own terminal
-  --code CODE        connect: the code wsp pair printed on the other computer
+                     wsp add, wsp remove, wsp pair and wsp devices take it only
+                     to answer that they run at that host's own terminal
+  --code CODE        connect: the code wsp pair printed on the other computer;
+                     join: the code wsp add printed on the host
+  --code-file PATH   join: read the code off this file and delete the file
+                     before dialing, so a code never sits on a disk
+  --serve            join: hold the link open in this terminal, which is what
+                     the service installed by a join runs
   --name ALIAS       connect: the name to call that host here (default what its
                      address calls it); relay link: the name the approval page
-                     shows for this computer (default what it calls itself)
+                     shows for this computer (default what it calls itself);
+                     join: the name the wsp calls the computer being joined
+                     (default its own name lowercased)
   --relay HOST       connect: reach that host through your relay by the name it
                      has there, instead of giving an address. The code is still
                      the one wsp pair printed on it: the relay never carries one
@@ -348,30 +372,6 @@ export function jsonCliIO(err: Writable = process.stderr): CliIO {
   const nobody = (q: string): Promise<never> => Promise.reject(new Error(nobodyLine(q)));
   const noKey = (q: string): Promise<never> => Promise.reject(authRefusal(nobodyLine(q)));
   return { log: say, error: say, stream: text => void err.write(text), ask: nobody, askSecret: noKey };
-}
-
-/** The one writer of the wsp home's .env: a key line it knows is rewritten in place, the rest appended, mode 0600. */
-export function writeEnvFile(path: string, set: Record<string, string>): void {
-  const pending = new Map(Object.entries(set));
-  const lines: string[] = [];
-  if (existsSync(path)) {
-    for (const line of readFileSync(path, "utf8").split("\n")) {
-      const key = line.match(/^([A-Z_]+)=/)?.[1];
-      const value = key === undefined ? undefined : pending.get(key);
-      if (key === undefined || value === undefined) {
-        lines.push(line);
-        continue;
-      }
-      lines.push(`${key}=${value}`);
-      pending.delete(key);
-    }
-    while (lines.at(-1) === "") lines.pop();
-  }
-  for (const [k, v] of pending) lines.push(`${k}=${v}`);
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  writeFileSync(path, `${lines.join("\n")}\n`, { mode: 0o600 });
-  // writeFileSync's mode only applies when it creates the file.
-  chmodSync(path, 0o600);
 }
 
 /** Where a key is read from, in the order they win: this process's environment, then ./.env, then the wsp home's. */
@@ -726,6 +726,7 @@ export function makeRuntime(
     },
     local: localWiring(),
     ssh: sshWiring(),
+    places: placeWiring(statePath, keys, env),
     store: jsonFileStore(statePath),
     adapters: HARNESS_ADAPTERS,
     goldenRecipe: recipe,
@@ -1426,6 +1427,8 @@ interface SharedFlags {
   local?: boolean;
   service?: boolean;
   code?: string;
+  "code-file"?: string;
+  serve?: boolean;
   name?: string;
   relay?: string;
   host?: string;
@@ -1537,6 +1540,37 @@ const COMMANDS: Readonly<Record<string, Command>> = {
         upCommand: upCommandFor(opts, values),
         forkCommand: forkCommandFor(opts, values),
       }),
+  },
+  add: {
+    json: false,
+    host: "hostSide",
+    cliOnly: "hands out a code that lets another computer join this wsp, or takes a provider's key into this person's own files; both belong with the terminal the host runs at",
+    run: (io, opts, values, args) =>
+      addCommand(io, { ...aimPick(opts, values), keys: keysFound(), providerEnv: opts.providerEnv }, args, values.name !== undefined ? { name: values.name } : {}),
+  },
+  remove: {
+    json: false,
+    host: "hostSide",
+    cliOnly: "takes a computer out of this wsp and sweeps wsp off it, which belongs with the terminal that joined it",
+    run: (io, opts, values, args) => removeCommand(io, aimPick(opts, values), args),
+  },
+  join: {
+    json: false,
+    host: "refused",
+    cliOnly: "joins the computer it is typed on to somebody's wsp and keeps the key it proves itself with in this person's own files; where their computer belongs is theirs to say",
+    run: (io, _opts, values, args) =>
+      joinCommand(io, args, {
+        ...(values.code !== undefined ? { code: values.code } : {}),
+        ...(values["code-file"] !== undefined ? { codeFile: values["code-file"] } : {}),
+        ...(values.name !== undefined ? { name: values.name } : {}),
+        ...(values.serve === true ? { serve: true } : {}),
+      }),
+  },
+  leave: {
+    json: false,
+    host: "refused",
+    cliOnly: "sweeps wsp off the computer it is typed on, which belongs with the terminal that joined it",
+    run: (io, _opts, _values, args) => leaveCommand(io, args),
   },
   doctor: {
     json: false,
@@ -1680,6 +1714,8 @@ export const SHARED_OPTIONS: Options = {
   local: { type: "boolean" },
   service: { type: "boolean" },
   code: { type: "string" },
+  "code-file": { type: "string" },
+  serve: { type: "boolean" },
   name: { type: "string" },
   relay: { type: "string" },
   host: { type: "string" },
