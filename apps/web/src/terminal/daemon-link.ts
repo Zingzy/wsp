@@ -6,7 +6,7 @@
 // still hold under it: the edge idle-sweeps quiet sockets (~30s) and browsers
 // cannot protocol-ping, so liveness is an app-level ping op, and every channel
 // is fresh, so the pane re-subscribes on every live transition.
-import { DaemonErrorCode, DaemonEvent, type DaemonChannelEvent, type DaemonLinkStatus } from "@wsp/protocol";
+import { DaemonErrorCode, DaemonEvent, linkBackoffMs, type DaemonChannelEvent, type DaemonLinkStatus } from "@wsp/protocol";
 import type { DaemonApi } from "../protocol/client.js";
 import { errorText } from "../lib/utils.js";
 import { NOT_OPENED_YET, type TerminalWire } from "./link.js";
@@ -28,6 +28,7 @@ export interface DaemonLinkOptions {
   /** Fires on every transition, with the door's sentence when the status is refused; dead is terminal. */
   onStatus?(s: DaemonLinkStatus, refusal?: string): void;
   heartbeatMs?: number;
+  /** The wait before each re-dial; the link rule's unless a test pins one. */
   backoffMs?: (attempt: number) => number;
   /** How long a link that has never been open is given before it reads unanswered. */
   firstAnswerMs?: number;
@@ -56,7 +57,6 @@ const DEFAULT_HEARTBEAT_MS = 10_000;
  * and what to do. Long enough to cover a daemon this host starts on the first dial, short enough that nobody sits in
  * front of a silent screen wondering. */
 const DEFAULT_FIRST_ANSWER_MS = 20_000;
-const defaultBackoff = (attempt: number): number => Math.min(10_000, 500 * 2 ** (attempt - 1));
 /** What a refused link waits: no retry at the usual pace opens a door that answered with a status, so every dial
  * after one is spaced at the backoff's ceiling until something past the door answers. */
 const REFUSED_ATTEMPT = 32;
@@ -67,7 +67,7 @@ interface Waiting {
 
 export function connectDaemonLink(opts: DaemonLinkOptions): DaemonLink {
   const heartbeatMs = opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
-  const backoff = opts.backoffMs ?? defaultBackoff;
+  const backoff = opts.backoffMs ?? linkBackoffMs;
 
   /** The channel the host answered the last dial with, until it is dropped. */
   let channel: string | null = null;

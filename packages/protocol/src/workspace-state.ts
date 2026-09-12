@@ -3,7 +3,7 @@
 // provider's word and the daemon reach only change it where they contradict
 // it. Every client renders these words, and the runtime refuses a send with
 // the same sentence the composer shows, so one screen never says two things.
-import { fmtThreads, JOINED_COMPUTER, MACHINE_WSP_FORKS, OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
+import { fmtThreads, JOINED_COMPUTER, MACHINE_WSP_FORKS, offlineFor, OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
 import type { HarnessCatalog, MachineState, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
 
 export type WorkspaceState = "running" | "pausing" | "paused" | "waking" | "unreachable" | "gone";
@@ -217,6 +217,47 @@ const WORDS: Record<WorkspaceState, string> = {
 
 export function workspaceWord(state: WorkspaceState): string {
   return WORDS[state];
+}
+
+/** What every surface says about a workspace whose computer is not answering, one reading per slot that has to
+ * hold it: the mono word of a state slot, a row's third line, the length of the silence beside the computer's own
+ * name, the two halves a pane refuses in, and the whole sentence. Six surfaces used to word this silence six ways
+ * (a dead label, a state word that disagreed with the readings under it, two table cells, a launch refusal naming
+ * a machine id and a toast in the sidebar's corner); they read these instead. */
+export interface AbsentComputer {
+  /** The state slot's word, the protocol's own for a machine that answers nothing. */
+  readonly word: string;
+  /** The one word a table slot standing beside three fact columns holds: the silence itself, with no figure on it.
+   * How long it has been rides the row's title and the detail that already carries it. */
+  readonly away: string;
+  /** A workspace row's third line, which has room for the figure. Written to thirty characters because that is
+   * what the row leaves for text: a longer line is cut from the right, and the half that says what to do is the
+   * half that goes. The second half states the silence and asks; it never says the computer is off, which this
+   * host cannot know, since a computer that is on and not answering reads this same line. */
+  readonly line: string;
+  /** What happened, the first half a pane refuses in. */
+  readonly said: string;
+  /** What happens next, the second half: nobody has to reconnect it, so the one thing left to do is switch it on. */
+  readonly will: string;
+  /** Both halves, for every slot with room for a sentence: the row's title, the pane's State row, the held send. */
+  readonly sentence: string;
+}
+
+/** The one state of a computer that is not answering. awayMs is how long this host has not heard from it, null
+ * where it never has. */
+export function absentComputer(name: string, awayMs: number | null): AbsentComputer {
+  const away = "no answer";
+  const said = `${name} is not answering`;
+  const will = "it connects on its own when it is on";
+  const dated = awayMs === null ? away : `${away} ${offlineFor(awayMs)}`;
+  return { word: workspaceWord("unreachable"), away, line: `${dated} · is it on?`, said, will, sentence: `${said}; ${will}` };
+}
+
+/** How long this host has not heard from a computer, off the row it holds for it; null on a row that never
+ * reported. One spelling of the silence's length, so the table and the sidebar date it alike. */
+export function awayMsOf(place: { readonly lastSeenAt?: string | undefined }, now: number): number | null {
+  const since = place.lastSeenAt === undefined ? NaN : Date.parse(place.lastSeenAt);
+  return Number.isNaN(since) ? null : now - since;
 }
 
 /** Why an action that needs the machine (send, import, export) cannot run in this state; null while running.
