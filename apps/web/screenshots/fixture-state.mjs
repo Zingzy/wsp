@@ -446,6 +446,19 @@ const orchestrator = () => {
   });
 };
 
+/** This computer with an image sealed and two computers of the person's own joined to it, both running Docker, and
+ * no workspace on either yet: the person the New workspace dialog is written for, who has somewhere to put one and
+ * has to pick. What the dialog and the creation log are photographed from. */
+const macAndBoxes = () =>
+  store({
+    workspaces: [workspace("ws_here", THIS_COMPUTER, { projects: [project("spoo", 48_200_000, 60 * 20)] })],
+    goldens: sealed(),
+    places: {
+      p_hetzner: place("p_hetzner", "hetzner", 1, { platform: "linux", os: "Ubuntu 24.04", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, docker: true, login: { HOME: "/root", USER: "root", PATH: "/usr/bin" } }),
+      p_studio: place("p_studio", "old-macbook", 4, { docker: true }),
+    },
+  });
+
 /** A person whose image is sealed and built in two places: what Settings > Image reads when there is a record to
  * read. One copy stands on the record as it is now and one was built from the record before it, so the table shows
  * both standing words. */
@@ -471,6 +484,7 @@ const FIXTURES = {
   "solari-only": solariOnly,
   "both-providers": bothProviders,
   "no-sign-in": thisComputer,
+  "mac-and-boxes": macAndBoxes,
   orchestrator,
   "image-built": imageBuilt,
 };

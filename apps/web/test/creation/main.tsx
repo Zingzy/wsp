@@ -31,6 +31,7 @@ const lines: CreationLine[] = Array.from({ length: count }, (_, i) => ({
 
 const creation: Creation = {
   key: "creating:beta",
+  askedAt: Date.now(),
   name: "beta",
   workspaceId: "ws_beta",
   lines,

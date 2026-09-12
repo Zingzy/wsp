@@ -12,6 +12,8 @@ import { sidebarMaxWidthBeside } from "../src/rightPanelLayout.js";
 import { RIGHT_PANEL_WIDTH_STORAGE_KEY, useRightPanelStore } from "../src/rightPanelStore.js";
 import { AppShell } from "../src/shell/AppShell.js";
 import { onNewThreadRequest } from "../src/shell/shellRequests.js";
+import { useSignInStore } from "../src/shell/signInStore.js";
+import { WorkspaceCreation } from "../src/shell/WorkspaceCreation.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
 
@@ -283,6 +285,24 @@ class ScriptedSocket {
     this.onclose?.({ code: 1000 });
   }
 }
+
+describe("the sign-in banner over the centre", () => {
+  it("stands above whatever the centre holds, which while a workspace is being created is its log", async () => {
+    useSignInStore.setState({ pages: { "ws_a:8976": { workspaceId: "ws_a", url: "https://github.com/login/device", port: 8976 } } });
+    useStore.getState().bind(fakeApi([view("ws_a", "api")]));
+    render(
+      <AppShell>
+        <WorkspaceCreation creation={{ key: "creating:spoo-fix", name: "spoo-fix", askedAt: Date.now(), workspaceId: "ws_a", lines: [], failed: null }} />
+      </AppShell>,
+    );
+    const bar = await screen.findByTestId("sign-in-banner");
+    const log = screen.getByTestId("creation-log");
+    expect(bar.textContent).toContain("A sign-in page for github.com is ready on api");
+    expect(bar.compareDocumentPosition(log) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(bar.contains(log)).toBe(false);
+    useSignInStore.setState({ pages: {} });
+  });
+});
 
 describe("disconnected banner", () => {
   it("appears while the runtime socket redials and clears when it is back", async () => {

@@ -2,11 +2,12 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, DAEMON_VERSION, FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, NO_LINGER_LINE, NOT_ON_THIS_KIND, fmtBytes, fmtSize, imageKeptLine, kindWords, machineLacksShort, servesReading, workspaceKind } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, DAEMON_VERSION, FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, NO_LINGER_LINE, NOT_ON_THIS_KIND, fmtBytes, fmtSize, imageKeptLine, kindWords, machineLacksShort, placeMachineId, servesReading, workspaceKind } from "@wsp/protocol";
 import type {
   Capabilities,
   EventUnion,
   GoldenMissingTool,
+  PlaceView,
   ProjectGolden,
   SnapshotLineage,
   SnapshotRollbackResult,
@@ -815,7 +816,8 @@ describe("project goldens in the lineage", () => {
     expect(screen.getByText("created 2026-08-30")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "new workspace proj from snap_p1" }));
     // The name a person reads on the row it makes: a copy of the project, never the verb under it.
-    await waitFor(() => expect(api.createWorkspace).toHaveBeenCalledWith("snap_p1", "proj-copy", undefined));
+    await waitFor(() => // A fork of a project golden names no computer: it goes where the image it carries already stands.
+    expect(api.createWorkspace).toHaveBeenCalledWith("snap_p1", "proj-copy", undefined, undefined));
     expect(api.createFromGoldenHead).not.toHaveBeenCalled();
   });
 
@@ -889,7 +891,7 @@ describe("the projects section", () => {
     off();
   });
 
-  it("this computer lists the folders registered on it and offers no snapshot, since it is not a machine to image", async () => {
+  it("this computer lists the folders registered on it, says a folder there is registered and not copied, and offers no snapshot", async () => {
     const mac: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "", projects: [{ name: "wsp", dest: "/Users/dev/wsp", importedAt: "2026-09-06T00:00:00Z", size: 133_000_000 }] };
     const api = fakeApi([mac]);
     api.watchStatuses = vi.fn(async () => [{ ...status(mac), kind: "local" as const, size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }]);
@@ -898,8 +900,51 @@ describe("the projects section", () => {
     await waitFor(() => expect(rows().map(r => r.getAttribute("data-k"))).toEqual(["project-wsp"]));
     expect(screen.getByRole("button", { name: "Import a folder" })).toBeDefined();
     expect(screen.queryByRole("button", { name: /as a project golden$/ })).toBeNull();
+    // Nothing is carried here, which a person about to import a large folder is owed before they press it.
+    expect(fact("projects-note")).toBe("On this Mac a folder is registered where it is, not copied.");
     // No lineage draws and no snapshot is offered here, so the tab asks the host for no project goldens.
     expect(api.listProjectGoldens).not.toHaveBeenCalled();
+  });
+
+  it("a workspace that copies says nothing about registering, and what a snapshot did takes the same slot", async () => {
+    await mount([{ ...view("ws_a", "api"), projects: [SPOO] }]);
+    expect(fact("projects-note")).toBe("");
+  });
+});
+
+describe("where a workspace runs", () => {
+  const HERE_PLACE: PlaceView = { id: "here", kind: "computer", name: "studio.local", default: false, present: true };
+  const HETZNER: PlaceView = { id: "p_1", kind: "computer", name: "hetzner", default: true, docker: true, present: true };
+  const ASCII: PlaceView = { id: "box", kind: "provider", name: "box", default: false, rateUsdPerHour: 0.018 };
+
+  it("names the computer a workspace stands on and what that computer is", async () => {
+    useStore.setState({ places: [HERE_PLACE, HETZNER, ASCII] });
+    const on: WorkspaceView = { ...view("ws_p", "box-build"), kind: "place", machineId: placeMachineId("p_1"), golden: "" };
+    const api = fakeApi([on]);
+    api.watchStatuses = vi.fn(async () => [{ ...status(on), kind: "place" as const, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0 }]);
+    useStore.getState().bind(api);
+    render(<MachineSurface workspaceId="ws_p" />);
+    await waitFor(() => expect(fact("where")).toBe("hetzner · a computer you joined"));
+  });
+
+  it("says the provider a fork was made at, and says this computer is this computer", async () => {
+    useStore.setState({ places: [HERE_PLACE, HETZNER, ASCII] });
+    await mount([view("ws_a", "api")]);
+    expect(fact("where")).toBe("ASCII · a provider");
+    cleanup();
+
+    const mac: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
+    const api = fakeApi([mac]);
+    api.watchStatuses = vi.fn(async () => [{ ...status(mac), kind: "local" as const, size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }]);
+    useStore.getState().bind(api);
+    render(<MachineSurface workspaceId="ws_m" />);
+    await waitFor(() => expect(fact("where")).toBe("this Mac"));
+  });
+
+  it("falls back to the row's own short word on a host that lists no computers", async () => {
+    useStore.setState({ places: [] });
+    await mount([{ ...view("ws_a", "api"), provider: "box" }]);
+    expect(fact("where")).toBe("box");
   });
 });
 

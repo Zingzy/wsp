@@ -10,6 +10,8 @@ import { DisconnectedError, RequestError, type Api, type ConnStatus, type Protoc
 import { lastWorkspaceId, rememberWorkspace } from "./lastWorkspace.js";
 import { clearLegacyPreferences, legacyPreferences } from "./legacyPreferences.js";
 import { bootPreferences, rememberFirstPaint } from "./firstPaint.js";
+import { placeName, placeNamed } from "../settings/places.js";
+import { imageBuildFrame } from "../shell/creationLog.js";
 import { useSignInStore } from "../shell/signInStore.js";
 
 export interface CostTick {
@@ -18,9 +20,10 @@ export interface CostTick {
   at: string;
 }
 
-/** One line of a create's stage log, stamped with the wall clock when it arrived here. */
+/** One line of a create's stage log, stamped with the wall clock when it arrived here. A line the image build put
+ * there carries `image` rather than one of the create's own stages: the two streams share the log. */
 export interface CreationLine {
-  readonly stage: WorkspaceCreateStage;
+  readonly stage: WorkspaceCreateStage | "image";
   readonly message: string;
   readonly at: string;
   readonly elapsedMs: number;
@@ -32,10 +35,18 @@ export interface Creation {
   /** What select() takes for it; stable from the click through the runtime's first stage event. */
   readonly key: string;
   readonly name: string;
+  /** When this row was made here, in wall-clock ms. A line the create's own stages carry their elapsed on needs
+   * nothing from it; a line this app stamps itself (the image build's) measures from here, since the build runs
+   * before the runtime's own clock on this create starts. */
+  readonly askedAt: number;
   /** The snapshot the create forks, when it is not the golden's head: a project golden's. */
   readonly golden?: string;
   /** The size the person picked; absent, the golden's. */
   readonly size?: WorkspaceSize;
+  /** The computer or provider the person picked in Where, by the word the create was asked with; absent, wherever
+   * a fork last landed. The image build's own frames name their place, so this is what says which are this
+   * create's. */
+  readonly where?: string;
   /** The id the runtime minted, known from its first stage event. */
   readonly workspaceId: string | null;
   readonly lines: ReadonlyArray<CreationLine>;
@@ -123,7 +134,7 @@ interface State {
   /** Starts a create from the golden head, or from `golden` (a project golden's snapshot) when given, selects its row,
    * and follows it through the stage events; resolves with the runtime's id for the new workspace, or null when the
    * create was refused. */
-  createWorkspace(name: string, golden?: string, size?: WorkspaceSize): Promise<string | null>;
+  createWorkspace(name: string, golden?: string, size?: WorkspaceSize, on?: string): Promise<string | null>;
   /** Makes this computer the host's local workspace and selects it, or selects the one it already is: there is one
    * per host, so a second pick is a selection, not a create. Null when the road is not there or the host refused,
    * whose own sentence lands as the toast. */
@@ -246,11 +257,11 @@ export const useStore = create<State>((set, get) => {
     set({ toast: refusal.line, toastAction: { for: refusal.line, word: refusal.word, run: () => get().openSetup() } });
     return true;
   };
-  const runCreation = async (key: string, name: string, golden?: string, size?: WorkspaceSize): Promise<string | null> => {
+  const runCreation = async (key: string, name: string, golden?: string, size?: WorkspaceSize, on?: string): Promise<string | null> => {
     const api = get().api;
     if (!api) return null;
     try {
-      const { notice, ...workspace } = await (golden === undefined ? api.createFromGoldenHead(name, size) : api.createWorkspace(golden, name, size));
+      const { notice, ...workspace } = await (golden === undefined ? api.createFromGoldenHead(name, size, on) : api.createWorkspace(golden, name, size, on));
       if (notice !== undefined) set({ toast: notice });
       // The created event normally lands first; when the reply beats it, the row still has a workspace to become.
       set(s => (s.workspaces.some(w => w.id === workspace.id) ? {} : { workspaces: [...s.workspaces, workspace].sort((a, b) => a.id.localeCompare(b.id)) }));
@@ -407,11 +418,15 @@ export const useStore = create<State>((set, get) => {
         if (preferenceSetsInFlight === 0) void api.preferences?.().then(preferences => set({ preferences })).catch(() => {});
       }
     },
-    async createWorkspace(name, golden, size) {
+    async createWorkspace(name, golden, size, on) {
       if (!get().api || holdCreate(golden)) return null;
       const key = `creating:${++creationSeq}`;
-      set(s => ({ creations: [...s.creations, { key, name, ...(golden !== undefined ? { golden } : {}), ...(size !== undefined ? { size } : {}), workspaceId: null, lines: NO_LINES, failed: null }], selectedId: key, selectedThreadId: null }));
-      return runCreation(key, name, golden, size);
+      set(s => ({
+        creations: [...s.creations, { key, name, askedAt: Date.now(), ...(golden !== undefined ? { golden } : {}), ...(size !== undefined ? { size } : {}), ...(on !== undefined ? { where: on } : {}), workspaceId: null, lines: NO_LINES, failed: null }],
+        selectedId: key,
+        selectedThreadId: null,
+      }));
+      return runCreation(key, name, golden, size, on);
     },
     async createLocalWorkspace() {
       const api = get().api;
@@ -438,7 +453,7 @@ export const useStore = create<State>((set, get) => {
       const creation = get().creations.find(c => c.key === key);
       if (!creation || holdCreate(creation.golden)) return;
       patchCreation(key, c => ({ ...c, workspaceId: null, lines: NO_LINES, failed: null }));
-      await runCreation(key, creation.name, creation.golden, creation.size);
+      await runCreation(key, creation.name, creation.golden, creation.size, creation.where);
     },
     dismissCreation(key) {
       set(s => ({
@@ -634,6 +649,24 @@ export const useStore = create<State>((set, get) => {
           set(s => ({ forwards: s.forwards.filter(f => !(f.workspaceId === e.workspaceId && f.port === e.port)) }));
           useSignInStore.getState().portClosed(e.workspaceId, e.port);
           return;
+        case "golden.stage": {
+          // The image being built where this create is going: one log, so the build's own stages read as the first
+          // lines of the create that is waiting on them. A frame naming no place is the image's own build, which
+          // the init screens own; one naming a place nobody here is waiting on is another road's.
+          const word = e.place;
+          if (word === undefined) return;
+          set(s => {
+            // Both words name the same row: the create was asked with the row's id and the build's frames carry
+            // the word the backend table keys it by, so the row itself is what matches the two.
+            const at = s.places.find(p => placeNamed(p, word));
+            const own = s.creations.find(c => c.failed === null && c.where !== undefined && (c.where === word || (at !== undefined && placeNamed(at, c.where))));
+            const line = own === undefined ? undefined : imageBuildFrame(e, at === undefined ? word : placeName(at));
+            if (own === undefined || line === undefined) return {};
+            const logged: CreationLine = { stage: "image", at: new Date().toISOString(), elapsedMs: Date.now() - own.askedAt, ...line };
+            return { creations: s.creations.map(c => (c === own ? { ...c, lines: [...c.lines, logged] } : c)) };
+          });
+          return;
+        }
         case "workspace.creating": {
           const line: CreationLine = { stage: e.stage, message: e.message, at: new Date().toISOString(), elapsedMs: e.elapsedMs, ...(e.notice !== undefined ? { notice: e.notice } : {}) };
           set(s => {
@@ -643,7 +676,7 @@ export const useStore = create<State>((set, get) => {
             const own = s.creations.find(c => c.workspaceId === e.workspaceId) ?? s.creations.find(c => c.workspaceId === null && c.name === e.name && c.failed === null);
             const failed = e.stage === "failed" ? { title: "Could not create the workspace", detail: e.message } : null;
             if (own === undefined) {
-              return { creations: [...s.creations, { key: `creating:${e.workspaceId}`, name: e.name, workspaceId: e.workspaceId, lines: [line], failed }] };
+              return { creations: [...s.creations, { key: `creating:${e.workspaceId}`, name: e.name, askedAt: Date.now() - e.elapsedMs, workspaceId: e.workspaceId, lines: [line], failed }] };
             }
             return { creations: s.creations.map(c => (c === own ? { ...c, workspaceId: e.workspaceId, lines: [...c.lines, line], failed: c.failed ?? failed } : c)) };
           });

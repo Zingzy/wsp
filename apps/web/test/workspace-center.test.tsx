@@ -185,7 +185,8 @@ describe("workspace creation view", () => {
 
     fireEvent.click(within(view).getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
-    expect(create).toHaveBeenLastCalledWith("beta", undefined);
+    // The retry goes back to the same computer, with the same size: a retry is the create again, not a new one.
+    expect(create).toHaveBeenLastCalledWith("beta", undefined, undefined);
     await waitFor(() => expect(screen.getByTestId("workspace-creation").getAttribute("aria-busy")).toBe("true"));
     expect(within(screen.getByTestId("workspace-creation")).queryByRole("button", { name: "Retry" })).toBeNull();
   });

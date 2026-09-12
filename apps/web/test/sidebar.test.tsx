@@ -5,7 +5,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DROP_A_FOLDER_LINE, FREE_WORD, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, exportFromLine, harmonyDots, importIntoLine, registerRequest, registeredLine, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceTheme, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DROP_A_FOLDER_LINE, FREE_WORD, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, exportFromLine, harmonyDots, importIntoLine, registerRequest, registeredLine, type PlaceView, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceTheme, type WorkspaceView } from "@wsp/protocol";
 import { WORKSPACE_WORDS } from "../src/actions/format.js";
 import { onOpenCommandPalette } from "../src/commandPaletteBus.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
@@ -65,6 +65,9 @@ type FakeApi = Api & {
 function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessions: SessionView[] = []): FakeApi {
   return {
     listWorkspaces: vi.fn(async () => workspaces),
+    // Two rows: this computer, which is never somewhere to put a workspace, and the provider this host forks on,
+    // which is the row the New workspace dialog checks.
+    placesList: vi.fn(async () => PLACES),
     getWorkspace: vi.fn(async id => workspaces.find(w => w.id === id)!),
     createWorkspace: vi.fn(async () => workspaces[0]!),
     createFromGoldenHead: vi.fn(async (name: string) => view("ws_new", name)),
@@ -102,9 +105,14 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
   };
 }
 
+const PLACES: PlaceView[] = [
+  { id: "here", kind: "computer", name: "studio.local", default: false, docker: false, present: true },
+  { id: "box", kind: "provider", name: "box", default: true, rateUsdPerHour: 0.018 },
+];
+
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
+  useStore.setState({ places: [], api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
 });
 
 async function mount(api: FakeApi, firstName: string) {
@@ -221,7 +229,7 @@ describe("rows from the fixture wire", () => {
       expect(slot.className).toContain("shrink-0");
       expect(slot.className).not.toMatch(/success|emerald|green/);
     }
-    act(() => useStore.setState({ creations: [{ key: "creating:1", name: "beta", workspaceId: null, lines: [], failed: null }] }));
+    act(() => useStore.setState({ creations: [{ key: "creating:1", name: "beta", askedAt: Date.now(), workspaceId: null, lines: [], failed: null }] }));
     expect(rowIds()).toEqual(["creating:1", "ws:ws_run", "ws:ws_nap", "ws:ws_gone"]);
   });
 
@@ -978,7 +986,7 @@ describe("the group before the first list has arrived", () => {
 
   it("a creation on its way holds the empty state off while the list is still coming", () => {
     render(<SidebarProvider defaultOpen><WorkspaceSidebar /></SidebarProvider>);
-    act(() => useStore.setState({ creations: [{ key: "creating:1", name: "beta", workspaceId: null, lines: [], failed: null }] }));
+    act(() => useStore.setState({ creations: [{ key: "creating:1", name: "beta", askedAt: Date.now(), workspaceId: null, lines: [], failed: null }] }));
     expect(screen.getByText("beta")).toBeDefined();
     expect(screen.queryByText(/No workspaces yet/)).toBeNull();
   });
@@ -1039,12 +1047,12 @@ describe("new workspace dialog", () => {
     fireEvent.change(input, { target: { value: "beta" } });
     fireEvent.click(within(group).getByRole("radio", { name: /8\u00a0GB/ }));
     fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(api.createFromGoldenHead).toHaveBeenCalledWith("beta", { cpu: 2, memMb: 8192 }));
+    await waitFor(() => expect(api.createFromGoldenHead).toHaveBeenCalledWith("beta", { cpu: 2, memMb: 8192 }, "box"));
 
     const again = await openDialog();
     fireEvent.change(again.input, { target: { value: "gamma" } });
     fireEvent.keyDown(again.input, { key: "Enter" });
-    await waitFor(() => expect(api.createFromGoldenHead).toHaveBeenCalledWith("gamma", undefined));
+    await waitFor(() => expect(api.createFromGoldenHead).toHaveBeenCalledWith("gamma", undefined, "box"));
     vi.unstubAllGlobals();
   });
 
@@ -1058,7 +1066,7 @@ describe("new workspace dialog", () => {
     fireEvent.change(input, { target: { value: "beta" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(api.createFromGoldenHead).toHaveBeenCalledWith("beta", undefined);
+    expect(api.createFromGoldenHead).toHaveBeenCalledWith("beta", undefined, "box");
     const pending = await screen.findByText("beta");
     const row = pending.closest<HTMLElement>("[data-sidebar-row]")!;
     expect(row.getAttribute("aria-busy")).toBe("true");
@@ -1108,7 +1116,7 @@ describe("new workspace dialog", () => {
     act(() => useStore.getState().applyEvent({ type: "init.job", job: { id: "init_1", road: "manual", phase: "done", keys: { solari: true }, step: 0, stoppable: false, screens: [], rows: [], progress: { done: 2, total: 2 }, log: [] } }));
     await waitFor(() => expect(within(dialog).getByRole("button", { name: "Create" }).hasAttribute("disabled")).toBe(false));
     fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
-    await waitFor(() => expect(api.createFromGoldenHead).toHaveBeenCalledWith("beta", undefined));
+    await waitFor(() => expect(api.createFromGoldenHead).toHaveBeenCalledWith("beta", undefined, "box"));
   });
 
   it("a refusal keeps the row, names the refusal on it, and reopens no dialog", async () => {
@@ -1132,21 +1140,16 @@ describe("new workspace dialog", () => {
     expect(useStore.getState().creations.map(c => c.name)).toEqual(["gamma", "gamma"]);
   });
 
-  it("the second choice creates, then opens the import dialog for the workspace the runtime made", async () => {
-    vi.stubGlobal("PointerEvent", class extends MouseEvent {});
+  it("the Where control offers the rows this wsp holds, never this computer, and the create names the checked one", async () => {
     const api = fakeApi([API], [status(API)]);
-    api.planProject = vi.fn(async () => ({ source: "/private/var/proj", repo: true, files: 3, bytes: 900, secrets: [], excluded: [], skipped: [], agents: [] }));
-    api.importProject = vi.fn();
     api.createFromGoldenHead = vi.fn(async (name: string) => view("ws_beta", name));
     await mount(api, "api");
     const { dialog, input } = await openDialog();
+    const group = await within(dialog).findByRole("radiogroup", { name: "Where" });
+    expect(within(group).getAllByRole("radio").map(r => [r.textContent, r.getAttribute("aria-checked")])).toEqual([["ASCII", "true"]]);
     fireEvent.change(input, { target: { value: "beta" } });
-    fireEvent.click(within(dialog).getByRole("radio", { name: /^Import a project/ }));
     fireEvent.keyDown(input, { key: "Enter" });
-    const importDialog = await screen.findByRole("dialog", { name: "Import a project" });
-    expect(within(importDialog).getByText(importIntoLine("beta"))).toBeDefined();
-    expect(useStore.getState().selectedId).toBe("ws_beta");
-    vi.unstubAllGlobals();
+    await waitFor(() => expect(api.createFromGoldenHead).toHaveBeenCalledWith("beta", undefined, "box"));
   });
 
   it("Escape cancels without creating; a blank name cannot be submitted", async () => {
