@@ -621,7 +621,7 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
   );
   return {
     backend,
-    execStream: o => localExecStream({ root: backend.workFolder(), ...o }),
+    execStream: (o, waiting) => localExecStream({ root: backend.workFolder(), ...o }, waiting),
     home: id => agentHome(person, id, env),
     homeDir: home,
     env: () => ({ ...Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined)), HOME: person }),

@@ -3,7 +3,7 @@
 // scripted harness that answers every prompt, one whose turn never ends, and
 // the guest side of the exec stream over the stub backend.
 import { randomUUID } from "node:crypto";
-import type { AdapterEvent, SessionRenameWrite, TurnResult } from "@wsp/protocol";
+import type { AdapterEvent, PermissionAsk, SessionRenameWrite, TurnResult } from "@wsp/protocol";
 import { tarOf, type ExecResult } from "@wsp/engine";
 import type { HarnessAdapterFactory, HarnessStartOptions, ProjectBundler } from "@wsp/runtime";
 import type { CliIO } from "../src/cli.js";
@@ -202,7 +202,12 @@ export function heldAgent(steers: boolean) {
     t.onEvent({ type: "turn.delta", sessionId: t.sessionId, kind: "text", text });
     end(t, { status: "completed", text });
   };
-  return { adapter, starts, envs, steered, interrupted, release };
+  /** Raises a permission prompt on a running turn, as a CLI's control channel does, and leaves the turn stopped on it. */
+  const ask = (turn: number, raised: PermissionAsk): void => {
+    const t = turns[turn]!;
+    t.onEvent({ type: "permission.ask", sessionId: t.sessionId, ask: raised });
+  };
+  return { adapter, starts, envs, steered, interrupted, release, ask };
 }
 
 /** One scripted tool call: the name and input the harness reports for it, and what it answered when it answered

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A permission prompt a harness raises mid-turn, all the way through the
 // runtime: into the transcript as its own row with the options a person picks,
-// answered from the chat, denied by the runtime when nobody comes, cancelled
-// with the turn on a stop, the access a thread starts at on a machine the
+// answered from the chat, standing on the thread's row for as long as nobody
+// answers, cancelled with the turn on a stop, the access a thread starts at on a machine the
 // person keeps, and an access picked while a turn runs. The harness here is a
 // fake that raises the prompt on command, so nothing on a machine is needed
 // and the runtime's own bookkeeping is what is under test.
@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { PERMISSION_ALLOW, PERMISSION_DENY, PERMISSION_DENIED_LINE, permissionUnansweredLine, THIS_COMPUTER, type PermissionAsk, type PermissionOutcome, type SessionEvent } from "@wsp/protocol";
+import { PERMISSION_ALLOW, PERMISSION_DENY, PERMISSION_DENIED_LINE, askingLine, THIS_COMPUTER, threadWordOf, foldThreads, type PermissionAsk, type PermissionOutcome, type SessionEvent } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type LocalWiring, type Runtime, type SessionHandle } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -107,9 +107,8 @@ describe("a permission prompt relayed into the chat", () => {
   let localWiring: LocalWiring;
   let rt: Runtime;
   let wait: ReturnType<typeof fakeClock>;
-  const WAIT_MS = 60_000;
 
-  const runtime = (): Runtime => createRuntime({ backend: stubBackend(), store, adapters: { claude: askingAdapter(turns) }, local: localWiring, permissionWaitMs: WAIT_MS, clock: wait.clock });
+  const runtime = (): Runtime => createRuntime({ backend: stubBackend(), store, adapters: { claude: askingAdapter(turns) }, local: localWiring, clock: wait.clock });
 
   /** A started turn on the one local workspace, with the fake turn it opened. */
   const started = async (): Promise<{ handle: SessionHandle; turn: Turn; workspaceId: string }> => {
@@ -125,7 +124,6 @@ describe("a permission prompt relayed into the chat", () => {
     root = mkdtempSync(join(tmpdir(), "wsp-perm-"));
     store = memoryStore();
     turns = [];
-    // The prompt's wait runs on this clock: on a busy machine it must not fire between one step of a test and the next.
     wait = fakeClock();
     localWiring = {
       backend: new LocalBackend({ root }),
@@ -153,7 +151,6 @@ describe("a permission prompt relayed into the chat", () => {
       toolUseId: "toolu_1",
       detail: "out.txt",
       input: '{"file_path":"/root/out.txt","content":"hi"}',
-      waitMs: WAIT_MS,
       turnId: handle.turnId,
     });
     // The adapter hands the CLI's own mode slug; the words for it live in the harness table, beside the picker's.
@@ -200,31 +197,32 @@ describe("a permission prompt relayed into the chat", () => {
     await handle.finished;
   });
 
-  it("nobody answering it denies it after the wait, in words that say so rather than blaming a person", async () => {
+  it("stands open for as long as the turn lives, well past the five minutes a person may be away for", async () => {
     const { handle, turn, workspaceId } = await started();
     turn.raise();
     await vi.waitFor(async () => expect(prompts(await history(workspaceId))).toHaveLength(1));
-    // A hair under the wait the row is still open, and the harness is still blocked on it.
-    wait.advance(WAIT_MS - 1);
+    wait.advance(20 * 60_000);
+    await Promise.resolve();
     expect(closes(await history(workspaceId))).toHaveLength(0);
-    wait.advance(1);
-    await vi.waitFor(async () => expect(closes(await history(workspaceId))).toHaveLength(1));
-    expect(turn.answers).toEqual([{ askId: "ask_1", optionId: PERMISSION_DENY, outcome: "unanswered", denyMessage: permissionUnansweredLine(WAIT_MS) }]);
-    expect(closes(await history(workspaceId))).toMatchObject([{ askId: "ask_1", outcome: "unanswered", optionId: PERMISSION_DENY }]);
-    // The turn is still running: the wait denies the call, it does not end the thread.
+    expect(turn.answers).toEqual([]);
     expect(handle.view().status).toBe("running");
+    // The person comes back to the question they were asked and answers it.
+    expect(await rt.sessions.answer(handle.id, { askId: "ask_1", optionId: PERMISSION_ALLOW })).toEqual({ outcome: "answered" });
+    expect(turn.answers).toEqual([{ askId: "ask_1", optionId: PERMISSION_ALLOW, outcome: "allowed", denyMessage: PERMISSION_DENIED_LINE }]);
     turn.reply();
     await handle.finished;
   });
 
-  it("a prompt answered in time is never denied by the wait afterwards", async () => {
+  it("puts what it is asking on the thread's row while it stands and takes it off when it is answered", async () => {
     const { handle, turn, workspaceId } = await started();
+    const thread = async () => foldThreads(await rt.sessions.list(workspaceId))[0]!;
+    expect(threadWordOf(await thread())).toBe("Working");
     turn.raise();
-    await vi.waitFor(async () => expect(prompts(await history(workspaceId))).toHaveLength(1));
+    await vi.waitFor(async () => expect((await thread()).asking).toBe(askingLine(ASK)));
+    expect(threadWordOf(await thread())).toBe("Needs you");
     await rt.sessions.answer(handle.id, { askId: "ask_1", optionId: PERMISSION_ALLOW });
-    // The pick took the wait with it: the clock runs well past it and nothing denies the prompt a second time.
-    wait.advance(WAIT_MS * 4);
-    expect(turn.answers).toHaveLength(1);
+    await vi.waitFor(async () => expect((await thread()).asking).toBeUndefined());
+    expect(threadWordOf(await thread())).toBe("Working");
     expect(closes(await history(workspaceId))).toHaveLength(1);
     turn.reply();
     await handle.finished;
@@ -261,8 +259,8 @@ describe("a permission prompt relayed into the chat", () => {
     // A paused workspace refuses the verb in its own words, as a send gets, and the closed row offers nothing anyway.
     await expect(rt.sessions.answer(handle.id, { askId: "ask_1", optionId: PERMISSION_ALLOW })).rejects.toThrow("Workspace is paused; wake it to send");
 
-    // The wait went with it: nothing denies a prompt on a turn that is over, and no second row lands.
-    wait.advance(WAIT_MS * 4);
+    // Nothing is left waiting on a turn that is over, and no second row lands however long the clock runs.
+    wait.advance(20 * 60_000);
     expect(turn.answers).toHaveLength(0);
     expect(closes(await history(cloud.id))).toHaveLength(1);
   });
