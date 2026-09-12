@@ -13,7 +13,7 @@ export function storageLine(s: SnapshotStorage): string {
   return `${count} · ${size} · ${cost}`;
 }
 
-export function SnapshotStorageLine() {
+export function SnapshotStorageLine({ takes = 0 }: { takes?: number }) {
   const api = useStore(s => s.api);
   const [storage, setStorage] = useState<SnapshotStorage | null>(null);
 
@@ -30,7 +30,9 @@ export function SnapshotStorageLine() {
       current = false;
     };
   }, [api]);
-  useEffect(load, [load]);
+  // A take on this pane adds a snapshot the account is billed for, and the provider answers no event for it, so the
+  // count the pane took is what this line reads again on.
+  useEffect(load, [load, takes]);
   // A seal adds a snapshot; nothing else this client sees changes the account's storage.
   useProtocolEvents(
     useCallback(
