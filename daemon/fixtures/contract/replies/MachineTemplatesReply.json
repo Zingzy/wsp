@@ -1,0 +1,15 @@
+[
+  {
+    "templates": [
+      {
+        "id": "wsp/dev:template",
+        "name": "dev",
+        "status": "ready",
+        "createdAt": "2026-09-12T18:00:00.000Z"
+      }
+    ]
+  },
+  {
+    "templates": []
+  }
+]

@@ -388,9 +388,9 @@ async fn on_the_link_the_machine_ops_are_the_runtimes_to_answer_and_inbound_the_
     let mut events = Vec::new();
     let answer = ask(&mut ws, 31, "machine.list", &mut events).await;
     assert_eq!(answer, json!({"id": 31, "ok": true, "machines": []}));
-    // An op the runtime does not serve yet still reads the refusal that names it.
+    // The store's listings answer from the runtime too, empty on a fresh root.
     let later = ask(&mut ws, 32, "machine.listSnapshots", &mut events).await;
-    assert_eq!(later, json!({"id": 32, "ok": false, "error": "this computer's backend has no machine.listSnapshots"}));
+    assert_eq!(later, json!({"id": 32, "ok": true, "snapshots": []}));
     // The same op on the place's own door, from a client holding its token, is not the link's to answer.
     let (mut inbound, _) = tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{}/", d.port)).await.unwrap();
     inbound.send(Message::text(json!({"id": 1, "op": "auth", "token": "link-token"}).to_string())).await.unwrap();

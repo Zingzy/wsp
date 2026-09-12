@@ -532,11 +532,12 @@ describe("rows from the fixture wire", () => {
       ),
       "api",
     );
-    // The cost leads before the meter's first tick too: a paused row is never a blank line.
-    await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("$0.00 today · edge slow…"));
+    // Before the meter's first tick the line says nothing about spend: a $0.00 that becomes a real figure a
+    // second later told the person something that was never true.
+    await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("edge slow · naps in 14m"));
     expect(stateSlot(rowOf("api")).textContent).toBe("");
     expect(stateSlot(rowOf("web")).textContent).toBe("Paused");
-    expect(metaOf(rowOf("web")).textContent).toBe("$0.00 today");
+    expect(metaOf(rowOf("web")).textContent).toBe("");
     act(() =>
       useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 120_000, accruedUsd: 0.29, at: new Date(NOW).toISOString() }),
     );
@@ -591,7 +592,7 @@ describe("rows from the fixture wire", () => {
     expect(metaOf(rowOf("zingzy-mac")).textContent).toBe(FREE_WORD);
     expect(stateSlot(rowOf("zingzy-mac")).textContent).toBe("");
     // The cloud rows beside it: the spend, the countdown and the paused word all read in their own slots.
-    expect(metaOf(rowOf("api")).textContent).toBe("$0.00 today · naps in 14m");
+    expect(metaOf(rowOf("api")).textContent).toBe("naps in 14m");
     expect(stateSlot(rowOf("web")).textContent).toBe("Paused");
     for (const name of ["zingzy-mac", "api", "web", "old"]) {
       expect(machineOf(rowOf(name)).className).toContain("font-mono");
@@ -1507,7 +1508,7 @@ describe("Spaces mode", () => {
 
   it("the header's lines are the machine, what it cost today with its rate, and the nap countdown only when one is set", async () => {
     await mountSpaces(fakeApi(THREE, statuses()));
-    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.00 today · $0.110/hr", "naps in 15m"]));
+    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.110/hr", "naps in 15m"]));
     act(() =>
       useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 120_000, accruedUsd: 0.29, at: new Date(NOW).toISOString() }),
     );
@@ -1529,7 +1530,7 @@ describe("Spaces mode", () => {
     useStore.setState({ selectedId: "ws_b" });
     await mountSpaces(fakeApi(THREE, statuses()));
     await waitFor(() => expect(within(spaceHeader()!).getByText("web")).toBeDefined());
-    expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.00 today"]);
+    expect(headerLines()).toEqual(["2 vCPU · 4 GB"]);
     expect(spaceHeader()!.querySelector("[data-space-state]")!.textContent).toBe("Paused");
   });
 
@@ -1559,7 +1560,7 @@ describe("Spaces mode", () => {
     // header while one travels out, so the lines are read once the body asked for is there alone.
     fireEvent.click(icons()[0]!);
     await waitFor(() => expect(within(spaceHeader()!).getByText("api")).toBeDefined());
-    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.00 today · $0.110/hr"]));
+    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.110/hr"]));
   });
 
   it("a space asked for while the body is still travelling turns it around and never draws one workspace twice", async () => {
@@ -1651,14 +1652,14 @@ describe("Spaces mode", () => {
 
   it("before the first status the header carries no machine line: nothing draws a size it does not have", async () => {
     await mountSpaces(fakeApi([API], []));
-    await waitFor(() => expect(headerLines()).toEqual(["$0.00 today"]));
+    await waitFor(() => expect(headerLines()).toEqual([]));
   });
 
   it("the two lines the row gives a whole line to lead the header's, and the rest stay under them", async () => {
     await mountSpaces(fakeApi(THREE, statuses()));
     await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB"));
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: { ...status(API, { idleAt: iso(15.5 * 60_000) }), daemonNote: DAEMON_UPDATING } }));
-    await waitFor(() => expect(headerLines()).toEqual([DAEMON_UPDATING, "2 vCPU · 4 GB", "$0.00 today · $0.110/hr", "naps in 15m"]));
+    await waitFor(() => expect(headerLines()).toEqual([DAEMON_UPDATING, "2 vCPU · 4 GB", "$0.110/hr", "naps in 15m"]));
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { idleAt: iso(15.5 * 60_000) }) }));
     await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB"));
   });

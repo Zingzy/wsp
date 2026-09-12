@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! The workspace manager behind the machine ops on a place link. The layer store and the registry fetch hold the
 //! image; on Linux the bundle, the runtime, the freezer and the ops run workspaces from it through youki's library
-//! and answer every `machine.*` frame, and the net module gives each workspace its network and its published
-//! ports. What this slice does not serve yet, and every op on another platform, is answered with one refusal that
-//! names it.
+//! and answer every `machine.*` frame, the net module gives each workspace its network and its published ports,
+//! and the snapshot module saves a workspace's upper directory as a layer the store holds. Every op on another
+//! platform is answered with one refusal that names it.
 
 #[cfg(target_os = "linux")]
 pub mod bundle;
@@ -22,6 +22,8 @@ pub mod ops;
 pub mod profile;
 #[cfg(target_os = "linux")]
 pub mod runtime;
+#[cfg(target_os = "linux")]
+pub mod snapshot;
 pub mod store;
 
 use wsp_frames::{DaemonErrorResponse, RequestId};
