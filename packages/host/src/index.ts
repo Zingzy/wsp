@@ -10,6 +10,7 @@ export {
 } from "./server.js";
 export {
   cli,
+  devCheckoutState,
   goldenRecipe,
   loadKeys,
   localWiring,

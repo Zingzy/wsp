@@ -1084,7 +1084,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     cancel(`Nothing was booted. The rows and their sizes are listed in ${path}; shrink or remove the largest on this computer and run wsp init again. The recipe is kept.`, out);
     return { code: 1 };
   }
-  let recipe = goldenRecipeFor(bring, opts.agentKeys, { import: imp });
+  let recipe = goldenRecipeFor(bring, opts.agentKeys, { import: imp, source: smallRecipeNow() });
   // Beside a host already serving this state file, everything from here is that host's: it owns the state, the
   // provider and the machines, so this run ends at the confirm and the build goes through its init job. The
   // question is asked here because the money is asked for here; the recipe the hand-off builds is the one saved
@@ -1204,7 +1204,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     // so the next wsp init on the same answers attaches to it.
     bring = bringing();
     imp = importOf(bring);
-    recipe = goldenRecipeFor(bring, opts.agentKeys, { import: imp });
+    recipe = goldenRecipeFor(bring, opts.agentKeys, { import: imp, source: smallRecipeNow() });
     await rt.close();
     rt = logged(opts.runtime({ ...recipe, onExec: runLog.exec }));
     earlier = await earlierBuilder();

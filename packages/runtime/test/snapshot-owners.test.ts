@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { createRuntime } from "../src/runtime.js";
+import { copyKey, createRuntime } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { OWN_GRACE_MS } from "@wsp/engine";
 import { fakeClock } from "./fake-clock.js";
@@ -29,7 +29,7 @@ async function account(): Promise<{ backend: StubBackend; rt: ReturnType<typeof 
   const store = memoryStore();
   const backend = stubBackend();
   backend.capabilities.templates = true;
-  await store.put("goldens", "default", { head: 1, versions: [version(1, "tpl_wsp-h1-default-v1")] });
+  await store.put("goldens", copyKey("default", "default"), { head: 1, versions: [version(1, "tpl_wsp-h1-default-v1")] });
   backend.snapshots.push(
     { id: "snap_wsp-h1-default-v1", name: "wsp-h1-default-v1", sizeBytes: 12 * GB, createdAt: OLD },
     { id: "snap_orphan", name: "wsp-h1-default-v9", sizeBytes: 20 * GB, createdAt: OLD },

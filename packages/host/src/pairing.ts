@@ -9,7 +9,7 @@ import { authority, fmtDuration, isLoopback, isWildcard, LOOPBACK, relayUrlOf, u
 import type { HostReach } from "@wsp/runtime";
 import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
-import { aimName, aimedHost, type HostAim, type HostPick } from "./hosts.js";
+import { aimName, aimedHost, hostSideOnlyLine, type HostAim, type HostPick } from "./hosts.js";
 import { publicHostname } from "./relay-link.js";
 import { dialHost, table, type DialOpts, type HostClient } from "./verbs.js";
 
@@ -92,13 +92,6 @@ export function pairLines(code: string, expiresAt: number, now: number, addresse
 export function deviceLines(devices: readonly DeviceView[]): string[] {
   if (devices.length === 0) return ["No computer is paired with this host. Run wsp pair for a code."];
   return table([["DEVICE", "ID", "PAIRED", "LAST SEEN"], ...devices.map(d => [d.name, d.id, d.createdAt, d.lastSeenAt])]);
-}
-
-/** What the person reads when one of these two is aimed at a host on another computer: a code is handed out and
- * taken back at the host's own terminal and nowhere else, so there is no road from here to there. Every way a line
- * is aimed reads the same, whether a --host flag, WSP_HOST or the default alias wsp hosts marks did the aiming. */
-export function hostSideOnlyLine(word: string, where: string): string {
-  return `wsp ${word} runs on the computer the host runs on, and this line is aimed at ${where}; run it in a terminal over there. Handing out access is the one thing a paired computer cannot do from here.`;
 }
 
 /** The line a host that binds this computer alone answers wsp pair with: nothing outside can reach it, so a code

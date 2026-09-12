@@ -8,6 +8,7 @@
 // stream that never comes. Adding a kind is a row here and its two modules,
 // and the words table in the protocol says the same about it for the panes
 // that cannot ask a daemon at all.
+import { platform as osPlatform } from "node:os";
 import { NOT_ON_THIS_KIND, type WorkspaceKind } from "@wsp/protocol";
 import type { PortSnapshotSource } from "./ports.js";
 import { LocalProcSource } from "./proc-local.js";
@@ -26,6 +27,10 @@ export interface ReadingsOptions {
   passwdPath?: string;
   /** This machine's listening ports, which the local kind's inspect names a pid's ports from. */
   ports: PortSnapshotSource;
+  /** Which system this daemon runs on, for the one kind whose machines are not all one: a computer somebody joined
+   * is a Mac as often as it is a Linux box. Absent reads this process's own, which is what a daemon means and a
+   * test does not. */
+  platform?: string;
 }
 
 /** One kind's two modules. Each is built per daemon, since each holds the readings its own deltas run from. */
@@ -42,6 +47,17 @@ const procReadings: KindReadings = {
   processes: o => new ProcFsSource({ ...(o.procRoot !== undefined ? { procRoot: o.procRoot } : {}), ...(o.passwdPath !== undefined ? { passwdPath: o.passwdPath } : {}) }),
 };
 
+/** What a daemon reads on a computer that is not a Linux guest: its own host, with os, df and ps, because the /proc
+ * road reads nothing at all on a Mac and left both panes at pending. */
+const hostReadings: KindReadings = {
+  metrics: o => hostSysSource(o.workFolder),
+  processes: o => new LocalProcSource({ ports: o.ports }),
+};
+
+/** The one platform switch there is, inside the one kind whose machines differ: a computer the person joined runs
+ * whatever they own. Every other kind knows its own system from its row. */
+const byPlatform = (o: ReadingsOptions): KindReadings => ((o.platform ?? osPlatform()) === "linux" ? procReadings : hostReadings);
+
 /** The kinds a daemon serves these two readings for. A machine over ssh runs the same daemon a fork does, on the
  * same Linux, so it reads the same /proc: the difference between the two is how the host reaches the daemon, not
  * what the daemon can see of its own machine. A daemon on a machine that is not Linux has no /proc to read and
@@ -49,9 +65,10 @@ const procReadings: KindReadings = {
 export const KIND_READINGS: Partial<Record<WorkspaceKind, KindReadings>> = {
   cloud: procReadings,
   ssh: procReadings,
-  local: {
-    metrics: o => hostSysSource(o.workFolder),
-    processes: o => new LocalProcSource({ ports: o.ports }),
+  local: hostReadings,
+  place: {
+    metrics: o => byPlatform(o).metrics(o),
+    processes: o => byPlatform(o).processes(o),
   },
 };
 

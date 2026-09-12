@@ -9,7 +9,7 @@ import { join } from "node:path";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PAIR_CODE_REFUSAL } from "@wsp/protocol";
-import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
+import { copyKey, createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { connectCommand, disconnectCommand, hostsCommand, type ConnectDeps } from "../src/connect.js";
 import { cli, type CliIO } from "../src/cli.js";
 import { runningWsp } from "../src/mcp-install.js";
@@ -77,7 +77,7 @@ function fakeWebDir(): string {
 
 function testRuntime(): Runtime {
   const store = memoryStore();
-  void store.put("goldens", "default", GOLDEN);
+  void store.put("goldens", copyKey("default", "default"), GOLDEN);
   return createRuntime({ backend: stubBackend(), store, adapters: {} });
 }
 

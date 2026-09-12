@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import { THREAD_AGENTS } from "@wsp/catalog";
-import { HarnessCatalog, catalogSourceLine, effortsFor, keptAccess, listedPick, markedDefault, noModelsLine, startPicks, THIS_COMPUTER, type HarnessCatalogProbe } from "@wsp/protocol";
+import { HarnessCatalog, catalogSourceLine, effortsFor, keptAccess, listedPick, markedDefault, modelOf, noModelsLine, startPicks, THIS_COMPUTER, type HarnessCatalogProbe } from "@wsp/protocol";
 import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog } from "../src/harness-catalog.js";
 
 describe("harness catalogs", () => {
@@ -105,6 +105,9 @@ describe("the default effort of a pick", () => {
     const claude = harnessCatalog("claude")!;
     expect(markedDefault(effortsFor(claude, markedDefault(claude.models) ?? null))?.value).toBe("high");
     expect(markedDefault(effortsFor(claude, null))?.value).toBe("high");
+    // Every model this list carries is one a thread may be opened on, so each has the effort its turns run at.
+    for (const m of claude.models) expect(markedDefault(effortsFor(claude, m))?.value).toBe("high");
+    expect(modelOf(claude, "claude-fable-5-1")).toMatchObject({ label: "Fable 5.1", contextWindows: ["200k", "1m"] });
     // A model the binary routes to another provider names no efforts and no default of its own.
     expect(markedDefault(effortsFor(codex, { value: "anthropic/claude-sonnet-4.5", label: "anthropic/claude-sonnet-4.5" }))?.value).toBe("low");
     expect(shown(null)).toBe("low");
