@@ -436,6 +436,21 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(keyOnlyInThisShell({ env: {}, cwd: home, home: join(home, ".wsp") })).toBeUndefined();
   });
 
+  it("names the wired provider's own variable, and says nothing where that provider reads no key", () => {
+    const sources = (env: Record<string, string | undefined>) => ({ env, cwd: home, home: join(home, ".wsp") });
+    // The row the run is wired to is the one the line is about: a host being installed for Box with the Box key
+    // only in the installing shell loses that key, and the line names it rather than another provider's.
+    const box = { WSP_PROVIDER: "box", BOX_API_KEY: "box_fake_key" };
+    expect(keyOnlyInThisShell(sources(box), box)).toContain("BOX_API_KEY is only in this shell's environment");
+    expect(keyOnlyInThisShell(sources(box), box)).not.toContain("SOLARI");
+    // A Solari key in the same shell is not what this service would read, so it is not what it is refused over.
+    const boxWithSolari = { ...box, SOLARI_API_KEY: KEY };
+    expect(keyOnlyInThisShell(sources(boxWithSolari), boxWithSolari)).toContain("BOX_API_KEY");
+    // Containers read no key at all: nothing is lost by starting without this shell, so there is no line.
+    const docker = { WSP_PROVIDER: "docker", SOLARI_API_KEY: KEY };
+    expect(keyOnlyInThisShell(sources(docker), docker)).toBeUndefined();
+  });
+
   it("keeps a keyless host up: nothing asks for a key, and no line says one went missing", async () => {
     // What wsp init's local road leaves behind: no golden was sealed and this computer is the workspace.
     writeFileSync(statePath, JSON.stringify({ workspaces: { ws_1: LOCAL_RECORD } }));

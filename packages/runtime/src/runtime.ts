@@ -191,7 +191,7 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { GUEST_WSP_BIN, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadWord, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct } from "@wsp/protocol";
-import { mcpServersBlocked, actionRefusal, copyIsCurrent, forksNoMachines, kindWords, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState, placeAbsentLine, placeDaemonPaths, placeNoPaneRoadLine, placeWorkspaceGoneLine, workFolderIn } from "@wsp/protocol";
+import { mcpServersBlocked, actionRefusal, copyIsCurrent, forksNoMachines, kindWords, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState, placeAbsentLine, placeDaemonPaths, placeNoPaneRoadLine, placeWorkspaceGoneLine, workFolderIn } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
 import { PlaceBackend, parsePlaceMachineId, placeMachineId } from "@wsp/engine";
@@ -1060,6 +1060,11 @@ export interface Runtime {
     get(id: string, origin?: Caller): Promise<WorkspaceView>;
     /** Every workspace this host holds, less the ones the caller's origin may not drive. */
     list(origin?: Caller): Promise<WorkspaceView[]>;
+    /** The workspace a name or an id names, off the reading list() serves: every verb that takes a workspace from a
+     * person or an agent comes through here, so what the listing shows and what a verb accepts are one thing. A name
+     * nothing here carries is refused as absent, and one the caller may not drive with the sentence of the rule that
+     * hides it rather than as missing. */
+    resolve(ref: string, origin?: Caller): Promise<WorkspaceView>;
     nap(id: string, origin?: Caller): Promise<WorkspaceView>;
     wake(id: string, origin?: Caller): Promise<WorkspaceView>;
     /** Stops a wake that is asking the provider again on its own, and answers with the record it leaves behind. The
@@ -2075,6 +2080,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (line !== undefined) throw new Error(line);
   };
   const drivesId = (workspaceId: string, caller: Caller | undefined): boolean => refusalFor(live.get(workspaceId)?.record, caller) === undefined;
+  /** Every workspace this host holds, as any door serves them: one a create has not finished is not there yet. */
+  const held = (): LiveWorkspace[] => [...live.values()].filter(e => !e.creating);
+  /** The workspaces this caller is served, which is the one reading behind the listings and behind resolving a name.
+   * Both lists a person meets are built here, so neither can drop a workspace the other keeps and no verb denies a
+   * name the listing just showed. */
+  const listedFor = (caller: Caller | undefined): LiveWorkspace[] => held().filter(e => refusalFor(e.record, caller) === undefined);
   /** Recording a machine that already exists is this computer's own act, whatever the kind takes once it is
    * recorded: the address and the key a record stands on are the person's to name, so a request relayed from a
    * machine is refused before anything is dialled and again where the record is written. */
@@ -3958,7 +3969,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async list(origin) {
       await ready();
-      return [...live.values()].filter(e => !e.creating && refusalFor(e.record, origin) === undefined).map(e => view(e.record));
+      return listedFor(origin).map(e => view(e.record));
+    },
+
+    async resolve(ref, origin) {
+      await ready();
+      const rows = held();
+      // A name names one workspace at most: the create and the rename both refuse a name another already holds.
+      const entry = rows.find(e => e.record.id === ref) ?? rows.find(e => e.record.name === ref);
+      if (entry === undefined) throw new Error(noWorkspaceRefusal(ref));
+      refuseRelayed(entry.record, origin);
+      return view(entry.record);
     },
 
     async nap(id, origin) {
@@ -6521,7 +6542,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     store,
     records: async () => {
       await ready();
-      return [...live.values()].filter(e => !e.creating).map(e => ({
+      return held().map(e => ({
         ...view(e.record),
         size: e.record.size,
         // The rate follows the machine's kind: a local workspace's backend prices it at zero, so no cost line rides its row.
@@ -6647,7 +6668,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     preferences,
     status: {
       ...status,
-      list: async (o, origin) => (await status.list(o)).filter(row => drivesId(row.id, origin)),
+      // Which workspaces this caller is served is decided here, after the probes, off the same reading the other
+      // listing and every verb take: a record dropped while the probes ran leaves both lists at once, so nothing a
+      // person is shown is denied by the next line they type.
+      list: async (o, origin) => {
+        const rows = await status.list(o);
+        const shown = new Set(listedFor(origin).map(e => e.record.id));
+        return rows.filter(row => shown.has(row.id));
+      },
       // A cost read answers for a workspace this host no longer holds, so the origin rule is read off the record when
       // there is one rather than through entryOf, which refuses an id it does not know.
       history: async (workspaceId, origin) => {
