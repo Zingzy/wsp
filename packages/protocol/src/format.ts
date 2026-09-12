@@ -2762,6 +2762,9 @@ export function placeWorkspacesCell(view: PlaceView): string {
   return view.docker === true ? `${count}` : `${count} · agents only`;
 }
 
+/** The one line that takes wsp off a computer it is typed on. */
+export const PLACE_LEAVE_LINE = "wsp leave";
+
 /** The words of the Settings section for where a person's agents run, and of the sheet that adds a computer. */
 export const PLACES_WORDS = {
   section: "Where agents run",
@@ -2793,6 +2796,15 @@ export const PLACES_WORDS = {
     close: "Close",
     /** Said once, the first time the door binds: a Mac with its firewall on asks whether wsp may accept connections. */
     firewall: "macOS may ask once whether wsp can accept connections; allow it",
+  },
+  remove: {
+    /** The line run on the computer itself, which is the one road that also takes the agent's service: the sweep
+     * the host asks for over the link leaves the unit standing, since its name is the host's rule and not the
+     * agent's. */
+    leaveLine: PLACE_LEAVE_LINE,
+    /** What that line takes and what it leaves, off the one list a sweep reads (placeOwnedPaths), which names the
+     * files under wsp's folder and never the folder itself, and the unit the manager holds the agent up with. */
+    leaveTakes: "It takes off the agent's service, wsp's own files under that login's home, and the browser shim beside it. Your work folder stays, and so do any copies of your image in Docker there.",
   },
 } as const;
 
