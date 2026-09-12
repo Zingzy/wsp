@@ -567,13 +567,25 @@ export function sealedImageLine(image: SealedImage): string {
   return [`${image.name} v${image.version}`, image.hash, held, ...size, `sealed on ${image.sealedFrom}`].join(" · ");
 }
 
+/** The two words a copy's standing is said in, either of which fits the slot the longer one needs. */
+export const COPY_CURRENT = "current";
+export const COPY_STALE = "stale";
+
+/** How a copy stands against the record, as the one word a person reads: current when it was built from the record
+ * as it is now, stale when it was built from an older one. Nothing at all where the record holds no vault: such a
+ * record was read back off its own copies rather than written at a seal, so it has nothing to judge them by. The
+ * one home for the word and for that gate; `wsp image` and Settings > Image both read it. */
+export function copyStanding(image: Pick<SealedImage, "hash" | "vault">, copy: Pick<SealedImageCopy, "hash">): string | undefined {
+  if (image.vault === undefined) return undefined;
+  return copyIsCurrent(image, copy) ? COPY_CURRENT : COPY_STALE;
+}
+
 /** One place's copy in one line: the place, the version it holds, its size where the provider reports one, and
- * whether it stands on the record as it is now. A record with no vault was read back off its own copies rather
- * than written at a seal, so it has nothing to judge them by and the word is left off. */
+ * whether it stands on the record as it is now. */
 export function sealedCopyLine(image: SealedImage, copy: SealedImageCopy): string {
   const size = copy.sizeBytes === undefined ? [] : [fmtBytes(copy.sizeBytes)];
-  const standing = image.vault === undefined ? [] : [copyIsCurrent(image, copy) ? "current" : "stale"];
-  return [copy.place, `v${copy.version}`, ...size, ...standing].join(" · ");
+  const standing = copyStanding(image, copy);
+  return [copy.place, `v${copy.version}`, ...size, ...(standing === undefined ? [] : [standing])].join(" · ");
 }
 
 /** One project image under the image, as a line: the workspace it was taken off, the projects on that disk and when. */

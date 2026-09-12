@@ -29,7 +29,6 @@ import {
   type InitRoad,
   PlaceDoorView,
   PlaceView,
-  SealedImageView,
   type InitScreenId,
   type ImageAttachment,
   TerminalConfig,
@@ -42,6 +41,7 @@ import {
   ProjectGolden,
   ProjectImportResult,
   ProjectPlan,
+  SealedImageView,
   type SessionEvent,
   type SessionView,
   type SnapshotLineage,
@@ -368,9 +368,6 @@ export interface Api {
   /** Takes a computer or a provider back out: the host sweeps wsp off it over its link where it is connected, drops
    * the workspaces standing on it and the record. */
   removePlace?(placeId: string): Promise<PlaceRemoved>;
-  /** This host's image as it stands and every built copy of it, by the computer or provider each sits on. The
-   * Remove dialog reads a copy's size to say what comes off that computer. */
-  image?(): Promise<SealedImageView>;
   /** The ssh road of Add a computer: the host logs in as the person's terminal would, installs wsp on the box and
    * waits for the box to dial back, calling `onStage` with each stage as the installer reaches it. Resolves with the
    * computer once it has joined. This is the one seam the sheet's ssh road calls; no op on the wire carries the
@@ -493,6 +490,10 @@ export interface Api {
   snapshotWorkspace?(id: string): Promise<ProjectGolden>;
   /** Every project golden the runtime took; the Lineage section lists each under the version it stands on. */
   listProjectGoldens?(): Promise<ProjectGolden[]>;
+  /** The image this host owns and the copy each place holds of it, as Settings > Image reads them and as the
+   * Remove dialog reads a copy's size to say what comes off that computer. Optional so a fixture that shows no
+   * image section need not fake it. */
+  image?(name?: string): Promise<SealedImageView>;
 }
 
 /** The page's one transport to a daemon. The route the machine answers on and the token that opens it never leave
@@ -652,8 +653,6 @@ export function makeApi(c: ProtocolClient): Api {
     initSignInCode: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.signInCode", { ...o })).job),
     initCancel: async () => InitJob.parse((await c.request<{ job?: unknown }>("init.cancel")).job),
     removePlace: async placeId => await c.request<PlaceRemoved>("places.remove", { placeId }),
-    // Parsed, not trusted: a sentence about what leaves a computer is built from these bytes.
-    image: async () => SealedImageView.parse((await c.request<{ view?: unknown }>("image.get")).view),
     subscribe: fn => c.subscribe(fn),
     getGolden: async (name = "default") => (await c.request<{ manifest?: GoldenManifest }>("golden.get", { name })).manifest,
     listSnapshots: async name =>
@@ -664,6 +663,8 @@ export function makeApi(c: ProtocolClient): Api {
     // Parsed, not trusted: the lineage renders and forks only snapshots the wire type vouches for.
     snapshotWorkspace: async id => ProjectGolden.parse((await c.request<{ projectGolden?: unknown }>("workspaces.snapshot", { workspaceId: id })).projectGolden),
     listProjectGoldens: async () => ProjectGolden.array().parse((await c.request<{ projectGoldens?: unknown }>("projectGoldens.list")).projectGoldens),
+    // Parsed, not trusted: the section draws a record and its copies only as the wire type vouches for them.
+    image: async name => SealedImageView.parse((await c.request<{ view?: unknown }>("image.get", name !== undefined ? { name } : {})).view),
     rollbackSnapshot: async (version, name) => {
       const { lineage, existingWorkspaces } = await c.request<SnapshotRollbackResult>("snapshots.rollback", {
         version,

@@ -1,0 +1,12 @@
+[
+  {
+    "id": 1,
+    "op": "fs.read"
+  },
+  {
+    "id": 1,
+    "op": "fs.read",
+    "path": "a",
+    "encoding": "latin1"
+  }
+]

@@ -7,7 +7,10 @@
 // The job, the step and the step's unsent draft live on the host: shutting the
 // sheet changes nothing, and it reopens on the step it was shut at with the
 // answers and what was ticked or typed since in place, until Start over or the
-// build.
+// build. The sheet's title is the caller's: the sidebar road names these
+// screens to a reader and nothing else, so its title stands for screen readers
+// alone, and a caller that names its own draws it in the sheet's corner, where
+// Settings says which of its rows this sheet was opened from.
 import { useCallback, useEffect, useState } from "react";
 import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, INIT_BUILD_STEP, KEY_REFUSED, KEY_UNCHECKED, initAgentStep, initDiskOverLine, initImageBytes, initJobOver, initStepCounter, wspToolsRowId, type InitDraft, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { Dialog, DialogSheet, DialogTitle } from "../components/ui/dialog.js";
@@ -42,7 +45,7 @@ const shownOf = (job: InitJob): InitScreen[] => job.screens.filter(s => s.id !==
 /** What the host kept of a step the person left mid-answer, if anything. */
 const keptAt = (job: InitJob, at: string): InitDraft | undefined => job.drafts?.find(d => d.at === at);
 
-export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
+export function CloudSetupDialog({ title, onClose }: { title?: string; onClose: () => void }) {
   const api = useStore(s => s.api);
   const job = useStore(s => s.initJob);
   const select = useStore(s => s.select);
@@ -261,7 +264,7 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
       }}
     >
       <DialogSheet data-cloud-setup-dialog initialFocus={false}>
-        <DialogTitle className="sr-only">{CLOUD_SETUP_WORDS.title}</DialogTitle>
+        <DialogTitle className={title === undefined ? "sr-only" : "absolute top-5 left-6 font-heading font-semibold text-xl leading-none"}>{title ?? CLOUD_SETUP_WORDS.title}</DialogTitle>
         {body}
       </DialogSheet>
     </Dialog>

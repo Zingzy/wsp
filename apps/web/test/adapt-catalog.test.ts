@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_AGENT } from "@wsp/catalog";
 import { DEFAULT_HARNESS } from "../src/components/chat/ComposerOptionPickers.js";
-import { HARNESS_CLIENTS, catalogFor, catalogFromHarness, deriveSession, harnessClient } from "../src/adapt/index.js";
+import { HARNESS_CLIENTS, catalogFor, catalogFromHarness, composerPlaceholder, deriveSession, harnessClient, offersSlashCommands } from "../src/adapt/index.js";
 import { CHAT_HARNESS, CHAT_STREAM } from "./fixtures/chat-stream.js";
 
 describe("the client's harness registry", () => {
@@ -47,5 +47,22 @@ describe("catalogFromHarness", () => {
     expect(catalogFromHarness({ id: "claude", harness: { permissionMode: "plan" } }).slashCommands).toBe(seed);
     expect(catalogFromHarness({ id: "codex", harness: null })).toEqual({ harness: "codex", slashCommands: [] });
     expect(catalogFromHarness({ id: "codex", harness: { slashCommands: ["diff"] } }).slashCommands.map(c => c.name)).toEqual(["diff"]);
+  });
+});
+
+describe("the composer's placeholder", () => {
+  it("names the slash menu only once a session announced a command the menu can offer", () => {
+    const announced = catalogFromHarness({ id: "claude", harness: CHAT_HARNESS });
+    expect(offersSlashCommands(announced)).toBe(true);
+    expect(composerPlaceholder(announced)).toBe("Ask anything, or / for commands");
+
+    const fresh = catalogFromHarness({ id: "claude", harness: null });
+    expect(offersSlashCommands(fresh)).toBe(false);
+    expect(composerPlaceholder(fresh)).toBe("Ask anything");
+
+    // A CLI that announced only the commands its own terminal runs leaves the menu with nothing, so the words go too.
+    const screenOnly = catalogFromHarness({ id: "claude", harness: { slashCommands: ["login"] }, screen: [{ name: "login", control: "sign-in" }] });
+    expect(offersSlashCommands(screenOnly)).toBe(false);
+    expect(composerPlaceholder(screenOnly)).toBe("Ask anything");
   });
 });

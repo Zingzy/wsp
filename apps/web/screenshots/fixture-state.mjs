@@ -202,12 +202,13 @@ const MIGRATION = {
 
 /** One store as the JSON file holds it: one object per collection, keyed the way the runtime keys it. Every
  * fixture below builds one. */
-const store = ({ workspaces, sessions = {}, transcripts = {}, goldens, devices, places }) => ({
+const store = ({ workspaces, sessions = {}, transcripts = {}, goldens, devices, images, places }) => ({
   workspaces: Object.fromEntries(workspaces.map(w => [w.id, w])),
   sessions,
   transcripts,
   ...(goldens !== undefined ? { goldens } : {}),
   ...(devices !== undefined ? { devices } : {}),
+  ...(images !== undefined ? { images } : {}),
   ...(places === undefined
     ? {}
     : {
@@ -362,6 +363,68 @@ const bothProviders = () =>
     goldens: sealed(),
   });
 
+/** The hash the record and every copy built from it carry; a copy built from an older record carries the other one,
+ * which is what the copies table reads as stale. */
+const IMAGE_HASH = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+const OLDER_HASH = "da39a3ee5e6b4b0d3255bfef95601890afd80709da39a3ee5e6b4b0d3255bfef";
+
+/** One row of a recipe as the record keeps it; the Image row counts them by kind. */
+const recipeRow = (id, kind) => ({ id, kind, on: true, source: { kind: "popular", sessions: 0, images: 0 } });
+
+/** The image record a host owns once wsp init has sealed one: what Settings > Image reads its facts line and its
+ * Built row off. The vault is what says the sign-ins are held, so its absence would take the standing word off
+ * every copy. */
+const imageRecord = () => ({
+  default: {
+    name: "default",
+    version: 1,
+    hash: IMAGE_HASH,
+    recipeHash: "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+    recipe: {
+      version: 1,
+      at: new Date(ago(150)).toISOString(),
+      histories: [],
+      rows: [
+        ...["agents/claude", "agents/codex"].map(id => recipeRow(id, "agent")),
+        ...["ripgrep", "fd", "jq", "gh", "fzf", "bat", "delta", "httpie", "node", "pnpm", "uv", "tmux", "neovim"].map(name => recipeRow(`tools/brew/${name}`, "tool")),
+      ],
+    },
+    logins: [
+      { name: "claude", state: "copied" },
+      { name: "gh", state: "signed-in" },
+      { name: "npm", state: "copied" },
+      { name: "aws", state: "skipped" },
+    ],
+    sealedAt: new Date(ago(150)).toISOString(),
+    sealedFrom: "this Mac",
+    vault: { sha256: "1c8e5f2a9b0d4e6f7a8b9c0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f60718293a4b", bytes: 2_400_000, paths: 9, takenAt: new Date(ago(150)).toISOString() },
+    usedBytes: Math.round(4.2 * 1024 ** 3),
+  },
+});
+
+/** One place's built copy of the image, as that place's own manifest keeps it: the key names the place, the head
+ * version's imageHash names the record it was built from. */
+const copyAt = (place, minutes, extra = {}) => [
+  `${place}/default`,
+  {
+    head: 1,
+    versions: [
+      {
+        version: 1,
+        snapshotId: `imgsnap_${place}`,
+        baseTemplate: "base",
+        setupSha: "0000000000000000000000000000000000000000000000000000000000000003",
+        createdAt: new Date(ago(minutes)).toISOString(),
+        smoke: { cmd: "claude --version", exitCode: 0 },
+        size: { cpu: 2, memMb: 4096 },
+        imageHash: IMAGE_HASH,
+        usedBytes: Math.round(4.2 * 1024 ** 3),
+        ...extra,
+      },
+    ],
+  },
+];
+
 /** A person who drives agents with agents: this computer with spawning on, three forks a root thread made, and a
  * thread on each hanging under that root. */
 const orchestrator = () => {
@@ -383,6 +446,20 @@ const orchestrator = () => {
   });
 };
 
+/** A person whose image is sealed and built in two places: what Settings > Image reads when there is a record to
+ * read. One copy stands on the record as it is now and one was built from the record before it, so the table shows
+ * both standing words. */
+const imageBuilt = () =>
+  store({
+    workspaces: [
+      workspace("ws_api", "api", { projects: [project("spoo", 48_200_000, 60 * 20)] }),
+      workspace("ws_web", "web", { projects: [project("landing", 9_400_000, 60 * 9)] }),
+    ],
+    ...API_THREADS(),
+    goldens: Object.fromEntries([copyAt("hetzner", 90), copyAt("ascii", 60, { imageHash: OLDER_HASH })]),
+    images: imageRecord(),
+  });
+
 /** Every setup a lab can serve, by the word `--fixture` takes. One row per kind of person: adding one is a row
  * here and its builder above. */
 const FIXTURES = {
@@ -395,6 +472,7 @@ const FIXTURES = {
   "both-providers": bothProviders,
   "no-sign-in": thisComputer,
   orchestrator,
+  "image-built": imageBuilt,
 };
 
 export const FIXTURE_NAMES = Object.keys(FIXTURES);

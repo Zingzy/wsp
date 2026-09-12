@@ -1,8 +1,12 @@
 {
   "widths": [
     1440,
+    1280,
     390
   ],
+  "heights": {
+    "1280": 800
+  },
   "surfaces": [
     {
       "name": "sidebar",
@@ -96,10 +100,45 @@
         "390:key:Escape",
         "390:sidebar=trigger",
         "k=settings-row",
-        "390:key:Escape",
         "k=add-computer-button"
       ],
       "wait": "k=add-computer",
+      "settleMs": 700
+    },
+    {
+      "name": "settings-image-fresh",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row"
+      ],
+      "wait": "k=image-facts",
+      "settleMs": 700
+    },
+    {
+      "name": "settings-image-built",
+      "at": "/",
+      "fixture": "image-built",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row"
+      ],
+      "wait": "k=image-copies",
+      "settleMs": 700
+    },
+    {
+      "name": "settings-image-sheet",
+      "at": "/",
+      "fixture": "image-built",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "k=edit-image"
+      ],
+      "wait": "k=choice",
       "settleMs": 700
     },
     {

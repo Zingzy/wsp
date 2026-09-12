@@ -1,0 +1,58 @@
+[
+  {
+    "id": 2,
+    "op": "place.prove",
+    "signature": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC==",
+    "report": {
+      "name": "studio",
+      "platform": "darwin",
+      "arch": "arm64",
+      "os": "macOS 15.6",
+      "shape": {
+        "cpu": 8,
+        "memMb": 16384
+      },
+      "diskFreeBytes": 123456789,
+      "login": {
+        "HOME": "/Users/me",
+        "USER": "me",
+        "PATH": "/usr/bin"
+      },
+      "docker": true,
+      "daemonVersion": 17,
+      "daemonPort": 51234,
+      "wsp": [
+        "node",
+        "/Users/me/wsp/dist/bin.js"
+      ],
+      "dialed": "http://192.168.1.20:7080",
+      "agents": [
+        "one",
+        "two"
+      ]
+    }
+  },
+  {
+    "id": 2,
+    "op": "place.prove",
+    "signature": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC==",
+    "report": {
+      "name": "box",
+      "platform": "linux",
+      "arch": "x86_64",
+      "os": "Ubuntu 24.04",
+      "shape": {
+        "cpu": 4,
+        "memMb": 8192
+      },
+      "login": {},
+      "docker": false,
+      "daemonVersion": 17,
+      "wsp": [
+        "wsp"
+      ],
+      "dialed": "https://relay.example",
+      "agents": []
+    }
+  }
+]
