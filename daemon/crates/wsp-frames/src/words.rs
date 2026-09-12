@@ -15,6 +15,7 @@ pub const FAILED_TO_START: &str = "wsp-daemon failed to start";
 
 pub const PLACE_LEAVE_ROAD_REFUSAL: &str =
     "place.leave is answered only on the link this computer opened to its host; run wsp leave here to take this computer out of a wsp";
+/// What an inbound socket gets for the leave op and the machine ops: they are the link's alone.
 pub const NOT_ON_THIS_ROAD: &str = "not on this road";
 pub const NOT_ON_THIS_KIND: &str = "not on this kind";
 pub const HOST_REFUSED_PLACE: &str = "the host refused this place";
