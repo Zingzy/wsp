@@ -143,7 +143,7 @@ describe("the wsp skill", () => {
     expect(setup).toContain("wsp threads: no wsp host is serving <path>; run wsp up first");
     expect(setup).toContain("app         http://127.0.0.1:4400");
     expect(setup).toContain(thisComputerLine("<name>", "ws_..."));
-    expect(setup).toContain("Solari API key: no terminal to ask on; set it in the environment, ./.env, or ~/.wsp/.env.");
+    expect(setup).toContain("Solari API key: no terminal to ask on; set SOLARI_API_KEY in the environment, ./.env, or ~/.wsp/.env.");
     expect(setup).toContain("wsp init --recipe ~/.wsp/recipe.json");
     expect(setup).toContain("--non-interactive --json > /tmp/wsp-init.jsonl");
     expect(setup).toContain('{"event":"sign-in","tool":"gh","label":"GitHub CLI login","browserUrl":"https://github.com/login/device","code":"8F4A-C21B","nextCommand":"open \'https://github.com/login/device\'","waitSeconds":960}');
