@@ -31,6 +31,62 @@
       "steps": ["390:key:Escape", "390:sidebar=trigger", "cloud-setup-row"],
       "wait": "k=choice",
       "settleMs": 700
+    },
+    {
+      "name": "settings-where-agents-run",
+      "at": "/",
+      "steps": ["390:key:Escape", "key:Meta+Comma"],
+      "wait": "k=add-computer",
+      "settleMs": 700
+    },
+    {
+      "name": "settings-computer-open",
+      "at": "/",
+      "steps": ["390:key:Escape", "key:Meta+Comma", "place=p_hetzner"],
+      "wait": "k=place-detail",
+      "settleMs": 700
+    },
+    {
+      "name": "add-computer-app",
+      "at": "/",
+      "steps": ["390:key:Escape", "key:Meta+Comma", "k=add-computer"],
+      "wait": "k=join-code",
+      "settleMs": 700
+    },
+    {
+      "name": "add-computer-no-app",
+      "at": "/",
+      "steps": ["390:key:Escape", "key:Meta+Comma", "k=add-computer", "k=no-app"],
+      "wait": "k=join-line",
+      "settleMs": 700
+    },
+    {
+      "name": "add-computer-ssh",
+      "at": "/",
+      "steps": ["390:key:Escape", "key:Meta+Comma", "k=add-computer", "segment=ssh"],
+      "wait": "k=login-field",
+      "settleMs": 700
+    },
+    {
+      "name": "connect-provider-pick",
+      "at": "/",
+      "steps": ["390:key:Escape", "key:Meta+Comma", "k=connect-provider"],
+      "wait": "provider=box",
+      "settleMs": 700
+    },
+    {
+      "name": "connect-provider-key",
+      "at": "/",
+      "steps": ["390:key:Escape", "key:Meta+Comma", "k=connect-provider", "k=continue"],
+      "wait": "k=where",
+      "settleMs": 700
+    },
+    {
+      "name": "remove-computer",
+      "at": "/",
+      "steps": ["390:key:Escape", "key:Meta+Comma", "place=p_hetzner", "k=remove"],
+      "wait": "k=remove-sentence",
+      "settleMs": 700
     }
   ]
 }

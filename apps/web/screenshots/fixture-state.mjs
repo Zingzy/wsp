@@ -151,6 +151,47 @@ const device = (id, name, minutes) => ({
   lastSeenAt: new Date(ago(minutes)).toISOString(),
 });
 
+/** A computer somebody joined to this host, as the places collection keeps one: the key is the whole of its
+ * identity, so a fixture carries a key of nothing, and the report is what it last said about itself. Nothing here
+ * is linked: a link is a live socket, so every joined computer a fixture serves reads as not answering. */
+const place = (id, name, minutes, report) => ({
+  id,
+  name,
+  publicKey: `no-key-reads-as-this-${id}`,
+  joinedAt: new Date(ago(60 * 30)).toISOString(),
+  lastSeenAt: new Date(ago(minutes)).toISOString(),
+  report: {
+    name,
+    arch: "arm64",
+    daemonVersion: 1,
+    login: { HOME: "/home/dev", USER: "dev", PATH: "/usr/local/bin:/usr/bin:/bin" },
+    wsp: ["/usr/local/bin/wsp"],
+    dialed: "http://192.168.1.20:7788",
+    ...report,
+  },
+  workspaceId: `ws_${id}`,
+});
+
+/** A workspace standing on a joined computer: the machine id the engine gives one, so the settings table counts it
+ * against that computer's row. */
+const onPlace = (id, name, placeId, size, extra = {}) => ({
+  id,
+  name,
+  machineId: `place:${placeId}`,
+  phase: "running",
+  kind: "place",
+  golden: "",
+  createdAt: new Date(ago(60 * 20)).toISOString(),
+  home: "/home/dev",
+  folder: "/home/dev",
+  // Every path a turn on a joined computer runs under is built from the login it reported, so a record without
+  // one is a record no join wrote and the runtime refuses it at startup.
+  login: { HOME: "/home/dev", USER: "dev", PATH: "/usr/local/bin:/usr/bin:/bin" },
+  size,
+  shape: size,
+  ...extra,
+});
+
 /** A thread an agent inside another thread opened: the same shape as a person's, with the tree it hangs in. */
 const spawned = (id, of, parent, root) => ({ ...of, id, parent, root, startedBy: "agent" });
 
@@ -166,12 +207,19 @@ const MIGRATE = {
 
 /** One store as the JSON file holds it: one object per collection, keyed the way the runtime keys it. Every
  * fixture below builds one. */
-const store = ({ workspaces, sessions = {}, transcripts = {}, goldens, devices }) => ({
+const store = ({ workspaces, sessions = {}, transcripts = {}, goldens, devices, places }) => ({
   workspaces: Object.fromEntries(workspaces.map(w => [w.id, w])),
   sessions,
   transcripts,
   ...(goldens !== undefined ? { goldens } : {}),
   ...(devices !== undefined ? { devices } : {}),
+  ...(places === undefined
+    ? {}
+    : {
+        places: Object.fromEntries(places.map(p => [p.id, p])),
+        // The last computer added is the one a verb means when nobody says; the settings row wears the word.
+        "place-default": { default: { placeId: places[0].id } },
+      }),
 });
 
 /** The threads one workspace holds, oldest first, with the transcript each replays. The order is the order the
@@ -192,6 +240,13 @@ const merge = (...parts) => ({
 
 const API_THREADS = () => threadsOn("ws_api", [[CHART, 300], [REDIRECT, 45]]);
 
+/** The two computers the settings table's own rows are read off: a Linux box of the person's running Docker, and
+ * an old Mac that runs their agents and nothing else. */
+const JOINED = () => [
+  place("p_hetzner", "hetzner", 1, { platform: "linux", os: "Ubuntu 24.04", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, docker: true }),
+  place("p_laptop", "old-macbook", 120, { platform: "darwin", os: "macOS 15.6", shape: { cpu: 4, memMb: 8192 }, diskFreeBytes: 91 * 1024 ** 3, docker: false }),
+];
+
 /** This computer alone: three workspaces of the local kind, no image sealed, so the cloud setup button stands in
  * the sidebar's foot. */
 const macOnly = () =>
@@ -200,8 +255,10 @@ const macOnly = () =>
       workspace("ws_api", "api", { projects: [project("spoo", 48_200_000, 60 * 20), project("wsp", 133_000_000, 60 * 5)] }),
       workspace("ws_web", "web", { projects: [project("landing", 9_400_000, 60 * 9)] }),
       workspace("ws_notes", "notes"),
+      onPlace("ws_p_hetzner", "spoo-fix", "p_hetzner", { cpu: 2, memMb: 4096 }),
     ],
-    ...API_THREADS(),
+    ...merge(API_THREADS(), threadsOn("ws_p_hetzner", [[CHART, 200], [REDIRECT, 30]])),
+    places: JOINED(),
   });
 
 /** This computer and an old laptop that redeemed a pairing code: a second workspace of the local kind, its own

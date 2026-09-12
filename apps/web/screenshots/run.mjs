@@ -8,10 +8,14 @@
 // current-home pointer out of it.
 //
 // Themes are emulated as the computer's colour scheme rather than written onto
-// the root: with labs off the app's theme preference is `system`, so the scheme
-// is the only thing that flips the `dark` class the stylesheet reads. Every shot
-// checks the class once the app is up, so a theme that stopped following the
-// scheme fails the run instead of shipping two identical files.
+// the root: the preference record a fixture serves names no side, so `system`
+// stands and the scheme is the only thing that flips the `dark` class the
+// stylesheet reads. Every shot checks the class once the app is up, so a theme
+// that stopped following the scheme fails the run instead of shipping two
+// identical files.
+//
+// The host is served with labs on, since the settings page is a labs surface
+// and a run photographing it would otherwise open a window with no road to it.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -99,7 +103,7 @@ async function main() {
   const written = [];
   const failures = [];
   try {
-    host = await startHost({ home, state: fixtureState(), port: await freePort(), wsPort: await freePort() });
+    host = await startHost({ home, state: fixtureState(), port: await freePort(), wsPort: await freePort(), labs: true });
     browser = await chromium.launch({ args: BROWSER_ARGS });
     for (const shot of shotPlan(list)) {
       let context;

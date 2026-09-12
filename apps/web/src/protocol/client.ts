@@ -28,6 +28,7 @@ import {
   type ImageAttachment,
   TerminalConfig,
   type TerminalScheme,
+  PlaceView,
   type PortProbeView,
   type PortReachView,
   Preferences,
@@ -257,6 +258,31 @@ export class ProtocolClient {
   #failAll(e: Error): void { for (const p of this.#pending.values()) p.reject(e); this.#pending.clear(); }
 }
 
+/** What a remove took: whether a computer of that id was there, what the sweep took off it, what its workspaces
+ * said as they went, and the one line for a computer that was not connected to sweep. */
+export interface PlaceRemoved {
+  removed: boolean;
+  swept: string[];
+  dropped: string[];
+  note?: string;
+}
+
+/** The ssh road of Add a computer: the login as a person's terminal would take it, and a key file where ssh asked
+ * for one. The only road on which the app ever opens a file picker. */
+export interface SshLogin {
+  address: string;
+  port?: number;
+  keyFile?: string;
+}
+
+/** One line of the installer's progress as the sheet draws it: the words, whether it is running, and the figure at
+ * its right end where the stage carries one. */
+export interface InstallStage {
+  word: string;
+  state: "running" | "done";
+  fact?: string;
+}
+
 export interface Api {
   listWorkspaces(): Promise<WorkspaceView[]>;
   getWorkspace(id: string): Promise<WorkspaceView>;
@@ -297,6 +323,19 @@ export interface Api {
   /** The guest ports the host forwards to this computer's loopback; forward.open and forward.close keep the list current. Optional so fixtures without forwards need not fake it. */
   listForwards?(): Promise<PortForward[]>;
   stopForward?(workspaceId: string, port: number): Promise<void>;
+  /** Every computer and provider this host holds, this computer first. Optional so fixtures without the settings
+   * section need not fake it; without it the section shows this computer alone. */
+  places?(): Promise<PlaceView[]>;
+  /** Takes a computer or a provider back out: the host sweeps wsp off it over its link where it is connected, drops
+   * the workspaces standing on it and the record. */
+  removePlace?(placeId: string): Promise<PlaceRemoved>;
+  /** A one time code another computer joins with, and when it runs out. The app road of Add a computer shows it. */
+  joinCode?(): Promise<{ code: string; expiresAt: number }>;
+  /** The ssh road of Add a computer: the host logs in as the person's terminal would, installs wsp on the box and
+   * waits for the box to dial back, calling `onStage` with each stage as the installer reaches it. Resolves with the
+   * computer once it has joined. This is the one seam the sheet's ssh road calls; the installer is #621 B's, so a
+   * host without it holds the road's Add rather than pretending to run one. */
+  addComputerOverSsh?(login: SshLogin, onStage: (stage: InstallStage) => void): Promise<PlaceView>;
   capabilities(): Promise<Capabilities>;
   /** How to dial the workspace's daemon right now; ask again per dial, the edge token expires hourly. */
   daemonReach(id: string): Promise<DaemonReachView>;
@@ -540,6 +579,10 @@ export function makeApi(c: ProtocolClient): Api {
     initBuild: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.build", { ...o })).job),
     initSignInCode: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.signInCode", { ...o })).job),
     initCancel: async () => InitJob.parse((await c.request<{ job?: unknown }>("init.cancel")).job),
+    // Parsed, not trusted: the table draws a computer's shape and disk only as the wire type vouches for them.
+    places: async () => PlaceView.array().parse((await c.request<{ places?: unknown }>("places.list")).places),
+    removePlace: async placeId => (await c.request<PlaceRemoved>("places.remove", { placeId })),
+    joinCode: async () => await c.request<{ code: string; expiresAt: number }>("pair.issue"),
     subscribe: fn => c.subscribe(fn),
     getGolden: async (name = "default") => (await c.request<{ manifest?: GoldenManifest }>("golden.get", { name })).manifest,
     listSnapshots: async name =>

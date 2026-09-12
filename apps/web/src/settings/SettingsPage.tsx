@@ -20,6 +20,7 @@ import { appTerminalFontSize } from "../terminal/ghostty/surface.js";
 import { appScheme } from "../terminal/ghosttyConfig.js";
 import { shellVersions } from "../shell/shellVersion.js";
 import { SETTINGS_WORDS, TERMINAL_SIZE_FACT, TERMINAL_SIZE_WORDS, THEME_WORDS, versionFact } from "./format.js";
+import { WhereAgentsRun } from "./WhereAgentsRun.js";
 
 const ZONE_LABEL = "font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground";
 const FACT = "font-mono text-[11px] tabular-nums text-muted-foreground";
@@ -50,7 +51,7 @@ export function SettingsPage() {
   const width = preferences.sidebarWidth ?? SIDEBAR_DEFAULT_WIDTH;
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <div data-settings-page className="mx-auto flex w-full max-w-xl flex-col gap-8 px-6 py-6">
+      <div data-settings-page className="mx-auto flex w-full max-w-[672px] flex-col gap-8 px-6 py-6">
         <Section id="settings-appearance" title={SETTINGS_WORDS.appearance}>
           <Row id="settings-theme" label={SETTINGS_WORDS.theme}>
             <SegmentedControl aria-labelledby="settings-theme" value={preferences.theme} segments={THEMES} onChange={theme => void setPreferences({ theme })} />
@@ -96,6 +97,7 @@ export function SettingsPage() {
             <SegmentedControl aria-labelledby="settings-text-size" value={preferences.terminalSize} segments={SIZES} onChange={terminalSize => void setPreferences({ terminalSize })} />
           </Row>
         </Section>
+        <WhereAgentsRun />
         <Section id="settings-about" title={SETTINGS_WORDS.about}>
           <Row id="settings-version" label={SETTINGS_WORDS.version}>
             {/* A row with no control still stands as tall as one, so the rhythm down the column never breaks. */}
