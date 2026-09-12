@@ -54,6 +54,20 @@ export const RUN_EXIT_MS = 10_000;
 /** How long a turn's process gets to go on the graceful signal before its group is killed, on either road: what the
  * guest's reap waits between its TERM and its KILL, and what a host gives the turns on this computer as it stops. */
 export const RUN_STOP_MS = 2_000;
+/** How long a road to a machine keeps being dialled while nothing answers before it is called down. The one rule
+ * every link this project holds reads, which is why it lives here: the host's dial of a machine's daemon and its
+ * re-dial after a drop, the post that launches or re-opens a turn's run, and the browser's link to a workspace.
+ * Measured 2026-09-12: one resolver dropped the name of a machine's edge for about three minutes at a time while
+ * the machines behind it went on running and their processes went on working, so a name that will not resolve is
+ * worth a minute of asking. */
+export const LINK_RETRY_WINDOW_MS = 60_000;
+
+/** The wait before dial `attempt`, half a second doubling to ten, with up to a quarter second of jitter so the
+ * turns of one machine do not all come back at the same instant after a blip. */
+export function linkBackoffMs(attempt: number): number {
+  return Math.min(10_000, 500 * 2 ** Math.max(0, attempt - 1)) + Math.floor(Math.random() * 250);
+}
+
 /** The close code a host sends the clients on its own socket as it stops: the socket did not break under them, the
  * host let it go, so a command waiting on a turn says the host is restarting rather than that the turn failed. */
 export const HOST_STOPPING_CLOSE = 4001;
@@ -1038,7 +1052,7 @@ export const SessionEndEvent = z.object({
   ...sessionScope,
   exitCode: z.number().nullable(),
   sawResult: z.boolean(),
-  /** Set when the runtime ended the session itself (a nap, a delete, a machine that stopped answering) rather than the harness exiting. */
+  /** Set when the runtime ended the session itself (a nap, a delete, a machine gone at the provider) rather than the harness exiting. */
   reason: z.string().optional(),
 });
 

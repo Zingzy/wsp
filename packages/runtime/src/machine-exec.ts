@@ -87,6 +87,9 @@ export interface TurnActivity {
   quietMs(nowMs: number): number;
   /** A byte from the harness, or a message the person sent into the turn. */
   touch(atMs: number): void;
+  /** A stretch nothing could be read through: the road to the machine was dark, so it is no part of the turn's
+   * quiet and the clock goes on from where it stood. */
+  hold(ms: number): void;
   /** One reading of the turn's tree. The first, and any that undercuts the one before it, is only what the next is
    * measured from: a group whose members exited carries less work than it did and is no baseline. */
   read(ticks: number, atMs: number): void;
@@ -99,6 +102,9 @@ export function turnActivity(startedAt: number): TurnActivity {
     quietMs: nowMs => nowMs - activeAt,
     touch: atMs => {
       activeAt = atMs;
+    },
+    hold: ms => {
+      activeAt += ms;
     },
     read: (ticks, atMs) => {
       if (base === undefined || ticks < base.ticks) {
@@ -259,8 +265,11 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         try {
           res = await machine.exec(pollCmd(offset, readsWork(idleMs, quietMs)), { timeoutMs: execTimeoutMs });
         } catch {
-          // Machine likely napping; polls recover after wake (P10 semantics).
+          // Machine likely napping; polls recover after wake (P10 semantics). A poll that never reached the machine
+          // says nothing about the process it was sent to read, so the stretch the road was dark is no part of the
+          // turn's silence: the idle clock holds here and goes on from the road's return.
           await sleep(pollMs);
+          activity.hold(now() - at);
           continue;
         }
 

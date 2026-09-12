@@ -1,4 +1,4 @@
-import { guestUnusableLine, machineUnreachedLine } from "@wsp/protocol";
+import { guestUnusableLine, LINK_RETRY_WINDOW_MS, linkBackoffMs, machineUnreachedLine } from "@wsp/protocol";
 
 export type ErrorKind =
   | "concurrency" | "plan" | "missing" | "conflict"
@@ -126,10 +126,6 @@ export function roadBackoffMs(retry: number): number {
   return retry * 3_000 + Math.floor(Math.random() * 250);
 }
 
-/** How long a call to a machine keeps being retried when nothing answers: a DNS blip on this computer was measured
- * at about a minute, and a turn that waits half of it beats one that fails at once. */
-export const REACH_WINDOW_MS = 30_000;
-
 /** The error `untilReached` gives up with: the protocol's sentence, with the count and the time behind it. */
 export class MachineUnreached extends Error {
   constructor(
@@ -149,8 +145,8 @@ export interface RetryClock {
 
 export const realRetryClock: RetryClock = { now: Date.now, sleep: ms => new Promise(r => setTimeout(r, ms)) };
 
-/** Calls `once` until it answers. A network failure is retried at the engine's backoff for as long as the next wait
- * still ends inside the reach window, then the caller gets MachineUnreached; any other failure is rethrown at once. */
+/** Calls `once` until it answers. A network failure is retried at the link rule's backoff for as long as the next
+ * wait still ends inside its window, then the caller gets MachineUnreached; any other failure is rethrown at once. */
 export async function untilReached<T>(once: () => Promise<T>, clock: RetryClock = realRetryClock): Promise<T> {
   const startedAt = clock.now();
   for (let attempt = 1; ; attempt++) {
@@ -158,8 +154,8 @@ export async function untilReached<T>(once: () => Promise<T>, clock: RetryClock 
       return await once();
     } catch (e) {
       if (!isNetworkError(e)) throw e;
-      const wait = backoffMs(attempt);
-      if (clock.now() - startedAt + wait > REACH_WINDOW_MS) throw new MachineUnreached(attempt, clock.now() - startedAt, e);
+      const wait = linkBackoffMs(attempt);
+      if (clock.now() - startedAt + wait > LINK_RETRY_WINDOW_MS) throw new MachineUnreached(attempt, clock.now() - startedAt, e);
       await clock.sleep(wait);
     }
   }

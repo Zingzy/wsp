@@ -2,6 +2,15 @@ import { describe, expect, it } from "vitest";
 import { machineUnreachedLine } from "@wsp/protocol";
 import { classify, isNetworkError, MachineUnreached, shouldRetry, untilReached } from "../src/errors.js";
 
+/** The link rule's waits, each with the jitter it draws on top of its own base. */
+const expectBackoffs = (waits: readonly number[], bases: readonly number[]): void => {
+  expect(waits).toHaveLength(bases.length);
+  waits.forEach((wait, i) => {
+    expect(wait).toBeGreaterThanOrEqual(bases[i]!);
+    expect(wait).toBeLessThan(bases[i]! + 250);
+  });
+};
+
 describe("error policy", () => {
   it("never retries 429", () => {
     const e = classify(429, { code: "ConcurrencyLimitExceeded", error: "Too many concurrent sessions" });
@@ -66,15 +75,11 @@ describe("untilReached", () => {
     };
   };
 
-  it("retries a call nothing answered at the engine's backoff and returns the answer that came", async () => {
+  it("retries a call nothing answered at the link rule's backoff and returns the answer that came", async () => {
     const f = fixture(2, () => new TypeError("fetch failed"));
     expect(await untilReached(f.once, f.clock)).toBe("answered");
     expect(f.calls()).toBe(3);
-    expect(f.waits.length).toBe(2);
-    expect(f.waits[0]).toBeGreaterThanOrEqual(1_000);
-    expect(f.waits[0]).toBeLessThan(1_250);
-    expect(f.waits[1]).toBeGreaterThanOrEqual(2_000);
-    expect(f.waits[1]).toBeLessThan(2_250);
+    expectBackoffs(f.waits, [500, 1_000]);
   });
 
   it("rethrows a failure that is not the network at once, after one call and no wait", async () => {
@@ -84,20 +89,20 @@ describe("untilReached", () => {
     expect(f.waits).toEqual([]);
   });
 
-  it("gives up once the next wait would end past the reach window, with the count and the time in the protocol's words", async () => {
+  it("gives up once the next wait would end past the link window, with the count and the time in the protocol's words", async () => {
     const f = fixture(99, () => new TypeError("fetch failed", { cause: Object.assign(new Error("getaddrinfo EAI_AGAIN"), { code: "EAI_AGAIN" }) }));
     const e = await untilReached(f.once, f.clock).catch((x: unknown) => x);
     expect(e).toBeInstanceOf(MachineUnreached);
     const unreached = e as MachineUnreached;
-    // Five-second calls with waits of 1, 2 and 4 seconds: the fourth call ends 27 seconds in, and the 8 second wait
-    // after it would end past the window, so no fifth is made.
-    expect(unreached.attempts).toBe(4);
-    expect(unreached.elapsedMs).toBeGreaterThanOrEqual(20_000 + 7_000);
-    expect(unreached.elapsedMs).toBeLessThan(20_000 + 7_000 + 750);
-    expect(unreached.message).toBe(machineUnreachedLine(4, unreached.elapsedMs));
-    expect(unreached.message).toMatch(/^the machine could not be reached from this computer after 4 attempts over 2[78]s$/);
+    // Five-second calls with the rule's waits between them: the seventh ends a minute and half a second in, past
+    // the window a name that will not resolve is given, so no eighth is made.
+    expect(unreached.attempts).toBe(7);
+    expectBackoffs(f.waits, [500, 1_000, 2_000, 4_000, 8_000, 10_000]);
+    expect(unreached.elapsedMs).toBeGreaterThanOrEqual(7 * 5_000 + 25_500);
+    expect(unreached.elapsedMs).toBeLessThan(7 * 5_000 + 27_000);
+    expect(unreached.message).toBe(machineUnreachedLine(7, unreached.elapsedMs));
     expect((unreached.cause as Error).message).toBe("fetch failed");
-    expect(f.calls()).toBe(4);
+    expect(f.calls()).toBe(7);
   });
 });
 
