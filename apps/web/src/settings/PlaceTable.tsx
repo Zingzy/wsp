@@ -6,16 +6,16 @@
 // reported yet holds a bar, so the table keeps its shape while it reports.
 //
 // Every column word and every cell rule is the protocol's: PLACES_WORDS.columns,
-// fmtSize, fmtBytes, placeStateWord and placeWorkspacesCell, so the app and the
+// fmtSize, fmtBytes, absentOf and placeWorkspacesCell, so the app and the
 // command line read one table. The head is the shipped TableHead's own style,
 // which is a tier above the zone label over the section.
 import type { ReactNode } from "react";
-import { PLACES_WORDS, fmtBytes, fmtSize, placeStateWord, placeWorkspacesCell, type PlaceView } from "@wsp/protocol";
+import { PLACES_WORDS, fmtBytes, fmtSize, placeWorkspacesCell, type PlaceView } from "@wsp/protocol";
 import { Skeleton } from "../components/ui/skeleton.js";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table.js";
 import { cn } from "../lib/utils.js";
 import { FACT, WHERE_WORDS } from "./format.js";
-import { placeCpuWord, placeName } from "./places.js";
+import { absentOf, placeCpuWord, placeName } from "./places.js";
 
 const CELL = "font-mono text-xs tabular-nums text-foreground";
 /** The one column the mock right-aligns, since a disk figure is read against the one above it. */
@@ -49,6 +49,9 @@ export function PlaceTable({ children, menu = true, k = "places-table" }: { chil
  * computer that is the default and is also away says both and no column moves when either word arrives.
  * The chevron, where the row opens, comes after them. */
 export function PlaceRow({ place, now, here = false, trail, menu, open, onToggle }: { place: PlaceView; now: number; /** Whether this is the computer the host runs on, which the list puts first. */ here?: boolean; /** The chevron after the state word, where the row opens. */ trail?: ReactNode; menu?: ReactNode; open?: boolean; onToggle?: () => void }) {
+  // The one reading of a computer that is not answering, which the sidebar row, the pane and the composer read
+  // too: the slot beside the name holds the one word and the whole sentence rides its title.
+  const absent = absentOf(place, now, here);
   return (
     <TableRow data-place-row={place.id} {...(open === undefined ? {} : { "aria-expanded": open })} className={cn(onToggle !== undefined && "cursor-pointer")} onClick={onToggle}>
       <TableCell>
@@ -59,8 +62,8 @@ export function PlaceRow({ place, now, here = false, trail, menu, open, onToggle
               {WHERE_WORDS.default}
             </span>
           ) : null}
-          <span className={FACT} data-k="place-state">
-            {placeStateWord(place, now)}
+          <span className={FACT} data-k="place-state" {...(absent === null ? {} : { title: absent.sentence })}>
+            {absent?.away ?? ""}
           </span>
           {trail}
         </span>

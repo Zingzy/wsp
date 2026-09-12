@@ -56,7 +56,7 @@ import { ImageIcon } from "lucide-react";
 import { foldThreads, HOST_ASLEEP_SEND, IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { hostAsleep } from "../../boot";
-import { useHarnessCatalogs, useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
+import { useAbsentComputer, useHarnessCatalogs, useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { onComposerFocusRequest } from "../../shell/shellRequests";
 import { useThreadStart } from "../../files/root";
 import { useLinkDownLine } from "../../terminal/paneWords";
@@ -92,11 +92,15 @@ export function composerSendBlock(input: {
   state: WorkspaceState | null;
   hydrated: boolean;
   agents: boolean;
+  /** This workspace's computer is not answering, which is its state whatever a status that predates the silence
+   * still says: the send is held on it in the same slot every other state is held in. */
+  absent?: boolean;
 }): SendRefusalKind | null {
   if (!input.hasApi || input.conn === "connecting") return "connecting";
   if (input.conn === "reconnecting") return "reconnecting";
   if (input.conn === "closed") return "closed";
   if (input.state === null) return "not-found";
+  if (input.absent === true) return "unreachable";
   if (input.state !== "running") return input.state;
   if (!input.hydrated) return "loading";
   if (!input.agents) return "no-agents";
@@ -170,16 +174,20 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const [highlightedSearchKey, setHighlightedSearchKey] = useState<string | null>(null);
   const [dismissedSearchKey, setDismissedSearchKey] = useState<string | null>(null);
 
+  const absent = useAbsentComputer(workspaceId);
   const linkDown = useLinkDownLine(workspaceId);
   const { harness } = thread.view;
   const catalog = useMemo(() => catalogFromHarness({ id: harnessId, harness, screen: screenCommandsOf(harnessCatalog) }), [harness, harnessCatalog, harnessId]);
-  const blocked = composerSendBlock({ conn, hasApi: api !== null, state, hydrated: thread.hydrated, agents: harnessCatalogs.length > 0 });
+  const blocked = composerSendBlock({ conn, hasApi: api !== null, state, hydrated: thread.hydrated, agents: harnessCatalogs.length > 0, absent: absent !== null });
   // A send wakes a paused machine by itself, so paused is not a refusal here: the box takes the words and the send
   // button says it wakes first.
   const wakesFirst = blocked === "paused";
   // A window on another computer whose wsp has gone quiet says which computer is asleep, not that wsp is not
   // running: nothing here is broken, and the turn starts when that computer wakes.
-  const unavailable = blocked === null || wakesFirst ? null : hostAsleep(conn) ? HOST_ASLEEP_SEND : sendRefusal(blocked);
+  // A computer that is not answering says so in its own sentence rather than in the state table's: the person's
+  // next move is to switch that computer on, and no wire word says that. The send is held either way, so nothing
+  // leaves the box and no refusal comes back as a line in the sidebar's corner.
+  const unavailable = blocked === null || wakesFirst ? null : absent !== null ? absent.sentence : hostAsleep(conn) ? HOST_ASLEEP_SEND : sendRefusal(blocked);
   // Everything that holds this send, in one reading: what blocks every send in this workspace, then what this draft
   // alone cannot be sent as. The slot, the send button and the Enter path all take it from here, so a person is told
   // once and told the same thing wherever they look.
@@ -498,9 +506,12 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
 
   return (
     <div className="w-full px-3 pt-1.5 pb-4 sm:px-5 sm:pt-2 sm:pb-5" data-chat-composer>
-      <div className="mx-auto flex h-5 w-full max-w-3xl items-center px-3" aria-live="polite" data-composer-refusal>
+      {/* The refusal slot stands at two lines whether or not it holds one, so nothing under it moves when a
+          sentence lands, and the sentence wraps: at the smallest window with the right panel open the slot is
+          narrower than the sentence, and a cut there drops the half that says what happens next. */}
+      <div className="mx-auto flex h-9 w-full max-w-3xl items-center px-3" aria-live="polite" data-composer-refusal>
         {line !== null ? (
-          <span role="status" className="min-w-0 truncate font-mono text-[11px] leading-5 text-muted-foreground" title={line}>
+          <span role="status" className="min-w-0 text-pretty font-mono text-[11px] leading-[18px] text-muted-foreground line-clamp-2" title={line}>
             {line}
           </span>
         ) : null}

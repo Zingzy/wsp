@@ -11,8 +11,9 @@ import { NOT_ON_THIS_KIND, servesReading, workspaceKind, type ProcEntry, type Pr
 import { useDaemonVersion } from "../../files/wire.js";
 import { cn, errorText } from "../../lib/utils.js";
 import { daemonBehindLine } from "../../machine/daemon.js";
+import { staleWord, type StaleWord } from "../../machine/live.js";
 import { getProcs, useWorkspaceProcs } from "../../machine/procs.js";
-import { useWorkspace } from "../../protocol/store.js";
+import { useAbsentComputer, useWorkspace } from "../../protocol/store.js";
 import { getTerminals, onTerminals } from "../../terminal/link.js";
 import { clockLabel, compactBytes } from "../machine/format.js";
 import { ScrollArea } from "../ui/scroll-area.js";
@@ -25,7 +26,7 @@ export const ROW_PX = 22;
 const COLUMNS = "grid grid-cols-[3.5rem_3.25rem_3.75rem_minmax(0,1fr)] items-center px-2";
 const NO_TABS: readonly never[] = [];
 
-type Stale = "napping" | "unreachable" | null;
+
 
 function useTerminalTitles(workspaceId: string): ReadonlyMap<string, string> {
   const terms = useSyncExternalStore(onTerminals, () => getTerminals(workspaceId));
@@ -36,6 +37,7 @@ function useTerminalTitles(workspaceId: string): ReadonlyMap<string, string> {
 
 export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
   const workspace = useWorkspace(workspaceId);
+  const absent = useAbsentComputer(workspaceId);
   const procs = useWorkspaceProcs(workspaceId);
   const version = useDaemonVersion(workspaceId);
   const titles = useTerminalTitles(workspaceId);
@@ -47,7 +49,7 @@ export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
 
   const snapshot = procs.snapshot;
   const rows = useMemo(() => procRows(snapshot?.procs ?? [], sort, filter), [snapshot, sort, filter]);
-  const stale: Stale = workspace?.phase === "napping" || workspace?.phase === "pausing" ? "napping" : procs.reach === "live" ? null : "unreachable";
+  const stale = staleWord(workspace?.phase ?? "running", procs.reach === "live");
   const served = workspace === null || servesReading(workspaceKind(workspace), "processes");
 
   // A process that went away takes its selection with it.
@@ -85,10 +87,20 @@ export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
       </div>
       <ScrollArea className="min-h-0 flex-1">
         <div role="table" aria-label="Processes" className={cn(stale !== null && "text-muted-foreground/60")} {...(stale !== null ? { "data-stale": stale } : {})}>
-          {unavailableLine !== null && (
-            <p className="truncate px-2 text-muted-foreground" style={{ lineHeight: `${ROW_PX}px` }} title={unavailable ?? undefined} data-procs-unavailable>
-              {unavailableLine}
+          {absent !== null ? (
+            // The refusal stands in the pane, in the two halves the one reading of an absent computer carries,
+            // rather than as a line at the foot of the sidebar in the opposite corner from the click.
+            <p className="px-2 text-muted-foreground" style={{ lineHeight: `${ROW_PX}px` }} data-procs-unavailable>
+              {absent.said}
+              <br />
+              {absent.will}
             </p>
+          ) : (
+            unavailableLine !== null && (
+              <p className="truncate px-2 text-muted-foreground" style={{ lineHeight: `${ROW_PX}px` }} title={unavailable ?? undefined} data-procs-unavailable>
+                {unavailableLine}
+              </p>
+            )
           )}
           {rows.map(({ proc, depth }) => {
             const lit = proc.pid === selected;
@@ -166,7 +178,7 @@ function Row({ proc, depth, label, lit, onSelect }: RowProps) {
 }
 
 /** The daemon's inspect fields for the lit row, read once when it opens, and the kill controls. */
-function Details({ workspaceId, proc, stale }: { workspaceId: string; proc: ProcEntry; stale: Stale }) {
+function Details({ workspaceId, proc, stale }: { workspaceId: string; proc: ProcEntry; stale: StaleWord }) {
   const [inspect, setInspect] = useState<ProcInspectReply | string | null>(null);
   useEffect(() => {
     let gone = false;

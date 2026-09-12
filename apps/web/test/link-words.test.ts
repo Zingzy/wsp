@@ -41,7 +41,7 @@ function connect(over: RelayHarness, opts: Partial<Parameters<typeof connectDaem
 
 /** The pane as a running workspace draws it from this link, which is what every surface reads. */
 function paneOf(l: DaemonLink, local = true): TerminalPaneState {
-  return terminalPaneState({ state: "running", reach: "reachable", socket: l.status(), refusal: l.refusal(), local });
+  return terminalPaneState({ state: "running", reach: "reachable", socket: l.status(), refusal: l.refusal(), local, where: "api" });
 }
 
 const saidBy = (pane: TerminalPaneState): string[] => [
@@ -78,15 +78,16 @@ describe("the words a link gets", () => {
     expect(link.status()).toBe("opening");
 
     const pane = paneOf(link);
-    expect(pane).toEqual({ kind: "starting", local: true });
+    expect(pane).toEqual({ kind: "starting", local: true, where: THIS_COMPUTER });
     // The word for the person's own computer is the protocol's, not one typed again here.
     expect(terminalPaneTitle(pane)).toBe(`Starting a terminal on ${THIS_COMPUTER}`);
     expect(terminalEmptyLine(pane)).toBe(`Starting a terminal on ${THIS_COMPUTER}; the first one opens when it is ready`);
     // The one word that promises something back belongs to a link that was open once, and this is not one.
     for (const line of saidBy(pane)) expect(line).not.toMatch(/reconnect/i);
     saysNoMachine(pane);
-    // A workspace that is not the person's own computer gets the same shape in its own words.
-    expect(terminalPaneTitle(paneOf(link, false))).toBe("Starting a terminal on this workspace");
+    // A workspace that is not the person's own computer gets the same shape and is named, so the sentence still
+    // says which one when it is read anywhere but inside that workspace's own pane.
+    expect(terminalPaneTitle(paneOf(link, false))).toBe("Starting a terminal on api");
     for (const line of saidBy(paneOf(link, false))) expect(line).not.toMatch(/reconnect/i);
     saysNoMachine(paneOf(link, false));
   }, 20_000);
@@ -119,11 +120,11 @@ describe("the words a link gets", () => {
     await until(() => link!.status() === "unanswered");
 
     const pane = paneOf(link);
-    expect(pane).toEqual({ kind: "unanswered", local: true });
+    expect(pane).toEqual({ kind: "unanswered", local: true, where: THIS_COMPUTER });
     // Two halves: what did not answer, then the one thing a person can do about it.
     expect(terminalPaneTitle(pane)).toBe(`Nothing has answered on ${THIS_COMPUTER}`);
     expect(terminalPaneHints(pane, null, null)).toEqual([`wsp keeps trying; look at the terminal you started wsp in on ${THIS_COMPUTER}`]);
-    expect(terminalPaneHints(paneOf(link, false), null, null)).toEqual(["wsp keeps trying; the Workspace panel says what this workspace is doing"]);
+    expect(terminalPaneHints(paneOf(link, false), null, null)).toEqual(["wsp keeps trying; the Workspace panel says what api is doing"]);
     saysNoMachine(paneOf(link, false));
     for (const line of saidBy(pane)) expect(line).not.toMatch(/reconnect/i);
     saysNoMachine(pane);

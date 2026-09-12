@@ -88,7 +88,7 @@ afterEach(() => {
 const cells = (row: HTMLElement): string[] => within(row).getAllByRole("cell").slice(0, 4).map(c => c.textContent ?? "");
 
 describe("Where agents run", () => {
-  it("lists this computer first with its size and disk, and says how long a computer that is not answering has been away", () => {
+  it("lists this computer first with its size and disk, and says how long a computer that is not answering has been away, once", () => {
     useStore.setState({ places: [here, laptop] });
     render(<WhereAgentsRun now={NOW} />);
     const rows = screen.getAllByRole("row").slice(1);
@@ -96,8 +96,14 @@ describe("Where agents run", () => {
     expect(cells(rows[0]!)[0]).not.toContain("zingzy-mbp");
     expect(cells(rows[0]!)[0]).toContain("default");
     expect(cells(rows[0]!).slice(1)).toEqual(["8 cores · 16 GB".replace(/ /g, " "), "210 GB", "1 · agents only"]);
-    expect(cells(rows[1]!)[0]).toContain("offline · 2 h");
-    expect(cells(rows[1]!).slice(1)).toEqual(["4 cores · 8 GB".replace(/ /g, " "), "91 GB", "1 · not answering"]);
+    // One state slot says the silence, in the words every other surface says it in; the Workspaces cell keeps to
+    // what the computer may hold, which is a different question and used to be a second wording of this one.
+    expect(cells(rows[1]!)[0]).toContain("no answer");
+    expect(cells(rows[1]!)[0]).not.toContain("offline");
+    expect(cells(rows[1]!)[0]).not.toContain("2 h");
+    expect(cells(rows[1]!).slice(1)).toEqual(["4 cores · 8 GB".replace(/ /g, " "), "91 GB", "1 · agents only"]);
+    // The whole sentence rides the slot, so the table and the sidebar row say one thing.
+    expect(rows[1]!.querySelector("[data-k='place-state']")?.getAttribute("title")).toBe("old-macbook is not answering; it connects on its own when it is on");
   });
 
   it("keeps the default mark beside the name and the state word in the slot, so a default that is away says both", () => {
@@ -105,7 +111,7 @@ describe("Where agents run", () => {
     render(<WhereAgentsRun now={NOW} />);
     const row = screen.getAllByRole("row")[1]!;
     expect(row.querySelector("[data-k='place-default']")?.textContent).toBe("default");
-    expect(row.querySelector("[data-k='place-state']")?.textContent).toBe("offline · 2 h");
+    expect(row.querySelector("[data-k='place-state']")?.textContent).toBe("no answer");
   });
 
   it("stands a bar in each cell a computer has not reported yet, so nothing moves when it does", () => {
