@@ -7,6 +7,9 @@ import {
   psCpuSeconds,
   biggerSizeLine,
   catalogSourceLine,
+  codexNotSignedInLine,
+  whoPaysLines,
+  THIS_COMPUTER,
   PERMISSION_DENIED_LINE,
   accessFromNextMessage,
   permissionAskLine,
@@ -320,36 +323,72 @@ describe("where the composer's model lists came from, in one line", () => {
   };
 
   it("names the agent's own binary and its own pin when its table stood in, never another agent's", () => {
-    expect(catalogSourceLine(TABLE)).toBe("codex table · app-server 0.153.0, 2026-09-07");
-    expect(catalogSourceLine({ ...TABLE, harness: "claude", label: "Claude Code", version: "--help 2.1.257, 2026-09-05" })).toBe("claude table · --help 2.1.257, 2026-09-05");
+    expect(catalogSourceLine(TABLE, THIS_COMPUTER)).toBe("codex table · app-server 0.153.0, 2026-09-07");
+    expect(catalogSourceLine({ ...TABLE, harness: "claude", label: "Claude Code", version: "--help 2.1.257, 2026-09-05" }, THIS_COMPUTER)).toBe("claude table · --help 2.1.257, 2026-09-05");
     // One line at the popup's width: 48 characters of the 10px mono the footer draws in, measured in Chromium.
-    expect(catalogSourceLine(TABLE).length).toBeLessThanOrEqual(48);
+    expect(catalogSourceLine(TABLE, THIS_COMPUTER).length).toBeLessThanOrEqual(48);
   });
 
   it("says the adapter's own reason where the binary answered and named one, in place of naming the table", () => {
-    expect(catalogSourceLine({ ...TABLE, refusal: "Codex is not signed in on this machine; run codex login there" })).toBe(
-      "Codex is not signed in on this machine; run codex login there · app-server 0.153.0, 2026-09-07",
+    expect(catalogSourceLine({ ...TABLE, refusal: codexNotSignedInLine("codex login") }, THIS_COMPUTER)).toBe(
+      "Codex is not signed in where this workspace runs; run codex login there · app-server 0.153.0, 2026-09-07",
     );
   });
 
-  it("a table with no pin of its own claims none, and the binary that answered carries its version", () => {
-    expect(catalogSourceLine({ ...TABLE, harness: "gemini", label: "Gemini CLI", version: null })).toBe("gemini table");
-    expect(catalogSourceLine({ ...TABLE, source: "harness", version: "0.153.0" })).toBe("Codex 0.153.0 on this machine");
-    expect(catalogSourceLine({ ...TABLE, source: "harness", version: null })).toBe("Codex on this machine");
+  it("a table with no pin of its own claims none, and the binary that answered carries the version and where it ran", () => {
+    expect(catalogSourceLine({ ...TABLE, harness: "gemini", label: "Gemini CLI", version: null }, THIS_COMPUTER)).toBe("gemini table");
+    expect(catalogSourceLine({ ...TABLE, source: "harness", version: "0.153.0" }, THIS_COMPUTER)).toBe("Codex 0.153.0 on this computer");
+    expect(catalogSourceLine({ ...TABLE, source: "harness", version: null }, "hetzner")).toBe("Codex on hetzner");
     // The reason belongs to the fallback: a binary that filled the lists has nothing to explain.
-    expect(catalogSourceLine({ ...TABLE, source: "harness", version: "0.153.0", refusal: "not signed in" })).toBe("Codex 0.153.0 on this machine");
+    expect(catalogSourceLine({ ...TABLE, source: "harness", version: "0.153.0", refusal: "not signed in" }, THIS_COMPUTER)).toBe("Codex 0.153.0 on this computer");
   });
 
   it("an empty model list reads as the source that gave it: what the binary reported, or what the table holds", () => {
     expect(noModelsLine({ ...TABLE, source: "harness", models: [] })).toBe("Codex reported no models");
     expect(noModelsLine({ ...TABLE, models: [] })).toBe("No model in the Codex table");
   });
+
+  it("the foot on this computer says whose sign-in the turn runs on and that the prices are the agent's own", () => {
+    const claude: HarnessCatalog = { ...TABLE, harness: "claude", label: "Claude Code", source: "harness", version: "2.1.257" };
+    expect([catalogSourceLine(claude, THIS_COMPUTER), ...whoPaysLines(claude, THIS_COMPUTER)]).toEqual([
+      "Claude Code 2.1.257 on this computer",
+      "Threads run on Claude Code's own sign-in on this computer, which costs this wsp nothing.",
+      "The prices are its list prices, not a bill.",
+    ]);
+  });
+
+  it("the foot on a workspace somewhere else names that place in the same sentences", () => {
+    const claude: HarnessCatalog = { ...TABLE, harness: "claude", label: "Claude Code", source: "harness", version: "2.1.257" };
+    expect([catalogSourceLine(claude, "hetzner"), ...whoPaysLines(claude, "hetzner")]).toEqual([
+      "Claude Code 2.1.257 on hetzner",
+      "Threads run on Claude Code's own sign-in on hetzner, which costs this wsp nothing.",
+      "The prices are its list prices, not a bill.",
+    ]);
+    // The prices sentence goes where the menu has no row to put a price on.
+    expect(whoPaysLines({ ...claude, models: [] }, "hetzner")).toEqual(["Threads run on Claude Code's own sign-in on hetzner, which costs this wsp nothing."]);
+  });
+
+  it("neither foot says machine, the word the app never uses to a person", () => {
+    const kinds: HarnessCatalog[] = [
+      { ...TABLE, source: "harness", version: "2.1.257" },
+      { ...TABLE, source: "harness", version: null },
+      { ...TABLE, refusal: codexNotSignedInLine("codex login") },
+      { ...TABLE, models: [] },
+      TABLE,
+    ];
+    for (const where of [THIS_COMPUTER, "hetzner"]) {
+      for (const catalog of kinds) {
+        for (const line of [catalogSourceLine(catalog, where), ...whoPaysLines(catalog, where)]) expect(line).not.toMatch(/machine/i);
+      }
+    }
+  });
 });
 
 describe("one home for the words under the composer's model lists", () => {
   const HOME = join("packages", "protocol", "src", "format.ts");
-  // A footer assembled anywhere else took its binary word from whichever agent's catalog it was written against.
-  const RULE = /\} table`|reported no models|no model in the/;
+  // A footer assembled anywhere else took its binary word from whichever agent's catalog it was written against,
+  // and a second copy of the sentences about whose sign-in pays would be the one a screen was left reading.
+  const RULE = /\} table`|reported no models|no model in the|costs this wsp nothing|list prices, not a bill/;
 
   it("no other source file spells the footer's words", () => {
     expect(sourceFiles().filter(rel => rel !== HOME && RULE.test(readFileSync(join(ROOT, rel), "utf8")))).toEqual([]);

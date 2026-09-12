@@ -2,20 +2,20 @@
   {
     "id": 1,
     "op": "git.diff",
-    "cwd": "/root/app",
-    "scope": "branch"
+    "cwd": "repo",
+    "scope": "unstaged"
   },
   {
-    "id": 2,
+    "id": 1,
     "op": "git.diff",
-    "cwd": "/root/app",
-    "scope": "unstaged",
+    "cwd": "repo",
+    "scope": "branch",
     "path": "src/a.ts"
   },
   {
-    "id": 3,
+    "id": 1,
     "op": "git.diff",
-    "cwd": ".",
+    "cwd": "repo",
     "scope": "staged"
   }
 ]

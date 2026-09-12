@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from "react";
 import { HOST_WORDS, hostMenuAction, hostsMenuItems, type HostOutcome, type HostsView } from "@wsp/protocol";
 import { ChevronsUpDownIcon } from "lucide-react";
 import { desktopBridge } from "../lib/desktopShell.js";
+import { errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
 import { FOOT_ROW_CLASS } from "../sidebar/rowGrammar.js";
 import { ConnectHostSheet } from "./ConnectHostSheet.js";
@@ -48,6 +49,11 @@ export function HostFoot() {
     if (action.kind === "connect") openConnect();
     else if (action.kind === "switch") said((await bridge.switchHost?.(action.alias)) ?? { ok: true });
     else if (action.kind === "disconnect") said((await bridge.disconnectHost?.(action.alias)) ?? { ok: true });
+    // The two rows a computer that joined another wsp carries: the hold that keeps it out of idle sleep while it is
+    // joined, and the way back out. Both are the shell's, since the place file and its service are this login's. The
+    // hold answers the standing rather than an outcome, so its refusal arrives as a throw and lands in the same toast.
+    else if (action.kind === "awake") await bridge.setStayAwake?.(action.on).catch((e: unknown) => useStore.setState({ toast: errorText(e) }));
+    else if (action.kind === "leave") said((await bridge.leaveWsp?.()) ?? { ok: true });
     reload();
   };
   return (

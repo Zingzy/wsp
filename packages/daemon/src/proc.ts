@@ -9,16 +9,12 @@
 // touches /proc/net.
 import { EventEmitter } from "node:events";
 import { open, readdir, readFile, readlink, stat } from "node:fs/promises";
-import type { ProcEntry, ProcInspectReply, ProcSignal, ProcSnapshot } from "@wsp/protocol";
+import { PROC_CAP, PROC_CMDLINE_BYTES, PROC_SAMPLER_STARTED, PROC_SAMPLER_STOPPED, type ProcEntry, type ProcInspectReply, type ProcSignal, type ProcSnapshot } from "@wsp/protocol";
 import { parseProcNetTcp } from "./ports.js";
 import { OpError } from "./workspace-paths.js";
 
 /** /proc reports times in USER_HZ ticks, 100 a second on every Linux. */
 const USER_HZ = 100;
-/** The first bytes of a command line, whichever module read it: the whole of one can run to ARG_MAX and every row carries it. */
-export const CMDLINE_BYTES = 200;
-/** Rows one snapshot carries at most, whichever module read them; total counts what the machine had. */
-export const PROC_CAP = 1000;
 const AT_PAGESZ = 6;
 /** Concurrent /proc reads per tick; the fs pool is four threads, so more only queues. */
 const BATCH = 32;
@@ -121,6 +117,7 @@ export interface ProcSamplerOptions {
   ptys?: () => { id: string; pid: number }[];
   intervalMs?: number;
   now?: () => number;
+  log?: (line: string) => void;
 }
 
 interface Known {
@@ -210,7 +207,7 @@ export class ProcFsSource implements ProcSource {
     };
   }
 
-  /** The first CMDLINE_BYTES only; a batch reads several at once, so each read has its own small buffer. */
+  /** The first PROC_CMDLINE_BYTES only; a batch reads several at once, so each read has its own small buffer. */
   private async readCmdline(dir: string): Promise<string> {
     let fh;
     try {
@@ -219,8 +216,8 @@ export class ProcFsSource implements ProcSource {
       return "";
     }
     try {
-      const buf = Buffer.allocUnsafe(CMDLINE_BYTES);
-      const { bytesRead } = await fh.read(buf, 0, CMDLINE_BYTES, 0);
+      const buf = Buffer.allocUnsafe(PROC_CMDLINE_BYTES);
+      const { bytesRead } = await fh.read(buf, 0, PROC_CMDLINE_BYTES, 0);
       let end = bytesRead;
       while (end > 0 && buf[end - 1] === 0) end--;
       return buf.toString("utf8", 0, end).replaceAll("\0", " ");
@@ -261,6 +258,7 @@ export class ProcSampler extends EventEmitter {
   private readonly ptys: () => { id: string; pid: number }[];
   private readonly intervalMs: number;
   private readonly now: () => number;
+  private readonly log: (line: string) => void;
   private timer: NodeJS.Timeout | null = null;
   private subscribers = 0;
   private inflight: Promise<void> | undefined;
@@ -276,6 +274,7 @@ export class ProcSampler extends EventEmitter {
     this.ptys = opts.ptys ?? (() => []);
     this.intervalMs = opts.intervalMs ?? 2000;
     this.now = opts.now ?? Date.now;
+    this.log = opts.log ?? (() => {});
   }
 
   get running(): boolean {
@@ -315,11 +314,15 @@ export class ProcSampler extends EventEmitter {
     this.lastAt = undefined;
     this.timer = setInterval(() => void this.poll(), this.intervalMs);
     this.timer.unref();
+    this.log(PROC_SAMPLER_STARTED);
     void this.poll();
   }
 
   stop(): void {
-    if (this.timer) clearInterval(this.timer);
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.log(PROC_SAMPLER_STOPPED);
+    }
     this.timer = null;
     this.lastAt = undefined;
     this.last = undefined;

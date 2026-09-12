@@ -1552,6 +1552,10 @@ export interface ContextMenuItem {
   group: string;
   enabled: boolean;
   refusal?: string;
+  /** What a row that can run says on hover, where the label leaves something out a person would want before pressing
+   * it. The two are one slot, read refusal first: a row is either dimmed with a reason or live with a word about
+   * what it does, never both, which is the reading every button in the app already makes. */
+  hint?: string;
   shortcut?: string;
   accelerator?: string;
   destructive?: boolean;
@@ -1594,20 +1598,6 @@ export type HostOutcome = { ok: true } | { ok: false; error: string; at: "url" |
 /** What the join screen sends the shell: the address as it is typed on the other screen, and the code beside it. */
 export const JoinAsk = z.object({ address: z.string().max(200), code: z.string().max(64) });
 export type JoinAsk = z.infer<typeof JoinAsk>;
-
-/** What the joined screen reads: this computer as the other wsp now holds it, and the wsp it joined. */
-export interface PlaceJoined {
-  name: string;
-  hostName: string;
-  hostUrl: string;
-  os: string;
-  shape: WorkspaceSize;
-  diskFreeBytes?: number;
-  docker: boolean;
-}
-
-/** How a join ended: done, or refused with the field the two halves belong under. */
-export type JoinOutcome = { ok: true; joined: PlaceJoined } | { ok: false; at: "address" | "code"; error: TwoPartRefusal };
 
 /** What this computer is to another wsp, read off its place file. */
 export interface PlaceStanding {
@@ -1676,10 +1666,10 @@ export interface DesktopBridge {
   disconnectHost(alias: string): Promise<HostOutcome>;
   /** The shell's own menu asked for the connect sheet. Returns the unsubscribe. */
   onConnectHostOpen(handler: () => void): () => void;
-  /** Joining this computer to another wsp, and what it is to that wsp once it has. Absent on a shell from before
-   * the bridge carried them, as `version` is: the page and the shell are two halves that ship together and can be
-   * two releases apart, so a page that would use one of these reads for it first. */
-  joinWsp?(ask: JoinAsk): Promise<JoinOutcome>;
+  // What this computer is to the wsp it joined, and the two things its window does about it. All three are absent
+  // on a shell from before the bridge carried them, as `version` is: the page and the shell are two halves that ship
+  // together and can be two releases apart, so a page that would use one reads for it first. The join itself is not
+  // among them: it is asked for on the first launch's own page, whose bridge is that page's and not this one.
   /** What this computer is to another wsp, or nothing when it belongs to none. */
   place?(): Promise<PlaceStanding | undefined>;
   /** Takes this computer back out of that wsp and returns the window to its own. */
@@ -2752,6 +2742,13 @@ export const SysSample = z.object({
 });
 export type SysSample = z.infer<typeof SysSample>;
 
+/** One reading of the computer the host runs on, pushed on a client's own socket rather than through the event
+ * stream: it is a tick of a live figure, not a thing that happened, so nothing replays it to a socket that comes
+ * back. Named apart from the daemon's own sys.sample because these two arrive on different sockets and a client
+ * that reads both must not mistake one for the other. */
+export const WorkspaceSysEvent = z.object({ type: z.literal("workspace.sys"), workspaceId: z.string(), sample: SysSample });
+export type WorkspaceSysEvent = z.infer<typeof WorkspaceSysEvent>;
+
 /** Every process the daemon read this tick. daemon is its own pid, so a
  * client can name it; total counts /proc entries, procs holds at most the
  * first thousand of them by pid. */
@@ -2788,6 +2785,7 @@ const DAEMON_CONTENTS = [
   "0ad3a1c3e98d5b75bf94d610b9e166a7ad1bb5e79ee7ab4905d6b738fb5eded9",
   "01030623497a43f044916ca27731dbfa4c92c6b82765a9e9dbd6426d69b1ee4e",
   "a6ae68d8af502a8a5ecf9795ca11ca0b9b12cda2792e45eee3376c7e4d57917b",
+  "055dcf11b2a17e8959ab3a6246c2d17f89eb3837c59b31d3a8138c6dc7b6c322",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -2825,7 +2823,10 @@ const DAEMON_CONTENTS = [
  * module serves every other op instead of refusing to start. Version 18 finds that native module where a packaged
  * command carries it: the command bundles node-pty rather than requiring it, and a bundled CommonJS module arrives
  * with a default export and no named one, so a daemon running inside the packaged command opened no terminal at
- * all until this. */
+ * all until this. Version 20 takes every option as a flag,
+ * one per option, reads its ports, load, processes and pty modes off one /proc root, logs its samplers' starts and
+ * stops, and builds a place's report and sweep off the home it is pointed at, so a test suite drives it as a binary
+ * and the words and numbers it answers with are the protocol's, held in one fixture set. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the daemon's sources, the dependency
@@ -3387,6 +3388,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * with kind "reauth" when the daemon took the upgrade and closed 4401 on the token, and with the runtime's own
    * sentence and no kind when the machine has no road or no daemon yet, or the dial failed or timed out. */
   z.object({ id: reqId, op: z.literal("daemon.open"), workspaceId: z.string() }),
+  /** Pushes WorkspaceSysEvent frames for this workspace on this socket, one per poll tick, until the socket goes.
+   * The one road for a workspace whose kind reads its Live rows in the host rather than off a daemon; refused for
+   * every other kind, which reads them over its own daemon link with sys.watch. Replies `{}`. */
+  z.object({ id: reqId, op: z.literal("sys.subscribe"), workspaceId: z.string() }),
   /** Sends one frame down a channel this socket opened and replies with a DaemonSendReply carrying the daemon's own
    * answer, ok or not. Refused (ok false, no kind) when the channel is not this socket's or died before the daemon
    * answered. */
@@ -3854,7 +3859,7 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
-export { actionRefusal, agentsKindRefusal, agentsMayDrive, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, type MachineOnDelete, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
+export { actionRefusal, agentsKindRefusal, agentsMayDrive, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";
@@ -3903,7 +3908,8 @@ export {
   type Rgb,
   type ThemePreset,
 } from "./workspace-look.js";
-export { folderName, parentFolderName, placeDaemonPaths, rootsPathIn, sshDaemonPaths, underProject, workFolderIn } from "./project-path.js";
+export { folderName, parentFolderName, placeDaemonPaths, placeOwnedPaths, rootsPathIn, sshDaemonPaths, underProject, workFolderIn } from "./project-path.js";
+export * from "./daemon-contract.js";
 export * from "./projects.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importDest, importRequest, registerRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";

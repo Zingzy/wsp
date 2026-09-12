@@ -2,6 +2,6 @@
   {
     "id": 1,
     "op": "git.status",
-    "cwd": "/root/app"
+    "cwd": "repo"
   }
 ]

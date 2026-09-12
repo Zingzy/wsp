@@ -3,16 +3,17 @@
 // forwards: the shapes tools print, what is not one, a URL cut by a chunk
 // boundary, and the event on the wire through a real daemon.
 import { execFile } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { localhostPortOf, localhostPortsIn, settledLocalPorts } from "../src/local-urls.js";
-import { startDaemon, type DaemonHandle } from "../src/main.js";
-import type { ListeningPort } from "../src/ports.js";
 import { TerminalUrlScanner } from "../src/relay.js";
+import { fakeProcTree, setListeners } from "./fake-proc.js";
+import { fixture as readFixture } from "./fixtures.js";
+import { daemonUnderTest, type DaemonUnderTest } from "./harness.js";
 import { rejectedEvents } from "./wire-events.js";
 
 const execFileAsync = promisify(execFile);
@@ -111,7 +112,7 @@ describe("localhostPortsIn (text a pty printed)", () => {
   it("the bytes a 40 column pty on a real wsp guest emitted for the same URL, verbatim", () => {
     // Captured through a wsp daemon pty (pty.create with cols 40) on a base sandbox: TERM and stty size read by commands typed
     // into that pty, then PS1 set to ten characters, then the line typed one character at a time and once more in one write.
-    const fixture = JSON.parse(readFileSync(new URL("./fixtures/readline-wrap-guest.json", import.meta.url), "utf8")) as {
+    const fixture = JSON.parse(readFixture("readline-wrap-guest.json")) as {
       bash: string; term: string; sttySize: string; cols: number; prompt: string; typed: string; oneWrite: string; port: number;
     };
     expect(fixture.bash).toContain("GNU bash, version 5.2.15");
@@ -230,21 +231,23 @@ async function until(cond: () => boolean, ms = 3000): Promise<void> {
 }
 
 describe("daemon: localhost.url on the wire", () => {
-  let daemon: DaemonHandle | undefined;
+  let daemon: DaemonUnderTest | undefined;
   let dir: string | undefined;
-  let snapshot: ListeningPort[] = [];
+  /** The fake machine the daemon reads its listening ports off. */
+  let procRoot: string;
   afterEach(async () => {
     await daemon?.close();
     daemon = undefined;
     if (dir) rmSync(dir, { recursive: true, force: true });
     dir = undefined;
-    snapshot = [];
+    rmSync(procRoot, { recursive: true, force: true });
   });
 
   async function start(): Promise<string> {
     dir = mkdtempSync(join(tmpdir(), "wsp-local-urls-"));
     const sockPath = join(dir, "open.sock");
-    daemon = await startDaemon({ host: "127.0.0.1", port: 0, token: TOKEN, openSocketPath: sockPath, portsSource: async () => snapshot, portsIntervalMs: 20 });
+    procRoot = fakeProcTree([]);
+    daemon = await daemonUnderTest({ host: "127.0.0.1", port: 0, token: TOKEN, openSocket: sockPath, procRoot, portsIntervalMs: 20 });
     return sockPath;
   }
 
@@ -276,7 +279,7 @@ describe("daemon: localhost.url on the wire", () => {
     expect(c.events.some(e => e.type === "browser.open")).toBe(false);
     expect(c.events.filter(e => e.type === "localhost.url")).toEqual([{ type: "localhost.url", port: 5173 }]);
     // A loopback listener appearing right after is not this open's callback.
-    snapshot = [{ port: 45543, pid: 2, inode: 2, uid: 0, loopback: true }];
+    setListeners(procRoot, [{ port: 45543, pid: 2, loopback: true }]);
     await until(() => c.events.some(e => e.type === "port.open" && e["port"] === 45543));
     await new Promise(r => setTimeout(r, 100));
     expect(c.events.some(e => e.type === "callback.port")).toBe(false);
@@ -293,7 +296,7 @@ describe("daemon: localhost.url on the wire", () => {
     expect(c.events.filter(e => e.type === "browser.open")).toEqual([{ type: "browser.open", url, port: 3000 }]);
     expect(c.events.filter(e => e.type === "localhost.url")).toEqual([{ type: "localhost.url", port: 54321 }]);
     // The redirect_uri named the port, so no listener heuristic is armed.
-    snapshot = [{ port: 45543, pid: 2, inode: 2, uid: 0, loopback: true }];
+    setListeners(procRoot, [{ port: 45543, pid: 2, loopback: true }]);
     await until(() => c.events.some(e => e.type === "port.open" && e["port"] === 45543));
     await new Promise(r => setTimeout(r, 100));
     expect(c.events.some(e => e.type === "callback.port")).toBe(false);

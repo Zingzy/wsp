@@ -11,7 +11,7 @@
     "id": 1,
     "op": "pty.create",
     "env": {
-      "A": 1
+      "TERM": 1
     }
   }
 ]
