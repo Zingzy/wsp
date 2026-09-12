@@ -3,9 +3,9 @@
 // t3code ClaudeAdapter.ts (MIT, see NOTICE); event shapes are the ones
 // recorded in solari-poc/RESULTS.md.
 
-import { PERMISSION_DENY, RUN_EXIT_MS, backgroundTasksLine, endAfterResult, endRun, fmtDuration, harnessExitLine, refusedTurn, titlePrompt } from "@wsp/protocol";
+import { PERMISSION_ALLOW, PERMISSION_DENY, RUN_EXIT_MS, backgroundTasksLine, endAfterResult, endRun, fmtDuration, harnessExitLine, refusedTurn, titlePrompt } from "@wsp/protocol";
 import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus } from "@wsp/protocol";
-import { controlAnswerLine, controlErrorLine, controlLine, setModeLine } from "./permissions.js";
+import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLine, controlLine, modeOptionOn, setModeLine } from "./permissions.js";
 import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv, newSessionId, userMessageLine } from "./landmines.js";
@@ -36,8 +36,10 @@ export type SteerOutcome = "accepted" | "not-running";
  * already, withdrawn by the CLI, or its turn is over). */
 export type AnswerOutcome = "answered" | "gone";
 
-/** What moving a running turn's access came to: the CLI took it and its next tool call runs at the new mode, it
- * refused the mode in its own words, or the turn is over and its channel takes nothing. */
+/** What moving a running turn's access came to: the turn is at the new mode, the CLI refused the mode in its own
+ * words and this host had no way to stand in for it, or the turn is over and its channel takes nothing. Set covers
+ * the mode the CLI takes only at launch: the request comes back refused and the turn runs at that mode anyway,
+ * because this host answers its prompts from here on. */
 export type AccessOutcome = "set" | "refused" | "gone";
 
 export interface ClaudeSession {
@@ -49,6 +51,9 @@ export interface ClaudeSession {
   readonly command?: string;
   /** What a later host process attaches to this turn by; absent when its run dies with this process. */
   readonly run?: string;
+  /** The process this turn leads on the computer the host runs on, where it runs there; absent on a turn running on
+   * another machine. */
+  readonly pid?: number;
   readonly finished: Promise<TurnResult>;
   interrupt(): Promise<void>;
   /** Writes a user message into the running turn; not-running before system/init and once result was seen or the process is gone. */
@@ -58,8 +63,10 @@ export interface ClaudeSession {
    * this is the person's pick or its own answer for a prompt nobody came to, and denyMessage is what the agent
    * reads as the call's result when the option refuses it. */
   answer(askId: string, answer: { optionId: string; outcome: PermissionOutcome; denyMessage: string }): Promise<AnswerOutcome>;
-  /** Puts this running turn into another access mode, from its next tool call on; settles on the CLI's own answer to
-   * the request, so a mode it will not take comes back refused rather than as a silent no-op. */
+  /** Puts this running turn into another access mode, from its next tool call on, and puts it to the prompt the turn
+   * is stopped on: a mode that asks nobody answers that prompt, and a mode the CLI itself offered on that call
+   * answers it as that option. Settles on the CLI's own answer to the request otherwise, so a mode it will not take
+   * and this host cannot stand in for comes back refused rather than as a silent no-op. */
   setAccess(mode: string): Promise<AccessOutcome>;
 }
 
@@ -93,6 +100,8 @@ export interface ClaudeAdapter {
   readonly attachments: "inline";
   /** The CLI takes MCP servers on the launch itself (--mcp-config), so a turn gets one whatever the config dir holds. */
   readonly mcpServers: true;
+  /** An access picked while a turn runs reaches that turn: over the control channel, and on the prompt it is stopped on. */
+  readonly movesAccess: true;
   /** The commands the CLI runs only in its own terminal; the composer keeps them out of its menu and sends none. */
   readonly screenCommands: ReadonlyArray<ScreenCommand>;
   /** Makes the binary describe itself under the same config dir as a session; null when it did not answer. The
@@ -379,6 +388,9 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     let askedSeq = 0;
     /** The call each running subagent was launched by, by the CLI's handle for the subagent. */
     const launchedBy = new Map<string, string>();
+    /** Set once this turn is moved to the mode that asks nobody: the CLI takes that one only at launch, so from here
+     * every prompt it raises is allowed by this host and none of them reaches a person. */
+    let skipsPrompts = false;
 
     /** Every request still waiting, answered as the caller's outcome; nothing can reach the CLI after this. */
     const settleAsked = (outcome: AccessOutcome): void => {
@@ -408,6 +420,10 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           if (control !== undefined) {
             switch (control.kind) {
               case "ask": {
+                if (skipsPrompts) {
+                  void stream.write(controlAllowLine(control.ask));
+                  break;
+                }
                 const parent = control.agentId === undefined ? undefined : launchedBy.get(control.agentId);
                 const ask = parent === undefined ? control.ask : { ...control.ask, parentToolUseId: parent };
                 pending.set(ask.askId, ask);
@@ -507,6 +523,20 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       return turnResult;
     })();
 
+    /** Answers a prompt this turn raised: the person's own pick, and this host's for a turn moved to a mode that
+     * answers it by itself. A deny message exists only for a deny, which only a person makes. */
+    const answerAsk = async (askId: string, o: { optionId: string; outcome: PermissionOutcome; denyMessage?: string }): Promise<AnswerOutcome> => {
+      const ask = pending.get(askId);
+      if (ask === undefined || exited) return "gone";
+      // Taken off the map before the write, so two answers racing on one prompt cannot both reach the CLI, which
+      // ignores the second and would leave a second closed row behind it.
+      pending.delete(askId);
+      const wrote = await stream.write(controlAnswerLine(ask, o.optionId, o.denyMessage ?? ""));
+      if (wrote !== "written") return "gone";
+      onEvent({ type: "permission.close", sessionId: claudeSessionId, askId, outcome: o.outcome, optionId: o.optionId });
+      return "answered";
+    };
+
     const session: ClaudeSession = {
       localId,
       get claudeSessionId() {
@@ -514,6 +544,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       },
       ...(o.command !== undefined ? { command: o.command } : {}),
       ...(stream.run !== undefined ? { run: stream.run } : {}),
+      ...(stream.pid !== undefined ? { pid: stream.pid } : {}),
       finished,
       steer: async (prompt) => {
         if (!running()) return "not-running";
@@ -521,17 +552,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
         // The turn may have ended while the write travelled; the line then sits unread and the caller starts a turn.
         return wrote === "written" && running() ? "accepted" : "not-running";
       },
-      answer: async (askId, { optionId, outcome, denyMessage }) => {
-        const ask = pending.get(askId);
-        if (ask === undefined || exited) return "gone";
-        // Taken off the map before the write, so two answers racing on one prompt cannot both reach the CLI, which
-        // ignores the second and would leave a second closed row behind it.
-        pending.delete(askId);
-        const wrote = await stream.write(controlAnswerLine(ask, optionId, denyMessage));
-        if (wrote !== "written") return "gone";
-        onEvent({ type: "permission.close", sessionId: claudeSessionId, askId, outcome, optionId });
-        return "answered";
-      },
+      answer: answerAsk,
       setAccess: async (mode) => {
         if (!running()) return "gone";
         const requestId = `wsp-set-mode-${++askedSeq}`;
@@ -541,7 +562,24 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           asked.delete(requestId);
           return "gone";
         }
-        return answered;
+        if (mode === SKIP_PROMPTS_MODE) {
+          // The CLI will not take this one on a turn already under way, so the turn goes to it here: every prompt it
+          // raises from now is allowed by this host, and the ones it is stopped on are allowed now. Its answer to the
+          // request is not waited for, since it cannot raise another prompt until the one in front of it is answered.
+          skipsPrompts = true;
+          for (const askId of [...pending.keys()]) await answerAsk(askId, { optionId: PERMISSION_ALLOW, outcome: "allowed" });
+          return "set";
+        }
+        const outcome = await answered;
+        // A prompt already open was raised at the mode the turn was in, so the CLI still holds it there; where the
+        // mode the person picked is one the CLI offered on that very call, the pick answers it as well.
+        if (outcome === "set") {
+          for (const [askId, ask] of [...pending.entries()]) {
+            const optionId = modeOptionOn(ask, mode);
+            if (optionId !== undefined) await answerAsk(askId, { optionId, outcome: "allowed" });
+          }
+        }
+        return outcome;
       },
       interrupt: async () => {
         interruptRequested = true;
@@ -582,6 +620,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       : {}),
     sessions,
     steers: true,
+    movesAccess: true,
     attachments: "inline",
     mcpServers: true,
     screenCommands: CLAUDE_SCREEN_COMMANDS,

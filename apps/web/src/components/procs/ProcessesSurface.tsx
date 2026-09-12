@@ -5,27 +5,49 @@
 // the only lit one and opens into the daemon's inspect fields with the kill
 // controls. A workspace with only the daemon running shows the daemon, and a
 // kind whose machines list no processes says so where the count sits, rather
-// than waiting on a stream that will never come.
+// than waiting on a stream that will never come. On the computer the host
+// runs on, the machine is the person's own and most of what it runs is
+// theirs: this workspace's threads come first, each under its own name, and
+// the rest of the computer waits behind a toggle. The count is the rows on
+// the screen, never the machine's total, so a filtered table never says a
+// number nothing in it adds up to.
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { NOT_ON_THIS_KIND, servesReading, workspaceKind, type ProcEntry, type ProcInspectReply, type ProcSignal } from "@wsp/protocol";
+import { ChevronRightIcon } from "lucide-react";
+import { NOT_ON_THIS_KIND, foldThreads, isLocalWorkspace, servesReading, workspaceKind, type ProcEntry, type ProcInspectReply, type ProcSignal } from "@wsp/protocol";
 import { useDaemonVersion } from "../../files/wire.js";
 import { cn, errorText } from "../../lib/utils.js";
 import { daemonBehindLine } from "../../machine/daemon.js";
+import { staleWord, type StaleWord } from "../../machine/live.js";
 import { getProcs, useWorkspaceProcs } from "../../machine/procs.js";
-import { useWorkspace } from "../../protocol/store.js";
+import { useAbsentComputer, useStore, useWorkspace } from "../../protocol/store.js";
 import { getTerminals, onTerminals } from "../../terminal/link.js";
 import { clockLabel, compactBytes } from "../machine/format.js";
 import { ScrollArea } from "../ui/scroll-area.js";
 import { terminalLabels } from "../WorkspaceTerminalDrawer.js";
 import { IDLE, offered, press, settle, type KillState } from "./kill.js";
-import { procLabel, procRows, type ProcSort } from "./tree.js";
+import { procLabel, procTable, type ProcRow, type ProcSort, type ProcThread } from "./tree.js";
 
 /** Every row is this tall, so the table reads as a grid and a selection moves nothing. */
 export const ROW_PX = 22;
 const COLUMNS = "grid grid-cols-[3.5rem_3.25rem_3.75rem_minmax(0,1fr)] items-center px-2";
 const NO_TABS: readonly never[] = [];
 
-type Stale = "napping" | "unreachable" | null;
+
+
+const NO_THREADS: readonly ProcThread[] = [];
+
+/** The threads of this workspace with a turn running on this computer, each with the process the host started for
+ * it: what the trees are headed by. The rows carry the pid only while the turn runs and only where it runs here, so
+ * a workspace whose turns run on another machine answers with none. */
+function useThreadRoots(workspaceId: string): readonly ProcThread[] {
+  const sessions = useStore(s => s.sessions[workspaceId]);
+  return useMemo(() => {
+    if (sessions === undefined) return NO_THREADS;
+    return foldThreads(sessions)
+      .filter(t => t.pid !== undefined)
+      .map(t => ({ threadId: t.id, title: t.title, pid: t.pid! }));
+  }, [sessions]);
+}
 
 function useTerminalTitles(workspaceId: string): ReadonlyMap<string, string> {
   const terms = useSyncExternalStore(onTerminals, () => getTerminals(workspaceId));
@@ -36,6 +58,7 @@ function useTerminalTitles(workspaceId: string): ReadonlyMap<string, string> {
 
 export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
   const workspace = useWorkspace(workspaceId);
+  const absent = useAbsentComputer(workspaceId);
   const procs = useWorkspaceProcs(workspaceId);
   const version = useDaemonVersion(workspaceId);
   const titles = useTerminalTitles(workspaceId);
@@ -46,8 +69,20 @@ export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
   useEffect(() => getProcs(workspaceId).watch(), [workspaceId]);
 
   const snapshot = procs.snapshot;
-  const rows = useMemo(() => procRows(snapshot?.procs ?? [], sort, filter), [snapshot, sort, filter]);
-  const stale: Stale = workspace?.phase === "napping" || workspace?.phase === "pausing" ? "napping" : procs.reach === "live" ? null : "unreachable";
+  const threads = useThreadRoots(workspaceId);
+  // The computer the host runs on is the person's own, and most of what it runs was never this workspace's. A
+  // machine wsp forks runs only what this workspace put on it, so it is listed whole.
+  const own = workspace !== null && isLocalWorkspace(workspace);
+  const table = useMemo(() => procTable(snapshot?.procs ?? [], sort, filter, own ? threads : NO_THREADS), [snapshot, sort, filter, own, threads]);
+  const [restOpen, setRestOpen] = useState(false);
+  // Nothing is split until a snapshot has landed: before it, what this computer is running is not yet known, and a
+  // section saying no thread runs here would be an answer the pane does not have.
+  const sectioned = own && snapshot !== null;
+  const showRest = !sectioned || restOpen;
+  // Whether a thread of this workspace is on the machine's list at all, which the filter says nothing about: the
+  // empty section has two true sentences and this is which one it is.
+  const threadsHere = useMemo(() => threads.some(t => (snapshot?.procs ?? []).some(p => p.pid === t.pid)), [threads, snapshot]);
+  const stale = staleWord(workspace?.phase ?? "running", procs.reach === "live");
   const served = workspace === null || servesReading(workspaceKind(workspace), "processes");
 
   // A process that went away takes its selection with it.
@@ -55,9 +90,23 @@ export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
     if (selected !== null && snapshot !== null && !snapshot.procs.some(p => p.pid === selected)) setSelected(null);
   }, [snapshot, selected]);
 
-  const count = snapshot === null ? "pending" : snapshot.procs.length < snapshot.total ? `${snapshot.procs.length} of ${snapshot.total}` : `${snapshot.total} processes`;
+  // What the table is showing, which is what the filter and the toggle left: the machine's own total is the second
+  // number and never the first, so the count and the rows under it always agree.
+  const shown = table.threads.reduce((n, t) => n + t.rows.length, 0) + (showRest ? table.rest.length : 0);
+  const count = snapshot === null ? "pending" : shown < snapshot.total ? `${shown} of ${snapshot.total}` : `${shown} processes`;
   const unavailable = served && stale === null && snapshot === null ? procs.unavailable : null;
   const unavailableLine = unavailable === null ? null : daemonBehindLine(version, "procs") ?? unavailable;
+  const draw = (rows: readonly ProcRow[], under = 0) =>
+    rows.map(({ proc, depth }) => {
+      const lit = proc.pid === selected;
+      const label = snapshot ? procLabel(proc, snapshot.daemon, titles) : null;
+      return (
+        <div key={proc.pid}>
+          <Row proc={proc} depth={depth + under} label={label} lit={lit} onSelect={() => setSelected(lit ? null : proc.pid)} />
+          {lit && <Details workspaceId={workspaceId} proc={proc} stale={stale} />}
+        </div>
+      );
+    });
 
   return (
     <div className="flex min-h-0 flex-1 flex-col font-mono text-[11px]" data-procs>
@@ -85,21 +134,50 @@ export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
       </div>
       <ScrollArea className="min-h-0 flex-1">
         <div role="table" aria-label="Processes" className={cn(stale !== null && "text-muted-foreground/60")} {...(stale !== null ? { "data-stale": stale } : {})}>
-          {unavailableLine !== null && (
-            <p className="truncate px-2 text-muted-foreground" style={{ lineHeight: `${ROW_PX}px` }} title={unavailable ?? undefined} data-procs-unavailable>
-              {unavailableLine}
+          {absent !== null ? (
+            // The refusal stands in the pane, in the two halves the one reading of an absent computer carries,
+            // rather than as a line at the foot of the sidebar in the opposite corner from the click.
+            <p className="px-2 text-muted-foreground" style={{ lineHeight: `${ROW_PX}px` }} data-procs-unavailable>
+              {absent.said}
+              <br />
+              {absent.will}
+            </p>
+          ) : (
+            unavailableLine !== null && (
+              <p className="truncate px-2 text-muted-foreground" style={{ lineHeight: `${ROW_PX}px` }} title={unavailable ?? undefined} data-procs-unavailable>
+                {unavailableLine}
+              </p>
+            )
+          )}
+          {sectioned &&
+            table.threads.map(({ thread, rows }) => (
+              <div key={thread.threadId}>
+                <p className="truncate px-2 text-foreground" style={{ lineHeight: `${ROW_PX}px` }} title={thread.title} data-procs-thread={thread.threadId}>
+                  {thread.title}
+                </p>
+                {draw(rows, 1)}
+              </div>
+            ))}
+          {sectioned && table.threads.length === 0 && (
+            <p className="truncate px-2 text-muted-foreground" style={{ lineHeight: `${ROW_PX}px` }} data-procs-no-threads>
+              {threadsHere ? "no thread of this workspace matches" : "no thread of this workspace is running here"}
             </p>
           )}
-          {rows.map(({ proc, depth }) => {
-            const lit = proc.pid === selected;
-            const label = snapshot ? procLabel(proc, snapshot.daemon, titles) : null;
-            return (
-              <div key={proc.pid}>
-                <Row proc={proc} depth={depth} label={label} lit={lit} onSelect={() => setSelected(lit ? null : proc.pid)} />
-                {lit && <Details workspaceId={workspaceId} proc={proc} stale={stale} />}
-              </div>
-            );
-          })}
+          {sectioned && (
+            <button
+              type="button"
+              aria-expanded={restOpen}
+              onClick={() => setRestOpen(o => !o)}
+              data-procs-rest
+              style={{ height: ROW_PX }}
+              className="flex w-full cursor-pointer items-center gap-1 px-2 text-left text-muted-foreground hover:text-foreground"
+            >
+              <ChevronRightIcon aria-hidden className={cn("size-3 shrink-0 transition-transform duration-150", restOpen && "rotate-90")} />
+              <span className="truncate">{threadsHere ? "the rest of this Mac" : "everything on this Mac"}</span>
+              <span className="tabular-nums">{table.rest.length}</span>
+            </button>
+          )}
+          {showRest && draw(table.rest)}
         </div>
       </ScrollArea>
     </div>
@@ -166,7 +244,7 @@ function Row({ proc, depth, label, lit, onSelect }: RowProps) {
 }
 
 /** The daemon's inspect fields for the lit row, read once when it opens, and the kill controls. */
-function Details({ workspaceId, proc, stale }: { workspaceId: string; proc: ProcEntry; stale: Stale }) {
+function Details({ workspaceId, proc, stale }: { workspaceId: string; proc: ProcEntry; stale: StaleWord }) {
   const [inspect, setInspect] = useState<ProcInspectReply | string | null>(null);
   useEffect(() => {
     let gone = false;

@@ -29,6 +29,7 @@ import type { SidebarProjectSnapshot } from "../adapt/index.js";
 import { SidebarMenuAction, SidebarMenuButton } from "../components/ui/sidebar.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { cn } from "../lib/utils.js";
+import { useAbsentComputer } from "../protocol/store.js";
 import { workspaceKindGlyph } from "../workspaceKindGlyph.js";
 import { RowNameInput } from "./RowNameInput.js";
 import { ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, THREE_LINE_ROW_CLASS, rowLineCut, workspaceRowId } from "./rowGrammar.js";
@@ -126,9 +127,10 @@ export function WorkspaceRow({
   const KindGlyph = workspaceKindGlyph(workspaceKind(project.workspace));
   const gone = project.state === "gone";
   const machine = machineLine(project) ?? "";
-  const meta = workspaceMetaLine({ project, cost, outOfMemory, nowMs });
+  const absent = useAbsentComputer(project.id, nowMs);
+  const meta = workspaceMetaLine({ project, absent, cost, outOfMemory, nowMs });
   // The same slot carries the cost most of the time and a sentence when something needs reading.
-  const metaIsProse = metaSentences({ project, outOfMemory }).includes(meta);
+  const metaIsProse = metaSentences({ project, absent, outOfMemory }).includes(meta);
   const forgetAction = actionById(actions, "forget");
   const rebuildAction = actionById(actions, "rebuild");
   const newThreadAction = actionById(actions, "new-thread");
@@ -164,13 +166,13 @@ export function WorkspaceRow({
               </span>
             )}
             <span data-workspace-state className={cn(ROW_META_CLASS, STATE_SLOT_CLASS)}>
-              {stateSlotWord(project)}
+              {stateSlotWord(project, absent)}
             </span>
           </span>
           <span data-workspace-machine className={cn(ROW_META_CLASS, "truncate")} title={machine}>
             {machine}
           </span>
-          <span data-workspace-meta className={cn(metaIsProse ? ROW_PROSE_CLASS : ROW_META_CLASS, "truncate")} title={meta}>
+          <span data-workspace-meta className={cn(metaIsProse ? ROW_PROSE_CLASS : ROW_META_CLASS, "truncate")} title={absent?.sentence ?? meta}>
             {rowLineCut(meta)}
           </span>
         </span>

@@ -34,7 +34,7 @@
 // every claim on the machine that the caller did not name.
 
 import { randomBytes } from "node:crypto";
-import { HANDSHAKE, INLINE_EXEC_MS, MachineUnreached, RUN_DIR, execFits, machineAnswer, putFiles, realRetryClock, untilReached, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
+import { HANDSHAKE, INLINE_EXEC_MS, MachineUnreached, RUN_DIR, execFits, isPlaceAbsent, machineAnswer, putFiles, realRetryClock, untilReached, type ExecResult, type GuestWrite, type Machine } from "@wsp/engine";
 import { EXEC_CHUNK_BYTES, RUN_STOP_MS, TURN_IDLE_MS, TURN_WALL_MS, TURN_WORK_TICKS_PER_S, shellQuote, turnCutLine, workScoreLine } from "@wsp/protocol";
 import type { ExecStream, ExecStreamFactory, TurnCutRule } from "@wsp/protocol";
 
@@ -87,6 +87,9 @@ export interface TurnActivity {
   quietMs(nowMs: number): number;
   /** A byte from the harness, or a message the person sent into the turn. */
   touch(atMs: number): void;
+  /** A stretch nothing could be read through: the road to the machine was dark, so it is no part of the turn's
+   * quiet and the clock goes on from where it stood. */
+  hold(ms: number): void;
   /** One reading of the turn's tree. The first, and any that undercuts the one before it, is only what the next is
    * measured from: a group whose members exited carries less work than it did and is no baseline. */
   read(ticks: number, atMs: number): void;
@@ -99,6 +102,9 @@ export function turnActivity(startedAt: number): TurnActivity {
     quietMs: nowMs => nowMs - activeAt,
     touch: atMs => {
       activeAt = atMs;
+    },
+    hold: ms => {
+      activeAt += ms;
     },
     read: (ticks, atMs) => {
       if (base === undefined || ticks < base.ticks) {
@@ -259,8 +265,11 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         try {
           res = await machine.exec(pollCmd(offset, readsWork(idleMs, quietMs)), { timeoutMs: execTimeoutMs });
         } catch {
-          // Machine likely napping; polls recover after wake (P10 semantics).
+          // Machine likely napping; polls recover after wake (P10 semantics). A poll that never reached the machine
+          // says nothing about the process it was sent to read, so the stretch the road was dark is no part of the
+          // turn's silence: the idle clock holds here and goes on from the road's return.
           await sleep(pollMs);
+          activity.hold(now() - at);
           continue;
         }
 
@@ -380,7 +389,9 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
         if (res.exitCode !== 0 || !res.stdout.includes(HANDSHAKE.launched)) throw new Error(`remote launch failed on ${machine.id}: nothing came back saying ${HANDSHAKE.launched}, the word the guest prints once the run is up; ${machineAnswer(res)}`);
       },
       (e: unknown) => {
-        if (e instanceof MachineUnreached) throw e;
+        // A computer that is not connected already carries the one sentence every surface says about it, and the
+        // machine's id is not a thing a person reads: both roads out are its own words, not a wrapper's.
+        if (e instanceof MachineUnreached || isPlaceAbsent(e)) throw e;
         throw new Error(`remote launch failed on ${machine.id}: ${e instanceof Error ? e.message : String(e)}`);
       },
     );

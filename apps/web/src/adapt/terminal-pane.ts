@@ -3,16 +3,16 @@
 // (the one vocabulary), the daemon reach and the pane's own socket. A pty
 // survives a pause (the machine is frozen, not rebuilt), so a paused pane keeps
 // its frame and offers the wake; only a replaced machine loses the shell.
-import { biggerSizeLine, outOfMemoryLine, THIS_COMPUTER, type DaemonLinkStatus, type MachineSizeOffer, type MemoryReading, type ReachState, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
+import { biggerSizeLine, outOfMemoryLine, THIS_COMPUTER, type AbsentComputer, type DaemonLinkStatus, type MachineSizeOffer, type MemoryReading, type ReachState, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
 
 export type TerminalPaneState =
   | { readonly kind: "live" }
   /** Nothing has been open on this link yet and its first-answer bound has not passed: the pane says what is being
    * started here, which is the one thing that is true, and promises nothing back. */
-  | { readonly kind: "starting"; readonly local: boolean }
+  | { readonly kind: "starting"; readonly local: boolean; readonly where: string }
   /** Nothing has been open on this link and the bound has passed: the pane names what is not answering and what to
    * do about it, since a wait that has already run out is not something to go on offering. */
-  | { readonly kind: "unanswered"; readonly local: boolean }
+  | { readonly kind: "unanswered"; readonly local: boolean; readonly where: string }
   /** The machine runs, this link was open once, and it is being dialled again: the one state that promises a return. */
   | { readonly kind: "reconnecting"; readonly outOfMemory?: MemoryReading }
   /** The workspace refused the token the host opened the connection with; the host dials again with the one it
@@ -26,6 +26,10 @@ export type TerminalPaneState =
   /** There is no daemon on this machine to dial: the host wired none for its kind, or the machine carries no route
    * to one. Nothing is reconnecting, so the pane says the daemon is absent instead of promising it back. */
   | { readonly kind: "no-daemon" }
+  /** The computer this workspace stands on is not answering. Nothing is reconnecting and nothing is wrong with the
+   * workspace: the computer dials this host itself when it is on, so the pane says so in the two halves the one
+   * reading of it carries rather than leaving a line in the sidebar's corner. */
+  | { readonly kind: "absent"; readonly absent: AbsentComputer }
   | { readonly kind: "paused"; readonly pausing: boolean }
   | { readonly kind: "waking" }
   | { readonly kind: "gone" };
@@ -41,17 +45,26 @@ export interface TerminalPaneInput {
   /** Whether this workspace is the person's own computer, which is the only thing the words for a link that has
    * never been open turn on. Read through the protocol's own reading of it, never by comparing a kind here. */
   readonly local?: boolean;
+  /** The one reading of this workspace's computer while it is not answering; null while it is. */
+  readonly absent?: AbsentComputer | null;
+  /** What this link's sentences call where they are being opened: the workspace's own name, which on a machine wsp
+   * forked is the name of that machine. Left out only where the caller holds no record yet. */
+  readonly where?: string;
 }
 
 export function terminalPaneState(input: TerminalPaneInput): TerminalPaneState {
   const oom = input.outOfMemory ? { outOfMemory: input.outOfMemory } : {};
   const local = input.local ?? false;
+  const where = local ? THIS_COMPUTER : (input.where ?? "this workspace");
   /** What a machine that is up but whose link is not open reads as, from the link alone. */
   const fromLink = (): TerminalPaneState => {
-    if (input.socket === "opening") return { kind: "starting", local };
-    if (input.socket === "unanswered") return { kind: "unanswered", local };
+    if (input.socket === "opening") return { kind: "starting", local, where };
+    if (input.socket === "unanswered") return { kind: "unanswered", local, where };
     return { kind: "reconnecting", ...oom };
   };
+  // Ahead of every other reading: while that computer is not connected, nothing else here is known about the
+  // workspace, and the socket's own words would promise a link nobody is opening.
+  if (input.absent != null) return { kind: "absent", absent: input.absent };
   switch (input.state) {
     case "gone":
       return { kind: "gone" };
@@ -82,15 +95,17 @@ export function terminalPaneTitle(pane: TerminalPaneState): string | null {
     case "live":
       return null;
     case "starting":
-      return `Starting a terminal on ${where(pane.local)}`;
+      return `Starting a terminal on ${pane.where}`;
     case "unanswered":
-      return `Nothing has answered on ${where(pane.local)}`;
+      return `Nothing has answered on ${pane.where}`;
     case "reconnecting":
       return "Reconnecting to the workspace";
     case "reauth":
       return "The workspace refused a stale daemon token; reconnecting with the one wsp holds now";
     case "not-answering":
       return pane.outOfMemory ? outOfMemoryLine(pane.outOfMemory) : "The workspace is not answering";
+    case "absent":
+      return pane.absent.said;
     case "no-daemon":
       return NO_DAEMON_TITLE;
     case "refused":
@@ -119,18 +134,13 @@ const REBUILD_HINT = `Rebuild it from the ${WORKSPACE_PANEL}`;
  * same thing. */
 export const SHELL_ENDED_LINE = "This shell ended when the workspace moved to another computer";
 
-/** Where a link is being opened, in the words a person reads: their own computer, or the workspace they are looking
- * at. The one split the link's own words make, taken from the protocol's reading of what this computer is rather
- * than from a kind compared here, so a kind added later needs no second table. */
-const where = (local: boolean): string => (local ? THIS_COMPUTER : "this workspace");
-
 /** What to do once nothing has answered. The fact is in the title; this half is the one thing a person can act on,
- * and it names the thing to look at rather than leaving an "it" open. Both halves read the same word for where,
+ * and it names the thing to look at rather than leaving an "it" open. Both halves read the same name for where,
  * so the pair cannot drift apart. */
-const unansweredHint = (local: boolean): string =>
-  local
-    ? `wsp keeps trying; look at the terminal you started wsp in on ${where(local)}`
-    : `wsp keeps trying; the ${WORKSPACE_PANEL} says what ${where(local)} is doing`;
+const unansweredHint = (pane: { local: boolean; where: string }): string =>
+  pane.local
+    ? `wsp keeps trying; look at the terminal you started wsp in on ${pane.where}`
+    : `wsp keeps trying; the ${WORKSPACE_PANEL} says what ${pane.where} is doing`;
 
 /** What a pane says for a machine with no daemon at all. One sentence stating the fact, with no return promised and
  * nothing to wait for: a pane that read "reconnecting" for a workspace that never had a daemon road was the bug
@@ -154,13 +164,15 @@ export function terminalPaneHints(pane: TerminalPaneState, size: WorkspaceSize |
   const bigger = size !== null && sizes !== null ? [biggerSizeLine(size, sizes)] : [];
   switch (pane.kind) {
     case "unanswered":
-      return [unansweredHint(pane.local)];
+      return [unansweredHint(pane)];
     case "starting":
       return [];
     case "reconnecting":
       return pane.outOfMemory ? [outOfMemoryLine(pane.outOfMemory), ...bigger] : [];
     case "not-answering":
       return pane.outOfMemory ? [...bigger, REBUILD_HINT] : [REBUILD_HINT];
+    case "absent":
+      return [pane.absent.will];
     case "no-daemon":
     case "refused":
       return [];
@@ -184,15 +196,17 @@ export function terminalEmptyLine(pane: TerminalPaneState): string | null {
     case "live":
       return null;
     case "starting":
-      return `Starting a terminal on ${where(pane.local)}; the first one opens when it is ready`;
+      return `Starting a terminal on ${pane.where}; the first one opens when it is ready`;
     case "unanswered":
-      return `Nothing has answered on ${where(pane.local)}, so no terminal opens yet`;
+      return `Nothing has answered on ${pane.where}, so no terminal opens yet`;
     case "reconnecting":
       return "The daemon link is reconnecting; terminals open when it is back";
     case "reauth":
       return "The workspace refused a stale daemon token; terminals open once the link carries the current one";
     case "not-answering":
       return "The workspace is not answering; terminals open when it does";
+    case "absent":
+      return `${pane.absent.sentence}, and a terminal opens then`;
     case "no-daemon":
       return NO_DAEMON_LINE;
     case "refused":
@@ -218,13 +232,15 @@ export function terminalInputRefusal(pane: TerminalPaneState): string | null {
     case "starting":
       return "Typing is refused while the terminal starts";
     case "unanswered":
-      return `Typing is refused: nothing has answered on ${where(pane.local)}`;
+      return `Typing is refused: nothing has answered on ${pane.where}`;
     case "reconnecting":
       return "Typing is refused while the workspace is reconnecting";
     case "reauth":
       return "Typing is refused until the workspace takes the current daemon token";
     case "not-answering":
       return "Typing is refused: the workspace is not answering";
+    case "absent":
+      return `Typing is refused: ${pane.absent.said}`;
     case "no-daemon":
       return NO_DAEMON_TYPING;
     case "refused":
@@ -242,10 +258,12 @@ export function terminalInputRefusal(pane: TerminalPaneState): string | null {
   }
 }
 
-/** The one line the main screen carries while this workspace's link is not open, so the composer never sits there
- * looking live over a link nobody can reach and nobody has to open a pane to find out. It is the pane's own title,
- * not a second sentence: the states that belong to the machine (paused, waking, gone) are left out, since the row's
- * state word already carries those, and so is a link still inside its first-answer bound, which is not down. */
+/** The one line the screen carries under the composer while this workspace's link is not open, so the box never
+ * sits there looking live over a link nobody can reach. It is the pane's own title, not a second sentence: the
+ * states that belong to the machine (paused, waking, gone, a computer that is not answering) are left out, since
+ * the row's state word and the composer's held send already carry those, and so is a link still inside its
+ * first-answer bound, which is not down. It is drawn beside the workspace it is about and nowhere else: the same
+ * sentence in the sidebar's corner slot read as a line about nothing, naming no workspace. */
 export function linkDownLine(pane: TerminalPaneState): string | null {
   switch (pane.kind) {
     case "unanswered":
@@ -257,6 +275,7 @@ export function linkDownLine(pane: TerminalPaneState): string | null {
     case "starting":
     case "not-answering":
     case "no-daemon":
+    case "absent":
     case "paused":
     case "waking":
     case "gone":

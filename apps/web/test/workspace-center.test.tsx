@@ -86,7 +86,7 @@ describe("workspace center", () => {
     const drawer = document.querySelector('[data-terminal-owner="drawer"]');
     expect(drawer).not.toBeNull();
     // The link here has never been open, so the drawer says what is being started rather than promising a return.
-    expect(drawer!.textContent).toContain("Starting a terminal on this workspace; the first one opens when it is ready");
+    expect(drawer!.textContent).toContain("Starting a terminal on api; the first one opens when it is ready");
     expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
   });
 

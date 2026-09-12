@@ -1,19 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The new-workspace dialog: its layout, its Where control and what each pick
 // says under it, the state with nowhere to put a workspace, and the four
-// reasons Create is held. Header, panel and footer stack inside one flex
-// column of the popup, so the footer stays attached to the card, and the form
-// still submits on Enter and on the Create button.
+// reasons Create is held, each of which is read in the caption under Where
+// before any click, with the keycap held while it waits and live the moment it
+// can be pressed. Header, panel and footer stack inside one flex column of the
+// popup, so the footer stays attached to the card, and the form still submits
+// on Enter and on the Create button.
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fmtRate, fmtSize, type PlaceView, type SealedImageCopy } from "@wsp/protocol";
-
-vi.mock("../src/components/ui/tooltip.js", () => ({
-  Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
-  TooltipTrigger: ({ render: element, children, ...rest }: { render: ReactElement<{ children?: ReactNode }>; children?: ReactNode }) => cloneElement(element, rest, children),
-  TooltipPopup: ({ children }: { children: ReactNode }) => <div role="tooltip">{children}</div>,
-}));
 
 import { NewWorkspaceDialog } from "../src/sidebar/NewWorkspaceDialog.js";
 
@@ -52,6 +47,9 @@ const open = async (props: Partial<Parameters<typeof NewWorkspaceDialog>[0]> = {
 const slot = (dialog: HTMLElement, name: string): HTMLElement => dialog.querySelector<HTMLElement>(`[data-slot="dialog-${name}"]`)!;
 const before = (a: Node, b: Node): boolean => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
 const caption = (dialog: HTMLElement): string | null => dialog.querySelector("[data-k=where-caption]")!.textContent;
+const create = (dialog: HTMLElement): HTMLButtonElement => within(dialog).getByRole("button", { name: "Create" }) as HTMLButtonElement;
+/** Whether a keycap is drawn as held; what held is drawn as lives with the button, in ui/button.test.tsx. */
+const isHeld = (button: HTMLElement): boolean => button.hasAttribute("data-held");
 
 describe("new workspace dialog", () => {
   it("lays header, panel and footer out in one flex column that is the popup's child", async () => {
@@ -132,9 +130,9 @@ describe("the Where control", () => {
     const dialog = await open({ places: [HERE, full], onCreate });
     const line = "free · 3 of 3 workspaces · pause or delete one there";
     expect(caption(dialog)).toBe(line);
-    expect(within(dialog).getByRole("button", { name: "Create" }).hasAttribute("disabled")).toBe(true);
-    expect(within(dialog).getByRole("tooltip").textContent).toBe(line);
-    fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
+    expect(create(dialog).disabled).toBe(true);
+    expect(isHeld(create(dialog))).toBe(true);
+    fireEvent.click(create(dialog));
     expect(onCreate).not.toHaveBeenCalled();
   });
 
@@ -149,58 +147,58 @@ describe("the Where control", () => {
 describe("with nowhere to put a workspace", () => {
   const NOWHERE = [HERE, { ...HETZNER, id: "p_9", name: "old-macbook", default: false, docker: false, forks: undefined }];
 
-  it("drops the control for two notes, offers Add a computer and holds Create", async () => {
+  it("drops the control for two notes, makes Add a computer the loud one and holds Create beside it", async () => {
     const onAddComputer = vi.fn();
     const dialog = await open({ places: NOWHERE, onAddComputer });
     expect(within(dialog).queryByRole("radiogroup", { name: "Where" })).toBeNull();
-    expect(dialog.querySelector("[data-k=nowhere-here]")!.textContent).toBe("this Mac is already a workspace, the only one it can be");
+    // What is missing, not what this computer already is: the sidebar beside the dialog may hold three workspaces.
+    expect(dialog.querySelector("[data-k=nowhere-here]")!.textContent).toBe("Nowhere to put a new workspace yet.");
     expect(dialog.querySelector("[data-k=nowhere-add]")!.textContent).toBe("Add a computer you own or connect a provider, and workspaces can be created there.");
-    expect(within(dialog).getByRole("button", { name: "Create" }).hasAttribute("disabled")).toBe(true);
-    expect(within(dialog).getByRole("tooltip").textContent).toBe("add a computer or connect a provider first");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Add a computer" }));
+    const add = within(dialog).getByRole("button", { name: "Add a computer" });
+    expect(isHeld(add)).toBe(false);
+    expect(create(dialog).disabled).toBe(true);
+    expect(isHeld(create(dialog))).toBe(true);
+    expect(within(dialog).queryByRole("tooltip")).toBeNull();
+    fireEvent.click(add);
     expect(onAddComputer).toHaveBeenCalled();
-  });
-
-  it("says nowhere to put one before it says the image is not built", async () => {
-    const dialog = await open({ places: NOWHERE, refusal: "the image is still building · 5 of 13" });
-    expect(within(dialog).getByRole("tooltip").textContent).toBe("add a computer or connect a provider first");
   });
 });
 
 describe("why Create is held", () => {
-  it("with nothing to fork yet the keycap is held and says why, and neither road creates anything", async () => {
+  it("with nothing to fork yet the keycap is held and the caption says why, and neither road creates anything", async () => {
     const onCreate = vi.fn();
     const line = "the image is still building · 5 of 13";
     const dialog = await open({ refusal: line, onCreate });
-    const create = within(dialog).getByRole("button", { name: "Create" });
-    expect(create.hasAttribute("disabled")).toBe(true);
-    expect(within(dialog).getByRole("tooltip").textContent).toBe(line);
-    fireEvent.click(create);
+    expect(create(dialog).disabled).toBe(true);
+    expect(isHeld(create(dialog))).toBe(true);
+    expect(caption(dialog)).toBe(line);
+    fireEvent.click(create(dialog));
     fireEvent.keyDown(within(dialog).getByLabelText("Name"), { key: "Enter" });
     expect(onCreate).not.toHaveBeenCalled();
-    // A disabled control cannot be hovered, so the reason hangs on a wrapper around it rather than on the button.
-    expect(dialog.querySelector("[data-k=create-reason]")?.contains(create)).toBe(true);
-    cleanup();
-    const free = await open();
-    expect(within(free).getByRole("button", { name: "Create" }).hasAttribute("disabled")).toBe(false);
-    expect(free.querySelector("[data-k=create-reason]")).toBeNull();
+    // No tooltip anywhere: a reason read only on hover was read by nobody.
+    expect(within(dialog).queryByRole("tooltip")).toBeNull();
+    expect(dialog.querySelector("[data-k=create-reason]")).toBeNull();
   });
 
-  it("a held keycap is the live one's width at every window, since the footer stacks its controls on a phone", async () => {
-    const live = within(await open()).getByRole("button", { name: "Create" });
-    const width = ["w-full", "sm:w-auto"].filter(c => live.className.split(" ").includes(c));
+  it("the held keycap and the live one stand in the same slot at the same size, and only the variant differs", async () => {
+    const held = create(await open({ refusal: "the image is still building" }));
+    const spot = { tag: held.tagName, type: held.getAttribute("type"), word: held.textContent, size: held.className.split(" ").filter(c => c.startsWith("h-") || c.startsWith("px-")) };
     cleanup();
-    const held = within(await open({ refusal: "the image is still building" })).getByRole("button", { name: "Create" });
-    // The live keycap takes the width the footer gives it; the held one is inside the tooltip's wrapper, so both
-    // it and the wrapper have to be told to take that width too.
-    expect(held.className.split(" ")).toEqual(expect.arrayContaining(["w-full", "sm:w-auto", ...width]));
-    expect(held.parentElement!.className.split(" ")).toEqual(expect.arrayContaining(["flex", "w-full", "sm:w-auto"]));
+    const live = create(await open());
+    expect({ tag: live.tagName, type: live.getAttribute("type"), word: live.textContent, size: live.className.split(" ").filter(c => c.startsWith("h-") || c.startsWith("px-")) }).toEqual(spot);
+    expect(isHeld(live)).toBe(false);
+    expect(live.disabled).toBe(false);
   });
 
-  it("an empty name holds it and asks for one", async () => {
+  it("an empty name holds it, and the caption asks for one until it is typed", async () => {
     const dialog = await open();
     fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "   " } });
-    expect(within(dialog).getByRole("button", { name: "Create" }).hasAttribute("disabled")).toBe(true);
-    expect(within(dialog).getByRole("tooltip").textContent).toBe("give the workspace a name");
+    expect(create(dialog).disabled).toBe(true);
+    expect(isHeld(create(dialog))).toBe(true);
+    expect(caption(dialog)).toBe("give the workspace a name");
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "beta" } });
+    expect(create(dialog).disabled).toBe(false);
+    expect(isHeld(create(dialog))).toBe(false);
+    expect(caption(dialog)).toBe("free · room for 3 workspaces · builds your image there first, about 4 min");
   });
 });

@@ -27,6 +27,14 @@ const askLine = JSON.stringify({
     tool_use_id: "toolu_1",
   },
 });
+/** A second call the CLI asks about, so a turn already moved to the mode that asks nobody can be seen answering one
+ * without a person. */
+const NEXT_ASK = "b2f1d8c0-11d2-4f23-9a55-2d6a4a3f0e77";
+const nextAskLine = JSON.stringify({
+  type: "control_request",
+  request_id: NEXT_ASK,
+  request: { subtype: "can_use_tool", tool_name: "Bash", input: { command: "cat out.txt" }, description: "cat out.txt", tool_use_id: "toolu_2" },
+});
 const resultLine = JSON.stringify({ type: "result", subtype: "success", session_id: SESSION, result: "Done.", usage: { output_tokens: 3 }, total_cost_usd: 0.01 });
 
 /** A stream the test feeds: `push` sends the CLI's next line, `end` exits the process, and `stdin` is every line the
@@ -310,6 +318,73 @@ describe("a running turn moved to another access mode", () => {
     await settle();
     io.push(answered(io.stdin[1]!, "invalid permission mode"));
     expect(await moved).toBe("refused");
+    io.push(resultLine);
+    io.end();
+    await session.finished;
+  });
+
+  it("the mode that asks nobody answers the prompt the turn is stopped on and every one it raises after", async () => {
+    const { events, session, io } = start();
+    io.push(initLine);
+    io.push(askLine);
+    await settle();
+    expect(asks(events)).toHaveLength(1);
+
+    const moved = session.setAccess("bypassPermissions");
+    await settle();
+    // The request goes down the channel all the same, and this CLI refuses it: the mode is a launch flag on it.
+    expect(JSON.parse(io.stdin[1]!)).toMatchObject({ type: "control_request", request: { subtype: "set_permission_mode", mode: "bypassPermissions" } });
+    io.push(answered(io.stdin[1]!, "the session was not launched with --dangerously-skip-permissions"));
+    // The prompt in front of the person is allowed by this host, so the turn goes on without a click.
+    expect(await moved).toBe("set");
+    expect(JSON.parse(io.stdin[2]!)).toMatchObject({ type: "control_response", response: { request_id: ASK, response: { behavior: "allow" } } });
+    expect(closes(events)).toEqual([{ type: "permission.close", sessionId: SESSION, askId: ASK, outcome: "allowed", optionId: PERMISSION_ALLOW }]);
+
+    io.push(nextAskLine);
+    await settle();
+    // The next call is allowed the same way and no prompt is put to anyone.
+    expect(asks(events)).toHaveLength(1);
+    expect(JSON.parse(io.stdin[3]!)).toMatchObject({ type: "control_response", response: { request_id: NEXT_ASK, response: { behavior: "allow" } } });
+
+    io.push(resultLine);
+    io.end();
+    await session.finished;
+  });
+
+  it("a mode the CLI offered on the open prompt answers it as that option, and one it did not leaves it for the person", async () => {
+    const { events, session, io } = start();
+    io.push(initLine);
+    io.push(askLine);
+    await settle();
+
+    // The prompt is a write and the CLI suggested accept edits for it, so the pick allows this call and stops the
+    // asking for the rest of the session in one answer.
+    const edits = session.setAccess("acceptEdits");
+    await settle();
+    io.push(answered(io.stdin[1]!));
+    expect(await edits).toBe("set");
+    expect(JSON.parse(io.stdin[2]!).response.response).toMatchObject({ behavior: "allow", updatedPermissions: [{ type: "setMode", mode: "acceptEdits", destination: "session" }] });
+    expect(closes(events)).toEqual([{ type: "permission.close", sessionId: SESSION, askId: ASK, outcome: "allowed", optionId: "mode:acceptEdits" }]);
+
+    io.push(resultLine);
+    io.end();
+    await session.finished;
+  });
+
+  it("a mode the open prompt carries no option for moves the turn and leaves that prompt standing", async () => {
+    const { events, session, io } = start();
+    io.push(initLine);
+    io.push(askLine);
+    await settle();
+    const moved = session.setAccess("plan");
+    await settle();
+    io.push(answered(io.stdin[1]!));
+    expect(await moved).toBe("set");
+    // Nothing was answered for the person: plan says nothing about the write in front of them.
+    expect(io.stdin).toHaveLength(2);
+    expect(closes(events)).toHaveLength(0);
+    expect(await session.answer(ASK, { optionId: PERMISSION_ALLOW, outcome: "allowed", denyMessage: "unused" })).toBe("answered");
+
     io.push(resultLine);
     io.end();
     await session.finished;

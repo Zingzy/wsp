@@ -1,9 +1,10 @@
 name: ci
 
 # Every pull request and every push to main runs what the merge gate runs on a
-# clean machine: install, build every package but the landing site and the
-# desktop bundle, the unit suite, and the type check per package. The Chromium
-# cases and the Electron smoke need a screen and stay behind their own flags.
+# clean machine: the daemon binary this runner runs, then install, build every
+# package but the landing site and the desktop bundle, the unit suite, and the
+# type check per package. The Chromium cases and the Electron smoke need a
+# screen and stay behind their own flags.
 on:
   pull_request:
   push:
@@ -35,6 +36,34 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+      # The host spawns the daemon for this computer's own workspace and the command line package carries it, so the
+      # build and the suite both want the one Linux binary this runner runs before anything of node's is built.
+      - name: Toolchain from rust-toolchain.toml
+        working-directory: daemon
+        run: |
+          rustup toolchain install
+          rustup show
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            daemon/target
+          key: daemon-rust-${{ runner.os }}-${{ hashFiles('daemon/Cargo.lock', 'daemon/rust-toolchain.toml') }}
+          restore-keys: |
+            daemon-rust-${{ runner.os }}-
+      # ring carries C, which musl-tools compiles for the musl target; libcontainer links libseccomp statically, and
+      # the archive has to be one built against musl, so the script builds it from its pinned release first.
+      - name: C compiler for the musl target, and libseccomp built against musl
+        working-directory: daemon
+        run: |
+          sudo apt-get install -y --no-install-recommends musl-tools gperf
+          ./scripts/libseccomp-archive.sh musl
+      - name: The daemon this runner runs
+        working-directory: daemon
+        run: LIBSECCOMP_LIB_PATH=$PWD/target/libseccomp/musl cargo build --release --target x86_64-unknown-linux-musl -p wsp-daemon-bin
+      - run: node packages/wspx/scripts/daemon-binary.mjs --triple x86_64-unknown-linux-musl
       - run: pnpm install --frozen-lockfile
       - name: Build
         run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' --filter '!@wsp/desktop' build

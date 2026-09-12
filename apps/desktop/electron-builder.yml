@@ -18,9 +18,9 @@ mac:
       arch: [universal]
     - target: dir
       arch: [universal]
-  # node-pty's two native builds are staged into both arch trees so the merge sees one file list, which leaves them
-  # byte for byte the same on both sides; the merge refuses an identical Mach-O it was not told to take once.
-  x64ArchFiles: "**/node-pty/prebuilds/**"
+  # The daemon binaries are staged into both arch trees, one thin file per target, byte for byte the same on both
+  # sides; the merge refuses an identical Mach-O it was not told to take once.
+  x64ArchFiles: "**/assets/daemon/**"
   # No identity is named: a Developer ID Application certificate in the keychain (CSC_LINK imports one) signs, and
   # without one electron-builder skips signing and scripts/after-pack.mjs signs ad hoc.
   hardenedRuntime: true

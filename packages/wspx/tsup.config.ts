@@ -5,9 +5,8 @@ import { defineConfig } from "tsup";
 // dependencies are all devDependencies here, which tsup inlines, so the
 // published package declares none. ws's optional native accelerators are the
 // only imports left outside, and ws is CommonJS, so the ESM output needs a
-// require of its own. node-pty is inlined too and reads __dirname to find the
-// helper beside its native module, which an ES module scope has not got, so
-// the two names CommonJS would have given it are declared here as well.
+// require of its own, and the two file names CommonJS would have given an
+// inlined module are declared beside it.
 export default defineConfig({
   entry: { bin: "src/bin.ts" },
   format: ["esm"],

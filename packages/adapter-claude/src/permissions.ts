@@ -20,6 +20,12 @@ import type { PermissionAsk, PermissionOption } from "@wsp/protocol";
 /** The one flag that routes the CLI's permission prompts to this process instead of having it deny them itself. */
 export const PERMISSION_PROMPT_TOOL = "stdio";
 
+/** The mode this CLI takes as a launch flag alone (--dangerously-skip-permissions), which is why it refuses
+ * set_permission_mode for it mid-turn. The launch reads this and so does the mid-turn pick, which answers the turn's
+ * prompts here instead: the mode means nobody is asked, and a person who picked it while a prompt is open is asking
+ * for that prompt to go too. */
+export const SKIP_PROMPTS_MODE = "bypassPermissions";
+
 /** A setMode suggestion's option id, so the runtime and the adapter name the same pick. */
 const modeOptionId = (mode: string): string => `mode:${mode}`;
 
@@ -127,11 +133,25 @@ export function controlAnswerLine(ask: PermissionAsk, optionId: string, denyMess
   return JSON.stringify({ type: "control_response", response: { subtype: "success", request_id: ask.askId, response } });
 }
 
+/** The line that allows a call nobody was asked about: the turn is at a mode that asks nobody, so the prompt the CLI
+ * raised is answered from here and no deny words exist for it. */
+export function controlAllowLine(ask: PermissionAsk): string {
+  return controlAnswerLine(ask, PERMISSION_ALLOW, "");
+}
+
+/** The option on an open prompt that allows this call and leaves the rest of the session in `mode`, where the CLI
+ * suggested that mode for this call; nothing where it suggested another or none, and the prompt then stands for the
+ * person as it did. */
+export function modeOptionOn(ask: PermissionAsk, mode: string): string | undefined {
+  return ask.options.find(o => o.effect === "mode" && o.mode === mode)?.id;
+}
+
 /** The request that puts a running turn into another access mode from its next tool call on: the same channel the
  * prompts ride, in the direction the SDK host writes. The CLI answers it with a control_response of this request's
  * own id. Measured on 2.1.263, 2026-09-08: every mode is taken mid-turn and the next tool call runs at it, except
  * bypass, which is refused with "the session was not launched with --dangerously-skip-permissions" because that mode
- * is a launch flag on this CLI, so a bypass pick is the one that waits for the person's next message. */
+ * is a launch flag on this CLI; the turn still goes to that mode, with this host answering its prompts rather than
+ * the CLI skipping them. */
 export function setModeLine(requestId: string, mode: string): string {
   return JSON.stringify({ type: "control_request", request_id: requestId, request: { subtype: "set_permission_mode", mode } });
 }

@@ -4,7 +4,7 @@
 // shape as chat.test.tsx; no live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { HOST_ASLEEP_SEND, screenCommandLine, SEND_BLOCK_WORDS, sendRefusal, stillWorkingLine, type EventUnion, type HarnessCatalog, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { HOST_ASLEEP_SEND, absentComputer, screenCommandLine, SEND_BLOCK_WORDS, sendRefusal, stillWorkingLine, type EventUnion, type HarnessCatalog, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
@@ -571,13 +571,56 @@ describe("composer while the workspace is not live", () => {
     expect(sendButton().disabled).toBe(true);
   });
 
+  it("a workspace on a computer that is not answering holds the send with that computer's own sentence and sends nothing", async () => {
+    const onPlace: WorkspaceView = { ...workspace, kind: "place", machineId: "place:p_oldlaptop" };
+    const { api, started } = fixtureApi([onPlace]);
+    await setup(api);
+    act(() =>
+      useStore.setState({
+        places: [
+          { id: "here", kind: "computer", name: "this-mac", default: false, present: true },
+          { id: "p_oldlaptop", kind: "computer", name: "old-laptop", default: true, present: false, lastSeenAt: new Date(Date.now() - 38 * 60_000).toISOString(), workspaceId: WS },
+        ],
+      }),
+    );
+    const sentence = absentComputer("old-laptop", 38 * 60_000).sentence;
+    // The standing refusal slot, not a toast: the person reads it where they are typing, and it stays there.
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(sentence));
+    expect(sentence).toBe("old-laptop is not answering; it connects on its own when it is on");
+    expect(isEditable(composerEditor())).toBe(false);
+    const send = screen.getByRole("button", { name: sentence }) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    expect(send.getAttribute("title")).toBe(sentence);
+    // Not the state table's words, and no machine id where a person reads.
+    expect(screen.queryByText(sendRefusal("unreachable")!)).toBeNull();
+    expect(screen.getByRole("status").textContent).not.toContain("place:");
+    // Enter with a draft in the box starts nothing, so no refusal comes back from the runtime at all.
+    await typeInto(composerEditor(), "list the files in this repo");
+    await press(composerEditor(), "Enter");
+    expect(started).toHaveLength(0);
+    expect(useStore.getState().toast).toBeNull();
+    // The slot stands at two lines and the sentence wraps in it. At the smallest window with the right panel open
+    // the slot is 296 px and the sentence is 430 px, so a slot that cut would drop the half that says what happens
+    // next, which is the half the person needs. Measured at 1024 by 700 with the panel open: the slot's own class
+    // is what holds, since jsdom lays nothing out.
+    const box = slot()!;
+    expect(box.className).toContain("h-9");
+    expect(box.className).not.toContain("h-5");
+    const said = screen.getByRole("status");
+    expect(said.className).not.toContain("truncate");
+    expect(said.className).toContain("text-pretty");
+    expect(said.textContent).toBe(sentence);
+  });
+
   it("the slot is laid out at one height with or without a line, so the composer does not move when a refusal lands", async () => {
     const { api, emit } = fixtureApi([workspace]);
     await setup(api);
     await waitFor(() => expect(isEditable(composerEditor())).toBe(true));
     const empty = slot();
     expect(empty).not.toBeNull();
-    expect(empty!.className).toContain("h-5");
+    // Two lines, the spec's refusal rule, empty or not, so the sentence that needs both has them and the box
+    // under the slot does not move when one lands.
+    expect(empty!.className).toContain("h-9");
     expect(empty!.className).toContain("max-w-3xl");
     // The slot is the live region, present before any words land, so a screen reader hears the line when it does.
     expect(empty!.getAttribute("aria-live")).toBe("polite");

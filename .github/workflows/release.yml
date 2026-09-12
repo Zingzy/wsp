@@ -1,14 +1,23 @@
 name: release
 
-# A pushed v1.2.3 tag is the whole release: the draft with its notes, the mac
-# disk image, the linux AppImage, the command line package on npm through
-# trusted publishing, and the draft turned into a release once every part
-# landed. Every asset also goes up under a name no version moves, which is what
-# releases/latest/download serves and what the site links.
+# A pushed v1.2.3 tag is the whole release: the draft with its notes, the four
+# daemon binaries, the mac disk image, the linux AppImage, the command line
+# package on npm through trusted publishing, and the draft turned into a
+# release once every part landed. Every bundle also goes up under a name no
+# version moves, which is what releases/latest/download serves and what the
+# site links. Run by hand it is a dry run: the daemon binaries are built and
+# uploaded as artifacts and the command line package is staged with them, and
+# nothing is drafted, attached or published.
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build the daemon binaries and stage the command line package with them; publish nothing
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -19,8 +28,71 @@ env:
   PNPM_VERSION: "11.9.0"
 
 jobs:
+  daemon:
+    name: Daemon ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+          - target: aarch64-apple-darwin
+            os: macos-14
+          - target: x86_64-apple-darwin
+            os: macos-14
+    defaults:
+      run:
+        working-directory: daemon
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain from rust-toolchain.toml
+        run: |
+          rustup toolchain install
+          rustup target add ${{ matrix.target }}
+          rustup show
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            daemon/target
+          key: daemon-release-${{ matrix.target }}-${{ hashFiles('daemon/Cargo.lock', 'daemon/rust-toolchain.toml') }}
+          restore-keys: |
+            daemon-release-${{ matrix.target }}-
+      # Each Linux binary is a static musl build on its own chip's runner: ring carries C, which musl-tools compiles
+      # for the musl target, and libcontainer links a libseccomp built against musl by the script, from its pinned
+      # release. The darwin builds link no C library of their own.
+      - name: C compiler for the musl target, and libseccomp built against musl
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y --no-install-recommends musl-tools gperf
+          ./scripts/libseccomp-archive.sh musl
+      - name: Build
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            LIBSECCOMP_LIB_PATH="$PWD/target/libseccomp/musl" cargo build --release --target "$TARGET" -p wsp-daemon-bin
+          else
+            cargo build --release --target "$TARGET" -p wsp-daemon-bin
+          fi
+          cp "target/$TARGET/release/wsp-daemon" "wsp-daemon-$TARGET"
+          ls -l "wsp-daemon-$TARGET"
+          file "wsp-daemon-$TARGET"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wsp-daemon-${{ matrix.target }}
+          path: daemon/wsp-daemon-${{ matrix.target }}
+          if-no-files-found: error
+
   draft:
     name: Draft release
+    if: ${{ !inputs.dry_run && github.ref_type == 'tag' }}
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -53,7 +125,7 @@ jobs:
 
   mac:
     name: macOS disk image
-    needs: draft
+    needs: [draft, daemon]
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -70,11 +142,18 @@ jobs:
         env:
           VERSION: ${{ needs.draft.outputs.version }}
         run: node packages/wspx/scripts/bundle-env.mjs "$VERSION" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wsp-daemon-*
+          path: daemon-bins
+      - name: The daemon binaries, where the app's build stages them
+        run: node packages/wspx/scripts/daemon-binary.mjs --from-artifacts daemon-bins
       # The certificate and the Apple account that sign and notarize the bundles reach this step alone. Unset, each
       # arrives empty and the build signs ad hoc; electron-builder takes an empty CSC_LINK for a certificate and fails
       # importing it, so that one is unset, while the other four read empty as unset.
       - name: Build the bundles
         env:
+          WSP_REQUIRE_DAEMON: "1"
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -89,7 +168,7 @@ jobs:
       - name: Check the packaged trees
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
-        run: pnpm --filter @wsp/desktop exec vitest run --minWorkers=1 --maxWorkers=1 test/signing.test.ts test/pty-native.test.ts
+        run: pnpm --filter @wsp/desktop exec vitest run --minWorkers=1 --maxWorkers=1 test/signing.test.ts
       - name: Name the disk image after the release, and copy it to the name that never moves
         run: |
           shopt -s nullglob
@@ -107,7 +186,7 @@ jobs:
 
   linux:
     name: Linux AppImage
-    needs: draft
+    needs: [draft, daemon]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -123,7 +202,16 @@ jobs:
         env:
           VERSION: ${{ needs.draft.outputs.version }}
         run: node packages/wspx/scripts/bundle-env.mjs "$VERSION" >> "$GITHUB_ENV"
-      - run: pnpm --filter @wsp/desktop run build:linux
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wsp-daemon-*
+          path: daemon-bins
+      - name: The daemon binaries, where the app's build stages them
+        run: node packages/wspx/scripts/daemon-binary.mjs --from-artifacts daemon-bins
+      - name: Build the bundle
+        env:
+          WSP_REQUIRE_DAEMON: "1"
+        run: pnpm --filter @wsp/desktop run build:linux
       - name: Name the AppImage after the release, and copy it to the name that never moves
         run: |
           shopt -s nullglob
@@ -141,10 +229,12 @@ jobs:
 
   npm:
     name: Command line package on npm
-    needs: draft
+    needs: [draft, daemon]
+    # On a dry run the draft is skipped and this still runs, to stage the package with the four binaries.
+    if: ${{ !cancelled() && needs.daemon.result == 'success' && (inputs.dry_run || needs.draft.result == 'success') }}
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       id-token: write
     steps:
       - uses: actions/checkout@v4
@@ -161,8 +251,25 @@ jobs:
       # npm token exists anywhere. It needs an npm newer than node 22 ships.
       - run: npm install -g npm@latest
       - run: pnpm install --frozen-lockfile
-      - run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' --filter '!@wsp/desktop' build
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wsp-daemon-*
+          path: daemon-bins
+      - name: The daemon binaries, where the command's build stages them
+        run: node packages/wspx/scripts/daemon-binary.mjs --from-artifacts daemon-bins
+      - name: Build, with every daemon binary required
+        env:
+          WSP_REQUIRE_DAEMON: "1"
+        run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' --filter '!@wsp/desktop' build
+      - name: Every target the host names is in the package
+        run: node packages/wspx/scripts/daemon-binary.mjs --check
+      - name: Attach the binaries to the draft
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" daemon-bins/*/wsp-daemon-* --clobber
       - name: Publish
+        if: ${{ !inputs.dry_run }}
         run: pnpm --filter @zingzy/wsp exec npm publish --provenance --access public
 
   publish:

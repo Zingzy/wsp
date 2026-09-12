@@ -18,7 +18,8 @@ import {
   PLACE_LINK_NONCE_BYTES,
   THREAD_OPS,
   placeDaemonPaths,
-  placeAbsentLine,
+  absentComputer,
+  workspaceState,
   placeLinkTranscript,
   placeNoDaemonPortLine,
   placeNoLinkLine,
@@ -525,8 +526,23 @@ describe("a workspace on a place", () => {
     await expect(runtime!.workspaces.daemonReach(ws.id)).rejects.toThrow(/old-macbook/);
     client.close();
     await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
-    await expect(runtime!.workspaces.exec(ws.id, "hostname")).rejects.toThrow(/is not connected right now/);
+    await expect(runtime!.workspaces.exec(ws.id, "hostname")).rejects.toThrow(/is not answering; it connects on its own when it is on/);
     expect(placeDaemonPaths("/home/maya").runDir).toBe("/home/maya/.wsp/run");
+  });
+
+  it("reads unreachable with the computer's own sentence once that computer stops answering, as a fork on it does", async () => {
+    const { hostKey } = await serving();
+    const { client, placeId } = await join(hostKey, { code: await code() });
+    sockets.push(client.ws);
+    const ws = (await runtime!.workspaces.list()).find(w => w.kind === "place")!;
+    client.close();
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
+    const away = (await runtime!.status.list()).find(r => r.id === ws.id)!;
+    // The workspace a joined computer is carries that computer in its machine id rather than on a place field, and
+    // a status that read it off the field alone left this one reading running with no daemon road at all.
+    expect(away.reach.state).toBe("unreachable");
+    expect(away.reason).toBe(absentComputer("old-macbook", null).sentence);
+    expect(workspaceState({ phase: away.phase, machineState: away.machineState, reach: away.reach.state })).toBe("unreachable");
   });
 });
 
@@ -572,7 +588,8 @@ describe("putting the agent on a computer over ssh", () => {
     expect(stages.map(s => `${s.step} ${s.state}`)).toEqual(["connect done", "join running", "join done"]);
     expect(added.addId).toBe("a_mine");
     expect(stages.every(s => s.addId === "a_mine")).toBe(true);
-    expect(stages.at(-1)?.note).toContain("cores");
+    // The one fact the box's own row does not already carry: a size here as well cuts the line the app draws.
+    expect(stages.at(-1)?.note).toBe("docker yes");
   });
 
   it("waits for the link the agent dials, not the socket the join itself opened and closed", async () => {
@@ -613,7 +630,7 @@ describe("putting the agent on a computer over ssh", () => {
         ...wiring(hostKey),
         install: async (req, stage) => {
           minted = req.code;
-          stage("node", "running");
+          stage("wsp", "running");
           throw new Error("ssh refused the login (publickey)");
         },
       },
@@ -621,7 +638,7 @@ describe("putting the agent on a computer over ssh", () => {
     srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
     runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
     await expect(runtime.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now())).rejects.toThrow("publickey");
-    expect(stages.map(s => `${s.step} ${s.state}`)).toEqual(["node running", "node failed"]);
+    expect(stages.map(s => `${s.step} ${s.state}`)).toEqual(["wsp running", "wsp failed"]);
     expect(stages.at(-1)?.note).toContain("publickey");
     // An install that never reached a join leaves its code unspent, and the person's next add mints another.
     expect(await runtime.devices.spend(minted, 1)).toBe(true);
@@ -649,7 +666,7 @@ describe("the road a pane takes to a place", () => {
     const { client, placeId } = await join(hostKey, { code: await code(), name: "box" });
     client.close();
     await until(async () => (await placesOf()).some(p => p.id === placeId && p.present === false));
-    await expect(runtime!.places!.road(placeId)).rejects.toThrow(placeAbsentLine("box"));
+    await expect(runtime!.places!.road(placeId)).rejects.toThrow(absentComputer("box", null).sentence);
   });
 
   it("is refused with its own sentence while that computer has not said which port its daemon bound", async () => {
@@ -1095,7 +1112,7 @@ describe("a fork on a computer you joined", () => {
     await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
     const away = (await runtime!.status.list()).find(r => r.id === made.id)!;
     expect(away.reach.state).toBe("unreachable");
-    expect(away.reason).toContain("srv is not connected right now");
+    expect(away.reason).toBe(absentComputer("srv", null).sentence);
     expect(away.machineState).toBe("running");
     const back = await relink(hostKey, placeId, key, report("srv"), c => forks(c));
     sockets.push(back.client.ws);

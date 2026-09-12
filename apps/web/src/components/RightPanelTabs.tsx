@@ -418,13 +418,13 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
                 key={action.label}
                 data-surface-launch={action.key}
                 data-available="false"
-                className={cn(
-                  "relative flex w-full flex-col items-start p-4 opacity-40",
-                  cardShellClass,
-                )}
+                className={cn("relative flex w-full flex-col items-start p-4", cardShellClass)}
               >
-                <Kbd className="absolute top-3 right-3">{action.shortcut}</Kbd>
-                <span className="flex items-center gap-2 pe-8">
+                {/* The dimming that says the card is held sits on the keycap, the icon and the label, which are
+                    the part a person is not being asked to read. The reason under them is the one sentence that
+                    says what happened and it reads at the muted ink's own alpha. */}
+                <Kbd className="absolute top-3 right-3 opacity-40">{action.shortcut}</Kbd>
+                <span className="flex items-center gap-2 pe-8 opacity-40" data-surface-card-head>
                   {actionIcon(action)}
                   <span className="font-medium text-sm">{action.label}</span>
                 </span>

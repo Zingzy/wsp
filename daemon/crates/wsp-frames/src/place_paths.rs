@@ -18,7 +18,6 @@ pub struct PlaceDaemonPaths {
     pub open_socket: PathBuf,
     pub manifest_path: PathBuf,
     pub profile_file: PathBuf,
-    pub node_dir: PathBuf,
     pub unit_dir: PathBuf,
     pub bin_dir: PathBuf,
     pub roots_path: PathBuf,
@@ -48,7 +47,6 @@ pub fn place_daemon_paths(home: &Path) -> PlaceDaemonPaths {
         open_socket: wsp.join("open.sock"),
         manifest_path: wsp.join("manifest.json"),
         profile_file: wsp.join("profile.sh"),
-        node_dir: wsp.join("node"),
         unit_dir: at.join(".config/systemd/user"),
         bin_dir: at.join(".local/bin"),
         roots_path: wsp.join("roots"),
@@ -72,11 +70,9 @@ pub fn place_owned_paths(home: &Path) -> Vec<PathBuf> {
         at.inbox,
         at.token_path,
         at.roots_path,
-        at.node_dir,
         at.profile_file,
         at.open_socket,
         at.run_dir,
-        at.wsp.join("wsp-npm.log"),
         at.port_file,
         at.bin_dir.join("wsp-open"),
         at.bin_dir.join("xdg-open"),
@@ -100,7 +96,7 @@ mod tests {
     }
 
     #[test]
-    fn the_owned_list_is_the_protocols_sixteen_in_order() {
+    fn the_owned_list_is_the_protocols_fourteen_in_order() {
         let owned = place_owned_paths(Path::new("/h"));
         let expected = [
             "/h/.wsp/place.json",
@@ -111,11 +107,9 @@ mod tests {
             "/h/.wsp/inbox",
             "/h/.wsp/daemon-token",
             "/h/.wsp/roots",
-            "/h/.wsp/node",
             "/h/.wsp/profile.sh",
             "/h/.wsp/open.sock",
             "/h/.wsp/run",
-            "/h/.wsp/wsp-npm.log",
             "/h/.wsp/daemon.port",
             "/h/.local/bin/wsp-open",
             "/h/.local/bin/xdg-open",
