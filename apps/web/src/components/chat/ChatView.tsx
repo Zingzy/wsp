@@ -46,7 +46,10 @@ export function ChatView({
   const workspace = useWorkspace(workspaceId);
   const wake = useStore(s => s.wake);
   const select = useStore(s => s.select);
-  const thread = useChatThread(workspaceId, threadId);
+  const newThread = useStore(s => s.newThread);
+  const readingThread = useStore(s => s.readingThread);
+  const freshThread = useStore(s => s.freshThread && s.selectedId === workspaceId);
+  const thread = useChatThread(workspaceId, threadId, freshThread);
   // Every workspace's threads, not this one's: a thread this one's agent opened may run anywhere, and nothing in
   // the transcript itself records that a turn opened one.
   const workspaces = useStore(s => s.workspaces);
@@ -84,18 +87,27 @@ export function ChatView({
   // Nothing is running and the workspace is paused: the last thing that happened to this thread is the nap, and the
   // next send is what wakes it. One line under the transcript in the timeline's own rule grammar, never a dialog.
   const paused = state === "paused" && !view.running ? pausedLine(status?.reason) : null;
-  const { startNewThread, hydrated } = thread;
+  const { startNewThread, hydrated, threadKey } = thread;
+  const asked = useNewThreadRequests(s => s.pending.has(workspaceId));
   useEffect(() => {
     // The latest view takes the request once its transcript is in, so it knows which thread it leaves behind.
     const consume = () => {
       const requests = useNewThreadRequests.getState();
       if (!requests.pending.has(workspaceId)) return;
-      if (threadId !== null) select(workspaceId);
+      if (threadId !== null) newThread(workspaceId);
       else if (hydrated && requests.take(workspaceId)) startNewThread();
     };
     consume();
     return useNewThreadRequests.subscribe(consume);
-  }, [hydrated, select, startNewThread, threadId, workspaceId]);
+  }, [hydrated, newThread, startNewThread, threadId, workspaceId]);
+  // With nothing picked, the thread this view settled on is what the person is reading, whether the transcript
+  // carried it or its own first turn opened it: the store records it in the address, and the header reads the same
+  // pick the body does. The key is the workspace's own until a session.start gives the view a thread, and a view
+  // about to clear itself for a new thread still holds the one it is leaving.
+  useEffect(() => {
+    if (!hydrated || asked || threadId !== null || threadKey === workspaceId) return;
+    readingThread(workspaceId, threadKey);
+  }, [asked, hydrated, readingThread, threadId, threadKey, workspaceId]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background text-foreground">

@@ -72,7 +72,7 @@ describe("the wsp skill", () => {
     expect(section).toContain("A send is never refused for meeting a turn");
     expect(section).toContain("(outcome `steered`)");
     expect(section).toContain("(outcome `queued`)");
-    expect(section).toContain(`\`${stillWorkingLine("1a2b3c4d")}\``);
+    expect(section).toContain(`\`${stillWorkingLine()}\``);
     expect(section).toContain("Two sends keep the order they arrived in");
     // The opening paragraph, which the MCP instructions carry, cannot say the old rule either.
     expect(INSTRUCTIONS).toContain("a send is never refused for meeting a turn");

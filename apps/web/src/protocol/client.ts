@@ -344,15 +344,16 @@ export interface InstallStage {
 export interface Api {
   listWorkspaces(): Promise<WorkspaceView[]>;
   getWorkspace(id: string): Promise<WorkspaceView>;
-  /** `size` is one of capabilities().sizes; absent, the workspace takes the golden's size. */
-  createWorkspace(golden: string, name?: string, size?: WorkspaceSize): Promise<CreatedWorkspace>;
+  /** `size` is one of capabilities().sizes; absent, the workspace takes the golden's size. `on` is the computer or
+   * provider it lands on, by the id its own row carries; absent, wherever a fork last landed. */
+  createWorkspace(golden: string, name?: string, size?: WorkspaceSize, on?: string): Promise<CreatedWorkspace>;
   /** Makes this computer the host's one local workspace, named after this computer, which the host is the one to
    * know. It forks nothing, so there is no image, no size and no boot to wait on: the record is written and the
    * reply is the workspace. Rejects with the host's own sentence when this computer already is one. Optional so
    * fixtures without the road need not fake it; a client without it offers no road to this computer. */
   createLocalWorkspace?(): Promise<WorkspaceView>;
   /** Resolves the default golden manifest's head so the UI never handles snapshot ids. */
-  createFromGoldenHead(name: string, size?: WorkspaceSize): Promise<CreatedWorkspace>;
+  createFromGoldenHead(name: string, size?: WorkspaceSize, on?: string): Promise<CreatedWorkspace>;
   /** Snapshot of enriched statuses; keeps the runtime's poller + cost ticker running for this socket. */
   watchStatuses(): Promise<WorkspaceStatus[]>;
   nap(id: string): Promise<WorkspaceView>;
@@ -591,8 +592,8 @@ export interface CreatedWorkspace extends WorkspaceView {
 }
 
 export function makeApi(c: ProtocolClient): Api {
-  const create = async (golden: string, name?: string, size?: WorkspaceSize): Promise<CreatedWorkspace> => {
-    const { workspace, notice } = await c.request<WorkspaceCreateResult>("workspaces.create", { golden, ...(name ? { name } : {}), ...size });
+  const create = async (golden: string, name?: string, size?: WorkspaceSize, on?: string): Promise<CreatedWorkspace> => {
+    const { workspace, notice } = await c.request<WorkspaceCreateResult>("workspaces.create", { golden, ...(name ? { name } : {}), ...size, ...(on === undefined ? {} : { on }) });
     return notice === undefined ? workspace : { ...workspace, notice };
   };
   return {
@@ -600,12 +601,12 @@ export function makeApi(c: ProtocolClient): Api {
     getWorkspace: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.get", { workspaceId: id })).workspace,
     createWorkspace: create,
     createLocalWorkspace: async () => (await c.request<{ workspace: WorkspaceView }>("workspaces.createLocal", {})).workspace,
-    createFromGoldenHead: async (name, size) => {
+    createFromGoldenHead: async (name, size, on) => {
       const { manifest } = await c.request<{ manifest?: GoldenManifest }>("golden.get", { name: "default" });
       const head = goldenHead(manifest);
       // A golden gone between the store's read and this ask: the app's own sentence, never a command to run.
       if (!head) throw new Error(CLOUD_SETUP_WORDS.create.none);
-      return create(head.snapshotId, name, size);
+      return create(head.snapshotId, name, size, on);
     },
     watchStatuses: async () => (await c.request<{ statuses: WorkspaceStatus[] }>("status.subscribe")).statuses,
     nap: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.nap", { workspaceId: id })).workspace,

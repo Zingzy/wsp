@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The new-workspace dialog's layout: header, panel and footer stack inside
-// one flex column of the popup, so the footer stays attached to the card,
-// and the form still submits on Enter and on the Create button.
+// The new-workspace dialog: its layout, its Where control and what each pick
+// says under it, the state with nowhere to put a workspace, and the four
+// reasons Create is held. Header, panel and footer stack inside one flex
+// column of the popup, so the footer stays attached to the card, and the form
+// still submits on Enter and on the Create button.
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { fmtRate, fmtSize, type PlaceView, type SealedImageCopy } from "@wsp/protocol";
 
 vi.mock("../src/components/ui/tooltip.js", () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -16,13 +19,43 @@ import { NewWorkspaceDialog } from "../src/sidebar/NewWorkspaceDialog.js";
 
 afterEach(cleanup);
 
+const HERE: PlaceView = { id: "here", kind: "computer", name: "studio.local", default: false, shape: { cpu: 8, memMb: 16384 }, docker: false, present: true };
+const HETZNER: PlaceView = { id: "p_1", kind: "computer", name: "hetzner", default: true, shape: { cpu: 2, memMb: 4096 }, docker: true, present: true, forks: { running: 0, room: 3 } };
+const ASCII: PlaceView = { id: "box", kind: "provider", name: "box", default: false, rateUsdPerHour: 0.018 };
+const COPY: SealedImageCopy = { place: "box", version: 1, snapshotId: "snap_box", builtAt: "2026-09-12T09:31:00.000Z" };
+
+const SIZES = [
+  { cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 },
+  { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 },
+];
+
+const dialogWith = (props: Partial<Parameters<typeof NewWorkspaceDialog>[0]> = {}) => (
+  <NewWorkspaceDialog
+    initialName="workspace-1"
+    places={[HERE, HETZNER, ASCII]}
+    copies={[]}
+    sizes={[]}
+    goldenSize={null}
+    refusal={null}
+    onCreate={() => {}}
+    onCancel={() => {}}
+    onAddComputer={() => {}}
+    {...props}
+  />
+);
+
+const open = async (props: Partial<Parameters<typeof NewWorkspaceDialog>[0]> = {}): Promise<HTMLElement> => {
+  render(dialogWith(props));
+  return screen.findByRole("dialog");
+};
+
 const slot = (dialog: HTMLElement, name: string): HTMLElement => dialog.querySelector<HTMLElement>(`[data-slot="dialog-${name}"]`)!;
 const before = (a: Node, b: Node): boolean => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+const caption = (dialog: HTMLElement): string | null => dialog.querySelector("[data-k=where-caption]")!.textContent;
 
 describe("new workspace dialog", () => {
   it("lays header, panel and footer out in one flex column that is the popup's child", async () => {
-    render(<NewWorkspaceDialog initialName="workspace-1" sizes={[]} goldenSize={null} refusal={null} onCreate={() => {}} onCancel={() => {}} />);
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await open();
     const popup = dialog.closest<HTMLElement>('[data-slot="dialog-popup"]') ?? dialog;
     const header = slot(popup, "header");
     const panel = slot(popup, "panel");
@@ -36,78 +69,109 @@ describe("new workspace dialog", () => {
     expect(before(panel, footer)).toBe(true);
   });
 
-  it("Enter in the name and the Create button both submit the trimmed name", async () => {
+  it("Enter in the name and the Create button both submit the trimmed name on the default row", async () => {
     const onCreate = vi.fn();
-    render(<NewWorkspaceDialog initialName="workspace-1" sizes={[]} goldenSize={null} refusal={null} onCreate={onCreate} onCancel={() => {}} />);
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await open({ onCreate });
     const input = within(dialog).getByLabelText("Name") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "  beta " } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(onCreate).toHaveBeenNthCalledWith(1, "beta", "fresh");
+    expect(onCreate).toHaveBeenNthCalledWith(1, "beta", "p_1", undefined);
     fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
-    expect(onCreate).toHaveBeenNthCalledWith(2, "beta", "fresh");
+    expect(onCreate).toHaveBeenNthCalledWith(2, "beta", "p_1", undefined);
+  });
+});
+
+describe("the Where control", () => {
+  it("lists every computer and provider that takes a workspace, never this computer, with the default checked", async () => {
+    const dialog = await open();
+    const group = within(dialog).getByRole("radiogroup", { name: "Where" });
+    const segments = within(group).getAllByRole("radio");
+    expect(segments.map(s => s.textContent)).toEqual(["hetzner", "ASCII"]);
+    expect(segments.map(s => s.getAttribute("aria-checked"))).toEqual(["true", "false"]);
   });
 
-  it("offers start fresh and import a project, fresh first; the choice rides along with the name", async () => {
-    // Base UI's radio re-dispatches a click as a PointerEvent, which jsdom does not have.
+  it("says what the checked row costs, its room, and that the image is built there first", async () => {
+    const dialog = await open();
+    expect(caption(dialog)).toBe("free · room for 3 workspaces · builds your image there first, about 4 min");
+  });
+
+  it("says a provider's rate and which image is there, and offers its sizes under the caption", async () => {
     vi.stubGlobal("PointerEvent", class extends MouseEvent {});
     const onCreate = vi.fn();
-    render(<NewWorkspaceDialog initialName="workspace-1" sizes={[]} goldenSize={null} refusal={null} onCreate={onCreate} onCancel={() => {}} />);
-    const dialog = await screen.findByRole("dialog");
-    const group = within(dialog).getByRole("radiogroup", { name: "Start from" });
-    const fresh = within(group).getByRole("radio", { name: /^Start fresh/ });
-    const imported = within(group).getByRole("radio", { name: /^Import a project/ });
-    expect(within(group).getAllByRole("radio")).toEqual([fresh, imported]);
-    expect([fresh, imported].map(r => r.getAttribute("aria-checked"))).toEqual(["true", "false"]);
-    expect(within(group).getByText("Then pick a folder on this Mac; it lands at the same path, caches left behind.")).toBeDefined();
-    fireEvent.click(imported);
-    expect([fresh, imported].map(r => r.getAttribute("aria-checked"))).toEqual(["false", "true"]);
+    const dialog = await open({ copies: [COPY], sizes: SIZES, goldenSize: { cpu: 2, memMb: 4096 }, onCreate });
+    expect(within(dialog).queryByRole("radiogroup", { name: "Size" })).toBeNull();
+    fireEvent.click(within(within(dialog).getByRole("radiogroup", { name: "Where" })).getByRole("radio", { name: "ASCII" }));
+    expect(caption(dialog)).toBe("$0.018/hr while awake · naps to $0 · your image is there, v1");
+    const sizes = within(dialog).getByRole("radiogroup", { name: "Size" });
+    const rows = within(sizes).getAllByRole("radio");
+    expect(rows.map(r => r.closest("label")!.textContent)).toEqual(SIZES.map(size => `${fmtSize(size)}${fmtRate(size.rateUsdPerHour)}`));
+    expect(rows.map(r => r.getAttribute("aria-checked"))).toEqual(["true", "false"]);
+    fireEvent.click(rows[1]!);
     fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
-    expect(onCreate).toHaveBeenCalledWith("workspace-1", "import");
+    expect(onCreate).toHaveBeenCalledWith("workspace-1", "box", { cpu: 2, memMb: 8192 });
     vi.unstubAllGlobals();
   });
 
-  const SIZES = [
-    { cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 },
-    { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 },
-  ];
-
-  it("lists the provider's sizes as muted mono rows with the rate of each, the golden's checked; untouched, the create carries no size", async () => {
-    const onCreate = vi.fn();
-    render(<NewWorkspaceDialog initialName="workspace-1" sizes={SIZES} goldenSize={{ cpu: 2, memMb: 4096 }} refusal={null} onCreate={onCreate} onCancel={() => {}} />);
-    const dialog = await screen.findByRole("dialog");
-    const group = within(dialog).getByRole("radiogroup", { name: "Size" });
-    const radios = within(group).getAllByRole("radio");
-    expect(radios.map(r => r.closest("label")!.textContent)).toEqual(["2 vCPU · 4 GB$0.11/hr", "2 vCPU · 8 GB$0.15/hr"]);
-    expect(radios.map(r => r.getAttribute("aria-checked"))).toEqual(["true", "false"]);
-    for (const r of radios) expect(r.closest("label")!.className.split(" ")).toEqual(expect.arrayContaining(["font-mono", "text-muted-foreground"]));
-    fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
-    expect(onCreate).toHaveBeenCalledWith("workspace-1", "fresh");
-  });
-
-  it("a picked size rides along with the name; without sizes there is no row, and a golden size off the list checks nothing", async () => {
+  it("leaves a size behind when the pick moves to a row that offers none", async () => {
     vi.stubGlobal("PointerEvent", class extends MouseEvent {});
     const onCreate = vi.fn();
-    render(<NewWorkspaceDialog initialName="workspace-1" sizes={SIZES} goldenSize={{ cpu: 2, memMb: 2048 }} refusal={null} onCreate={onCreate} onCancel={() => {}} />);
-    const dialog = await screen.findByRole("dialog");
-    const group = within(dialog).getByRole("radiogroup", { name: "Size" });
-    expect(within(group).getAllByRole("radio").map(r => r.getAttribute("aria-checked"))).toEqual(["false", "false"]);
-    fireEvent.click(within(group).getByRole("radio", { name: /8\u00a0GB/ }));
-    expect(within(group).getAllByRole("radio").map(r => r.getAttribute("aria-checked"))).toEqual(["false", "true"]);
+    const dialog = await open({ sizes: SIZES, onCreate });
+    const where = within(dialog).getByRole("radiogroup", { name: "Where" });
+    fireEvent.click(within(where).getByRole("radio", { name: "ASCII" }));
+    fireEvent.click(within(within(dialog).getByRole("radiogroup", { name: "Size" })).getAllByRole("radio")[1]!);
+    fireEvent.click(within(where).getByRole("radio", { name: "hetzner" }));
+    expect(within(dialog).queryByRole("radiogroup", { name: "Size" })).toBeNull();
     fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
-    expect(onCreate).toHaveBeenCalledWith("workspace-1", "fresh", { cpu: 2, memMb: 8192 });
-    cleanup();
-    render(<NewWorkspaceDialog initialName="workspace-1" sizes={[]} goldenSize={{ cpu: 2, memMb: 4096 }} refusal={null} onCreate={onCreate} onCancel={() => {}} />);
-    const bare = await screen.findByRole("dialog");
-    expect(within(bare).queryByRole("radiogroup", { name: "Size" })).toBeNull();
+    expect(onCreate).toHaveBeenCalledWith("workspace-1", "p_1", undefined);
     vi.unstubAllGlobals();
   });
 
-  it("with nothing to fork yet the Create keycap is held and says why, and neither road creates anything", async () => {
+  it("holds Create on a row with no room left and gives its caption as the reason", async () => {
+    const onCreate = vi.fn();
+    const full = { ...HETZNER, forks: { running: 3, room: 0 } };
+    const dialog = await open({ places: [HERE, full], onCreate });
+    const line = "free · 3 of 3 workspaces · pause or delete one there";
+    expect(caption(dialog)).toBe(line);
+    expect(within(dialog).getByRole("button", { name: "Create" }).hasAttribute("disabled")).toBe(true);
+    expect(within(dialog).getByRole("tooltip").textContent).toBe(line);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  it("puts the rows in a select once there are more than four", async () => {
+    const more = ["a", "b", "c", "d", "e"].map((name, at): PlaceView => ({ ...HETZNER, id: `p_${at}`, name, default: at === 0 }));
+    const dialog = await open({ places: [HERE, ...more] });
+    expect(within(dialog).queryByRole("radiogroup", { name: "Where" })).toBeNull();
+    expect(dialog.querySelector<HTMLElement>("[data-slot=select-button]")!.textContent).toContain("a");
+  });
+});
+
+describe("with nowhere to put a workspace", () => {
+  const NOWHERE = [HERE, { ...HETZNER, id: "p_9", name: "old-macbook", default: false, docker: false, forks: undefined }];
+
+  it("drops the control for two notes, offers Add a computer and holds Create", async () => {
+    const onAddComputer = vi.fn();
+    const dialog = await open({ places: NOWHERE, onAddComputer });
+    expect(within(dialog).queryByRole("radiogroup", { name: "Where" })).toBeNull();
+    expect(dialog.querySelector("[data-k=nowhere-here]")!.textContent).toBe("this Mac is already a workspace, the only one it can be");
+    expect(dialog.querySelector("[data-k=nowhere-add]")!.textContent).toBe("Add a computer you own or connect a provider, and workspaces can be created there.");
+    expect(within(dialog).getByRole("button", { name: "Create" }).hasAttribute("disabled")).toBe(true);
+    expect(within(dialog).getByRole("tooltip").textContent).toBe("add a computer or connect a provider first");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add a computer" }));
+    expect(onAddComputer).toHaveBeenCalled();
+  });
+
+  it("says nowhere to put one before it says the image is not built", async () => {
+    const dialog = await open({ places: NOWHERE, refusal: "the image is still building · 5 of 13" });
+    expect(within(dialog).getByRole("tooltip").textContent).toBe("add a computer or connect a provider first");
+  });
+});
+
+describe("why Create is held", () => {
+  it("with nothing to fork yet the keycap is held and says why, and neither road creates anything", async () => {
     const onCreate = vi.fn();
     const line = "the image is still building · 5 of 13";
-    render(<NewWorkspaceDialog initialName="workspace-1" sizes={[]} goldenSize={null} refusal={line} onCreate={onCreate} onCancel={() => {}} />);
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await open({ refusal: line, onCreate });
     const create = within(dialog).getByRole("button", { name: "Create" });
     expect(create.hasAttribute("disabled")).toBe(true);
     expect(within(dialog).getByRole("tooltip").textContent).toBe(line);
@@ -117,9 +181,26 @@ describe("new workspace dialog", () => {
     // A disabled control cannot be hovered, so the reason hangs on a wrapper around it rather than on the button.
     expect(dialog.querySelector("[data-k=create-reason]")?.contains(create)).toBe(true);
     cleanup();
-    render(<NewWorkspaceDialog initialName="workspace-1" sizes={[]} goldenSize={null} refusal={null} onCreate={onCreate} onCancel={() => {}} />);
-    const free = await screen.findByRole("dialog");
+    const free = await open();
     expect(within(free).getByRole("button", { name: "Create" }).hasAttribute("disabled")).toBe(false);
     expect(free.querySelector("[data-k=create-reason]")).toBeNull();
+  });
+
+  it("a held keycap is the live one's width at every window, since the footer stacks its controls on a phone", async () => {
+    const live = within(await open()).getByRole("button", { name: "Create" });
+    const width = ["w-full", "sm:w-auto"].filter(c => live.className.split(" ").includes(c));
+    cleanup();
+    const held = within(await open({ refusal: "the image is still building" })).getByRole("button", { name: "Create" });
+    // The live keycap takes the width the footer gives it; the held one is inside the tooltip's wrapper, so both
+    // it and the wrapper have to be told to take that width too.
+    expect(held.className.split(" ")).toEqual(expect.arrayContaining(["w-full", "sm:w-auto", ...width]));
+    expect(held.parentElement!.className.split(" ")).toEqual(expect.arrayContaining(["flex", "w-full", "sm:w-auto"]));
+  });
+
+  it("an empty name holds it and asks for one", async () => {
+    const dialog = await open();
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "   " } });
+    expect(within(dialog).getByRole("button", { name: "Create" }).hasAttribute("disabled")).toBe(true);
+    expect(within(dialog).getByRole("tooltip").textContent).toBe("give the workspace a name");
   });
 });

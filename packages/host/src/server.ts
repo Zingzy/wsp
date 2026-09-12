@@ -323,11 +323,14 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   };
 
   const handler = (here: boolean) => (req: IncomingMessage, res: ServerResponse) => {
+    const sendPage = (): void => {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(page(here));
+    };
     void (async () => {
       const path = new URL(req.url ?? "/", "http://localhost").pathname;
       if (req.method === "GET" && path === "/") {
-        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-        res.end(page(here));
+        sendPage();
         return;
       }
       const who = path.startsWith("/api/") ? await callerOf(req, here) : {};
@@ -361,6 +364,14 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
         return;
       }
       if (req.method === "GET" && sendAsset(res, webDir, path)) return;
+      // The app records what a person is reading in the address, and a person types and pastes addresses: a GET
+      // naming no route of this host and no file of the bundle is the app itself, which reads the address it opened
+      // on. A path carrying an extension or ending in a slash asked for a file that is not there and stays a miss,
+      // so a script that moved never answers as a page.
+      if (req.method === "GET" && !path.startsWith("/api/") && extname(path) === "" && !path.endsWith("/")) {
+        sendPage();
+        return;
+      }
       sendJson(res, 404, { error: `no route: ${req.method} ${path}` });
     })().catch((e: unknown) => {
       if (!res.headersSent) sendJson(res, 500, { error: e instanceof Error ? e.message : String(e) });
